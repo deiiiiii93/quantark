@@ -30,6 +30,16 @@ redirected to a noisy daily RQMC hedge. See `GateRouting.solver_for`,
 `ADIGreekRouting`, and `apply_adi_greek_admission`. The run manifest records
 both decision files, both evidence hashes, and every excluded variant.
 
+A third, narrower boundary is declared per CELL rather than per variant:
+``SCOPE_EXCLUSIONS`` names four consecutive inceptions on which the 2-D route's
+spatial grid resolves about twice as coarse as the 1-D profile's ``eps_crit``
+target.  Gate G5 does not sweep that grid and Gate G2 certified no finer
+configuration, so those cells are declared out of scope instead of priced on
+uncertified settings.  They are skipped rather than attempted, recorded in the
+manifest under ``scope_exclusions`` separately from ``failures``, and counted
+against ``runs_in_scope`` -- while ``runs_expected`` stays the full grid so the
+gap never disappears from the denominator.  See ``apply_scope_exclusions``.
+
 Trade lifecycle per inception: the replay runs from inception until knock-out,
 maturity, or the end of the data window, whichever comes first.  Runs that hit
 the data window first are recorded as ``censored_at_data_end`` rather than
@@ -201,6 +211,63 @@ VARIANTS: Tuple[str, ...] = (
     "localvol",
     "heston",
     "heston_slv",
+)
+
+# The 2-D variants, whose ADI solver builds a variance axis alongside the
+# spatial one.  Named once because both the Greek admission and the grid scope
+# declaration below key on the same set.
+TWO_D_VARIANTS: Tuple[str, ...] = ("heston", "heston_slv")
+
+
+@dataclass(frozen=True)
+class ScopeExclusion:
+    """One (inception, variants) cell declared outside this study's scope.
+
+    A declaration, not a workaround: the cell is never priced, never counted
+    as a failure, and never silently absent.  ``achieved``/``target`` are the
+    MEASURED spacings from the run that established it, so a reader can audit
+    the decision instead of taking the exclusion on trust.
+    """
+
+    inception: str
+    variants: Tuple[str, ...]
+    achieved: float
+    target: float
+    reason: str
+
+
+# Gate G5 sweeps the 1-D spatial grid and declares the 2-D variance axis NOT
+# COVERED (see 11c_grid_preflight.py NOT_COVERED).  The fleet then found four
+# consecutive inceptions where the 2-D route's own spatial grid -- built at
+# n_x=200 / num_std=8.0 while inheriting the 1-D `standard` profile's
+# eps_crit=0.003 -- lands roughly 2x coarser than that target and fails closed.
+#
+# Resolved as a SCOPE DECLARATION rather than a grid change: raising n_x would
+# price these cells on a configuration Gate G2 never certified, which trades a
+# visible gap for an invisible one.  The four are consecutive (2024-08 through
+# 2024-11), so this is NOT a random subsample -- every downstream comparison
+# must be paired, and stage 13 warns when a pooled mean spans variants with
+# different coverage.
+GRID_SCOPE_REASON = (
+    "2-D ADI spatial grid resolves ~2x coarser than the 1-D profile's "
+    "eps_crit target; Gate G5 does not cover the 2-D arm and Gate G2 "
+    "certified no finer configuration, so the cell is declared out of scope "
+    "rather than priced on uncertified settings"
+)
+SCOPE_EXCLUSIONS: Tuple[ScopeExclusion, ...] = tuple(
+    ScopeExclusion(
+        inception=inception,
+        variants=TWO_D_VARIANTS,
+        achieved=achieved,
+        target=0.003,
+        reason=GRID_SCOPE_REASON,
+    )
+    for inception, achieved in (
+        ("2024-08-01", 0.00741),
+        ("2024-09-02", 0.00664),
+        ("2024-10-08", 0.00635),
+        ("2024-11-01", 0.00667),
+    )
 )
 
 
@@ -1204,15 +1271,22 @@ def make_engine_config(
         mc_paths = int(gated["paths_per_batch"])
         mc_batches = int(gated["batches"])
         mc_seed = int(gated["seed"])
-        # Heston-only QE knobs; the gate's localvol entry has neither
-        # (LocalVolSnowballMCEngine accepts neither kwarg), so only forward
-        # keys the decision actually set -- passing substeps_per_interval=None
-        # would TypeError inside the engine rather than falling back to its
-        # default.
+        # substeps_per_interval is NOT Heston-only: _SubstepRefinementMixin
+        # sits on _VolModelSnowballMCBase, so LocalVolSnowballMCEngine takes it
+        # too (test_mc_substeps_per_interval.py proves it for 'lv-snowball').
+        # Believing otherwise is what let stage 11 gate localvol against a
+        # substeps=1 reference and then ship that same under-resolved config to
+        # the fleet.  Only "scheme" is genuinely engine-specific.
         #
+        # Still filtered on `is not None`: a decision that omits the key must
+        # not send substeps_per_interval=None into the engine.
+        #
+        # lv_time_sampling is recorded only for the localvol reference (the QE
+        # engines have no surface time axis), so the filter drops it for the
+        # Heston pairs where the engine ctor would reject it.
         mc_engine_options = {
             key: gated[key]
-            for key in ("substeps_per_interval",)
+            for key in ("substeps_per_interval", "lv_time_sampling")
             if gated.get(key) is not None
         }
         # The QE scheme knob is ASYMMETRIC across the two Heston engines the
@@ -2021,6 +2095,73 @@ def inception_implied_q(
     return float(implied_q)
 
 
+@dataclass(frozen=True)
+class ScopeResult:
+    """What the scope declaration did to one fleet's task list."""
+
+    tasks: List[Dict[str, Any]]
+    excluded: List[Dict[str, Any]]
+    # Declared inceptions this schedule never contained.  Normal for a subset
+    # run (--max-inceptions, --gate-g3); on a FULL fleet it means the
+    # declaration has drifted off the schedule it describes.  Not fatal: a
+    # drifted entry excludes nothing, so the cell is attempted and the grid
+    # check fails closed exactly as it did before the declaration existed.
+    # The failure is visible, which is the direction that stays safe.
+    unmatched: List[str]
+
+
+def apply_scope_exclusions(
+    tasks: Sequence[Dict[str, Any]],
+    *,
+    prepared: Sequence[Dict[str, Any]],
+    exclusions: Sequence[ScopeExclusion] = SCOPE_EXCLUSIONS,
+) -> ScopeResult:
+    """Drop declared out-of-scope cells from a task list.
+
+    Fails closed on the one drift that is unambiguously wrong: an exclusion
+    naming a variant outside the 2-D arm.  That would shrink an arm the gates
+    fully cover, and no subset run can produce it legitimately.
+    """
+    for exclusion in exclusions:
+        unknown = [v for v in exclusion.variants if v not in TWO_D_VARIANTS]
+        if unknown:
+            raise ValidationError(
+                f"scope exclusion for {exclusion.inception} names non-2-D "
+                f"variant(s) {unknown}; the declaration covers the 2-D ADI "
+                "grid only"
+            )
+
+    scheduled = {entry["inception"] for entry in prepared}
+    excluded_keys = {
+        (exclusion.inception, variant): exclusion
+        for exclusion in exclusions
+        for variant in exclusion.variants
+    }
+    kept: List[Dict[str, Any]] = []
+    records: List[Dict[str, Any]] = []
+    for task in tasks:
+        key = (task["inception"], task["variant"])
+        exclusion = excluded_keys.get(key)
+        if exclusion is None:
+            kept.append(task)
+            continue
+        records.append(
+            {
+                "inception": exclusion.inception,
+                "variant": task["variant"],
+                "reason": exclusion.reason,
+                "achieved_spacing": exclusion.achieved,
+                "target_eps_crit": exclusion.target,
+            }
+        )
+    unmatched = sorted(
+        exclusion.inception
+        for exclusion in exclusions
+        if exclusion.inception not in scheduled
+    )
+    return ScopeResult(tasks=kept, excluded=records, unmatched=unmatched)
+
+
 def build_tasks(
     *,
     prepared: Sequence[Dict[str, Any]],
@@ -2148,6 +2289,7 @@ def build_run_manifest(
     failures: Sequence[Dict[str, Any]],
     elapsed: float,
     plan: Optional[ResumePlan] = None,
+    scope_exclusions: Sequence[Dict[str, Any]] = (),
 ) -> Dict[str, Any]:
     censored = sum(1 for s in summaries if s["lifecycle"]["censored_at_data_end"])
     knocked_out = sum(1 for s in summaries if s["lifecycle"]["knocked_out"])
@@ -2209,10 +2351,21 @@ def build_run_manifest(
         "inceptions": list(prepared),
         "runs": list(summaries),
         "failures": list(failures),
+        # Cells this study declares outside its scope: never priced, and kept
+        # separate from `failures` because a declared gap and a broken run are
+        # different facts about the result.
+        "scope_exclusions": list(scope_exclusions),
         "counts": {
             "inceptions": len(prepared),
             "variants": len(cfg["variants"]),
+            # runs_expected stays the FULL grid so the exclusions never shrink
+            # the denominator out of sight; runs_in_scope is what was actually
+            # attempted, and is the number completion should be judged against.
             "runs_expected": len(prepared) * len(cfg["variants"]),
+            "runs_out_of_scope": len(scope_exclusions),
+            "runs_in_scope": (
+                len(prepared) * len(cfg["variants"]) - len(scope_exclusions)
+            ),
             "runs_completed": len(summaries),
             "runs_failed": len(failures),
             "knocked_out": knocked_out,
@@ -2445,6 +2598,33 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         code_sha256=code_sha256,
         data_sha256=data_sha256,
     )
+    scope = apply_scope_exclusions(tasks, prepared=prepared)
+    tasks, scope_exclusions = scope.tasks, scope.excluded
+    if scope.unmatched:
+        print(
+            "[scope] WARNING: declared inception(s) "
+            f"{', '.join(scope.unmatched)} are not in this schedule and "
+            "excluded nothing; expected for a subset run, otherwise the "
+            "declaration needs re-measuring",
+            flush=True,
+        )
+    if scope_exclusions:
+        by_inception: Dict[str, List[str]] = {}
+        for record in scope_exclusions:
+            by_inception.setdefault(record["inception"], []).append(record["variant"])
+        print(
+            f"[scope] {len(scope_exclusions)} cell(s) declared out of scope and "
+            "NOT priced: "
+            + "; ".join(
+                f"{inception} ({', '.join(sorted(names))})"
+                for inception, names in sorted(by_inception.items())
+            ),
+            flush=True,
+        )
+    if not tasks:
+        raise ValidationError(
+            "every scheduled cell is declared out of scope; nothing to run"
+        )
     plan = plan_resume(
         tasks,
         out_dir=out_dir,
@@ -2534,6 +2714,7 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         failures=failures,
         elapsed=time.perf_counter() - started,
         plan=plan,
+        scope_exclusions=scope_exclusions,
     )
     _atomic_write_json(out_dir / "inceptions.json", list(prepared))
     _atomic_write_json(out_dir / "run_manifest.json", manifest)
@@ -2548,7 +2729,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "\n[summary] {completed}/{expected} runs completed, {failed} failed "
         "({ko} KO, {mat} matured, {cens} censored)".format(
             completed=counts["runs_completed"],
-            expected=counts["runs_expected"],
+            expected=counts.get("runs_in_scope", counts["runs_expected"]),
             failed=counts["runs_failed"],
             ko=counts["knocked_out"],
             mat=counts["matured"],
@@ -2556,6 +2737,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
         flush=True,
     )
+    if counts.get("runs_out_of_scope"):
+        print(
+            f"[summary] {counts['runs_out_of_scope']} cell(s) declared out of "
+            f"scope of {counts['runs_expected']} in the full grid",
+            flush=True,
+        )
     resume = manifest.get("resume", {})
     if resume.get("enabled"):
         adopted = len(resume.get("adopted_without_fingerprint", []))

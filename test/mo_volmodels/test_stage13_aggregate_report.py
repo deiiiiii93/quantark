@@ -173,7 +173,9 @@ def _write_run(
     )
 
 
-def _write_manifest(root: Path, runs, *, variants, inceptions, failures=None):
+def _write_manifest(
+    root: Path, runs, *, variants, inceptions, failures=None, scope_exclusions=None
+):
     (root).mkdir(parents=True, exist_ok=True)
     (root / "run_manifest.json").write_text(
         json.dumps(
@@ -211,6 +213,11 @@ def _write_manifest(root: Path, runs, *, variants, inceptions, failures=None):
                 ],
                 "runs": runs,
                 "failures": failures or [],
+                **(
+                    {"scope_exclusions": scope_exclusions}
+                    if scope_exclusions is not None
+                    else {}
+                ),
                 "counts": {
                     "inceptions": len(inceptions),
                     "variants": len(variants),
@@ -1440,6 +1447,178 @@ def test_report_carries_both_cuts(fleet):
     assert "The knock-out coupon is not income" in html
     # The identity residuals are stated, not merely computed.
     assert "worst residual" in html
+
+
+# ---------------------------------------------------------------------------
+# Declared scope exclusions
+#
+# Four consecutive inceptions are declared out of scope for the 2-D variants:
+# their ADI spatial grid resolves ~2x coarser than the 1-D profile's eps_crit
+# target, Gate G5 does not sweep the 2-D arm, and Gate G2 certified no finer
+# configuration.  Reported as a stated boundary, never as breakage -- and
+# never silently.
+# ---------------------------------------------------------------------------
+
+GRID_ERROR = (
+    "spatial grid achieved spacing 0.00741 exceeds 2x target eps_crit 0.00300; "
+    "increase GridConfig(points=...) or select a higher accuracy profile"
+)
+DECLARED_INCEPTION = "2024-08-01"
+
+
+def _scoped_fleet(root, *, failures=None, scope_exclusions=None, variants=None):
+    """One in-scope inception plus the declared one, 2-D variant missing."""
+    variants = variants or ["flat_bsm", "heston"]
+    inceptions = ["2023-05-04", DECLARED_INCEPTION]
+    runs = []
+    for inception in inceptions:
+        for variant in variants:
+            if inception == DECLARED_INCEPTION and variant == "heston":
+                continue  # never produced -- declared out of scope
+            _write_run(root, inception, variant, total_pnl=300_000.0, settle=True)
+            runs.append({"inception": inception, "variant": variant})
+    _write_manifest(
+        root, runs, variants=variants, inceptions=inceptions,
+        failures=failures, scope_exclusions=scope_exclusions,
+    )
+    return root
+
+
+def test_a_declared_cell_is_not_reported_as_a_failure(tmp_path):
+    """The manifest predates the declaration, so it carries them as failures."""
+    root = _scoped_fleet(
+        tmp_path / "old",
+        failures=[
+            {
+                "inception": DECLARED_INCEPTION,
+                "variant": "heston",
+                "error": GRID_ERROR,
+                "error_type": "ValidationError",
+            }
+        ],
+    )
+    agg = s13.aggregate(root)
+    assert agg["failures"] == []
+    assert len(agg["scope_exclusions"]) == 1
+    record = agg["scope_exclusions"][0]
+    assert record["inception"] == DECLARED_INCEPTION
+    assert record["reclassified_from_failure"] is True
+    # The measurement behind the decision travels with it.
+    assert record["achieved_spacing"] == pytest.approx(0.00741)
+    assert record["target_eps_crit"] == pytest.approx(0.003)
+    assert agg["manifest_counts"]["runs_out_of_scope"] == 1
+    assert agg["manifest_counts"]["runs_failed"] == 0
+
+
+def test_a_declared_cell_failing_some_other_way_is_still_a_failure(tmp_path):
+    """The declaration covers a known grid limit, not the cell itself.
+
+    Swallowing an unrelated crash because the cell happens to be declared
+    would turn a scope statement into a blanket excuse.
+    """
+    root = _scoped_fleet(
+        tmp_path / "other",
+        failures=[
+            {
+                "inception": DECLARED_INCEPTION,
+                "variant": "heston",
+                "error": "calibration did not converge",
+                "error_type": "NumericalError",
+            }
+        ],
+    )
+    agg = s13.aggregate(root)
+    assert len(agg["failures"]) == 1
+    assert agg["scope_exclusions"] == []
+    assert agg["manifest_counts"]["runs_failed"] == 1
+
+
+def test_an_undeclared_cell_with_the_same_error_is_still_a_failure(tmp_path):
+    """Only the DECLARED cells are excused, not every cell hitting that limit."""
+    root = _scoped_fleet(
+        tmp_path / "undeclared",
+        failures=[
+            {
+                "inception": "2023-05-04",   # not in the declaration
+                "variant": "heston",
+                "error": GRID_ERROR,
+                "error_type": "ValidationError",
+            }
+        ],
+    )
+    agg = s13.aggregate(root)
+    assert len(agg["failures"]) == 1
+    assert agg["scope_exclusions"] == []
+
+
+def test_a_manifest_that_declares_its_own_exclusions_is_taken_as_written(tmp_path):
+    """A fleet run after the declaration skips the cells and records them."""
+    root = _scoped_fleet(
+        tmp_path / "new",
+        scope_exclusions=[
+            {
+                "inception": DECLARED_INCEPTION,
+                "variant": "heston",
+                "reason": "declared",
+                "achieved_spacing": 0.00741,
+                "target_eps_crit": 0.003,
+            }
+        ],
+    )
+    agg = s13.aggregate(root)
+    assert len(agg["scope_exclusions"]) == 1
+    assert not agg["scope_exclusions"][0].get("reclassified_from_failure")
+    html = s13.build_report(agg)
+    assert "never priced" in html          # skipped outright, not attempted
+    assert "failed closed" not in html
+
+
+def test_declared_exclusions_do_not_raise_the_partial_result_banner(tmp_path):
+    """A stated boundary is not breakage; flagging it red trains readers to
+    ignore the banner that marks real breakage."""
+    # Every known variant present, so the banner's other clause (a variant
+    # missing outright) cannot fire and the run-count clause is isolated.
+    root = _scoped_fleet(
+        tmp_path / "banner",
+        variants=list(s13.VARIANT_ORDER),
+        failures=[{
+            "inception": DECLARED_INCEPTION, "variant": "heston",
+            "error": GRID_ERROR, "error_type": "ValidationError",
+        }],
+    )
+    html = s13.build_report(s13.aggregate(root))
+    assert "PARTIAL RESULT" not in html
+    assert "Cells declared out of scope" in html
+
+
+def test_uneven_coverage_warns_against_comparing_pooled_means(tmp_path):
+    """The excluded band is consecutive, so it is not a thinner sample of the
+    same regime -- a pooled mean over it is a different market period."""
+    root = _scoped_fleet(
+        tmp_path / "coverage",
+        failures=[{
+            "inception": DECLARED_INCEPTION, "variant": "heston",
+            "error": GRID_ERROR, "error_type": "ValidationError",
+        }],
+    )
+    agg = s13.aggregate(root)
+    coverage = agg["coverage"]
+    assert coverage["uniform"] is False
+    assert coverage["variants"]["heston"]["n_covered"] == 1
+    assert coverage["variants"]["flat_bsm"]["n_covered"] == 2
+    assert coverage["variants"]["heston"]["missing_inceptions"] == [DECLARED_INCEPTION]
+    html = s13.build_report(agg)
+    assert "Coverage is uneven" in html
+    assert "A declared 2-D gap" in html
+
+
+def test_even_coverage_says_nothing_about_it(fleet):
+    """No warning when every variant ran the same inceptions."""
+    agg = s13.aggregate(fleet)
+    assert agg["coverage"]["uniform"] is True
+    html = s13.build_report(agg)
+    assert "Coverage is uneven" not in html
+    assert "Cells declared out of scope" not in html
 
 
 # ---------------------------------------------------------------------------

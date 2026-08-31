@@ -1533,3 +1533,186 @@ def test_a_deleted_source_file_moves_the_fingerprint(code_repo):
 def test_code_fingerprint_is_none_outside_a_repository(tmp_path):
     """No git answer means resume cannot tie a cell to its code -- fail closed."""
     assert s12.compute_code_fingerprint(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# Declared scope exclusions
+#
+# Four consecutive inceptions are declared out of scope for the 2-D variants
+# (see SCOPE_EXCLUSIONS).  The fleet must not spend compute attempting them,
+# must not record them as failures, and must fail closed if the declaration
+# has drifted away from the schedule it describes.
+# ---------------------------------------------------------------------------
+
+
+def _prepared(*inceptions):
+    return [
+        {
+            "inception": inception,
+            "initial_spot": 6733.97,
+            "coupon": 0.15,
+            "maturity_date": "2027-05-04",
+        }
+        for inception in inceptions
+    ]
+
+
+def _scope_tasks(inceptions, variants):
+    return _resume_tasks(
+        Path("/tmp/unused"), prepared=_prepared(*inceptions), variants=list(variants)
+    )
+
+
+def test_the_declaration_names_only_two_d_variants():
+    """A 1-D variant here would silently shrink an arm the gate fully covers."""
+    for exclusion in s12.SCOPE_EXCLUSIONS:
+        assert set(exclusion.variants) <= set(s12.TWO_D_VARIANTS)
+        # The measurement that justifies it travels with it.
+        assert exclusion.achieved > exclusion.target
+        assert exclusion.reason
+
+
+def test_declared_cells_are_dropped_and_recorded(tmp_path):
+    declared = s12.SCOPE_EXCLUSIONS[0].inception
+    inceptions = ["2023-05-04", declared]
+    variants = ["flat_bsm", "heston", "heston_slv"]
+    tasks = _scope_tasks(inceptions, variants)
+    assert len(tasks) == 6
+
+    scope = s12.apply_scope_exclusions(tasks, prepared=_prepared(*inceptions))
+    kept, records = scope.tasks, scope.excluded
+    assert scope.unmatched == sorted(
+        e.inception for e in s12.SCOPE_EXCLUSIONS if e.inception != declared
+    )
+    assert len(kept) == 4
+    assert {(t["inception"], t["variant"]) for t in kept} == {
+        ("2023-05-04", "flat_bsm"),
+        ("2023-05-04", "heston"),
+        ("2023-05-04", "heston_slv"),
+        (declared, "flat_bsm"),          # 1-D arm still runs on that date
+    }
+    assert {(r["inception"], r["variant"]) for r in records} == {
+        (declared, "heston"),
+        (declared, "heston_slv"),
+    }
+    for record in records:
+        assert record["achieved_spacing"] > record["target_eps_crit"]
+        assert record["reason"]
+
+
+def test_a_one_d_only_fleet_is_untouched_by_the_declaration():
+    """The declaration is about the 2-D grid, not about those dates."""
+    inceptions = [s12.SCOPE_EXCLUSIONS[0].inception, "2023-05-04"]
+    tasks = _scope_tasks(inceptions, ["flat_bsm", "ts_bsm", "localvol"])
+    scope = s12.apply_scope_exclusions(tasks, prepared=_prepared(*inceptions))
+    assert len(scope.tasks) == len(tasks)
+    assert scope.excluded == []
+
+
+def test_an_unscheduled_declaration_is_reported_not_fatal():
+    """A subset run legitimately misses declared inceptions.
+
+    Failing here would break --max-inceptions and the G3 smoke.  A declared
+    entry that matches nothing simply excludes nothing, so the cell is
+    attempted and the grid check fails closed as it always did -- visible,
+    which is the safe direction.  It is surfaced so a FULL fleet can notice.
+    """
+    tasks = _scope_tasks(["2023-05-04"], ["heston"])
+    scope = s12.apply_scope_exclusions(tasks, prepared=_prepared("2023-05-04"))
+    assert scope.excluded == []
+    assert len(scope.tasks) == 1
+    assert scope.unmatched == sorted(e.inception for e in s12.SCOPE_EXCLUSIONS)
+
+
+def test_a_declaration_naming_a_one_d_variant_fails_closed():
+    tasks = _scope_tasks(["2023-05-04"], ["localvol"])
+    bad = (
+        s12.ScopeExclusion(
+            inception="2023-05-04",
+            variants=("localvol",),
+            achieved=0.007,
+            target=0.003,
+            reason="wrong arm",
+        ),
+    )
+    with pytest.raises(ValidationError, match="non-2-D"):
+        s12.apply_scope_exclusions(
+            tasks, prepared=_prepared("2023-05-04"), exclusions=bad
+        )
+
+
+def test_the_manifest_separates_out_of_scope_from_failed():
+    """A declared gap and a broken run are different facts about the result."""
+    prepared = _prepared("2023-05-04", "2023-06-01")
+    records = [
+        {
+            "inception": "2023-06-01",
+            "variant": "heston",
+            "reason": "declared",
+            "achieved_spacing": 0.0074,
+            "target_eps_crit": 0.003,
+        }
+    ]
+    manifest = s12.build_run_manifest(
+        cfg={
+            "notional": 50_000_000.0,
+            "costs_enabled": True,
+            "variants": ["flat_bsm", "heston"],
+            "out_dir": "/tmp/out",
+        },
+        routing=_routing(),
+        prepared=prepared,
+        summaries=[
+            {
+                "inception": i,
+                "variant": v,
+                "lifecycle": {
+                    "knocked_out": True,
+                    "matured": False,
+                    "censored_at_data_end": False,
+                },
+            }
+            for i, v in (
+                ("2023-05-04", "flat_bsm"),
+                ("2023-05-04", "heston"),
+                ("2023-06-01", "flat_bsm"),
+            )
+        ],
+        failures=[],
+        elapsed=1.0,
+        scope_exclusions=records,
+    )
+    counts = manifest["counts"]
+    assert counts["runs_expected"] == 4          # the full grid stays visible
+    assert counts["runs_out_of_scope"] == 1
+    assert counts["runs_in_scope"] == 3
+    assert counts["runs_completed"] == 3
+    assert counts["runs_failed"] == 0
+    assert manifest["scope_exclusions"] == records
+
+
+def test_a_manifest_without_exclusions_still_reports_full_scope():
+    prepared = _prepared("2023-05-04")
+    manifest = s12.build_run_manifest(
+        cfg={
+            "notional": 50_000_000.0,
+            "costs_enabled": True,
+            "variants": ["flat_bsm"],
+            "out_dir": "/tmp/out",
+        },
+        routing=_routing(),
+        prepared=prepared,
+        summaries=[{
+            "inception": "2023-05-04",
+            "variant": "flat_bsm",
+            "lifecycle": {
+                "knocked_out": True, "matured": False,
+                "censored_at_data_end": False,
+            },
+        }],
+        failures=[],
+        elapsed=1.0,
+    )
+    assert manifest["scope_exclusions"] == []
+    assert manifest["counts"]["runs_out_of_scope"] == 0
+    assert manifest["counts"]["runs_in_scope"] == 1

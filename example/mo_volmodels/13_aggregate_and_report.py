@@ -96,6 +96,32 @@ def _load_certificate_transfer():
 
 certificate_transfer = _load_certificate_transfer()
 
+_STAGE12 = None
+
+
+def stage12():
+    """Import the fleet runner lazily -- it pulls the whole engine stack in.
+
+    Stage 13 needs exactly one thing from it: the scope declaration, so a
+    manifest written BEFORE that declaration existed still reports its
+    declared-out-of-scope cells as declared rather than as failures.
+    """
+    global _STAGE12
+    if _STAGE12 is None:
+        path = Path(__file__).resolve().parent / "12_snowball_volmodel_backtest.py"
+        spec = importlib.util.spec_from_file_location("mo_stage12_for_s13", path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["mo_stage12_for_s13"] = module
+        spec.loader.exec_module(module)
+        _STAGE12 = module
+    return _STAGE12
+
+
+# A failure is only reclassified as a declared exclusion when its error is the
+# one the declaration is ABOUT.  A declared cell that broke some other way is
+# still a failure -- the declaration covers a known grid limit, not the cell.
+GRID_SCOPE_ERROR_MARKER = "exceeds 2x target eps_crit"
+
 # The variants that actually run an ADI 2-D solver, and so are the only ones
 # the Greek certificate is about.  flat_bsm / ts_bsm / localvol never touch it.
 ADI_CERTIFIED_VARIANTS = ("heston", "heston_slv")
@@ -1095,6 +1121,107 @@ def pooled_certificate_span(per_run: Sequence[Dict[str, Any]]) -> Dict[str, Any]
     }
 
 
+def resolve_scope(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Split declared-out-of-scope cells from genuine failures.
+
+    A fleet run after the declaration lands records its own
+    ``scope_exclusions`` and never attempts those cells.  A manifest written
+    BEFORE it instead carries them as failures -- reporting those as breakage
+    would be wrong, and quietly dropping them would be worse.  So failures are
+    matched against the declaration on BOTH the cell and the error class: a
+    declared cell that failed some other way stays a failure.
+    """
+    declared = manifest.get("scope_exclusions")
+    records: List[Dict[str, Any]] = list(declared or [])
+    try:
+        declaration = stage12().SCOPE_EXCLUSIONS
+    except Exception:  # pragma: no cover - stage 12 unavailable in isolation
+        declaration = ()
+    keys = {
+        (exclusion.inception, variant): exclusion
+        for exclusion in declaration
+        for variant in exclusion.variants
+    }
+    already = {(str(r.get("inception")), str(r.get("variant"))) for r in records}
+
+    failures: List[Dict[str, Any]] = []
+    reclassified = 0
+    for failure in manifest.get("failures", []):
+        key = (str(failure.get("inception")), str(failure.get("variant")))
+        exclusion = keys.get(key)
+        matches = exclusion is not None and GRID_SCOPE_ERROR_MARKER in str(
+            failure.get("error", "")
+        )
+        if not matches or key in already:
+            failures.append(failure)
+            continue
+        records.append(
+            {
+                "inception": exclusion.inception,
+                "variant": failure.get("variant"),
+                "reason": exclusion.reason,
+                "achieved_spacing": exclusion.achieved,
+                "target_eps_crit": exclusion.target,
+                "reclassified_from_failure": True,
+            }
+        )
+        already.add(key)
+        reclassified += 1
+
+    counts = dict(manifest.get("counts", {}))
+    expected = counts.get("runs_expected")
+    counts["runs_out_of_scope"] = len(records)
+    if expected is not None:
+        counts["runs_in_scope"] = int(expected) - len(records)
+    counts["runs_failed"] = len(failures)
+    return {
+        "scope_exclusions": records,
+        "failures": failures,
+        "counts": counts,
+        "n_reclassified_from_failure": reclassified,
+    }
+
+
+def variant_coverage(
+    per_run: Sequence[Dict[str, Any]],
+    *,
+    scope_exclusions: Sequence[Dict[str, Any]] = (),
+) -> Dict[str, Any]:
+    """Which inceptions each variant actually covers, and whether that differs.
+
+    Declared scope exclusions make coverage UNEVEN, and uneven coverage is the
+    one thing that silently invalidates a pooled mean: variants would then be
+    averaged over different inceptions, so a difference between their means
+    could be entirely the sample rather than the model.  Paired comparisons are
+    immune (they only ever use inceptions both arms ran), which is why the
+    report leans on them -- but the pooled table has to say so.
+    """
+    by_variant: Dict[str, set] = {}
+    for row in per_run:
+        by_variant.setdefault(row["variant"], set()).add(row["inception"])
+    all_inceptions = set().union(*by_variant.values()) if by_variant else set()
+    excluded: Dict[str, List[str]] = {}
+    for record in scope_exclusions:
+        excluded.setdefault(str(record.get("variant")), []).append(
+            str(record.get("inception"))
+        )
+    full = {v: sorted(all_inceptions - set(covered)) for v, covered in by_variant.items()}
+    return {
+        "n_inceptions_any_variant": len(all_inceptions),
+        "variants": {
+            variant: {
+                "n_covered": len(covered),
+                "missing_inceptions": full[variant],
+                "excluded_inceptions": sorted(excluded.get(variant, [])),
+            }
+            for variant, covered in sorted(by_variant.items())
+        },
+        # True only when every variant ran on the same inceptions, which is the
+        # precondition for comparing pooled means directly.
+        "uniform": all(not missing for missing in full.values()),
+    }
+
+
 def pnl_decomposition_audit(per_run: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Fleet-level check that both cuts of the PnL still add up.
 
@@ -1160,12 +1287,13 @@ def aggregate(run_dir: Path) -> Dict[str, Any]:
         v: variant_summary([r for r in per_run if r["variant"] == v]) for v in variants
     }
     pairs = paired_comparisons(per_run)
+    scope = resolve_scope(manifest)
 
     return {
         "schema_version": SCHEMA_VERSION,
         "study": "snowball_volmodel_backtest_aggregate",
         "run_dir": str(run_dir),
-        "manifest_counts": manifest.get("counts", {}),
+        "manifest_counts": scope["counts"],
         "config": manifest.get("config", {}),
         "term_sheet": manifest.get("term_sheet", {}),
         "hedge_costs": manifest.get("hedge_costs", {}),
@@ -1179,9 +1307,13 @@ def aggregate(run_dir: Path) -> Dict[str, Any]:
         "paired_vs_baseline": pairs,
         "paired_summary": paired_summary(pairs),
         "pnl_decomposition": pnl_decomposition_audit(per_run),
+        "scope_exclusions": scope["scope_exclusions"],
+        "coverage": variant_coverage(
+            per_run, scope_exclusions=scope["scope_exclusions"]
+        ),
         "missing_runs": missing,
         "completeness": verify_fleet_completeness(Path(run_dir), manifest),
-        "failures": manifest.get("failures", []),
+        "failures": scope["failures"],
     }
 
 
@@ -1297,6 +1429,119 @@ def _num_cells(values: Sequence[Any], digits: int = 3, suffix: str = "") -> str:
     return "".join(f'<td class="num">{_fmt(v, digits, suffix)}</td>' for v in values)
 
 
+def _scope_section(agg: Dict[str, Any]) -> str:
+    """Name every declared-out-of-scope cell, with the measurement behind it."""
+    records = agg.get("scope_exclusions", []) or []
+    if not records:
+        return ""
+    by_inception: Dict[str, Dict[str, Any]] = {}
+    for record in records:
+        entry = by_inception.setdefault(
+            str(record.get("inception")),
+            {
+                "variants": [],
+                "achieved": record.get("achieved_spacing"),
+                "target": record.get("target_eps_crit"),
+            },
+        )
+        entry["variants"].append(
+            VARIANT_LABELS.get(str(record.get("variant")), str(record.get("variant")))
+        )
+    rows = "".join(
+        f"<tr><td>{inception}</td><td>{', '.join(sorted(e['variants']))}</td>"
+        f'<td class="num">{_fmt(e["achieved"], 5)}</td>'
+        f'<td class="num">{_fmt(e["target"], 5)}</td>'
+        f'<td class="num">{_fmt((e["achieved"] or 0.0) / (e["target"] or 1.0), 2, "&times;")}</td></tr>'
+        for inception, e in sorted(by_inception.items())
+    )
+    reasons = sorted({str(r.get("reason")) for r in records if r.get("reason")})
+    # Say which actually happened.  On a fleet that predates the declaration
+    # these cells were attempted and failed closed; a later fleet skips them
+    # outright.  Both are the same decision, but only one of them is "never
+    # priced", and claiming the stronger one would be false.
+    n_reclassified = sum(
+        1 for r in records if r.get("reclassified_from_failure")
+    )
+    if n_reclassified == len(records):
+        provenance = (
+            f"{len(records)} cell(s) are <b>excluded by declaration</b>. This fleet "
+            "predates the declaration, so it attempted them and the grid check "
+            "<em>failed closed</em> &mdash; no price was produced, and none was "
+            "estimated. A fleet run against the current declaration skips them "
+            "outright."
+        )
+    elif n_reclassified:
+        provenance = (
+            f"{len(records)} cell(s) are <b>excluded by declaration</b>; "
+            f"{len(records) - n_reclassified} were skipped outright and "
+            f"{n_reclassified} were attempted by an earlier fleet and failed closed."
+        )
+    else:
+        provenance = (
+            f"{len(records)} cell(s) were <b>never priced</b>, by declaration rather "
+            "than by failure."
+        )
+    return f"""
+<h3>2.1 &nbsp; Cells declared out of scope</h3>
+<p>{provenance} The 2-D ADI route builds its spatial grid at a resolution the 1-D profile's
+target does not admit on these dates, Gate G5 does not sweep the 2-D arm, and Gate G2 certified
+no finer configuration &mdash; so pricing them would have meant running on settings no gate
+covers. That trades a visible gap for an invisible one, and the visible gap is the better
+trade.</p>
+<div class="tablewrap"><table><thead><tr><th>inception</th><th>variants</th>
+<th>achieved spacing</th><th>target eps_crit</th><th>ratio</th></tr></thead>
+<tbody>{rows}</tbody></table></div>
+<p class="small">{"; ".join(reasons)}.</p>
+"""
+
+
+def _scope_caveat_bullet(agg: Dict[str, Any]) -> str:
+    """The declared gap, restated where a reader looks for what is missing."""
+    records = agg.get("scope_exclusions", []) or []
+    if not records:
+        return ""
+    inceptions = sorted({str(r.get("inception")) for r in records})
+    variants = sorted({str(r.get("variant")) for r in records})
+    labels = ", ".join(VARIANT_LABELS.get(v, v) for v in variants)
+    return (
+        f"<li><b>A declared 2-D gap.</b> {labels} were never run on "
+        f"{len(inceptions)} consecutive inceptions ({inceptions[0]} to "
+        f"{inceptions[-1]}) &mdash; see &sect;2.1. This study therefore says "
+        "nothing about how those models would have hedged that particular "
+        "stretch of market, and because the stretch is contiguous rather than "
+        "scattered, that is a gap in a specific regime, not a thinner sample "
+        "of the same one.</li>\n"
+    )
+
+
+def _coverage_caveat(agg: Dict[str, Any]) -> str:
+    """Warn when pooled means span variants that ran on different inceptions."""
+    coverage = agg.get("coverage", {}) or {}
+    if not coverage or coverage.get("uniform", True):
+        return ""
+    uneven = {
+        variant: entry
+        for variant, entry in (coverage.get("variants", {}) or {}).items()
+        if entry.get("missing_inceptions")
+    }
+    if not uneven:
+        return ""
+    detail = "; ".join(
+        f"<b>{VARIANT_LABELS.get(v, v)}</b> covers {e['n_covered']} of "
+        f"{coverage.get('n_inceptions_any_variant', '?')} "
+        f"(absent: {', '.join(e['missing_inceptions'])})"
+        for v, e in sorted(uneven.items())
+    )
+    return (
+        '<div class="callout key"><b>Coverage is uneven &mdash; do not compare the pooled '
+        "means across variants.</b> " + detail + ". Those inceptions are consecutive, not a "
+        "random subsample, so a pooled mean that includes them is averaging a different "
+        "market period from one that does not. Every model comparison in &sect;4 is "
+        "<b>paired</b>, which uses only inceptions both arms ran and is therefore immune; "
+        "the pooled table above is a per-variant description, not a comparison.</div>"
+    )
+
+
 def _decomposition_note(decomp: Dict[str, Any]) -> str:
     """State both identities' worst residual, and how many marks are still open."""
     if not decomp:
@@ -1389,7 +1634,10 @@ def build_report(agg: Dict[str, Any]) -> str:
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     incomplete_banner = ""
-    n_expected = counts.get("runs_expected")
+    # Judge completion against what was IN SCOPE.  Declared exclusions are not
+    # a partial result -- they are a stated boundary, and flagging them red
+    # would train the reader to ignore the banner that marks real breakage.
+    n_expected = counts.get("runs_in_scope", counts.get("runs_expected"))
     n_done = counts.get("runs_completed")
     missing_variants = [v for v in VARIANT_ORDER if v not in variants]
     certification_exclusions = greek_gate.get("excluded_variants", {}) or {}
@@ -1633,6 +1881,9 @@ averaged in.</div>"""
     verdict = _verdict_paragraph(agg)
     outcome_caveat = _outcome_concentration_caveat(agg)
     paired_collapse = _paired_collapse_note(agg)
+    scope_section = _scope_section(agg)
+    coverage_caveat = _coverage_caveat(agg)
+    scope_caveat = _scope_caveat_bullet(agg)
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1764,6 +2015,7 @@ this run reads from disk rather than assuming:</p>
 An unresolved 2-D estimator is excluded and shown above; it is never replaced with a noisy
 daily Monte Carlo hedge. The tables below therefore report only variants with complete numerical
 admission evidence.</p>
+{scope_section}
 
 <h2 id="s3">3 &nbsp; Results: PnL distribution across inceptions</h2>
 <p>All figures are <b>percent of notional</b>, from the seller's perspective, net of hedging costs.
@@ -1773,6 +2025,7 @@ expressed as cash per 1% spot move &mdash; the direct measure of hedge quality.<
 <th>median</th><th>stdev</th><th>min</th><th>max</th><th>cost drag</th>
 <th>residual &delta; RMS</th><th>trades</th></tr></thead>
 <tbody>{dist_rows}</tbody></table></div>
+{coverage_caveat}
 
 <h3>3.1 &nbsp; Where the PnL comes from &mdash; two cuts of the same total</h3>
 <p>The total admits two decompositions. They are <b>different cuts of one number</b>, not two
@@ -1854,8 +2107,8 @@ the trade.</li>
 <li><b>One underlying, one term sheet, one regime.</b> Every inception is the same product on the
 same index over an overlapping window, so the runs are <em>not</em> independent observations. The
 spread across inceptions understates true sampling uncertainty.</li>
-<li><b>Heston identification.</b> See &sect;5: parameters that fit the smile are not necessarily
-determined by it.</li>
+{scope_caveat}<li><b>Heston identification.</b> See &sect;5: parameters that fit the smile are not
+necessarily determined by it.</li>
 <li><b>Monte Carlo noise in the SV deltas.</b> Heston and Heston-SLV deltas come from bumped MC
 reprices. Randomized-QMC with common random numbers keeps bump noise far below raw price noise,
 but it is not zero, and it does not shrink the way a PDE delta's discretization error does.</li>
