@@ -1815,6 +1815,126 @@ def chart_coverage_grid(agg: Dict[str, Any]) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Page shell: fonts, tokens, and the two document forms
+#
+# The report is published two ways from one source -- a standalone file you can
+# open from disk, and a body-only fragment for a hosted artifact, which supplies
+# its own <!doctype>/<head>/<body>.  Everything visual is shared, so the hosted
+# page can never drift from the local one.
+# ---------------------------------------------------------------------------
+
+REPORT_TITLE = "Does Vol-Model Sophistication Pay in Snowball Hedging?"
+
+# IBM Plex, not a default sans: it was drawn for engineering documentation,
+# its three cuts are designed to sit together, and it has true tabular figures
+# -- which this page needs, being eight tables of aligned decimals.  Serif for
+# headings gives the research-paper register; mono carries the equation blocks
+# and the identifiers.  Every stack keeps a real fallback, including a CJK face
+# for the underlying's Chinese name.
+FONT_LINK = (
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
+    "family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Serif:wght@600;700&"
+    'family=IBM+Plex+Mono:wght@400;600&display=swap">'
+)
+
+# Defined once and emitted three times: bare :root is the complete light
+# palette, and the dark tokens are repeated under the OS preference AND under
+# an explicit data-theme="dark", so a reader's toggle wins in both directions.
+# Components only ever read tokens -- a colour defined solely inside a media
+# block would never apply in the un-stamped default state, which is how an
+# artifact ends up rendering one theme's text on the other theme's ground.
+_DARK_TOKENS = """
+  --ink:#e6edf3; --muted:#9aa7b8; --line:#2b3648;
+  --accent:#8fb4e0; --accent2:#e8927c;
+  --bg:#0d131c; --card:#141d2b;
+  --code-bg:#1c2634; --eq-bg:#060b12; --eq-ink:#e6edf3; --eq-comment:#7d8aa0;
+  --callout-bg:#1b1512; --callout-key-bg:#111a26;
+  --th-ink:#0d131c;
+"""
+
+
+def _stylesheet() -> str:
+    return f"""<style>
+:root {{
+  --ink:#151d2b; --muted:#5a6577; --line:#e2e6ee;
+  --accent:#1E3A5F; --accent2:#b5432f;
+  --bg:#ffffff; --card:#f7f9fc;
+  --code-bg:#eef1f6; --eq-bg:#0d1b2a; --eq-ink:#e6edf3; --eq-comment:#7d8aa0;
+  --callout-bg:#fbf2ef; --callout-key-bg:#eef3f9;
+  --th-ink:#ffffff;
+  --display:"IBM Plex Serif",Georgia,"Songti SC",serif;
+  --body:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"IBM Plex Mono","SF Mono",Menlo,Consolas,monospace;
+  --measure:72ch;
+}}
+@media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{{_DARK_TOKENS}}} }}
+:root[data-theme="dark"] {{{_DARK_TOKENS}}}
+* {{ box-sizing:border-box; }}
+body {{ font-family:var(--body); color:var(--ink); background:var(--bg);
+       margin:0; line-height:1.62; }}
+.wrap {{ max-width:960px; margin:0 auto; padding:2.5rem 1.4rem 5rem; }}
+h1,h2,h3 {{ font-family:var(--display); text-wrap:balance; }}
+h1 {{ font-size:2.1rem; line-height:1.18; margin:.2rem 0 .5rem; letter-spacing:-.01em; }}
+h2 {{ font-size:1.42rem; margin:2.6rem 0 .6rem; padding-top:1rem;
+     border-top:2px solid var(--line); color:var(--accent); }}
+h3 {{ font-size:1.08rem; margin:1.5rem 0 .3rem; color:var(--accent2); }}
+p, li {{ font-size:.98rem; max-width:var(--measure); }}
+.lede {{ color:var(--muted); font-size:1.06rem; max-width:var(--measure); }}
+.meta {{ font-size:.85rem; color:var(--muted); background:var(--card);
+        border:1px solid var(--line); border-radius:8px; padding:.7rem 1rem; margin:1rem 0 0; }}
+code {{ font-family:var(--mono); background:var(--code-bg); padding:.05rem .3rem;
+       border-radius:4px; font-size:.88em; }}
+.eq {{ background:var(--eq-bg); color:var(--eq-ink); border-radius:8px; padding:.8rem 1.1rem;
+      margin:.8rem 0; font-family:var(--mono); font-size:.9rem; overflow-x:auto; }}
+.eq .c {{ color:var(--eq-comment); }}
+.tablewrap {{ overflow-x:auto; }}
+table {{ border-collapse:collapse; width:100%; margin:1rem 0; font-size:.9rem;
+        font-variant-numeric:tabular-nums; }}
+th,td {{ border:1px solid var(--line); padding:.42rem .6rem; text-align:left; }}
+th {{ background:var(--accent); color:var(--th-ink); font-weight:600;
+     font-family:var(--body); letter-spacing:.01em; }}
+td.num {{ text-align:right; }}
+tr:nth-child(even) td {{ background:var(--card); }}
+.callout {{ border-left:4px solid var(--accent2); background:var(--callout-bg);
+           padding:.8rem 1.1rem; border-radius:0 8px 8px 0; margin:1.1rem 0;
+           max-width:var(--measure); }}
+.callout.key {{ border-color:var(--accent); background:var(--callout-key-bg); }}
+.callout b {{ color:var(--accent2); }}
+.callout.key b {{ color:var(--accent); }}
+figure.chart {{ margin:1.4rem 0; padding:.9rem 1rem 1rem; background:var(--card);
+               border:1px solid var(--line); border-radius:8px; overflow-x:auto; }}
+figure.chart svg {{ display:block; min-width:520px; }}
+figure.chart figcaption {{ font-size:.84rem; color:var(--muted); margin-top:.6rem;
+                          max-width:var(--measure); }}
+figure.chart figcaption.charttitle {{ font-family:var(--display); font-size:.98rem;
+                                     color:var(--ink); font-weight:600; margin:0 0 .5rem; }}
+.toc {{ background:var(--card); border:1px solid var(--line); border-radius:8px;
+       padding:1rem 1.3rem; margin:1.4rem 0; max-width:var(--measure); }}
+.toc ol {{ margin:.3rem 0; padding-left:1.2rem; }}
+.toc a {{ color:var(--accent); text-decoration:none; }}
+.toc a:hover, .toc a:focus-visible {{ text-decoration:underline; }}
+:focus-visible {{ outline:2px solid var(--accent2); outline-offset:2px; }}
+footer {{ margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line);
+         font-size:.82rem; color:var(--muted); }}
+</style>"""
+
+
+def _document(content: str, *, standalone: bool = True) -> str:
+    """Wrap the report body for a file on disk, or for a hosted artifact."""
+    head = f"<title>{REPORT_TITLE}</title>\n{FONT_LINK}\n{_stylesheet()}"
+    page = f'<div class="wrap">\n{content}\n</div>'
+    if not standalone:
+        # The host supplies <!doctype>/<head>/<body> and reads the title from
+        # the first tag it finds, so that has to lead.
+        return f"{head}\n{page}"
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"{head}\n</head><body>\n{page}\n</body></html>"
+    )
+
+
 def _scope_section(agg: Dict[str, Any]) -> str:
     """Name every declared-out-of-scope cell, with the measurement behind it."""
     records = agg.get("scope_exclusions", []) or []
@@ -2007,7 +2127,7 @@ def _paired_collapse_note(agg: Dict[str, Any]) -> str:
     )
 
 
-def build_report(agg: Dict[str, Any]) -> str:
+def build_report(agg: Dict[str, Any], *, standalone: bool = True) -> str:
     cfg = agg.get("config", {})
     term = agg.get("term_sheet", {})
     costs = agg.get("hedge_costs", {})
@@ -2271,6 +2391,17 @@ averaged in.</div>"""
     coverage_caveat = _coverage_caveat(agg)
     scope_caveat = _scope_caveat_bullet(agg)
 
+    # "154/162 runs completed" reads as eight failures when the eight are a
+    # declared boundary.  Judge completion against what was in scope, and name
+    # the exclusions separately.
+    n_scope = counts.get("runs_in_scope", counts.get("runs_expected", "?"))
+    runs_line = f'{counts.get("runs_completed", "?")}/{n_scope} runs completed'
+    if counts.get("runs_out_of_scope"):
+        runs_line += (
+            f' (+{counts["runs_out_of_scope"]} declared out of scope, '
+            f'&sect;2.1)'
+        )
+
     # Coverage is uneven, so a single pair count would be wrong for some arm.
     pair_counts = sorted({p.get("n_pairs") or 0 for p in paired.values()})
     n_pairs = (
@@ -2314,53 +2445,7 @@ averaged in.</div>"""
         "sample of the same one.",
     )
 
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Does Vol-Model Sophistication Pay in Snowball Hedging?</title>
-<style>
-:root {{ --ink:#1a2230; --muted:#5a6577; --line:#e2e6ee; --accent:#1E3A5F; --accent2:#b5432f;
-        --bg:#ffffff; --card:#f7f9fc; --code:#0d1b2a; }}
-* {{ box-sizing:border-box; }}
-body {{ font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;
-       color:var(--ink); background:var(--bg); margin:0; line-height:1.62; }}
-.wrap {{ max-width:960px; margin:0 auto; padding:2.5rem 1.4rem 5rem; }}
-h1 {{ font-size:2rem; line-height:1.2; margin:.2rem 0 .4rem; }}
-h2 {{ font-size:1.4rem; margin:2.6rem 0 .6rem; padding-top:1rem; border-top:2px solid var(--line); color:var(--accent); }}
-h3 {{ font-size:1.08rem; margin:1.5rem 0 .3rem; color:var(--accent2); }}
-.lede {{ color:var(--muted); font-size:1.05rem; }}
-.meta {{ font-size:.85rem; color:var(--muted); background:var(--card); border:1px solid var(--line);
-         border-radius:8px; padding:.7rem 1rem; margin:1rem 0 0; }}
-p, li {{ font-size:.98rem; }}
-code {{ font-family:"SF Mono",Menlo,Consolas,monospace; background:#eef1f6; padding:.05rem .3rem; border-radius:4px; font-size:.9em; }}
-.eq {{ background:var(--code); color:#e6edf3; border-radius:8px; padding:.8rem 1.1rem; margin:.8rem 0;
-       font-family:"SF Mono",Menlo,Consolas,monospace; font-size:.92rem; overflow-x:auto; }}
-.eq .c {{ color:#7d8aa0; }}
-.tablewrap {{ overflow-x:auto; }}
-table {{ border-collapse:collapse; width:100%; margin:1rem 0; font-size:.9rem; }}
-th,td {{ border:1px solid var(--line); padding:.42rem .6rem; text-align:left; }}
-th {{ background:var(--accent); color:#fff; font-weight:600; }}
-td.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
-tr:nth-child(even) td {{ background:var(--card); }}
-.callout {{ border-left:4px solid var(--accent2); background:#fbf2ef; padding:.8rem 1.1rem; border-radius:0 8px 8px 0; margin:1.1rem 0; }}
-.callout.key {{ border-color:var(--accent); background:#eef3f9; }}
-.callout b {{ color:var(--accent2); }}
-.callout.key b {{ color:var(--accent); }}
-figure.chart {{ margin:1.4rem 0; padding:.9rem 1rem 1rem; background:var(--card);
-                border:1px solid var(--line); border-radius:8px; overflow-x:auto; }}
-figure.chart svg {{ display:block; min-width:520px; }}
-figure.chart figcaption {{ font-size:.84rem; color:var(--muted); margin-top:.6rem; }}
-figure.chart figcaption.charttitle {{ font-size:.92rem; color:var(--ink); font-weight:600;
-                                      margin:0 0 .5rem; }}
-.toc {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:1rem 1.3rem; margin:1.4rem 0; }}
-.toc ol {{ margin:.3rem 0; padding-left:1.2rem; }}
-.toc a {{ color:var(--accent); text-decoration:none; }}
-footer {{ margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line); font-size:.82rem; color:var(--muted); }}
-@media (prefers-color-scheme: dark) {{
-  :root {{ --ink:#e6edf3; --muted:#9aa7b8; --line:#2b3648; --accent:#8fb4e0; --accent2:#e8927c;
-           --bg:#0d131c; --card:#141d2b; --code:#060b12; }}
-  code {{ background:#1c2634; }} .callout {{ background:#1b1512; }} .callout.key {{ background:#111a26; }}
-}}
-</style></head><body><div class="wrap">
+    content = f"""{incomplete_banner}
 {incomplete_banner}
 <h1>Does vol-model sophistication pay in snowball hedging?</h1>
 <p class="lede">A historical backtest of a <b>short 3-year CSI&nbsp;1000 snowball</b>
@@ -2371,7 +2456,7 @@ real CFFEX settlement data.</p>
 
 <div class="meta">
 {counts.get("inceptions", "?")} monthly inceptions &middot; {len(variants)} variants &middot;
-{counts.get("runs_completed", "?")}/{counts.get("runs_expected", "?")} runs completed &middot;
+{runs_line} &middot;
 notional {_fmt(cfg.get("notional"), 0)} CNY &middot; flat rate {_fmt(cfg.get("rate"), 4)} &middot;
 generated {generated}
 </div>
@@ -2559,8 +2644,8 @@ Generated {generated} &middot; source
 <code>example/mo_volmodels/13_aggregate_and_report.py</code> (this report) &middot;
 engines from <code>quantark.volmodels</code> / <code>quantark.asset.equity.engine</code> &middot;
 market data: official CFFEX MO settlement files via AKShare.
-</footer>
-</div></body></html>"""
+</footer>"""
+    return _document(content, standalone=standalone)
 
 
 def _outcome_concentration_caveat(agg: Dict[str, Any]) -> str:
@@ -2666,11 +2751,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     paths = write_tables(agg, out_dir)
     report_path = out_dir / "volmodel_backtest_lecture.html"
     report_path.write_text(build_report(agg), encoding="utf-8")
+    # Body-only twin for publishing as a hosted artifact, written from the same
+    # aggregate so the shared page can never drift from the local one.
+    artifact_path = out_dir / "volmodel_backtest_artifact.html"
+    artifact_path.write_text(
+        build_report(agg, standalone=False), encoding="utf-8"
+    )
 
     print(f"[aggregate] {len(agg['per_run'])} runs, {len(agg['variants'])} variants")
     for name, path in paths.items():
         print(f"  {name}: {path}")
     print(f"  report: {report_path}")
+    print(f"  artifact: {artifact_path}")
     comp = agg["completeness"]
     print(
         f"  completeness: {comp['n_complete']}/{comp['n_runs_checked']} runs "
