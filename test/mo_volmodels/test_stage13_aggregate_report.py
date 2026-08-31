@@ -1688,3 +1688,161 @@ def test_localvol_still_needs_its_dupire_surface_stats(tmp_path):
     )
     assert not check["complete"]
     assert any("lv_min" in i for i in check["issues"])
+
+
+# ---------------------------------------------------------------------------
+# Inline SVG charts
+#
+# Generated from the aggregate on every run, so what they pin is that the
+# drawing FOLLOWS THE DATA -- a chart that silently detaches from the numbers
+# it illustrates is worse than no chart.
+# ---------------------------------------------------------------------------
+
+
+def _svg(markup):
+    """Parse the markup so assertions run against real elements, not substrings."""
+    import xml.etree.ElementTree as ET
+
+    return ET.fromstring(markup.replace("&mdash;", "-").replace("&ndash;", "-"))
+
+
+def test_every_chart_is_well_formed_svg(fleet):
+    agg = s13.aggregate(fleet)
+    for fn in (
+        s13.chart_paired_strip,
+        s13.chart_inception_vs_hedging,
+        s13.chart_component_split,
+        s13.chart_coverage_grid,
+    ):
+        markup = fn(agg)
+        assert markup, fn.__name__
+        root = _svg(markup)
+        assert root.tag.endswith("svg")
+        # Screen-reader name and a viewBox, so it scales and is not a mystery.
+        assert root.get("viewBox")
+        assert root.get("aria-label")
+
+
+def test_charts_are_empty_rather_than_broken_without_data(tmp_path):
+    """An empty fleet must yield no chart, not a chart of nothing."""
+    root = tmp_path / "empty"
+    _write_manifest(root, [], variants=[], inceptions=[])
+    agg = s13.aggregate(root)
+    for fn in (
+        s13.chart_paired_strip,
+        s13.chart_inception_vs_hedging,
+        s13.chart_component_split,
+        s13.chart_coverage_grid,
+    ):
+        assert fn(agg) == "", fn.__name__
+    assert "<svg" not in s13.build_report(agg)
+
+
+def test_the_strip_plot_draws_one_dot_per_paired_inception(fleet):
+    """The chart's dot count IS the sample size -- they cannot drift apart."""
+    agg = s13.aggregate(fleet)
+    root = _svg(s13.chart_paired_strip(agg))
+    circles = [e for e in root.iter() if e.tag.endswith("circle")]
+    assert len(circles) == len(agg["paired_vs_baseline"])
+
+
+def test_the_strip_plot_reports_the_win_count_in_full(fleet):
+    """`13/2` instead of `13/27` reads as a real and much worse number."""
+    agg = s13.aggregate(fleet)
+    root = _svg(s13.chart_paired_strip(agg))
+    labels = [
+        e.text for e in root.iter() if e.tag.endswith("text") and e.text and "/" in e.text
+    ]
+    expected = {
+        f"{sum(1 for p in agg['paired_vs_baseline'] if p['variant'] == v and p['d_pnl_pct_notional'] > 0)}"
+        f"/{s['n_pairs']}"
+        for v, s in agg["paired_summary"].items()
+    }
+    assert set(labels) == expected
+
+
+def test_no_chart_element_escapes_its_viewbox(fleet):
+    """Anything drawn outside the box is invisible, and silently so."""
+    agg = s13.aggregate(fleet)
+    for fn in (
+        s13.chart_paired_strip,
+        s13.chart_inception_vs_hedging,
+        s13.chart_component_split,
+        s13.chart_coverage_grid,
+    ):
+        root = _svg(fn(agg))
+        _, _, width, height = (float(v) for v in root.get("viewBox").split())
+        for element in root.iter():
+            for attr in ("x", "cx", "x1", "x2"):
+                if element.get(attr) is not None:
+                    assert -1 <= float(element.get(attr)) <= width, (fn.__name__, attr)
+            for attr in ("y", "cy", "y1", "y2"):
+                if element.get(attr) is not None:
+                    assert -1 <= float(element.get(attr)) <= height, (fn.__name__, attr)
+
+
+def test_the_component_split_never_overlaps_money_in_with_money_out(tmp_path):
+    """A waterfall drew the hedge back across the coupon and hid it.
+
+    Needs a SETTLED fleet: with no coupon there is no large outflow to
+    overlap, so the shared fixture would pass this without exercising the bug.
+    Here the coupon dwarfs the net, which is the real shape.
+    """
+    root = tmp_path / "split"
+    for inception in ("2023-05-04", "2023-06-01"):
+        _write_run(
+            root, inception, "flat_bsm",
+            total_pnl=400_000.0, product_pnl_final=-9_000_000.0, settle=True,
+        )
+    _write_manifest(
+        root,
+        [{"inception": i, "variant": "flat_bsm"} for i in ("2023-05-04", "2023-06-01")],
+        variants=["flat_bsm"],
+        inceptions=["2023-05-04", "2023-06-01"],
+    )
+    agg = s13.aggregate(root)
+    assert (agg["variant_summary"]["flat_bsm"]["pnl_cashflows_pct_notional"]["mean"]
+            < -10.0), "fixture must produce a coupon large enough to overlap"
+    root = _svg(s13.chart_component_split(agg))
+    rects = [
+        e for e in root.iter()
+        if e.tag.endswith("rect") and (e.find("{*}title") is not None or list(e))
+    ]
+    spans = []
+    for rect in rects:
+        title = "".join(t.text or "" for t in rect)
+        if title.startswith(("coupon", "hedge", "costs")):
+            x = float(rect.get("x"))
+            spans.append((title.split()[0], x, x + float(rect.get("width"))))
+    assert spans, "no labelled component bars"
+    outflow = [s for s in spans if s[0] in ("coupon", "costs")]
+    inflow = [s for s in spans if s[0] == "hedge"]
+    assert outflow and inflow
+    # Every outflow bar ends where every inflow bar starts, or earlier.
+    assert max(s[2] for s in outflow) <= min(s[1] for s in inflow) + 1.0
+
+
+def test_the_coverage_grid_marks_declared_cells_and_only_those(tmp_path):
+    root = _scoped_fleet(
+        tmp_path / "gridchart",
+        failures=[{
+            "inception": DECLARED_INCEPTION, "variant": "heston",
+            "error": GRID_ERROR, "error_type": "ValidationError",
+        }],
+    )
+    agg = s13.aggregate(root)
+    markup = s13.chart_coverage_grid(agg)
+    root_el = _svg(markup)
+    titles = ["".join(t.itertext()) for t in root_el.iter() if t.tag.endswith("title")]
+    declared = [t for t in titles if "declared out of scope" in t]
+    assert len(declared) == 1
+    assert DECLARED_INCEPTION in declared[0]
+    assert sum(1 for t in titles if t.endswith(": ran")) == len(agg["per_run"])
+
+
+def test_charts_reach_the_report(fleet):
+    html = s13.build_report(s13.aggregate(fleet))
+    assert html.count('<figure class="chart"') == 4
+    assert html.count("<svg") == 4
+    # Every figure is captioned; an unexplained chart is decoration.
+    assert html.count("figcaption") >= 8

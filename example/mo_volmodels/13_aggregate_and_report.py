@@ -50,6 +50,9 @@ VARIANT_LABELS = {
     "localvol": "Local Vol",
     "heston": "Heston",
     "heston_slv": "Heston-SLV",
+    # The embedded null control: same dynamics as flat_bsm, different engine,
+    # so its paired edge is the study's own noise floor.
+    "flat_bsm_quad": "Flat BSM (quad)",
 }
 SCHEMA_VERSION = 1
 
@@ -1429,6 +1432,389 @@ def _num_cells(values: Sequence[Any], digits: int = 3, suffix: str = "") -> str:
     return "".join(f'<td class="num">{_fmt(v, digits, suffix)}</td>' for v in values)
 
 
+# ---------------------------------------------------------------------------
+# Inline SVG charts
+#
+# Generated from the aggregate, never drawn by hand: the report is rebuilt
+# from aggregate.json on every run, so a static image would silently detach
+# from the data the first time the fleet changes.  Inline SVG also keeps the
+# page self-contained -- no charting library, nothing to fetch -- which is
+# what lets it be opened or published anywhere.
+#
+# Colours are mid-tones chosen to stay legible against both the light and the
+# dark palette, and structural strokes use the same CSS variables as the rest
+# of the page so the charts follow the reader's theme.
+# ---------------------------------------------------------------------------
+
+VARIANT_COLORS = {
+    "flat_bsm": "#7a8699",
+    "flat_bsm_quad": "#9b8f7e",
+    "ts_bsm": "#4e8ac2",
+    "localvol": "#d08a3e",
+    "heston": "#5aa06f",
+    "heston_slv": "#a8709e",
+}
+
+
+def _nice_bounds(values: Sequence[float], *, pad: float = 0.12) -> Tuple[float, float]:
+    """Symmetric-ish bounds that always include zero, with a little air."""
+    vals = _finite(values)
+    if not vals:
+        return (-1.0, 1.0)
+    lo, hi = min(min(vals), 0.0), max(max(vals), 0.0)
+    span = hi - lo
+    if is_zero(span):
+        return (lo - 1.0, hi + 1.0)
+    return (lo - span * pad, hi + span * pad)
+
+
+def _px(value: float, lo: float, hi: float, a: float, b: float) -> float:
+    """Map a data value onto a pixel range; degenerate bounds map to the middle."""
+    if is_zero(hi - lo):
+        return (a + b) / 2.0
+    return a + (float(value) - lo) * (b - a) / (hi - lo)
+
+
+def _n(value: float) -> str:
+    """Compact number for SVG coordinates -- keeps the markup readable."""
+    return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def _figure(title: str, svg: str, caption: str) -> str:
+    if not svg:
+        return ""
+    return (
+        f'<figure class="chart"><figcaption class="charttitle">{title}</figcaption>'
+        f"{svg}<figcaption>{caption}</figcaption></figure>"
+    )
+
+
+def _xaxis(
+    lo: float, hi: float, x0: float, x1: float, y: float, *, suffix: str = "%"
+) -> str:
+    """Zero rule plus min/zero/max ticks -- enough to read a value, no clutter."""
+    parts = [
+        f'<line x1="{_n(x0)}" y1="{_n(y)}" x2="{_n(x1)}" y2="{_n(y)}" '
+        'stroke="var(--line)" stroke-width="1"/>'
+    ]
+    for value in sorted({lo, 0.0, hi}):
+        px = _px(value, lo, hi, x0, x1)
+        emphasis = is_zero(value)
+        parts.append(
+            f'<line x1="{_n(px)}" y1="{_n(y)}" x2="{_n(px)}" y2="{_n(y + 4)}" '
+            f'stroke="{"var(--ink)" if emphasis else "var(--line)"}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{_n(px)}" y="{_n(y + 16)}" text-anchor="middle" font-size="10" '
+            f'fill="var(--muted)">{value:+.1f}{suffix}</text>'
+        )
+    return "".join(parts)
+
+
+def _zero_rule(lo: float, hi: float, x0: float, x1: float, y0: float, y1: float) -> str:
+    px = _px(0.0, lo, hi, x0, x1)
+    return (
+        f'<line x1="{_n(px)}" y1="{_n(y0)}" x2="{_n(px)}" y2="{_n(y1)}" '
+        'stroke="var(--ink)" stroke-width="1" stroke-dasharray="3 3" opacity="0.55"/>'
+    )
+
+
+def chart_paired_strip(agg: Dict[str, Any]) -> str:
+    """One dot per inception: the sign test, shown instead of summarised.
+
+    The pooled table reports a mean and a win rate; neither tells you whether
+    the edge is a consistent tilt or one inception carrying the average.  This
+    does, and it is the chart the study's central claim rests on.
+    """
+    pairs = agg.get("paired_vs_baseline", []) or []
+    variants = [v for v in agg.get("variants", []) if v != BASELINE_VARIANT]
+    rows = [
+        (v, _finite([p["d_pnl_pct_notional"] for p in pairs if p["variant"] == v]))
+        for v in variants
+    ]
+    rows = [(v, values) for v, values in rows if values]
+    if not rows:
+        return ""
+
+    # `right` has to hold the "won/total" label outside the plot area; at 24px
+    # it clipped "15/27" to "15/2", which reads as a real (and wrong) number.
+    left, right, top, row_h = 110.0, 58.0, 14.0, 34.0
+    width, height = 900.0, top + len(rows) * row_h + 34.0
+    x0, x1 = left, width - right
+    lo, hi = _nice_bounds([d for _, values in rows for d in values])
+
+    body = [_zero_rule(lo, hi, x0, x1, top, top + len(rows) * row_h)]
+    for i, (variant, values) in enumerate(rows):
+        cy = top + i * row_h + row_h / 2.0
+        color = VARIANT_COLORS.get(variant, "var(--accent)")
+        body.append(
+            f'<text x="{_n(left - 10)}" y="{_n(cy + 4)}" text-anchor="end" '
+            f'font-size="12" fill="var(--ink)">{VARIANT_LABELS.get(variant, variant)}</text>'
+        )
+        for value in values:
+            body.append(
+                f'<circle cx="{_n(_px(value, lo, hi, x0, x1))}" cy="{_n(cy)}" r="4" '
+                f'fill="{color}" opacity="0.5"/>'
+            )
+        mean = _mean(values)
+        if mean is not None:
+            mx = _px(mean, lo, hi, x0, x1)
+            body.append(
+                f'<line x1="{_n(mx)}" y1="{_n(cy - 11)}" x2="{_n(mx)}" y2="{_n(cy + 11)}" '
+                f'stroke="{color}" stroke-width="2.5"/>'
+            )
+            wins = sum(1 for d in values if d > 0.0)
+            body.append(
+                f'<text x="{_n(x1 + 4)}" y="{_n(cy + 4)}" font-size="10" '
+                f'fill="var(--muted)">{wins}/{len(values)}</text>'
+            )
+    body.append(_xaxis(lo, hi, x0, x1, top + len(rows) * row_h + 6))
+    return (
+        f'<svg viewBox="0 0 {_n(width)} {_n(height)}" width="100%" '
+        f'role="img" aria-label="Paired PnL edge over flat BSM, one dot per inception">'
+        f"<title>Paired PnL edge per inception</title>{''.join(body)}</svg>"
+    )
+
+
+def chart_inception_vs_hedging(agg: Dict[str, Any]) -> str:
+    """The two halves of the paired edge, side by side.
+
+    A table row showing +0.31 and +0.09 reads as two smallish numbers.  Drawn
+    against a shared zero, a day-one mark propping up a losing hedge is
+    obvious at a glance -- which is the whole point of splitting them.
+    """
+    paired = agg.get("paired_summary", {}) or {}
+    variants = [
+        v for v in agg.get("variants", []) if v != BASELINE_VARIANT and v in paired
+    ]
+    rows = []
+    for variant in variants:
+        inception = (paired[variant].get("d_pnl_inception_pct_notional") or {}).get("mean")
+        hedging = (paired[variant].get("d_pnl_hedging_pct_notional") or {}).get("mean")
+        if inception is None and hedging is None:
+            continue
+        rows.append((variant, inception or 0.0, hedging or 0.0))
+    if not rows:
+        return ""
+
+    left, right, top, row_h, bar_h = 110.0, 60.0, 16.0, 46.0, 15.0
+    width, height = 900.0, top + len(rows) * row_h + 34.0
+    x0, x1 = left, width - right
+    lo, hi = _nice_bounds([v for _, a, b in rows for v in (a, b)])
+    zero = _px(0.0, lo, hi, x0, x1)
+
+    body = [_zero_rule(lo, hi, x0, x1, top, top + len(rows) * row_h)]
+    for i, (variant, inception, hedging) in enumerate(rows):
+        base = top + i * row_h
+        color = VARIANT_COLORS.get(variant, "var(--accent)")
+        body.append(
+            f'<text x="{_n(left - 10)}" y="{_n(base + row_h / 2.0 + 4)}" text-anchor="end" '
+            f'font-size="12" fill="var(--ink)">{VARIANT_LABELS.get(variant, variant)}</text>'
+        )
+        for j, (label, value, opacity) in enumerate(
+            (("inception", inception, 0.45), ("hedging", hedging, 1.0))
+        ):
+            y = base + 5 + j * (bar_h + 3)
+            px = _px(value, lo, hi, x0, x1)
+            body.append(
+                f'<rect x="{_n(min(zero, px))}" y="{_n(y)}" '
+                f'width="{_n(abs(px - zero))}" height="{_n(bar_h)}" '
+                f'fill="{color}" opacity="{opacity}"/>'
+            )
+            anchor, tx = ("start", px + 5) if value >= 0 else ("end", px - 5)
+            body.append(
+                f'<text x="{_n(tx)}" y="{_n(y + bar_h - 3)}" text-anchor="{anchor}" '
+                f'font-size="10" fill="var(--muted)">{label} {value:+.2f}</text>'
+            )
+    body.append(_xaxis(lo, hi, x0, x1, top + len(rows) * row_h + 6))
+    return (
+        f'<svg viewBox="0 0 {_n(width)} {_n(height)}" width="100%" role="img" '
+        f'aria-label="Paired edge split into the day-one mark and the hedging period">'
+        f"<title>Inception mark vs hedging period</title>{''.join(body)}</svg>"
+    )
+
+
+def chart_component_split(agg: Dict[str, Any]) -> str:
+    """Cut B: how a huge coupon and a huge hedge net to a little.
+
+    Drawn as a DIVERGING bar -- money out stacked left of zero, money in
+    stacked right -- with the net on a thin bar beneath.  A waterfall was the
+    obvious first choice and is wrong here: with terms this large and of
+    alternating sign, the hedge step runs back across the coupon step and
+    hides it, so the chart shows one bar where there are two.  Diverging keeps
+    both gross magnitudes visible, which is the point -- the headline is a
+    small DIFFERENCE of large numbers, and that is why a point of hedging
+    error moves it so far.
+    """
+    summaries = agg.get("variant_summary", {}) or {}
+    variants = [v for v in agg.get("variants", []) if v in summaries]
+    rows = []
+    for variant in variants:
+        s = summaries[variant]
+        terms = [
+            ("coupon", (s.get("pnl_cashflows_pct_notional") or {}).get("mean")),
+            ("hedge", (s.get("pnl_hedge_pct_notional") or {}).get("mean")),
+            ("costs", -((s.get("cost_drag_pct_notional") or {}).get("mean") or 0.0)),
+            ("mark", (s.get("pnl_open_mark_pct_notional") or {}).get("mean") or 0.0),
+        ]
+        total = (s.get("pnl_pct_notional") or {}).get("mean")
+        if any(v is None for _, v in terms) or total is None:
+            continue
+        rows.append((variant, terms, total))
+    if not rows:
+        return ""
+
+    left, right, top = 110.0, 74.0, 16.0
+    row_h, bar_h, net_h = 52.0, 18.0, 9.0
+    width, height = 900.0, top + len(rows) * row_h + 40.0
+    x0, x1 = left, width - right
+    extremes = [0.0]
+    for _, terms, total in rows:
+        extremes.append(sum(v for _, v in terms if v < 0))
+        extremes.append(sum(v for _, v in terms if v > 0))
+        extremes.append(total)
+    lo, hi = _nice_bounds(extremes, pad=0.04)
+    zero = _px(0.0, lo, hi, x0, x1)
+
+    fills = {
+        "coupon": "#b5432f",
+        "hedge": "#2f7d55",
+        "costs": "#8a6d3b",
+        "mark": "#5a6577",
+    }
+    body = [_zero_rule(lo, hi, x0, x1, top, top + len(rows) * row_h)]
+    for i, (variant, terms, total) in enumerate(rows):
+        y = top + i * row_h + 4
+        body.append(
+            f'<text x="{_n(left - 10)}" y="{_n(y + bar_h - 4)}" text-anchor="end" '
+            f'font-size="12" fill="var(--ink)">{VARIANT_LABELS.get(variant, variant)}</text>'
+        )
+        # Outflows stack leftward from zero, inflows rightward, so the two can
+        # never overwrite each other whatever their relative sizes.
+        for negative in (True, False):
+            acc = 0.0
+            for name, value in terms:
+                if is_zero(value) or (value < 0) is not negative:
+                    continue
+                start = _px(acc, lo, hi, x0, x1)
+                end = _px(acc + value, lo, hi, x0, x1)
+                body.append(
+                    f'<rect x="{_n(min(start, end))}" y="{_n(y)}" '
+                    f'width="{_n(max(abs(end - start), 1.0))}" height="{_n(bar_h)}" '
+                    f'fill="{fills.get(name, "var(--accent)")}" opacity="0.85">'
+                    f"<title>{name} {value:+.3f}% of notional</title></rect>"
+                )
+                if abs(end - start) > 40:
+                    body.append(
+                        f'<text x="{_n((start + end) / 2.0)}" y="{_n(y + bar_h - 5)}" '
+                        f'text-anchor="middle" font-size="10" fill="#ffffff">'
+                        f"{value:+.1f}</text>"
+                    )
+                acc += value
+        ny = y + bar_h + 3
+        nx = _px(total, lo, hi, x0, x1)
+        body.append(
+            f'<rect x="{_n(min(zero, nx))}" y="{_n(ny)}" '
+            f'width="{_n(max(abs(nx - zero), 1.0))}" height="{_n(net_h)}" '
+            f'fill="var(--ink)" opacity="0.85"><title>net {total:+.3f}%</title></rect>'
+        )
+        body.append(
+            f'<text x="{_n(max(nx, zero) + 6)}" y="{_n(ny + net_h - 1)}" font-size="10" '
+            f'fill="var(--ink)">net {total:+.2f}</text>'
+        )
+    body.append(_xaxis(lo, hi, x0, x1, top + len(rows) * row_h + 6))
+    legend_items = [(n, fills[n]) for n in ("coupon", "hedge", "costs")]
+    legend_items.append(("net", "var(--ink)"))
+    legend = "".join(
+        f'<rect x="{_n(left + k * 92)}" y="{_n(height - 14)}" width="10" height="10" '
+        f'fill="{fill}" opacity="0.85"/>'
+        f'<text x="{_n(left + k * 92 + 14)}" y="{_n(height - 5)}" font-size="10" '
+        f'fill="var(--muted)">{name}</text>'
+        for k, (name, fill) in enumerate(legend_items)
+    )
+    return (
+        f'<svg viewBox="0 0 {_n(width)} {_n(height)}" width="100%" role="img" '
+        f'aria-label="Money out, money in, and the net, per variant">'
+        f"<title>Component split</title>{''.join(body)}{legend}</svg>"
+    )
+
+
+def chart_coverage_grid(agg: Dict[str, Any]) -> str:
+    """Every cell of the study, and which ones are not there.
+
+    The declared gap is currently three paragraphs of prose.  As a grid it is
+    one look -- and because the missing cells sit together rather than
+    scattered, the shape of the gap is the point.
+    """
+    coverage = agg.get("coverage", {}) or {}
+    per_variant = coverage.get("variants", {}) or {}
+    if not per_variant:
+        return ""
+    inceptions = [str(e.get("inception")) for e in agg.get("inceptions", [])]
+    if not inceptions:
+        inceptions = sorted(
+            {str(r["inception"]) for r in agg.get("per_run", [])}
+        )
+    variants = [v for v in agg.get("variants", []) if v in per_variant]
+    if not inceptions or not variants:
+        return ""
+    excluded = {
+        (str(r.get("inception")), str(r.get("variant")))
+        for r in agg.get("scope_exclusions", []) or []
+    }
+
+    # `top` has to clear the rotated date labels, which run UPWARD from their
+    # anchor: at 40px a 10-character date was cut to "2023-05", which reads as
+    # a month rather than the day the trade actually started.
+    left, top, cell, gap = 110.0, 62.0, 22.0, 3.0
+    width = left + len(inceptions) * (cell + gap) + 20.0
+    height = top + len(variants) * (cell + gap) + 14.0
+    body = []
+    for j, inception in enumerate(inceptions):
+        x = left + j * (cell + gap) + cell / 2.0
+        body.append(
+            f'<text x="{_n(x)}" y="{_n(top - 8)}" font-size="9" fill="var(--muted)" '
+            f'transform="rotate(-90 {_n(x)} {_n(top - 8)})" text-anchor="start">'
+            f"{inception}</text>"
+        )
+    for i, variant in enumerate(variants):
+        y = top + i * (cell + gap)
+        covered = set(inceptions) - set(
+            per_variant[variant].get("missing_inceptions", [])
+        )
+        body.append(
+            f'<text x="{_n(left - 10)}" y="{_n(y + cell - 6)}" text-anchor="end" '
+            f'font-size="11" fill="var(--ink)">{VARIANT_LABELS.get(variant, variant)}</text>'
+        )
+        for j, inception in enumerate(inceptions):
+            x = left + j * (cell + gap)
+            if inception in covered:
+                fill, opacity, stroke = (
+                    VARIANT_COLORS.get(variant, "var(--accent)"),
+                    "0.72",
+                    "none",
+                )
+                label = "ran"
+            elif (inception, variant) in excluded:
+                fill, opacity, stroke = "none", "1", "var(--accent2)"
+                label = "declared out of scope"
+            else:
+                fill, opacity, stroke = "none", "1", "var(--line)"
+                label = "absent"
+            body.append(
+                f'<rect x="{_n(x)}" y="{_n(y)}" width="{_n(cell)}" height="{_n(cell)}" '
+                f'rx="3" fill="{fill}" opacity="{opacity}" stroke="{stroke}" '
+                f'stroke-width="1.5" stroke-dasharray="{"3 2" if stroke != "none" else ""}">'
+                f"<title>{inception} {VARIANT_LABELS.get(variant, variant)}: {label}</title>"
+                "</rect>"
+            )
+    return (
+        f'<svg viewBox="0 0 {_n(width)} {_n(height)}" width="100%" role="img" '
+        f'aria-label="Coverage grid of inceptions by variant">'
+        f"<title>Coverage grid</title>{''.join(body)}</svg>"
+    )
+
+
 def _scope_section(agg: Dict[str, Any]) -> str:
     """Name every declared-out-of-scope cell, with the measurement behind it."""
     records = agg.get("scope_exclusions", []) or []
@@ -1885,6 +2271,49 @@ averaged in.</div>"""
     coverage_caveat = _coverage_caveat(agg)
     scope_caveat = _scope_caveat_bullet(agg)
 
+    # Coverage is uneven, so a single pair count would be wrong for some arm.
+    pair_counts = sorted({p.get("n_pairs") or 0 for p in paired.values()})
+    n_pairs = (
+        str(pair_counts[0])
+        if len(pair_counts) == 1
+        else f"{pair_counts[0]}&ndash;{pair_counts[-1]}"
+    ) if pair_counts else "0"
+    fig_strip = _figure(
+        "Paired edge over flat BSM, one dot per inception",
+        chart_paired_strip(agg),
+        "Each dot is one inception's paired difference; the bar is the mean and the "
+        "figure on the right is the count of inceptions won. Dots are drawn "
+        "semi-transparent, so overlap reads as density. A tight cluster left of the "
+        "dashed zero line is a consistent loss, not an unlucky average.",
+    )
+    fig_split = _figure(
+        "The same edge, split into the day-one mark and the hedging period",
+        chart_inception_vs_hedging(agg),
+        "Mean paired difference, % of notional. The pale bar is the one-off "
+        "valuation opinion booked on day 1; the solid bar is what accrued over "
+        f"{n_pairs} paired inceptions of daily rebalancing. Where they point in "
+        "opposite directions, the blended total understates both.",
+    )
+    fig_bridge = _figure(
+        "How the total is actually made: coupon paid, hedge earned, costs spent",
+        chart_component_split(agg),
+        "Cut B, mean % of notional. Money out stacks left of zero, money in stacks "
+        "right, and the dark bar beneath each pair is what is left. Note the scale: "
+        "a coupon near &minus;16% against a hedge near +21% nets to a few percent, "
+        "so the headline result is a small <em>difference of large numbers</em> "
+        "&mdash; which is why a point of hedging error moves it so far. The coupon "
+        "differs between arms only because coverage does; within one inception it "
+        "is identical.",
+    )
+    fig_coverage = _figure(
+        "Which cells the study actually contains",
+        chart_coverage_grid(agg),
+        "Filled squares ran. Dashed outlines are declared out of scope (&sect;2.1). "
+        "The gap sits in one contiguous block rather than scattered across the "
+        "window, which is why it is a gap in a market regime rather than a thinner "
+        "sample of the same one.",
+    )
+
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Does Vol-Model Sophistication Pay in Snowball Hedging?</title>
@@ -1916,6 +2345,12 @@ tr:nth-child(even) td {{ background:var(--card); }}
 .callout.key {{ border-color:var(--accent); background:#eef3f9; }}
 .callout b {{ color:var(--accent2); }}
 .callout.key b {{ color:var(--accent); }}
+figure.chart {{ margin:1.4rem 0; padding:.9rem 1rem 1rem; background:var(--card);
+                border:1px solid var(--line); border-radius:8px; overflow-x:auto; }}
+figure.chart svg {{ display:block; min-width:520px; }}
+figure.chart figcaption {{ font-size:.84rem; color:var(--muted); margin-top:.6rem; }}
+figure.chart figcaption.charttitle {{ font-size:.92rem; color:var(--ink); font-weight:600;
+                                      margin:0 0 .5rem; }}
 .toc {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:1rem 1.3rem; margin:1.4rem 0; }}
 .toc ol {{ margin:.3rem 0; padding-left:1.2rem; }}
 .toc a {{ color:var(--accent); text-decoration:none; }}
@@ -2016,6 +2451,7 @@ An unresolved 2-D estimator is excluded and shown above; it is never replaced wi
 daily Monte Carlo hedge. The tables below therefore report only variants with complete numerical
 admission evidence.</p>
 {scope_section}
+{fig_coverage}
 
 <h2 id="s3">3 &nbsp; Results: PnL distribution across inceptions</h2>
 <p>All figures are <b>percent of notional</b>, from the seller's perspective, net of hedging costs.
@@ -2041,6 +2477,7 @@ from</em>.</p>
 <tbody>{decomp_rows}</tbody></table></div>
 <p class="small">Every column is a <b>signed contribution</b>, so each cut adds straight across to
 the total on the right &mdash; costs appear negative because they are money spent.</p>
+{fig_bridge}
 {decomp_note}
 <div class="callout key"><b>Do not add across the cuts.</b> Every Cut-B term that lands after day 1
 &mdash; the coupon, the hedge, all but the first day's costs &mdash; is <em>already inside</em> Cut
@@ -2074,6 +2511,8 @@ would instead be dominated by which inceptions happened to knock out early.</p>
 <th>&Delta; inception</th><th>&Delta; hedging</th><th>hedging win rate</th>
 <th>mean &Delta;residual &delta;</th><th>hedge win rate</th></tr></thead>
 <tbody>{paired_rows}</tbody></table></div>
+{fig_strip}
+{fig_split}
 <div class="callout key"><b>Inception vs hedging &mdash; read these before the total.</b>
 &Delta;PnL splits along Cut A (&sect;3.1) into two parts that mean different things. Every variant prices the
 SAME contract, whose coupon was solved so that flat BSM values it at zero (Gate G4), and the
