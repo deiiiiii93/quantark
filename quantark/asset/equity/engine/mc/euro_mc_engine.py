@@ -252,8 +252,11 @@ class EuropeanMCEngine(BaseEngine):
             raise ValidationError(f"Strike price must be positive, got {K}")
         if T < 0:
             raise ValidationError(f"Time to maturity must be non-negative, got {T}")
-        if sigma <= 0:
-            raise ValidationError(f"Volatility must be positive, got {sigma}")
+        if sigma < 0:
+            # sigma == 0.0 is a legitimate exact value under a trading-clock
+            # surface (pure-holiday horizon): the GBM step is deterministic
+            # drift, and the path generator accepts zero vols.
+            raise ValidationError(f"Volatility must be non-negative, got {sigma}")
 
     def _create_path_generator(
         self,
