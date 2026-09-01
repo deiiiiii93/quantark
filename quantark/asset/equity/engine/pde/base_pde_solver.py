@@ -89,11 +89,17 @@ class StepCoefficients(NamedTuple):
     interval [t_vec[j], t_vec[j+1]]). Flat market inputs produce exactly one
     set, preserving single-operator factorization reuse; term inputs pay the
     designed per-step rebuild (spec Component 4).
+
+    ``zero_diffusion_sets`` marks unique sets whose step vol is exactly 0.0
+    (holiday intervals under a trading-clock surface): their operator is
+    first-order upwind and the sweep forces theta = 1.0 on those steps
+    (spec 2026-09-01 trading-clock-vol §4.5).
     """
 
     lcu_sets: list
     set_index: np.ndarray
     n_unique: int
+    zero_diffusion_sets: frozenset = frozenset()
 
 
 class PDESolutionResult(NamedTuple):
@@ -1134,11 +1140,39 @@ class BasePDESolver(BaseEngine):
             l[:, 0], c[:, 0], u[:, 0] = l[:, 1], c[:, 1], u[:, 1]
             l[:, -1], c[:, -1], u[:, -1] = l[:, -2], c[:, -2], u[:, -2]
 
+        # Zero-diffusion sets (sigma_step exactly 0.0 — holiday intervals of a
+        # trading-clock surface, spec 2026-09-01 trading-clock-vol §4.5):
+        # centered advection has a wrong-sign off-diagonal at D = 0, so those
+        # rows are overwritten with first-order upwind selected by sign(mu);
+        # the -0.5*sigma^2 drift term vanishes, so mu = r - q exactly.
+        sig_zero = uniq[:, 2] == 0.0
+        if np.any(sig_zero):
+            uniform_dx = is_close(float(np.max(dx_vec)), float(np.min(dx_vec)))
+            if uniform_dx:
+                h_minus = np.full(num_x - 2, dx_vec[0])
+                h_plus = h_minus
+            else:
+                h_minus, h_plus = dx_vec[:-1], dx_vec[1:]
+            for k in np.nonzero(sig_zero)[0]:
+                r_k = float(uniq[k, 0])
+                mu_k = r_k - float(uniq[k, 1])
+                if mu_k >= 0.0:
+                    l[k, 1:-1] = 0.0
+                    u[k, 1:-1] = mu_k / h_plus
+                    c[k, 1:-1] = -mu_k / h_plus - r_k
+                else:
+                    l[k, 1:-1] = -mu_k / h_minus
+                    u[k, 1:-1] = 0.0
+                    c[k, 1:-1] = mu_k / h_minus - r_k
+                l[k, 0], c[k, 0], u[k, 0] = l[k, 1], c[k, 1], u[k, 1]
+                l[k, -1], c[k, -1], u[k, -1] = l[k, -2], c[k, -2], u[k, -2]
+
         lcu_sets = [(l[k], c[k], u[k]) for k in range(n_unique)]
         result = StepCoefficients(
             lcu_sets=lcu_sets,
             set_index=np.asarray(set_index, dtype=int).reshape(n_steps),
             n_unique=n_unique,
+            zero_diffusion_sets=frozenset(np.nonzero(sig_zero)[0].tolist()),
         )
         if memo is not None:
             if len(memo) >= _STEP_COEFF_MEMO_MAX_ENTRIES:
@@ -1251,6 +1285,10 @@ class BasePDESolver(BaseEngine):
 
             if step_coeffs is not None:
                 k = int(step_coeffs.set_index[j])
+                if k in step_coeffs.zero_diffusion_sets:
+                    # upwind advection is monotone only fully implicit
+                    # (spec 2026-09-01 trading-clock-vol §4.5)
+                    theta = 1.0
                 l, _c_j, u = step_coeffs.lcu_sets[k]
                 A = self._operator_matrix_for_set(step_coeffs, k, num_x)
             else:
