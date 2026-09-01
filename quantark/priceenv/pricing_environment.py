@@ -54,6 +54,11 @@ class PricingEnvironment:
             raise MarketDataError(
                 f"Business days per year must be positive, got {self.bus_days_in_year}"
             )
+        if self.day_count_convention == DayCountConvention.BUSINESS_DAYS:
+            from quantark.priceenv.clock_validation import (
+                validate_trading_clock_configuration,
+            )
+            validate_trading_clock_configuration(self)
 
     @property
     def spot(self) -> float:

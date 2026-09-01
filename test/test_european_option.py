@@ -432,7 +432,14 @@ def test_date_based_option_calendar_days():
 
 
 def test_date_based_option_business_days():
-    """Test date-based option with business day convention."""
+    """Test date-based option with business day convention.
+
+    A calendar is REQUIRED: without one, the old fallback computed exactly
+    ACT/365 (the D cancels algebraically) — this test used to believe it
+    tested business-day pricing while exercising calendar time.
+    """
+    from quantark.util.calendar import CalendarType, create_calendar
+
     spot = SpotQuote(spot=100.0)
     vol = FlatVolSurface(volatility=0.20)
     rate = FlatRateCurve(rate=0.05)
@@ -440,6 +447,7 @@ def test_date_based_option_business_days():
 
     valuation_date = datetime(2024, 1, 1)
     exercise_date = datetime(2024, 7, 1)  # 6 months
+    calendar = create_calendar(CalendarType.CHINA_SSE, year_range=(2024, 2025))
 
     pricing_env = PricingEnvironment(
         spot_quote=spot,
@@ -449,6 +457,7 @@ def test_date_based_option_business_days():
         valuation_date=valuation_date,
         day_count_convention=DayCountConvention.BUSINESS_DAYS,
         bus_days_in_year=252,
+        calendar=calendar,
     )
 
     # Create call option with dates
@@ -458,10 +467,15 @@ def test_date_based_option_business_days():
 
     engine = BlackScholesEngine()
     price = engine.price(call, pricing_env)
+    assert price > 0
 
-    # Verify maturity calculation
+    # Maturity must be the GENUINE business-day fraction, not ACT/365
     maturity = call.get_maturity(pricing_env)
-    assert maturity > 0, f"Maturity should be positive: {maturity}"
+    expected = calendar.count_business_days(
+        valuation_date, exercise_date, include_start=False, include_end=True
+    ) / 252.0
+    assert maturity == expected
+    assert maturity != (exercise_date - valuation_date).days / 365.0
     print(
         f"✓ Date-based option (business days) test passed: ${price:.6f}, maturity={maturity:.4f}"
     )

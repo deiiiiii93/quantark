@@ -21,7 +21,7 @@ from quantark.asset.equity.param import EngineParams
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
-from quantark.util.calendar import DayCountConvention
+from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 
 
 def print_section(title: str):
@@ -311,6 +311,9 @@ def demo_date_based_options():
         valuation_date=valuation_date,
         day_count_convention=DayCountConvention.BUSINESS_DAYS,
         bus_days_in_year=252,
+        # BUSINESS_DAYS requires a real calendar: the old no-calendar
+        # fallback computed exactly ACT/365 (the denominator cancels).
+        calendar=create_calendar(CalendarType.CHINA_SSE),
     )
 
     call_business = EuropeanVanillaOption(

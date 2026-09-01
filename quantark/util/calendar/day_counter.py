@@ -119,10 +119,13 @@ def calculate_year_fraction(
                         business_days += 1
                     current += timedelta(days=1)
             return business_days / float(bus_days_in_year)
-        # Approximate: assume 5/7 of calendar days are business days
-        # More accurate would require a business day calendar
-        business_days = num_days * (bus_days_in_year / 365.0)
-        return business_days / bus_days_in_year
+        # A calendar is REQUIRED: the old fallback num_days*(D/365)/D
+        # cancels to exactly num_days/365 for every D — silently identical
+        # to ACT/365, never an approximation of business days.
+        raise ValidationError(
+            "BUSINESS_DAYS day count requires a business-day calendar; "
+            "pass calendar=... (the no-calendar fallback was exactly ACT/365)"
+        )
 
     # For all other conventions, delegate to calculate_day_count_fraction
     else:
