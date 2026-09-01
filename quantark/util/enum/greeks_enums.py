@@ -27,6 +27,9 @@ class EquityGreek(Enum):
     DELTA_Q = "delta_q"
     CHARM = "charm"
     COLOR = "color"
+    SPEED = "speed"
+    ZOMMA = "zomma"
+    DIVIDEND_VOLGA = "dividend_volga"
 
 
 class EquityDividendInputMode(Enum):

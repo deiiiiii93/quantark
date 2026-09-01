@@ -456,6 +456,30 @@ class GreeksCalculator:
                 base_price=base_price,
                 div_bump=self._bump_config.div_bump,
             )
+        if "speed" in requested:
+            greeks_out["speed"] = self.calculate_numerical_speed(
+                product,
+                pricing_env,
+                bump_engine,
+                base_price=base_price,
+                bump=self._bump_config.spot_bump,
+            )
+        if "zomma" in requested:
+            greeks_out["zomma"] = self.calculate_numerical_zomma(
+                product,
+                pricing_env,
+                bump_engine,
+                base_price=base_price,
+                vol_bump=self._bump_config.vol_bump,
+            )
+        if "dividend_volga" in requested:
+            greeks_out["dividend_volga"] = self.calculate_numerical_dividend_volga(
+                product,
+                pricing_env,
+                bump_engine,
+                base_price=base_price,
+                div_bump=self._bump_config.div_bump,
+            )
 
         # Estimate theta components using fast approximation from existing Greeks
         if {"convexity_theta", "r_theta", "q_theta"} & requested:
@@ -668,6 +692,48 @@ class GreeksCalculator:
         return numerical.numerical_delta_q(
             self, product, pricing_env, engine,
             base_price=base_price, div_bump=div_bump, base_delta=base_delta,
+        )
+
+    def calculate_numerical_speed(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float] = None,
+        bump: Optional[float] = None,
+    ) -> float:
+        """Numerical speed (d3V/dS3) via a 4-point spot stencil."""
+        return numerical.numerical_speed(
+            self, product, pricing_env, engine,
+            base_price=base_price, bump=bump,
+        )
+
+    def calculate_numerical_zomma(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float] = None,
+        vol_bump: Optional[float] = None,
+    ) -> float:
+        """Numerical zomma (dGamma/dsigma) via gamma at vol-bumped envs."""
+        return numerical.numerical_zomma(
+            self, product, pricing_env, engine,
+            base_price=base_price, vol_bump=vol_bump,
+        )
+
+    def calculate_numerical_dividend_volga(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float] = None,
+        div_bump: Optional[float] = None,
+    ) -> float:
+        """Numerical dividend volga (d2V/dq2) via central div-yield bumps."""
+        return numerical.numerical_dividend_volga(
+            self, product, pricing_env, engine,
+            base_price=base_price, div_bump=div_bump,
         )
 
     def calculate_futures_delta_buckets(

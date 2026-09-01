@@ -372,6 +372,112 @@ def numerical_delta_q(
     return (delta_up - delta_down) / (2.0 * div_bump)
 
 
+def numerical_speed(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_price: Optional[float] = None,
+    bump: Optional[float] = None,
+) -> float:
+    """Numerical speed (d3V/dS3) via a 4-point stencil on the spot axis.
+
+    Uses single-level relative bumps only: the V(S(1±h)) legs are the same
+    prices delta/gamma use, and V(S(1±2h)) adds two pricings. No nested
+    bumped-env chains, so no compounded-bump ambiguity.
+    """
+    engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
+    bump = bump if bump is not None else calc._bump_config.spot_bump
+    base_price, price_up, price_down = bump_envs.spot_bumped_prices(
+        product, pricing_env, engine, bump, base_price=base_price
+    )
+
+    env_up2 = deepcopy(pricing_env)
+    env_up2.spot_quote.spot *= 1 + 2.0 * bump
+    price_up2 = engine.price(product, env_up2)
+
+    env_down2 = deepcopy(pricing_env)
+    env_down2.spot_quote.spot *= 1 - 2.0 * bump
+    price_down2 = engine.price(product, env_down2)
+
+    h = pricing_env.spot * bump
+    return (
+        price_up2 - 2.0 * price_up + 2.0 * price_down - price_down2
+    ) / (2.0 * h**3)
+
+
+def numerical_zomma(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_price: Optional[float] = None,
+    vol_bump: Optional[float] = None,
+) -> float:
+    """Numerical zomma (dGamma/dsigma) via gamma at vol-bumped envs.
+
+    Inner gammas go through get_delta_gamma, so greeks_mode ENGINE/AUTO
+    grid readout is honored. Falls back to a one-sided-up difference when
+    sigma - vol_bump would be non-positive (same guard as vanna/volga).
+    """
+    engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
+    vol_bump = vol_bump if vol_bump is not None else calc._bump_config.vol_bump
+    base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
+    T = product.get_maturity(pricing_env)
+    strike = getattr(product, "strike", pricing_env.spot)
+    current_vol = pricing_env.get_vol(strike, T)
+
+    env_up = bump_envs.build_vol_bumped_env(
+        pricing_env, product, current_vol, vol_bump, direction=1.0
+    )
+
+    if current_vol - vol_bump <= 0:
+        _, _, gamma_base = get_delta_gamma(
+            calc, product, pricing_env, engine, base_price
+        )
+        _, _, gamma_up = get_delta_gamma(calc, product, env_up, engine, None)
+        return (gamma_up - gamma_base) / vol_bump
+
+    env_down = bump_envs.build_vol_bumped_env(
+        pricing_env, product, current_vol, vol_bump, direction=-1.0
+    )
+    _, _, gamma_up = get_delta_gamma(calc, product, env_up, engine, None)
+    _, _, gamma_down = get_delta_gamma(calc, product, env_down, engine, None)
+    return (gamma_up - gamma_down) / (2.0 * vol_bump)
+
+
+def numerical_dividend_volga(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_price: Optional[float] = None,
+    div_bump: Optional[float] = None,
+) -> float:
+    """Numerical dividend volga (d2V/dq2) via central dividend-yield bumps.
+
+    Second-order convexity in the carry input; central second difference
+    like volga. No positivity guard: a negative dividend yield is a
+    legitimate carry input, unlike volatility.
+    """
+    engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
+    div_bump = div_bump if div_bump is not None else calc._bump_config.div_bump
+    base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
+    T = product.get_maturity(pricing_env)
+    current_div = pricing_env.get_div_yield(T)
+    env_up = bump_envs.build_div_bumped_env(
+        pricing_env, product, current_div, div_bump, direction=1.0
+    )
+    env_down = bump_envs.build_div_bumped_env(
+        pricing_env, product, current_div, div_bump, direction=-1.0
+    )
+    price_up = engine.price(product, env_up)
+    price_down = engine.price(product, env_down)
+    return bump_envs.calculate_sensitivity(
+        base_price, price_up, price_down, bump=div_bump, mode="second_order"
+    )
+
+
 def get_delta_gamma(
     calc,
     product: BaseEquityProduct,

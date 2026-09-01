@@ -64,6 +64,9 @@ _DEFS = (
     ),
     GreekDef("charm", supports_clock=True),
     GreekDef("color", supports_clock=True),
+    GreekDef("speed"),
+    GreekDef("zomma"),
+    GreekDef("dividend_volga"),
     GreekDef(
         "convexity_theta",
         default=True,
