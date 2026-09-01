@@ -360,4 +360,5 @@ def greeks_at_expiry(
         "r_theta": 0.0,
         "q_theta": 0.0,
         "rho": 0.0,
+        "dividend_rho": 0.0,
     }

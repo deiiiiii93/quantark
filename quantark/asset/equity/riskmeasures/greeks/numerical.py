@@ -734,6 +734,13 @@ def numerical_gamma_theta(
     T = product.get_maturity(pricing_env)
     if T <= 0.0:
         return 0.0
+    # Route through the shared time scenario so gamma_theta carries the same
+    # clock validation and zero guards as the rest of the theta suite: an
+    # unknown clock raises, _1td demands a pricing calendar, and a step that
+    # crosses maturity or drops every observation zeroes the whole family.
+    scenario = time_scenario(calc, product, pricing_env, clock, memo)
+    if scenario["zero"]:
+        return 0.0
     if gamma is None:
         engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
         _, _, gamma = _base_delta_gamma(

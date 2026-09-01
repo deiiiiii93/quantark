@@ -364,3 +364,63 @@ def test_invalid_theta_decomposition_mode_rejected():
             greeks=["r_theta"],
             theta_decomposition_mode="bogus",
         )
+
+
+def test_invalid_mode_rejected_even_on_analytical_route():
+    # calculate() validates the mode BEFORE analytical auto-routing, so a
+    # vanilla default request cannot silently accept a bogus mode.
+    calc = GreeksCalculator()
+    with pytest.raises(ValidationError):
+        calc.calculate(
+            _product(),
+            _calendar_env_with_trading_calendar(),
+            BlackScholesEngine(),
+            theta_decomposition_mode="bogus",
+        )
+
+
+def test_gamma_theta_rejects_unknown_clock_and_requires_calendar():
+    calc = GreeksCalculator()
+    engine = BlackScholesEngine()
+    with pytest.raises(ValidationError):
+        calc.calculate_gamma_theta(
+            _product(), _calendar_env_with_trading_calendar(), engine,
+            clock="bogus",
+        )
+    env_no_calendar = PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.2),
+        rate_curve=FlatRateCurve(rate=0.03),
+        div_yield=ContinuousDividendYield(div_yield=0.02),
+        valuation_date=FRIDAY,
+    )
+    with pytest.raises(ValidationError):
+        calc.calculate_gamma_theta(
+            _product(), env_no_calendar, engine, clock="1td"
+        )
+
+
+def test_gamma_theta_and_components_zero_when_step_crosses_maturity():
+    env = _calendar_env_with_trading_calendar()
+    product = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, maturity=1e-4
+    )
+    calc = GreeksCalculator()
+    greeks = calc.calculate_numerical_greeks(
+        product,
+        env,
+        BlackScholesEngine(),
+        greeks=["gamma_theta_1d", "r_theta_1d", "q_theta_1d"],
+    )
+    assert greeks["gamma_theta_1d"] == 0.0
+    assert greeks["r_theta_1d"] == 0.0
+    assert greeks["q_theta_1d"] == 0.0
+
+
+def test_analytical_expiry_dividend_rho_requestable():
+    from quantark.asset.equity.riskmeasures.greeks.analytical import (
+        greeks_at_expiry,
+    )
+
+    expiry = greeks_at_expiry(_product(), 100.0)
+    assert expiry["dividend_rho"] == 0.0

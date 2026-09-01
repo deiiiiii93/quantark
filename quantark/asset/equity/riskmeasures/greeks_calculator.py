@@ -76,10 +76,20 @@ class GreeksCalculator:
         greeks: Optional[Sequence[object]] = None,
         theta_decomposition_mode: str = "estimate",
     ) -> Dict[str, float]:
-        """Unified entry point for Greeks calculation."""
+        """Unified entry point for Greeks calculation.
+
+        theta_decomposition_mode applies to the numerical path; the
+        analytical route's theta components are the closed-form
+        decomposition, which is already exact.
+        """
         method = method.lower()
         if method not in ("auto", "analytical", "numerical"):
             raise ValidationError(f"Unknown greeks method: {method}")
+        if theta_decomposition_mode not in ("estimate", "exact"):
+            raise ValidationError(
+                "theta_decomposition_mode must be 'estimate' or 'exact', "
+                f"got {theta_decomposition_mode!r}"
+            )
 
         requested = self._normalize_greeks(greeks)
         analytical_supported = registry.ANALYTICAL_AUTO_SET
@@ -721,7 +731,14 @@ class GreeksCalculator:
             product, pricing_env, engine, base_price, clock, memo
         )
         T = product.get_maturity(pricing_env)
-        if T <= 0.0:
+        scenario = numerical.time_scenario(
+            self, product, pricing_env, clock, memo
+        )
+        if T <= 0.0 or scenario["zero"]:
+            # A zero scenario (non-advancing step, maturity-crossing step, or
+            # a time_shift that dropped every observation) zeroes theta, so
+            # its carry components must be zero too — otherwise r/q_theta
+            # would report carry the repriced theta does not contain.
             memo[key] = {
                 "convexity_theta": 0.0,
                 "r_theta": 0.0,
