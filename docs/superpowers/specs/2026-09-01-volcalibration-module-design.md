@@ -134,14 +134,38 @@ code path.
 ```
 
 - `listed_strike` expiry:
-  `{expiry_date, T_years, quotes: [{strike, type, last, bid, ask, volume, open_interest}]}`
-  — today's MO snapshot shape.
+  `{expiry_date, T_years, quotes: [{strike, type, settlement?, last?, bid?, ask?, volume, open_interest}]}`
+  — the union of today's two MO snapshot shapes (see the price-field rule below).
 - `fx_delta` expiry:
-  `{tenor, T_years, forward, domestic_rate, quotes: [{pillar, strike, bid_iv, mid_iv, ask_iv, delta}]}`
-  — today's CFETS snapshot shape.
+  `{tenor, expiry_date?, T_years, forward, domestic_rate, quotes: [{pillar, strike, bid_iv, mid_iv, ask_iv, delta}]}`
+  — today's CFETS snapshot shape, plus an optional `expiry_date` (§5.2).
 
 `snapshot.py` validates both fail-closed. `01_fetch_*` scripts stay in
 `example/` and emit this schema.
+
+**Price-field rule (listed conventions).** The MO suite has *two* live quote
+shapes, not one: `01_fetch_mo_snapshot.py` writes `last`/`bid`/`ask`, while
+`01_fetch_mo_settlement_history.py` writes a `settlement` key, and
+`10_calibration_diagnostics.py:392` reads prices as `quote.get(PRICE_FIELD)`
+with `PRICE_FIELD = "settlement"`. All 766 historical surfaces come from the
+settlement path. `source.price_field` is therefore the **canonical, required
+selector**, with exactly two allowed values:
+
+| `price_field` | Price used per quote |
+|---|---|
+| `settlement` | the quote's `settlement` value |
+| `mid_or_last` | `(bid + ask) / 2` when both are present and positive, else `last` (today's `_mo_common._quote_price`) |
+
+The normalizer resolves the price *only* through this selector and rejects a
+snapshot whose declared `price_field` is absent from its quotes. This preserves
+both existing behaviours exactly while making the choice explicit rather than
+inferred from which keys happen to be present.
+
+**No mixed cohorts.** `10_calibration_diagnostics.py:129` already enforces that
+"midpoint and settlement cohorts cannot mix". That invariant is promoted: the
+run config declares the expected `price_field`, the normalizer rejects any
+snapshot that disagrees, and each manifest record carries the `price_field`
+actually used (§5.4) so a mixed history is detectable after the fact.
 
 ### 5.2 `QuoteSet` (new; the normalizer output)
 
@@ -154,7 +178,8 @@ class IvNode:
 
 @dataclass(frozen=True)
 class ExpiryQuotes:
-    expiry_date: str
+    expiry_label: str          # listed: the expiry date; FX: the tenor ("3M")
+    expiry_date: str | None    # None when the snapshot carries no calendar date
     T: float
     forward: float
     discount_factor: float
@@ -177,6 +202,14 @@ inversion, applying the parity quality gates (`|implied rate| <= 10%`,
 extraction. `weight_hint` carries each convention's SABR fit weighting (MO:
 Gaussian in log-moneyness; FX: per-pillar mode), so `surface.py` never branches
 on convention.
+
+`expiry_label` is separate from `expiry_date` because CFETS snapshots identify
+a slice by tenor (`1M`, `3M`) and carry no calendar date; deriving one would
+require an FX expiry calendar and a spot-lag/adjustment convention this module
+does not own. Listed snapshots populate both. The artifact's `per_expiry` and
+`atm_pillars` blocks emit `expiry_date` only when it is known — `IvSurfaceArtifact`
+validates `T` and `forward`/`atm_vol`, and treats `expiry_date` as optional, so
+this is compatible with existing artifacts unchanged.
 
 ### 5.3 Frozen contracts (unchanged)
 
@@ -202,7 +235,8 @@ Formalizes stage 14's `PipelinePaths`; unchanged on disk.
 <root>/
   snapshots/{YYYYMMDD}.json
   iv_surface/mo_iv_surface_{YYYYMMDD}.json
-  surface_manifest.json          {date, status, reason, detail, n_expiries, artifact_sha256}
+  surface_manifest.json          {date, status, reason, detail, n_expiries, artifact_sha256,
+                                  snapshot_sha256, price_field, builder_fingerprint}
   calibration_cache/{variant}-{key}.json
   calibration_manifest.json      per-date per-variant records + resolved config
   status.json                    freshness: latest refreshed / admitted / calibrated, lag, state
@@ -213,6 +247,20 @@ Three manifests, because they answer three questions with three lifetimes:
 which dates produced a surface (rebuilt only when surfaces are); which surfaces
 have models under which config (rebuilt per calibration run); is the pipeline
 current (rewritten every run). Merging them would couple those lifetimes.
+
+**Resume invalidation.** The three fields beyond today's record —
+`snapshot_sha256`, `price_field`, `builder_fingerprint` (canonical JSON of the
+resolved `surface:` config block) — exist so that "already built" is a
+*checkable* claim rather than a filename's existence. Before skipping a date,
+the runner compares all three against what the current inputs and config would
+produce; any mismatch rebuilds the artifact. Without this, a re-published
+settlement CSV for an existing date, or a change to `sabr_beta`, leaves a stale
+surface in place that a resume run reports as complete. Today the only remedy
+is a blanket `--force`.
+
+Both the calibration cache (keyed on surface sha + config fingerprint) and this
+comparison are pure metadata: neither adds anything to the artifact body, so
+the §5.3 byte constraint holds.
 
 ### 5.5 `CalibrationSet` (new; the backtest handover)
 
@@ -245,6 +293,7 @@ name: mo-daily
 underlying:
   symbol: "000852.SH"
   convention: listed_strike        # selects the normalizer
+  price_field: settlement          # settlement | mid_or_last; snapshots must agree
 paths:
   root: example/mo_volmodels/data/history
 surface:
@@ -300,11 +349,14 @@ python -m quantark.volcalibration list   [--config <config.yaml>]
    the manifest and will never become admissible.
 3. **Idempotent and resumable.** Re-running a successful config is a no-op
    reporting `current`. An interrupted run resumes from the manifests; every
-   write is atomic.
+   write is atomic. "Already done" is verified, not assumed: a date is skipped
+   only when its recorded `snapshot_sha256`, `price_field` and
+   `builder_fingerprint` still match the current inputs and config (§5.4).
 4. **Failures are machine-readable.** The `AdmissionError` reason vocabulary
    already in the builder — `missing_spot`, `invalid_spot`, `missing_csv`,
    `parse_failed`, `sabr_smoothing_failed`, `static_arbitrage`,
-   `invalid_atm_pillar` — is promoted to a documented, stable enum, and
+   `invalid_atm_pillar` — is promoted to a documented, stable enum, extended
+   with `price_field_mismatch` (§5.1), and
    `status.json` names the blocking date, stage and reason code. An agent's
    decision procedure is `exit code -> reason code -> act`, never prose parsing.
 
@@ -379,6 +431,15 @@ an optional follow-up, not a prerequisite.
 - **CLI contract.** Exit codes 0/1/2/75; stdout is pure JSON under `--json`;
   `run` idempotence; `--plan` writes nothing; an excluded-date fixture returns
   2 rather than 1.
+- **Resume invalidation.** Three cases must each trigger a rebuild rather than
+  a skip: a re-published snapshot for an existing date (new `snapshot_sha256`),
+  a changed `surface:` config block (new `builder_fingerprint`), and a changed
+  `price_field`. A fourth case asserts the converse — unchanged inputs skip and
+  leave the artifact byte-identical.
+- **Price-field discipline.** A snapshot declaring `price_field: settlement`
+  whose quotes carry only `last`/`bid`/`ask` is rejected, and vice versa; a
+  snapshot whose `price_field` disagrees with the run config is rejected. Both
+  fail-closed with a named reason code, never by silently picking another field.
 - **FX parity.** `fxdelta` produces a structurally identical `QuoteSet` and
   builds one end-to-end surface from the committed CFETS sample.
 
