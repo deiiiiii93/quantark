@@ -27,6 +27,12 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
     time_map: BusinessTimeMap
     is_smile: bool = field(init=False, default=False)
 
+    #: Explicit opt-in for the exact total-variance protocol in
+    #: TermCoefficients.from_env — the marker (not the method name alone)
+    #: gates the fast path, because ``total_variance`` also exists on
+    #: SVIVolSurface with a different (strike, t) arity.
+    exposes_exact_total_variance = True
+
     def __post_init__(self) -> None:
         if not isinstance(self.inner, BlackImpliedVolSurface):
             raise ValidationError("inner must be a BlackImpliedVolSurface")

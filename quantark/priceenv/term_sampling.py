@@ -78,11 +78,14 @@ class TermCoefficients:
         fwd_rates = -np.log(node_dfs[1:] / node_dfs[:-1]) / np.diff(t)
         # Surfaces exposing an exact total variance (TradingClockVolSurface)
         # feed step_vols_on_grid directly so holiday plateaus difference to
-        # exactly 0.0 (spec 2026-09-01 trading-clock-vol §4.2).
+        # exactly 0.0 (spec 2026-09-01 trading-clock-vol §4.2). The protocol
+        # is an EXPLICIT marker + method pair — not bare duck-typing on the
+        # method name, which collides with SVIVolSurface.total_variance(k, t)
+        # (different arity, different contract).
         surface = getattr(pricing_env, "vol_surface", None)
-        tv_method = getattr(surface, "total_variance", None)
         tv = None
-        if tv_method is not None:
+        if getattr(surface, "exposes_exact_total_variance", False):
+            tv_method = surface.total_variance
             spot = pricing_env.spot
             tv = lambda k, ts: tv_method(k, ts, spot)
         return cls(
