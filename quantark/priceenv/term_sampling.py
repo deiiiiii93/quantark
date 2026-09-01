@@ -76,11 +76,22 @@ class TermCoefficients:
         # Forward rates from the node DFs directly — identical DF-based math
         # to forward_rates_on_grid, without re-evaluating the curve per step.
         fwd_rates = -np.log(node_dfs[1:] / node_dfs[:-1]) / np.diff(t)
+        # Surfaces exposing an exact total variance (TradingClockVolSurface)
+        # feed step_vols_on_grid directly so holiday plateaus difference to
+        # exactly 0.0 (spec 2026-09-01 trading-clock-vol §4.2).
+        surface = getattr(pricing_env, "vol_surface", None)
+        tv_method = getattr(surface, "total_variance", None)
+        tv = None
+        if tv_method is not None:
+            spot = pricing_env.spot
+            tv = lambda k, ts: tv_method(k, ts, spot)
         return cls(
             t_grid=t,
             fwd_rates=fwd_rates,
             fwd_carry=forward_carry_on_grid(pricing_env.get_div_yield, t),
-            step_vols=step_vols_on_grid(pricing_env.get_vol, ref_strike, t),
+            step_vols=step_vols_on_grid(
+                pricing_env.get_vol, ref_strike, t, total_variance=tv
+            ),
             node_dfs=node_dfs,
             step_dfs=node_dfs[1:] / node_dfs[:-1],
         )

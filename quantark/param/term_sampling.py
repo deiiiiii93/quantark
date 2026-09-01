@@ -90,15 +90,35 @@ def discount_factors_on_grid(rate_curve, t_grid: np.ndarray) -> np.ndarray:
 
 
 def step_vols_on_grid(
-    get_vol: Callable[[float, float], float], ref_strike: float, t_grid: np.ndarray
+    get_vol: Callable[[float, float], float],
+    ref_strike: float,
+    t_grid: np.ndarray,
+    total_variance: "Callable[[float, np.ndarray], np.ndarray] | None" = None,
 ) -> np.ndarray:
     """Per-interval vols from total-variance differencing at a reference strike.
 
     w(t) = get_vol(ref_strike, t)^2 * t;  step vol = sqrt((w1 - w0) / dt).
+    When ``total_variance`` is provided (surfaces exposing an exact w, e.g.
+    TradingClockVolSurface), w is taken from it directly — no sigma^2*t
+    reconstruction — so holiday plateaus difference to EXACTLY 0.0 (the
+    degenerate-branch trigger; spec 2026-09-01 trading-clock-vol §4.2).
     Raises NumericalError if total variance decreases beyond tolerance
     (calendar arbitrage in the input surface).
     """
     t = _validate_grid(t_grid)
+    if total_variance is not None:
+        w = np.asarray(total_variance(float(ref_strike), t), dtype=float)
+        if w.shape != t.shape or not np.all(np.isfinite(w)) or np.any(w < 0.0):
+            raise NumericalError("total_variance produced an invalid w array")
+        dw = np.diff(w)
+        if np.any(dw < -1e-12):
+            raise NumericalError(
+                "total variance is decreasing on the grid (calendar arbitrage)"
+            )
+        out = np.sqrt(np.maximum(dw, 0.0) / np.diff(t))
+        if not np.all(np.isfinite(out)):
+            raise NumericalError("total_variance produced non-finite step vols")
+        return out
     v_all = _sample_vectorized(lambda ts: get_vol(float(ref_strike), ts), t)
     if v_all is None:
         v_all = np.array(
