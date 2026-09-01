@@ -87,11 +87,12 @@ class GreeksCalculator:
         if method in ("auto", "analytical") and isinstance(
             product, EuropeanVanillaOption
         ):
-            if requested is None or requested.issubset(analytical_supported):
-                greeks_out = self.calculate_analytical_greeks(product, pricing_env)
-                if requested is None:
-                    return greeks_out
-                return {key: greeks_out[key] for key in greeks_out if key in requested}
+            if requested is None:
+                return self.calculate_analytical_greeks(product, pricing_env)
+            if requested.issubset(analytical_supported):
+                return self.calculate_analytical_greeks(
+                    product, pricing_env, greeks=sorted(requested)
+                )
             if method == "analytical":
                 raise ValidationError(
                     "Analytical greeks do not support requested greeks: "
@@ -332,9 +333,16 @@ class GreeksCalculator:
         product: BaseEquityProduct,
         pricing_env: PricingEnvironment,
         price: Optional[float] = None,
+        greeks: Optional[Sequence[object]] = None,
     ) -> Dict[str, float]:
-        """Closed-form BS greeks for European vanillas; see greeks.analytical."""
-        return analytical.calculate_analytical_greeks(product, pricing_env, price)
+        """Closed-form BS greeks for European vanillas; see greeks.analytical.
+
+        greeks=None returns the incumbent key set; an explicit list may add
+        the higher-order closed forms and returns only the requested keys.
+        """
+        return analytical.calculate_analytical_greeks(
+            product, pricing_env, price, greeks=greeks
+        )
 
     def calculate_numerical_greeks(
         self,

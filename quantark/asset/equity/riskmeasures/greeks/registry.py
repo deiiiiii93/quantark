@@ -62,13 +62,26 @@ _DEFS = (
         "delta_q",
         aliases=("deltaq", "deltadq", "d_delta_d_q", "d_delta_dq"),
     ),
-    GreekDef("charm", supports_clock=True),
-    GreekDef("color", supports_clock=True),
-    GreekDef("speed"),
-    GreekDef("zomma"),
-    GreekDef("dividend_volga"),
-    GreekDef("vega_theta", aliases=("veta",), supports_clock=True),
-    GreekDef("gamma_theta", supports_clock=True, requires=("gamma",)),
+    # New names carry analytical_auto=True: they never had an incumbent
+    # route, so auto-routing them to closed forms for vanillas breaks
+    # nothing (vanna/volga/delta_q keep their incumbent numerical routing).
+    GreekDef("charm", supports_clock=True, analytical_auto=True),
+    GreekDef("color", supports_clock=True, analytical_auto=True),
+    GreekDef("speed", analytical_auto=True),
+    GreekDef("zomma", analytical_auto=True),
+    GreekDef("dividend_volga", analytical_auto=True),
+    GreekDef(
+        "vega_theta",
+        aliases=("veta",),
+        supports_clock=True,
+        analytical_auto=True,
+    ),
+    GreekDef(
+        "gamma_theta",
+        supports_clock=True,
+        requires=("gamma",),
+        analytical_auto=True,
+    ),
     GreekDef(
         "convexity_theta",
         default=True,
