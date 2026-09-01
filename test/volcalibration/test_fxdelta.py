@@ -125,6 +125,22 @@ def test_a_listed_snapshot_is_refused():
 
 
 @pytest.mark.skipif(not SAMPLE.is_file(), reason=f"no CFETS sample at {SAMPLE}")
+def test_show_emits_valid_json_for_a_surface_with_no_parity_diagnostics(tmp_path):
+    """FX artifacts carry no put-call-parity residual; NaN is not JSON."""
+    from quantark.volcalibration.cli import _expiry_diagnostics, _emit
+    from quantark.volcalibration.surface import build_artifact
+
+    snapshot = _snapshot()
+    quotes = FxDeltaNormalizer(tenor_set="core").normalize(snapshot)
+    artifact = build_artifact(quotes, snapshot)
+    rows = _expiry_diagnostics(artifact)
+    assert rows and rows[0]["parity_rmse_points"] is None
+    assert rows[0]["parity_rmse_over_forward"] is None
+    # json.dump(allow_nan=False) raises on NaN; this must not.
+    json.dumps({"per_expiry": rows}, allow_nan=False)
+
+
+@pytest.mark.skipif(not SAMPLE.is_file(), reason=f"no CFETS sample at {SAMPLE}")
 def test_one_end_to_end_fx_surface_builds_and_admits():
     from quantark.volcalibration.surface import build_artifact
 

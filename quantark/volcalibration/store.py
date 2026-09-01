@@ -65,11 +65,23 @@ def surface_record(
     n_expiries: int = 0,
     artifact_sha256: Optional[str] = None,
     snapshot_sha256: Optional[str] = None,
+    snapshot_content_sha256: Optional[str] = None,
+    symbol: Optional[str] = None,
     price_field: Optional[str] = None,
     fingerprint: Optional[str] = None,
     provenance: str = PROVENANCE_VERIFIED,
 ) -> Dict[str, Any]:
-    """Build one surface-manifest record."""
+    """Build one surface-manifest record.
+
+    ``snapshot_sha256`` is the *vendor source* digest -- the CSV the snapshot
+    was parsed from -- which is what legacy records can recover from the
+    artifact body.  It does not cover everything the build consumed: the spot
+    comes from a separate cache, so a corrected spot leaves it unchanged.
+    ``snapshot_content_sha256`` closes that by digesting the canonical snapshot
+    file itself, and ``symbol`` records which underlying the record is about.
+    Both are newer than the migration, so a legacy record simply does not carry
+    them (see ``surface_record_is_current``).
+    """
     return {
         "date": str(trade_date),
         "status": str(status),
@@ -78,6 +90,8 @@ def surface_record(
         "n_expiries": int(n_expiries),
         "artifact_sha256": artifact_sha256,
         "snapshot_sha256": snapshot_sha256,
+        "snapshot_content_sha256": snapshot_content_sha256,
+        "symbol": symbol,
         "price_field": price_field,
         "builder_fingerprint": fingerprint,
         "builder_schema_version": BUILDER_SCHEMA_VERSION,
@@ -199,6 +213,27 @@ class StoreLayout:
     @property
     def lock(self) -> Path:
         return self.runtime_dir / "pipeline.lock"
+
+    @property
+    def history_lock(self) -> Path:
+        """Guards the surface artifacts and their manifest.
+
+        Separate from ``lock`` because split roots let two configs share one
+        ``history_dir`` while holding different ``runtime_dir`` locks; without
+        this they could replace the same artifacts concurrently and leave a
+        manifest sha pointing at the other process's file.
+        """
+        return self.history_dir / "surface.lock"
+
+    def lock_paths(self) -> List[Path]:
+        """Every lock a run must hold, in a fixed order to avoid deadlock.
+
+        Always two distinct files, even in a single-root store: they guard
+        different resources (the shared surface history, this run's calibration
+        output) and are named differently, so acquiring both never contends
+        with itself.
+        """
+        return [self.history_lock, self.lock]
 
     def snapshot_path(self, trade_date: str) -> Path:
         return self.snapshots_dir / f"{trade_date}.json"

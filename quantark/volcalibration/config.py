@@ -11,7 +11,7 @@ dependency runs downward: backtest imports volcalibration, never the reverse.
 from __future__ import annotations
 
 import math
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -308,6 +308,44 @@ class CalibrationRunConfig:
             )
         if int(self.structural_ewma_span) < 1:
             raise ValidationError("calibration.structural_ewma_span must be at least 1")
+
+    @classmethod
+    def from_manifest_payload(
+        cls, payload: Mapping[str, Any]
+    ) -> "CalibrationRunConfig":
+        """Rebuild the config a stored manifest was produced under.
+
+        The manifest records the resolved config, so this is recovery, not a
+        guess -- and it is what lets a consumer open a store that was built
+        with CLI overrides without having to restate them.
+        """
+        if not isinstance(payload, Mapping):
+            raise ValidationError(
+                f"calibration config block must be a mapping, got {payload!r}"
+            )
+        defaults = cls()
+        scheme = payload.get("temporal_scheme") or {}
+        return cls(
+            variants=tuple(payload.get("variants", defaults.variants)),
+            heston_preset=str(payload.get("heston_preset", defaults.heston_preset)),
+            heston_max_nfev=int(
+                payload.get("heston_max_nfev", defaults.heston_max_nfev)
+            ),
+            slv_eta=float(payload.get("slv_eta", defaults.slv_eta)),
+            slv_n_steps=int(payload.get("slv_n_steps", defaults.slv_n_steps)),
+            slv_n_x=int(payload.get("slv_n_x", defaults.slv_n_x)),
+            slv_n_z=int(payload.get("slv_n_z", defaults.slv_n_z)),
+            temporal_smoothing=bool(scheme),
+            structural_ewma_span=int(
+                scheme.get("structural_ewma_span", defaults.structural_ewma_span)
+            ),
+            heston_temporal_regularization=float(
+                scheme.get(
+                    "heston_temporal_regularization",
+                    defaults.heston_temporal_regularization,
+                )
+            ),
+        )
 
     def manifest_payload(self) -> Dict[str, Any]:
         """The per-record ``config`` block, shaped like the live manifest's."""

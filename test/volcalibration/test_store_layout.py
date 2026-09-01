@@ -55,6 +55,21 @@ def test_a_single_root_store_needs_only_one_key(tmp_path):
     assert layout.history_dir == layout.runtime_dir
 
 
+def test_split_roots_lock_the_shared_history_too(tmp_path):
+    """Two configs can share a history_dir while holding different runtime
+    locks; the surface artifacts are the shared resource."""
+    split = StoreLayout.from_config(_config(tmp_path, runtime=tmp_path / "out"))
+    assert split.lock_paths() == [split.history_lock, split.lock]
+    assert split.history_lock == tmp_path / "history/surface.lock"
+
+
+def test_the_two_locks_are_always_distinct_files(tmp_path):
+    """flock is per-fd, so a run acquiring both must never contend with itself."""
+    single = StoreLayout.from_config(_config(tmp_path))
+    assert single.history_lock != single.lock
+    assert len(set(single.lock_paths())) == 2
+
+
 def test_available_snapshot_dates_ignores_non_date_files(tmp_path):
     layout = StoreLayout.from_config(_config(tmp_path))
     assert layout.available_snapshot_dates() == []

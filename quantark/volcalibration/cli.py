@@ -69,7 +69,17 @@ CONFIG_SEARCH_DIRS = (Path("example/mo_volmodels"), Path("example/fx_volmodels")
 
 def _emit(payload: Mapping[str, Any], *, as_json: bool, human) -> None:
     if as_json:
-        json.dump(dict(payload), sys.stdout, indent=2, sort_keys=True, default=str)
+        # allow_nan=False: NaN/Infinity are not JSON and strict parsers reject
+        # them, which would break the "stdout is one parseable object"
+        # guarantee for the agent reading it.  Absent numbers are null.
+        json.dump(
+            dict(payload),
+            sys.stdout,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+            default=str,
+        )
         sys.stdout.write("\n")
     else:
         human(payload)
@@ -277,12 +287,18 @@ def _cmd_status(args: argparse.Namespace, config: RunConfig) -> int:
 
 
 def _expiry_diagnostics(artifact: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    """Per-expiry parity and fit quality, in the units a human reads."""
+    """Per-expiry parity and fit quality, in the units a human reads.
+
+    A diagnostic the artifact does not carry is reported ``null``, never NaN.
+    Delta-quoted surfaces have no put-call-parity residual at all, and a NaN
+    would both be invalid JSON and read as a computed value.
+    """
     rows = []
     for pillar in artifact.get("per_expiry", []):
         forward = float(pillar["forward"])
-        rmse_points = float(pillar.get("parity_rmse_points", float("nan")))
-        mse = float(pillar.get("sabr_params", {}).get("mse", float("nan")))
+        raw_rmse = pillar.get("parity_rmse_points")
+        rmse_points = None if raw_rmse is None else float(raw_rmse)
+        raw_mse = pillar.get("sabr_params", {}).get("mse")
         rows.append(
             {
                 "T": float(pillar["T"]),
@@ -295,9 +311,13 @@ def _expiry_diagnostics(artifact: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 "off_grid_node_count": pillar.get("off_grid_node_count"),
                 "parity_pair_count": pillar.get("pair_count"),
                 "parity_rmse_points": rmse_points,
-                "parity_rmse_over_forward": rmse_points / forward,
+                "parity_rmse_over_forward": (
+                    None if rmse_points is None else rmse_points / forward
+                ),
                 # 1 vol point = 0.01 of implied volatility.
-                "sabr_fit_rmse_vol_points": math.sqrt(mse) * 100.0,
+                "sabr_fit_rmse_vol_points": (
+                    None if raw_mse is None else math.sqrt(float(raw_mse)) * 100.0
+                ),
             }
         )
     return rows
@@ -371,11 +391,13 @@ def _print_show(payload: Mapping[str, Any]) -> None:
     else:
         print()
     for row in surface.get("per_expiry", []):
+        parity = row["parity_rmse_over_forward"]
+        sabr = row["sabr_fit_rmse_vol_points"]
         print(
             f"  T={row['T']:.4f} {row['expiry_date']} F={row['forward']:.2f} "
             f"r={row['r']:+.4f} q={row['q']:+.4f} nodes={row['n_nodes']} "
-            f"parity_rmse/F={row['parity_rmse_over_forward']:.2e} "
-            f"sabr_rmse={row['sabr_fit_rmse_vol_points']:.3f}vp"
+            f"parity_rmse/F={'n/a' if parity is None else f'{parity:.2e}'} "
+            f"sabr_rmse={'n/a' if sabr is None else f'{sabr:.3f}vp'}"
         )
     calibration = payload["calibration"]
     print(f"  calibration: {calibration['status']}")

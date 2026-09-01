@@ -105,11 +105,18 @@ def test_a_plan_after_a_run_is_empty_and_exits_zero(workspace, capsys):
 
 
 def test_an_excluded_expected_date_exits_two_not_one(tmp_path, capsys):
+    import hashlib
+
+    from quantark.volcalibration.store import builder_fingerprint
+    from quantark.volcalibration.yaml_loader import load_run_config
+
     config_path = tmp_path / "run.yaml"
     config_path.write_text(CONFIG_YAML, encoding="utf-8")
+    config = load_run_config(config_path)
     layout = StoreLayout(tmp_path / "history", tmp_path / "history")
     layout.snapshots_dir.mkdir(parents=True)
-    (layout.snapshots_dir / "20240930.json").write_text("{}")
+    raw = json.dumps({"source": {"sha256": "src"}}).encode()
+    (layout.snapshots_dir / "20240930.json").write_bytes(raw)
     atomic_write_json(
         layout.surface_manifest,
         {
@@ -120,6 +127,13 @@ def test_an_excluded_expected_date_exits_two_not_one(tmp_path, capsys):
                     status="excluded",
                     reason="insufficient_expiries",
                     n_expiries=1,
+                    snapshot_sha256="src",
+                    snapshot_content_sha256=hashlib.sha256(raw).hexdigest(),
+                    symbol=config.underlying.symbol,
+                    price_field=config.underlying.price_field,
+                    fingerprint=builder_fingerprint(
+                        config.surface.fingerprint_payload()
+                    ),
                 )
             ],
         },

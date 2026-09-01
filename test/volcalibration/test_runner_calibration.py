@@ -119,6 +119,34 @@ def test_a_date_window_bounds_the_backfill():
     assert selected == ["20260102"]
 
 
+def test_temporal_smoothing_invalidates_every_later_date():
+    """Each fit is regularized toward an EWMA of all prior fits, so
+    recalibrating one date makes the whole suffix stale."""
+    surfaces = {
+        d: {"status": "ok", "artifact_sha256": d}
+        for d in ("20260101", "20260102", "20260103")
+    }
+    # 0102 is stale (wrong sha); 0101 and 0103 look fine on their own.
+    records = {
+        "20260101": _cal_record("20260101", "20260101"),
+        "20260102": _cal_record("20260102", "stale"),
+        "20260103": _cal_record("20260103", "20260103"),
+    }
+    kwargs = dict(
+        config=CONFIG,
+        backfill=True,
+        max_dates=None,
+        baseline_date=None,
+        start_date=None,
+        end_date=None,
+        variants=VARIANTS,
+    )
+    assert select_calibration_dates(surfaces, records, **kwargs) == ["20260102"]
+    assert select_calibration_dates(
+        surfaces, records, temporal_smoothing=True, **kwargs
+    ) == ["20260102", "20260103"]
+
+
 def test_excluded_surfaces_are_never_calibrated():
     surfaces = {"20260101": {"status": "excluded", "reason": "static_arbitrage"}}
     assert (

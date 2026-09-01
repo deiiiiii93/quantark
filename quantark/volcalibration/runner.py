@@ -17,7 +17,7 @@ import math
 import os
 import time
 from concurrent.futures import ProcessPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
@@ -156,6 +156,8 @@ def surface_record_is_current(
     record: Mapping[str, Any],
     *,
     snapshot_sha: Optional[str],
+    snapshot_content_sha: Optional[str] = None,
+    symbol: Optional[str] = None,
     price_field: str,
     fingerprint: str,
 ) -> bool:
@@ -164,6 +166,13 @@ def surface_record_is_current(
     This judges the *metadata* only; the artifact it refers to is checked
     separately by :func:`artifact_is_intact`, because the two failures want
     different explanations.
+
+    ``snapshot_content_sha`` and ``symbol`` are compared only when the record
+    carries them.  They postdate the legacy migration, so a migrated record has
+    neither, and demanding them would rebuild all 787 admitted artifacts to
+    prove something their bytes already settle.  Every record this builder
+    writes carries both, so the exemption shrinks to zero as history is
+    rebuilt for other reasons.
     """
     if not record:
         return False
@@ -180,9 +189,20 @@ def surface_record_is_current(
     recorded_sha = record.get("snapshot_sha256")
     if recorded_sha is None or snapshot_sha is None:
         return False
+    if recorded_sha != snapshot_sha:
+        return False
+    recorded_content = record.get("snapshot_content_sha256")
+    if recorded_content is not None and recorded_content != snapshot_content_sha:
+        # The vendor digest covers the source file; this covers everything the
+        # canonical snapshot carries, including the spot, which arrives from a
+        # separate cache and can be corrected on its own.
+        return False
+    recorded_symbol = record.get("symbol")
+    if recorded_symbol is not None and symbol is not None:
+        if recorded_symbol != symbol:
+            return False
     return bool(
-        recorded_sha == snapshot_sha
-        and record.get("price_field") == price_field
+        record.get("price_field") == price_field
         and record.get("builder_fingerprint") == fingerprint
         and int(record.get("builder_schema_version", -1)) == BUILDER_SCHEMA_VERSION
     )
@@ -208,6 +228,14 @@ def _snapshot_sha_on_disk(layout: StoreLayout, tag: str) -> Optional[str]:
     return str(sha) if sha else None
 
 
+def _snapshot_content_sha_on_disk(layout: StoreLayout, tag: str) -> Optional[str]:
+    """Digest of the canonical snapshot file; None when it is unreadable."""
+    try:
+        return hashlib.sha256(layout.snapshot_path(tag).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def plan_surface_dates(
     layout: StoreLayout,
     records: Mapping[str, Mapping[str, Any]],
@@ -230,6 +258,8 @@ def plan_surface_dates(
         if surface_record_is_current(
             record,
             snapshot_sha=_snapshot_sha_on_disk(layout, tag),
+            snapshot_content_sha=_snapshot_content_sha_on_disk(layout, tag),
+            symbol=config.underlying.symbol,
             price_field=config.underlying.price_field,
             fingerprint=fingerprint,
         ) and artifact_is_intact(layout, record):
@@ -303,10 +333,16 @@ def build_one_surface(task: Mapping[str, Any]) -> Dict[str, Any]:
     price_field = task["price_field"]
     limits = task["limits"]
     record = surface_record(
-        tag, status="excluded", price_field=price_field, fingerprint=task["fingerprint"]
+        tag,
+        status="excluded",
+        symbol=task["symbol"],
+        price_field=price_field,
+        fingerprint=task["fingerprint"],
     )
     try:
-        payload = json.loads(Path(task["snapshot_path"]).read_text(encoding="utf-8"))
+        raw = Path(task["snapshot_path"]).read_bytes()
+        record["snapshot_content_sha256"] = hashlib.sha256(raw).hexdigest()
+        payload = json.loads(raw.decode("utf-8"))
         snapshot = QuoteSnapshot.from_payload(payload)
         record["snapshot_sha256"] = snapshot.sha256
         _check_snapshot_identity(
@@ -334,7 +370,12 @@ def build_one_surface(task: Mapping[str, Any]) -> Dict[str, Any]:
         record["reason"] = AdmissionReason.MISSING_SOURCE.value
         record["detail"] = f"{type(exc).__name__}: {exc}"
         return record
-    except QuantArkException as exc:
+    except Exception as exc:
+        # Deliberately broad, as stage 03's worker was: a malformed nested
+        # field raises KeyError/TypeError/ValueError from deep inside a
+        # normalizer, and letting that escape `pool.map` aborts the whole
+        # batch and discards every record it had produced.  One bad date must
+        # cost one date.
         _remove_stale_artifact(Path(artifact_dir), tag)
         record["reason"] = AdmissionReason.UNEXPECTED_ERROR.value
         record["detail"] = f"{type(exc).__name__}: {exc}"
@@ -630,8 +671,15 @@ def select_calibration_dates(
     start_date: Optional[str],
     end_date: Optional[str],
     variants: Sequence[str],
+    temporal_smoothing: bool = False,
 ) -> List[str]:
-    """Resumable calibration work, without an accidental multi-year bootstrap."""
+    """Resumable calibration work, without an accidental multi-year bootstrap.
+
+    Under ``temporal_smoothing`` each date's Heston fit is regularized toward
+    an EWMA of every prior admitted fit, so recalibrating one date makes every
+    later record stale even though its own surface, config and variants still
+    match.  The dependency is a suffix, so the selection is extended to one.
+    """
     eligible = [
         trade_date
         for trade_date, record in sorted(surface_records.items())
@@ -656,6 +704,10 @@ def select_calibration_dates(
             variants,
         )
     ]
+    if temporal_smoothing and stale:
+        # Everything at or after the earliest stale date inherits its EWMA.
+        earliest = min(stale)
+        stale = [d for d in eligible if d >= earliest]
     if not backfill:
         latest_existing = max(calibration_records) if calibration_records else None
         if (
@@ -881,6 +933,7 @@ def run_calibration_stage(
         start_date=start_date,
         end_date=end_date,
         variants=tuple(config.calibration.variants),
+        temporal_smoothing=bool(config.calibration.temporal_smoothing),
     )
     if (
         selected
@@ -1060,14 +1113,17 @@ def build_status(
     # same predicates the planners use.  Reading only `status` would report
     # exit 0 after a snapshot was re-published or the config moved, while
     # `--plan` on the same store scheduled work.
+    surface_metadata_current = surface_record_is_current(
+        expected_surface,
+        snapshot_sha=_snapshot_sha_on_disk(layout, expected),
+        snapshot_content_sha=_snapshot_content_sha_on_disk(layout, expected),
+        symbol=config.underlying.symbol,
+        price_field=config.underlying.price_field,
+        fingerprint=builder_fingerprint(config.surface.fingerprint_payload()),
+    )
     surface_ok = bool(
         expected_surface.get("status") == "ok"
-        and surface_record_is_current(
-            expected_surface,
-            snapshot_sha=_snapshot_sha_on_disk(layout, expected),
-            price_field=config.underlying.price_field,
-            fingerprint=builder_fingerprint(config.surface.fingerprint_payload()),
-        )
+        and surface_metadata_current
         and artifact_is_intact(layout, expected_surface)
     )
     calibration_ok = calibration_record_is_current(
@@ -1083,7 +1139,14 @@ def build_status(
         overall = "market_cache_stale"
     elif not has_snapshot:
         overall = "snapshot_pending"
-    elif expected_surface.get("status") == "excluded":
+    elif (
+        expected_surface.get("status") == "excluded" and surface_metadata_current
+    ):
+        # Only a *current* exclusion is the permanent kind the agent contract
+        # tells callers not to retry.  A stale one -- the snapshot was
+        # corrected, or the config moved -- is work a run would redo, so
+        # reporting it as excluded would tell an agent to give up on a date
+        # that is about to succeed.
         overall = "surface_excluded"
     elif not surface_ok:
         overall = "surface_pending"
@@ -1175,7 +1238,12 @@ def run_pipeline(
     layout = StoreLayout.from_config(config)
     layout.runtime_dir.mkdir(parents=True, exist_ok=True)
     run_id = _utc_now().isoformat()
-    with acquire_lock(layout.lock):
+    with ExitStack() as locks:
+        # Both roots, in a fixed order: two configs can share a history_dir
+        # while holding different runtime locks, and the surface artifacts are
+        # the shared resource.
+        for lock_path in layout.lock_paths():
+            locks.enter_context(acquire_lock(lock_path))
         try:
             if skip_surfaces:
                 _payload, surface_records = load_surface_manifest(layout)

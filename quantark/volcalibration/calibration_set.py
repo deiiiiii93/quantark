@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from quantark.param import GridVolSurface, SpotQuote
 from quantark.param.div import TermStructureDividendYield
@@ -54,11 +54,21 @@ class CalibrationSet:
                 "this directory is not a calibration store"
             )
         history = VolSurfaceHistory(layout.history_dir)
-        _payload, records = load_calibration_manifest(layout)
+        payload, records = load_calibration_manifest(layout)
+        if calibration is None:
+            # Recovered from the manifest, not defaulted: a store built with
+            # `--variants localvol` would otherwise be rejected by model_for
+            # for disagreeing with a config nobody chose.
+            recorded = payload.get("config")
+            calibration = (
+                CalibrationRunConfig.from_manifest_payload(recorded)
+                if isinstance(recorded, Mapping)
+                else CalibrationRunConfig()
+            )
         return cls(
             layout=layout,
             surface_history=history,
-            calibration=calibration or CalibrationRunConfig(),
+            calibration=calibration,
             records=records,
         )
 

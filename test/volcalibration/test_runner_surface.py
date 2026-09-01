@@ -292,6 +292,59 @@ def test_a_moved_extrapolation_reaches_the_artifact(store):
     assert artifact["admission"]["min_expiries"] == 2
 
 
+def test_a_corrected_spot_invalidates_even_with_the_same_vendor_digest(store):
+    """The vendor sha covers the CSV; the spot comes from a separate cache."""
+    config, layout, snap = store
+    records = run_surface_stage(layout, config)
+    payload = snap.to_payload()
+    payload["underlying"]["spot"] = 8400.0  # corrected spot, same source sha
+    layout.snapshot_path(TAG).write_text(json.dumps(payload), encoding="utf-8")
+    assert plan_surface_dates(
+        layout, records, config, tags=[TAG], force=False
+    ) == [TAG]
+
+
+def test_repointing_the_symbol_invalidates(store):
+    config, layout, _ = store
+    records = run_surface_stage(layout, config)
+    other = RunConfig(
+        name="t",
+        underlying=UnderlyingConfig("000300.SH", "listed_strike", "settlement"),
+        history_dir=layout.history_dir,
+        runtime_dir=layout.runtime_dir,
+        spot_csv=None,
+        surface=SurfaceBuildConfig(),
+        calibration=CalibrationRunConfig(),
+        workers=1,
+    )
+    assert plan_surface_dates(layout, records, other, tags=[TAG], force=False) == [TAG]
+
+
+def test_a_legacy_record_without_the_new_fields_is_not_rebuilt(store):
+    """Those fields postdate the migration; demanding them would rebuild 787."""
+    config, layout, _ = store
+    records = run_surface_stage(layout, config)
+    legacy = dict(records[TAG])
+    legacy.pop("snapshot_content_sha256")
+    legacy.pop("symbol")
+    assert (
+        plan_surface_dates(layout, {TAG: legacy}, config, tags=[TAG], force=False) == []
+    )
+
+
+def test_a_malformed_nested_field_costs_one_date_not_the_batch(store):
+    """A KeyError from inside a normalizer must not abort pool.map."""
+    config, layout, snap = store
+    payload = snap.to_payload()
+    payload["expiries"][0].pop("contracts", None)
+    payload["expiries"][0]["quotes"] = "not a list"
+    layout.snapshot_path(TAG).write_text(json.dumps(payload), encoding="utf-8")
+    records = run_surface_stage(layout, config)
+    assert records[TAG]["status"] == "excluded"
+    assert records[TAG]["reason"] in ("unexpected_error", "invalid_snapshot")
+    assert records[TAG]["detail"]
+
+
 def test_the_manifest_source_survives_an_all_failed_batch(store):
     """A batch where every snapshot is unreadable must still record why."""
     config, layout, _ = store

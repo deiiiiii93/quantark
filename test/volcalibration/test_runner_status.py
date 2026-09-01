@@ -136,28 +136,61 @@ def test_an_empty_store_with_no_calendar_fails_closed(tmp_path):
         build_status(layout, config, as_of=date(2026, 5, 1))
 
 
+def _current_excluded_record(layout, config, tag, *, reason):
+    """An exclusion record that is current for the snapshot written on disk."""
+    import hashlib
+    import json as _json
+
+    from quantark.volcalibration.store import builder_fingerprint
+
+    raw = _json.dumps({"source": {"sha256": f"src-{tag}"}}).encode()
+    layout.snapshots_dir.mkdir(parents=True, exist_ok=True)
+    layout.snapshot_path(tag).write_bytes(raw)
+    return surface_record(
+        tag,
+        status="excluded",
+        reason=reason,
+        n_expiries=1,
+        snapshot_sha256=f"src-{tag}",
+        snapshot_content_sha256=hashlib.sha256(raw).hexdigest(),
+        symbol=config.underlying.symbol,
+        price_field=config.underlying.price_field,
+        fingerprint=builder_fingerprint(config.surface.fingerprint_payload()),
+    )
+
+
 def test_an_excluded_expected_date_is_non_current_not_failed(tmp_path):
     """A date can be legitimately uncalibratable forever (spec 6.3.2)."""
     config = _config(tmp_path)
     layout = StoreLayout.from_config(config)
-    layout.snapshots_dir.mkdir(parents=True)
-    (layout.snapshots_dir / "20240930.json").write_text("{}")
+    record = _current_excluded_record(
+        layout, config, "20240930", reason="insufficient_expiries"
+    )
     atomic_write_json(
-        layout.surface_manifest,
-        {
-            "schema_version": 1,
-            "records": [
-                surface_record(
-                    "20240930",
-                    status="excluded",
-                    reason="insufficient_expiries",
-                    n_expiries=1,
-                )
-            ],
-        },
+        layout.surface_manifest, {"schema_version": 1, "records": [record]}
     )
     status = build_status(layout, config, as_of=date(2024, 10, 1))
     assert status["overall_status"] == "surface_excluded"
+    assert status_exit_code(status) == EXIT_NON_CURRENT
+
+
+def test_a_stale_exclusion_is_pending_not_excluded(tmp_path):
+    """`surface_excluded` tells an agent to give up; only a current exclusion
+    has earned that."""
+    config = _config(tmp_path)
+    layout = StoreLayout.from_config(config)
+    record = _current_excluded_record(
+        layout, config, "20240930", reason="static_arbitrage"
+    )
+    # The snapshot was corrected: a run would retry this date.
+    layout.snapshot_path("20240930").write_text(
+        '{"source": {"sha256": "corrected"}}', encoding="utf-8"
+    )
+    atomic_write_json(
+        layout.surface_manifest, {"schema_version": 1, "records": [record]}
+    )
+    status = build_status(layout, config, as_of=date(2024, 10, 1))
+    assert status["overall_status"] == "surface_pending"
     assert status_exit_code(status) == EXIT_NON_CURRENT
 
 

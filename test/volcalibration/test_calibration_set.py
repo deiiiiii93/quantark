@@ -103,6 +103,23 @@ def test_a_record_for_a_different_surface_is_refused(history):
     assert "surface in force" in str(exc.value)
 
 
+def test_open_recovers_the_store_s_own_calibration_config(history):
+    """A store built with --variants localvol must not be judged against a
+    default nobody chose."""
+    from quantark.volcalibration.config import CalibrationRunConfig
+    from quantark.volcalibration.store import StoreLayout, atomic_write_json
+
+    layout = StoreLayout(history, history)
+    recorded = CalibrationRunConfig(variants=("localvol",)).manifest_payload()
+    atomic_write_json(
+        layout.calibration_manifest,
+        {"schema_version": 1, "config": recorded, "records": []},
+    )
+    cs = CalibrationSet.open(history)
+    assert cs.calibration.variants == ("localvol",)
+    assert cs.calibration.manifest_payload() == recorded
+
+
 def test_a_record_from_another_configuration_is_refused(history):
     from quantark.volcalibration.config import CalibrationRunConfig
 
