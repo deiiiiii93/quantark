@@ -198,6 +198,34 @@ def test_list_with_a_config_reports_per_date_rows(workspace, capsys):
     assert rows[0]["calibrated_variants"] == ["localvol"]
 
 
+def test_the_shipped_mo_config_loads_with_the_frozen_fingerprint():
+    from quantark.volcalibration.store import builder_fingerprint
+    from quantark.volcalibration.yaml_loader import load_run_config
+
+    config = load_run_config("example/mo_volmodels/mo_calibration.yaml")
+    assert config.name == "mo-daily"
+    assert config.underlying.price_field == "settlement"
+    assert builder_fingerprint(
+        config.surface.fingerprint_payload()
+    ) == builder_fingerprint(
+        {
+            "artifact_schema_version": 1,
+            "min_common_strikes": 3,
+            "min_expiries": 2,
+            "min_strikes_per_expiry": 5,
+            "sabr_beta": 1.0,
+        }
+    ), "the shipped config must not invalidate the 787 admitted artifacts"
+
+
+def test_list_finds_the_shipped_config(capsys):
+    code = main(["list", "--json"])
+    out, _ = capsys.readouterr()
+    names = {c.get("name") for c in json.loads(out)["configs"]}
+    assert code == 0
+    assert "mo-daily" in names
+
+
 def test_human_output_carries_no_json(workspace, capsys):
     config_path, _ = workspace
     main(["status", str(config_path), "--as-of", "2026-04-30"])

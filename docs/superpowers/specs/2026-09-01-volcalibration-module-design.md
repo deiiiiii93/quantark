@@ -462,6 +462,43 @@ python -m quantark.volcalibration list   [--config <config.yaml>]
 Fail-closed with no fallback remains the rule: a failed calibration raises,
 naming the surface date and sha. There is no flat-vol fallback anywhere.
 
+### 6.4 Decisions resolved during implementation
+
+Three things this section left underdetermined, decided while building phases
+4-7 and recorded here so the reasoning travels with the design.
+
+**A foreign exclusion is never rebuilt.** §5.4's resume rule compares four
+fields and rebuilds on any mismatch. An `excluded` record has no artifact sha
+to compare, so a naive reading rebuilds it -- which would silently reverse
+`example/mo_volmodels/exclude_thin_surfaces.py`, re-admitting two surfaces that
+break 20 of 27 `localvol` runs. Decision: **a record whose `reason` is outside
+`AdmissionReason` was written by something other than the builder, and a normal
+run leaves it alone.** `--force` still rebuilds it. Same bounded-exception
+shape as `grandfathered`, discriminated by data rather than a date list.
+
+**The builder fingerprint stays legacy-shaped until a knob actually moves.**
+Hashing all seven `SurfaceBuildConfig` fields would mismatch every one of the
+787 migrated records on the first resumed run and rebuild them all, destroying
+exactly the bytes §5.3 protects. Decision: **the fingerprint payload is the
+five frozen legacy keys, plus any knob whose value differs from its frozen
+default.** Default configs hash identically to history; a changed
+`extrapolation` or parity gate enters the payload and correctly invalidates.
+
+**The trading calendar is optional, and its absence is visible.** §5.4's layout
+has no spot CSV, but stage 14 derived `expected_trade_date` from one. Decision:
+`paths.spot_csv` is an optional key. With it, `expected` is the last calendar
+date at or before `--as-of` and the `spot_cache_*` fields are populated;
+without it, `expected` is the newest snapshot on disk and those fields are
+`null`, with `freshness.calendar_source` naming which of the two applied.
+
+**One §4.4 claim needed narrowing.** "Everything downstream is
+convention-blind" holds from the *smoothed* surface onward, not from grid
+assembly: listed ladders share observed strikes and delta-quoted books share
+none, so no single grid rule serves both. The rule is therefore declared by the
+normalizer in `QuoteSet.universe` and read by `surface.build_raw_surface` --
+explicit data, not an inferred switch, because auto-detecting an empty
+intersection would present a failure as a design choice.
+
 ## 7. Migration
 
 ### 7.1 Inventory
