@@ -1,15 +1,24 @@
-"""On-disk contracts: artifact serialization and surface-manifest records.
+"""On-disk contracts: store layout, artifact serialization, both manifests.
 
 Artifact bytes are frozen (spec 5.3): their sha256 feeds the calibration cache
-key, so provenance lives in manifest records and never in the artifact body.
+key, so no field may be added to or removed from the artifact body.  Anything
+new -- resume metadata, provenance status -- goes in a manifest record.  The
+body's existing ``source_sha256`` is what makes the legacy migration a per-date
+recovery rather than a guess.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from quantark.util.exceptions import ValidationError
 
 # Bump whenever a change to normalization, smoothing or admission CODE alters
 # builder output.  Config changes are covered by the fingerprint; code changes
@@ -20,6 +29,11 @@ BUILDER_SCHEMA_VERSION = 1
 
 PROVENANCE_VERIFIED = "verified"
 PROVENANCE_GRANDFATHERED = "grandfathered"
+
+SURFACE_MANIFEST_SCHEMA_VERSION = 1
+CALIBRATION_MANIFEST_SCHEMA_VERSION = 1
+GAP_POLICY = "consumers carry forward previous admitted surface"
+BOOTSTRAP_POLICY = "latest_admitted_surface_only"
 
 
 def serialize_artifact(artifact: Mapping[str, Any]) -> bytes:
@@ -136,3 +150,217 @@ def migrate_manifest(
 
     out["records"] = migrated
     return out
+
+
+# ------------------------------------------------------------- store layout
+
+
+@dataclass(frozen=True)
+class StoreLayout:
+    """Where a run's inputs, artifacts and manifests live.
+
+    Two roots, not one: the MO deployment keeps surfaces beside the example
+    suite's data and calibration output under ``output/``.  ``runtime_dir``
+    defaults to ``history_dir``, so a single-root store stays a single key in
+    the YAML.
+    """
+
+    history_dir: Path
+    runtime_dir: Path
+
+    @classmethod
+    def from_config(cls, config) -> "StoreLayout":
+        return cls(Path(config.history_dir), Path(config.runtime_dir))
+
+    @property
+    def snapshots_dir(self) -> Path:
+        return self.history_dir / "snapshots"
+
+    @property
+    def surface_dir(self) -> Path:
+        return self.history_dir / "iv_surface"
+
+    @property
+    def surface_manifest(self) -> Path:
+        return self.history_dir / "surface_manifest.json"
+
+    @property
+    def calibration_cache(self) -> Path:
+        return self.runtime_dir / "calibration_cache"
+
+    @property
+    def calibration_manifest(self) -> Path:
+        return self.runtime_dir / "calibration_manifest.json"
+
+    @property
+    def status(self) -> Path:
+        return self.runtime_dir / "status.json"
+
+    @property
+    def lock(self) -> Path:
+        return self.runtime_dir / "pipeline.lock"
+
+    def snapshot_path(self, trade_date: str) -> Path:
+        return self.snapshots_dir / f"{trade_date}.json"
+
+    def artifact_path(self, trade_date: str) -> Path:
+        return artifact_path(self.surface_dir, trade_date)
+
+    def available_snapshot_dates(self) -> List[str]:
+        """Trade-date tags with a snapshot on disk, ascending."""
+        if not self.snapshots_dir.is_dir():
+            return []
+        return sorted(
+            p.stem for p in self.snapshots_dir.glob("*.json") if p.stem.isdigit()
+        )
+
+
+# ------------------------------------------------------------------ file IO
+
+
+def _iso_utc() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def read_json(path, *, default):
+    """Read a JSON file, returning ``default`` only when it does not exist.
+
+    An unreadable or malformed file raises: silently falling back to a default
+    would rewrite a corrupt manifest as an empty one and orphan every artifact
+    it recorded.
+    """
+    target = Path(path)
+    if not target.is_file():
+        return default
+    try:
+        return json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValidationError(f"cannot read {target}: {exc}") from exc
+
+
+def atomic_write_bytes(path, data: bytes) -> None:
+    """Write bytes through a same-directory temp file and one ``os.replace``."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=target.parent, prefix=target.name + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, target)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def atomic_write_json(path, payload) -> None:
+    """Deterministic, atomic JSON write: sorted keys, no NaN, trailing newline."""
+    text = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False, default=str)
+    atomic_write_bytes(path, (text + "\n").encode("utf-8"))
+
+
+# ----------------------------------------------------------------- manifests
+
+
+def _records_by_date(payload: Mapping[str, Any], source: str) -> Dict[str, dict]:
+    records = payload.get("records", [])
+    if not isinstance(records, list):
+        raise ValidationError(f"{source}: 'records' must be a list")
+    out: Dict[str, dict] = {}
+    for record in records:
+        if not isinstance(record, dict) or "date" not in record:
+            raise ValidationError(f"{source}: every record needs a 'date'")
+        out[str(record["date"])] = dict(record)
+    return out
+
+
+def load_surface_manifest(layout: StoreLayout) -> Tuple[dict, Dict[str, dict]]:
+    """Full manifest payload plus its records keyed by date tag."""
+    payload = read_json(
+        layout.surface_manifest,
+        default={"schema_version": SURFACE_MANIFEST_SCHEMA_VERSION, "records": []},
+    )
+    if payload.get("schema_version") != SURFACE_MANIFEST_SCHEMA_VERSION:
+        raise ValidationError(
+            f"{layout.surface_manifest}: unsupported schema_version "
+            f"{payload.get('schema_version')!r}"
+        )
+    return payload, _records_by_date(payload, str(layout.surface_manifest))
+
+
+def save_surface_manifest(
+    layout: StoreLayout,
+    records: Mapping[str, Mapping[str, Any]],
+    *,
+    config: Mapping[str, Any],
+    window: Mapping[str, str],
+    price_field: str,
+    source_class: str,
+) -> None:
+    """Rewrite the surface manifest, preserving foreign top-level blocks.
+
+    ``exclude_thin_surfaces.py`` writes a ``study_admission`` block at top
+    level; overwriting the file wholesale would drop the record of why two
+    dates are excluded.  Everything the builder does not own is carried
+    forward untouched.
+    """
+    previous = read_json(layout.surface_manifest, default={})
+    payload = dict(previous) if isinstance(previous, dict) else {}
+    payload.update(
+        {
+            "schema_version": SURFACE_MANIFEST_SCHEMA_VERSION,
+            "source": source_class,
+            "price_field": price_field,
+            "generated_at": _iso_utc(),
+            "window": dict(window),
+            "gap_policy": GAP_POLICY,
+            "config": dict(config),
+            "records": [dict(records[tag]) for tag in sorted(records)],
+        }
+    )
+    atomic_write_json(layout.surface_manifest, payload)
+
+
+def load_calibration_manifest(layout: StoreLayout) -> Tuple[dict, Dict[str, dict]]:
+    """Full calibration-manifest payload plus its records keyed by date tag."""
+    payload = read_json(
+        layout.calibration_manifest,
+        default={
+            "schema_version": CALIBRATION_MANIFEST_SCHEMA_VERSION,
+            "records": [],
+            "bootstrap_policy": BOOTSTRAP_POLICY,
+        },
+    )
+    if payload.get("schema_version") != CALIBRATION_MANIFEST_SCHEMA_VERSION:
+        raise ValidationError(
+            f"{layout.calibration_manifest}: unsupported schema_version "
+            f"{payload.get('schema_version')!r}"
+        )
+    return payload, _records_by_date(payload, str(layout.calibration_manifest))
+
+
+def save_calibration_manifest(
+    layout: StoreLayout,
+    base_payload: Mapping[str, Any],
+    records: Mapping[str, Mapping[str, Any]],
+    *,
+    config: Mapping[str, Any],
+) -> None:
+    """Rewrite the calibration manifest, keeping its policy metadata."""
+    payload = dict(base_payload)
+    payload.update(
+        {
+            "schema_version": CALIBRATION_MANIFEST_SCHEMA_VERSION,
+            "generated_at": _iso_utc(),
+            "config": dict(config),
+            "records": [dict(records[tag]) for tag in sorted(records)],
+        }
+    )
+    payload.setdefault("bootstrap_policy", BOOTSTRAP_POLICY)
+    atomic_write_json(layout.calibration_manifest, payload)
