@@ -60,3 +60,21 @@ def test_all_positive_vols_bitwise_unchanged():
 
 
 FROZEN_ALL_POSITIVE = 7.140157199617561  # pre-change tree (Tasks 1-3 HEAD)
+
+
+def test_alpha_beta_bitwise_match_original_expressions():
+    """The positive-vol slots must evaluate the pre-trading-clock formulas
+    VERBATIM: pow(v, 4) and (v*v)**2 differ by an ulp on ~half of realistic
+    vols, so any algebraic 'simplification' here breaks the bitwise-frozen
+    all-positive path (found via the flat-BSM impact review)."""
+    vols = (0.083, 0.2336, 0.2857, 0.31, 1.17)
+    times = tuple(0.1 * (i + 1) for i in range(len(vols)))
+    core = QuadratureCore(
+        grid_x=101, spot=100.0, observation_times=list(times),
+        rate=0.02, div=0.01, vol=list(vols),
+    )
+    v, r, q = core.vol, core.r, core.q
+    alpha_ref = (r - q - 0.5 * v * v) / (v * v)
+    beta_ref = (r - q - 0.5 * v * v) ** 2 / v**4 + 2.0 * r / v**2
+    assert np.array_equal(core.alpha, alpha_ref)
+    assert np.array_equal(core.beta, beta_ref)

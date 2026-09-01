@@ -108,15 +108,21 @@ class QuadratureCore:
         if np.any((self.tau[1:] <= 0.0) & pos[1:]):
             raise ValidationError("time step too small for quadrature solver.")
 
+        # Positive-vol slots MUST evaluate the pre-trading-clock expressions
+        # verbatim (vol**4, vol**2): pow(v, 4) and (v*v)**2 differ by an ulp
+        # on ~half of realistic vols, and the all-positive path is
+        # bitwise-frozen. Zero slots produce inf/nan here and are masked out.
         with np.errstate(divide="ignore", invalid="ignore"):
-            v2 = np.where(pos, self.vol * self.vol, 1.0)
             self.alpha = np.where(
-                pos, (self.r - self.q - 0.5 * self.vol * self.vol) / v2, 0.0
+                pos,
+                (self.r - self.q - 0.5 * self.vol * self.vol)
+                / (self.vol * self.vol),
+                0.0,
             )
             self.beta = np.where(
                 pos,
-                (self.r - self.q - 0.5 * self.vol * self.vol) ** 2 / v2**2
-                + 2.0 * self.r / v2,
+                (self.r - self.q - 0.5 * self.vol * self.vol) ** 2 / self.vol**4
+                + 2.0 * self.r / self.vol**2,
                 0.0,
             )
 
