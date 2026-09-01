@@ -94,25 +94,37 @@ class QuadratureCore:
 
         if self.spot <= 0.0:
             raise ValidationError(f"spot must be positive, got {self.spot}.")
-        if np.any(self.vol[1:] <= 0.0):
-            raise ValidationError("volatility must be positive.")
+        if np.any(self.vol[1:] < 0.0):
+            raise ValidationError("volatility must be non-negative.")
         if np.any(self.dt[1:] <= 0.0):
             raise ValidationError("observation_times must be strictly increasing.")
 
+        # vol == 0.0 marks an exact zero-variance interval (holiday plateau
+        # under a trading-clock surface; spec 2026-09-01 trading-clock-vol
+        # §4.5) — it takes the deterministic-shift transition, never the
+        # Gaussian kernel, so alpha/beta/tau for those steps are unused.
         self.tau = 0.5 * self.vol * self.vol * self.dt
-        if np.any(self.tau[1:] <= 0.0):
+        pos = self.vol > 0.0
+        if np.any((self.tau[1:] <= 0.0) & pos[1:]):
             raise ValidationError("time step too small for quadrature solver.")
 
-        self.alpha = (self.r - self.q - 0.5 * self.vol * self.vol) / (
-            self.vol * self.vol
-        )
-        self.beta = (
-            (self.r - self.q - 0.5 * self.vol * self.vol) ** 2 / self.vol**4
-            + 2.0 * self.r / self.vol**2
-        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            v2 = np.where(pos, self.vol * self.vol, 1.0)
+            self.alpha = np.where(
+                pos, (self.r - self.q - 0.5 * self.vol * self.vol) / v2, 0.0
+            )
+            self.beta = np.where(
+                pos,
+                (self.r - self.q - 0.5 * self.vol * self.vol) ** 2 / v2**2
+                + 2.0 * self.r / v2,
+                0.0,
+            )
 
         self.maturity = float(times[-1])
-        vol_max = float(np.max(self.vol[1:]))
+        vol_pos = self.vol[1:][self.vol[1:] > 0.0]
+        if vol_pos.size == 0:
+            raise ValidationError("at least one interval must carry variance.")
+        vol_max = float(np.max(vol_pos))
         self._math = QuadratureMath(
             grid_x=self.grid_x,
             spot=self.spot,
@@ -231,6 +243,18 @@ class QuadratureCore:
             else:
                 base = math.exp(-r * dt)
             return base if epsilon <= 0 else np.zeros_like(base, dtype=float)
+
+        if vol == 0.0:
+            # sigma -> 0 limit: N(eps*d1) and N(eps*d2) collapse to the
+            # forward-moneyness indicator (same sign-aware convention as
+            # param/vol/vannavolga/bs_fx.py::_d1_d2).
+            spot_array = np.asarray(spot, dtype=float)
+            forward = spot_array * math.exp((r - q) * dt)
+            itm = np.where(forward >= strike, 1.0, 0.0)
+            ind = itm if epsilon >= 0 else 1.0 - itm
+            if kind == "a":
+                return spot_array * math.exp(-q * dt) * ind
+            return math.exp(-r * dt) * ind
 
         spot_array = np.asarray(spot, dtype=float)
         sqrt_dt = math.sqrt(dt)
@@ -379,8 +403,13 @@ class QuadratureCore:
         u_array = self._calculate_integral_simpson(y_array, p_lr_m, p_ur_m, p0_m)
 
         for m in range(self.grid_t - 1, 1, -1):
-            omega_array = self._omega(self._z_grid, m)
-            prefactor = self._prefactor(m)
+            if float(self.tau[m]) == 0.0:
+                # zero-variance interval: exact deterministic shift, the
+                # Gaussian kernel (omega/prefactor) is never built.
+                omega_array, prefactor = None, 0.0
+            else:
+                omega_array = self._omega(self._z_grid, m)
+                prefactor = self._prefactor(m)
             state = self._calculate_values_in_process(
                 m, u_array, omega_array, y_array, bound_upper, bound_lower, factors,
                 (v_bound_lr_m, v_bound_ur_m, v_xee_lr_m, v_xee_ur_m),
@@ -414,6 +443,11 @@ class QuadratureCore:
         prev_boundaries: tuple,
         prefactor: float,
     ) -> StepState:
+        if float(self.tau[m]) == 0.0:
+            return self._deterministic_step(
+                m, y_array, bound_upper, bound_lower, factors
+            )
+
         bound_lr_m, bound_ur_m, xee_lr_m, xee_ur_m = prev_boundaries
         v_bound_lr_m, v_bound_ur_m, v_xee_lr_m, v_xee_ur_m = prev_values
         p_lr_m, p_ur_m, p0_m = prev_points
@@ -471,6 +505,48 @@ class QuadratureCore:
             boundaries=(bound_lr_m_n1, bound_ur_m_n1, xee_lr_m_n1, xee_ur_m_n1),
         )
 
+    def _deterministic_step(
+        self,
+        m: int,
+        y_array: np.ndarray,
+        bound_upper: np.ndarray,
+        bound_lower: np.ndarray,
+        factors: QuadFactors,
+    ) -> StepState:
+        """sigma -> 0 limit of the transition: y_{m-1}(x) =
+        e^{-r dt} * y_m(x + (r - q) dt), linear interpolation on the log
+        grid (the only numerical error the Gaussian step already carries).
+        Spec 2026-09-01 trading-clock-vol §4.5.
+        """
+        dt = float(self.dt[m])
+        r, q = float(self.r[m]), float(self.q[m])
+        shift = (r - q) * dt
+        df = math.exp(-r * dt)
+
+        bound_lr_m_n1 = float(bound_lower[m - 1])
+        bound_ur_m_n1 = float(bound_upper[m - 1])
+        p_lr, p_ur, p0 = self._select_simpson_indices(bound_lr_m_n1, bound_ur_m_n1)
+        xee_lr = 0.5 * (self.grid[p_lr] + bound_lr_m_n1)
+        xee_ur = 0.5 * (self.grid[p_ur + p0] + bound_ur_m_n1)
+        x_m_n1 = np.array([bound_lr_m_n1, bound_ur_m_n1, xee_lr, xee_ur])
+
+        y_shifted = df * np.interp(self.grid + shift, self.grid, y_array)
+        v_quad = df * np.interp(x_m_n1 + shift, self.grid, y_array)
+
+        spot_pts = self.spot * np.exp(x_m_n1)
+        values = v_quad + self._barrier_payoff(spot_pts, factors, m)
+        y_new = self._add_barrier_payoff(
+            y_shifted, factors, self.spot * np.exp(self.grid), m
+        )
+        u_new = self._calculate_integral_simpson(y_new, p_lr, p_ur, p0)
+        return StepState(
+            y_array=y_new,
+            u_array=u_new,
+            values=tuple(values),
+            points=(p_lr, p_ur, p0),
+            boundaries=(bound_lr_m_n1, bound_ur_m_n1, xee_lr, xee_ur),
+        )
+
     def _barrier_payoff(
         self, spot_array: np.ndarray, factors: QuadFactors, m: int
     ) -> np.ndarray:
@@ -494,6 +570,16 @@ class QuadratureCore:
         bound_lr_m, bound_ur_m, xee_lr_m, xee_ur_m = final_boundaries
         v_bound_lr_m, v_bound_ur_m, v_xee_lr_m, v_xee_ur_m = final_values
         p_lr_m, p_ur_m, p0_m = final_points
+        if float(self.tau[1]) == 0.0:
+            # zero-variance first interval (valuation date inside a holiday
+            # block): V(0) = e^{-r dt} * y(shift) exactly.
+            dt = float(self.dt[1])
+            r, q = float(self.r[1]), float(self.q[1])
+            value = math.exp(-r * dt) * float(
+                np.interp((r - q) * dt, self.grid, y_array)
+            )
+            value += self._barrier_payoff(self.spot, factors, 1)
+            return float(value)
         prefactor = self._prefactor(1)
 
         y1 = np.sum(
