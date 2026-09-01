@@ -69,6 +69,25 @@ def test_declared_price_field_absent_is_rejected():
         snap.quote_price({"last": 1.0, "bid": 0.9, "ask": 1.1})
 
 
+def test_the_canonical_envelope_round_trips():
+    """The runner writes snapshots to disk and reads them back; this is that trip."""
+    original = QuoteSnapshot.from_legacy_settlement(
+        json.loads(SETTLE.read_text()),
+        trade_date=date(2026, 4, 30),
+        spot=8381.947,
+        symbol="000852.SH",
+    )
+    assert QuoteSnapshot.from_payload(original.to_payload()) == original
+
+
+def test_sha256_reads_the_source_block():
+    payload = json.loads(SETTLE.read_text())
+    snap = QuoteSnapshot.from_legacy_settlement(
+        payload, trade_date=date(2026, 4, 30), spot=8381.947, symbol="X"
+    )
+    assert snap.sha256 == payload["source_sha256"]
+
+
 def test_from_payload_rejects_unknown_convention():
     with pytest.raises(ValidationError, match="convention"):
         QuoteSnapshot.from_payload(

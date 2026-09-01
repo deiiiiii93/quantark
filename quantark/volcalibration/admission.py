@@ -38,6 +38,11 @@ class AdmissionReason(str, Enum):
     STATIC_ARBITRAGE = "static_arbitrage"
     INVALID_ATM_PILLAR = "invalid_atm_pillar"
     PRICE_FIELD_MISMATCH = "price_field_mismatch"
+    # Anything that escapes an AdmissionError.  Present so the vocabulary is
+    # complete: the runner uses "is this reason in the enum?" to tell a record
+    # the builder wrote from one written out-of-band by a study script, and a
+    # missing member would misclassify the builder's own record as foreign.
+    UNEXPECTED_ERROR = "unexpected_error"
 
 
 class AdmissionError(QuantArkException):

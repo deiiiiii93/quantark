@@ -185,6 +185,24 @@ class QuoteSnapshot:
             expiries=tuple(dict(e) for e in expiries),
         )
 
+    # ------------------------------------------------------------ accessors
+    @property
+    def sha256(self) -> Optional[str]:
+        """The source payload's sha256, as recorded by whoever fetched it."""
+        value = self.source.get("sha256")
+        return str(value) if value else None
+
+    def to_payload(self) -> Dict[str, Any]:
+        """The canonical envelope; round-trips through :meth:`from_payload`."""
+        return {
+            "schema_version": self.schema_version,
+            "convention": self.convention,
+            "trade_date": self.trade_date.isoformat(),
+            "underlying": {"symbol": self.symbol, "spot": self.spot},
+            "source": dict(self.source),
+            "expiries": [dict(e) for e in self.expiries],
+        }
+
     # ---------------------------------------------------------------- price
     def quote_price(self, quote: Mapping[str, Any]) -> float:
         """Resolve one quote's price through the declared ``price_field``.
