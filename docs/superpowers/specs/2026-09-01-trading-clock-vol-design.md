@@ -149,8 +149,11 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
   spot)` — the **full** `get_vol` query signature, so smile surfaces whose
   vol depends on spot/moneyness reproduce the identical inner query —
   returning `w_td(τ_td)` computed once from `τ_td`, and
-  `step_vols_on_grid` prefers this method when the surface provides it
-  (getattr protocol, existing surfaces unchanged). Differencing bitwise-
+  `step_vols_on_grid` prefers this method when the surface opts in via an
+  explicit `exposes_exact_total_variance = True` marker (implementation
+  finding: bare duck-typing on the method name collides with
+  `SVIVolSurface.total_variance(k, t)`, which has a different arity and
+  contract; existing surfaces unchanged). Differencing bitwise-
   equal w values yields Δw == 0.0 exactly; the degenerate branches key on
   that exact zero — no tolerance is introduced.
 - τ_cal → 0 limit: return `σ_inner(K, 0⁺) · sqrt(slope(0))` where slope(0)
