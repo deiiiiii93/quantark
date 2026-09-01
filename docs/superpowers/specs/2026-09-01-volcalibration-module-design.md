@@ -134,14 +134,27 @@ code path.
 ```
 
 - `listed_strike` expiry:
-  `{expiry_date, T_years, quotes: [{strike, type, settlement?, last?, bid?, ask?, volume, open_interest}]}`
+  `{expiry_date, T_years, quotes: [{strike, type, settlement?, last?, bid?, ask?, volume, oi}]}`
   — the union of today's two MO snapshot shapes (see the price-field rule below).
+  Open interest is `oi` in both existing shapes; the canonical schema keeps that name.
 - `fx_delta` expiry:
   `{tenor, expiry_date?, T_years, forward, domestic_rate, quotes: [{pillar, strike, bid_iv, mid_iv, ask_iv, delta}]}`
   — today's CFETS snapshot shape, plus an optional `expiry_date` (§5.2).
 
 `snapshot.py` validates both fail-closed. `01_fetch_*` scripts stay in
 `example/` and emit this schema.
+
+**Lifting today's files.** Neither existing MO snapshot shape is already this
+envelope: the live snapshot (`fetched_at`, `market_open`, `underlying`,
+`expiries`) has no `trade_date`, `schema_version` or `source`, and the
+settlement snapshot (`schema_version`, `source_class`, `price_field`,
+`expiries`, `expiry_calendar`, …) carries **no spot at all** — spot comes from a
+separate CSV via `load_spot_map`, and the trade date from the filename. So
+`snapshot.py` ships two explicit lifters,
+`QuoteSnapshot.from_legacy_live(payload, *, trade_date)` and
+`QuoteSnapshot.from_legacy_settlement(payload, *, trade_date, spot, source_sha256)`,
+which supply the missing fields from their arguments and fail closed when a
+caller omits one. Nothing infers a spot or a date.
 
 **Price-field rule (listed conventions).** The MO suite has *two* live quote
 shapes, not one: `01_fetch_mo_snapshot.py` writes `last`/`bid`/`ask`, while
