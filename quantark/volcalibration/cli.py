@@ -491,6 +491,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
     as_json = bool(getattr(args, "json", False))
 
+    # Only `list` can arrive without one: the other three take it as a
+    # required positional, so argparse has already refused a missing config.
     config: Optional[RunConfig] = None
     if args.config is not None:
         try:
@@ -503,9 +505,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 human=lambda p: None,
             )
             return EXIT_FAILED
-    elif args.command != "list":
-        print("error: a run config is required", file=sys.stderr)
-        return EXIT_FAILED
 
     try:
         return _COMMANDS[args.command](args, config)
