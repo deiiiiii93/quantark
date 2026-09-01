@@ -40,3 +40,34 @@ def test_old_module_re_exports_the_new_class():
     from quantark.volmodels.calibration import VolModelCalibrator as Old
 
     assert Old is New
+
+
+def test_the_old_path_is_the_same_module_object_not_a_re_export():
+    """Patching the old path has to reach the code that runs.
+
+    This module *was* the implementation, so callers patch its globals --
+    the OTC tests substitute kernels with
+    ``monkeypatch.setattr(vol_calibrators, "build_dupire_local_vol", ...)``.
+    A re-export shim keeps ``import`` working while making every such patch
+    inert, which is how 24 of those tests broke without any import failing.
+    """
+    import quantark.volcalibration.calibrate as new
+    import quantark.volmodels.calibration as old
+
+    assert old is new
+
+
+def test_the_old_path_exposes_the_kernels_callers_patch(monkeypatch):
+    import quantark.volmodels.calibration as old
+
+    for kernel in (
+        "build_dupire_local_vol",
+        "calibrate_heston",
+        "calibrate_leverage_surface_fp",
+    ):
+        assert hasattr(old, kernel), f"{kernel} is not reachable from the old path"
+        # setattr must land on the module the calibrator resolves from.
+        monkeypatch.setattr(old, kernel, object())
+        import quantark.volcalibration.calibrate as new
+
+        assert getattr(new, kernel) is getattr(old, kernel)

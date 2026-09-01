@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -59,7 +59,10 @@ VOL_MODEL_HESTON = "heston"
 VOL_MODEL_HESTON_SLV = "heston_slv"
 VOL_MODEL_VARIANTS = (VOL_MODEL_LOCALVOL, VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV)
 # Frozen Heston presets moved to quantark.volcalibration.config in 0.4.0.
-from quantark.volcalibration.config import HESTON_PRESETS  # noqa: F401,E402
+from quantark.volcalibration.config import (  # noqa: F401,E402
+    HESTON_PARAMETER_NAMES,
+    HESTON_PRESETS,
+)
 
 
 # SLV leverage-calibration grid defaults mirror the mo suite
