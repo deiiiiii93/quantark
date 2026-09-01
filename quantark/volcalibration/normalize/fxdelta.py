@@ -69,6 +69,24 @@ TENOR_SETS = {
 # own rounding.
 DELTA_ROUND_TRIP_ATOL = 2e-10
 
+# A CFETS slice carries THREE foreign rates, and they are not interchangeable:
+#
+#   foreign_rate                     the published deposit rate; it differs
+#                                    from the forward-implied carry by the
+#                                    slice's own published_forward_basis_bps
+#   pricing_foreign_rate             the rate consistent with the published
+#                                    forward
+#   effective_foreign_rate_for_delta the rate under the delta convention
+#
+# The carry this module records is the one that reproduces the published
+# forward, because the artifact stores that forward and a consumer rebuilding
+# curves from `q` must land back on it.  It is *derived* from the forward
+# rather than read, so the two agree by construction; the published
+# pricing_foreign_rate is then a cross-check, not an input.  (Measured over
+# the six committed CFETS snapshots, derived == published exactly, while
+# foreign_rate is off by ~1 pip at 1M.)
+CARRY_CONSISTENCY_ATOL = 2e-10
+
 
 def normalise_tenor(tenor: str) -> str:
     """The canonical tenor label."""
@@ -182,7 +200,14 @@ class FxDeltaNormalizer:
             maturity = float(row["maturity"])
             forward = float(row["forward"])
             domestic_rate = float(row["domestic_rate"])
-            foreign_rate = float(row["foreign_rate"])
+            carry_rate = _forward_implied_carry(
+                spot=snapshot.spot,
+                forward=forward,
+                maturity=maturity,
+                domestic_rate=domestic_rate,
+                published=row.get("pricing_foreign_rate"),
+                tenor=tenor,
+            )
             quotes = row.get("quotes", [])
             if tuple(q.get("pillar") for q in quotes) != PILLAR_ORDER:
                 raise ValidationError(
@@ -206,10 +231,11 @@ class FxDeltaNormalizer:
                     # Domestic discounting: the CNY leg is the numeraire.
                     discount_factor=math.exp(-domestic_rate * maturity),
                     r=domestic_rate,
-                    q=foreign_rate,
+                    q=carry_rate,
                     diagnostics={
                         "pillar_count": float(len(nodes)),
                         "delta_round_trip_atol": DELTA_ROUND_TRIP_ATOL,
+                        "published_deposit_rate": float(row["foreign_rate"]),
                     },
                     nodes=nodes,
                 )
@@ -232,6 +258,35 @@ class FxDeltaNormalizer:
                 "strike_grid_size": self.grid_size,
             },
         )
+
+
+def _forward_implied_carry(
+    *,
+    spot: float,
+    forward: float,
+    maturity: float,
+    domestic_rate: float,
+    published: Any,
+    tenor: str,
+) -> float:
+    """The foreign rate that reproduces the published forward.
+
+    Inverting covered interest parity is a definition, not an approximation:
+    ``F = S exp((r_d - q) T)``.  Deriving ``q`` this way guarantees that a
+    consumer rebuilding curves from the artifact lands back on the forward the
+    artifact records -- a guarantee that reading ``foreign_rate`` does not give,
+    because that rate carries the slice's published forward basis.
+    """
+    carry = domestic_rate - math.log(forward / spot) / maturity
+    if published is not None and not math.isclose(
+        carry, float(published), rel_tol=0.0, abs_tol=CARRY_CONSISTENCY_ATOL
+    ):
+        raise ValidationError(
+            f"tenor {tenor}: the published forward implies a foreign rate of "
+            f"{carry:.10f}, but the snapshot's pricing_foreign_rate is "
+            f"{float(published):.10f}; the slice is internally inconsistent"
+        )
+    return carry
 
 
 def _verify_delta_round_trip(row: Dict[str, Any], tenor: str) -> int:

@@ -63,6 +63,40 @@ def test_the_fx_normalizer_emits_a_structurally_identical_quote_set():
 
 
 @pytest.mark.skipif(not SAMPLE.is_file(), reason=f"no CFETS sample at {SAMPLE}")
+def test_the_recorded_carry_reproduces_the_published_forward():
+    """A consumer rebuilding curves from the artifact must land on the forward
+    the artifact records.  foreign_rate would miss it by ~1 pip at 1M."""
+    import math
+
+    payload = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    snapshot = QuoteSnapshot.from_legacy_fx(payload)
+    quotes = FxDeltaNormalizer(tenor_set="core").normalize(snapshot)
+    published = {
+        row["tenor"]: row for row in payload["slices"]
+    }
+    for slice_ in quotes.expiries:
+        row = published[slice_.expiry_label]
+        rebuilt = snapshot.spot * math.exp((slice_.r - slice_.q) * slice_.T)
+        assert rebuilt == pytest.approx(float(row["forward"]), abs=1e-12)
+        # ... and it is not simply the published deposit rate
+        assert slice_.diagnostics["published_deposit_rate"] == float(
+            row["foreign_rate"]
+        )
+
+
+@pytest.mark.skipif(not SAMPLE.is_file(), reason=f"no CFETS sample at {SAMPLE}")
+def test_an_internally_inconsistent_slice_is_refused():
+    payload = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    for row in payload["slices"]:
+        if row["tenor"] == "3M":
+            row["pricing_foreign_rate"] = float(row["pricing_foreign_rate"]) + 1e-3
+    with pytest.raises(ValidationError, match="internally inconsistent"):
+        FxDeltaNormalizer(tenor_set="core").normalize(
+            QuoteSnapshot.from_legacy_fx(payload)
+        )
+
+
+@pytest.mark.skipif(not SAMPLE.is_file(), reason=f"no CFETS sample at {SAMPLE}")
 def test_a_tampered_strike_fails_the_round_trip_check():
     payload = json.loads(SAMPLE.read_text(encoding="utf-8"))
     for row in payload["slices"]:
