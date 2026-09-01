@@ -99,10 +99,23 @@ class BusinessTimeMap:
   `horizon_date`. `to_trading` is piecewise linear: slope 365/D across a
   trading day, slope 0 across a holiday. Continuous, monotone
   (non-strictly).
-- `to_calendar` is the inverse restricted to increasing segments: exact at
-  trading-day knots (the only points date-anchored consumers hit), linear
-  within a trading day. A holiday plateau maps to the plateau's start.
-  This convention is documented on the method.
+- `to_calendar` is NOT the pointwise inverse of `to_trading` — a plateau
+  has no inverse, and mapping a plateau value to its start would make the
+  wrapped DF *discontinuous in trading time*: `u` ↦ plateau start but
+  `u+ε` ↦ past the plateau end, concentrating the entire holiday carry
+  into an arbitrarily short trading-time substep (where native trading-axis
+  variance is positive, so no zero-variance guard fires, and PDE/QUAD
+  results become grid-dependent). Instead `to_calendar` is the
+  **continuous** piecewise-linear map between consecutive trading-date
+  knots: `[k/D, (k+1)/D]` maps linearly onto the full calendar span
+  between those two trading dates, holidays included. It is strictly
+  increasing and agrees with `to_trading` exactly at every trading-date
+  knot — the two directions are deliberately not inverses off-knot
+  (`to_trading` places variance; `to_calendar` places carry; the knots are
+  the shared anchor contract, which is where the D5 DF invariance is
+  asserted). Cash wrappers (§4.3) consume `to_calendar`; a holiday's carry
+  is thereby distributed smoothly across its adjacent trading tick instead
+  of appearing as a jump.
 - **No extrapolation by default.** Querying beyond `horizon_date` raises
   `ValidationError`. An explicit `extend_weekdays=True` constructor flag
   enables the mo-style weekday extension past the calendar's data, and the
@@ -132,7 +145,9 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
   §4.5 with a catastrophically under-resolved Gaussian kernel. Two-part fix:
   (a) `BusinessTimeMap.to_trading` returns the stored knot *value* (not
   arithmetic interpolation) inside a plateau, so equal trading times are
-  bitwise equal; (b) the wrapper exposes `total_variance(K, τ_cal)`
+  bitwise equal; (b) the wrapper exposes `total_variance(strike, τ_cal,
+  spot)` — the **full** `get_vol` query signature, so smile surfaces whose
+  vol depends on spot/moneyness reproduce the identical inner query —
   returning `w_td(τ_td)` computed once from `τ_td`, and
   `step_vols_on_grid` prefers this method when the surface provides it
   (getattr protocol, existing surfaces unchanged). Differencing bitwise-
@@ -183,6 +198,15 @@ class TradingClockRateCurve(RateCurve):
   (unwrapped, quoted at n_td/D pillars) and the curves are wrapped — the
   mirror of the default axis. `phoenix_external_case_compare.py` gets a
   pointer to this as the correct construction.
+- **One clock per configuration, validated.** Product times on this axis
+  come from the env resolver (`day_count_convention`, `bus_days_in_year`,
+  `calendar`) while the wrappers carry a `TradingClock` — a 252-resolver
+  paired with a 244-map would mis-date every query while the DF invariant
+  silently breaks. The wrappers expose their clock, and a validation
+  helper (invoked by the env when `day_count_convention == BUSINESS_DAYS`,
+  and available standalone) asserts `env.bus_days_in_year ==
+  clock.days_per_year` and `env.calendar is clock.calendar` for every
+  wrapped curve on the env, raising `ValidationError` on mismatch.
 
 ### 4.4 `BUSINESS_DAYS` hardening
 
@@ -207,10 +231,15 @@ pass a calendar and assert genuinely business-day behavior.
   for other payoffs or grids, and autocallable value functions carry kinks
   exactly where oscillations start. When a step's σ_step == 0 (the exact
   zero from §4.2), its operator uses first-order upwind advection selected
-  by the sign of (r − q); steps with σ_step > 0 are untouched, so no
-  numerical diffusion is added anywhere it wasn't already. The upwind
-  truncation error is negligible here: the holiday step advects the profile
-  by (r − q)·Δτ_cal, a sub-cell shift at production grids. The
+  by the sign of (r − q) **and the step runs fully implicit (θ = 1)** —
+  with θ < 1 the explicit half retains negative coefficients whenever the
+  advection CFL bound is exceeded, so upwinding alone is not
+  unconditionally monotone; backward Euler with an upwind operator is,
+  with no CFL condition. The per-step θ scheduling machinery the damping
+  steps already use carries this. Steps with σ_step > 0 are untouched, so
+  no numerical diffusion is added anywhere it wasn't already; the upwind
+  truncation error is negligible here (the holiday step advects the
+  profile by (r − q)·Δτ_cal, a sub-cell shift at production grids). The
   holiday-straddling characterization test *verifies* the scheme; it does
   not decide it.
 - **MC**: a unit test pins the zero-vol step (drift-only advance, no
