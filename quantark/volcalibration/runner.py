@@ -9,12 +9,16 @@ agent reads to decide what to do next.
 
 from __future__ import annotations
 
+import csv
+import fcntl
 import hashlib
 import json
 import math
+import os
 import time
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
@@ -781,3 +785,283 @@ def run_calibration_stage(
         save_calibration_manifest(layout, base_payload, records, config=payload)
         log(f"{tag}: {record['status']} [{record['elapsed_seconds']:.2f}s]")
     return records
+
+
+# ------------------------------------------------------- lock and exit codes
+
+EXIT_CURRENT = 0
+EXIT_FAILED = 1
+EXIT_NON_CURRENT = 2
+EXIT_LOCKED = 75
+
+STATUS_SCHEMA_VERSION = 1
+STATUS_CACHE_MAX_AGE_DAYS = 4
+
+
+class LockBusy(QuantArkException):
+    """Another invocation owns the runtime lock."""
+
+
+@contextmanager
+def acquire_lock(path):
+    """A non-blocking advisory lock covering the whole daily transaction."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a+", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            handle.seek(0)
+            owner = handle.read().strip()
+            detail = f" ({owner})" if owner else ""
+            raise LockBusy(f"calibration pipeline already running{detail}") from exc
+        handle.seek(0)
+        handle.truncate()
+        handle.write(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "started_at": _utc_now().isoformat(),
+                    "cwd": os.getcwd(),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        handle.flush()
+        os.fsync(handle.fileno())
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            handle.truncate()
+            handle.flush()
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+# ------------------------------------------------------------------- status
+
+
+def load_trading_dates(spot_csv, *, as_of=None) -> List[str]:
+    """Trade-date tags from a spot cache CSV, ascending and de-duplicated."""
+    path = Path(spot_csv)
+    if not path.is_file():
+        raise ValidationError(f"spot trading-calendar cache is missing: {path}")
+    tags: List[str] = []
+    try:
+        with path.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                raw = str(row.get("date", "")).strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = date.fromisoformat(raw)
+                except ValueError:
+                    continue
+                if as_of is None or parsed <= as_of:
+                    tags.append(parsed.strftime("%Y%m%d"))
+    except OSError as exc:
+        raise ValidationError(f"cannot read spot calendar {path}: {exc}") from exc
+    unique = sorted(set(tags))
+    if not unique:
+        raise ValidationError(f"spot calendar {path} has no usable dates")
+    return unique
+
+
+def _latest(records: Mapping[str, Mapping[str, Any]], *, status, require) -> Optional[str]:
+    candidates = [
+        tag
+        for tag, record in records.items()
+        if record.get("status") == status and require(tag)
+    ]
+    return max(candidates) if candidates else None
+
+
+def trading_day_lag(
+    trading_dates: Sequence[str], latest: Optional[str], expected: str
+) -> Optional[int]:
+    if latest is None:
+        return None
+    index = {value: position for position, value in enumerate(trading_dates)}
+    if latest not in index or expected not in index:
+        return None
+    return max(0, index[expected] - index[latest])
+
+
+def build_status(
+    layout: StoreLayout,
+    config: RunConfig,
+    *,
+    as_of,
+    run_id: Optional[str] = None,
+    last_error: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """The freshness payload an agent reads to decide what to do next."""
+    snapshots = layout.available_snapshot_dates()
+    if config.spot_csv is not None:
+        trading_dates = load_trading_dates(config.spot_csv, as_of=as_of)
+        calendar_source = str(config.spot_csv)
+        spot_cache_latest = trading_dates[-1]
+        cache_age_days = (
+            as_of - date.fromisoformat(_iso_tag(trading_dates[-1]))
+        ).days
+    else:
+        # No calendar: "expected" is the newest snapshot we hold.  The status
+        # names which of the two it is rather than implying a freshness check
+        # that did not run.
+        if not snapshots:
+            raise ValidationError(
+                f"{layout.snapshots_dir} holds no snapshots and no paths.spot_csv "
+                "is configured, so there is no trade date to report on"
+            )
+        trading_dates = snapshots
+        calendar_source = "snapshots_on_disk"
+        spot_cache_latest = None
+        cache_age_days = None
+    expected = trading_dates[-1]
+
+    _surface_payload, surface_records = load_surface_manifest(layout)
+    _calibration_payload, calibration_records = load_calibration_manifest(layout)
+
+    snapshot_latest = max(snapshots) if snapshots else None
+    surface_latest = _latest(
+        surface_records,
+        status="ok",
+        require=lambda tag: layout.artifact_path(tag).is_file(),
+    )
+    calibration_latest = _latest(
+        calibration_records, status="ok", require=lambda tag: True
+    )
+
+    expected_surface = surface_records.get(expected, {})
+    expected_calibration = calibration_records.get(expected, {})
+    has_snapshot = expected in snapshots
+
+    if last_error is not None:
+        overall = "failed"
+    elif cache_age_days is not None and cache_age_days > STATUS_CACHE_MAX_AGE_DAYS:
+        overall = "market_cache_stale"
+    elif not has_snapshot:
+        overall = "snapshot_pending"
+    elif expected_surface.get("status") == "excluded":
+        overall = "surface_excluded"
+    elif expected_surface.get("status") != "ok":
+        overall = "surface_pending"
+    elif expected_calibration.get("status") == "failed":
+        overall = "calibration_failed"
+    elif expected_calibration.get("status") != "ok":
+        overall = "calibration_pending"
+    else:
+        overall = "current"
+
+    return {
+        "schema_version": STATUS_SCHEMA_VERSION,
+        "module": "quantark.volcalibration",
+        "pipeline": config.name,
+        "overall_status": overall,
+        "generated_at": _utc_now().isoformat(),
+        "as_of_date": as_of.isoformat(),
+        "run_id": run_id,
+        "expected_trade_date": expected,
+        "config": config.echo(),
+        "grandfathered_surface_dates": sum(
+            1
+            for record in surface_records.values()
+            if record.get("provenance") == PROVENANCE_GRANDFATHERED
+        ),
+        "freshness": {
+            "calendar_source": calendar_source,
+            "spot_cache_latest": spot_cache_latest,
+            "spot_cache_calendar_age_days": cache_age_days,
+            "spot_cache_max_age_days": STATUS_CACHE_MAX_AGE_DAYS,
+            "snapshot_latest": snapshot_latest,
+            "snapshot_lag_trading_days": trading_day_lag(
+                trading_dates, snapshot_latest, expected
+            ),
+            "surface_latest": surface_latest,
+            "surface_lag_trading_days": trading_day_lag(
+                trading_dates, surface_latest, expected
+            ),
+            "calibration_latest": calibration_latest,
+            "calibration_lag_trading_days": trading_day_lag(
+                trading_dates, calibration_latest, expected
+            ),
+        },
+        "expected_date_records": {
+            "snapshot": {"date": expected, "present": has_snapshot},
+            "surface": expected_surface or None,
+            "calibration": expected_calibration or None,
+        },
+        "last_error": dict(last_error) if last_error is not None else None,
+    }
+
+
+def _iso_tag(tag: str) -> str:
+    return f"{tag[:4]}-{tag[4:6]}-{tag[6:]}"
+
+
+def status_exit_code(status: Mapping[str, Any]) -> int:
+    """0 current, 1 failure, 2 non-current but fail-closed."""
+    overall = status.get("overall_status")
+    if overall == "current":
+        return EXIT_CURRENT
+    if overall in ("failed", "calibration_failed"):
+        return EXIT_FAILED
+    return EXIT_NON_CURRENT
+
+
+# ------------------------------------------------------------ the transaction
+
+
+def run_pipeline(
+    config: RunConfig,
+    *,
+    as_of,
+    tags: Optional[Sequence[str]] = None,
+    backfill: bool = False,
+    max_dates: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    force: bool = False,
+    skip_surfaces: bool = False,
+    skip_calibration: bool = False,
+    log: Logger = _null_log,
+):
+    """One locked, atomic, resumable run. Returns ``(exit_code, status)``.
+
+    ``LockBusy`` propagates uncaught: writing a status file while another
+    process owns the transaction would corrupt its view of the store.
+    """
+    layout = StoreLayout.from_config(config)
+    layout.runtime_dir.mkdir(parents=True, exist_ok=True)
+    run_id = _utc_now().isoformat()
+    with acquire_lock(layout.lock):
+        try:
+            if skip_surfaces:
+                _payload, surface_records = load_surface_manifest(layout)
+            else:
+                surface_records = run_surface_stage(
+                    layout, config, tags=tags, force=force, log=log
+                )
+            if not skip_calibration:
+                run_calibration_stage(
+                    layout,
+                    config,
+                    surface_records=surface_records,
+                    backfill=backfill,
+                    max_dates=max_dates,
+                    start_date=start_date,
+                    end_date=end_date,
+                    log=log,
+                )
+            status = build_status(layout, config, as_of=as_of, run_id=run_id)
+        except QuantArkException as exc:
+            status = build_status(
+                layout,
+                config,
+                as_of=as_of,
+                run_id=run_id,
+                last_error={"error_type": type(exc).__name__, "message": str(exc)},
+            )
+        atomic_write_json(layout.status, status)
+        return status_exit_code(status), status
