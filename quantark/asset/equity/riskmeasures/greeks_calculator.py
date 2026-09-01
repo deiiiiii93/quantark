@@ -2,12 +2,9 @@
 Greeks calculation for equity derivatives.
 """
 
-import math
 from copy import deepcopy
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
-
-from scipy import stats
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.param import EngineParams
@@ -20,7 +17,11 @@ from quantark.asset.equity.riskmeasures.bucketed_coordinates import (
     vol_model,
     vol_tenor_vega,
 )
-from quantark.asset.equity.riskmeasures.greeks import bump_envs
+from quantark.asset.equity.riskmeasures.greeks import (
+    analytical,
+    bump_envs,
+    theta_decomposition,
+)
 from quantark.asset.equity.riskmeasures.bucketed_greeks import (
     BucketedGreekCoordinate,
     BucketedGreekDifferenceMode,
@@ -32,7 +33,6 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CommonGreek, EquityGreek
 from quantark.util.enum.engine_enums import EngineType, GreeksCalculationMode
 from quantark.util.exceptions import NumericalError, ValidationError
-from quantark.util.numerical import is_zero
 
 
 class GreeksCalculator:
@@ -402,127 +402,8 @@ class GreeksCalculator:
         pricing_env: PricingEnvironment,
         price: Optional[float] = None,
     ) -> Dict[str, float]:
-        """
-        Calculate Greeks using analytical Black-Scholes formulas.
-
-        Only works for European vanilla options under Black-Scholes model.
-
-        Args:
-            product: European vanilla option
-            pricing_env: Pricing environment
-            price: Pre-calculated price (optional, will calculate if not provided)
-
-        Returns:
-            Dictionary of Greeks: delta, gamma, vega, theta, rho
-
-        Raises:
-            ValidationError: If product is not a European vanilla option
-        """
-        if not isinstance(product, EuropeanVanillaOption):
-            raise ValidationError(
-                f"Analytical Greeks only support EuropeanVanillaOption, "
-                f"got {type(product).__name__}"
-            )
-
-        # Extract parameters
-        S = pricing_env.spot
-        K = product.strike
-        T = product.get_maturity(pricing_env)
-        r = pricing_env.get_rate(T)
-        q = pricing_env.get_div_yield(T)
-        sigma = pricing_env.get_vol(K, T)
-
-        # Handle edge case: option at expiry
-        if is_zero(T):
-            return self._greeks_at_expiry(product, S)
-
-        # Calculate d1 and d2
-        sqrt_T = math.sqrt(T)
-        d1 = (math.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * sqrt_T)
-        d2 = d1 - sigma * sqrt_T
-
-        # Calculate discount factors
-        discount_div = math.exp(-q * T)
-        discount_rf = math.exp(-r * T)
-
-        # Standard normal PDF and CDF
-        n_d1 = stats.norm.pdf(d1)  # phi(d1)
-        N_d1 = stats.norm.cdf(d1)  # Phi(d1)
-        N_d2 = stats.norm.cdf(d2)  # Phi(d2)
-
-        greeks = {}
-
-        multiplier = product.contract_multiplier
-
-        # Calculate price if not provided (per-unit)
-        if price is None:
-            if product.is_call():
-                price = S * discount_div * N_d1 - K * discount_rf * N_d2
-            else:
-                price = K * discount_rf * stats.norm.cdf(
-                    -d2
-                ) - S * discount_div * stats.norm.cdf(-d1)
-        else:
-            price = price / multiplier
-        greeks["price"] = price
-
-        # Delta: ∂V/∂S
-        if product.is_call():
-            delta = discount_div * N_d1
-        else:
-            delta = -discount_div * stats.norm.cdf(-d1)
-        greeks["delta"] = delta
-
-        # Gamma: ∂²V/∂S²
-        gamma = discount_div * n_d1 / (S * sigma * sqrt_T)
-        greeks["gamma"] = gamma
-
-        # Vega: ∂V/∂σ (divided by 100 for 1% change)
-        vega = S * discount_div * n_d1 * sqrt_T / 100
-        greeks["vega"] = vega
-
-        # Theta: ∂V/∂t (per day, divided by 365)
-        # Decomposed into three components:
-        #   convexity_theta: time decay from gamma/convexity erosion (always negative)
-        #   r_theta: time decay from interest rate cost of carry
-        #   q_theta: time decay from dividend yield
-        term1 = -S * discount_div * n_d1 * sigma / (2 * sqrt_T)
-        if product.is_call():
-            term2 = -r * K * discount_rf * N_d2
-            term3 = q * S * discount_div * N_d1
-        else:
-            term2 = r * K * discount_rf * stats.norm.cdf(-d2)
-            term3 = -q * S * discount_div * stats.norm.cdf(-d1)
-
-        # Store decomposed components (per day)
-        convexity_theta = term1 / 365
-        r_theta = term2 / 365
-        q_theta = term3 / 365
-        theta = convexity_theta + r_theta + q_theta
-
-        greeks["theta"] = theta
-        greeks["convexity_theta"] = convexity_theta
-        greeks["r_theta"] = r_theta
-        greeks["q_theta"] = q_theta
-
-        # Rho: ∂V/∂r (divided by 100 for 1% change)
-        if product.is_call():
-            rho = K * T * discount_rf * N_d2 / 100
-        else:
-            rho = -K * T * discount_rf * stats.norm.cdf(-d2) / 100
-        greeks["rho"] = rho
-
-        # Dividend Rho: ∂V/∂q (divided by 100 for 1% change)
-        if product.is_call():
-            dividend_rho = -S * T * discount_div * N_d1 / 100
-        else:
-            dividend_rho = S * T * discount_div * stats.norm.cdf(-d1) / 100
-        greeks["dividend_rho"] = dividend_rho
-
-        for key, value in greeks.items():
-            greeks[key] = value * multiplier
-
-        return greeks
+        """Closed-form BS greeks for European vanillas; see greeks.analytical."""
+        return analytical.calculate_analytical_greeks(product, pricing_env, price)
 
     def calculate_numerical_greeks(
         self,
@@ -1122,49 +1003,17 @@ class GreeksCalculator:
         rate_bump: float = 0.01,
         dividend_bump: float = 0.01,
     ) -> Dict[str, float]:
-        """
-        Fast estimation of theta components from existing Greeks.
-
-        Uses the relationships between theta components and other Greeks:
-            r_theta ≈ -r/T * rho / rate_bump (corrected for scale and daily conversion)
-            q_theta ≈ -q/T * dividend_rho / dividend_bump (corrected for scale and daily conversion)
-            convexity_theta ≈ theta - r_theta - q_theta
-
-        This is an approximation that avoids repricing. For exact decomposition,
-        use _calculate_numerical_theta_components() instead.
-
-        Args:
-            theta: Total theta (per day)
-            rho: Rho (sensitivity to rate, per 1% change)
-            dividend_rho: Dividend rho (sensitivity to dividend yield, per 1% change)
-            r: Interest rate (annual)
-            q: Dividend yield (annual)
-            T: Time to maturity in years
-            rate_bump: Rate scale of the rho input (default: 1% = 0.01)
-            dividend_bump: Dividend scale of the dividend_rho input (default: 1% = 0.01)
-
-        Returns:
-            Dictionary with convexity_theta, r_theta, q_theta (all per day)
-        """
-        if is_zero(T):
-            return {
-                "convexity_theta": 0.0,
-                "r_theta": 0.0,
-                "q_theta": 0.0,
-            }
-
-        # Rho/Dividend Rho are per rate_bump/dividend_bump size, so divide by scale.
-        # Divide by 365 to convert annual rate decay to daily theta equivalent.
-        # Divide by T to cancel out the T term in Rho (Rho = dV/dr = T * dV/d(rT) approx).
-        r_theta = -r / T * (rho / rate_bump) / 365
-        q_theta = -q / T * (dividend_rho / dividend_bump) / 365
-        convexity_theta = theta - r_theta - q_theta
-
-        return {
-            "convexity_theta": convexity_theta,
-            "r_theta": r_theta,
-            "q_theta": q_theta,
-        }
+        """Fast theta component estimate; see greeks.theta_decomposition."""
+        return theta_decomposition.estimate_theta_components(
+            theta,
+            rho,
+            dividend_rho,
+            r,
+            q,
+            T,
+            rate_bump=rate_bump,
+            dividend_bump=dividend_bump,
+        )
 
     def _calculate_numerical_theta_components(
         self,
@@ -1174,78 +1023,15 @@ class GreeksCalculator:
         base_price: Optional[float] = None,
         time_bump_days: Optional[int] = None,
     ) -> Dict[str, float]:
-        """
-        Exact numerical theta decomposition via repricing with zeroed r/q.
-
-        This method computes exact theta components by repricing with different
-        rate and dividend yield combinations:
-            1. theta_no_rq = theta with r=0, q=0 → convexity_theta
-            2. theta_no_q = theta with q=0 → r_theta = theta_no_q - convexity_theta
-            3. theta_no_r = theta with r=0 → q_theta = theta_no_r - convexity_theta
-
-        Note: This is computationally expensive (3 extra pricings) and should
-        be treated as a slow path. For fast estimation, use
-        estimate_theta_components() instead.
-
-        Args:
-            product: The derivative product
-            pricing_env: Pricing environment
-            engine: Pricing engine
-            base_price: Pre-calculated base price
-            time_bump_days: Time bump in days
-
-        Returns:
-            Dictionary with convexity_theta, r_theta, q_theta (all per day)
-        """
-        from quantark.param.div import ContinuousDividendYield
-        from quantark.param.rrf import FlatRateCurve
-
-        time_bump_days = (
-            time_bump_days
-            if time_bump_days is not None
-            else self._bump_config.time_bump_days
+        """Exact zeroed-r/q theta decomposition; see greeks.theta_decomposition."""
+        return theta_decomposition.exact_theta_components(
+            self,
+            product,
+            pricing_env,
+            engine,
+            base_price=base_price,
+            time_bump_days=time_bump_days,
         )
-
-        T = product.get_maturity(pricing_env)
-        if is_zero(T):
-            return {
-                "convexity_theta": 0.0,
-                "r_theta": 0.0,
-                "q_theta": 0.0,
-            }
-
-        # Create environments with zeroed r and/or q
-        env_no_r = deepcopy(pricing_env)
-        env_no_r.rate_curve = FlatRateCurve(0.0)
-
-        env_no_q = deepcopy(pricing_env)
-        env_no_q.div_yield = ContinuousDividendYield(0.0)
-
-        env_no_rq = deepcopy(pricing_env)
-        env_no_rq.rate_curve = FlatRateCurve(0.0)
-        env_no_rq.div_yield = ContinuousDividendYield(0.0)
-
-        # Calculate theta in each environment
-        theta_no_rq = self.calculate_numerical_theta(
-            product, env_no_rq, engine, time_bump_days=time_bump_days
-        )
-        theta_no_q = self.calculate_numerical_theta(
-            product, env_no_q, engine, time_bump_days=time_bump_days
-        )
-        theta_no_r = self.calculate_numerical_theta(
-            product, env_no_r, engine, time_bump_days=time_bump_days
-        )
-
-        # Decompose
-        convexity_theta = theta_no_rq
-        r_theta = theta_no_q - convexity_theta
-        q_theta = theta_no_r - convexity_theta
-
-        return {
-            "convexity_theta": convexity_theta,
-            "r_theta": r_theta,
-            "q_theta": q_theta,
-        }
 
     def _spot_bumped_prices(
         self,
@@ -1327,41 +1113,8 @@ class GreeksCalculator:
     def _greeks_at_expiry(
         self, product: EuropeanVanillaOption, spot: float
     ) -> Dict[str, float]:
-        """
-        Calculate Greeks at expiry.
-
-        At expiry:
-        - Price = intrinsic value
-        - Delta = 1 (ITM call), -1 (ITM put), 0 (OTM)
-        - Gamma, Vega, Theta, Rho = 0
-
-        Args:
-            product: European vanilla option
-            spot: Current spot price
-
-        Returns:
-            Dictionary of Greeks
-        """
-        multiplier = product.contract_multiplier
-        price = product.get_payoff(spot) / multiplier
-
-        # Delta at expiry
-        if product.is_call():
-            delta = 1.0 if spot > product.strike else 0.0
-        else:
-            delta = -1.0 if spot < product.strike else 0.0
-
-        return {
-            "price": price * multiplier,
-            "delta": delta * multiplier,
-            "gamma": 0.0,
-            "vega": 0.0,
-            "theta": 0.0,
-            "convexity_theta": 0.0,
-            "r_theta": 0.0,
-            "q_theta": 0.0,
-            "rho": 0.0,
-        }
+        """Greeks at expiry; see greeks.analytical.greeks_at_expiry."""
+        return analytical.greeks_at_expiry(product, spot)
 
     def compare_greeks(
         self, analytical: Dict[str, float], numerical: Dict[str, float]
