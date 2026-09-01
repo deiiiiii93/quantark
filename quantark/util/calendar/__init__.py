@@ -12,16 +12,22 @@ from .business_calendar import (
     Calendar,
     create_calendar
 )
+from .trading_clock import (
+    BusinessTimeMap,
+    TradingClock
+)
 
 __all__ = [
-    'DayCountConvention', 
+    'DayCountConvention',
     'calculate_year_fraction',
     'calculate_day_count_fraction',
     'is_leap_year',
     'BusinessDayConvention',
     'CalendarType',
     'Calendar',
-    'create_calendar'
+    'create_calendar',
+    'BusinessTimeMap',
+    'TradingClock'
 ]
 
 
