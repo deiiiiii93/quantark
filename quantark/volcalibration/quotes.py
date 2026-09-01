@@ -8,9 +8,9 @@ different work but produce the same :class:`QuoteSet`, so everything downstream
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
-from typing import Mapping, Optional, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 from quantark.util.exceptions import ValidationError
 
@@ -84,12 +84,20 @@ class ExpiryQuotes:
 
 @dataclass(frozen=True)
 class QuoteSet:
-    """One trading date's expiries, normalized out of any quoting convention."""
+    """One trading date's expiries, normalized out of any quoting convention.
+
+    ``universe`` is the normalizer's audit record -- how many quotes it saw,
+    what it filtered and why, which expiries it excluded.  It is carried here
+    rather than returned separately because it describes exactly this QuoteSet,
+    and the artifact writer persists it so an excluded quote is always
+    accounted for rather than silently missing.
+    """
 
     trade_date: date
     spot: float
     convention: str
     expiries: Tuple[ExpiryQuotes, ...]
+    universe: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _finite_positive(self.spot, "QuoteSet.spot")
