@@ -226,6 +226,46 @@ def test_list_finds_the_shipped_config(capsys):
     assert "mo-daily" in names
 
 
+def test_status_notices_a_changed_config_not_just_a_status_field(workspace, capsys):
+    """`current` must mean a run would do nothing, or exit 0 lies."""
+    config_path, _ = workspace
+    assert main(["run", str(config_path), "--as-of", "2026-04-30"]) == 0
+    capsys.readouterr()
+    config_path.write_text(
+        CONFIG_YAML + "surface:\n  min_expiries: 3\n", encoding="utf-8"
+    )
+    code = main(["status", str(config_path), "--as-of", "2026-04-30", "--json"])
+    out, _ = capsys.readouterr()
+    assert json.loads(out)["overall_status"] == "surface_pending"
+    assert code == 2
+
+
+def test_status_notices_a_deleted_artifact(workspace, capsys):
+    config_path, layout = workspace
+    main(["run", str(config_path), "--as-of", "2026-04-30"])
+    capsys.readouterr()
+    layout.artifact_path("20260430").unlink()
+    code = main(["status", str(config_path), "--as-of", "2026-04-30", "--json"])
+    out, _ = capsys.readouterr()
+    assert json.loads(out)["overall_status"] == "surface_pending"
+    assert code == 2
+
+
+def test_plan_schedules_calibration_for_a_forced_rebuild(workspace, capsys):
+    """A stale record must not mask the calibration a rebuild will require."""
+    config_path, _ = workspace
+    main(["run", str(config_path), "--as-of", "2026-04-30"])
+    capsys.readouterr()
+    code = main(
+        ["run", str(config_path), "--as-of", "2026-04-30", "--plan", "--force", "--json"]
+    )
+    out, _ = capsys.readouterr()
+    plan = json.loads(out)
+    assert plan["surfaces_to_build"] == ["20260430"]
+    assert plan["calibrations_to_run"] == ["20260430"]
+    assert code == 2
+
+
 def test_human_output_carries_no_json(workspace, capsys):
     config_path, _ = workspace
     main(["status", str(config_path), "--as-of", "2026-04-30"])

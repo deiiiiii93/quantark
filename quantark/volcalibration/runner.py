@@ -40,12 +40,13 @@ from quantark.volcalibration.store import (
     builder_fingerprint,
     load_calibration_manifest,
     load_surface_manifest,
+    read_json,
     save_calibration_manifest,
     save_surface_manifest,
     serialize_artifact,
     surface_record,
 )
-from quantark.volcalibration.surface import build_artifact
+from quantark.volcalibration.surface import SurfaceLimits, build_artifact
 
 Logger = Callable[[str], None]
 
@@ -61,13 +62,30 @@ def _utc_now() -> datetime:
 # --------------------------------------------------------------- normalizers
 
 
-def normalizer_for(convention: str, price_field: str):
+def surface_limits_for(config: RunConfig) -> SurfaceLimits:
+    """The run config's surface knobs, as the stage functions consume them."""
+    surface = config.surface
+    return SurfaceLimits(
+        min_expiries=int(surface.min_expiries),
+        min_strikes_per_expiry=int(surface.min_strikes_per_expiry),
+        min_common_strikes=int(surface.min_common_strikes),
+        extrapolation=str(surface.extrapolation),
+        max_abs_implied_rate=float(surface.max_abs_implied_rate),
+        max_rmse_over_forward=float(surface.max_rmse_over_forward),
+    )
+
+
+def normalizer_for(convention: str, price_field: str, limits: SurfaceLimits):
     """The one pluggable stage: quote convention -> normalizer.
 
     Listed-live and listed-settlement are separate normalizers rather than one
     with a flag: they disagree on the price field, the liquidity rule, the
     maturity derivation, the expiry-date check and the IV-inversion units, so a
     parameterized version could select combinations no real venue produces.
+
+    ``limits`` carries the parity gate, which the normalizer *enforces* and the
+    artifact only records; both sides read the same object so a stored surface
+    cannot claim thresholds it was not admitted under.
     """
     if convention == CONVENTION_LISTED:
         if price_field == PRICE_FIELD_SETTLEMENT:
@@ -75,7 +93,11 @@ def normalizer_for(convention: str, price_field: str):
                 SettlementNormalizer,
             )
 
-            return SettlementNormalizer()
+            return SettlementNormalizer(
+                min_expiries=limits.min_expiries,
+                max_abs_implied_rate=limits.max_abs_implied_rate,
+                max_rmse_over_forward=limits.max_rmse_over_forward,
+            )
         from quantark.volcalibration.normalize.listed import ListedNormalizer
 
         return ListedNormalizer()
@@ -107,6 +129,29 @@ def _reason_is_builder_owned(reason: Optional[str]) -> bool:
     return True
 
 
+def artifact_is_intact(layout: StoreLayout, record: Mapping[str, Any]) -> bool:
+    """Does this record's artifact exist on disk with the sha it claims?
+
+    A manifest record is a claim about a file.  Checking only the record would
+    let a deleted or corrupted artifact be reported ``current`` -- and an
+    existing calibration record for the same date would keep it that way, so
+    the failure surfaces in a consumer rather than in the pipeline that owns
+    it.  This check applies to grandfathered records too: their exemption is
+    from re-deriving metadata, not from having to exist.
+    """
+    if record.get("status") != "ok":
+        return True  # an excluded date is not expected to have an artifact
+    path = layout.artifact_path(str(record.get("date", "")))
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+    recorded = record.get("artifact_sha256")
+    if not recorded:
+        return False
+    return hashlib.sha256(data).hexdigest() == str(recorded)
+
+
 def surface_record_is_current(
     record: Mapping[str, Any],
     *,
@@ -114,7 +159,12 @@ def surface_record_is_current(
     price_field: str,
     fingerprint: str,
 ) -> bool:
-    """Is this recorded date still valid for the current inputs and config?"""
+    """Is this record still valid for the current inputs and config?
+
+    This judges the *metadata* only; the artifact it refers to is checked
+    separately by :func:`artifact_is_intact`, because the two failures want
+    different explanations.
+    """
     if not record:
         return False
     if record.get("provenance") == PROVENANCE_GRANDFATHERED:
@@ -125,8 +175,13 @@ def surface_record_is_current(
         record.get("reason")
     ):
         return True
+    # Both sides being None is not a match: a snapshot with no declared digest
+    # would otherwise be permanently "current" and never re-read after an edit.
+    recorded_sha = record.get("snapshot_sha256")
+    if recorded_sha is None or snapshot_sha is None:
+        return False
     return bool(
-        record.get("snapshot_sha256") == snapshot_sha
+        recorded_sha == snapshot_sha
         and record.get("price_field") == price_field
         and record.get("builder_fingerprint") == fingerprint
         and int(record.get("builder_schema_version", -1)) == BUILDER_SCHEMA_VERSION
@@ -177,7 +232,7 @@ def plan_surface_dates(
             snapshot_sha=_snapshot_sha_on_disk(layout, tag),
             price_field=config.underlying.price_field,
             fingerprint=fingerprint,
-        ):
+        ) and artifact_is_intact(layout, record):
             continue
         pending.append(tag)
     return pending
@@ -194,31 +249,80 @@ def _remove_stale_artifact(artifact_dir: Path, tag: str) -> None:
         pass
 
 
-def build_one_surface(task) -> Dict[str, Any]:
+def _check_snapshot_identity(
+    snapshot: QuoteSnapshot,
+    *,
+    tag: str,
+    symbol: str,
+    convention: str,
+    price_field: str,
+) -> None:
+    """Is this snapshot the one we asked for?
+
+    The runner takes the date from the *filename* and the store from the run
+    config, so a valid but misplaced snapshot -- a wrong-date file, another
+    underlying's, a live book where settlement marks were configured -- would
+    otherwise be built and recorded under the wrong identity. Nothing about the
+    payload is trusted to match its location until it is checked.
+    """
+    actual = snapshot.trade_date.strftime("%Y%m%d")
+    if actual != tag:
+        raise AdmissionError(
+            AdmissionReason.INVALID_SNAPSHOT,
+            f"snapshot at {tag}.json declares trade_date {actual}",
+        )
+    if symbol and snapshot.symbol != symbol:
+        raise AdmissionError(
+            AdmissionReason.INVALID_SNAPSHOT,
+            f"snapshot declares symbol {snapshot.symbol!r}, run config expects "
+            f"{symbol!r}",
+        )
+    if snapshot.convention != convention:
+        raise AdmissionError(
+            AdmissionReason.INVALID_SNAPSHOT,
+            f"snapshot declares convention {snapshot.convention!r}, run config "
+            f"expects {convention!r}",
+        )
+    if snapshot.price_field != price_field:
+        raise AdmissionError(
+            AdmissionReason.PRICE_FIELD_MISMATCH,
+            f"snapshot declares price_field {snapshot.price_field!r}, run config "
+            f"expects {price_field!r}",
+        )
+
+
+def build_one_surface(task: Mapping[str, Any]) -> Dict[str, Any]:
     """Worker: build and atomically write one date's artifact.
 
-    Module-level and tuple-argued so ``ProcessPoolExecutor`` can pickle it.
+    Module-level and plain-data-argued so ``ProcessPoolExecutor`` can pickle it.
     A per-date failure returns an ``excluded`` record rather than raising: one
     inadmissible date must not abort a backfill of eight hundred.
     """
-    (
-        tag,
-        snapshot_path,
-        artifact_dir,
-        convention,
-        price_field,
-        sabr_beta,
-        fingerprint,
-    ) = task
+    tag = task["tag"]
+    artifact_dir = task["artifact_dir"]
+    price_field = task["price_field"]
+    limits = task["limits"]
     record = surface_record(
-        tag, status="excluded", price_field=price_field, fingerprint=fingerprint
+        tag, status="excluded", price_field=price_field, fingerprint=task["fingerprint"]
     )
     try:
-        payload = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+        payload = json.loads(Path(task["snapshot_path"]).read_text(encoding="utf-8"))
         snapshot = QuoteSnapshot.from_payload(payload)
         record["snapshot_sha256"] = snapshot.sha256
-        quotes = normalizer_for(convention, price_field).normalize(snapshot)
-        artifact = build_artifact(quotes, snapshot, sabr_beta=float(sabr_beta))
+        _check_snapshot_identity(
+            snapshot,
+            tag=tag,
+            symbol=task["symbol"],
+            convention=task["convention"],
+            price_field=price_field,
+        )
+        normalizer = normalizer_for(task["convention"], price_field, limits)
+        artifact = build_artifact(
+            normalizer.normalize(snapshot),
+            snapshot,
+            sabr_beta=float(task["sabr_beta"]),
+            limits=limits,
+        )
         data = serialize_artifact(artifact)
     except AdmissionError as exc:
         _remove_stale_artifact(Path(artifact_dir), tag)
@@ -269,17 +373,24 @@ def run_surface_stage(
         return records
 
     fingerprint = builder_fingerprint(config.surface.fingerprint_payload())
+    limits = surface_limits_for(config)
+    # Resolved BEFORE any artifact is written: this can fail, and failing after
+    # the workers have written files would leave them orphaned with their
+    # manifest records discarded.
+    source_class = _resolve_source_class(layout, pending)
     layout.surface_dir.mkdir(parents=True, exist_ok=True)
     tasks = [
-        (
-            tag,
-            str(layout.snapshot_path(tag)),
-            str(layout.surface_dir),
-            config.underlying.convention,
-            config.underlying.price_field,
-            float(config.surface.sabr_beta),
-            fingerprint,
-        )
+        {
+            "tag": tag,
+            "snapshot_path": str(layout.snapshot_path(tag)),
+            "artifact_dir": str(layout.surface_dir),
+            "symbol": config.underlying.symbol,
+            "convention": config.underlying.convention,
+            "price_field": config.underlying.price_field,
+            "sabr_beta": float(config.surface.sabr_beta),
+            "limits": limits,
+            "fingerprint": fingerprint,
+        }
         for tag in pending
     ]
 
@@ -305,7 +416,7 @@ def run_surface_stage(
         config=config.surface.fingerprint_payload(),
         window={"start": present[0], "end": present[-1]},
         price_field=config.underlying.price_field,
-        source_class=_source_class(layout, pending),
+        source_class=source_class,
     )
     return records
 
@@ -315,20 +426,27 @@ def _surface_line(record: Mapping[str, Any]) -> str:
     return f"{record['date']}: {record['status']}{suffix}"
 
 
-def _source_class(layout: StoreLayout, tags: Sequence[str]) -> str:
-    """The vendor label the built snapshots declare.
+def _resolve_source_class(
+    layout: StoreLayout, tags: Sequence[str]
+) -> Optional[str]:
+    """The vendor label the snapshots declare, or the one already recorded.
 
     Read from the snapshot rather than configured: the manifest's ``source``
     field is provenance, and provenance is what the data says about itself.
+
+    When no pending snapshot is readable -- a batch where every date fails --
+    the manifest's existing ``source`` stands, and failing that the field is
+    written ``null``.  Recording an honest absence is right here; raising would
+    discard every per-date failure record the batch just produced, which is the
+    output that explains what went wrong.
     """
     for tag in tags:
         vendor = _snapshot_field(layout, tag, "source", "vendor")
         if vendor:
             return str(vendor)
-    raise ValidationError(
-        f"no snapshot in {layout.snapshots_dir} declares source.vendor; "
-        "the manifest's provenance field cannot be written"
-    )
+    previous = read_json(layout.surface_manifest, default={})
+    recorded = previous.get("source") if isinstance(previous, Mapping) else None
+    return str(recorded) if recorded else None
 
 
 # ------------------------------------------------- Heston temporal smoothing
@@ -938,6 +1056,27 @@ def build_status(
     expected_calibration = calibration_records.get(expected, {})
     has_snapshot = expected in snapshots
 
+    # `current` must mean "a run would do nothing", so it is judged with the
+    # same predicates the planners use.  Reading only `status` would report
+    # exit 0 after a snapshot was re-published or the config moved, while
+    # `--plan` on the same store scheduled work.
+    surface_ok = bool(
+        expected_surface.get("status") == "ok"
+        and surface_record_is_current(
+            expected_surface,
+            snapshot_sha=_snapshot_sha_on_disk(layout, expected),
+            price_field=config.underlying.price_field,
+            fingerprint=builder_fingerprint(config.surface.fingerprint_payload()),
+        )
+        and artifact_is_intact(layout, expected_surface)
+    )
+    calibration_ok = calibration_record_is_current(
+        expected_calibration,
+        expected_surface,
+        config.calibration.manifest_payload(),
+        tuple(config.calibration.variants),
+    )
+
     if last_error is not None:
         overall = "failed"
     elif cache_age_days is not None and cache_age_days > STATUS_CACHE_MAX_AGE_DAYS:
@@ -946,11 +1085,11 @@ def build_status(
         overall = "snapshot_pending"
     elif expected_surface.get("status") == "excluded":
         overall = "surface_excluded"
-    elif expected_surface.get("status") != "ok":
+    elif not surface_ok:
         overall = "surface_pending"
     elif expected_calibration.get("status") == "failed":
         overall = "calibration_failed"
-    elif expected_calibration.get("status") != "ok":
+    elif not calibration_ok:
         overall = "calibration_pending"
     else:
         overall = "current"

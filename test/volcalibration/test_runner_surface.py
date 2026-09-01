@@ -128,12 +128,14 @@ def test_each_invalidation_field_forces_a_rebuild(store, mutate):
 
 
 def test_a_grandfathered_record_is_trusted_not_rebuilt(store):
+    """Grandfathering exempts metadata re-derivation -- not the artifact itself."""
     config, layout, _ = store
+    built = run_surface_stage(layout, config)
     record = surface_record(
         TAG,
         status="ok",
         n_expiries=6,
-        artifact_sha256="a",
+        artifact_sha256=built[TAG]["artifact_sha256"],
         provenance="grandfathered",
     )
     assert surface_record_is_current(
@@ -144,6 +146,50 @@ def test_a_grandfathered_record_is_trusted_not_rebuilt(store):
     )
     assert (
         plan_surface_dates(layout, {TAG: record}, config, tags=[TAG], force=False) == []
+    )
+
+
+def test_a_record_whose_artifact_vanished_is_rebuilt(store):
+    """A manifest record is a claim about a file; the file has to be there."""
+    config, layout, _ = store
+    records = run_surface_stage(layout, config)
+    layout.artifact_path(TAG).unlink()
+    assert plan_surface_dates(
+        layout, records, config, tags=[TAG], force=False
+    ) == [TAG]
+
+    # ... and grandfathering does not exempt it.
+    grandfathered = dict(records[TAG], provenance="grandfathered")
+    assert plan_surface_dates(
+        layout, {TAG: grandfathered}, config, tags=[TAG], force=False
+    ) == [TAG]
+
+
+def test_a_corrupted_artifact_is_rebuilt(store):
+    config, layout, _ = store
+    records = run_surface_stage(layout, config)
+    layout.artifact_path(TAG).write_bytes(b'{"tampered": true}\n')
+    assert plan_surface_dates(
+        layout, records, config, tags=[TAG], force=False
+    ) == [TAG]
+
+
+def test_a_snapshot_without_a_digest_never_looks_current(store):
+    """None == None must not be a match, or an edited snapshot is never re-read."""
+    config, layout, _ = store
+    record = surface_record(
+        TAG,
+        status="ok",
+        artifact_sha256="a",
+        snapshot_sha256=None,
+        price_field="settlement",
+        fingerprint=builder_fingerprint(config.surface.fingerprint_payload()),
+    )
+    assert not surface_record_is_current(
+        record,
+        snapshot_sha=None,
+        price_field="settlement",
+        fingerprint=builder_fingerprint(config.surface.fingerprint_payload()),
     )
 
 
@@ -189,3 +235,70 @@ def test_a_moved_knob_rebuilds_because_the_fingerprint_moves(store):
 def test_planning_defaults_to_every_snapshot_on_disk(store):
     config, layout, _ = store
     assert plan_surface_dates(layout, {}, config) == [TAG]
+
+
+@pytest.mark.parametrize(
+    "field,value,reason",
+    [
+        ("trade_date", "2026-05-06", "invalid_snapshot"),
+        ("symbol", "000300.SH", "invalid_snapshot"),
+        ("convention", "fx_delta", "invalid_snapshot"),
+        ("price_field", "mid_or_last", "price_field_mismatch"),
+    ],
+)
+def test_a_misplaced_snapshot_is_refused_by_name(store, field, value, reason):
+    """The date comes from the filename and the store from the config; neither
+    is evidence that the payload belongs there."""
+    config, layout, snap = store
+    payload = snap.to_payload()
+    if field == "symbol":
+        payload["underlying"]["symbol"] = value
+    elif field == "price_field":
+        payload["source"]["price_field"] = value
+    else:
+        payload[field] = value
+    layout.snapshot_path(TAG).write_text(json.dumps(payload), encoding="utf-8")
+
+    records = run_surface_stage(layout, config)
+    assert records[TAG]["status"] == "excluded"
+    assert records[TAG]["reason"] == reason
+    assert not layout.artifact_path(TAG).is_file()
+
+
+def test_a_moved_min_expiries_actually_changes_the_build(store):
+    """A fingerprinted knob that does not reach the builder is a lie."""
+    config, layout, _ = store
+    strict = _config(layout.history_dir, min_expiries=7)
+    records = run_surface_stage(layout, strict)
+    assert records[TAG]["status"] == "excluded"
+    assert records[TAG]["reason"] == "insufficient_expiries"
+    assert "need >= 7" in records[TAG]["detail"]
+
+
+def test_a_moved_parity_gate_actually_changes_the_build(store):
+    config, layout, _ = store
+    strict = _config(layout.history_dir, max_rmse_over_forward=1e-12)
+    records = run_surface_stage(layout, strict)
+    assert records[TAG]["status"] == "excluded"
+    assert records[TAG]["reason"] == "insufficient_expiries"
+
+
+def test_a_moved_extrapolation_reaches_the_artifact(store):
+    config, layout, _ = store
+    moved = _config(layout.history_dir, extrapolation="flat_vol")
+    run_surface_stage(layout, moved)
+    artifact = json.loads(layout.artifact_path(TAG).read_text())
+    assert artifact["extrapolation_policy"]["beyond_last_listed_expiry"] == "flat_vol"
+    assert artifact["admission"]["min_expiries"] == 2
+
+
+def test_the_manifest_source_survives_an_all_failed_batch(store):
+    """A batch where every snapshot is unreadable must still record why."""
+    config, layout, _ = store
+    run_surface_stage(layout, config)
+    layout.snapshot_path("20260501").write_text("{ not json", encoding="utf-8")
+    records = run_surface_stage(layout, config)
+    assert records["20260501"]["status"] == "excluded"
+    assert records["20260501"]["reason"] == "missing_source"
+    payload, _ = load_surface_manifest(layout)
+    assert payload["source"] == "official_cffex_eod_settlement"

@@ -135,8 +135,19 @@ class SettlementNormalizer:
 
     convention = "listed_strike"
 
-    def __init__(self, *, min_expiries: int = 2) -> None:
+    def __init__(
+        self,
+        *,
+        min_expiries: int = 2,
+        max_abs_implied_rate: float = MAX_ABS_PARITY_IMPLIED_RATE,
+        max_rmse_over_forward: float = MAX_PARITY_RMSE_FORWARD_RATIO,
+    ) -> None:
         self._min_expiries = int(min_expiries)
+        # The parity gate is enforced here and only *recorded* in the artifact,
+        # so the run config has to reach this constructor or the recorded
+        # thresholds would describe a gate that never ran.
+        self._max_abs_implied_rate = float(max_abs_implied_rate)
+        self._max_rmse_over_forward = float(max_rmse_over_forward)
 
     def normalize(self, snapshot: QuoteSnapshot) -> QuoteSet:
         """Parity -> OTM/liquidity filter -> normalized IV inversion, per expiry."""
@@ -239,8 +250,8 @@ class SettlementNormalizer:
             parity_rmse_points = float(np.sqrt(np.mean(np.square(residuals))))
             parity_rmse_ratio = parity_rmse_points / forward
             gate_passed = bool(
-                abs(implied_rate) <= MAX_ABS_PARITY_IMPLIED_RATE
-                and parity_rmse_ratio <= MAX_PARITY_RMSE_FORWARD_RATIO
+                abs(implied_rate) <= self._max_abs_implied_rate
+                and parity_rmse_ratio <= self._max_rmse_over_forward
             )
             parity_evaluation = {
                 **base,
@@ -265,8 +276,8 @@ class SettlementNormalizer:
                     {
                         **parity_evaluation,
                         "reason": "parity_quality_gate_failed",
-                        "maximum_absolute_implied_rate": MAX_ABS_PARITY_IMPLIED_RATE,
-                        "maximum_rmse_forward_ratio": MAX_PARITY_RMSE_FORWARD_RATIO,
+                        "maximum_absolute_implied_rate": self._max_abs_implied_rate,
+                        "maximum_rmse_forward_ratio": self._max_rmse_over_forward,
                     }
                 )
                 continue

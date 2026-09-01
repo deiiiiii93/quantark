@@ -74,6 +74,33 @@ def test_a_tampered_strike_fails_the_round_trip_check():
 
 
 @pytest.mark.skipif(not SAMPLE.is_file(), reason=f"no CFETS sample at {SAMPLE}")
+def test_a_slice_without_the_delta_rate_is_refused_not_skipped():
+    """The round trip is the FX parity gate; it must not be waivable."""
+    payload = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    for row in payload["slices"]:
+        if row["tenor"] == "3M":
+            row.pop("effective_foreign_rate_for_delta", None)
+    with pytest.raises(ValidationError, match="cannot be verified"):
+        FxDeltaNormalizer(tenor_set="core").normalize(
+            QuoteSnapshot.from_legacy_fx(payload)
+        )
+
+
+@pytest.mark.skipif(not SAMPLE.is_file(), reason=f"no CFETS sample at {SAMPLE}")
+def test_the_fx_snapshot_has_one_stable_identity():
+    """Per-pillar digests fold into one, or the resume rule cannot tell two
+    CFETS snapshots apart."""
+    payload = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    first = QuoteSnapshot.from_legacy_fx(payload).sha256
+    assert first and len(first) == 64
+    assert QuoteSnapshot.from_legacy_fx(payload).sha256 == first
+
+    changed = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    changed["provenance"]["payload_sha256"]["ATM"] = "0" * 64
+    assert QuoteSnapshot.from_legacy_fx(changed).sha256 != first
+
+
+@pytest.mark.skipif(not SAMPLE.is_file(), reason=f"no CFETS sample at {SAMPLE}")
 def test_an_unknown_tenor_set_is_refused():
     with pytest.raises(ValidationError, match="tenor_set"):
         FxDeltaNormalizer(tenor_set="nonsense").normalize(_snapshot())

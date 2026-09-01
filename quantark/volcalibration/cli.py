@@ -230,9 +230,14 @@ def _cmd_plan(args: argparse.Namespace, config: RunConfig) -> int:
     # What would be calibrated, assuming every planned surface admits.  An
     # optimistic projection is the honest one here: the alternative is to
     # build the surfaces, which --plan promises not to do.
+    #
+    # Assign, do not setdefault: a date being rebuilt already has a record, and
+    # keeping it would let its old sha match an old calibration record and hide
+    # the calibration the rebuild will require -- or leave a --force'd excluded
+    # date still projected as excluded.
     projected = dict(surface_records)
     for tag in surfaces:
-        projected.setdefault(tag, {"status": "ok", "artifact_sha256": None})
+        projected[tag] = {"status": "ok", "artifact_sha256": None}
     calibrations = select_calibration_dates(
         projected,
         calibration_records,

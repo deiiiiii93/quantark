@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -40,6 +42,21 @@ def _as_date(value) -> date:
             except ValueError:
                 continue
     raise ValidationError(f"Cannot interpret {value!r} as a trade date")
+
+
+def _fold_source_digests(shas) -> Optional[str]:
+    """One identity from a source that publishes several digests.
+
+    A single string passes through unchanged.  A mapping of per-endpoint
+    digests is folded over its canonical JSON, so the same published data
+    always yields the same identity and any change to any endpoint changes it.
+    """
+    if isinstance(shas, str):
+        return shas
+    if isinstance(shas, Mapping) and shas:
+        canonical = json.dumps(dict(shas), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return None
 
 
 def _positive(value, what: str) -> float:
@@ -234,9 +251,12 @@ class QuoteSnapshot:
                 "quote_time": payload.get("quote_time"),
                 "delta_convention": payload.get("delta_convention"),
                 # CFETS publishes one sha per pillar endpoint, not one per
-                # snapshot; the canonical field takes whatever single value
-                # exists, and None is honest when there is no single one.
-                "sha256": shas if isinstance(shas, str) else None,
+                # snapshot.  The canonical field needs a single identity or the
+                # resume rule can never tell two CFETS snapshots apart, so the
+                # per-pillar digests are folded into one over their canonical
+                # JSON.  That is derived from the source's own digests -- not
+                # invented, and stable for the same published data.
+                "sha256": _fold_source_digests(shas),
                 "payload_sha256": shas,
                 "source_url": provenance.get("curve_endpoint")
                 if isinstance(provenance, Mapping)

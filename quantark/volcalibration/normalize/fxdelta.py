@@ -237,12 +237,20 @@ class FxDeltaNormalizer:
 def _verify_delta_round_trip(row: Dict[str, Any], tenor: str) -> int:
     """Do the published strikes reproduce the published deltas? Count checked.
 
-    A slice without ``effective_foreign_rate_for_delta`` carries no rate under
-    which the check is defined, so it is reported as zero checks rather than
-    silently passed.
+    This is the FX analogue of the listed path's parity gate -- the one check
+    that says the venue's own numbers are internally consistent -- so a slice
+    that carries no ``effective_foreign_rate_for_delta`` is refused rather than
+    waved through with zero checks.  ``foreign_rate`` is NOT substituted: CFETS
+    publishes a separate effective rate for its delta convention, and using the
+    pricing rate instead would test a different quantity and pass for the wrong
+    reason.
     """
     if "effective_foreign_rate_for_delta" not in row:
-        return 0
+        raise ValidationError(
+            f"tenor {tenor}: snapshot carries no "
+            "'effective_foreign_rate_for_delta', so the published deltas cannot "
+            "be verified against the published strikes"
+        )
     delta_rate = float(row["effective_foreign_rate_for_delta"])
     checked = 0
     for quote in row["quotes"]:

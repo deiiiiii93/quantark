@@ -268,6 +268,22 @@ def atomic_write_json(path, payload) -> None:
 # ----------------------------------------------------------------- manifests
 
 
+def _require_mapping(payload: Any, source: str) -> Mapping[str, Any]:
+    """A manifest must be a JSON object.
+
+    ``read_json`` only guarantees valid JSON, so a structurally corrupt file
+    like ``[]`` would otherwise reach ``.get`` and raise ``AttributeError`` --
+    escaping the CLI's ``QuantArkException`` handler and losing the
+    machine-readable failure the agent contract promises.
+    """
+    if not isinstance(payload, Mapping):
+        raise ValidationError(
+            f"{source}: manifest must be a JSON object, got "
+            f"{type(payload).__name__}"
+        )
+    return payload
+
+
 def _records_by_date(payload: Mapping[str, Any], source: str) -> Dict[str, dict]:
     records = payload.get("records", [])
     if not isinstance(records, list):
@@ -282,9 +298,12 @@ def _records_by_date(payload: Mapping[str, Any], source: str) -> Dict[str, dict]
 
 def load_surface_manifest(layout: StoreLayout) -> Tuple[dict, Dict[str, dict]]:
     """Full manifest payload plus its records keyed by date tag."""
-    payload = read_json(
-        layout.surface_manifest,
-        default={"schema_version": SURFACE_MANIFEST_SCHEMA_VERSION, "records": []},
+    payload = _require_mapping(
+        read_json(
+            layout.surface_manifest,
+            default={"schema_version": SURFACE_MANIFEST_SCHEMA_VERSION, "records": []},
+        ),
+        str(layout.surface_manifest),
     )
     if payload.get("schema_version") != SURFACE_MANIFEST_SCHEMA_VERSION:
         raise ValidationError(
@@ -301,7 +320,7 @@ def save_surface_manifest(
     config: Mapping[str, Any],
     window: Mapping[str, str],
     price_field: str,
-    source_class: str,
+    source_class: Optional[str],
 ) -> None:
     """Rewrite the surface manifest, preserving foreign top-level blocks.
 
@@ -329,13 +348,16 @@ def save_surface_manifest(
 
 def load_calibration_manifest(layout: StoreLayout) -> Tuple[dict, Dict[str, dict]]:
     """Full calibration-manifest payload plus its records keyed by date tag."""
-    payload = read_json(
-        layout.calibration_manifest,
-        default={
-            "schema_version": CALIBRATION_MANIFEST_SCHEMA_VERSION,
-            "records": [],
-            "bootstrap_policy": BOOTSTRAP_POLICY,
-        },
+    payload = _require_mapping(
+        read_json(
+            layout.calibration_manifest,
+            default={
+                "schema_version": CALIBRATION_MANIFEST_SCHEMA_VERSION,
+                "records": [],
+                "bootstrap_policy": BOOTSTRAP_POLICY,
+            },
+        ),
+        str(layout.calibration_manifest),
     )
     if payload.get("schema_version") != CALIBRATION_MANIFEST_SCHEMA_VERSION:
         raise ValidationError(

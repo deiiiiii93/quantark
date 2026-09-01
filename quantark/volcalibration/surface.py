@@ -8,6 +8,7 @@ must not change (spec 5.3).
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 import numpy as np
@@ -58,7 +59,35 @@ _STRIKE_GRID_LABELS = {
 }
 
 
-def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
+@dataclass(frozen=True)
+class SurfaceLimits:
+    """The admission thresholds one surface build runs under.
+
+    These were module constants; they are a value object so a run config can
+    actually move them.  A config field that is fingerprinted but ignored is
+    worse than no field at all -- it invalidates every artifact and changes
+    nothing about how they are built.
+
+    The defaults are today's constants, so a default build is byte-identical
+    to the 787 stored artifacts.  The parity gates are enforced by the
+    normalizer and only *recorded* here, so both sides must be handed the same
+    object rather than reading separate constants.
+    """
+
+    min_expiries: int = MIN_EXPIRIES
+    min_strikes_per_expiry: int = MIN_STRIKES_PER_EXPIRY
+    min_common_strikes: int = MIN_COMMON_STRIKES
+    extrapolation: str = EXTRAPOLATION_POLICY
+    max_abs_implied_rate: float = MAX_ABS_PARITY_IMPLIED_RATE
+    max_rmse_over_forward: float = MAX_PARITY_RMSE_FORWARD_RATIO
+
+
+DEFAULT_SURFACE_LIMITS = SurfaceLimits()
+
+
+def build_raw_surface(
+    quotes: QuoteSet, *, limits: SurfaceLimits = DEFAULT_SURFACE_LIMITS
+) -> Dict[str, Any]:
     """Assemble a rectangular strike x maturity IV grid from a QuoteSet.
 
     The surface domain is the OVERLAP of the per-expiry quoted strike ranges,
@@ -97,10 +126,10 @@ def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
                 "points": [(n.strike, n.iv) for n in e.nodes],
             }
         )
-    if len(per_expiry) < MIN_EXPIRIES:
+    if len(per_expiry) < limits.min_expiries:
         raise AdmissionError(
             AdmissionReason.INSUFFICIENT_EXPIRIES,
-            f"{len(per_expiry)} expiries (need >= {MIN_EXPIRIES})",
+            f"{len(per_expiry)} expiries (need >= {limits.min_expiries})",
         )
     for i in range(len(per_expiry) - 1):
         if per_expiry[i + 1]["T"] <= per_expiry[i]["T"]:
@@ -119,7 +148,7 @@ def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
         )
 
     if grid_rule == STRIKE_GRID_UNIFORM_OVER_OVERLAP:
-        return _uniform_grid_surface(quotes, per_expiry, universe_in)
+        return _uniform_grid_surface(quotes, per_expiry, universe_in, limits)
 
     dropped_trimmed: List[Dict[str, Any]] = []
     grid_lo = grid_hi = 0.0
@@ -134,7 +163,7 @@ def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
                 for k, v in pe["points"]
                 if grid_lo - 1e-9 <= k <= grid_hi + 1e-9
             ]
-            if len(in_grid) >= MIN_STRIKES_PER_EXPIRY:
+            if len(in_grid) >= limits.min_strikes_per_expiry:
                 pe["off_grid_node_count"] = len(pe["points"]) - len(in_grid)
                 pe["points"] = in_grid
                 kept.append(pe)
@@ -146,18 +175,19 @@ def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
                         "reason": "fewer_than_min_strikes_inside_quoted_range_overlap",
                         "node_count": len(pe["points"]),
                         "in_domain_node_count": len(in_grid),
-                        "min_strikes_per_expiry": MIN_STRIKES_PER_EXPIRY,
+                        "min_strikes_per_expiry": limits.min_strikes_per_expiry,
                         "quoted_range_overlap": [grid_lo, grid_hi],
                     }
                 )
         if not dropped_trim:
             break
         per_expiry = kept
-        if len(per_expiry) < MIN_EXPIRIES:
+        if len(per_expiry) < limits.min_expiries:
             raise AdmissionError(
                 AdmissionReason.INSUFFICIENT_EXPIRIES,
-                f"< {MIN_EXPIRIES} expiries with >= {MIN_STRIKES_PER_EXPIRY} "
-                f"nodes inside the quoted-range overlap; dropped={dropped_trim}",
+                f"< {limits.min_expiries} expiries with >= "
+                f"{limits.min_strikes_per_expiry} nodes inside the quoted-range "
+                f"overlap; dropped={dropped_trim}",
             )
 
     all_strikes = sorted({k for pe in per_expiry for k, _ in pe["points"]})
@@ -169,11 +199,11 @@ def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
         )
 
     strikes = [k for k in all_strikes if _count(k) >= 2 and grid_lo <= k <= grid_hi]
-    if len(strikes) < MIN_COMMON_STRIKES:
+    if len(strikes) < limits.min_common_strikes:
         raise AdmissionError(
             AdmissionReason.INSUFFICIENT_COMMON_STRIKES,
             f"{len(strikes)} shared strikes inside quoted-range overlap "
-            f"[{grid_lo}, {grid_hi}] (< {MIN_COMMON_STRIKES})",
+            f"[{grid_lo}, {grid_hi}] (< {limits.min_common_strikes})",
         )
     maturities = [pe["T"] for pe in per_expiry]
     grid = np.empty((len(maturities), len(strikes)))
@@ -206,6 +236,7 @@ def _uniform_grid_surface(
     quotes: QuoteSet,
     per_expiry: List[Dict[str, Any]],
     universe: Dict[str, Any],
+    limits: SurfaceLimits,
 ) -> Dict[str, Any]:
     """Grid assembly for books whose expiries share no observed strike.
 
@@ -213,17 +244,17 @@ def _uniform_grid_surface(
     cover, so no slice is evaluated outside its own quoted range.
     """
     grid_size = int(universe.get("strike_grid_size", DEFAULT_UNIFORM_GRID_SIZE))
-    if grid_size < MIN_COMMON_STRIKES:
+    if grid_size < limits.min_common_strikes:
         raise ValidationError(
             f"strike_grid_size {grid_size} is below min_common_strikes "
-            f"{MIN_COMMON_STRIKES}"
+            f"{limits.min_common_strikes}"
         )
     for pe in per_expiry:
-        if len(pe["points"]) < MIN_STRIKES_PER_EXPIRY:
+        if len(pe["points"]) < limits.min_strikes_per_expiry:
             raise AdmissionError(
                 AdmissionReason.INSUFFICIENT_EXPIRIES,
                 f"expiry {pe['expiry_date']} has {len(pe['points'])} nodes "
-                f"(need >= {MIN_STRIKES_PER_EXPIRY})",
+                f"(need >= {limits.min_strikes_per_expiry})",
             )
         pe["off_grid_node_count"] = 0
 
@@ -411,14 +442,19 @@ def build_artifact(
     snapshot: QuoteSnapshot,
     *,
     sabr_beta: float = DEFAULT_SABR_BETA,
+    limits: SurfaceLimits = DEFAULT_SURFACE_LIMITS,
 ) -> Dict[str, Any]:
     """QuoteSet -> complete, admission-checked IV-surface artifact dict.
 
     The key set and field names are those the existing artifacts already use:
     the artifact's sha256 feeds the calibration cache key, so changing them
     invalidates every warm cache entry and cohort pin (spec 5.3).
+
+    ``limits`` must be the same object the normalizer enforced its parity gates
+    with: this function only *records* those two thresholds, so handing it a
+    different one would stamp an artifact with gates it was not admitted under.
     """
-    raw = build_raw_surface(quotes)
+    raw = build_raw_surface(quotes, limits=limits)
     try:
         smoothed = sabr_smoothed_surface(raw, beta=sabr_beta)
     except (ValidationError, NumericalError) as exc:
@@ -470,17 +506,17 @@ def build_artifact(
     smoothed["source_sha256"] = source.get("sha256")
     smoothed["atm_pillars"] = atm_pillars
     smoothed["extrapolation_policy"] = {
-        "beyond_last_listed_expiry": EXTRAPOLATION_POLICY,
+        "beyond_last_listed_expiry": limits.extrapolation,
         "max_listed_T": max(float(t) for t in smoothed["maturities"]),
     }
     smoothed["admission"] = {
-        "min_expiries": MIN_EXPIRIES,
-        "min_strikes_per_expiry": MIN_STRIKES_PER_EXPIRY,
-        "min_common_strikes": MIN_COMMON_STRIKES,
+        "min_expiries": limits.min_expiries,
+        "min_strikes_per_expiry": limits.min_strikes_per_expiry,
+        "min_common_strikes": limits.min_common_strikes,
         "sabr_beta": float(sabr_beta),
         "parity_quality_gate": {
-            "maximum_absolute_annualized_implied_rate": MAX_ABS_PARITY_IMPLIED_RATE,
-            "maximum_rmse_divided_by_forward": MAX_PARITY_RMSE_FORWARD_RATIO,
+            "maximum_absolute_annualized_implied_rate": limits.max_abs_implied_rate,
+            "maximum_rmse_divided_by_forward": limits.max_rmse_over_forward,
         },
         "static_arbitrage_validation": validation_method,
         "strike_grid": _STRIKE_GRID_LABELS[

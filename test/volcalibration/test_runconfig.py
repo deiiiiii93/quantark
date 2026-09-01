@@ -163,6 +163,47 @@ def test_an_unknown_variant_is_refused(tmp_path):
     assert "wishart" in str(exc.value)
 
 
+@pytest.mark.parametrize(
+    "block,message",
+    [
+        ('calibration:\n  temporal_smoothing: "false"\n', "boolean"),
+        ("calibration:\n  heston_max_nfev: 1.5\n", "integer"),
+        ("calibration:\n  heston_max_nfev: abc\n", "integer"),
+        ("calibration:\n  variants: localvol\n", "list of strings"),
+        ("surface:\n  sabr_beta: high\n", "number"),
+        ("run:\n  workers: true\n", "integer"),
+        ("surface:\n  extrapolation: 3\n", "string"),
+    ],
+)
+def test_scalars_are_validated_not_coerced(tmp_path, block, message):
+    """bool("false") is True, and int("abc") raises a builtin the CLI cannot see."""
+    with pytest.raises(ValidationError) as exc:
+        load_run_config_text(MINIMAL_YAML + block, base_dir=tmp_path)
+    assert message in str(exc.value)
+
+
+def test_a_quoted_true_still_reads_as_a_type_error(tmp_path):
+    with pytest.raises(ValidationError):
+        load_run_config_text(
+            MINIMAL_YAML + 'calibration:\n  temporal_smoothing: "true"\n',
+            base_dir=tmp_path,
+        )
+
+
+def test_fx_delta_requires_a_vol_quoted_price_field(tmp_path):
+    text = MINIMAL_YAML.replace("convention: listed_strike", "convention: fx_delta")
+    with pytest.raises(ValidationError) as exc:
+        load_run_config_text(text, base_dir=tmp_path)
+    assert "fx_delta" in str(exc.value)
+
+
+def test_listed_rejects_a_vol_quoted_price_field(tmp_path):
+    text = MINIMAL_YAML.replace("price_field: settlement", "price_field: mid_iv")
+    with pytest.raises(ValidationError) as exc:
+        load_run_config_text(text, base_dir=tmp_path)
+    assert "listed_strike" in str(exc.value)
+
+
 def test_run_config_rejects_a_non_positive_worker_count(tmp_path):
     with pytest.raises(ValidationError):
         RunConfig(

@@ -102,6 +102,36 @@ class CalibrationSet:
                 f"{when}: no calibration record for surface {artifact.sha256[:12]} "
                 f"({tag}); run `python -m quantark.volcalibration run` first"
             )
+        # The record is an authorization to return the *recorded* model.  Three
+        # things must line up or it authorizes something else, and returning a
+        # fresh fit under an audited record's cover is the failure mode this
+        # guards: a rebuilt surface (new sha), a store opened with a different
+        # calibration config (different cache key), or a temporally smoothed
+        # record whose EWMA reference cannot be reconstructed from config alone.
+        recorded_sha = record.get("surface_sha")
+        if recorded_sha != artifact.sha256:
+            raise ValidationError(
+                f"{when}: calibration record is for surface {str(recorded_sha)[:12]} "
+                f"but the surface in force is {artifact.sha256[:12]}; re-run "
+                "calibration for this date"
+            )
+        recorded_config = record.get("config")
+        current_config = self.calibration.manifest_payload()
+        if recorded_config != current_config:
+            raise ValidationError(
+                f"{when}: calibration record was produced under a different "
+                "configuration than this CalibrationSet was opened with; open it "
+                "with CalibrationSet.from_config(<the run config>) or re-run "
+                "calibration"
+            )
+        if record.get("temporal_scheme") is not None:
+            raise ValidationError(
+                f"{when}: this date was calibrated under the "
+                f"{record['temporal_scheme'].get('name')!r} temporal scheme, whose "
+                "EWMA reference is not reconstructable from the run config alone; "
+                "read the recorded parameters from the manifest instead of "
+                "re-fitting"
+            )
         variants = record.get("variants", {})
         if variant not in variants:
             raise ValidationError(

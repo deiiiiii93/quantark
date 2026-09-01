@@ -144,6 +144,39 @@ def test_an_unsupported_calibration_schema_is_refused(tmp_path):
         load_calibration_manifest(layout)
 
 
+@pytest.mark.parametrize("body", ["[]", '"a string"', "42"])
+def test_a_structurally_corrupt_manifest_raises_validation_error(tmp_path, body):
+    """Valid JSON is not a valid manifest; .get on a list is an AttributeError
+    the CLI's QuantArkException handler would never see."""
+    layout = StoreLayout.from_config(_config(tmp_path))
+    layout.surface_manifest.parent.mkdir(parents=True, exist_ok=True)
+    layout.surface_manifest.write_text(body)
+    with pytest.raises(ValidationError) as exc:
+        load_surface_manifest(layout)
+    assert "JSON object" in str(exc.value)
+
+    layout.calibration_manifest.write_text(body)
+    with pytest.raises(ValidationError):
+        load_calibration_manifest(layout)
+
+
+def test_a_manifest_source_may_be_recorded_as_unknown(tmp_path):
+    """Writing null is honest when no snapshot declares a vendor; raising here
+    would discard the per-date failure records that explain why."""
+    layout = StoreLayout.from_config(_config(tmp_path))
+    save_surface_manifest(
+        layout,
+        {"20260430": surface_record("20260430", status="excluded", reason="parse_failed")},
+        config={},
+        window={"start": "20260430", "end": "20260430"},
+        price_field="settlement",
+        source_class=None,
+    )
+    payload, records = load_surface_manifest(layout)
+    assert payload["source"] is None
+    assert records["20260430"]["reason"] == "parse_failed"
+
+
 def test_a_record_without_a_date_is_refused(tmp_path):
     layout = StoreLayout.from_config(_config(tmp_path))
     atomic_write_json(
