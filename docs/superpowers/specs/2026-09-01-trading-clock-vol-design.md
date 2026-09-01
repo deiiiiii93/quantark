@@ -125,6 +125,19 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
 - `get_vol(K, τ_cal, spot)` computes `τ_td = time_map.to_trading(τ_cal)` and
   returns `σ_inner(K, τ_td) · sqrt(τ_td / τ_cal)` — i.e. **total variance is
   preserved by construction**: w_cal(τ) = w_td(τ_td(τ)).
+- **Exact-zero holiday increments.** Reconstructing w downstream as
+  `get_vol(t)²·t` re-rounds, so two grid points on the same holiday plateau
+  can differ by ulps and an economically zero variance increment would come
+  back as a tiny positive number — missing the deterministic branches in
+  §4.5 with a catastrophically under-resolved Gaussian kernel. Two-part fix:
+  (a) `BusinessTimeMap.to_trading` returns the stored knot *value* (not
+  arithmetic interpolation) inside a plateau, so equal trading times are
+  bitwise equal; (b) the wrapper exposes `total_variance(K, τ_cal)`
+  returning `w_td(τ_td)` computed once from `τ_td`, and
+  `step_vols_on_grid` prefers this method when the surface provides it
+  (getattr protocol, existing surfaces unchanged). Differencing bitwise-
+  equal w values yields Δw == 0.0 exactly; the degenerate branches key on
+  that exact zero — no tolerance is introduced.
 - τ_cal → 0 limit: return `σ_inner(K, 0⁺) · sqrt(slope(0))` where slope(0)
   is the map's initial derivative (0 if the anchor sits before a holiday —
   the correct statement that no variance accrues before the next trading
@@ -157,8 +170,15 @@ class TradingClockRateCurve(RateCurve):
   `get_rate` derives from the DF. Forwards telescope exactly, so holiday-
   crossing steps legitimately carry large forward-rate spikes (≈ 9 days of
   interest in one trading tick) while PV, parity and carry stay exact (D5).
-- A matching thin wrapper `TradingClockDividendYield` adapts `DividendYield`
-  the same way (same map object).
+- `TradingClockDividendYield` must NOT use the same argument-only remap:
+  `forward_carry_on_grid` differences the cumulative yield `q(t)·t`, so
+  returning `q_cal(c)` at `u = τ_td` would accrue `q_cal(c)·u` instead of the
+  true `q_cal(c)·c` — under-accruing dividends over holidays and breaking
+  forward parity. The wrapper is cumulative-yield preserving:
+  `q_td(u) = q_cal(c)·c/u` for `u > 0` with `c = to_calendar(u)`, and 0 at
+  `u = 0` (the same convention `forward_carry_on_grid` applies at t = 0).
+  The rate wrapper above needs no such correction because it is DF-based —
+  cumulative by construction.
 - Pairing rule (documented): on the trading axis the vol surface is native
   (unwrapped, quoted at n_td/D pillars) and the curves are wrapped — the
   mirror of the default axis. `phoenix_external_case_compare.py` gets a
@@ -180,11 +200,19 @@ pass a calendar and assert genuinely business-day behavior.
   Gaussian kernel, no division by σ√dt. This is the σ → 0 limit of the
   kernel — the only numerical error left is the grid interpolation the QUAD
   step already carries; no new approximation is introduced.
-- **PDE**: zero-diffusion steps (D = 0, central-differenced advection under
-  the implicit θ-scheme) get a characterization test on a holiday-straddling
-  case — stability and monotonicity are verified, not assumed. If the test
-  shows oscillation at production settings, the fix is scheme-level (upwind
-  those steps), decided on the test's evidence, not pre-emptively.
+- **PDE**: zero-diffusion steps are **unconditionally upwinded**. With
+  D = 0 the centered first-derivative operator has a wrong-sign
+  off-diagonal, so an implicit θ-step is not monotonicity-preserving in
+  general — one passing characterization case cannot establish the property
+  for other payoffs or grids, and autocallable value functions carry kinks
+  exactly where oscillations start. When a step's σ_step == 0 (the exact
+  zero from §4.2), its operator uses first-order upwind advection selected
+  by the sign of (r − q); steps with σ_step > 0 are untouched, so no
+  numerical diffusion is added anywhere it wasn't already. The upwind
+  truncation error is negligible here: the holiday step advects the profile
+  by (r − q)·Δτ_cal, a sub-cell shift at production grids. The
+  holiday-straddling characterization test *verifies* the scheme; it does
+  not decide it.
 - **MC**: a unit test pins the zero-vol step (drift-only advance, no
   division hazard) for the GBM path generator and the snowball engines.
 
@@ -220,8 +248,11 @@ Desk comparisons must state units; the conversion table ships in the docs.
 - `TradingClockRateCurve` propagates the inner curve's validation; wrapped
   DF must remain strictly positive (inherited check).
 - `BUSINESS_DAYS` without calendar → `ValidationError` (§4.4).
-- `step_vols_on_grid` behavior unchanged: dw < −1e-12 still raises
-  (calendar arbitrage); dw = 0 is legal and now meaningful.
+- `step_vols_on_grid`: dw < −1e-12 still raises (calendar arbitrage);
+  dw = 0 is legal and now meaningful. New behavior: when the surface
+  provides `total_variance`, w is taken from it directly (no σ²·t
+  reconstruction); surfaces without the method keep the existing path
+  bit-for-bit.
 
 ## 7. Validation
 
@@ -241,14 +272,20 @@ Desk comparisons must state units; the conversion table ships in the docs.
    node equals w_td(node) and E[S_T]·DF_cal(T) satisfies forward parity —
    pins each clock to its own quantity.
 6. **Degenerate guards**: QUAD deterministic-shift interval vs analytic
-   value; PDE zero-D stability/monotonicity characterization; MC zero-vol
-   step unit test.
+   value; PDE upwinded zero-D step — monotonicity on a kinked (barrier)
+   profile across a holiday, plus no-oscillation characterization; MC
+   zero-vol step unit test.
+7. **Plateau exactness** (exact): through the full `step_vols_on_grid`
+   path with a wrapped surface, every holiday interval yields
+   Δw == 0.0 bitwise — the trigger contract of §4.5 — including intervals
+   whose endpoints are interior grid points of the same plateau.
 
 ## 8. Phasing
 
 - **Phase 1 — the need**: `TradingClock`, `BusinessTimeMap`,
-  `TradingClockVolSurface`, degenerate guards (§4.5), tests 1/2/5/6,
-  docs/contract lines. Delivers trading-clock vol on the default axis.
+  `TradingClockVolSurface` (+ `total_variance` fast path), degenerate
+  guards (§4.5), tests 1/2/5/6/7, docs/contract lines. Delivers
+  trading-clock vol on the default axis.
 - **Phase 2 — the opt-in axis**: `TradingClockRateCurve` (+ dividend
   wrapper), `BUSINESS_DAYS` hardening (§4.4), tests 3/4, example fixes
   (`test_european_option.py:443`, pointer in
