@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from quantark.util.exceptions import ValidationError
+from quantark.volcalibration.admission import AdmissionError, AdmissionReason
 from quantark.volcalibration.normalize.listed import ListedNormalizer
 from quantark.volcalibration.quotes import IvNode
 from quantark.volcalibration.snapshot import QuoteSnapshot
@@ -66,5 +66,18 @@ def test_too_few_common_strikes_is_rejected():
         ),
     )
     broken = replace(quotes, expiries=(quotes.expiries[0], shifted))
-    with pytest.raises(ValidationError, match="common strikes"):
+    with pytest.raises(AdmissionError) as exc:
         build_raw_surface(broken)
+    assert exc.value.reason is AdmissionReason.INSUFFICIENT_COMMON_STRIKES
+
+
+def test_grid_domain_is_the_overlap_of_quoted_ranges_not_their_union():
+    """A union-range grid would evaluate SABR wings the market never quoted."""
+    quotes = _quotes()
+    surface = build_raw_surface(quotes)
+    lo = max(min(n.strike for n in e.nodes) for e in quotes.expiries)
+    hi = min(max(n.strike for n in e.nodes) for e in quotes.expiries)
+    assert min(surface["strikes"]) >= lo
+    assert max(surface["strikes"]) <= hi
+    # Trimmed wing nodes are counted for audit, never silently dropped.
+    assert all("off_grid_node_count" in pe for pe in surface["per_expiry"])

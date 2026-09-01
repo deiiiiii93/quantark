@@ -37,6 +37,7 @@ MAX_CALENDAR_DAYS = 365
 MIN_PARITY_PAIRS = 3
 MAX_ABS_PARITY_IMPLIED_RATE = 0.10
 MAX_PARITY_RMSE_FORWARD_RATIO = 0.01
+NEAR_ATM_PARITY_PAIR_COUNT = 9
 
 # CFFEX shifts expiry off the third Friday when it falls on a holiday.  The
 # generic rule cannot predict these, so known shifts are tabulated; an unknown
@@ -81,6 +82,52 @@ def _finite_positive(value, name: str) -> float:
     if not math.isfinite(out) or out <= 0.0:
         raise ValueError(f"{name} must be positive and finite, got {out}")
     return out
+
+
+def _near_atm_parity_sensitivity(
+    strikes: np.ndarray,
+    differences: np.ndarray,
+    *,
+    primary_forward: float,
+    primary_rate: float,
+    maturity: float,
+) -> Dict[str, Any]:
+    """Refit parity on the nearest strikes without changing the primary OLS.
+
+    A full-ladder OLS can be dragged by wide deep-wing marks.  Refitting on the
+    near-ATM subset says how much of the recovered forward and rate is actually
+    load-bearing, which is the diagnostic you want when an expiry fails the
+    quality gate.  It never replaces the primary fit.
+    """
+    subset_size = min(NEAR_ATM_PARITY_PAIR_COUNT, strikes.size)
+    indices = np.argsort(np.abs(strikes - primary_forward))[:subset_size]
+    subset_strikes = strikes[indices]
+    subset_differences = differences[indices]
+    slope, intercept = np.polyfit(subset_strikes, subset_differences, 1)
+    discount_factor = -float(slope)
+    if not math.isfinite(discount_factor) or discount_factor <= 0.0:
+        return {
+            "method": "OLS_on_nearest_strikes_to_primary_forward",
+            "subset_pair_count": int(subset_size),
+            "status": "invalid_non_positive_discount_factor",
+            "discount_factor": discount_factor,
+        }
+    forward = float(intercept / discount_factor)
+    implied_rate = -math.log(discount_factor) / maturity
+    residuals = subset_differences - (
+        -discount_factor * subset_strikes + discount_factor * forward
+    )
+    return {
+        "method": "OLS_on_nearest_strikes_to_primary_forward",
+        "subset_pair_count": int(subset_size),
+        "status": "measured",
+        "discount_factor": discount_factor,
+        "forward": forward,
+        "implied_rate": implied_rate,
+        "parity_rmse_points": float(np.sqrt(np.mean(np.square(residuals)))),
+        "forward_relative_difference_vs_full_ols": forward / primary_forward - 1.0,
+        "implied_rate_difference_vs_full_ols": implied_rate - primary_rate,
+    }
 
 
 class SettlementNormalizer:
@@ -191,20 +238,32 @@ class SettlementNormalizer:
             implied_rate = -math.log(discount_factor) / maturity
             parity_rmse_points = float(np.sqrt(np.mean(np.square(residuals))))
             parity_rmse_ratio = parity_rmse_points / forward
-            if (
-                abs(implied_rate) > MAX_ABS_PARITY_IMPLIED_RATE
-                or parity_rmse_ratio > MAX_PARITY_RMSE_FORWARD_RATIO
-            ):
+            gate_passed = bool(
+                abs(implied_rate) <= MAX_ABS_PARITY_IMPLIED_RATE
+                and parity_rmse_ratio <= MAX_PARITY_RMSE_FORWARD_RATIO
+            )
+            parity_evaluation = {
+                **base,
+                "T": maturity,
+                "pair_count": len(strikes_for_parity),
+                "forward": forward,
+                "discount_factor": discount_factor,
+                "implied_rate": implied_rate,
+                "parity_rmse_points": parity_rmse_points,
+                "parity_rmse_forward_ratio": parity_rmse_ratio,
+                "quality_gate_passed": gate_passed,
+                "near_atm_sensitivity": _near_atm_parity_sensitivity(
+                    strike_array,
+                    difference_array,
+                    primary_forward=forward,
+                    primary_rate=implied_rate,
+                    maturity=maturity,
+                ),
+            }
+            if not gate_passed:
                 excluded.append(
                     {
-                        **base,
-                        "T": maturity,
-                        "pair_count": len(strikes_for_parity),
-                        "forward": forward,
-                        "discount_factor": discount_factor,
-                        "implied_rate": implied_rate,
-                        "parity_rmse_points": parity_rmse_points,
-                        "parity_rmse_forward_ratio": parity_rmse_ratio,
+                        **parity_evaluation,
                         "reason": "parity_quality_gate_failed",
                         "maximum_absolute_implied_rate": MAX_ABS_PARITY_IMPLIED_RATE,
                         "maximum_rmse_forward_ratio": MAX_PARITY_RMSE_FORWARD_RATIO,

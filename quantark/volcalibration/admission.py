@@ -31,6 +31,7 @@ class AdmissionReason(str, Enum):
     INVALID_SNAPSHOT = "invalid_snapshot"
     PARITY_GATING_FAILED = "parity_gating_failed"
     INSUFFICIENT_EXPIRIES = "insufficient_expiries"
+    INSUFFICIENT_COMMON_STRIKES = "insufficient_common_strikes"
     DUPLICATE_MATURITY = "duplicate_maturity"
     NON_FINITE_CARRY = "non_finite_carry"
     SABR_SMOOTHING_FAILED = "sabr_smoothing_failed"

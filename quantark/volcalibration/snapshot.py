@@ -144,11 +144,18 @@ class QuoteSnapshot:
         spot,
         symbol: str,
         source_sha256: Optional[str] = None,
+        source_url: Optional[str] = None,
     ) -> "QuoteSnapshot":
         """Lift a CFFEX settlement payload into the canonical envelope.
 
         The settlement shape carries no spot -- it comes from the separate spot
         CSV -- so ``spot`` is a required argument.  Nothing is inferred.
+
+        ``source_url`` and ``source_sha256`` are fetcher provenance: snapshots
+        written by the live pipeline carry them in the payload, while the
+        committed samples are stripped of them, so the payload wins and the
+        arguments fill in.  They are recorded in the artifact body, which is
+        where the existing artifacts already keep them.
         """
         declared = payload.get("price_field")
         if declared != PRICE_FIELD_SETTLEMENT:
@@ -172,7 +179,8 @@ class QuoteSnapshot:
                 "vendor": payload.get("source_class", "official_cffex_eod_settlement"),
                 "price_field": PRICE_FIELD_SETTLEMENT,
                 "record_count": payload.get("record_count"),
-                "sha256": source_sha256,
+                "sha256": payload.get("source_sha256", source_sha256),
+                "source_url": payload.get("source_url", source_url),
             },
             expiries=tuple(dict(e) for e in expiries),
         )
