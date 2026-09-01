@@ -71,15 +71,41 @@ def surface_record(
     }
 
 
-def migrate_manifest(manifest: Mapping[str, Any]) -> Dict[str, Any]:
+def _snapshot_sha_from_artifact(iv_surface_dir, trade_date: str) -> Optional[str]:
+    """Read one artifact's own ``source_sha256``; None if unreadable.
+
+    The artifact body records the sha of the snapshot it was built from, so the
+    source CSV does not need to still exist for a date to migrate to
+    ``verified``.
+    """
+    if iv_surface_dir is None:
+        return None
+    path = artifact_path(iv_surface_dir, trade_date)
+    try:
+        payload = json.loads(path.read_bytes())
+    except (OSError, json.JSONDecodeError):
+        return None
+    sha = payload.get("source_sha256")
+    return str(sha) if sha else None
+
+
+def migrate_manifest(
+    manifest: Mapping[str, Any], *, iv_surface_dir=None
+) -> Dict[str, Any]:
     """One-time, no-rebuild migration of legacy surface-manifest records.
 
     Most of the missing metadata is already in the manifest, one level up: the
     top-level ``price_field`` and ``config`` block ARE the settings those
     artifacts were built with.  Copying them down is lossless and touches no
-    artifact.  Anything not recoverable leaves the record ``grandfathered``,
-    which is never treated as a mismatch and never triggers a rebuild --
-    rebuilding would destroy the very bytes the pins depend on.
+    artifact.
+
+    ``snapshot_sha256`` comes from each artifact's own ``source_sha256`` field
+    when ``iv_surface_dir`` is given, so an admitted date migrates to
+    ``verified`` without needing its source CSV.  Anything still unrecoverable
+    -- a missing or unreadable artifact, or an ``excluded`` date that never had
+    one -- leaves the record ``grandfathered``, which is never treated as a
+    mismatch and never triggers a rebuild: rebuilding would destroy the very
+    bytes the cohort pins depend on.
     """
     out = dict(manifest)
     config = dict(out.get("config", {}))
@@ -89,7 +115,10 @@ def migrate_manifest(manifest: Mapping[str, Any]) -> Dict[str, Any]:
     migrated = []
     for raw in out.get("records", []):
         rec = dict(raw)
-        rec.setdefault("snapshot_sha256", None)
+        if rec.get("snapshot_sha256") is None:
+            rec["snapshot_sha256"] = _snapshot_sha_from_artifact(
+                iv_surface_dir, str(rec.get("date", ""))
+            )
         if rec.get("price_field") is None:
             rec["price_field"] = top_price_field
         if rec.get("builder_fingerprint") is None:

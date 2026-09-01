@@ -2736,3 +2736,55 @@ The full suite must show the same failures as the `main` baseline — no new one
 **Two gaps genuinely need the executor's environment**, each with a verification command in its step: the full `admission` key set, which must be read off a stored artifact so the rebuilt bytes match (Task 10 Step 3), and any public name the old `calibration.py` exported beyond the shim's import list (Task 12 Step 3). Both depend on local files this plan cannot inline.
 
 **Type consistency:** `QuoteSet`/`ExpiryQuotes`/`IvNode` field names are identical in Tasks 2, 4, 6 and 10. `ExpirySlice` has six fields in the library (Task 3) and five in the shim (Task 5) — deliberate, and `to_library()` bridges them. `AdmissionReason.PRICE_FIELD_MISMATCH` (Task 8) matches the string `QuoteSnapshot.quote_price` raises (Task 1).
+
+---
+
+## Execution Notes (2026-09-01, all 12 tasks complete)
+
+Executed inline. Final state: **6685 passed, 2 failed, 120 skipped** across the
+whole tree, the 2 failures being a pre-existing pair captured as a baseline
+before any change (`test_stage12_backtest_runner` needs the git-excluded
+`data/history/csi1000_spot.csv`, invisible from a worktree). 57 new library
+tests. Commits `b795db2` … `c2fe15a`.
+
+### Where the plan was wrong
+
+**Task 6 under-specified the grid rule, which surfaced at Task 10.** The plan's
+`build_raw_surface` used the union of quoted strike ranges and
+`MIN_COMMON_STRIKES = 5`. The real builder uses the **overlap** of the
+per-expiry quoted ranges, iterated to a fixed point (dropping an expiry widens
+the overlap), with `MIN_COMMON_STRIKES = 3`, per-expiry `off_grid_node_count`,
+and a `node_universe` block. Byte reproduction was unreachable until this was
+ported faithfully. The user chose option A (port it) over descoping Task 10.
+
+**The 789 artifacts come from a normalizer the plan never mentioned.** Stage
+10's settlement path differs from `_mo_common`'s live path on price field,
+liquidity rule, maturity derivation, expiry validation and IV-inversion units
+(see spec §4.4). This became an unplanned task — `normalize/settlement.py`,
+commit `0247c17` — rather than a flag on `ListedNormalizer`.
+
+**Task 10's test would have skipped silently.** The artifacts are in
+`.git/info/exclude`, so they do not exist in a worktree; the planned test
+globbed a worktree path, found nothing, and would have reported success while
+checking nothing. Fixed by resolving the history root from
+`QUANTARK_MO_HISTORY`, defaulting to the main checkout, with byte comparison
+behind `QUANTARK_VOLCALIB_BYTES=1`.
+
+### Three findings worth carrying forward
+
+1. **A holiday-shift table is load-bearing.** Generic third-Friday arithmetic
+   is correct for June 2026 (the 19th) but CFFEX settled on the 22nd. The suite
+   keeps `EXPIRY_DATE_OVERRIDES` and *raises* on any mismatch instead of
+   trusting the payload's `expiry_date` — an unknown shift must be loud, not a
+   silently wrong maturity feeding every downstream vol.
+2. **The last byte to match was a diagnostic on a rejected expiry.**
+   `near_atm_sensitivity` is recorded only when an expiry FAILS the parity
+   gate. It changes no price, but it is in the file, so it is in the sha, so it
+   is in the calibration cache key.
+3. **The artifact body already carries `source_sha256` and `source_url`.**
+   Spec §5.3 originally claimed provenance had to live in the manifest because
+   the body was frozen; frozen means unchangeable, not empty. Corrected in the
+   spec, and it materially improves §5.4: the migration recovers
+   `snapshot_sha256` per date from the artifact, so records migrate to
+   `verified` and `grandfathered` shrinks to the narrow residue of
+   missing/unreadable artifacts and excluded dates.

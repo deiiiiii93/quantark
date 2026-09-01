@@ -58,7 +58,7 @@ Turn the calibration procedure demonstrated in `example/mo_volmodels/` and
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | **Input boundary: normalized snapshot in.** Two normalizers ship (listed strike-quoted, FX delta-quoted). Vendor fetching stays in `example/` and the akshare / wind skills. | Matches the existing convention (`quantark/util/marketdata/adapter/` ships only a base protocol and a mock). Keeps the library network-free and deterministic under test. |
+| D1 | **Input boundary: normalized snapshot in.** Three normalizers ship — listed-live (bid/ask/last), listed-settlement (exchange EOD marks), FX delta-quoted. Vendor fetching stays in `example/` and the akshare / wind skills. | Matches the existing convention (`quantark/util/marketdata/adapter/` ships only a base protocol and a mock). Keeps the library network-free and deterministic under test. The live/settlement split is not a refinement of one rule: see §4.4. |
 | D2 | **Run interface: YAML config + CLI verbs.** `python -m quantark.volcalibration run\|status\|show\|list`, JSON on `--json`, exit codes as state. | Mirrors `quantark.modelvalidation`, the one agent-operable module already in the tree. One versionable, diffable file reproduces a run. |
 | D3 | **Backtest handover: publish a `CalibrationSet` loader and move the config.** `VolModelCalibrationConfig` moves into this module; `backtest.replay` re-exports it; backtest gains one config field accepting a `CalibrationSet`. | Fixes D-2.3's inversion and gives backtest a supported entry point. Fleet/cohort orchestration stays in `example/`. |
 | D4 | **Home: new top-level `quantark/volcalibration/`.** | `quantark/volmodels/` promises asset-neutrality and no `PricingEnvironment`; this layer needs both. House precedent: `modelvalidation`, `execution`, `stresstest`, `dynamicscenario`. |
@@ -79,7 +79,9 @@ quantark/volcalibration/
   snapshot.py        QuoteSnapshot schema + validated load
   normalize/
     __init__.py      QuoteNormalizer protocol
-    listed.py        parity (DF, F, r, q); OTM wing filter; call-equivalent IV inversion
+    listed.py        live books: parity (DF, F, r, q); OTM wing filter; IV inversion
+    settlement.py    exchange EOD marks: expiry-calendar check, volume+OI filter,
+                     normalized IV inversion, auditable node universe
     fxdelta.py       tenor selection; pillar mid extraction; delta<->strike round-trip check
   surface.py         grid assembly, SABR slice fit, calendar projection of total variance
   admission.py       static-arb admission (butterfly + calendar; reduced form at 2 expiries)
@@ -112,10 +114,28 @@ move, `backtest.replay` imports `VolModelCalibrationConfig` from
 
 ### 4.4 The convergence point
 
-`listed.py` and `fxdelta.py` both emit the same `QuoteSet`. Everything
-downstream — smoothing, admission, Dupire/Heston/SLV calibration — is
-convention-blind. This is what collapses two copies of stages 02–05 into one
-code path.
+`listed.py`, `settlement.py` and `fxdelta.py` all emit the same `QuoteSet`.
+Everything downstream — smoothing, admission, Dupire/Heston/SLV calibration —
+is convention-blind. This is what collapses the duplicated stages 02–05 into
+one code path.
+
+**Why listed-live and listed-settlement are separate normalizers, not one with
+a flag.** They are both "listed strike-quoted", but they disagree on nearly
+every rule that matters, because settlement marks are official EOD prices
+rather than executable quotes:
+
+| | listed-live | listed-settlement |
+|---|---|---|
+| Price | bid/ask mid, else last | the `settlement` field |
+| Liquidity | `volume >= 1` | `volume > 0` **and** `oi > 0` |
+| Maturity | the payload's `T_years` | derived `calendar_days / 365` |
+| Expiry date | trusted | verified against the third-Friday rule plus a holiday-shift table; a mismatch raises |
+| IV inversion | raw units at `(S, K, r, q)` | normalized units at `(1, K/F, C/(DF·F), 0, 0)` |
+| Rejections | dropped | counted by named reason into a `node_universe` |
+
+Collapsing these into one parameterized function would mean a caller could
+select a combination no real venue produces. They share the `QuoteSet` output
+and nothing else, which is exactly the boundary the protocol draws.
 
 ## 5. Data contracts
 
@@ -226,8 +246,10 @@ this is compatible with existing artifacts unchanged.
 
 ### 5.3 Frozen contracts (unchanged)
 
-- **Artifact JSON**: `{trade_date, s0, strikes, maturities, iv_grid,
-  atm_pillars, per_expiry, extrapolation_policy, admission, target_smoothing}`.
+- **Artifact JSON** (verified against a stored artifact, 2026-09-01):
+  `{schema_version, trade_date, source_class, price_field, source_url,
+  source_sha256, s0, strikes, maturities, iv_grid, per_expiry, node_universe,
+  atm_pillars, extrapolation_policy, admission, target_smoothing}`.
 - **Calibration cache entry**: `{schema_version, variant, surface_sha,
   surface_date, config_fingerprint, params, record}` at
   `cache_dir/{variant}-{sha256(surface_sha|variant|fingerprint)}.json`.
@@ -236,9 +258,18 @@ this is compatible with existing artifacts unchanged.
 taken over raw file bytes, and that sha is an input to the calibration cache
 key. 766 admitted MO surfaces and a warm calibration cache are keyed on those
 shas. Writing even one extra key into the artifact body changes every sha and
-invalidates the cache and every cohort pin. Therefore: **new provenance
-(snapshot sha, package version, builder config) goes in the manifest record,
-never in the artifact body.**
+invalidates the cache and every cohort pin. Therefore: **no field may be added
+to or removed from the artifact body.** Anything new goes in the manifest
+record.
+
+**The body already carries its own source provenance.** An earlier draft of
+this section claimed provenance had to live in the manifest because the body
+was frozen; that conflated "frozen" with "empty". Stored artifacts already
+record `source_sha256`, `source_url`, `source_class`, `price_field`,
+`trade_date` and `schema_version`, plus a `node_universe` block accounting for
+every quote the normalizer filtered and every expiry it excluded. The freeze
+means those fields must stay exactly as they are — it does not mean the
+snapshot sha is unavailable per date. §5.4's migration depends on this.
 
 ### 5.4 Store layout
 
@@ -303,10 +334,19 @@ protect. That is not acceptable, so the migration is defined explicitly:
    artifacts were built with. The migration copies it down to each record and
    derives `builder_fingerprint` from it. This is lossless and touches no
    artifact.
-2. `snapshot_sha256` is recomputed from the source snapshot when it is still on
-   disk, and left `null` otherwise.
+2. `snapshot_sha256` is read from the **artifact's own `source_sha256` field**
+   (§5.3). Every admitted date has one, so this is a per-date recovery, not a
+   guess and not a recomputation — it does not require the source CSV to still
+   be on disk.
 3. Each record gets `provenance: "verified"` when every field was recovered, or
    `"grandfathered"` when any is `null`.
+
+**Almost every admitted record migrates to `verified`.** An earlier draft
+assumed `snapshot_sha256` would usually be unrecoverable and designed
+grandfathering as the common path; because the artifact body carries
+`source_sha256`, that is wrong. `grandfathered` is now the narrow residue: a
+record whose artifact is missing or unreadable, or an `excluded` date that
+never had an artifact and so has no sha to recover.
 
 **A `grandfathered` record is never treated as a mismatch and never triggers a
 rebuild.** It is trusted as-is, because the artifact bytes are the pinned
@@ -427,11 +467,11 @@ naming the surface date and sha. There is no flat-vol fallback anywhere.
 | | `ExpirySlice`/`iter_expiries`, `imply_forward_and_rate`, `select_otm`, `otm_implied_vol` | `normalize/listed.py` |
 | | `sabr_smoothed_surface`, `prepare_model_surface` | `surface.py` |
 | | `build_env` | `store.py` (`environment_for`) |
-| `03_build_iv_surface_history.py` | `_surface_base` | `surface.py` |
+| `03_build_iv_surface_history.py` | `_surface_base` — including the quoted-range-overlap domain iterated to its fixed point, `off_grid_node_count`, and the `node_universe` block | `surface.py` |
 | | `_validate_static_arbitrage`, `AdmissionError` + reason codes | `admission.py` |
 | | `serialize_artifact`, `save_manifest`, `load_manifest_records`, `_record_from_existing_artifact` | `store.py` |
 | | `_build_one` worker pool | `runner.py` |
-| `10_calibration_diagnostics.py` | `build_calibration_nodes`, parity quality-gate constants | `normalize/listed.py` |
+| `10_calibration_diagnostics.py` | `build_calibration_nodes`, `_third_friday` + `EXPIRY_DATE_OVERRIDES`, `_near_atm_parity_sensitivity`, parity quality-gate constants | `normalize/settlement.py` |
 | `14_daily_calibration_pipeline.py` | `PipelinePaths`, `persist_calibration_manifest`, `load_calibration_records` | `store.py` |
 | | `acquire_lock`, `select_calibration_dates`, `calibrate_one_surface`, `build_freshness_status`, `status_exit_code`, EWMA temporal smoothing | `runner.py` |
 | `_fx_common.py` | `selected_slices`, `iter_nodes`, `strike_from_spot_delta`, `spot_delta_from_strike` | `normalize/fxdelta.py` |

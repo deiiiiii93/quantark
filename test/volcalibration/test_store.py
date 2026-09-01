@@ -77,6 +77,36 @@ def test_migration_is_idempotent():
     assert once == twice
 
 
+def test_migration_recovers_snapshot_sha_from_the_artifact_body(tmp_path):
+    """An admitted date migrates to 'verified' without needing its source CSV."""
+    import json
+
+    iv_dir = tmp_path / "iv_surface"
+    iv_dir.mkdir()
+    (iv_dir / "mo_iv_surface_20260430.json").write_text(
+        json.dumps({"source_sha256": "cafebabe", "s0": 6000.0})
+    )
+
+    migrated = migrate_manifest(LEGACY_MANIFEST, iv_surface_dir=iv_dir)
+    ok = next(r for r in migrated["records"] if r["date"] == "20260430")
+    assert ok["snapshot_sha256"] == "cafebabe"
+    assert ok["provenance"] == "verified"
+
+    # The excluded date never had an artifact, so it stays grandfathered.
+    excluded = next(r for r in migrated["records"] if r["date"] == "20240930")
+    assert excluded["snapshot_sha256"] is None
+    assert excluded["provenance"] == "grandfathered"
+
+
+def test_migration_grandfathers_an_unreadable_artifact(tmp_path):
+    iv_dir = tmp_path / "iv_surface"
+    iv_dir.mkdir()
+    (iv_dir / "mo_iv_surface_20260430.json").write_text("{ not json")
+    migrated = migrate_manifest(LEGACY_MANIFEST, iv_surface_dir=iv_dir)
+    ok = next(r for r in migrated["records"] if r["date"] == "20260430")
+    assert ok["provenance"] == "grandfathered"
+
+
 def test_new_records_are_verified():
     rec = surface_record(
         "20260901",
