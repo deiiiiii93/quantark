@@ -37,6 +37,11 @@ _SHARED_DEFAULTS = dict(
 class GridConfig:
     """Expert grid configuration; ``None`` fields inherit from the profile."""
 
+    #: NOTE: ``day_count`` is a STEP-DENSITY constant in the units of the
+    #: engine's time axis (interval_length * day_count = "days" of fill),
+    #: not a day-count convention. On the default ACT/365 calendar axis the
+    #: 252 default yields ~0.69 steps-per-"day" per calendar day; see
+    #: docs/trading-clock.md.
     points: Optional[int] = None
     steps_per_day: Optional[float] = None
     eps_crit: Optional[float] = None

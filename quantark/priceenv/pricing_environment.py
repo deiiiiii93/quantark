@@ -29,7 +29,14 @@ class PricingEnvironment:
         vol_surface: Volatility surface (optional, required for equity derivatives)
         div_yield: Dividend yield (optional, defaults to zero)
         basis_yield: Annualized basis yield for futures (optional, defaults to None)
-        day_count_convention: Convention for calculating year fractions (default: CALENDAR_DAYS)
+        day_count_convention: Convention for calculating year fractions
+            (default: CALENDAR_DAYS). Honored ONLY by date-based product
+            resolution (BaseEquityOption.get_maturity,
+            ObservationRecord.resolve_time); products constructed with float
+            maturities/observation times bypass it entirely — their clock is
+            whatever the caller used. BUSINESS_DAYS requires ``calendar``
+            and validates any TradingClock-wrapped curves against
+            ``bus_days_in_year`` (see docs/trading-clock.md).
         bus_days_in_year: Number of business days per year for business day convention (default: 252)
         calendar: Optional business day calendar (used when day_count_convention is BUSINESS_DAYS)
     """

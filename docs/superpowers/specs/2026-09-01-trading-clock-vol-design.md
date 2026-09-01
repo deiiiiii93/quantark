@@ -271,6 +271,14 @@ Greeks and quotes carry axis-dependent units. The spec of record:
 
 Desk comparisons must state units; the conversion table ships in the docs.
 
+**Coupon/rebate rates are contract data, not engine properties**
+(implementation finding, axis-equivalence gate): a snowball coupon accrues
+as `ko_rate × elapsed engine time`, so the same scalar rate on the two axes
+defines two different contracts (0.15·τ_td ≠ 0.15·τ_cal at the same date).
+Moving a term sheet between axes requires restating the accrual so the cash
+paid at each date is unchanged; the equivalence gate therefore uses a
+zero-coupon contract.
+
 ## 6. Error handling
 
 - `BusinessTimeMap` query beyond horizon → `ValidationError` (unless

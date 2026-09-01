@@ -1,6 +1,13 @@
 """
 Price the external variable-KI Phoenix case with multiple engines.
 
+NOTE (trading axis): this script runs the BUSINESS_DAYS date-based mode, so
+engine times are remaining-trading-days/D. On that axis the calendar-quoted
+r/q curves should be wrapped with TradingClockRateCurve /
+TradingClockDividendYield (quantark.param.rrf / quantark.param.div) so
+discounting matches the true payment dates — see docs/trading-clock.md.
+Left unwrapped here to preserve the original external-case reconciliation.
+
 Case source:
     external/ki_variant_phx/phoenix_example.txt
 
