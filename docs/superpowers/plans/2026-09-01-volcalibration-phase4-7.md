@@ -3262,3 +3262,68 @@ Expected: the same two pre-existing failures as the phase 1–3 baseline (`2 fai
 **Type consistency.** `variants` is threaded as an explicit keyword through `calibration_record_is_current`, `select_calibration_dates` and `run_calibration_stage` (Task 16) and consumed by `_cmd_run` (Task 18). `StoreLayout` is constructed by `from_config` everywhere except `CalibrationSet.open`, which builds it from a root path. `builder_fingerprint` always takes `config.surface.fingerprint_payload()`, never the `RunConfig`. `surface_record`'s `fingerprint=` keyword (phase 2) is what Tasks 15 and 22 pass.
 
 **Sequencing risk.** Task 20 touches `quantark/backtest/replay/market.py` — the one file in this plan outside `volcalibration/`. Run `test/replay_golden` in that task, not only at the end, so a regression there is attributed to the change that caused it.
+
+
+---
+
+## Execution Notes (2026-09-01, all 10 tasks complete)
+
+Recorded rather than silently edited into the tasks above, so the next reader
+can see where the plan was wrong.
+
+**The plan missed a whole design problem in Task 21.** It assumed the FX
+normalizer only had to emit a `QuoteSet` and the existing `build_raw_surface`
+would take it. It does not: that function builds its grid from strikes quoted
+by >= 2 expiries, and delta-quoted books share no strike at all -- every
+tenor's 25-delta strike is its own. The first end-to-end FX test failed with
+`insufficient_expiries: < 2 expiries with >= 5 nodes inside the quoted-range
+overlap; dropped=[all five]`. Fixed by making the grid rule a field the
+normalizer declares in `QuoteSet.universe` (`STRIKE_GRID_SHARED_OBSERVED` vs
+`STRIKE_GRID_UNIFORM_OVER_OVERLAP`), which keeps listed artifacts byte-exact
+and refuses to auto-detect. This is the one place §4.4's "everything downstream
+is convention-blind" needed narrowing, now recorded in spec §6.4.
+
+**The plan missed a second one in the same task.** Delta-quoted books publish
+implied vols, not prices, so neither existing `price_field` describes them.
+Added `PRICE_FIELD_MID_IV`, made `quote_price` refuse it by name, and made
+`UnderlyingConfig` reject a convention/price-field pair no venue produces.
+
+**Three factual errors in the plan's own pre-resolved facts**, all caught by
+checking the tree before writing code: the 20260430 artifact's `s0` is
+8381.947 (the plan guessed 6167.16); the committed CFETS snapshots are
+per-date (`cfets_usdcny_snapshot_20260430.json`, not a single file); and
+`snapshot.py` already defined `CONVENTION_LISTED` / `PRICE_FIELD_*`, which
+`config.py` was about to redeclare.
+
+**A missing import survived three green test runs.** `runner.run_pipeline` used
+`atomic_write_json` without importing it, and only the Task 18 CLI tests
+reached that line -- Task 17's status tests never call `run_pipeline`. Worth
+remembering: a unit test of the pieces is not a test of the transaction.
+
+**Deviations from the plan as written, each with its reason:**
+
+- `test_calibration_set.py` imports fixtures via `sys.path` + `from
+  replay_golden.fixtures import ...`, matching `test/test_calibration_relocation.py`.
+  `test/` is not a package, so the plan's `from test.replay_golden...` fails.
+- The root `CLAUDE.md` row was **not** applied. That file is git-excluded and
+  exists only in the main checkout, so editing it from a worktree would mutate
+  shared state that cannot be reviewed on this branch. The exact line to add is
+  in the handover.
+- `quantark/volcalibration/CLAUDE.md` was force-added despite the repo-wide
+  `CLAUDE.md` exclusion. The exclusion targets the root working-notes file; a
+  module guide recording the `BUILDER_SCHEMA_VERSION` obligation has to ship
+  with the code. One `git rm --cached` reverses it.
+
+**Findings worth carrying forward:**
+
+- The committed settlement snapshots carry `expiry_calendar.frozen_overrides`
+  (`{"2606": "2026-06-22"}`), while `normalize/settlement.py` hardcodes the
+  same table as `EXPIRY_DATE_OVERRIDES`. The snapshot is the authoritative
+  copy and the hardcoded one will go stale. Reading the snapshot's table when
+  present (falling back to the frozen one) is strictly better and byte-exact
+  on every sample -- not done here because it changes phase-2 code that is
+  already certified.
+- `show --json` needed no new diagnostics: the artifact and calibration records
+  already carry `parity_rmse_points`, `sabr_params.mse`, `feller_ratio`,
+  `bound_hits`, `overall_rmse_iv` and `leverage_min/max`. The verb exists so
+  nobody reads three JSON files by hand, not to invent a fourth format.
