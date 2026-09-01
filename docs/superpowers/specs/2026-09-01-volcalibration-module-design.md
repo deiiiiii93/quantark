@@ -236,7 +236,8 @@ Formalizes stage 14's `PipelinePaths`; unchanged on disk.
   snapshots/{YYYYMMDD}.json
   iv_surface/mo_iv_surface_{YYYYMMDD}.json
   surface_manifest.json          {date, status, reason, detail, n_expiries, artifact_sha256,
-                                  snapshot_sha256, price_field, builder_fingerprint}
+                                  snapshot_sha256, price_field, builder_fingerprint,
+                                  builder_schema_version, provenance}
   calibration_cache/{variant}-{key}.json
   calibration_manifest.json      per-date per-variant records + resolved config
   status.json                    freshness: latest refreshed / admitted / calibrated, lag, state
@@ -248,19 +249,59 @@ which dates produced a surface (rebuilt only when surfaces are); which surfaces
 have models under which config (rebuilt per calibration run); is the pipeline
 current (rewritten every run). Merging them would couple those lifetimes.
 
-**Resume invalidation.** The three fields beyond today's record —
-`snapshot_sha256`, `price_field`, `builder_fingerprint` (canonical JSON of the
-resolved `surface:` config block) — exist so that "already built" is a
-*checkable* claim rather than a filename's existence. Before skipping a date,
-the runner compares all three against what the current inputs and config would
-produce; any mismatch rebuilds the artifact. Without this, a re-published
-settlement CSV for an existing date, or a change to `sabr_beta`, leaves a stale
-surface in place that a resume run reports as complete. Today the only remedy
-is a blanket `--force`.
+**Resume invalidation.** The fields beyond today's record exist so that
+"already built" is a *checkable* claim rather than a filename's existence:
+
+| Field | Invalidates on |
+|---|---|
+| `snapshot_sha256` | a re-published or corrected source snapshot for that date |
+| `price_field` | `settlement` ↔ `mid_or_last` change |
+| `builder_fingerprint` | canonical JSON of the resolved `surface:` config block |
+| `builder_schema_version` | a change to builder *code* that alters output |
+
+Before skipping a date, the runner compares all four; any mismatch rebuilds.
+Without this, a re-published settlement CSV or a changed `sabr_beta` leaves a
+stale surface that a resume run reports as complete — today the only remedy is
+a blanket `--force`.
+
+`builder_schema_version` covers what a config fingerprint structurally cannot:
+a change to normalization, smoothing or admission code with inputs and config
+unchanged. This is the same hazard `quantark/volmodels/calibration.py` already
+handles with `_CACHE_SCHEMA_VERSION`, whose comment records the obligation to
+bump it "when any kernel default that affects calibration output changes …
+the version bump is the only mechanism that invalidates warm entries after a
+kernel upgrade". The surface builder inherits that obligation verbatim, and it
+is stated in the module `CLAUDE.md`.
 
 Both the calibration cache (keyed on surface sha + config fingerprint) and this
 comparison are pure metadata: neither adds anything to the artifact body, so
 the §5.3 byte constraint holds.
+
+**Legacy record migration (one-time, no rebuild).** Every existing record
+predates these fields, so a naive "any mismatch rebuilds" would rebuild all 766
+artifacts on the first resumed run — changing their bytes on a different
+architecture and destroying the warm cache and cohort pins §5.3 exists to
+protect. That is not acceptable, so the migration is defined explicitly:
+
+1. Most of the missing metadata is already in the manifest, just at the wrong
+   level. `save_manifest` writes top-level `price_field` and a `config` block
+   (`sabr_beta`, `min_expiries`, `min_strikes_per_expiry`, `min_common_strikes`,
+   `artifact_schema_version`) that *is* the resolved surface config those
+   artifacts were built with. The migration copies it down to each record and
+   derives `builder_fingerprint` from it. This is lossless and touches no
+   artifact.
+2. `snapshot_sha256` is recomputed from the source snapshot when it is still on
+   disk, and left `null` otherwise.
+3. Each record gets `provenance: "verified"` when every field was recovered, or
+   `"grandfathered"` when any is `null`.
+
+**A `grandfathered` record is never treated as a mismatch and never triggers a
+rebuild.** It is trusted as-is, because the artifact bytes are the pinned
+object and rebuilding would destroy them to prove a property nobody doubts.
+This is a deliberate, bounded exception — not a silent fallback: the count of
+grandfathered dates appears in `status --json` and per-date in `show`, and
+`--force` remains the way to demand a verified rebuild. New records are always
+`verified`.
 
 ### 5.5 `CalibrationSet` (new; the backtest handover)
 
@@ -431,11 +472,16 @@ an optional follow-up, not a prerequisite.
 - **CLI contract.** Exit codes 0/1/2/75; stdout is pure JSON under `--json`;
   `run` idempotence; `--plan` writes nothing; an excluded-date fixture returns
   2 rather than 1.
-- **Resume invalidation.** Three cases must each trigger a rebuild rather than
-  a skip: a re-published snapshot for an existing date (new `snapshot_sha256`),
-  a changed `surface:` config block (new `builder_fingerprint`), and a changed
-  `price_field`. A fourth case asserts the converse — unchanged inputs skip and
-  leave the artifact byte-identical.
+- **Resume invalidation.** Four cases must each trigger a rebuild rather than a
+  skip: a re-published snapshot for an existing date (new `snapshot_sha256`), a
+  changed `surface:` config block (new `builder_fingerprint`), a changed
+  `price_field`, and a bumped `builder_schema_version`. A fifth case asserts the
+  converse — unchanged inputs skip and leave the artifact byte-identical.
+- **Legacy migration.** Run the migration against a copy of the real
+  `surface_manifest.json` and assert: zero artifact files modified (compare
+  mtimes and bytes before/after), every `ok` record ends `verified` or
+  `grandfathered`, and a subsequent resume run rebuilds nothing. This is the
+  test that protects §5.3 from the invalidation rule added above.
 - **Price-field discipline.** A snapshot declaring `price_field: settlement`
   whose quotes carry only `last`/`bid`/`ask` is rejected, and vice versa; a
   snapshot whose `price_field` disagrees with the run config is rejected. Both
@@ -453,7 +499,8 @@ Each phase is independently mergeable and leaves the tree green.
 1. **Contracts + normalizers** — `snapshot.py`, `QuoteSet`,
    `normalize/listed.py`; `_mo_common` shim; ported tests green.
 2. **Surface + admission** — `surface.py`, `admission.py`, `store.py` writers;
-   artifact reproduction test.
+   the legacy manifest migration (§5.4) and its no-rebuild test; artifact
+   reproduction test.
 3. **Calibration relocation** — move `calibration.py` and
    `VolModelCalibrationConfig`; shims both sides; relocation invariant.
 4. **Runner + CLI** — `runner.py`, `cli.py`, `__main__.py`, status and exit
