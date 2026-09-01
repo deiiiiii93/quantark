@@ -533,6 +533,7 @@ class GreeksCalculator:
                     pricing_env,
                     bump_engine,
                     base_price=base_price,
+                    theta=greeks_out.get("theta"),
                 )
                 for key, value in theta_components.items():
                     if key in requested:
@@ -720,6 +721,9 @@ class GreeksCalculator:
                 base_price=base_price,
                 time_bump_days=time_bump_days,
                 time_bump_mode=time_bump_mode,
+                theta=self._clock_theta(
+                    product, pricing_env, engine, base_price, clock, memo
+                ),
             )
             memo[key] = {
                 f"{name}": components[name]
@@ -1123,6 +1127,8 @@ class GreeksCalculator:
         engine: BaseEngine,
         base_price: Optional[float] = None,
         time_bump_days: Optional[int] = None,
+        time_bump_mode: Optional[str] = None,
+        theta: Optional[float] = None,
     ) -> Dict[str, float]:
         """Exact zeroed-r/q theta decomposition; see greeks.theta_decomposition."""
         return theta_decomposition.exact_theta_components(
@@ -1132,6 +1138,8 @@ class GreeksCalculator:
             engine,
             base_price=base_price,
             time_bump_days=time_bump_days,
+            time_bump_mode=time_bump_mode,
+            theta=theta,
         )
 
     def _spot_bumped_prices(

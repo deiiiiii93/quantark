@@ -75,19 +75,21 @@ def exact_theta_components(
     base_price: Optional[float] = None,
     time_bump_days: Optional[int] = None,
     time_bump_mode: Optional[str] = None,
+    theta: Optional[float] = None,
 ) -> Dict[str, float]:
     """
     Exact numerical theta decomposition via repricing with zeroed r/q.
 
-    This method computes exact theta components by repricing with different
-    rate and dividend yield combinations:
-        1. theta_no_rq = theta with r=0, q=0 → convexity_theta
-        2. theta_no_q = theta with q=0 → r_theta = theta_no_q - convexity_theta
-        3. theta_no_r = theta with r=0 → q_theta = theta_no_r - convexity_theta
+    Reprices theta under (r=0,q=0), (q=0), (r=0) and allocates the r/q
+    interaction term symmetrically (Shapley attribution), so the three
+    components sum to the total theta exactly:
+        convexity_theta = theta(0,0)
+        r_theta = 1/2 [ (theta(r,0)-theta(0,0)) + (theta(r,q)-theta(0,q)) ]
+        q_theta = 1/2 [ (theta(0,q)-theta(0,0)) + (theta(r,q)-theta(r,0)) ]
 
-    Note: This is computationally expensive (3 extra pricings) and should
-    be treated as a slow path. For fast estimation, use
-    estimate_theta_components() instead.
+    Note: This is computationally expensive (3 extra theta evaluations,
+    plus the total theta when not supplied) and should be treated as a
+    slow path. For fast estimation, use estimate_theta_components().
 
     Args:
         calc: GreeksCalculator facade instance
@@ -96,6 +98,8 @@ def exact_theta_components(
         engine: Pricing engine
         base_price: Pre-calculated base price
         time_bump_days: Time bump in days
+        time_bump_mode: Date-advance mode for the theta step
+        theta: Total theta under the same step, if already computed
 
     Returns:
         Dictionary with convexity_theta, r_theta, q_theta (all per day)
@@ -141,11 +145,18 @@ def exact_theta_components(
         product, env_no_r, engine,
         time_bump_days=time_bump_days, time_bump_mode=time_bump_mode,
     )
+    if theta is None:
+        theta = calc.calculate_numerical_theta(
+            product, pricing_env, engine,
+            base_price=base_price,
+            time_bump_days=time_bump_days, time_bump_mode=time_bump_mode,
+        )
 
-    # Decompose
+    # Symmetric (Shapley) allocation of the r/q interaction: the three
+    # components reconcile to the total theta exactly.
     convexity_theta = theta_no_rq
-    r_theta = theta_no_q - convexity_theta
-    q_theta = theta_no_r - convexity_theta
+    r_theta = 0.5 * ((theta_no_q - theta_no_rq) + (theta - theta_no_r))
+    q_theta = 0.5 * ((theta_no_r - theta_no_rq) + (theta - theta_no_q))
 
     return {
         "convexity_theta": convexity_theta,

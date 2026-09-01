@@ -327,16 +327,20 @@ def test_exact_mode_components_match_zeroed_env_definition():
     theta_no_q = calc.calculate_numerical_theta(product, env_no_q, engine)
     theta_no_r = calc.calculate_numerical_theta(product, env_no_r, engine)
 
+    # Symmetric (Shapley) allocation of the r/q interaction term.
     assert greeks["convexity_theta"] == pytest.approx(theta_no_rq, rel=1e-12)
     assert greeks["r_theta"] == pytest.approx(
-        theta_no_q - theta_no_rq, rel=1e-12
+        0.5 * ((theta_no_q - theta_no_rq) + (greeks["theta"] - theta_no_r)),
+        rel=1e-12,
     )
     assert greeks["q_theta"] == pytest.approx(
-        theta_no_r - theta_no_rq, rel=1e-12
+        0.5 * ((theta_no_r - theta_no_rq) + (greeks["theta"] - theta_no_q)),
+        rel=1e-12,
     )
-    # Reconciliation to total theta holds up to the r/q interaction term.
+    # The allocation reconciles to total theta exactly (no dangling
+    # interaction term).
     total = greeks["convexity_theta"] + greeks["r_theta"] + greeks["q_theta"]
-    assert total == pytest.approx(greeks["theta"], abs=5e-3)
+    assert total == pytest.approx(greeks["theta"], rel=1e-12, abs=1e-15)
     assert greeks["convexity_theta"] < 0.0
 
 
@@ -422,5 +426,19 @@ def test_analytical_expiry_dividend_rho_requestable():
         greeks_at_expiry,
     )
 
+    # The greeks=None expiry dict keeps the legacy key set (no
+    # dividend_rho) per the compatibility contract...
     expiry = greeks_at_expiry(_product(), 100.0)
-    assert expiry["dividend_rho"] == 0.0
+    assert "dividend_rho" not in expiry
+
+    # ...but an explicit request at expiry returns 0.0 instead of KeyError.
+    calc = GreeksCalculator()
+    at_expiry = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, maturity=1e-13
+    )
+    greeks = calc.calculate_analytical_greeks(
+        at_expiry, _calendar_env_with_trading_calendar(),
+        greeks=["dividend_rho", "delta"],
+    )
+    assert greeks["dividend_rho"] == 0.0
+    assert set(greeks.keys()) == {"dividend_rho", "delta"}

@@ -90,7 +90,9 @@ def calculate_analytical_greeks(
     extended_needed = names & EXTENDED_GREEKS
     if extended_needed:
         full.update(_extended_greeks(product, pricing_env, extended_needed))
-    return {name: full[name] for name in names}
+    # At expiry the legacy base dict omits some zero-valued names
+    # (dividend_rho); an explicit request still deserves its 0.0 key.
+    return {name: full.get(name, 0.0) for name in names}
 
 
 def _extended_greeks(
@@ -350,6 +352,10 @@ def greeks_at_expiry(
     else:
         delta = -1.0 if spot < product.strike else 0.0
 
+    # Legacy default key set (no dividend_rho) — the greeks=None result at
+    # expiry is frozen by the compatibility contract. An explicit request
+    # for a missing base name is filled with 0.0 in
+    # calculate_analytical_greeks instead.
     return {
         "price": price * multiplier,
         "delta": delta * multiplier,
@@ -360,5 +366,4 @@ def greeks_at_expiry(
         "r_theta": 0.0,
         "q_theta": 0.0,
         "rho": 0.0,
-        "dividend_rho": 0.0,
     }
