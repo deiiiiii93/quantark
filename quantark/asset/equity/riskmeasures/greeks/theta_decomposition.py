@@ -74,6 +74,7 @@ def exact_theta_components(
     engine: BaseEngine,
     base_price: Optional[float] = None,
     time_bump_days: Optional[int] = None,
+    time_bump_mode: Optional[str] = None,
 ) -> Dict[str, float]:
     """
     Exact numerical theta decomposition via repricing with zeroed r/q.
@@ -129,13 +130,16 @@ def exact_theta_components(
 
     # Calculate theta in each environment
     theta_no_rq = calc.calculate_numerical_theta(
-        product, env_no_rq, engine, time_bump_days=time_bump_days
+        product, env_no_rq, engine,
+        time_bump_days=time_bump_days, time_bump_mode=time_bump_mode,
     )
     theta_no_q = calc.calculate_numerical_theta(
-        product, env_no_q, engine, time_bump_days=time_bump_days
+        product, env_no_q, engine,
+        time_bump_days=time_bump_days, time_bump_mode=time_bump_mode,
     )
     theta_no_r = calc.calculate_numerical_theta(
-        product, env_no_r, engine, time_bump_days=time_bump_days
+        product, env_no_r, engine,
+        time_bump_days=time_bump_days, time_bump_mode=time_bump_mode,
     )
 
     # Decompose

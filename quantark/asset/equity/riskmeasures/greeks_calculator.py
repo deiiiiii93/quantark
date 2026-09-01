@@ -74,6 +74,7 @@ class GreeksCalculator:
         engine: BaseEngine,
         method: str = "auto",
         greeks: Optional[Sequence[object]] = None,
+        theta_decomposition_mode: str = "estimate",
     ) -> Dict[str, float]:
         """Unified entry point for Greeks calculation."""
         method = method.lower()
@@ -98,7 +99,11 @@ class GreeksCalculator:
                 )
 
         return self.calculate_numerical_greeks(
-            product, pricing_env, engine, greeks=greeks
+            product,
+            pricing_env,
+            engine,
+            greeks=greeks,
+            theta_decomposition_mode=theta_decomposition_mode,
         )
 
     def _normalize_greeks(
@@ -338,6 +343,7 @@ class GreeksCalculator:
         engine: BaseEngine,
         base_price: Optional[float] = None,
         greeks: Optional[Sequence[object]] = None,
+        theta_decomposition_mode: str = "estimate",
     ) -> Dict[str, float]:
         """
         Calculate Greeks using finite difference method (FDM).
@@ -355,18 +361,37 @@ class GreeksCalculator:
         For delta and gamma, if greeks_mode is ENGINE or AUTO (with PDE engine),
         the engine's own calculate_greeks() method is used instead of bumping.
 
+        Theta-family greeks (theta, r/q/convexity/gamma_theta, charm, color,
+        vega_theta) accept clock qualifiers in the request: ``<name>_1d``
+        advances one calendar day, ``<name>_1td`` one trading day on the
+        pricing calendar; bare names keep the BumpConfig.time_bump_mode
+        resolution.
+
         Args:
             product: The derivative product
             pricing_env: Pricing environment
             engine: Pricing engine to use
             base_price: Pre-calculated base price (optional)
+            greeks: Requested greek names/enums (None = default set)
+            theta_decomposition_mode: "estimate" (default; fast, from
+                rho/dividend_rho, the incumbent behavior) or "exact"
+                (zeroed-r/q repricing, 3 extra theta evaluations).
 
         Returns:
             Dictionary of Greeks for the requested set (or defaults if None).
         """
-        requested = self._normalize_greeks(greeks)
-        if requested is None:
-            requested = set(registry.DEFAULT_SET)
+        if theta_decomposition_mode not in ("estimate", "exact"):
+            raise ValidationError(
+                "theta_decomposition_mode must be 'estimate' or 'exact', "
+                f"got {theta_decomposition_mode!r}"
+            )
+        requests = registry.normalize_greeks(greeks)
+        if requests is None:
+            requests = {
+                registry.GreekRequest(key=name, canonical=name)
+                for name in registry.DEFAULT_SET
+            }
+        requested = {req.key for req in requests}
 
         if product.is_linear:
             base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
@@ -481,48 +506,256 @@ class GreeksCalculator:
                 div_bump=self._bump_config.div_bump,
             )
 
-        # Estimate theta components using fast approximation from existing Greeks
+        # Theta components for BARE names: estimate (incumbent default) from
+        # existing Greeks, or exact zeroed-r/q repricing when opted in.
         if {"convexity_theta", "r_theta", "q_theta"} & requested:
-            if "theta" not in greeks_out:
-                greeks_out["theta"] = self.calculate_numerical_theta(
+            if theta_decomposition_mode == "exact":
+                theta_components = self._calculate_numerical_theta_components(
                     product,
                     pricing_env,
                     bump_engine,
                     base_price=base_price,
-                    time_bump_days=self._bump_config.time_bump_days,
                 )
-            if "rho" not in greeks_out:
-                greeks_out["rho"] = self.calculate_numerical_rho(
+                for key, value in theta_components.items():
+                    if key in requested:
+                        greeks_out[key] = value
+            else:
+                if "theta" not in greeks_out:
+                    greeks_out["theta"] = self.calculate_numerical_theta(
+                        product,
+                        pricing_env,
+                        bump_engine,
+                        base_price=base_price,
+                        time_bump_days=self._bump_config.time_bump_days,
+                    )
+                if "rho" not in greeks_out:
+                    greeks_out["rho"] = self.calculate_numerical_rho(
+                        product,
+                        pricing_env,
+                        bump_engine,
+                        base_price=base_price,
+                        rate_bump=self._bump_config.rate_bump,
+                    )
+                if "dividend_rho" not in greeks_out:
+                    greeks_out["dividend_rho"] = self.calculate_numerical_dividend_rho(
+                        product,
+                        pricing_env,
+                        bump_engine,
+                        base_price=base_price,
+                        div_bump=self._bump_config.div_bump,
+                    )
+                T = product.get_maturity(pricing_env)
+                r = pricing_env.get_rate(T)
+                q = pricing_env.get_div_yield(T)
+                theta_components = self.estimate_theta_components(
+                    theta=greeks_out["theta"],
+                    rho=greeks_out["rho"],
+                    dividend_rho=greeks_out["dividend_rho"],
+                    r=r,
+                    q=q,
+                    T=T,
+                )
+                for key, value in theta_components.items():
+                    if key in requested:
+                        greeks_out[key] = value
+
+        # Time-family block: bare charm/color/vega_theta/gamma_theta plus
+        # every clock-qualified (_1d/_1td) request. Scenarios and inner
+        # delta/gamma/vega evaluations are shared through a per-call memo.
+        time_requests = sorted(
+            (
+                req
+                for req in requests
+                if req.clock is not None
+                or req.canonical
+                in ("charm", "color", "vega_theta", "gamma_theta")
+            ),
+            key=lambda req: req.key,
+        )
+        if time_requests:
+            memo: Dict[str, object] = {}
+            for req in time_requests:
+                greeks_out[req.key] = self._time_family_value(
                     product,
                     pricing_env,
                     bump_engine,
-                    base_price=base_price,
-                    rate_bump=self._bump_config.rate_bump,
+                    base_price,
+                    req,
+                    greeks_out,
+                    memo,
+                    theta_decomposition_mode,
                 )
-            if "dividend_rho" not in greeks_out:
-                greeks_out["dividend_rho"] = self.calculate_numerical_dividend_rho(
-                    product,
-                    pricing_env,
-                    bump_engine,
-                    base_price=base_price,
-                    div_bump=self._bump_config.div_bump,
-                )
-            T = product.get_maturity(pricing_env)
-            r = pricing_env.get_rate(T)
-            q = pricing_env.get_div_yield(T)
-            theta_components = self.estimate_theta_components(
-                theta=greeks_out["theta"],
-                rho=greeks_out["rho"],
-                dividend_rho=greeks_out["dividend_rho"],
-                r=r,
-                q=q,
-                T=T,
-            )
-            for key, value in theta_components.items():
-                if key in requested:
-                    greeks_out[key] = value
 
         return {key: greeks_out[key] for key in greeks_out if key in requested}
+
+    def _time_family_value(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float],
+        req: "registry.GreekRequest",
+        greeks_out: Dict[str, float],
+        memo: Dict[str, object],
+        theta_decomposition_mode: str,
+    ) -> float:
+        """One time-family greek under one clock (bare, _1d, or _1td)."""
+        canonical, clock = req.canonical, req.clock
+        if canonical == "theta":
+            return self._clock_theta(
+                product, pricing_env, engine, base_price, clock, memo
+            )
+        if canonical in ("convexity_theta", "r_theta", "q_theta"):
+            components = self._clock_theta_components(
+                product,
+                pricing_env,
+                engine,
+                base_price,
+                clock,
+                memo,
+                greeks_out,
+                theta_decomposition_mode,
+            )
+            return components[canonical]
+        if canonical == "charm":
+            return numerical.numerical_charm(
+                self, product, pricing_env, engine,
+                base_price=base_price, clock=clock, memo=memo,
+            )
+        if canonical == "color":
+            return numerical.numerical_color(
+                self, product, pricing_env, engine,
+                base_price=base_price, clock=clock, memo=memo,
+            )
+        if canonical == "vega_theta":
+            return numerical.numerical_vega_theta(
+                self, product, pricing_env, engine,
+                base_price=base_price, clock=clock, memo=memo,
+                base_vega=greeks_out.get("vega"),
+            )
+        if canonical == "gamma_theta":
+            return numerical.numerical_gamma_theta(
+                self, product, pricing_env, engine,
+                base_price=base_price, gamma=greeks_out.get("gamma"),
+                clock=clock, memo=memo,
+            )
+        raise ValidationError(
+            f"Greek {canonical!r} does not belong to the time family"
+        )
+
+    def _clock_theta(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float],
+        clock: Optional[str],
+        memo: Dict[str, object],
+    ) -> float:
+        key = f"theta:{clock or 'bare'}"
+        if key not in memo:
+            time_bump_days, time_bump_mode = numerical.clock_advance_args(
+                self, clock
+            )
+            memo[key] = self.calculate_numerical_theta(
+                product,
+                pricing_env,
+                engine,
+                base_price=base_price,
+                time_bump_days=time_bump_days,
+                time_bump_mode=time_bump_mode,
+            )
+        return memo[key]
+
+    def _clock_theta_components(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float],
+        clock: Optional[str],
+        memo: Dict[str, object],
+        greeks_out: Dict[str, float],
+        theta_decomposition_mode: str,
+    ) -> Dict[str, float]:
+        """Clock-qualified theta components.
+
+        Estimate mode scales the annualized carry decay by the step's year
+        fraction under the environment's own day count (1 calendar day on an
+        ACT/365-style env is 1/365 — the incumbent per-day scaling; a
+        Fri->Mon 1TD step is 3/365 there, but 1/244 on a BUSINESS_DAYS env,
+        where a Fri->Sat 1D step correctly carries zero). Exact mode
+        reprices with zeroed r/q through the same clock advance.
+        """
+        key = f"components:{clock or 'bare'}:{theta_decomposition_mode}"
+        if key in memo:
+            return memo[key]
+        if theta_decomposition_mode == "exact":
+            time_bump_days, time_bump_mode = numerical.clock_advance_args(
+                self, clock
+            )
+            components = theta_decomposition.exact_theta_components(
+                self,
+                product,
+                pricing_env,
+                engine,
+                base_price=base_price,
+                time_bump_days=time_bump_days,
+                time_bump_mode=time_bump_mode,
+            )
+            memo[key] = {
+                f"{name}": components[name]
+                for name in ("convexity_theta", "r_theta", "q_theta")
+            }
+            return memo[key]
+
+        theta_value = self._clock_theta(
+            product, pricing_env, engine, base_price, clock, memo
+        )
+        T = product.get_maturity(pricing_env)
+        if T <= 0.0:
+            memo[key] = {
+                "convexity_theta": 0.0,
+                "r_theta": 0.0,
+                "q_theta": 0.0,
+            }
+            return memo[key]
+        if "rho:base" not in memo:
+            memo["rho:base"] = greeks_out.get(
+                "rho"
+            ) if "rho" in greeks_out else self.calculate_numerical_rho(
+                product,
+                pricing_env,
+                engine,
+                base_price=base_price,
+                rate_bump=self._bump_config.rate_bump,
+            )
+        if "dividend_rho:base" not in memo:
+            memo["dividend_rho:base"] = greeks_out.get(
+                "dividend_rho"
+            ) if "dividend_rho" in greeks_out else self.calculate_numerical_dividend_rho(
+                product,
+                pricing_env,
+                engine,
+                base_price=base_price,
+                div_bump=self._bump_config.div_bump,
+            )
+        scenario = numerical.time_scenario(
+            self, product, pricing_env, clock, memo
+        )
+        step_year_fraction = scenario["time_bump"]
+        r = pricing_env.get_rate(T)
+        q = pricing_env.get_div_yield(T)
+        annual_r_theta = -r / T * (memo["rho:base"] / 0.01)
+        annual_q_theta = -q / T * (memo["dividend_rho:base"] / 0.01)
+        r_theta = annual_r_theta * step_year_fraction
+        q_theta = annual_q_theta * step_year_fraction
+        memo[key] = {
+            "convexity_theta": theta_value - r_theta - q_theta,
+            "r_theta": r_theta,
+            "q_theta": q_theta,
+        }
+        return memo[key]
 
     def calculate_numerical_delta(
         self,
@@ -692,6 +925,63 @@ class GreeksCalculator:
         return numerical.numerical_delta_q(
             self, product, pricing_env, engine,
             base_price=base_price, div_bump=div_bump, base_delta=base_delta,
+        )
+
+    def calculate_numerical_charm(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float] = None,
+        clock: Optional[str] = None,
+    ) -> float:
+        """Numerical charm (dDelta/dt) per clock step (None/'1d'/'1td')."""
+        return numerical.numerical_charm(
+            self, product, pricing_env, engine,
+            base_price=base_price, clock=clock,
+        )
+
+    def calculate_numerical_color(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float] = None,
+        clock: Optional[str] = None,
+    ) -> float:
+        """Numerical color (dGamma/dt) per clock step (None/'1d'/'1td')."""
+        return numerical.numerical_color(
+            self, product, pricing_env, engine,
+            base_price=base_price, clock=clock,
+        )
+
+    def calculate_numerical_vega_theta(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float] = None,
+        clock: Optional[str] = None,
+    ) -> float:
+        """Numerical vega decay (dVega/dt, veta) per clock step."""
+        return numerical.numerical_vega_theta(
+            self, product, pricing_env, engine,
+            base_price=base_price, clock=clock,
+        )
+
+    def calculate_gamma_theta(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float] = None,
+        gamma: Optional[float] = None,
+        clock: Optional[str] = None,
+    ) -> float:
+        """Gamma bleed -1/2 sigma^2 S^2 Gamma per day via the PDE identity."""
+        return numerical.numerical_gamma_theta(
+            self, product, pricing_env, engine,
+            base_price=base_price, gamma=gamma, clock=clock,
         )
 
     def calculate_numerical_speed(

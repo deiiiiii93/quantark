@@ -67,6 +67,8 @@ _DEFS = (
     GreekDef("speed"),
     GreekDef("zomma"),
     GreekDef("dividend_volga"),
+    GreekDef("vega_theta", aliases=("veta",), supports_clock=True),
+    GreekDef("gamma_theta", supports_clock=True, requires=("gamma",)),
     GreekDef(
         "convexity_theta",
         default=True,
@@ -113,6 +115,15 @@ def _resolve_name(greek: object) -> str:
     return ALIASES.get(name, name)
 
 
+def _split_clock(name: str) -> Tuple[str, Optional[str]]:
+    """Strip a trailing clock qualifier: theta_1td -> (theta, "1td")."""
+    if name.endswith("_1td"):
+        return name[:-4], "1td"
+    if name.endswith("_1d"):
+        return name[:-3], "1d"
+    return name, None
+
+
 def normalize_greeks(
     greeks: Optional[Sequence[object]],
 ) -> Optional[Set[GreekRequest]]:
@@ -120,7 +131,10 @@ def normalize_greeks(
 
     Returns None for a None request (meaning: the default set), an empty set
     for an explicitly empty request, and otherwise one GreekRequest per
-    distinct requested name.
+    distinct requested name. Clock qualifiers (``theta_1d`` / ``theta_1td``)
+    are accepted only on greeks with ``supports_clock``; the output key uses
+    the canonical spelling plus the qualifier (``veta_1td`` ->
+    ``vega_theta_1td``).
     """
     if greeks is None:
         return None
@@ -129,7 +143,20 @@ def normalize_greeks(
     normalized: Set[GreekRequest] = set()
     for greek in greeks:
         name = _resolve_name(greek)
-        if name not in REGISTRY:
-            raise ValidationError(f"Unknown greek name: {name}")
-        normalized.add(GreekRequest(key=name, canonical=name))
+        if name in REGISTRY:
+            normalized.add(GreekRequest(key=name, canonical=name))
+            continue
+        base, clock = _split_clock(name)
+        base = ALIASES.get(base, base)
+        if clock is not None and base in REGISTRY:
+            if not REGISTRY[base].supports_clock:
+                raise ValidationError(
+                    f"Greek {base!r} does not support the {clock!r} clock "
+                    f"qualifier (requested: {name!r})"
+                )
+            normalized.add(
+                GreekRequest(key=f"{base}_{clock}", canonical=base, clock=clock)
+            )
+            continue
+        raise ValidationError(f"Unknown greek name: {name}")
     return normalized

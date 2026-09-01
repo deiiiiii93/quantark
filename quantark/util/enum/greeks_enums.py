@@ -30,6 +30,8 @@ class EquityGreek(Enum):
     SPEED = "speed"
     ZOMMA = "zomma"
     DIVIDEND_VOLGA = "dividend_volga"
+    VEGA_THETA = "vega_theta"
+    GAMMA_THETA = "gamma_theta"
 
 
 class EquityDividendInputMode(Enum):

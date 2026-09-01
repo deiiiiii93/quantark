@@ -50,3 +50,71 @@ def test_normalize_rejects_unknown():
 def test_normalize_rejects_bad_type():
     with pytest.raises(ValidationError):
         normalize_greeks([3.14])
+
+
+def test_clock_qualified_normalization():
+    requests = normalize_greeks(["theta_1td", "veta_1d"])
+    by_key = {req.key: req for req in requests}
+    assert by_key["theta_1td"].canonical == "theta"
+    assert by_key["theta_1td"].clock == "1td"
+    assert by_key["vega_theta_1d"].canonical == "vega_theta"
+    assert by_key["vega_theta_1d"].clock == "1d"
+
+
+def test_clock_qualifier_rejected_for_non_time_greeks():
+    with pytest.raises(ValidationError):
+        normalize_greeks(["vanna_1td"])
+    with pytest.raises(ValidationError):
+        normalize_greeks(["speed_1d"])
+
+
+def test_every_registered_name_is_computable():
+    """The anti-drift test: every canonical name, alias, and clock-qualified
+    form must produce its key when requested individually. This is the test
+    that makes the charm/color silent-miss class of bug unrepresentable."""
+    from datetime import datetime
+
+    from quantark.asset.equity.engine.analytical.black_scholes_engine import (
+        BlackScholesEngine,
+    )
+    from quantark.asset.equity.product.option.european_vanilla_option import (
+        EuropeanVanillaOption,
+    )
+    from quantark.asset.equity.riskmeasures.greeks_calculator import (
+        GreeksCalculator,
+    )
+    from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+    from quantark.param.div import ContinuousDividendYield
+    from quantark.priceenv import PricingEnvironment
+    from quantark.util.calendar import CalendarType, create_calendar
+    from quantark.util.enum import OptionType
+
+    env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.2),
+        rate_curve=FlatRateCurve(rate=0.02),
+        div_yield=ContinuousDividendYield(div_yield=0.01),
+        valuation_date=datetime(2026, 6, 26),
+        calendar=create_calendar(CalendarType.CHINA_SSE),
+    )
+    product = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, maturity=1.0
+    )
+    calc = GreeksCalculator()
+    engine = BlackScholesEngine()
+
+    names = []
+    for greek_def in REGISTRY.values():
+        names.append(greek_def.name)
+        names.extend(greek_def.aliases)
+        if greek_def.supports_clock:
+            names.append(f"{greek_def.name}_1d")
+            names.append(f"{greek_def.name}_1td")
+
+    for name in names:
+        result = calc.calculate_numerical_greeks(
+            product, env, engine, greeks=[name]
+        )
+        requests = normalize_greeks([name])
+        expected_key = next(iter(requests)).key
+        assert expected_key in result, f"{name!r} produced no {expected_key!r}"

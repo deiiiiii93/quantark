@@ -519,6 +519,232 @@ def get_delta_gamma(
     return base_price, delta, gamma
 
 
+# --- time-family greeks (dual clock: bare / _1d / _1td) ---------------------
+#
+# All time-derivative greeks share one date-advance scenario per clock within
+# a request (memoized on structural string keys, never floats): the advanced
+# product/env pair, plus the delta/gamma/vega evaluated on it.
+
+
+def clock_advance_args(calc, clock: Optional[str]) -> Tuple[int, str]:
+    """Map a clock qualifier to (time_bump_days, time_bump_mode).
+
+    None (bare name) keeps the incumbent BumpConfig resolution; "1d" is one
+    calendar day; "1td" is one trading day on the pricing calendar.
+    """
+    if clock is None:
+        return (
+            calc._bump_config.time_bump_days,
+            getattr(calc._bump_config, "time_bump_mode", "auto"),
+        )
+    if clock == "1d":
+        return 1, "calendar_days"
+    if clock == "1td":
+        return 1, "business_days"
+    raise ValidationError(f"Unknown clock qualifier: {clock}")
+
+
+def time_scenario(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    clock: Optional[str],
+    memo: Dict[str, object],
+) -> Dict[str, object]:
+    """Advanced-date scenario for one clock, memoized per request.
+
+    Mirrors numerical_theta's guard cascade exactly: a non-advancing step,
+    an at-expiry product, a step past maturity, or a time_shift that drops
+    every observation all mark the scenario ``zero`` (the greek is 0.0).
+    """
+    key = f"time_adv:{clock or 'bare'}"
+    if key in memo:
+        return memo[key]
+    time_bump_days, time_bump_mode = clock_advance_args(calc, clock)
+    bumped_date, time_bump, resolved_mode = bump_envs.advance_theta_bump(
+        pricing_env, time_bump_days, time_bump_mode
+    )
+    current_maturity = product.get_maturity(pricing_env)
+    zero = False
+    if time_bump <= 0.0:
+        if current_maturity <= 0.0:
+            zero = True
+        elif resolved_mode == "business_days":
+            raise ValidationError(
+                "Business-day time bump did not advance time: "
+                f"valuation_date={pricing_env.valuation_date}, "
+                f"bumped_date={bumped_date}, time_bump_days={time_bump_days}"
+            )
+        else:
+            zero = True
+    elif current_maturity <= time_bump:
+        zero = True
+
+    product_adv = None
+    env_adv = None
+    if not zero:
+        product_adv = deepcopy(product)
+        env_adv = deepcopy(pricing_env)
+        env_adv.valuation_date = bumped_date
+        dropped_all_observations = product_adv.time_shift(
+            time_bump, bumped_date, env_adv
+        )
+        if dropped_all_observations:
+            zero = True
+
+    scenario = {
+        "zero": zero,
+        "product": product_adv,
+        "env": env_adv,
+        "bumped_date": bumped_date,
+        "time_bump": time_bump,
+        "resolved_mode": resolved_mode,
+    }
+    memo[key] = scenario
+    return scenario
+
+
+def _base_delta_gamma(calc, product, pricing_env, engine, base_price, memo):
+    key = "delta_gamma:base"
+    if key not in memo:
+        memo[key] = get_delta_gamma(calc, product, pricing_env, engine, base_price)
+    return memo[key]
+
+
+def _adv_delta_gamma(calc, engine, scenario, clock, memo):
+    key = f"delta_gamma:adv:{clock or 'bare'}"
+    if key not in memo:
+        memo[key] = get_delta_gamma(
+            calc, scenario["product"], scenario["env"], engine, None
+        )
+    return memo[key]
+
+
+def numerical_charm(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_price: Optional[float] = None,
+    clock: Optional[str] = None,
+    memo: Optional[Dict[str, object]] = None,
+) -> float:
+    """Numerical charm (dDelta/dt): delta at the advanced date minus base
+    delta, per clock step. Inner deltas honor greeks_mode grid readout."""
+    memo = {} if memo is None else memo
+    engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
+    scenario = time_scenario(calc, product, pricing_env, clock, memo)
+    if scenario["zero"]:
+        return 0.0
+    _, base_delta, _ = _base_delta_gamma(
+        calc, product, pricing_env, engine, base_price, memo
+    )
+    _, delta_adv, _ = _adv_delta_gamma(calc, engine, scenario, clock, memo)
+    return delta_adv - base_delta
+
+
+def numerical_color(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_price: Optional[float] = None,
+    clock: Optional[str] = None,
+    memo: Optional[Dict[str, object]] = None,
+) -> float:
+    """Numerical color (dGamma/dt): gamma at the advanced date minus base
+    gamma, per clock step. Shares the advanced scenario with charm."""
+    memo = {} if memo is None else memo
+    engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
+    scenario = time_scenario(calc, product, pricing_env, clock, memo)
+    if scenario["zero"]:
+        return 0.0
+    _, _, base_gamma = _base_delta_gamma(
+        calc, product, pricing_env, engine, base_price, memo
+    )
+    _, _, gamma_adv = _adv_delta_gamma(calc, engine, scenario, clock, memo)
+    return gamma_adv - base_gamma
+
+
+def numerical_vega_theta(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_price: Optional[float] = None,
+    clock: Optional[str] = None,
+    memo: Optional[Dict[str, object]] = None,
+    base_vega: Optional[float] = None,
+) -> float:
+    """Numerical vega decay (dVega/dt, alias veta): vega at the advanced
+    date minus base vega, per clock step."""
+    memo = {} if memo is None else memo
+    engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
+    scenario = time_scenario(calc, product, pricing_env, clock, memo)
+    if scenario["zero"]:
+        return 0.0
+    if base_vega is None:
+        vega_key = "vega:base"
+        if vega_key not in memo:
+            memo[vega_key] = numerical_vega(
+                calc, product, pricing_env, engine, base_price=base_price
+            )
+        base_vega = memo[vega_key]
+    adv_key = f"vega:adv:{clock or 'bare'}"
+    if adv_key not in memo:
+        memo[adv_key] = numerical_vega(
+            calc, scenario["product"], scenario["env"], engine, base_price=None
+        )
+    return memo[adv_key] - base_vega
+
+
+def gamma_theta_days(calc, pricing_env: PricingEnvironment, clock: Optional[str]) -> float:
+    """Days-per-year divisor for gamma_theta under a clock: calendar time
+    decays over 365, trading time over the env's bus_days_in_year. Bare
+    names follow the same resolution as bare theta."""
+    if clock == "1d":
+        return 365.0
+    if clock == "1td":
+        return float(pricing_env.bus_days_in_year)
+    resolved = bump_envs.resolve_theta_bump_mode(
+        pricing_env, getattr(calc._bump_config, "time_bump_mode", "auto")
+    )
+    if resolved == "business_days":
+        return float(pricing_env.bus_days_in_year)
+    return 365.0
+
+
+def numerical_gamma_theta(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_price: Optional[float] = None,
+    gamma: Optional[float] = None,
+    clock: Optional[str] = None,
+    memo: Optional[Dict[str, object]] = None,
+) -> float:
+    """Gamma bleed via the BS-PDE identity: -1/2 sigma^2 S^2 Gamma per day.
+
+    Free when gamma is already measured; deliberately distinct from the
+    convexity_theta residual, which also absorbs observation-schedule and
+    barrier effects on exotics.
+    """
+    memo = {} if memo is None else memo
+    T = product.get_maturity(pricing_env)
+    if T <= 0.0:
+        return 0.0
+    if gamma is None:
+        engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
+        _, _, gamma = _base_delta_gamma(
+            calc, product, pricing_env, engine, base_price, memo
+        )
+    strike = getattr(product, "strike", pricing_env.spot)
+    sigma = pricing_env.get_vol(strike, T)
+    days = gamma_theta_days(calc, pricing_env, clock)
+    return -0.5 * sigma**2 * pricing_env.spot**2 * gamma / days
+
+
 def linear_greeks(product: BaseEquityProduct, price: float) -> Dict[str, float]:
     """
     Greeks for linear (delta-one) products.

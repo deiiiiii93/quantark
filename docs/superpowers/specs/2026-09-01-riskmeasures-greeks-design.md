@@ -215,7 +215,7 @@ time, carry accrues on calendar time):
 | Component | `_1d` | `_1td` |
 |---|---|---|
 | `theta` (repricing) | price(d+1cd) − price(d) | price(next TD) − price(d); carries the *actual* calendar gap (Fri→Mon = 3 days of carry) |
-| `r_theta`, `q_theta` (estimate) | annual component × 1/365 | annual component × actual calendar year-fraction of the step, `(bumped_date − d).days / 365` |
+| `r_theta`, `q_theta` (estimate) | annual component × step year-fraction (1/365 on an ACT/365-style env — the incumbent per-day scaling) | annual component × step year-fraction under the env's own day count (Fri→Mon = 3/365 on a calendar env; 1/244 on a BUSINESS_DAYS env). Amended during implementation from "calendar days/365": on a BUSINESS_DAYS env a Fri→Sat 1D step prices zero time passing (theta_1d = 0), so scaling carry by the raw calendar gap would fabricate carry the repriced theta does not contain; the env's year fraction keeps theta and its components on the same clock. |
 | `gamma_theta` | −½σ²S²Γ / 365 | −½σ²S²Γ / `pricing_env.bus_days_in_year` |
 | `charm`, `color`, `vega_theta` | per their clock's advance step | same |
 | exact mode | correct under either clock automatically (reprices through the same advance) | same |
