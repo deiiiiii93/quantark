@@ -2,7 +2,6 @@
 Greeks calculation for equity derivatives.
 """
 
-from copy import deepcopy
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -20,6 +19,8 @@ from quantark.asset.equity.riskmeasures.bucketed_coordinates import (
 from quantark.asset.equity.riskmeasures.greeks import (
     analytical,
     bump_envs,
+    numerical,
+    registry,
     theta_decomposition,
 )
 from quantark.asset.equity.riskmeasures.bucketed_greeks import (
@@ -30,9 +31,8 @@ from quantark.asset.equity.riskmeasures.bucketed_greeks import (
     BucketedGreeksResult,
 )
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import CommonGreek, EquityGreek
 from quantark.util.enum.engine_enums import EngineType, GreeksCalculationMode
-from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class GreeksCalculator:
@@ -81,14 +81,7 @@ class GreeksCalculator:
             raise ValidationError(f"Unknown greeks method: {method}")
 
         requested = self._normalize_greeks(greeks)
-        analytical_supported = {
-            "price",
-            "delta",
-            "gamma",
-            "vega",
-            "theta",
-            "rho",
-        }
+        analytical_supported = registry.ANALYTICAL_AUTO_SET
 
         if method in ("auto", "analytical") and isinstance(
             product, EuropeanVanillaOption
@@ -111,51 +104,10 @@ class GreeksCalculator:
     def _normalize_greeks(
         self, greeks: Optional[Sequence[object]]
     ) -> Optional[set[str]]:
-        if greeks is None:
+        requests = registry.normalize_greeks(greeks)
+        if requests is None:
             return None
-        if len(greeks) == 0:
-            return set()
-        aliases = {
-            "deltaq": "delta_q",
-            "deltadq": "delta_q",
-            "d_delta_d_q": "delta_q",
-            "d_delta_dq": "delta_q",
-            "rhoq": "dividend_rho",
-            "div_rho": "dividend_rho",
-            "dividendrho": "dividend_rho",
-        }
-        allowed = {
-            "price",
-            "delta",
-            "gamma",
-            "vega",
-            "theta",
-            "rho",
-            "dividend_rho",
-            "vanna",
-            "volga",
-            "delta_q",
-            "charm",
-            "color",
-            "convexity_theta",
-            "r_theta",
-            "q_theta",
-        }
-        normalized: set[str] = set()
-        for greek in greeks:
-            if isinstance(greek, (CommonGreek, EquityGreek)):
-                name = greek.value
-            elif isinstance(greek, str):
-                name = greek.strip().lower()
-            else:
-                raise ValidationError(
-                    f"Unsupported greek identifier type: {type(greek).__name__}"
-                )
-            name = aliases.get(name, name)
-            if name not in allowed:
-                raise ValidationError(f"Unknown greek name: {name}")
-            normalized.add(name)
-        return normalized
+        return {req.key for req in requests}
 
     def _has_custom_greeks(self, engine: BaseEngine) -> bool:
         """Return True if engine overrides calculate_greeks()."""
@@ -366,35 +318,9 @@ class GreeksCalculator:
         base_price: Optional[float],
     ) -> Tuple[float, float, float]:
         """Get base price, delta, and gamma via engine or bump method."""
-        if self._should_use_engine_greeks(engine):
-            engine_greeks = engine.calculate_greeks(product, pricing_env)
-            if base_price is None:
-                base_price = engine_greeks["price"]
-            return base_price, engine_greeks["delta"], engine_greeks["gamma"]
-
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
-        spot_prices = self._spot_bumped_prices(
-            product, pricing_env, engine, self._bump_config.spot_bump, base_price=base_price
-        )[1:]
-
-        delta = self.calculate_numerical_delta(
-            product,
-            pricing_env,
-            engine,
-            base_price=base_price,
-            spot_prices=spot_prices,
-            bump=self._bump_config.spot_bump,
+        return numerical.get_delta_gamma(
+            self, product, pricing_env, engine, base_price
         )
-        gamma = self.calculate_numerical_gamma(
-            product,
-            pricing_env,
-            engine,
-            base_price=base_price,
-            spot_prices=spot_prices,
-            bump=self._bump_config.spot_bump,
-        )
-
-        return base_price, delta, gamma
 
     def calculate_analytical_greeks(
         self,
@@ -440,18 +366,7 @@ class GreeksCalculator:
         """
         requested = self._normalize_greeks(greeks)
         if requested is None:
-            requested = {
-                "price",
-                "delta",
-                "gamma",
-                "vega",
-                "theta",
-                "rho",
-                "dividend_rho",
-                "convexity_theta",
-                "r_theta",
-                "q_theta",
-            }
+            requested = set(registry.DEFAULT_SET)
 
         if product.is_linear:
             base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
@@ -595,22 +510,14 @@ class GreeksCalculator:
         bump: Optional[float] = None,
     ) -> float:
         """Numerical delta using central spot bump."""
-        bump = bump if bump is not None else self._bump_config.spot_bump
-        base_price, price_up_spot, price_down_spot = self._spot_bumped_prices(
+        return numerical.numerical_delta(
+            self,
             product,
             pricing_env,
             engine,
-            bump,
             base_price=base_price,
-            reuse=spot_prices,
-        )
-        return self._calculate_sensitivity(
-            base_price,
-            price_up_spot,
-            price_down_spot,
+            spot_prices=spot_prices,
             bump=bump,
-            scale=pricing_env.spot,
-            mode="central",
         )
 
     def calculate_numerical_gamma(
@@ -623,22 +530,14 @@ class GreeksCalculator:
         bump: Optional[float] = None,
     ) -> float:
         """Numerical gamma using central spot bump."""
-        bump = bump if bump is not None else self._bump_config.spot_bump
-        base_price, price_up_spot, price_down_spot = self._spot_bumped_prices(
+        return numerical.numerical_gamma(
+            self,
             product,
             pricing_env,
             engine,
-            bump,
             base_price=base_price,
-            reuse=spot_prices,
-        )
-        return self._calculate_sensitivity(
-            base_price,
-            price_up_spot,
-            price_down_spot,
+            spot_prices=spot_prices,
             bump=bump,
-            scale=pricing_env.spot,
-            mode="second_order",
         )
 
     def calculate_numerical_vega(
@@ -650,18 +549,9 @@ class GreeksCalculator:
         vol_bump: Optional[float] = None,
     ) -> float:
         """Numerical vega from a vol bump."""
-        engine = self._resolve_bump_engine(product, pricing_env, engine)
-        vol_bump = vol_bump if vol_bump is not None else self._bump_config.vol_bump
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
-        T = product.get_maturity(pricing_env)
-        strike = getattr(product, "strike", pricing_env.spot)
-        current_vol = pricing_env.get_vol(strike, T)
-        env_up_vol = self._build_vol_bumped_env(
-            pricing_env, product, current_vol, vol_bump, direction=1.0
-        )
-        price_up_vol = engine.price(product, env_up_vol)
-        return self._calculate_sensitivity(
-            base_price, price_up_vol, bump=vol_bump, mode="one_sided"
+        return numerical.numerical_vega(
+            self, product, pricing_env, engine,
+            base_price=base_price, vol_bump=vol_bump,
         )
 
     def calculate_numerical_volga(
@@ -673,35 +563,9 @@ class GreeksCalculator:
         vol_bump: Optional[float] = None,
     ) -> float:
         """Numerical volga (second derivative wrt vol) using vol bumps."""
-        engine = self._resolve_bump_engine(product, pricing_env, engine)
-        vol_bump = vol_bump if vol_bump is not None else self._bump_config.vol_bump
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
-        T = product.get_maturity(pricing_env)
-        strike = getattr(product, "strike", pricing_env.spot)
-        current_vol = pricing_env.get_vol(strike, T)
-
-        if current_vol - vol_bump <= 0:
-            env_up = self._build_vol_bumped_env(
-                pricing_env, product, current_vol, vol_bump, direction=1.0
-            )
-            vega_base = self.calculate_numerical_vega(
-                product, pricing_env, engine, base_price=base_price, vol_bump=vol_bump
-            )
-            vega_up = self.calculate_numerical_vega(
-                product, env_up, engine, base_price=None, vol_bump=vol_bump
-            )
-            return (vega_up - vega_base) / vol_bump
-
-        env_up = self._build_vol_bumped_env(
-            pricing_env, product, current_vol, vol_bump, direction=1.0
-        )
-        env_down = self._build_vol_bumped_env(
-            pricing_env, product, current_vol, vol_bump, direction=-1.0
-        )
-        price_up = engine.price(product, env_up)
-        price_down = engine.price(product, env_down)
-        return self._calculate_sensitivity(
-            base_price, price_up, price_down, bump=vol_bump, mode="second_order"
+        return numerical.numerical_volga(
+            self, product, pricing_env, engine,
+            base_price=base_price, vol_bump=vol_bump,
         )
 
     def calculate_numerical_vanna(
@@ -713,52 +577,10 @@ class GreeksCalculator:
         vol_bump: Optional[float] = None,
     ) -> float:
         """Numerical vanna (cross derivative wrt spot and vol)."""
-        engine = self._resolve_bump_engine(product, pricing_env, engine)
-        vol_bump = vol_bump if vol_bump is not None else self._bump_config.vol_bump
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
-        T = product.get_maturity(pricing_env)
-        strike = getattr(product, "strike", pricing_env.spot)
-        current_vol = pricing_env.get_vol(strike, T)
-
-        env_up = self._build_vol_bumped_env(
-            pricing_env, product, current_vol, vol_bump, direction=1.0
+        return numerical.numerical_vanna(
+            self, product, pricing_env, engine,
+            base_price=base_price, vol_bump=vol_bump,
         )
-        env_down = self._build_vol_bumped_env(
-            pricing_env, product, current_vol, vol_bump, direction=-1.0
-        )
-
-        if current_vol - vol_bump <= 0:
-            base_delta = self.calculate_numerical_delta(
-                product,
-                pricing_env,
-                engine,
-                base_price=base_price,
-                bump=self._bump_config.spot_bump,
-            )
-            delta_up = self.calculate_numerical_delta(
-                product,
-                env_up,
-                engine,
-                base_price=base_price,
-                bump=self._bump_config.spot_bump,
-            )
-            return (delta_up - base_delta) / vol_bump
-
-        delta_up = self.calculate_numerical_delta(
-            product,
-            env_up,
-            engine,
-            base_price=base_price,
-            bump=self._bump_config.spot_bump,
-        )
-        delta_down = self.calculate_numerical_delta(
-            product,
-            env_down,
-            engine,
-            base_price=base_price,
-            bump=self._bump_config.spot_bump,
-        )
-        return (delta_up - delta_down) / (2.0 * vol_bump)
 
     def calculate_numerical_theta(
         self,
@@ -777,49 +599,15 @@ class GreeksCalculator:
         advances by valid pricing-calendar business days, and "auto" uses
         business days for BUSINESS_DAYS pricing environments with a calendar.
         """
-        engine = self._resolve_bump_engine(product, pricing_env, engine)
-        time_bump_days = (
-            time_bump_days
-            if time_bump_days is not None
-            else self._bump_config.time_bump_days
+        return numerical.numerical_theta(
+            self,
+            product,
+            pricing_env,
+            engine,
+            base_price=base_price,
+            time_bump_days=time_bump_days,
+            time_bump_mode=time_bump_mode,
         )
-        time_bump_mode = (
-            time_bump_mode
-            if time_bump_mode is not None
-            else getattr(self._bump_config, "time_bump_mode", "auto")
-        )
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
-        product_theta = deepcopy(product)
-        env_theta = deepcopy(pricing_env)
-        current_maturity = product.get_maturity(pricing_env)
-
-        bumped_date, time_bump, resolved_mode = self._advance_theta_bump(
-            pricing_env, time_bump_days, time_bump_mode
-        )
-
-        if time_bump <= 0.0:
-            if current_maturity <= 0.0:
-                return 0.0
-            if resolved_mode == "business_days":
-                raise ValidationError(
-                    "Business-day theta bump did not advance time: "
-                    f"valuation_date={pricing_env.valuation_date}, "
-                    f"bumped_date={bumped_date}, time_bump_days={time_bump_days}"
-                )
-            return 0.0
-        if current_maturity <= time_bump:
-            return 0.0
-
-        env_theta.valuation_date = bumped_date
-        dropped_all_observations = product_theta.time_shift(
-            time_bump, bumped_date, env_theta
-        )
-
-        if dropped_all_observations:
-            return 0.0
-
-        price_theta = engine.price(product_theta, env_theta)
-        return price_theta - base_price
 
     def _advance_theta_bump(
         self,
@@ -848,20 +636,10 @@ class GreeksCalculator:
         rate_bump: Optional[float] = None,
     ) -> float:
         """Numerical rho from a rate bump (per 1% rate change)."""
-        engine = self._resolve_bump_engine(product, pricing_env, engine)
-        rate_bump = rate_bump if rate_bump is not None else self._bump_config.rate_bump
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
-        env_up_rate = deepcopy(pricing_env)
-        from quantark.param.rrf import FlatRateCurve
-
-        T = product.get_maturity(pricing_env)
-        current_rate = pricing_env.get_rate(T)
-        env_up_rate.rate_curve = FlatRateCurve(current_rate + rate_bump)
-        price_up_rate = engine.price(product, env_up_rate)
-        raw = self._calculate_sensitivity(
-            base_price, price_up_rate, bump=rate_bump, mode="one_sided"
+        return numerical.numerical_rho(
+            self, product, pricing_env, engine,
+            base_price=base_price, rate_bump=rate_bump,
         )
-        return raw * (0.01 / rate_bump)
 
     def calculate_numerical_dividend_rho(
         self,
@@ -871,37 +649,11 @@ class GreeksCalculator:
         base_price: Optional[float] = None,
         div_bump: Optional[float] = None,
     ) -> float:
-        """
-        Numerical dividend_rho (psi) from dividend yield bump.
-
-        Measures price sensitivity to dividend yield changes:
-            dividend_rho = dV/dq
-
-        Args:
-            product: The derivative product
-            pricing_env: Pricing environment
-            engine: Pricing engine
-            base_price: Pre-calculated base price
-            div_bump: Absolute dividend yield bump (uses config if None)
-
-        Returns:
-            Dividend rho value (price change per 1% div_yield change).
-            Negative for call options (higher div = lower call price).
-            Positive for put options (higher div = higher put price).
-        """
-        engine = self._resolve_bump_engine(product, pricing_env, engine)
-        div_bump = div_bump if div_bump is not None else self._bump_config.div_bump
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
-        T = product.get_maturity(pricing_env)
-        current_div = pricing_env.get_div_yield(T)
-        env_up_div = self._build_div_bumped_env(
-            pricing_env, product, current_div, div_bump, direction=1.0
+        """Numerical dividend_rho (dV/dq, per 1% div_yield change)."""
+        return numerical.numerical_dividend_rho(
+            self, product, pricing_env, engine,
+            base_price=base_price, div_bump=div_bump,
         )
-        price_up_div = engine.price(product, env_up_div)
-        raw = self._calculate_sensitivity(
-            base_price, price_up_div, bump=div_bump, mode="one_sided"
-        )
-        return raw * (0.01 / div_bump)
 
     def calculate_numerical_delta_q(
         self,
@@ -913,42 +665,10 @@ class GreeksCalculator:
         base_delta: Optional[float] = None,
     ) -> float:
         """Numerical dDelta/dq via dividend yield bumps."""
-        engine = self._resolve_bump_engine(product, pricing_env, engine)
-        div_bump = div_bump if div_bump is not None else self._bump_config.div_bump
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
-        T = product.get_maturity(pricing_env)
-        current_div = pricing_env.get_div_yield(T)
-
-        if base_delta is None:
-            base_delta = self.calculate_numerical_delta(
-                product,
-                pricing_env,
-                engine,
-                base_price=base_price,
-                bump=self._bump_config.spot_bump,
-            )
-
-        env_up = self._build_div_bumped_env(
-            pricing_env, product, current_div, div_bump, direction=1.0
+        return numerical.numerical_delta_q(
+            self, product, pricing_env, engine,
+            base_price=base_price, div_bump=div_bump, base_delta=base_delta,
         )
-        env_down = self._build_div_bumped_env(
-            pricing_env, product, current_div, div_bump, direction=-1.0
-        )
-        delta_up = self.calculate_numerical_delta(
-            product,
-            env_up,
-            engine,
-            base_price=base_price,
-            bump=self._bump_config.spot_bump,
-        )
-        delta_down = self.calculate_numerical_delta(
-            product,
-            env_down,
-            engine,
-            base_price=base_price,
-            bump=self._bump_config.spot_bump,
-        )
-        return (delta_up - delta_down) / (2.0 * div_bump)
 
     def calculate_futures_delta_buckets(
         self,
@@ -1083,32 +803,8 @@ class GreeksCalculator:
     def _greeks_for_linear(
         self, product: BaseEquityProduct, price: float
     ) -> Dict[str, float]:
-        """
-        Calculate Greeks for linear (delta-one) products.
-
-        Delta-one products have trivial Greeks:
-        - Delta = 1.0 (always)
-        - Gamma, Vega, Theta, Rho, Dividend Rho = 0.0 (no optionality)
-
-        Args:
-            product: Delta-one product
-            price: Current price
-
-        Returns:
-            Dictionary of Greeks
-        """
-        return {
-            "price": price,
-            "delta": 1.0,
-            "gamma": 0.0,
-            "vega": 0.0,
-            "theta": 0.0,
-            "convexity_theta": 0.0,
-            "r_theta": 0.0,
-            "q_theta": 0.0,
-            "rho": 0.0,
-            "dividend_rho": 0.0,
-        }
+        """Greeks for linear (delta-one) products; see greeks.numerical."""
+        return numerical.linear_greeks(product, price)
 
     def _greeks_at_expiry(
         self, product: EuropeanVanillaOption, spot: float
