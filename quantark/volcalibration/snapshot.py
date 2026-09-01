@@ -17,7 +17,15 @@ CONVENTIONS = (CONVENTION_LISTED, CONVENTION_FX_DELTA)
 
 PRICE_FIELD_SETTLEMENT = "settlement"
 PRICE_FIELD_MID_OR_LAST = "mid_or_last"
-PRICE_FIELDS = (PRICE_FIELD_SETTLEMENT, PRICE_FIELD_MID_OR_LAST)
+# Delta-quoted books publish implied volatilities, not option prices.  Naming
+# that explicitly keeps quote_price honest: there is no price to resolve, so
+# it refuses rather than inventing one from a vol.
+PRICE_FIELD_MID_IV = "mid_iv"
+PRICE_FIELDS = (
+    PRICE_FIELD_SETTLEMENT,
+    PRICE_FIELD_MID_OR_LAST,
+    PRICE_FIELD_MID_IV,
+)
 
 
 def _as_date(value) -> date:
@@ -185,6 +193,58 @@ class QuoteSnapshot:
             expiries=tuple(dict(e) for e in expiries),
         )
 
+    @classmethod
+    def from_legacy_fx(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        symbol: Optional[str] = None,
+    ) -> "QuoteSnapshot":
+        """Lift a CFETS delta-quoted payload into the canonical envelope.
+
+        Unlike the two listed shapes, this one is self-describing: it carries
+        its own trade date, spot and currency pair, so nothing is supplied by
+        the caller except an optional symbol override.  Its tenor slices become
+        the canonical ``expiries`` verbatim -- the delta convention, published
+        strikes and rates all live inside them, and it is the FX normalizer's
+        job to read them, not this lifter's.
+        """
+        for key in ("trade_date", "spot", "slices"):
+            if key not in payload:
+                raise ValidationError(f"CFETS snapshot requires {key!r}")
+        slices = payload["slices"]
+        if not isinstance(slices, list) or not slices:
+            raise ValidationError("CFETS snapshot requires a non-empty 'slices' list")
+        provenance = payload.get("provenance", {})
+        shas = (
+            provenance.get("payload_sha256")
+            if isinstance(provenance, Mapping)
+            else None
+        )
+        return cls(
+            schema_version=SCHEMA_VERSION,
+            convention=CONVENTION_FX_DELTA,
+            trade_date=_as_date(payload["trade_date"]),
+            symbol=str(symbol or payload.get("currency_pair", "")),
+            spot=_positive(payload["spot"], "spot"),
+            price_field=PRICE_FIELD_MID_IV,
+            source={
+                "vendor": payload.get("source_class", "cfets_public_composite"),
+                "price_field": PRICE_FIELD_MID_IV,
+                "quote_time": payload.get("quote_time"),
+                "delta_convention": payload.get("delta_convention"),
+                # CFETS publishes one sha per pillar endpoint, not one per
+                # snapshot; the canonical field takes whatever single value
+                # exists, and None is honest when there is no single one.
+                "sha256": shas if isinstance(shas, str) else None,
+                "payload_sha256": shas,
+                "source_url": provenance.get("curve_endpoint")
+                if isinstance(provenance, Mapping)
+                else None,
+            },
+            expiries=tuple(dict(row) for row in slices),
+        )
+
     # ------------------------------------------------------------ accessors
     @property
     def sha256(self) -> Optional[str]:
@@ -233,4 +293,11 @@ class QuoteSnapshot:
                     "bid/ask pair and no 'last' key"
                 )
             return float(last)
+        if self.price_field == PRICE_FIELD_MID_IV:
+            raise ValidationError(
+                "price_field_mismatch: snapshot declares "
+                f"{PRICE_FIELD_MID_IV!r}, which quotes implied volatility rather "
+                "than an option price; read the vol directly instead of asking "
+                "for a price"
+            )
         raise ValidationError(f"unsupported price_field {self.price_field!r}")

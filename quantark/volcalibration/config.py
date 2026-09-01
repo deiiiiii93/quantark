@@ -21,8 +21,10 @@ from quantark.volcalibration.snapshot import (
     CONVENTION_FX_DELTA,
     CONVENTION_LISTED,
     CONVENTIONS,
+    PRICE_FIELD_MID_IV,
     PRICE_FIELD_MID_OR_LAST,
     PRICE_FIELD_SETTLEMENT,
+    PRICE_FIELDS,
 )
 
 HESTON_PARAMETER_NAMES = ("v0", "kappa", "theta", "sigma", "rho")
@@ -200,11 +202,23 @@ class UnderlyingConfig:
                 f"underlying.convention must be one of {list(CONVENTIONS)}, "
                 f"got {self.convention!r}"
             )
-        if self.price_field not in (PRICE_FIELD_SETTLEMENT, PRICE_FIELD_MID_OR_LAST):
+        if self.price_field not in PRICE_FIELDS:
             raise ValidationError(
-                "underlying.price_field must be "
-                f"{PRICE_FIELD_SETTLEMENT!r} or {PRICE_FIELD_MID_OR_LAST!r}, "
+                f"underlying.price_field must be one of {list(PRICE_FIELDS)}, "
                 f"got {self.price_field!r}"
+            )
+        # A convention and a price field are not independent: a listed book
+        # quotes prices and a delta-quoted book quotes vols, so a mismatched
+        # pair describes a venue that does not exist.
+        allowed = (
+            (PRICE_FIELD_MID_IV,)
+            if self.convention == CONVENTION_FX_DELTA
+            else (PRICE_FIELD_SETTLEMENT, PRICE_FIELD_MID_OR_LAST)
+        )
+        if self.price_field not in allowed:
+            raise ValidationError(
+                f"underlying.convention {self.convention!r} requires "
+                f"price_field in {list(allowed)}, got {self.price_field!r}"
             )
 
 

@@ -37,6 +37,26 @@ EXTRAPOLATION_POLICY = "flat_total_variance"
 ARTIFACT_SCHEMA_VERSION = 1
 _STRIKE_MATCH_ATOL = 1e-6
 
+# How the shared strike grid is built.  This is not a free choice: it follows
+# from whether the book's expiries share a strike ladder at all.  A listed
+# ladder does, so its grid is the strikes the market actually quoted.  A
+# delta-quoted book does not -- every tenor's 25-delta strike is its own -- so
+# there is no shared observed strike to build a grid from, and the grid has to
+# be laid down over the interval all tenors cover.  The normalizer declares
+# which rule its book obeys in ``QuoteSet.universe``; nothing is inferred here,
+# because a silent switch would hide an empty intersection as a design choice.
+STRIKE_GRID_SHARED_OBSERVED = "shared_observed_within_quoted_range_overlap"
+STRIKE_GRID_UNIFORM_OVER_OVERLAP = "uniform_over_quoted_range_overlap"
+STRIKE_GRID_RULES = (STRIKE_GRID_SHARED_OBSERVED, STRIKE_GRID_UNIFORM_OVER_OVERLAP)
+DEFAULT_UNIFORM_GRID_SIZE = 31
+
+_STRIKE_GRID_LABELS = {
+    STRIKE_GRID_SHARED_OBSERVED: "shared_by_>=2_expiries_within_quoted_range_overlap",
+    STRIKE_GRID_UNIFORM_OVER_OVERLAP: (
+        "uniform_within_quoted_range_overlap_of_all_expiries"
+    ),
+}
+
 
 def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
     """Assemble a rectangular strike x maturity IV grid from a QuoteSet.
@@ -49,6 +69,14 @@ def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
     trimmed to that shared domain; off-grid wing nodes are counted for audit,
     never silently dropped.  Dropping an expiry can widen the overlap, so the
     trim iterates to its fixed point.
+
+    Under ``STRIKE_GRID_UNIFORM_OVER_OVERLAP`` the overlap is still the domain,
+    but nodes are neither trimmed nor dropped: a five-pillar delta-quoted slice
+    keeps all five, and the grid is laid uniformly across the interval every
+    expiry covers.  ``sabr_smoothed_surface`` then fits each slice to its own
+    observed nodes and evaluates it on that grid, so the artifact's
+    ``raw_points`` remain the observed quotes and only ``points`` are model
+    values.
     """
     per_expiry: List[Dict[str, Any]] = []
     for e in quotes.expiries:
@@ -81,6 +109,17 @@ def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
                 f"{per_expiry[i]['expiry_date']} and "
                 f"{per_expiry[i + 1]['expiry_date']} share T={per_expiry[i]['T']}",
             )
+
+    universe_in = dict(quotes.universe or {})
+    grid_rule = str(universe_in.get("strike_grid_rule", STRIKE_GRID_SHARED_OBSERVED))
+    if grid_rule not in STRIKE_GRID_RULES:
+        raise ValidationError(
+            f"unknown strike_grid_rule {grid_rule!r}; known rules are "
+            f"{list(STRIKE_GRID_RULES)}"
+        )
+
+    if grid_rule == STRIKE_GRID_UNIFORM_OVER_OVERLAP:
+        return _uniform_grid_surface(quotes, per_expiry, universe_in)
 
     dropped_trimmed: List[Dict[str, Any]] = []
     grid_lo = grid_hi = 0.0
@@ -159,6 +198,72 @@ def build_raw_surface(quotes: QuoteSet) -> Dict[str, Any]:
             "filtered_quote_counts": universe.get("filtered_quote_counts", {}),
             "excluded_expiries": list(universe.get("excluded_expiries", []))
             + dropped_trimmed,
+        },
+    }
+
+
+def _uniform_grid_surface(
+    quotes: QuoteSet,
+    per_expiry: List[Dict[str, Any]],
+    universe: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Grid assembly for books whose expiries share no observed strike.
+
+    Every expiry keeps all its nodes; the grid spans the interval all expiries
+    cover, so no slice is evaluated outside its own quoted range.
+    """
+    grid_size = int(universe.get("strike_grid_size", DEFAULT_UNIFORM_GRID_SIZE))
+    if grid_size < MIN_COMMON_STRIKES:
+        raise ValidationError(
+            f"strike_grid_size {grid_size} is below min_common_strikes "
+            f"{MIN_COMMON_STRIKES}"
+        )
+    for pe in per_expiry:
+        if len(pe["points"]) < MIN_STRIKES_PER_EXPIRY:
+            raise AdmissionError(
+                AdmissionReason.INSUFFICIENT_EXPIRIES,
+                f"expiry {pe['expiry_date']} has {len(pe['points'])} nodes "
+                f"(need >= {MIN_STRIKES_PER_EXPIRY})",
+            )
+        pe["off_grid_node_count"] = 0
+
+    grid_lo = max(min(k for k, _ in pe["points"]) for pe in per_expiry)
+    grid_hi = min(max(k for k, _ in pe["points"]) for pe in per_expiry)
+    if not grid_hi > grid_lo:
+        raise AdmissionError(
+            AdmissionReason.INSUFFICIENT_COMMON_STRIKES,
+            f"quoted strike ranges do not overlap: [{grid_lo}, {grid_hi}]",
+        )
+    strikes = np.linspace(grid_lo, grid_hi, grid_size).tolist()
+
+    maturities = [pe["T"] for pe in per_expiry]
+    grid = np.empty((len(maturities), len(strikes)))
+    for i, pe in enumerate(per_expiry):
+        ks = np.array([k for k, _ in pe["points"]])
+        vs = np.array([v for _, v in pe["points"]])
+        # Placeholder values only: sabr_smoothed_surface refits each slice to
+        # pe["points"] and overwrites this row.
+        grid[i] = np.interp(strikes, ks, vs)
+
+    if not np.all(np.isfinite(grid)) or np.any(grid <= 0.0):
+        raise ValidationError("grid assembly produced non-positive or non-finite IVs")
+
+    return {
+        "s0": quotes.spot,
+        "strikes": strikes,
+        "maturities": maturities,
+        "iv_grid": grid.tolist(),
+        "per_expiry": per_expiry,
+        "node_universe": {
+            "node_count": int(universe.get("node_count", 0)),
+            "expiry_count": int(universe.get("expiry_count", 0)),
+            "filtered_quote_counts": universe.get("filtered_quote_counts", {}),
+            "excluded_expiries": list(universe.get("excluded_expiries", [])),
+            # Every grid value is a model value; the observed quotes survive as
+            # per_expiry raw_points.  Saying so keeps a reader from mistaking
+            # grid width for liquidity.
+            "grid_values_are_model_values": True,
+            "quoted_range_overlap": [grid_lo, grid_hi],
         },
     }
 
@@ -378,7 +483,13 @@ def build_artifact(
             "maximum_rmse_divided_by_forward": MAX_PARITY_RMSE_FORWARD_RATIO,
         },
         "static_arbitrage_validation": validation_method,
-        "strike_grid": "shared_by_>=2_expiries_within_quoted_range_overlap",
+        "strike_grid": _STRIKE_GRID_LABELS[
+            str(
+                (quotes.universe or {}).get(
+                    "strike_grid_rule", STRIKE_GRID_SHARED_OBSERVED
+                )
+            )
+        ],
         "sabr_fit_domain": "nodes_inside_strike_grid_only",
     }
     return smoothed
