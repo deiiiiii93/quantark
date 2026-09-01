@@ -394,7 +394,7 @@ surface:
   sabr_beta: 1.0
   min_expiries: 2
   min_strikes_per_expiry: 5
-  min_common_strikes: 5
+  min_common_strikes: 3
   extrapolation: flat_beyond_last_listed_expiry
   parity_gate: {max_abs_implied_rate: 0.10, max_rmse_over_forward: 0.01}
 calibration:
@@ -411,6 +411,11 @@ Every value currently hard-coded as a module constant in
 `MIN_STRIKES_PER_EXPIRY`, `MIN_COMMON_STRIKES`, `EXTRAPOLATION_POLICY`) becomes
 config with that value as its default, so the config above is what is run
 today, written down. The resolved config is echoed into both manifests.
+
+The frozen defaults above are the values the 787 admitted MO surfaces were
+built with, read back from the live manifest's `config` block on 2026-09-01;
+`min_common_strikes` is 3 (the butterfly check needs three grid strikes), not
+5 as an earlier draft of this section said.
 
 ### 6.2 Verbs
 
