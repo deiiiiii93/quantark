@@ -17,7 +17,17 @@ from quantark.volcalibration.calibrate import (
     CalibratedVolModel,
     VolModelCalibrator,
 )
-from quantark.volcalibration.config import HESTON_PRESETS, VolModelCalibrationConfig
+from quantark.volcalibration.calibration_set import CalibrationSet
+from quantark.volcalibration.config import (
+    HESTON_PRESETS,
+    CalibrationRunConfig,
+    RunConfig,
+    SurfaceBuildConfig,
+    UnderlyingConfig,
+    VolModelCalibrationConfig,
+)
+from quantark.volcalibration.store import StoreLayout
+from quantark.volcalibration.yaml_loader import load_run_config
 
 # The producer/consumer contract lives in the shared param layer so backtest
 # and modelvalidation can depend on it without depending on this package.
@@ -35,6 +45,13 @@ __all__ = [
     "VolModelCalibrationConfig",
     "HESTON_PRESETS",
     "VOL_MODEL_VARIANTS",
+    "RunConfig",
+    "UnderlyingConfig",
+    "SurfaceBuildConfig",
+    "CalibrationRunConfig",
+    "load_run_config",
+    "StoreLayout",
+    "CalibrationSet",
     "IvSurfaceArtifact",
     "VolSurfaceHistory",
 ]

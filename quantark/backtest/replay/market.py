@@ -137,6 +137,13 @@ class AutocallableMarketDataSet:
     not participate in the ``dates`` calendar intersection: surfaces attach
     to the existing calendar dates via the manifest carry-forward gap policy
     (see :class:`quantark.param.vol.surface_history.VolSurfaceHistory`).
+
+    ``calibration_set`` is the supported way to attach one: a
+    :class:`quantark.volcalibration.calibration_set.CalibrationSet` validates
+    the store's manifests and owns its paths, so nothing here reaches into a
+    directory.  It is annotated ``Any`` rather than by its real type on
+    purpose -- naming the type would make every backtest import pull the
+    SABR/Heston calibration stack through ``quantark.volcalibration``.
     """
 
     spot_data: pd.DataFrame
@@ -145,6 +152,23 @@ class AutocallableMarketDataSet:
     futures_data: pd.DataFrame
     metadata: Dict[str, Any] | None = None
     surface_history: Optional[VolSurfaceHistory] = None
+    calibration_set: Optional[Any] = None
+
+    def __post_init__(self) -> None:
+        if self.calibration_set is None:
+            return
+        if self.surface_history is not None:
+            raise ValidationError(
+                "supply either surface_history or calibration_set, not both; "
+                "a CalibrationSet already carries its surface history"
+            )
+        history = getattr(self.calibration_set, "surface_history", None)
+        if history is None:
+            raise ValidationError(
+                "calibration_set must expose a surface_history "
+                "(build it with CalibrationSet.open)"
+            )
+        self.surface_history = history
 
     @classmethod
     def from_dataframes(
@@ -156,6 +180,7 @@ class AutocallableMarketDataSet:
         futures_data: pd.DataFrame,
         metadata: Optional[Dict[str, Any]] = None,
         surface_history: Optional[VolSurfaceHistory] = None,
+        calibration_set: Optional[Any] = None,
     ) -> "AutocallableMarketDataSet":
         return cls(
             spot_data=normalize_time_series(spot_data, ["date", "spot"]),
@@ -164,6 +189,7 @@ class AutocallableMarketDataSet:
             futures_data=normalize_futures_chain(futures_data),
             metadata=metadata or {},
             surface_history=surface_history,
+            calibration_set=calibration_set,
         )
 
     @property
