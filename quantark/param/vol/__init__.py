@@ -9,6 +9,7 @@ from .vol_surface import (
     GridVolSurface,
 )
 from .sabr import SABRVolSurface
+from .trading_clock_surface import TradingClockVolSurface
 from .vannavolga import VannaVolgaVolSurface, TermStructureVannaVolgaVolSurface
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "TermStructureVolSurface",
     "GridVolSurface",
     "SABRVolSurface",
+    "TradingClockVolSurface",
     "VannaVolgaVolSurface",
     "TermStructureVannaVolgaVolSurface",
 ]
