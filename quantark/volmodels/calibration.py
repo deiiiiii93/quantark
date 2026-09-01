@@ -58,41 +58,9 @@ VOL_MODEL_LOCALVOL = "localvol"
 VOL_MODEL_HESTON = "heston"
 VOL_MODEL_HESTON_SLV = "heston_slv"
 VOL_MODEL_VARIANTS = (VOL_MODEL_LOCALVOL, VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV)
+# Frozen Heston presets moved to quantark.volcalibration.config in 0.4.0.
+from quantark.volcalibration.config import HESTON_PRESETS  # noqa: F401,E402
 
-HESTON_PARAMETER_NAMES = ("v0", "kappa", "theta", "sigma", "rho")
-
-# Frozen Heston calibration preset "mo_frozen".
-# Provenance: values copied from the mo_volmodels suite —
-# example/mo_volmodels/04_heston_calibration.py (HESTON_BOUNDS,
-# REGULARIZE_FELLER, SOLVER_TOLERANCES, target="iv", method="lewis", single
-# deterministic shortest-expiry ATM-variance start) and
-# example/mo_volmodels/10_calibration_diagnostics.py (same bounds, frozen
-# 2026-07 for the CFFEX MO cohort).  example/ scripts are NOT importable
-# from quantark (canonical-import rule), so the frozen configuration is
-# re-declared here; keep it in sync with the suite.
-#
-# DELIBERATE DIVERGENCE from those scripts: enforce_feller is True here,
-# where they use False with only the soft regularize_feller penalty.  Every
-# MO settlement surface sampled under the soft policy came back with
-# kappa/sigma pinned on the bounds at 2*kappa*theta/sigma^2 ~ 0.29-0.48, and
-# the 0.4.0 re-baseline design (§7A) traced a 2.5%-of-notional 2D-PDE vs
-# QE-M-MC gap to exactly that degeneracy.  Feasibility is bought with smile
-# accuracy on those dates, so runs MUST report per-date fit RMSE — the model
-# under test is not the same one the diagnostics scripts fitted.  The soft
-# penalty is kept: it still shapes the interior of the feasible region.
-HESTON_PRESETS: Dict[str, Dict[str, Any]] = {
-    "mo_frozen": {
-        "bounds": (
-            (1e-6, 1e-3, 1e-4, 1e-3, -0.95),
-            (0.5, 3.0, 0.5, 0.7, 0.0),
-        ),
-        "regularize_feller": 0.05,
-        "solver_tolerances": {"xtol": 1e-6, "ftol": 1e-6, "gtol": 1e-6},
-        "target": "iv",
-        "method": "lewis",
-        "enforce_feller": True,
-    }
-}
 
 # SLV leverage-calibration grid defaults mirror the mo suite
 # (_mo_common.calibrate_leverage_for: n_steps=40, n_x=161, n_z=81); the
