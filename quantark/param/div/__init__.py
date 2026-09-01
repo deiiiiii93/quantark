@@ -8,9 +8,11 @@ from .dividend_yield import (
     NoDividend,
     TermStructureDividendYield,
 )
+from .trading_clock_yield import TradingClockDividendYield
 
 __all__ = [
     'ForwardCarryCurve',
+    'TradingClockDividendYield',
     "DividendYield",
     "ContinuousDividendYield",
     "NoDividend",

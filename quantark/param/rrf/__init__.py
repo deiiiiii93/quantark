@@ -10,8 +10,10 @@ from .rate_curve import (
     LogLinearRateCurve,
     CubicSplineRateCurve,
 )
+from .trading_clock_curve import TradingClockRateCurve
 
 __all__ = [
+    'TradingClockRateCurve',
     'RateCurve',
     'FlatRateCurve',
     'ParallelShiftRateCurve',
