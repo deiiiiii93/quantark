@@ -11,10 +11,17 @@ from quantark.pnlexplain.equity.factor_diff import FactorMoves  # noqa: F401
 from quantark.pnlexplain.equity.fingerprints import contract_fingerprint, lifecycle_fingerprint  # noqa: F401
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition  # noqa: F401
 from quantark.pnlexplain.equity.explain import explain  # noqa: F401
+from quantark.pnlexplain.equity.trades import ExplainTrade  # noqa: F401
+from quantark.pnlexplain.equity.portfolio import (  # noqa: F401
+    BookSnapshot, PortfolioExplainResult, PositionExplainResult, PositionSnapshot, QuotedLegSnapshot,
+    explain_portfolio, explain_position, explain_quoted_leg,
+)
 
 __all__ = [
-    "ExplainMethod", "ExplainRow", "FRAME_COLUMNS", "Factor", "FactorCoordinate", "FactorMoves",
-    "LifecycleTransition", "MARKET_FACTORS", "MOVE_KEYS", "PnLExplainConfig", "PnLExplainResult",
-    "RowKind", "ValuationSnapshot", "ValueBreakdown", "component_sum", "contract_fingerprint",
-    "explain", "lifecycle_fingerprint", "make_total_row", "rows_to_frame", "value",
+    "BookSnapshot", "ExplainMethod", "ExplainRow", "ExplainTrade", "FRAME_COLUMNS", "Factor",
+    "FactorCoordinate", "FactorMoves", "LifecycleTransition", "MARKET_FACTORS", "MOVE_KEYS",
+    "PnLExplainConfig", "PnLExplainResult", "PortfolioExplainResult", "PositionExplainResult",
+    "PositionSnapshot", "QuotedLegSnapshot", "RowKind", "ValuationSnapshot", "ValueBreakdown",
+    "component_sum", "contract_fingerprint", "explain", "explain_portfolio", "explain_position",
+    "explain_quoted_leg", "lifecycle_fingerprint", "make_total_row", "rows_to_frame", "value",
 ]
