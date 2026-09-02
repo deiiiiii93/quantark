@@ -4,6 +4,15 @@ The base set is the incumbent GreeksCalculator surface (moved verbatim in
 R1c); EXTENDED_GREEKS adds closed forms for the higher-order greeks, which
 are reachable only through the explicit ``greeks=`` parameter or auto
 routing for names that never had an incumbent route.
+
+Time units. The incumbent base theta family is per calendar day (``/365``)
+whatever the environment's day count; that is frozen by the compatibility
+contract. The new time greeks (TIME_GREEKS: charm, color, vega_theta,
+gamma_theta) instead follow the same clock as their numerical
+counterparts: a bare name uses the resolved theta bump mode (per trading
+day on a BUSINESS_DAYS env with a calendar, per calendar day otherwise),
+``<name>_1d`` pins one calendar day (``/365``) and ``<name>_1td`` one trading
+day (``/bus_days_in_year``).
 """
 
 import math
@@ -13,41 +22,65 @@ from scipy import stats
 
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.riskmeasures.greeks import bump_envs
+from quantark.asset.equity.riskmeasures.greeks.registry import (
+    ANALYTICAL_AUTO_SET,
+    GreekRequest,
+    normalize_greeks,
+)
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
 
-#: Higher-order names with closed forms (beyond the incumbent base dict).
-EXTENDED_GREEKS = frozenset(
-    {
-        "vanna",
-        "volga",
-        "charm",
-        "color",
-        "speed",
-        "zomma",
-        "vega_theta",
-        "gamma_theta",
-        "delta_q",
-        "dividend_volga",
-    }
+#: Keys of the incumbent base dict (calculate_analytical_greeks(greeks=None)),
+#: in the dict's insertion order. Result-dict order is part of the contract
+#: (downstream DataFrame builders copy it into column order), so requested
+#: subsets are emitted in this order, never in set-iteration order.
+BASE_ORDER = (
+    "price",
+    "delta",
+    "gamma",
+    "vega",
+    "theta",
+    "convexity_theta",
+    "r_theta",
+    "q_theta",
+    "rho",
+    "dividend_rho",
 )
+BASE_GREEKS = frozenset(BASE_ORDER)
 
-#: Keys of the incumbent base dict (calculate_analytical_greeks(greeks=None)).
-BASE_GREEKS = frozenset(
-    {
-        "price",
-        "delta",
-        "gamma",
-        "vega",
-        "theta",
-        "convexity_theta",
-        "r_theta",
-        "q_theta",
-        "rho",
-        "dividend_rho",
-    }
+#: Higher-order names with closed forms (beyond the incumbent base dict), in
+#: definition order; they follow the base keys in the result dict.
+EXTENDED_ORDER = (
+    "vanna",
+    "volga",
+    "speed",
+    "zomma",
+    "charm",
+    "color",
+    "vega_theta",
+    "gamma_theta",
+    "delta_q",
+    "dividend_volga",
 )
+EXTENDED_GREEKS = frozenset(EXTENDED_ORDER)
+
+#: Extended names that are per-day time derivatives and therefore carry a
+#: clock (bare / _1d / _1td) on the analytical route.
+TIME_GREEKS = frozenset({"charm", "color", "vega_theta", "gamma_theta"})
+
+_ORDER_INDEX = {name: i for i, name in enumerate(BASE_ORDER + EXTENDED_ORDER)}
+_CLOCK_RANK = {None: 0, "1d": 1, "1td": 2}
+
+
+def supports_request(req: GreekRequest) -> bool:
+    """True if ``calculate()`` may auto-route this request entry to the
+    closed forms: an analytical-auto name, clock-qualified only for the
+    TIME_GREEKS (the base theta family stays per calendar day)."""
+    if req.canonical not in ANALYTICAL_AUTO_SET:
+        return False
+    return req.clock is None or req.canonical in TIME_GREEKS
 
 
 def calculate_analytical_greeks(
@@ -55,44 +88,80 @@ def calculate_analytical_greeks(
     pricing_env: PricingEnvironment,
     price: Optional[float] = None,
     greeks: Optional[Sequence[object]] = None,
+    time_bump_mode: str = "auto",
 ) -> Dict[str, float]:
     """Closed-form BS greeks.
 
     With ``greeks=None`` this returns exactly the incumbent key set. An
     explicit ``greeks`` list may add the EXTENDED_GREEKS closed forms and
-    returns only the requested keys; clock-qualified names are rejected
-    (analytical time greeks are per calendar day).
+    returns only the requested keys, base names first in the incumbent dict
+    order, then extended names in definition order.
+
+    Clock qualifiers are accepted on the TIME_GREEKS only: ``charm_1d`` is
+    per calendar day, ``charm_1td`` per trading day (``bus_days_in_year``),
+    and bare ``charm`` follows ``time_bump_mode`` resolved against the env
+    exactly like the numerical route. The base theta family keeps its
+    incumbent per-calendar-day scaling and rejects qualifiers.
     """
     if greeks is None:
         return _base_greeks(product, pricing_env, price)
 
-    from quantark.asset.equity.riskmeasures.greeks.registry import (
-        normalize_greeks,
-    )
-
     requests = normalize_greeks(greeks)
     if requests is None or len(requests) == 0:
         return {}
-    names = set()
     for req in requests:
-        if req.clock is not None:
-            raise ValidationError(
-                "Analytical greeks do not support clock-qualified names "
-                f"(got {req.key!r}); they are per calendar day"
-            )
         if req.canonical not in BASE_GREEKS | EXTENDED_GREEKS:
             raise ValidationError(
                 f"Analytical greeks do not support: {req.canonical!r}"
             )
-        names.add(req.canonical)
+        if req.clock is not None and req.canonical not in TIME_GREEKS:
+            raise ValidationError(
+                "Analytical greeks accept clock qualifiers only on "
+                f"{sorted(TIME_GREEKS)} (got {req.key!r}); the base theta "
+                "family is per calendar day"
+            )
+    ordered = sorted(
+        requests,
+        key=lambda req: (_ORDER_INDEX[req.canonical], _CLOCK_RANK[req.clock]),
+    )
+    names = {req.canonical for req in requests}
 
     full = _base_greeks(product, pricing_env, price)
     extended_needed = names & EXTENDED_GREEKS
-    if extended_needed:
-        full.update(_extended_greeks(product, pricing_env, extended_needed))
-    # At expiry the legacy base dict omits some zero-valued names
-    # (dividend_rho); an explicit request still deserves its 0.0 key.
-    return {name: full.get(name, 0.0) for name in names}
+    raw_extended = (
+        _extended_greeks(product, pricing_env, extended_needed)
+        if extended_needed
+        else {}
+    )
+    multiplier = product.contract_multiplier
+    out: Dict[str, float] = {}
+    for req in ordered:
+        name = req.canonical
+        if name in raw_extended:
+            days = (
+                bump_envs.time_days_per_year(pricing_env, req.clock, time_bump_mode)
+                if name in TIME_GREEKS
+                else None
+            )
+            out[req.key] = _scale_extended(name, raw_extended[name], days, multiplier)
+        else:
+            # At expiry the legacy base dict omits some zero-valued names
+            # (dividend_rho); an explicit request still deserves its 0.0 key.
+            out[req.key] = full.get(name, 0.0)
+    return out
+
+
+def _scale_extended(
+    name: str, raw: float, days: Optional[float], multiplier: float
+) -> float:
+    """Apply the per-day clock and contract multiplier to one raw closed
+    form, in the incumbent operation order (divide, then multiply)."""
+    value = raw
+    if days is not None:
+        value = value / days
+        if name == "vega_theta":
+            value = value / 100.0  # vega per 1 vol point
+    return value * multiplier
 
 
 def _extended_greeks(
@@ -100,12 +169,13 @@ def _extended_greeks(
     pricing_env: PricingEnvironment,
     names: Iterable[str],
 ) -> Dict[str, float]:
-    """Closed forms for the higher-order greeks (continuous dividend q).
+    """Raw closed forms for the higher-order greeks (continuous dividend q).
 
-    Units match the numerical conventions: charm/color per calendar day,
-    vega_theta as (vega per 1 vol pt) per calendar day, vanna/volga/speed/
-    zomma/delta_q/dividend_volga raw. All scaled by contract_multiplier.
-    Signs are pinned by the FD oracle in test_analytical_higher_order.py.
+    Returned unscaled: the TIME_GREEKS as annualised rates (the caller
+    divides by the clock's days per year; vega_theta is additionally per
+    1 vol point), vanna/volga/speed/zomma/delta_q/dividend_volga as raw
+    derivatives, and no contract_multiplier. Signs are pinned by the FD
+    oracle in test_analytical_higher_order.py.
     """
     if not isinstance(product, EuropeanVanillaOption):
         raise ValidationError(
@@ -150,7 +220,7 @@ def _extended_greeks(
         charm_annual = q * disc_div * N_d1 + charm_common
     else:
         charm_annual = -q * disc_div * N_m_d1 + charm_common
-    out["charm"] = charm_annual / 365.0
+    out["charm"] = charm_annual
 
     # color: dGamma per calendar day as the valuation date advances
     color_annual = (
@@ -163,7 +233,7 @@ def _extended_greeks(
             + d1 * (2.0 * (r - q) * T - d2 * sigma * sqrt_T) / (sigma * sqrt_T)
         )
     )
-    out["color"] = -color_annual / 365.0
+    out["color"] = -color_annual
 
     # vega_theta (veta): d(vega per 1 vol pt) per calendar day as the
     # valuation date advances (sign pinned by the FD oracle: vega decays)
@@ -172,12 +242,13 @@ def _extended_greeks(
         + (r - q) * d1 / (sigma * sqrt_T)
         - (1.0 + d1 * d2) / (2.0 * T)
     )
-    out["vega_theta"] = veta_annual / 365.0 / 100.0
+    out["vega_theta"] = veta_annual
 
     # gamma_theta: the BS-PDE identity term. The expression is written
-    # exactly as _base_greeks writes convexity_theta (term1 / 365) so the
-    # two are bitwise equal for vanillas, not merely algebraically equal.
-    out["gamma_theta"] = (-S * disc_div * phi_d1 * sigma / (2 * sqrt_T)) / 365
+    # exactly as _base_greeks writes convexity_theta's term1, so after the
+    # caller's /365 on a calendar-day env the two are bitwise equal for
+    # vanillas, not merely algebraically equal.
+    out["gamma_theta"] = -S * disc_div * phi_d1 * sigma / (2 * sqrt_T)
 
     # q-axis greeks; dV/dq collapses to -/+ tau S e^{-q tau} Phi(+/-d1)
     # after the identity S e^{-q tau} phi(d1) = K e^{-r tau} phi(d2)
@@ -193,8 +264,7 @@ def _extended_greeks(
             + T**1.5 * S * disc_div * phi_d1 / sigma
         )
 
-    multiplier = product.contract_multiplier
-    return {name: out[name] * multiplier for name in names}
+    return {name: out[name] for name in EXTENDED_ORDER if name in names}
 
 
 def _base_greeks(

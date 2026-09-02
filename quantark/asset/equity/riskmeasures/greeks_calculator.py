@@ -48,6 +48,48 @@ class GreeksCalculator:
     - GreeksCalculationMode.BUMP: Always use finite difference bump method
     - GreeksCalculationMode.ENGINE: Use engine.calculate_greeks() when overridden
     - GreeksCalculationMode.AUTO: Use engine method for PDE engines, bump otherwise
+
+    Requestable greeks (``calculate(..., greeks=[...])``; names, ``EquityGreek``
+    members or aliases; ``None`` = the default set marked *):
+
+    ==================  =====================  =========================
+    name                definition             notes
+    ==================  =====================  =========================
+    price*, delta*,     value and first order  analytical for vanillas
+    gamma*, vega*,                             under method="auto"
+    theta*, rho*
+    dividend_rho*       dV/dq                  aliases rhoq, div_rho
+    convexity_theta*,   theta split: residual  estimate from rho/dividend_rho
+    r_theta*, q_theta*  / funding / carry      (default) or exact zeroed-r/q
+                                               repricing with a symmetric
+                                               Shapley split of the r-q
+                                               interaction, so the three sum
+                                               to theta exactly
+                                               (theta_decomposition_mode)
+    vanna, volga,       dDelta/dVol, d2V/dVol2 numerical even for vanillas
+    delta_q             dDelta/dq              (incumbent routing)
+    charm, color        dDelta/dt, dGamma/dt   time family
+    speed, zomma        d3V/dS3, dGamma/dVol
+    dividend_volga      d2V/dq2
+    vega_theta (veta)   dVega/dt               time family
+    gamma_theta         -1/2 sigma^2 S^2 Gamma time family; the hedgeable
+                        per step               gamma bleed, distinct from
+                                               convexity_theta on exotics
+    ==================  =====================  =========================
+
+    Time family and clocks: every time greek is the change over one step as
+    the valuation date advances. A bare name follows
+    ``BumpConfig.time_bump_mode`` resolved against the environment (one
+    trading day on a BUSINESS_DAYS env with a calendar, one calendar day
+    otherwise); ``<name>_1d`` pins one calendar day and ``<name>_1td`` one
+    trading day, e.g. ``greeks=["theta_1d", "theta_1td", "charm_1td"]``. On
+    the analytical route the new time greeks divide the annual rate by 365
+    or ``bus_days_in_year`` accordingly, while the incumbent theta family
+    stays per calendar day (compatibility contract).
+
+    Cross greeks requested together share engine pricings within one call
+    (spot legs, the advanced-date scenario per clock); requesting
+    ``["delta", "gamma", "theta", "charm", "color"]`` costs six pricings.
     """
 
     def __init__(
@@ -78,6 +120,17 @@ class GreeksCalculator:
     ) -> Dict[str, float]:
         """Unified entry point for Greeks calculation.
 
+        method: "auto" uses the Black-Scholes closed forms for a European
+        vanilla when every requested name has one (clock-qualified names
+        only for charm/color/vega_theta/gamma_theta) and bumps the engine
+        otherwise; "analytical" insists on closed forms (ValidationError
+        if unsupported); "numerical" always bumps.
+
+        greeks: names / EquityGreek members / aliases, optionally with a
+        ``_1d`` or ``_1td`` clock suffix on the time family (see the class
+        docstring); None requests the default set. Result keys echo the
+        requested spellings (aliases canonicalised) in a fixed order.
+
         theta_decomposition_mode applies to the numerical path; the
         analytical route's theta components are the closed-form
         decomposition, which is already exact.
@@ -91,22 +144,26 @@ class GreeksCalculator:
                 f"got {theta_decomposition_mode!r}"
             )
 
-        requested = self._normalize_greeks(greeks)
-        analytical_supported = registry.ANALYTICAL_AUTO_SET
+        requests = registry.normalize_greeks(greeks)
 
         if method in ("auto", "analytical") and isinstance(
             product, EuropeanVanillaOption
         ):
-            if requested is None:
+            if requests is None:
                 return self.calculate_analytical_greeks(product, pricing_env)
-            if requested.issubset(analytical_supported):
+            unsupported = sorted(
+                req.key for req in requests if not analytical.supports_request(req)
+            )
+            if not unsupported:
                 return self.calculate_analytical_greeks(
-                    product, pricing_env, greeks=sorted(requested)
+                    product,
+                    pricing_env,
+                    greeks=sorted(req.key for req in requests),
                 )
             if method == "analytical":
                 raise ValidationError(
                     "Analytical greeks do not support requested greeks: "
-                    f"{sorted(requested - analytical_supported)}"
+                    f"{unsupported}"
                 )
 
         return self.calculate_numerical_greeks(
@@ -332,10 +389,11 @@ class GreeksCalculator:
         pricing_env: PricingEnvironment,
         engine: BaseEngine,
         base_price: Optional[float],
+        memo: Optional[Dict[str, object]] = None,
     ) -> Tuple[float, float, float]:
         """Get base price, delta, and gamma via engine or bump method."""
         return numerical.get_delta_gamma(
-            self, product, pricing_env, engine, base_price
+            self, product, pricing_env, engine, base_price, memo=memo
         )
 
     def calculate_analytical_greeks(
@@ -349,9 +407,18 @@ class GreeksCalculator:
 
         greeks=None returns the incumbent key set; an explicit list may add
         the higher-order closed forms and returns only the requested keys.
+        The new time greeks (charm, color, vega_theta, gamma_theta) follow
+        this calculator's BumpConfig.time_bump_mode resolved against the
+        env (per trading day on a BUSINESS_DAYS env with a calendar) and
+        accept ``_1d`` / ``_1td`` qualifiers; the base theta family stays
+        per calendar day.
         """
         return analytical.calculate_analytical_greeks(
-            product, pricing_env, price, greeks=greeks
+            product,
+            pricing_env,
+            price,
+            greeks=greeks,
+            time_bump_mode=getattr(self._bump_config, "time_bump_mode", "auto"),
         )
 
     def calculate_numerical_greeks(
@@ -414,7 +481,7 @@ class GreeksCalculator:
         if product.is_linear:
             base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
             greeks_out = self._greeks_for_linear(product, base_price)
-            for extra in requested:
+            for extra in sorted(requested):
                 greeks_out.setdefault(extra, 0.0)
             return {key: greeks_out[key] for key in greeks_out if key in requested}
 
@@ -423,12 +490,17 @@ class GreeksCalculator:
         if "price" in requested and base_price is not None:
             greeks_out["price"] = base_price
 
+        # Per-request scenario memo (structural string keys, never floats):
+        # the base delta/gamma and spot legs, the advanced-date price and
+        # delta/gamma/vega per clock. Cross greeks share pricings through it.
+        memo: Dict[str, object] = {}
         delta = None
         gamma = None
         if {"delta", "gamma", "delta_q", "vanna"} & requested:
             base_price, delta, gamma = self._get_delta_gamma(
-                product, pricing_env, bump_engine, base_price
+                product, pricing_env, bump_engine, base_price, memo=memo
             )
+            memo["delta_gamma:base"] = (base_price, delta, gamma)
         if delta is not None and "delta" in requested:
             greeks_out["delta"] = delta
         if gamma is not None and "gamma" in requested:
@@ -476,12 +548,8 @@ class GreeksCalculator:
                 base_delta=delta,
             )
         if "theta" in requested:
-            greeks_out["theta"] = self.calculate_numerical_theta(
-                product,
-                pricing_env,
-                bump_engine,
-                base_price=base_price,
-                time_bump_days=self._bump_config.time_bump_days,
+            greeks_out["theta"] = self._clock_theta(
+                product, pricing_env, bump_engine, base_price, None, memo
             )
         if "rho" in requested:
             greeks_out["rho"] = self.calculate_numerical_rho(
@@ -506,6 +574,7 @@ class GreeksCalculator:
                 bump_engine,
                 base_price=base_price,
                 bump=self._bump_config.spot_bump,
+                spot_prices=memo.get("spot_prices:base"),
             )
         if "zomma" in requested:
             greeks_out["zomma"] = self.calculate_numerical_zomma(
@@ -540,12 +609,8 @@ class GreeksCalculator:
                         greeks_out[key] = value
             else:
                 if "theta" not in greeks_out:
-                    greeks_out["theta"] = self.calculate_numerical_theta(
-                        product,
-                        pricing_env,
-                        bump_engine,
-                        base_price=base_price,
-                        time_bump_days=self._bump_config.time_bump_days,
+                    greeks_out["theta"] = self._clock_theta(
+                        product, pricing_env, bump_engine, base_price, None, memo
                     )
                 if "rho" not in greeks_out:
                     greeks_out["rho"] = self.calculate_numerical_rho(
@@ -592,7 +657,6 @@ class GreeksCalculator:
             key=lambda req: req.key,
         )
         if time_requests:
-            memo: Dict[str, object] = {}
             for req in time_requests:
                 greeks_out[req.key] = self._time_family_value(
                     product,
@@ -673,16 +737,12 @@ class GreeksCalculator:
     ) -> float:
         key = f"theta:{clock or 'bare'}"
         if key not in memo:
-            time_bump_days, time_bump_mode = numerical.clock_advance_args(
-                self, clock
+            scenario = numerical.time_scenario(
+                self, product, pricing_env, clock, memo
             )
-            memo[key] = self.calculate_numerical_theta(
-                product,
-                pricing_env,
-                engine,
-                base_price=base_price,
-                time_bump_days=time_bump_days,
-                time_bump_mode=time_bump_mode,
+            memo[key] = numerical.numerical_theta_from_scenario(
+                self, product, pricing_env, engine, base_price,
+                scenario, clock, memo,
             )
         return memo[key]
 
@@ -1020,11 +1080,16 @@ class GreeksCalculator:
         engine: BaseEngine,
         base_price: Optional[float] = None,
         bump: Optional[float] = None,
+        spot_prices: Optional[Tuple[float, float]] = None,
     ) -> float:
-        """Numerical speed (d3V/dS3) via a 4-point spot stencil."""
+        """Numerical speed (d3V/dS3) via a 4-point spot stencil.
+
+        ``spot_prices`` are the V(S(1±bump)) legs if already priced (the
+        same legs delta/gamma use); the stencil then adds only V(S(1±2bump)).
+        """
         return numerical.numerical_speed(
             self, product, pricing_env, engine,
-            base_price=base_price, bump=bump,
+            base_price=base_price, bump=bump, spot_prices=spot_prices,
         )
 
     def calculate_numerical_zomma(

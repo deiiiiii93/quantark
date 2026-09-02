@@ -1,14 +1,21 @@
 """Single source of truth for scalar greek names.
 
 Every requestable greek is a ``GreekDef`` here; request validation, alias
-resolution, the ``greeks=None`` default set, the analytical auto-routing
-set, and linear-product values all derive from this one table, so a name
-can no longer be requestable-but-uncomputed (the charm/color silent-miss
-class of bug).
+resolution, clock-qualifier acceptance, the ``greeks=None`` default set, the
+analytical auto-routing set, and linear-product values all derive from this
+one table, so a name can no longer be requestable-but-uncomputed (the
+charm/color silent-miss class of bug).
+
+What the table does NOT hold is the per-greek computation: dispatch is the
+hand-ordered chain in ``GreeksCalculator.calculate_numerical_greeks``,
+because the engine-invocation order is part of the compatibility contract
+(identical call order guarantees identical numbers). Adding a name here
+without a branch in that chain is caught by the completeness test in
+test_greeks_registry.py.
 """
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, FrozenSet, Optional, Sequence, Set, Tuple
+from dataclasses import dataclass
+from typing import Dict, FrozenSet, Optional, Sequence, Set, Tuple
 
 from quantark.util.enum import CommonGreek, EquityGreek
 from quantark.util.exceptions import ValidationError
@@ -18,11 +25,13 @@ from quantark.util.exceptions import ValidationError
 class GreekDef:
     """One requestable scalar greek.
 
-    numerical: bump-based implementation ``(calc, ctx) -> float`` used by the
-        registry-driven part of dispatch. Derived names (theta components) and
-        names whose dispatch is hand-ordered in the facade may leave it None;
-        the completeness test in test_greeks_registry.py is the guard that
-        every requestable name actually produces a value.
+    name: canonical request name and result-dict key.
+    aliases: alternative spellings resolved to ``name``.
+    analytical_auto: for European vanillas under ``method="auto"`` the
+        closed form is used when every requested name has this flag.
+    default: member of the ``greeks=None`` default set.
+    linear_value: value reported for delta-one products.
+    supports_clock: accepts the ``_1d`` / ``_1td`` clock qualifiers.
     """
 
     name: str
@@ -31,8 +40,6 @@ class GreekDef:
     default: bool = False
     linear_value: float = 0.0
     supports_clock: bool = False
-    requires: Tuple[str, ...] = ()
-    numerical: Optional[Callable] = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -76,30 +83,10 @@ _DEFS = (
         supports_clock=True,
         analytical_auto=True,
     ),
-    GreekDef(
-        "gamma_theta",
-        supports_clock=True,
-        requires=("gamma",),
-        analytical_auto=True,
-    ),
-    GreekDef(
-        "convexity_theta",
-        default=True,
-        supports_clock=True,
-        requires=("theta", "rho", "dividend_rho"),
-    ),
-    GreekDef(
-        "r_theta",
-        default=True,
-        supports_clock=True,
-        requires=("theta", "rho", "dividend_rho"),
-    ),
-    GreekDef(
-        "q_theta",
-        default=True,
-        supports_clock=True,
-        requires=("theta", "rho", "dividend_rho"),
-    ),
+    GreekDef("gamma_theta", supports_clock=True, analytical_auto=True),
+    GreekDef("convexity_theta", default=True, supports_clock=True),
+    GreekDef("r_theta", default=True, supports_clock=True),
+    GreekDef("q_theta", default=True, supports_clock=True),
 )
 
 REGISTRY: Dict[str, GreekDef] = {d.name: d for d in _DEFS}

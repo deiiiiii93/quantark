@@ -191,3 +191,97 @@ def test_analytical_rejects_unsupported_method_analytical():
         calc.calculate(
             product, _env(), engine, method="analytical", greeks=["vanna"]
         )
+
+
+# --- analytical time greeks follow the resolved theta clock -----------------
+
+
+def _business_day_env():
+    from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
+
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.2),
+        rate_curve=FlatRateCurve(rate=0.02),
+        div_yield=ContinuousDividendYield(div_yield=0.01),
+        valuation_date=datetime(2026, 6, 26),
+        day_count_convention=DayCountConvention.BUSINESS_DAYS,
+        bus_days_in_year=244,
+        calendar=create_calendar(CalendarType.CHINA_SSE),
+    )
+
+
+def _calendar_env_same_market():
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.2),
+        rate_curve=FlatRateCurve(rate=0.02),
+        div_yield=ContinuousDividendYield(div_yield=0.01),
+        valuation_date=datetime(2026, 6, 26),
+    )
+
+
+_TIME_NAMES = ["charm", "color", "vega_theta", "gamma_theta"]
+
+
+def test_analytical_time_greeks_use_business_day_year_on_business_day_env():
+    calc = GreeksCalculator()
+    product = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    per_calendar_day = calc.calculate_analytical_greeks(
+        product, _calendar_env_same_market(), greeks=_TIME_NAMES
+    )
+    per_trading_day = calc.calculate_analytical_greeks(
+        product, _business_day_env(), greeks=_TIME_NAMES
+    )
+    for name in _TIME_NAMES:
+        assert per_trading_day[name] == pytest.approx(
+            per_calendar_day[name] * 365.0 / 244.0, rel=1e-12
+        )
+
+
+def test_analytical_and_numerical_time_greeks_agree_in_units_on_business_day_env():
+    """The defect: bare names on a business-day env were per calendar day on
+    the analytical route but per trading day on the numerical route (ratio
+    365/244 = 1.496). Both routes must now report the same units."""
+    calc = GreeksCalculator()
+    product = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    env = _business_day_env()
+    engine = BlackScholesEngine()
+    analytical = calc.calculate(product, env, engine, greeks=_TIME_NAMES)
+    numerical = calc.calculate(product, env, engine, method="numerical", greeks=_TIME_NAMES)
+    for name in _TIME_NAMES:
+        assert analytical[name] / numerical[name] == pytest.approx(1.0, abs=0.1)
+
+
+def test_analytical_accepts_clock_qualifiers_on_time_greeks():
+    calc = GreeksCalculator()
+    product = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    out = calc.calculate_analytical_greeks(
+        product, _business_day_env(), greeks=["charm", "charm_1d", "charm_1td"]
+    )
+    assert set(out) == {"charm", "charm_1d", "charm_1td"}
+    assert out["charm"] == out["charm_1td"]              # bare follows the env clock
+    assert out["charm_1d"] == pytest.approx(out["charm_1td"] * 244.0 / 365.0, rel=1e-12)
+
+    calendar = calc.calculate_analytical_greeks(
+        product, _calendar_env_same_market(), greeks=["charm", "charm_1d"]
+    )
+    assert calendar["charm"] == calendar["charm_1d"]
+
+
+def test_calculate_auto_routes_clock_qualified_time_greeks_to_closed_forms():
+    calc = GreeksCalculator()
+    product = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    env = _business_day_env()
+    via_calculate = calc.calculate(product, env, BlackScholesEngine(), greeks=["charm_1td", "gamma_theta_1d"])
+    direct = calc.calculate_analytical_greeks(product, env, greeks=["charm_1td", "gamma_theta_1d"])
+    assert via_calculate == direct
+
+
+def test_analytical_still_rejects_theta_clock_qualifier():
+    """Bare analytical theta is frozen at /365 by the compatibility contract,
+    so its clock forms stay on the numerical route."""
+    calc = GreeksCalculator()
+    product = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    with pytest.raises(ValidationError):
+        calc.calculate_analytical_greeks(product, _business_day_env(), greeks=["theta_1td"])

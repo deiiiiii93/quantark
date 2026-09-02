@@ -60,6 +60,17 @@ re-export `GreeksCalculator`.
    - Bare `theta`/`r_theta`/`q_theta`/`convexity_theta` keep today's semantics
      bit-for-bit, including the estimate path's `/365` scaling even when the
      resolved theta clock is business days (legacy quirk, preserved).
+   - Known exception (found in pre-merge review): a vanilla request that
+     mixes `charm` and/or `color` with existing names, e.g.
+     `["delta", "charm", "color"]`, used to route numerical and silently drop
+     charm/color (the requestable-but-uncomputed bug). It now routes
+     analytical because charm/color joined the auto-set, so `delta` moves
+     from FD to the closed form. No in-repo caller issues such a request.
+   - Result-dict key order is part of this contract (portfolio storage
+     copies it into DataFrame columns): analytical subsets keep the base
+     dict order, delta-one products keep the incumbent literal order, and
+     no path may build a result dict by iterating a set
+     (test_greeks_key_order.py checks under several hash seeds).
 3. `calculate_analytical_greeks()` returns its **current key set** by default;
    extended greeks appear only when requested via a new optional `greeks=`
    parameter (unconditional new keys would silently change dict-iterating
@@ -106,18 +117,22 @@ bucket methods (`calculate_futures_delta_buckets`,
 class GreekDef:
     name: str                    # canonical, e.g. "zomma"
     aliases: tuple[str, ...]     # e.g. ("veta",) on vega_theta
-    numerical: Callable          # (ctx: NumericalGreekContext) -> float  (REQUIRED)
     analytical_auto: bool        # member of the analytical auto-routing set (§3.2, §9)
     default: bool                # member of the greeks=None default set
     linear_value: float          # value for delta-one products
     supports_clock: bool         # accepts _1d/_1td qualifiers (§8)
-    requires: tuple[str, ...]    # derived-greek dependencies, e.g. ("gamma",)
 ```
 
-- `_normalize_greeks` validation, alias resolution, the default set, and
-  dispatch all derive from this one table. A greek can no longer be
-  requestable-but-uncomputed; a registry-completeness test enforces it
-  (§12.2).
+- `_normalize_greeks` validation, alias resolution, clock acceptance, the
+  default set, the analytical auto-set and delta-one values all derive from
+  this one table. A greek can no longer be requestable-but-uncomputed; a
+  registry-completeness test enforces it (§12.2).
+- What the table does **not** hold (amended in pre-merge review; the design
+  originally listed `numerical` / `requires` fields): the per-greek
+  computation. Dispatch stays the hand-ordered chain in
+  `calculate_numerical_greeks`, because the engine-invocation order is part
+  of §3.2 (identical call order guarantees identical numbers). Adding a name
+  to the table without a branch in that chain fails the completeness test.
 - Clock qualifiers: the normalizer parses `<name>_1d` / `<name>_1td` into
   (canonical name, clock override) for entries with `supports_clock=True`, and
   rejects the suffix otherwise (e.g. `vanna_1td` → `ValidationError`). Result
@@ -127,17 +142,20 @@ class GreekDef:
   `delta_q`; `rhoq`/`div_rho`/`dividendrho` → `dividend_rho`. New: `veta` →
   `vega_theta`.
 
-### NumericalGreekContext
+### Request memo (implemented in place of a NumericalGreekContext object)
 
-Carries (product, pricing_env, engine, bump_config, greeks_mode, clock
-override) plus a **scenario memo** keyed by structural strings — `"spot_up"`,
-`"spot_up2"`, `"vol_up"`, `"time_adv"`, `"time_adv:spot_up"`, … — never by
-floats. Cross greeks requested together share engine prices deterministically:
-charm + color + vega_theta price the time-advanced env's spot/vol bumps once
-(~4 extra pricings total instead of ~9). The memo lives for one
-`calculate_numerical_greeks` call; the standalone public per-greek methods
-(`calculate_numerical_vanna`, …) construct a fresh context and keep their
-exact current behavior.
+`calculate_numerical_greeks` keeps one **scenario memo** per call, a dict
+keyed by structural strings — `"delta_gamma:base"`, `"spot_prices:base"`,
+`"time_adv:<clock>"`, `"price:adv:<clock>"`, `"delta_gamma:adv:<clock>"`,
+`"vega:adv:<clock>"` — never by floats. The delta/gamma pre-pass seeds it,
+bare theta and every clock-qualified time greek price the advanced-date
+scenario through it, and speed reuses the V(S(1±h)) legs. Measured pricings
+(BS engine, bump mode; test_greeks_pricing_reuse.py): `[delta, gamma, speed]`
+= 5, `[theta, charm, color]` = 6, `[delta, gamma, theta, charm, color]` = 6,
+`[delta, gamma, vega, theta, charm, color, vega_theta]` = 8 — no scenario is
+priced twice. Under engine-greeks mode the base grid solve is likewise done
+once. The memo lives for one call; the standalone public per-greek methods
+(`calculate_numerical_vanna`, …) keep their exact current behavior.
 
 ## 6. New greeks
 
@@ -188,9 +206,13 @@ key is added.
 
 New parameter `theta_decomposition_mode` ∈ {`"estimate"` (default),
 `"exact"`} on `calculate()` and `calculate_numerical_greeks()`. `"exact"`
-promotes the currently-private zeroed-r/q repricing path: `convexity_theta =
-θ|r=0,q=0`, `r_theta = θ|q=0 − convexity_theta`, `q_theta = θ|r=0 −
-convexity_theta` (3 extra theta repricings). The estimate stays the default
+promotes the currently-private zeroed-r/q repricing path (3 extra theta
+repricings). As shipped (amended from the sequential formula first written
+here, which left an unallocated r–q interaction term): `convexity_theta =
+θ(0,0)`, `r_theta = ½[(θ(r,0) − θ(0,0)) + (θ(r,q) − θ(0,q))]`, `q_theta =
+½[(θ(0,q) − θ(0,0)) + (θ(r,q) − θ(r,0))]` — a symmetric Shapley split of the
+interaction, so the three components sum to θ exactly and the result is
+independent of request order. The estimate stays the default
 because it is the incumbent behavior and flipping would both change numbers
 and triple default-set theta cost across backtest fleets; the docstring labels
 it clearly as an estimate.
@@ -222,7 +244,12 @@ time, carry accrues on calendar time):
 
 Bare `gamma_theta` (new, no incumbent behavior) follows the same resolved
 clock as bare `theta`: `/365` under calendar, `/bus_days_in_year` under
-business days.
+business days. Amended in pre-merge review: the **analytical** closed forms
+for `charm`, `color`, `vega_theta` and `gamma_theta` follow the same rule
+(they hard-coded `/365` at first, so a vanilla and an exotic on one
+business-day env reported the new greeks in different units), and accept
+`_1d` / `_1td` directly. The base theta family stays per calendar day on the
+analytical route by §3.2.
 
 Only `_1d`/`_1td` are supported — no arbitrary horizons; multi-day steps
 remain a `time_bump_days` config concern for the bare names.
@@ -242,18 +269,21 @@ the existing set **plus**: `vanna`, `volga`, `charm`, `color`, `speed`,
   from the call/put with q in both the discount factor and d₁/d₂; validated
   against FD in tests. If the derivation cannot be made exact, the analytical
   entry is omitted (TODO + numerical only) rather than approximated.
-- Time-derivative closed forms are reported per calendar day (/365), matching
-  the existing analytical theta convention; they are the oracle for the `_1d`
-  variants. `_1td` variants are validated structurally (§12.4), not against a
-  closed form.
+- Time-derivative closed forms (charm, color, vega_theta, gamma_theta) are
+  per day on the resolved theta clock: `/365` on a calendar-day env or under
+  `_1d`, `/bus_days_in_year` on a BUSINESS_DAYS env with a calendar or under
+  `_1td` (amended in pre-merge review; originally always `/365`). The `_1d`
+  forms are the oracle for the numerical `_1d` variants; the `_1td` forms are
+  the clean trading-day rate and are compared to the numerical `_1td` step
+  in test_analytical_higher_order.py at FD tolerance.
 - Auto-routing: existing names keep their incumbent routing (§3.2). The new
   canonical names (charm, color, speed, zomma, vega_theta, dividend_volga,
   gamma_theta) join the analytical auto-set, so a vanilla request routes
   analytical only when *all* requested names are in that set (the existing
-  subset rule). Clock-qualified names (`*_1d`/`*_1td`) always route
-  numerical — the analytical per-day forms are reachable explicitly via
-  `calculate_analytical_greeks(greeks=[...])` and serve as the `_1d` oracle
-  in tests.
+  subset rule). Clock-qualified `charm`/`color`/`vega_theta`/`gamma_theta`
+  route analytical for vanillas as well (closed form per clock); clock-
+  qualified `theta`/`r_theta`/`q_theta`/`convexity_theta` always route
+  numerical, since bare analytical theta is frozen at `/365` by §3.2.
 
 ## 10. Enum changes
 

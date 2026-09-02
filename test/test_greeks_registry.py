@@ -118,3 +118,21 @@ def test_every_registered_name_is_computable():
         requests = normalize_greeks([name])
         expected_key = next(iter(requests)).key
         assert expected_key in result, f"{name!r} produced no {expected_key!r}"
+
+
+def test_greek_def_carries_no_dead_dispatch_fields():
+    """Dispatch order lives in the facade's hand-ordered chain (call order is
+    part of the compatibility contract); the registry must not advertise
+    per-greek callables or dependency lists that nothing reads."""
+    from quantark.asset.equity.riskmeasures.greeks.registry import GreekDef
+
+    assert set(GreekDef.__dataclass_fields__) == {
+        "name", "aliases", "analytical_auto", "default", "linear_value", "supports_clock",
+    }
+
+
+def test_linear_order_matches_default_set():
+    from quantark.asset.equity.riskmeasures.greeks.numerical import LINEAR_ORDER
+
+    assert len(LINEAR_ORDER) == len(DEFAULT_SET)
+    assert set(LINEAR_ORDER) == set(DEFAULT_SET)

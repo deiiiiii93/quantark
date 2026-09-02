@@ -11,7 +11,7 @@ from typing import Dict, Optional, Tuple
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.riskmeasures.greeks import bump_envs
-from quantark.asset.equity.riskmeasures.greeks.registry import DEFAULT_SET, REGISTRY
+from quantark.asset.equity.riskmeasures.greeks.registry import REGISTRY
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
 
@@ -379,17 +379,19 @@ def numerical_speed(
     engine: BaseEngine,
     base_price: Optional[float] = None,
     bump: Optional[float] = None,
+    spot_prices: Optional[Tuple[float, float]] = None,
 ) -> float:
     """Numerical speed (d3V/dS3) via a 4-point stencil on the spot axis.
 
     Uses single-level relative bumps only: the V(S(1±h)) legs are the same
-    prices delta/gamma use, and V(S(1±2h)) adds two pricings. No nested
-    bumped-env chains, so no compounded-bump ambiguity.
+    prices delta/gamma use (pass them as ``spot_prices`` to skip repricing
+    them), and V(S(1±2h)) adds two pricings. No nested bumped-env chains,
+    so no compounded-bump ambiguity.
     """
     engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
     bump = bump if bump is not None else calc._bump_config.spot_bump
     base_price, price_up, price_down = bump_envs.spot_bumped_prices(
-        product, pricing_env, engine, bump, base_price=base_price
+        product, pricing_env, engine, bump, base_price=base_price, reuse=spot_prices
     )
 
     env_up2 = deepcopy(pricing_env)
@@ -484,8 +486,14 @@ def get_delta_gamma(
     pricing_env: PricingEnvironment,
     engine: BaseEngine,
     base_price: Optional[float],
+    memo: Optional[Dict[str, object]] = None,
 ) -> Tuple[float, float, float]:
-    """Get base price, delta, and gamma via engine or bump method."""
+    """Get base price, delta, and gamma via engine or bump method.
+
+    With a request ``memo``, the bump path records its V(S(1±h)) legs under
+    ``"spot_prices:base"`` so speed can reuse them (engine-greeks mode has
+    no spot legs to share).
+    """
     if calc._should_use_engine_greeks(engine):
         engine_greeks = engine.calculate_greeks(product, pricing_env)
         if base_price is None:
@@ -496,6 +504,8 @@ def get_delta_gamma(
     spot_prices = bump_envs.spot_bumped_prices(
         product, pricing_env, engine, calc._bump_config.spot_bump, base_price=base_price
     )[1:]
+    if memo is not None:
+        memo["spot_prices:base"] = spot_prices
 
     delta = numerical_delta(
         calc,
@@ -604,18 +614,64 @@ def time_scenario(
     return scenario
 
 
+def advanced_price(engine, scenario, clock, memo) -> float:
+    """The advanced-date base price for one clock, priced once per request.
+
+    Always an ``engine.price`` result (never a grid-readout price from
+    ``calculate_greeks``), so theta under a clock is the same difference the
+    standalone ``numerical_theta`` computes.
+    """
+    key = f"price:adv:{clock or 'bare'}"
+    if key not in memo:
+        memo[key] = engine.price(scenario["product"], scenario["env"])
+    return memo[key]
+
+
+def numerical_theta_from_scenario(
+    calc,
+    product: BaseEquityProduct,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_price: Optional[float],
+    scenario: Dict[str, object],
+    clock: Optional[str],
+    memo: Dict[str, object],
+) -> float:
+    """``numerical_theta`` on a memoized ``time_scenario``.
+
+    Same guard cascade and the same ``V(adv) - V(base)`` arithmetic as
+    ``numerical_theta``; the advanced-date price goes through the memo so
+    charm/color/vega_theta under the same clock reuse it.
+    """
+    engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
+    base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
+    if scenario["zero"]:
+        return 0.0
+    return advanced_price(engine, scenario, clock, memo) - base_price
+
+
 def _base_delta_gamma(calc, product, pricing_env, engine, base_price, memo):
     key = "delta_gamma:base"
     if key not in memo:
-        memo[key] = get_delta_gamma(calc, product, pricing_env, engine, base_price)
+        memo[key] = get_delta_gamma(
+            calc, product, pricing_env, engine, base_price, memo=memo
+        )
     return memo[key]
 
 
 def _adv_delta_gamma(calc, engine, scenario, clock, memo):
     key = f"delta_gamma:adv:{clock or 'bare'}"
     if key not in memo:
+        # Bump mode needs the advanced base price for its central
+        # differences: take the shared one. Engine-greeks mode reads price,
+        # delta and gamma off one grid solve and ignores base_price.
+        base_price = (
+            None
+            if calc._should_use_engine_greeks(engine)
+            else advanced_price(engine, scenario, clock, memo)
+        )
         memo[key] = get_delta_gamma(
-            calc, scenario["product"], scenario["env"], engine, None
+            calc, scenario["product"], scenario["env"], engine, base_price
         )
     return memo[key]
 
@@ -693,7 +749,11 @@ def numerical_vega_theta(
     adv_key = f"vega:adv:{clock or 'bare'}"
     if adv_key not in memo:
         memo[adv_key] = numerical_vega(
-            calc, scenario["product"], scenario["env"], engine, base_price=None
+            calc,
+            scenario["product"],
+            scenario["env"],
+            engine,
+            base_price=advanced_price(engine, scenario, clock, memo),
         )
     return memo[adv_key] - base_vega
 
@@ -702,16 +762,9 @@ def gamma_theta_days(calc, pricing_env: PricingEnvironment, clock: Optional[str]
     """Days-per-year divisor for gamma_theta under a clock: calendar time
     decays over 365, trading time over the env's bus_days_in_year. Bare
     names follow the same resolution as bare theta."""
-    if clock == "1d":
-        return 365.0
-    if clock == "1td":
-        return float(pricing_env.bus_days_in_year)
-    resolved = bump_envs.resolve_theta_bump_mode(
-        pricing_env, getattr(calc._bump_config, "time_bump_mode", "auto")
+    return bump_envs.time_days_per_year(
+        pricing_env, clock, getattr(calc._bump_config, "time_bump_mode", "auto")
     )
-    if resolved == "business_days":
-        return float(pricing_env.bus_days_in_year)
-    return 365.0
 
 
 def numerical_gamma_theta(
@@ -752,6 +805,24 @@ def numerical_gamma_theta(
     return -0.5 * sigma**2 * pricing_env.spot**2 * gamma / days
 
 
+#: Incumbent literal order of the delta-one greeks dict. Key order is part
+#: of the contract (portfolio storage copies it into DataFrame columns), so
+#: this is a tuple, never DEFAULT_SET iteration; test_greeks_registry pins
+#: it to the registry's default set.
+LINEAR_ORDER = (
+    "price",
+    "delta",
+    "gamma",
+    "vega",
+    "theta",
+    "convexity_theta",
+    "r_theta",
+    "q_theta",
+    "rho",
+    "dividend_rho",
+)
+
+
 def linear_greeks(product: BaseEquityProduct, price: float) -> Dict[str, float]:
     """
     Greeks for linear (delta-one) products.
@@ -761,8 +832,6 @@ def linear_greeks(product: BaseEquityProduct, price: float) -> Dict[str, float]:
     the default key set cannot drift from the request surface.
     """
     greeks = {"price": price}
-    for name in DEFAULT_SET:
-        if name == "price":
-            continue
+    for name in LINEAR_ORDER[1:]:
         greeks[name] = REGISTRY[name].linear_value
     return greeks

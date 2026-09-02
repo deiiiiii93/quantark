@@ -174,6 +174,27 @@ def advance_theta_bump(
     return bumped_date, time_bump, mode
 
 
+def time_days_per_year(
+    pricing_env: PricingEnvironment, clock: Optional[str], time_bump_mode: str
+) -> float:
+    """Days-per-year divisor of a per-day time greek under a clock.
+
+    ``"1d"`` is one calendar day (365), ``"1td"`` one trading day (the
+    env's ``bus_days_in_year``); a bare name (``None``) follows the resolved
+    theta bump mode, so a BUSINESS_DAYS env with a calendar reports per
+    trading day and every other env per calendar day.
+    """
+    if clock == "1d":
+        return 365.0
+    if clock == "1td":
+        return float(pricing_env.bus_days_in_year)
+    if clock is not None:
+        raise ValidationError(f"Unknown clock qualifier: {clock}")
+    if resolve_theta_bump_mode(pricing_env, time_bump_mode) == "business_days":
+        return float(pricing_env.bus_days_in_year)
+    return 365.0
+
+
 def resolve_theta_bump_mode(
     pricing_env: PricingEnvironment, time_bump_mode: str
 ) -> str:
