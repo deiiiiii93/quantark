@@ -137,7 +137,10 @@ def check_contract_roll(product_t0: Any, product_alive_t1: Any, calendar_days: i
 
 BOOKKEEPING_FIELDS = frozenset({
     "observed_ko_indices", "observed_ki_indices", "observed_coupon_indices",
-})   # grow on every observation date without an event; pricing-neutral (spec §8)
+    "valuation_point",
+})   # change on every observation date without an event; pricing-neutral (spec §8).
+# ``valuation_point`` is the tracker's last-observation clock stamp: the snapshot
+# carries its own valuation point, so the stamp is bookkeeping, not contract state.
 
 
 def lifecycle_fingerprint(state: Any) -> tuple:

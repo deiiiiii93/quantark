@@ -64,6 +64,7 @@ def explain(
         "effective_factors": tuple(f.value for f in MARKET_FACTORS if f in cache.effective),
         "coordinate": (coordinate.reference_strike, coordinate.tenor_t1),
         "transition_changed": transition.changed,
+        "contract_roll_days": days if transition.contract_roll_days is None else int(transition.contract_roll_days),
         "interaction": config.interaction,
         **taylor_meta,
     }

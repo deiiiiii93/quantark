@@ -90,6 +90,13 @@ class BacktestEngine:
         self._cumulative_transaction_costs: float = 0.0
         self._num_hedges_executed: int = 0
 
+        # Optional daily PnL explain (quantark.pnlexplain); None changes nothing
+        self._explain_recorder = None
+        self._last_net_pnl: float = 0.0
+        if getattr(config, "pnl_explain", None) is not None:
+            from quantark.pnlexplain.equity.recorder import PnLExplainRecorder
+            self._explain_recorder = PnLExplainRecorder(config.pnl_explain)
+
     def run(self) -> "BacktestResults":
         """
         Execute the backtest.
@@ -238,6 +245,10 @@ class BacktestEngine:
         # Update pricing environment with current market data
         self._update_pricing_environment(timestamp)
 
+        # PnL explain: capture today's alive contracts BEFORE lifecycle events
+        if self._explain_recorder is not None:
+            self._explain_recorder.begin_day(self, timestamp)
+
         # Process realized lifecycle events on this day's close. Determined
         # cashflows remain as receivables until their payment dates; knocked-in
         # barriers reprice as their European equivalent. Processed before
@@ -330,6 +341,13 @@ class BacktestEngine:
             market_data=market_data,
             trade_records=trade_records,
         )
+
+        # PnL explain: close the day against the recorded state
+        if self._explain_recorder is not None:
+            self._explain_recorder.end_day(
+                self, timestamp, trade_records, self._cumulative_transaction_costs,
+                self._lifecycle_events_today, self._last_net_pnl,
+            )
 
     def _process_lifecycle(self, timestamp: datetime):
         """
@@ -563,6 +581,8 @@ class BacktestEngine:
             + realized_pnl
             - self._cumulative_transaction_costs
         )
+        if self._explain_recorder is not None:
+            self._last_net_pnl = net_pnl
 
         # Create state
         state = BacktestState(
@@ -622,6 +642,9 @@ class BacktestEngine:
             ),
             num_hedges=self._num_hedges_executed,
             total_transaction_costs=self._cumulative_transaction_costs,
+            explain_frames=(
+                self._explain_recorder.frames() if self._explain_recorder is not None else None
+            ),
         )
 
         return results

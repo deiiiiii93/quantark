@@ -127,3 +127,15 @@ def test_lifecycle_fingerprint_is_computed_and_sensitive():
         cashflow_id="x", event_type=LifecycleEventType.COUPON, amount=1.0,
         determination_date=D0, payment_date=D0))
     assert lifecycle_fingerprint(b) != lifecycle_fingerprint(BarrierLifecycleState())
+
+
+def test_lifecycle_fingerprint_ignores_the_trackers_clock_stamp():
+    """Trackers re-stamp ``valuation_point`` on every observation; that is not an event."""
+    from quantark.asset.equity.lifecycle.state import BarrierLifecycleState
+    a = BarrierLifecycleState()
+    b = BarrierLifecycleState()
+    a.valuation_point = ValuationPoint(date=D0)
+    b.valuation_point = ValuationPoint(date=D0 + timedelta(days=1))
+    assert lifecycle_fingerprint(a) == lifecycle_fingerprint(b)
+    b.knocked_in = True
+    assert lifecycle_fingerprint(a) != lifecycle_fingerprint(b)

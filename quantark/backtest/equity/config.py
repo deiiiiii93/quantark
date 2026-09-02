@@ -37,6 +37,8 @@ class BacktestConfig:
             payment and then become cash; knocked-in barriers reprice as their
             European equivalent. Positions with no lifecycle semantics are
             unaffected.
+        pnl_explain: Optional daily PnL explain configuration (quantark.pnlexplain).
+            None (the default) records nothing and changes no behaviour.
         metadata: Additional metadata for the backtest
     """
 
@@ -55,6 +57,7 @@ class BacktestConfig:
     calculate_greeks: bool = True
     greeks_method: str = "analytical"
     handle_lifecycle_events: bool = True
+    pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):

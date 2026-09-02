@@ -960,7 +960,10 @@ def check_contract_roll(product_t0: Any, product_alive_t1: Any, calendar_days: i
 
 BOOKKEEPING_FIELDS = frozenset({
     "observed_ko_indices", "observed_ki_indices", "observed_coupon_indices",
-})   # grow on every observation date without an event; pricing-neutral (spec §8)
+    "valuation_point",
+})   # change on every observation date without an event; pricing-neutral (spec §8).
+# ``valuation_point`` is the tracker's last-observation clock stamp: the snapshot
+# carries its own valuation point, so the stamp is bookkeeping, not contract state.
 
 
 def lifecycle_fingerprint(state: Any) -> tuple:
@@ -1549,7 +1552,7 @@ put the transition tests in `test/test_pnlexplain_lifecycle.py`, the cache tests
 
 **Interfaces:**
 - Consumes: Tasks 1–4.
-- Produces: `LifecycleTransition(product_alive_t1, engine_alive_t1, state_before, state_after, events=())` with `.changed`; `resolve_transition(snap0, snap1, transition, *, calendar_days) -> LifecycleTransition`; `event_row(cache, transition, level) -> ExplainRow`; `ScenarioCache(snap0, snap1, transition, moves, config)` with `.effective`, `.value_for(applied) -> ValueBreakdown`, `.all_market()`, `.value_t1()`, `.time_pure()`, `.bump_engine_t0`, `.moves`; `sequential_rows(cache, order, level) -> tuple[ExplainRow, ...]`; `explain(snapshot_t0, snapshot_t1, *, config=None, transition=None) -> PnLExplainResult`.
+- Produces: `LifecycleTransition(product_alive_t1, engine_alive_t1, state_before, state_after, events=(), contract_roll_days=None)` with `.changed` (`contract_roll_days=0` declares an unrolled float-maturity contract — spec §8; added while landing Task 11); `resolve_transition(snap0, snap1, transition, *, calendar_days) -> LifecycleTransition`; `event_row(cache, transition, level) -> ExplainRow`; `ScenarioCache(snap0, snap1, transition, moves, config)` with `.effective`, `.value_for(applied) -> ValueBreakdown`, `.all_market()`, `.value_t1()`, `.time_pure()`, `.bump_engine_t0`, `.moves`; `sequential_rows(cache, order, level) -> tuple[ExplainRow, ...]`; `explain(snapshot_t0, snapshot_t1, *, config=None, transition=None) -> PnLExplainResult`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3752,6 +3755,18 @@ raises `ValidationError` (never `TypeError`/`KeyError`, and never a silent `None
 `test_nonzero_trade_without_position_id_is_rejected` and `test_missing_or_non_finite_trade_price_is_rejected`
 to this task's test file (each feeds one malformed record through the recorder and expects
 `ValidationError`).
+
+**Findings while landing (2026-09-02):** (1) the equity `BacktestEngine` never rolls an untracked
+float-maturity product (only lifecycle trackers roll; `time_shift` is used solely inside theta bumps), so
+the recorder declares `contract_roll_days=0` for such positions and the time row carries only the
+valuation-date effect — report to the user as a pre-existing backtest limitation. (2) The simple
+`HedgeExecutor` with `delta_threshold=0` on the KO'd barrier book tries to set its hedge quantity to
+exactly zero and `Portfolio.update_position` rejects it with the explain OFF too — pre-existing; the
+hedge test uses the vanilla short-call book instead. (3) A lagged-settlement barrier cannot be priced by
+`BarrierAnalyticalEngine` (delayed first-hit payment), so the lagged KO test runs on the lifecycle
+suite's `ConstantEngine` with greeks off and the waterfall method only. (4) The barrier tracker
+re-stamps `valuation_point` daily: it is now a bookkeeping field of the lifecycle fingerprint (spec §8).
+(5) Float-schedule ledgers are read at `(date − manager.base_date)/365`, exactly as the manager does.
 
 **Files:**
 - Create: `quantark/pnlexplain/equity/recorder.py`

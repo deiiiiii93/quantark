@@ -15,14 +15,26 @@ from quantark.util.exceptions import ValidationError
 
 @dataclass(frozen=True)
 class LifecycleTransition:
+    """The alive-at-t1 contract, the state pair and the events of one step.
+
+    ``contract_roll_days`` declares by how many calendar days the alive
+    contract was rolled from ``product_t0``. None (default) means "by the
+    step's calendar days" (spec §5.3). ``0`` declares, explicitly, that the
+    holder repriced the SAME float-maturity contract without rolling it
+    (the equity BacktestEngine does this for untracked positions); the time
+    row then carries only the valuation-date effect and no contract theta.
+    """
     product_alive_t1: Any
     engine_alive_t1: Any
     state_before: Any
     state_after: Any
     events: Tuple[Any, ...] = ()
+    contract_roll_days: Optional[int] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "events", tuple(self.events))
+        if self.contract_roll_days is not None and int(self.contract_roll_days) < 0:
+            raise ValidationError("contract_roll_days must be None or a non-negative day count")
 
     @property
     def changed(self) -> bool:
@@ -58,9 +70,14 @@ def resolve_transition(
         raise ValidationError("transition.state_before does not match snapshot_t0.lifecycle_state")
     if lifecycle_fingerprint(transition.state_after) != fp1:
         raise ValidationError("transition.state_after does not match snapshot_t1.lifecycle_state")
+    roll_days = calendar_days if transition.contract_roll_days is None else int(transition.contract_roll_days)
+    if roll_days > calendar_days:
+        raise ValidationError(
+            f"contract_roll_days {roll_days} exceeds the step's {calendar_days} calendar days"
+        )
     terminal_t0 = is_terminal(snap0.lifecycle_state)
     if not terminal_t0:
-        check_contract_roll(snap0.product, transition.product_alive_t1, calendar_days)
+        check_contract_roll(snap0.product, transition.product_alive_t1, roll_days)
     if fp0 == fp1:
         if transition.events:
             raise ValidationError("transition carries events but the lifecycle state is unchanged")

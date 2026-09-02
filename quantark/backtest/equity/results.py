@@ -36,6 +36,7 @@ class BacktestResults:
         final_value: float,
         num_hedges: int,
         total_transaction_costs: float,
+        explain_frames=None,
     ):
         """
         Initialize backtest results.
@@ -47,6 +48,8 @@ class BacktestResults:
             final_value: Final portfolio value
             num_hedges: Number of hedges
             total_transaction_costs: Total transaction costs
+            explain_frames: ``(explain_df, reconciliation_df)`` from the PnL
+                explain recorder, or None when ``config.pnl_explain`` is None
         """
         self.config = config
         self.state_tracker = state_tracker
@@ -54,6 +57,7 @@ class BacktestResults:
         self.final_value = final_value
         self.num_hedges = num_hedges
         self.total_transaction_costs = total_transaction_costs
+        self._explain_frames = explain_frames
 
         # Lazy-loaded dataframes
         self._states_df: Optional[pd.DataFrame] = None
@@ -73,6 +77,22 @@ class BacktestResults:
         if self._trades_df is None:
             self._trades_df = self.state_tracker.get_trades_dataframe()
         return self._trades_df
+
+    @property
+    def explain_df(self) -> pd.DataFrame:
+        """Daily PnL explain rows (empty, fixed columns, when the explain is off)."""
+        if self._explain_frames is None:
+            from quantark.pnlexplain.base import rows_to_frame
+            return rows_to_frame([], date=self.config.start_date).iloc[0:0]
+        return self._explain_frames[0]
+
+    @property
+    def explain_reconciliation_df(self) -> pd.DataFrame:
+        """Daily explain reconciliation (empty, fixed columns, when the explain is off)."""
+        if self._explain_frames is None:
+            from quantark.pnlexplain.equity.recorder import RECON_COLUMNS
+            return pd.DataFrame(columns=RECON_COLUMNS)
+        return self._explain_frames[1]
 
     @property
     def metrics(self) -> "PerformanceMetrics":

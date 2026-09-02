@@ -641,6 +641,7 @@ class LifecycleTransition:
     state_before: Optional[EquityOptionLifecycleState]   # deep copy at t0
     state_after: Optional[EquityOptionLifecycleState]    # deep copy at t1
     events: tuple[LifecycleEvent, ...] = ()      # fired in (t0, t1], chronological
+    contract_roll_days: Optional[int] = None     # None = rolled by the step's calendar days
 
     @property
     def changed(self) -> bool: ...               # fingerprints differ (computed, never supplied)
@@ -655,6 +656,18 @@ post-event product and engine are `snapshot_t1.product` /
 `snapshot_t1.engine`; the transition never carries copies of them, it is
 validated against them (below).
 
+`contract_roll_days` declares by how many calendar days `product_alive_t1`
+was rolled from `product_t0` for the §5.3 roll check. `None` means the
+step's calendar days. `0` declares, explicitly, that the holder repriced the
+**same** float-maturity contract without rolling it: the equity
+`BacktestEngine` does this for every untracked position (it never rolls a
+float maturity; only lifecycle trackers roll), so the recorder declares it
+rather than guessing. Under `contract_roll_days = 0` the time row carries
+only the valuation-date effect (`time_pure` of the unrolled contract), the
+Taylor time greeks are not requested and the `theta_contract` sub-row is 0,
+and the result metadata reports `contract_roll_days` / `contract_rolled`.
+A value larger than the step's calendar days is a `ValidationError`.
+
 `lifecycle_fingerprint` is the semantic identity used for change detection
 and is always **computed**, never accepted as an input. It is generic over
 the state dataclasses so that a new pricing-relevant field can never be
@@ -665,11 +678,13 @@ determination_date.isoformat() | determination_time, payment_date.isoformat()
 | payment_time, sorted metadata items)`, a `ValuationPoint` becomes
 `("date", iso)` or `("time", float)`, sets become sorted tuples, datetimes
 become ISO strings, floats are kept exact. `None` states fingerprint to
-`("v1", None)`. The only excluded fields are the trackers' bookkeeping index
-sets `observed_ko_indices`, `observed_ki_indices`, `observed_coupon_indices`:
-they grow on every observation date whether or not anything fired, carry no
+`("v1", None)`. The only excluded fields are the trackers' bookkeeping fields:
+the index sets `observed_ko_indices`, `observed_ki_indices`,
+`observed_coupon_indices` (they grow on every observation date whether or not
+anything fired) and the clock stamp `valuation_point` (re-stamped on every
+observation; the snapshot carries its own valuation point). They carry no
 pricing information (the pricing product is rolled from the schedule, not
-from these sets), and would otherwise flag a state change with no event.
+from these fields), and would otherwise flag a state change with no event.
 `LIFECYCLE_EVENT` is changed iff the two fingerprints differ.
 
 Rules (all violations raise `ValidationError`):

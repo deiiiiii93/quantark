@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Dict, List, Optional, Tuple
 
+from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.riskmeasures.greeks.bump_envs import resolve_theta_bump_mode
 from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
 from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
@@ -143,7 +144,9 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
     terms, subrows = resolve_stencil(config), resolved_subrows(config)
     alive_move = cache.all_market().total - cache.value_for(()).total
     time_pure = cache.time_pure()
-    params = config.params if config.params is not None else snap0.engine.params
+    params = config.params if config.params is not None else getattr(snap0.engine, "params", None)
+    if params is None:
+        params = EngineParams()        # the GreeksCalculator's own default for a params-less engine
     bump = params.get_effective_bump_config()
     n, clock_label = _resolve_steps(cache, config, bump)
     per_day = float(days) if config.time_term == "exact_gap" else 1.0
@@ -153,22 +156,31 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
     route: Optional[str] = None
     vega_scale: Optional[float] = None
     gap_scale = 1.0
+    # contract_roll_days == 0: the holder repriced the SAME float-maturity contract without
+    # rolling it, so there is no contract theta to measure; every time greek is zero and the
+    # time row carries only the valuation-date effect (spec §8).
+    rolled = getattr(cache.transition, "contract_roll_days", None) != 0
     if not terminal:
         calc = _calculator(params, bump, config, days)
         wanted = list(terms)
         if "theta" in terms and subrows:                      # sub-rows are numerical-only in the calculator
             wanted += ["r_theta", "q_theta"] + (["gamma_theta"] if "gamma_theta" in subrows else [])
         suffix = _clock_suffix(config)
-        request = [f"{name}{suffix}" if name in TIME_GREEKS else name for name in wanted]
+        requested = [name for name in wanted if rolled or name not in TIME_GREEKS]
+        request = [f"{name}{suffix}" if name in TIME_GREEKS else name for name in requested]
         route = config.greeks_method if config.greeks_method != "auto" \
             else calc.resolve_route(snap0.product, request)
         raw = calc.calculate(snap0.product, snap0.pricing_env, cache.bump_engine_t0, method=route,
                              greeks=request, theta_decomposition_mode=config.theta_decomposition_mode)
-        greeks = {name: float(raw[f"{name}{suffix}" if name in TIME_GREEKS else name]) for name in wanted}
+        greeks = {name: float(raw[f"{name}{suffix}" if name in TIME_GREEKS else name]) for name in requested}
+        for name in wanted:
+            if name not in greeks:
+                greeks[name] = 0.0                           # unrolled contract: no time greek
         vega_scale = 0.01 if route == "analytical" else float(bump.vol_bump)
         # analytical time greeks are per-day rates; numerical ones are gap-valued under exact_gap
         gap_scale = float(days) if (route == "analytical" and config.time_term == "exact_gap") else 1.0
-    meta = {"route": route, "vega_scale": vega_scale, "n_steps": n, "clock": clock_label, "gap_scale": gap_scale}
+    meta = {"route": route, "vega_scale": vega_scale, "n_steps": n, "clock": clock_label, "gap_scale": gap_scale,
+            "contract_rolled": rolled}
 
     def derivative(name: str) -> float:
         g = greeks[name]

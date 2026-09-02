@@ -186,3 +186,26 @@ def test_shapley_matches_brute_force_average_and_sums_to_total():
                 acc[row.factor] += row.pnl / len(perms)
     for f in eff:
         assert sh[f] == pytest.approx(acc[f], abs=1e-9)
+
+
+def test_unrolled_contract_must_be_declared_and_then_has_no_contract_theta():
+    """The equity BacktestEngine reprices an untracked float-maturity product with a constant
+    tenor. Explaining that requires an explicit contract_roll_days=0; nothing is guessed."""
+    from quantark.pnlexplain.equity.lifecycle import LifecycleTransition
+    s0, s1 = _pair()
+    same = ValuationSnapshot(s0.product, ENG, s1.pricing_env, date=MON, quantity=2.0)   # T unchanged
+    with pytest.raises(ValidationError):                                             # undeclared: rejected
+        explain(s0, same)
+    declared = LifecycleTransition(product_alive_t1=s0.product, engine_alive_t1=ENG,
+                                   state_before=None, state_after=None, contract_roll_days=0)
+    res = explain(s0, same, transition=declared)
+    assert res.metadata["contract_roll_days"] == 0 and res.metadata["contract_rolled"] is False
+    assert res.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=_tol(res.total_pnl))
+    assert res.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=_tol(res.total_pnl))
+    # a flat environment and a constant tenor: the valuation date alone moves nothing
+    assert res.metadata["time_pure"] == pytest.approx(0.0, abs=1e-12)
+    taylor = {r.term: r for r in res.rows if r.method is ExplainMethod.TAYLOR}
+    assert taylor["theta"].pnl == pytest.approx(0.0, abs=1e-12)
+    assert taylor["theta_contract"].pnl == 0.0 and taylor["r_theta"].pnl == 0.0
+    with pytest.raises(ValidationError):                                             # more than the step
+        explain(s0, same, transition=LifecycleTransition(s0.product, ENG, None, None, contract_roll_days=4))
