@@ -2306,6 +2306,7 @@ FRI = datetime(2026, 6, 26)
 SAT = datetime(2026, 6, 27)
 MON = datetime(2026, 6, 29)
 Q = 5.0
+K = 105.0                                                       # off the d2 = 0 point: vanna/volga != 0
 CLOSED_FORM = ["delta", "gamma", "vega", "theta", "rho"]      # every name auto-routes analytical
 FD = dict(rel=2e-2, abs=1e-6)                                   # spec §12 "FD tolerance"
 
@@ -2322,9 +2323,9 @@ def _snaps(ds=0.5, dvol=0.002, dr=0.0005, dq=0.0, d1=SAT, calendar=None, engine=
     e0 = _env(100.0, 0.20, 0.03, 0.01, FRI, calendar)
     e1 = _env(100.0 + ds, 0.20 + dvol, 0.03 + dr, 0.01 + dq, d1, calendar)
     eng = engine or BlackScholesEngine()
-    s0 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0),
+    s0 = ValuationSnapshot(EuropeanVanillaOption(strike=K, option_type=OptionType.CALL, maturity=1.0),
                            eng, e0, date=FRI, quantity=Q)
-    s1 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0 - days / 365),
+    s1 = ValuationSnapshot(EuropeanVanillaOption(strike=K, option_type=OptionType.CALL, maturity=1.0 - days / 365),
                            eng, e1, date=d1, quantity=Q)
     return s0, s1
 
@@ -2358,8 +2359,12 @@ def test_default_stencil_routes_numerical_and_matches_closed_form_to_fd_toleranc
     components = [r.pnl for r in res.rows_for(ExplainMethod.TAYLOR, kind=RowKind.COMPONENT)
                   if r.method is ExplainMethod.TAYLOR and r.factor is not Factor.UNEXPLAINED]
     assert res.unexplained == pytest.approx((res.pv_alive_t1.total - res.pv_t0.total) - sum(components), abs=1e-12)
-    ext = explain(s0, s1, config=PnLExplainConfig(stencil="extended"))
-    assert abs(ext.unexplained) < abs(res.unexplained)
+    # The extended stencil adds the time-cross and third-order terms in (S, sigma, t); no stencil
+    # carries a delta-rate cross term, so the comparison is made without a rate move.
+    s0r, s1r = _snaps(dr=0.0)
+    std_r = explain(s0r, s1r)
+    ext = explain(s0r, s1r, config=PnLExplainConfig(stencil="extended"))
+    assert abs(ext.unexplained) < abs(std_r.unexplained)
     assert "gamma_theta" in _rows(ext) and "speed" in _rows(ext)
     assert rows["vanna"].factor is Factor.VOL and rows["delta"].factor is Factor.SPOT
     assert rows["vanna"].moves == {"spot_return": pytest.approx(0.005), "vol_pts": pytest.approx(0.2)}

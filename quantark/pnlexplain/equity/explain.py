@@ -1,7 +1,7 @@
 """Two-snapshot explain orchestrator (spec §5.6)."""
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from quantark.pnlexplain.base import MARKET_FACTORS, ExplainMethod, ExplainRow, PnLExplainResult, make_total_row
 from quantark.pnlexplain.config import PnLExplainConfig
@@ -10,6 +10,7 @@ from quantark.pnlexplain.equity.factor_diff import build_factor_moves, validate_
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition, event_row, resolve_transition
 from quantark.pnlexplain.equity.scenario import ScenarioCache
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
+from quantark.pnlexplain.equity.taylor import taylor_rows
 from quantark.pnlexplain.equity.waterfall import sequential_rows, shapley_rows
 from quantark.util.exceptions import NumericalError
 from quantark.util.numerical import is_close
@@ -42,10 +43,8 @@ def explain(
     pv_t1 = cache.value_t1()
     total_pnl = pv_t1.total - pv_t0.total
 
-    # Explicit gates for modes built by later tasks (each is removed by the task that
-    # implements the mode; a gate is never a fallback, it refuses).
-    if ExplainMethod.TAYLOR in config.methods:
-        raise NotImplementedError("the Taylor explainer lands in Task 8")
+    taylor_meta: Dict[str, Any] = {"route": None, "vega_scale": None, "n_steps": None, "clock": None,
+                                   "gap_scale": None}
     rows: List[ExplainRow] = []
     if ExplainMethod.WATERFALL in config.methods:
         if config.interaction == "sequential":
@@ -53,7 +52,11 @@ def explain(
         else:
             rows.extend(shapley_rows(cache, LEVEL))
     rows.append(event_row(cache, transition, LEVEL))
+    # The residual is assigned exactly once: None unless the Taylor method is requested.
     unexplained: Optional[float] = None
+    if ExplainMethod.TAYLOR in config.methods:
+        trows, unexplained, taylor_meta = taylor_rows(cache, config, LEVEL)
+        rows.extend(trows)
     rows.append(make_total_row(LEVEL, total_pnl))
 
     metadata = {
@@ -62,6 +65,7 @@ def explain(
         "coordinate": (coordinate.reference_strike, coordinate.tenor_t1),
         "transition_changed": transition.changed,
         "interaction": config.interaction,
+        **taylor_meta,
     }
     result = PnLExplainResult(
         date_t0=snapshot_t0.date, date_t1=snapshot_t1.date, pv_t0=pv_t0,

@@ -57,12 +57,6 @@ def _tol(total):
     return 1e-10 * max(1.0, abs(total))
 
 
-def test_taylor_is_gated_until_its_task():
-    s0, s1 = _pair()
-    with pytest.raises(NotImplementedError):
-        explain(s0, s1)                                     # the default config requests Taylor
-
-
 def test_waterfall_is_exact_and_time_row_is_time_pure():
     s0, s1 = _pair()
     res = explain(s0, s1, config=WF)
