@@ -57,12 +57,10 @@ def _tol(total):
     return 1e-10 * max(1.0, abs(total))
 
 
-def test_taylor_and_shapley_are_gated_until_their_tasks():
+def test_taylor_is_gated_until_its_task():
     s0, s1 = _pair()
     with pytest.raises(NotImplementedError):
         explain(s0, s1)                                     # the default config requests Taylor
-    with pytest.raises(NotImplementedError):
-        explain(s0, s1, config=PnLExplainConfig(methods=(ExplainMethod.WATERFALL,), interaction="shapley"))
 
 
 def test_waterfall_is_exact_and_time_row_is_time_pure():
@@ -159,3 +157,38 @@ def test_unchanged_factors_are_not_priced(monkeypatch):
     # base, time, spot, and the t1 endpoint: four pricings, no more
     assert len(calls) == 4
     assert res.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=_tol(res.total_pnl))
+
+
+import itertools  # noqa: E402
+
+
+def test_shapley_matches_brute_force_average_and_sums_to_total():
+    from quantark.pnlexplain.equity.coordinate import resolve_coordinate
+    from quantark.pnlexplain.equity.factor_diff import build_factor_moves
+    from quantark.pnlexplain.equity.lifecycle import resolve_transition
+    from quantark.pnlexplain.equity.scenario import ScenarioCache
+    from quantark.pnlexplain.equity.waterfall import sequential_rows
+
+    s0, s1 = _pair(rate1=0.03, div1=0.01)          # TIME, SPOT, VOL change (3 effective factors)
+    cfg = PnLExplainConfig(methods=(ExplainMethod.WATERFALL,), interaction="shapley")
+    res = explain(s0, s1, config=cfg)
+    assert res.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=_tol(res.total_pnl))
+    sh = {r.factor: r.pnl for r in res.rows_for(ExplainMethod.WATERFALL, kind=RowKind.COMPONENT)
+          if r.method is ExplainMethod.WATERFALL}
+    assert all(r.step is None for r in res.rows if r.method is ExplainMethod.WATERFALL)
+
+    tr = resolve_transition(s0, s1, None, calendar_days=3)
+    coord = resolve_coordinate(s0.product, 100.0, tr.product_alive_t1, s1.pricing_env)
+    mv = build_factor_moves(s0, s1, coord, engine_alive_t1=tr.engine_alive_t1, lifecycle_changed=False)
+    cache = ScenarioCache(s0, s1, tr, mv, cfg)
+    eff = [f for f in MARKET_FACTORS if f in cache.effective]
+    assert len(eff) == 3
+    acc = {f: 0.0 for f in eff}
+    perms = list(itertools.permutations(eff))
+    for perm in perms:
+        order = tuple(perm) + tuple(f for f in MARKET_FACTORS if f not in eff)
+        for row in sequential_rows(cache, order):
+            if row.factor in acc:
+                acc[row.factor] += row.pnl / len(perms)
+    for f in eff:
+        assert sh[f] == pytest.approx(acc[f], abs=1e-9)

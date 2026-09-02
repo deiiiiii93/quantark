@@ -10,7 +10,7 @@ from quantark.pnlexplain.equity.factor_diff import build_factor_moves, validate_
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition, event_row, resolve_transition
 from quantark.pnlexplain.equity.scenario import ScenarioCache
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
-from quantark.pnlexplain.equity.waterfall import sequential_rows
+from quantark.pnlexplain.equity.waterfall import sequential_rows, shapley_rows
 from quantark.util.exceptions import NumericalError
 from quantark.util.numerical import is_close
 
@@ -46,11 +46,12 @@ def explain(
     # implements the mode; a gate is never a fallback, it refuses).
     if ExplainMethod.TAYLOR in config.methods:
         raise NotImplementedError("the Taylor explainer lands in Task 8")
-    if config.interaction == "shapley":
-        raise NotImplementedError("interaction='shapley' lands in Task 6")
     rows: List[ExplainRow] = []
     if ExplainMethod.WATERFALL in config.methods:
-        rows.extend(sequential_rows(cache, config.waterfall_order, LEVEL))
+        if config.interaction == "sequential":
+            rows.extend(sequential_rows(cache, config.waterfall_order, LEVEL))
+        else:
+            rows.extend(shapley_rows(cache, LEVEL))
     rows.append(event_row(cache, transition, LEVEL))
     unexplained: Optional[float] = None
     rows.append(make_total_row(LEVEL, total_pnl))
