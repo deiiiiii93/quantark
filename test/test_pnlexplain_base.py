@@ -2,11 +2,10 @@
 import math
 from datetime import datetime
 
-import pandas as pd
 import pytest
 
 from quantark.pnlexplain.base import (
-    FRAME_COLUMNS, MOVE_KEYS, ExplainMethod, ExplainRow, Factor, RowKind,
+    FRAME_COLUMNS, ExplainMethod, ExplainRow, Factor, RowKind,
     ValueBreakdown, PnLExplainResult, component_sum, make_total_row, rows_to_frame,
 )
 from quantark.util.exceptions import NumericalError, ValidationError
