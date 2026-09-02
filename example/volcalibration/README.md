@@ -110,7 +110,7 @@ CFETS forwards and they agree exactly — but an FX consumer wanting a typed
 
 ## Further reading
 
-- `quantark/volcalibration/CLAUDE.md` — the module guide: the
+- `quantark/volcalibration/README.md` — the module guide: the
   `BUILDER_SCHEMA_VERSION` obligation, the artifact-bytes constraint, the
   resume rule and its two bounded exceptions.
 - `docs/superpowers/specs/2026-09-01-volcalibration-module-design.md` — the

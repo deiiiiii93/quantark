@@ -2,8 +2,7 @@
 
 Implements the Basel Committee SA-CCR methodology for Exposure at Default (EAD)
 on derivative netting sets: ``EAD = alpha x (RC + PFE)``. See
-``quantark/saccr/doc/saccr_basel.md`` for the methodology reference and
-``quantark/saccr/CLAUDE.md`` for the developer guide.
+``quantark/saccr/doc/saccr_basel.md`` for the methodology reference.
 
 Reference: Basel Committee on Banking Supervision, "The standardised approach for
 measuring counterparty credit risk exposures" (BCBS d291, Mar 2014, rev Apr 2014).

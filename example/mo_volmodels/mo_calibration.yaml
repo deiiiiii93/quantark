@@ -4,7 +4,7 @@
 # built with, read back from the manifest's own `config` block.  Running this
 # config rebuilds nothing: a default surface block fingerprints identically to
 # the frozen history, which is what protects the warm calibration cache and the
-# cohort pins (see quantark/volcalibration/CLAUDE.md).
+# cohort pins (see quantark/volcalibration/README.md).
 #
 #   .venv/bin/python example/mo_volmodels/export_snapshots.py
 #   .venv/bin/python -m quantark.volcalibration run example/mo_volmodels/mo_calibration.yaml --plan --json
