@@ -4441,13 +4441,20 @@ git commit -m "feat(pnlexplain): replay engine recorder with quoted futures legs
 
 ### Task 13: Bucketed vega / rho rows (P5, opt-in)
 
-**Review amendment (plan review 2):** structure compatibility is a RULE, not a hint: both
-snapshots must carry the same term-structure class on the SAME pillar grid (vol `times`, rate pillar
-tenors) or bucketed mode raises `ValidationError`. Add
-`test_bucketed_rejects_mismatched_pillars` (a `TermStructureVolSurface(times=[0.5, 1.0], ...)` at t0
-against `TermStructureVolSurface(times=[0.25, 0.5, 1.0], ...)` at t1 with `bucketed=True` →
-`ValidationError`), next to the existing term-structure-vs-flat rejection test. `_pillars` needs
-`Mapping` from `typing` in `bucketed.py`.
+**Review amendment (plan review 2, resolved against the spec):** structure compatibility is a
+RULE: the spec (§7.6) defines it — the canonical pillars are the t0 object's, and the t1 object is
+sampled at those pillars with its own interpolation, so a differing t1 grid is ALLOWED; only a term
+structure on one side (term vs flat) raises `ValidationError`. `test_bucketed_samples_t1_on_t0_pillars`
+pins the rule (a finer t1 grid; each `vega.<τ>` move equals `σ1(K*, τ) − σ0(K*, τ)` at the t0 pillars).
+
+**Findings while landing (2026-09-02):** the calculator's key-rate rho is carry-invariant (forward
+held, dividend yield re-derived: pure discounting), a different sensitivity from the factor model's rate
+step (rate curve replaced, dividend yield held) — opposite in sign for a vanilla call. Booking those
+buckets as the rate component would mis-attribute a rate move, so `rate_keyrate.<τ>` and
+`rate_keyrate.parallel` are INFORMATIONAL rows (metadata `convention="carry_invariant"`) beneath the
+scalar `rho`, which stays the COMPONENT; only tenor-vega buckets replace their scalar row
+(`metadata["bucketed_factors"]`). Spec §7.6 amended. `LinearRateCurve` lives in
+`quantark.param.rrf.rate_curve` (not exported from `quantark.param`).
 
 **Files:**
 - Create: `quantark/pnlexplain/equity/bucketed.py`

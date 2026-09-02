@@ -131,12 +131,6 @@ def test_cash_greek_columns_follow_the_desk_table():
     assert vanna.cash_greek == pytest.approx(Q * _analytical(s0, ["vanna"])["vanna"] * S * 0.01, **FD)
 
 
-def test_bucketed_is_gated_until_task_13():
-    s0, s1 = _snaps()
-    with pytest.raises(NotImplementedError):
-        explain(s0, s1, config=PnLExplainConfig(bucketed=True))
-
-
 def test_clocks_exact_gap_versus_per_step():
     cal = create_calendar(CalendarType.CHINA_SSE)
     s0, s1 = _snaps(d1=MON, calendar=cal)

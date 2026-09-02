@@ -622,13 +622,27 @@ explain never depends on it.
   machinery (already the signed-bump-normalised derivative, central or
   one-sided per the coordinate's difference mode) is multiplied by
   `quantity` and by the pillar move: `vega.<τ>` = `dV/dσ_τ × Δσ_τ`,
-  `rho.<τ>` = `dV/dr_τ × Δr_τ`. The display columns follow §7.5 with the
-  pillar in `moves["tenor"]`.
-- **Rows**: bucket rows are the `COMPONENT` rows and the scalar `vega` /
-  `rho` row they replace is not emitted, so nothing is counted twice; the
-  key-rate parallel (`rate_keyrate.parallel × Δr_parallel`) is an
-  `INFORMATIONAL` row with `sum_of_buckets` and `reconciles` in metadata.
-  Reconciliation is unchanged: bucket rows sum into the Taylor components.
+  `rate_keyrate.<τ>` = `dV/dr_τ × Δr_τ`. The display columns follow §7.5
+  with the pillar in `moves["tenor"]`.
+- **Vega rows**: the `vega.<τ>` rows are `COMPONENT` rows and the scalar
+  `vega` row they replace is not emitted, so nothing is counted twice; the
+  node-aligned bumps sum to the scalar vega, so the buckets are the scalar
+  row split by pillar. Reconciliation is unchanged: bucket rows sum into
+  the Taylor components. `metadata["bucketed_factors"]` lists the factors
+  whose scalar row was replaced (`("vol",)` or `()`).
+- **Rate rows are informational** (amended while implementing P5): the
+  only key-rate machinery in `riskmeasures` is *carry-invariant* — the
+  pillar bump holds the forward fixed and re-derives the dividend yield,
+  a pure discounting sensitivity — whereas this factor model's rate step
+  replaces the rate curve with the dividend yield held (§5.3), so the two
+  are different sensitivities (opposite in sign for a vanilla call).
+  Booking the carry-invariant buckets as the rate component would
+  mis-attribute a rate move, so the scalar `rho` stays the `COMPONENT`
+  and the `rate_keyrate.<τ>` rows plus `rate_keyrate.parallel` (with
+  `sum_of_buckets` and `reconciles`) sit beneath it as `INFORMATIONAL`
+  rows tagged `metadata["convention"] = "carry_invariant"`. A q-held
+  key-rate rho would need new numerics in `riskmeasures`, which this
+  feature does not touch.
 - Objects that are not term structures keep the scalar rows.
 
 ## 8. Lifecycle event term

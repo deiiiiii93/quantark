@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.riskmeasures.greeks.bump_envs import resolve_theta_bump_mode
@@ -137,8 +137,6 @@ def _theta_subrows(level, greeks, q, n, days, per_day, gap_scale, config, subrow
 
 def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "instrument"
                 ) -> Tuple[Tuple[ExplainRow, ...], float, Dict[str, Any]]:
-    if config.bucketed:
-        raise NotImplementedError("bucketed rows land in Task 13")     # removed in Task 13
     snap0, moves = cache.snap0, cache.moves
     q, days, S0 = snap0.quantity, moves.calendar_days, moves.spot_t0
     terms, subrows = resolve_stencil(config), resolved_subrows(config)
@@ -156,6 +154,8 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
     route: Optional[str] = None
     vega_scale: Optional[float] = None
     gap_scale = 1.0
+    bucket_rows: Mapping[Factor, Tuple[ExplainRow, ...]] = {}
+    covered: FrozenSet[Factor] = frozenset()
     # contract_roll_days == 0: the holder repriced the SAME float-maturity contract without
     # rolling it, so there is no contract theta to measure; every time greek is zero and the
     # time row carries only the valuation-date effect (spec §8).
@@ -179,8 +179,11 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
         vega_scale = 0.01 if route == "analytical" else float(bump.vol_bump)
         # analytical time greeks are per-day rates; numerical ones are gap-valued under exact_gap
         gap_scale = float(days) if (route == "analytical" and config.time_term == "exact_gap") else 1.0
+        if config.bucketed:
+            from quantark.pnlexplain.equity.bucketed import bucketed_rows
+            bucket_rows, covered = bucketed_rows(cache, calc, bump, level)
     meta = {"route": route, "vega_scale": vega_scale, "n_steps": n, "clock": clock_label, "gap_scale": gap_scale,
-            "contract_rolled": rolled}
+            "contract_rolled": rolled, "bucketed_factors": tuple(sorted(f.value for f in covered))}
 
     def derivative(name: str) -> float:
         g = greeks[name]
@@ -198,6 +201,13 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
         coeff, exps = TERM_SPEC[name]
         applicable = factor in moves.coordinate.applicable and all(
             raw_moves[i] is not None for i, e in enumerate(exps[:4]) if e)
+        if name == "vega" and Factor.VOL in covered:
+            # tenor-vega buckets take the scalar row's slot exactly once (spec §7.6)
+            for row in bucket_rows[Factor.VOL]:
+                rows.append(row)
+                if row.kind is RowKind.COMPONENT:
+                    explained += row.pnl
+            continue
         if name == "theta":
             if config.time_term == "exact_gap":
                 pnl, greek = time_pure, time_pure / per_day
@@ -225,6 +235,9 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
         rows.append(_row(level, name, factor, pnl, greek=greek_disp,
                          cash=cash_greek(name, g_pos, S0, per_day), mv=display_moves(exps, moves)))
         explained += pnl
+        if name == "rho" and Factor.RATE in bucket_rows:
+            # carry-invariant key-rate view: informational rows beneath the scalar rho (spec §7.6)
+            rows.extend(bucket_rows[Factor.RATE])
     unexplained = alive_move - explained
     rows.append(_row(level, "unexplained", Factor.UNEXPLAINED, unexplained,
                      extra={"basis_and_model_effects_included": True}))
