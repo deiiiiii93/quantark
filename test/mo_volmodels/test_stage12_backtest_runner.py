@@ -1406,7 +1406,56 @@ def test_manifest_of_a_plain_run_reports_no_reuse(tmp_path):
 # --- the data fingerprint, on the real history tree -------------------------
 
 
-def test_data_fingerprint_ignores_rows_beyond_the_pinned_window():
+PINNED = date(2026, 7, 31)
+
+
+@pytest.fixture
+def fingerprint_inputs(tmp_path):
+    """A minimal history for the data-fingerprint tests.
+
+    ``compute_data_fingerprint`` takes both frames as arguments and reads only
+    ``surface_manifest.json`` off disk, so this is everything it needs.  Built
+    here rather than loaded from ``HISTORY_DIR`` because that directory is
+    git-excluded: these two tests used to fail outright wherever the real
+    market-data cache was absent, which is every clean checkout and CI.  The
+    properties under test are pure fingerprint logic and have nothing to do
+    with real prices.
+    """
+    import pandas as pd
+
+    (tmp_path / "surface_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "records": [
+                    {"date": "20260730", "status": "ok", "artifact_sha256": "a" * 64},
+                    {"date": "20260731", "status": "ok", "artifact_sha256": "b" * 64},
+                    # Beyond the pinned window: must not enter the digest.
+                    {"date": "20260803", "status": "ok", "artifact_sha256": "c" * 64},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    spot = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-07-30", "2026-07-31"]),
+            "spot": [6100.0, 6125.5],
+        }
+    )
+    futures = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-07-30", "2026-07-31"]),
+            "contract": ["IM2608", "IM2608"],
+            "futures_price": [6090.0, 6115.0],
+            "expiry_date": pd.to_datetime(["2026-08-21", "2026-08-21"]),
+            "multiplier": [200.0, 200.0],
+        }
+    )
+    return tmp_path, spot, futures
+
+
+def test_data_fingerprint_ignores_rows_beyond_the_pinned_window(fingerprint_inputs):
     """The property that makes resume usable at all.
 
     The daily calibration pipeline appends a spot row every weekday.  If the
@@ -1415,37 +1464,83 @@ def test_data_fingerprint_ignores_rows_beyond_the_pinned_window():
     """
     import pandas as pd
 
-    spot = s12.load_spot_frame(HISTORY_DIR)
-    futures = s12.load_futures_frame(HISTORY_DIR)
-    pinned = date(2026, 7, 31)
+    history_dir, spot, futures = fingerprint_inputs
     before = s12.compute_data_fingerprint(
-        history_dir=HISTORY_DIR, spot=spot, futures=futures, data_end=pinned
+        history_dir=history_dir, spot=spot, futures=futures, data_end=PINNED
     )
     tomorrow = spot.tail(1).assign(date=pd.Timestamp("2027-03-01"), spot=1.0)
     after = s12.compute_data_fingerprint(
-        history_dir=HISTORY_DIR,
+        history_dir=history_dir,
         spot=pd.concat([spot, tomorrow], ignore_index=True),
         futures=futures,
-        data_end=pinned,
+        data_end=PINNED,
     )
     assert before == after
 
 
-def test_data_fingerprint_notices_a_rewritten_row_inside_the_window():
-    import pandas as pd
-
-    spot = s12.load_spot_frame(HISTORY_DIR)
-    futures = s12.load_futures_frame(HISTORY_DIR)
-    pinned = date(2026, 7, 31)
+def test_data_fingerprint_notices_a_rewritten_row_inside_the_window(fingerprint_inputs):
+    history_dir, spot, futures = fingerprint_inputs
     before = s12.compute_data_fingerprint(
-        history_dir=HISTORY_DIR, spot=spot, futures=futures, data_end=pinned
+        history_dir=history_dir, spot=spot, futures=futures, data_end=PINNED
     )
     tampered = spot.copy()
     tampered.loc[0, "spot"] = float(tampered.loc[0, "spot"]) + 1.0
     after = s12.compute_data_fingerprint(
-        history_dir=HISTORY_DIR, spot=tampered, futures=futures, data_end=pinned
+        history_dir=history_dir, spot=tampered, futures=futures, data_end=PINNED
     )
     assert before != after
+
+
+def test_data_fingerprint_notices_a_futures_row_inside_the_window(fingerprint_inputs):
+    """The futures channel is digested too, not just spot."""
+    history_dir, spot, futures = fingerprint_inputs
+    before = s12.compute_data_fingerprint(
+        history_dir=history_dir, spot=spot, futures=futures, data_end=PINNED
+    )
+    tampered = futures.copy()
+    tampered.loc[0, "futures_price"] = float(tampered.loc[0, "futures_price"]) + 1.0
+    after = s12.compute_data_fingerprint(
+        history_dir=history_dir, spot=spot, futures=tampered, data_end=PINNED
+    )
+    assert before != after
+
+
+def test_data_fingerprint_notices_a_resurfaced_date_inside_the_window(
+    fingerprint_inputs,
+):
+    """A rebuilt artifact inside the window changes its manifest sha, and the
+    digest has to move with it -- that is what makes a resumed cell honest."""
+    history_dir, spot, futures = fingerprint_inputs
+    before = s12.compute_data_fingerprint(
+        history_dir=history_dir, spot=spot, futures=futures, data_end=PINNED
+    )
+    manifest_path = history_dir / "surface_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["records"][1]["artifact_sha256"] = "d" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    after = s12.compute_data_fingerprint(
+        history_dir=history_dir, spot=spot, futures=futures, data_end=PINNED
+    )
+    assert before != after
+
+
+def test_data_fingerprint_ignores_a_surface_beyond_the_pinned_window(
+    fingerprint_inputs,
+):
+    history_dir, spot, futures = fingerprint_inputs
+    before = s12.compute_data_fingerprint(
+        history_dir=history_dir, spot=spot, futures=futures, data_end=PINNED
+    )
+    manifest_path = history_dir / "surface_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["records"].append(
+        {"date": "20260901", "status": "ok", "artifact_sha256": "e" * 64}
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    after = s12.compute_data_fingerprint(
+        history_dir=history_dir, spot=spot, futures=futures, data_end=PINNED
+    )
+    assert before == after
 
 
 def _git(repo, *args):

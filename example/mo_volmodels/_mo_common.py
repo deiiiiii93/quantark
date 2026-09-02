@@ -1,24 +1,35 @@
-"""Shared helpers for the MO vol-model suite: snapshot IO, put-call parity, OTM
-filtering, Black-IV inversion, and plotting. Pure quantark (no akshare)."""
+"""Shared helpers for the MO vol-model suite.
+
+DEPRECATED: the calibration procedure now lives in ``quantark.volcalibration``.
+This module is a thin compatibility shim preserving the suite's legacy
+signatures; new code should import from the library directly.
+"""
 from __future__ import annotations
 
-import json
 import copy
+import json
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
 
-from quantark.util.numerical import safe_log
-from quantark.volmodels.black_scholes import implied_vol_call
-from quantark.util.exceptions import NumericalError
+from quantark.util.exceptions import ValidationError
+from quantark.volcalibration.normalize import listed as _listed
+from quantark.volcalibration.normalize.listed import (  # noqa: F401
+    OtmQuote,
+    otm_implied_vol,
+    select_otm,
+)
+from quantark.volcalibration.snapshot import QuoteSnapshot
 
 _REQUIRED = {"fetched_at", "underlying", "expiries"}
+_LEGACY_TRADE_DATE = date(2026, 7, 6)  # the suite's fixed valuation date
 
 
 def load_snapshot(path) -> dict:
-    """Load and lightly validate an MO snapshot JSON."""
+    """Load and lightly validate an MO snapshot JSON (legacy: returns the dict)."""
     snap = json.loads(Path(path).read_text())
     missing = _REQUIRED - set(snap)
     if missing:
@@ -30,45 +41,28 @@ def load_snapshot(path) -> dict:
 
 @dataclass
 class ExpirySlice:
-    """One expiry's quotes, indexed by strike for calls and puts separately."""
+    """Legacy five-field slice; delegates the maths to the library."""
 
     expiry_date: str
     T: float
-    calls: Dict[float, float]  # strike -> last price
+    calls: Dict[float, float]
     puts: Dict[float, float]
     volume: Dict[Tuple[float, str], int] = field(default_factory=dict)
 
-
-def _quote_price(q: dict) -> float:
-    """Price used for a quote: bid/ask mid when both sides are live, else last.
-
-    Real MO deep quotes can carry a stale 'last' far from the current book; the mid is
-    the cleaner mark. The synthetic sample sets bid/ask symmetrically around last, so the
-    mid equals last there — this choice is neutral on the sample and better on live data.
-    """
-    bid, ask = q.get("bid"), q.get("ask")
-    if bid is not None and ask is not None and bid > 0 and ask > 0:
-        return 0.5 * (float(bid) + float(ask))
-    return float(q["last"])
-
-
-def iter_expiries(snapshot: dict) -> List[ExpirySlice]:
-    """Reshape the flat quote list of each expiry into strike-indexed maps."""
-    out: List[ExpirySlice] = []
-    for exp in snapshot["expiries"]:
-        calls: Dict[float, float] = {}
-        puts: Dict[float, float] = {}
-        vol: Dict[Tuple[float, str], int] = {}
-        for q in exp["quotes"]:
-            (calls if q["type"] == "C" else puts)[float(q["strike"])] = _quote_price(q)
-            vol[(float(q["strike"]), q["type"])] = int(q.get("volume", 0))
-        out.append(ExpirySlice(exp["expiry_date"], float(exp["T_years"]), calls, puts, vol))
-    return out
+    def to_library(self) -> "_listed.ExpirySlice":
+        return _listed.ExpirySlice(
+            expiry_label=self.expiry_date,
+            expiry_date=self.expiry_date,
+            T=self.T,
+            calls=self.calls,
+            puts=self.puts,
+            volume=self.volume,
+        )
 
 
 @dataclass
 class ParityResult:
-    """Carry recovered from one expiry via put-call parity."""
+    """Legacy five-field parity result."""
 
     r: float
     forward: float
@@ -77,84 +71,42 @@ class ParityResult:
     n_pairs: int
 
 
-def imply_forward_and_rate(sl: "ExpirySlice", s0: float) -> "ParityResult":
-    """Recover (r, forward, DF, q) for one expiry from put-call parity.
-
-    Model: for each paired strike K,  C(K) - P(K) = DF * (F - K),
-    which is linear in K with slope = -DF and intercept = DF*F.
-    """
-    pairs = sorted(set(sl.calls) & set(sl.puts))
-    if len(pairs) < 3:
-        raise ValueError(f"expiry {sl.expiry_date}: only {len(pairs)} paired strikes (<3)")
-    K = np.array(pairs)
-    y = np.array([sl.calls[k] - sl.puts[k] for k in pairs])
-    # Put-call parity is model-free: C - P = DF*(F - K) is a straight line in K.
-    # Slope = -DF, intercept = DF*F. A single OLS fit yields both the market
-    # discount factor and the forward. (Near-ATM weighting is possible via the
-    # `w=` arg of polyfit; OLS is used here — clean on arbitrage-consistent quotes.)
-    a, b = np.polyfit(K, y, 1)
-    df = -a
-    if df <= 0.0:
-        raise ValueError(
-            f"expiry {sl.expiry_date}: non-positive discount factor {df:.4g} "
-            "(arbitrage-violating quotes) — excluded, not fabricated"
+def iter_expiries(snapshot: dict) -> List[ExpirySlice]:
+    """Reshape a legacy snapshot dict into legacy slices via the library."""
+    lifted = QuoteSnapshot.from_legacy_live(
+        snapshot, trade_date=_LEGACY_TRADE_DATE, symbol="000852.SH"
+    )
+    return [
+        ExpirySlice(
+            expiry_date=sl.expiry_date,
+            T=sl.T,
+            calls=sl.calls,
+            puts=sl.puts,
+            volume=sl.volume,
         )
-    forward = float(b / df)
-    r = float(-safe_log(df) / sl.T)
-    q = float(r - safe_log(forward / s0) / sl.T)
-    return ParityResult(r=r, forward=forward, discount_factor=float(df), q=q, n_pairs=len(pairs))
+        for sl in _listed.iter_expiries(lifted)
+    ]
 
 
-@dataclass
-class OtmQuote:
-    """A single out-of-the-money quote surviving the liquidity filter."""
+def imply_forward_and_rate(sl: ExpirySlice, s0: float) -> ParityResult:
+    """Recover (r, F, DF, q) for one expiry (legacy wrapper; raises ValueError).
 
-    strike: float
-    kind: str  # "C" or "P"
-    price: float
-
-
-def select_otm(sl: "ExpirySlice", forward: float, min_volume: int = 1) -> List["OtmQuote"]:
-    """Keep only OTM options: puts below the forward, calls at/above it, liquid & sane.
-
-    The desk convention: only OTM options carry clean volatility information. Deep-ITM
-    quotes are dominated by intrinsic value and are typically stale/wide, so a small
-    pricing error there is a large IV error. We therefore take the put wing below the
-    forward and the call wing at/above it.
+    The library raises ``ValidationError``, which derives from
+    ``QuantArkException`` and NOT from ``ValueError``.  The suite's tests assert
+    ``pytest.raises(ValueError)``, so this re-raise is load-bearing -- do not
+    remove it.
     """
-    out: List[OtmQuote] = []
-    strikes = sorted(set(sl.calls) | set(sl.puts))
-    for k in strikes:
-        kind = "P" if k < forward else "C"
-        book = sl.puts if kind == "P" else sl.calls
-        if k not in book:
-            continue  # that side not quoted at this strike
-        if sl.volume.get((k, kind), 0) < min_volume:
-            continue  # illiquid / no trades
-        price = book[k]
-        if price <= 0.0:
-            continue  # non-positive quote
-        out.append(OtmQuote(strike=k, kind=kind, price=price))
-    return out
-
-
-def otm_implied_vol(oq: "OtmQuote", s0, r, q_carry, forward, discount_factor, T):
-    """Invert an OTM quote to Black IV via its call-equivalent price. None if uninvertible.
-
-    An OTM put is turned into the price of the call at the same strike using put-call
-    parity, C = P + DF*(F - K). A single call inverter then handles both wings, and the
-    put/call smiles agree at the forward by construction — the no-arbitrage property the
-    Dupire builder needs. A quote outside the no-arb band yields None (excluded, never
-    fabricated) per the project's no-fallback rule.
-    """
-    if oq.kind == "P":
-        call_equiv = oq.price + discount_factor * (forward - oq.strike)
-    else:
-        call_equiv = oq.price
     try:
-        return implied_vol_call(s0, oq.strike, T, call_equiv, r, q_carry)
-    except NumericalError:
-        return None
+        res = _listed.imply_forward_and_rate(sl.to_library(), s0)
+    except ValidationError as exc:
+        raise ValueError(str(exc)) from exc
+    return ParityResult(
+        r=res.r,
+        forward=res.forward,
+        discount_factor=res.discount_factor,
+        q=res.q,
+        n_pairs=res.n_pairs,
+    )
 
 
 def build_env(surface_json: dict):

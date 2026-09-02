@@ -1,0 +1,42 @@
+# The MO daily calibration, written down.
+#
+# Every value here is the value the 787 admitted surfaces in data/history were
+# built with, read back from the manifest's own `config` block.  Running this
+# config rebuilds nothing: a default surface block fingerprints identically to
+# the frozen history, which is what protects the warm calibration cache and the
+# cohort pins (see quantark/volcalibration/CLAUDE.md).
+#
+#   .venv/bin/python example/mo_volmodels/export_snapshots.py
+#   .venv/bin/python -m quantark.volcalibration run example/mo_volmodels/mo_calibration.yaml --plan --json
+#   .venv/bin/python -m quantark.volcalibration run example/mo_volmodels/mo_calibration.yaml
+schema_version: 1
+name: mo-daily
+underlying:
+  symbol: "000852.SH"
+  convention: listed_strike
+  price_field: settlement
+paths:
+  root: data/history
+  runtime: ../../output/mo_daily_calibration
+  spot_csv: data/history/csi1000_spot.csv
+surface:
+  sabr_beta: 1.0
+  min_expiries: 2
+  min_strikes_per_expiry: 5
+  # 3, not 5: the butterfly check needs three grid strikes.
+  min_common_strikes: 3
+  extrapolation: flat_total_variance
+  parity_gate:
+    max_abs_implied_rate: 0.10
+    max_rmse_over_forward: 0.01
+calibration:
+  variants: [localvol, heston, heston_slv]
+  heston_preset: mo_frozen
+  heston_max_nfev: 200
+  slv:
+    eta: 1.0
+    n_steps: 40
+    n_x: 161
+    n_z: 81
+run:
+  workers: 2

@@ -1,0 +1,43 @@
+# A complete run config for `quantark.volcalibration`, USD/CNY.
+#
+# This one is self-contained: the six committed CFETS snapshots under
+# example/fx_volmodels/data/ carry their own spot, so 01_end_to_end.py runs
+# from a clean clone with no network and no private history.  Compare with
+# example/mo_volmodels/mo_calibration.yaml, which is the real daily
+# equity-index workflow and needs the (git-excluded) settlement history.
+#
+# Every key below is optional except schema_version, name, underlying and
+# paths.root; the values shown for `surface` are the defaults, written out so
+# the file documents what actually runs.
+schema_version: 1
+name: usdcny-demo
+underlying:
+  symbol: "USD.CNY"
+  # Delta-quoted book: CFETS publishes five delta pillars per tenor, and
+  # quotes implied volatility rather than an option price.
+  convention: fx_delta
+  price_field: mid_iv
+paths:
+  root: ../../output/volcalibration_demo
+surface:
+  sabr_beta: 1.0
+  min_expiries: 2
+  min_strikes_per_expiry: 5
+  min_common_strikes: 3
+  extrapolation: flat_total_variance
+  parity_gate:
+    max_abs_implied_rate: 0.10
+    max_rmse_over_forward: 0.01
+calibration:
+  # Local vol only, so the demo finishes in seconds.  Add heston and
+  # heston_slv for the full set; those take minutes per date.
+  variants: [localvol]
+  heston_preset: mo_frozen
+  heston_max_nfev: 200
+  slv:
+    eta: 1.0
+    n_steps: 40
+    n_x: 161
+    n_z: 81
+run:
+  workers: 1
