@@ -656,8 +656,12 @@ determination_date.isoformat() | determination_time, payment_date.isoformat()
 | payment_time, sorted metadata items)`, a `ValuationPoint` becomes
 `("date", iso)` or `("time", float)`, sets become sorted tuples, datetimes
 become ISO strings, floats are kept exact. `None` states fingerprint to
-`("v1", None)`. `LIFECYCLE_EVENT` is changed iff the two fingerprints
-differ.
+`("v1", None)`. The only excluded fields are the trackers' bookkeeping index
+sets `observed_ko_indices`, `observed_ki_indices`, `observed_coupon_indices`:
+they grow on every observation date whether or not anything fired, carry no
+pricing information (the pricing product is rolled from the schedule, not
+from these sets), and would otherwise flag a state change with no event.
+`LIFECYCLE_EVENT` is changed iff the two fingerprints differ.
 
 Rules (all violations raise `ValidationError`):
 
@@ -915,11 +919,20 @@ trading_days, tenor` (missing moves are NaN; enums serialised as `.value`;
 position < portfolio, `position_id`, method order waterfall < taylor <
 shared, `step`, stencil order). Both position-level and portfolio-level
 rows are emitted. A companion `explain_reconciliation_df` has one row per
-(`date`, `method`, `level`) with `expected` (that day's change in the states
-frame's total PnL for the portfolio level; the position's own `total_pnl`
-for the position level), `explained` (Σ COMPONENT rows with method ∈ {M,
-SHARED} at that level), `gap` and `ok`. An empty result yields empty frames
-with exactly these columns.
+(`date`, `method`, `level`, `position_id`) with `expected` (the economic
+identity: Σ positions (V1 − V0 + trade cash) − costs at the portfolio level;
+the position's own `total_pnl` at the position level), `explained` (Σ
+COMPONENT rows with method ∈ {M, SHARED} at that level), `gap`, `ok`, and
+at the portfolio level additionally `expected_states` (that day's change in
+the states frame's total PnL) and `gap_states`. The two expectations differ
+only where the backtest's own accounting departs from the identity: the
+equity engine's simple `HedgeExecutor` adjusts a hedge quantity without
+re-averaging the entry price, so its states PnL jumps by Δq·(p − entry) on
+adjust days (pre-existing, out of scope here); the multi-instrument
+executor (average cost + realised PnL) and the replay engine agree with the
+identity. `ok` gates the identity everywhere; the `gap_states` gate is
+asserted for the multi-instrument executor and the replay engine. An empty
+result yields empty frames with exactly these columns.
 
 ## 11. Error handling
 
