@@ -7,7 +7,6 @@ from typing import Any, FrozenSet, Optional
 from quantark.asset.equity.product.deltaone import Futures, SpotInstrument
 from quantark.pnlexplain.base import MARKET_FACTORS, Factor
 from quantark.pnlexplain.equity.fingerprints import MATURITY_FLOOR
-from quantark.util.exceptions import ValidationError
 
 _TERM_FACTORS = frozenset({Factor.VOL, Factor.RATE, Factor.DIVIDEND, Factor.BASIS})
 
@@ -28,13 +27,21 @@ def _positive(value: Any) -> Optional[float]:
 
 
 def _tenor(product: Any, env: Any) -> Optional[float]:
-    if getattr(product, "maturity", None) is None and getattr(product, "maturity_date", None) is None \
-            and getattr(product, "exercise_date", None) is None:
+    """Remaining tenor of the alive-at-t1 product, or None when it has no expiry.
+
+    The one known non-error case in which ``get_maturity`` raises is a
+    date-based product valued on or after its expiry; that is detected here
+    explicitly and read as tenor 0. Every other ``ValidationError`` (a
+    malformed product or environment) propagates: no invented expiry.
+    """
+    expiry = getattr(product, "exercise_date", None)
+    if expiry is None:
+        expiry = getattr(product, "maturity_date", None)
+    if getattr(product, "maturity", None) is None and expiry is None:
         return None
-    try:
-        return float(product.get_maturity(env))
-    except ValidationError:
-        return 0.0     # valuation on/after a date-based expiry
+    if expiry is not None and env is not None and env.valuation_date >= expiry:
+        return 0.0
+    return float(product.get_maturity(env))
 
 
 def resolve_coordinate(product_t0: Any, spot_t0: float, product_alive_t1: Any, env_t1: Any

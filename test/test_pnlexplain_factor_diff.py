@@ -125,3 +125,18 @@ def test_non_finite_sample_raises():
     with pytest.raises(NumericalError):
         build_factor_moves(ValuationSnapshot(p0, ENG, e0, date=FRI), ValuationSnapshot(p1, ENG, e1, date=MON),
                            coord, engine_alive_t1=ENG, lifecycle_changed=False)
+
+
+def test_tenor_detects_date_expiry_and_reraises_other_validation_errors():
+    e1 = _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON)
+    expired = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, exercise_date=FRI)
+    c = resolve_coordinate(expired, 100.0, expired, e1)          # valued on/after expiry
+    assert c.tenor_t1 == 0.0 and Factor.VOL not in c.applicable and Factor.SPOT in c.applicable
+
+    class Broken(EuropeanVanillaOption):
+        def get_maturity(self, pricing_env=None):
+            raise ValidationError("malformed maturity")
+
+    with pytest.raises(ValidationError, match="malformed"):
+        resolve_coordinate(_call(1.0), 100.0,
+                           Broken(strike=100.0, option_type=OptionType.CALL, maturity=1.0), e1)

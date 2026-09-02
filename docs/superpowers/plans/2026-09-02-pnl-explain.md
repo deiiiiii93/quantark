@@ -1243,6 +1243,21 @@ def test_non_finite_sample_raises():
     with pytest.raises(NumericalError):
         build_factor_moves(ValuationSnapshot(p0, ENG, e0, date=FRI), ValuationSnapshot(p1, ENG, e1, date=MON),
                            coord, engine_alive_t1=ENG, lifecycle_changed=False)
+
+
+def test_tenor_detects_date_expiry_and_reraises_other_validation_errors():
+    e1 = _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON)
+    expired = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, exercise_date=FRI)
+    c = resolve_coordinate(expired, 100.0, expired, e1)          # valued on/after expiry
+    assert c.tenor_t1 == 0.0 and Factor.VOL not in c.applicable and Factor.SPOT in c.applicable
+
+    class Broken(EuropeanVanillaOption):
+        def get_maturity(self, pricing_env=None):
+            raise ValidationError("malformed maturity")
+
+    with pytest.raises(ValidationError, match="malformed"):
+        resolve_coordinate(_call(1.0), 100.0,
+                           Broken(strike=100.0, option_type=OptionType.CALL, maturity=1.0), e1)
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -1263,7 +1278,6 @@ from typing import Any, FrozenSet, Optional
 from quantark.asset.equity.product.deltaone import Futures, SpotInstrument
 from quantark.pnlexplain.base import MARKET_FACTORS, Factor
 from quantark.pnlexplain.equity.fingerprints import MATURITY_FLOOR
-from quantark.util.exceptions import ValidationError
 
 _TERM_FACTORS = frozenset({Factor.VOL, Factor.RATE, Factor.DIVIDEND, Factor.BASIS})
 
@@ -1284,13 +1298,21 @@ def _positive(value: Any) -> Optional[float]:
 
 
 def _tenor(product: Any, env: Any) -> Optional[float]:
-    if getattr(product, "maturity", None) is None and getattr(product, "maturity_date", None) is None \
-            and getattr(product, "exercise_date", None) is None:
+    """Remaining tenor of the alive-at-t1 product, or None when it has no expiry.
+
+    The one known non-error case in which ``get_maturity`` raises is a
+    date-based product valued on or after its expiry; that is detected here
+    explicitly and read as tenor 0. Every other ``ValidationError`` (a
+    malformed product or environment) propagates: no invented expiry.
+    """
+    expiry = getattr(product, "exercise_date", None)
+    if expiry is None:
+        expiry = getattr(product, "maturity_date", None)
+    if getattr(product, "maturity", None) is None and expiry is None:
         return None
-    try:
-        return float(product.get_maturity(env))
-    except ValidationError:
-        return 0.0     # valuation on/after a date-based expiry
+    if expiry is not None and env is not None and env.valuation_date >= expiry:
+        return 0.0
+    return float(product.get_maturity(env))
 
 
 def resolve_coordinate(product_t0: Any, spot_t0: float, product_alive_t1: Any, env_t1: Any
@@ -1500,7 +1522,7 @@ def build_factor_moves(
 - [ ] **Step 5: Run tests**
 
 Run: `PYTEST test/test_pnlexplain_factor_diff.py -q`
-Expected: 5 passed. (`PricingEnvironment.get_basis_yield` returns `0.0` when no basis object is set, so `basis_t0` / `basis_t1` are `0.0` and BASIS is unchanged in these fixtures.)
+Expected: 6 passed. (`PricingEnvironment.get_basis_yield` returns `0.0` when no basis object is set, so `basis_t0` / `basis_t1` are `0.0` and BASIS is unchanged in these fixtures.)
 
 - [ ] **Step 6: Commit**
 
@@ -1512,6 +1534,14 @@ git commit -m "feat(pnlexplain): factor coordinate resolver and FactorMoves with
 ---
 
 ### Task 5: Lifecycle transition, scenario cache, sequential waterfall, `explain()`
+
+**Review amendment (plan review 2):** land this task as THREE commits so each piece is
+reviewable on its own: (a) `lifecycle.py` + the transition tests (`-k "transition or event_row"`),
+(b) `scenario.py` + the cache tests (`-k "scenario or time_pure or endpoints"`), (c) `waterfall.py` +
+`explain.py` + the remaining tests. The code below is unchanged; only the commit boundaries move, and the
+test module grows with each commit (a commit's test file must import only what that commit provides —
+put the transition tests in `test/test_pnlexplain_lifecycle.py`, the cache tests in
+`test/test_pnlexplain_scenario.py`, and the rest in `test/test_pnlexplain_waterfall.py`).
 
 **Files:**
 - Create: `quantark/pnlexplain/equity/lifecycle.py`, `quantark/pnlexplain/equity/scenario.py`, `quantark/pnlexplain/equity/waterfall.py`, `quantark/pnlexplain/equity/explain.py`
@@ -2227,6 +2257,11 @@ git commit -m "feat(riskmeasures): GreeksCalculator.resolve_route pure routing h
 
 ### Task 8: Taylor explainer
 
+**Review amendment (plan review 2):** implement Steps 3, 4 AND 6 before the first test run and
+make ONE commit (the Step 5 "part 1" checkpoint cannot be green on its own: the committed test file
+already contains the sub-row and clock tests). Run the complete `test/test_pnlexplain_taylor.py` and
+`test/test_pnlexplain_waterfall.py` at that single checkpoint.
+
 **Files:**
 - Create: `quantark/pnlexplain/equity/taylor.py`
 - Modify: `quantark/pnlexplain/equity/explain.py` (replace the Taylor gate with the branch + route metadata), `test/test_pnlexplain_waterfall.py` (delete the Taylor gate test)
@@ -2618,19 +2653,23 @@ Replace the gate `raise NotImplementedError("the Taylor explainer lands in Task 
     if ExplainMethod.TAYLOR in config.methods:
         from quantark.pnlexplain.equity.taylor import taylor_rows
 ```
-and after the event row is appended:
+and replace the existing `unexplained = None` line that follows the event row with this final block
+(the residual is assigned exactly once — initialised before the conditional, replaced by the Taylor
+branch when requested, and never reset before `PnLExplainResult` is built):
 ```python
+    unexplained: Optional[float] = None
     if ExplainMethod.TAYLOR in config.methods:
         trows, unexplained, taylor_meta = taylor_rows(cache, config, LEVEL)
         rows.extend(trows)
 ```
-merge `**taylor_meta` into `metadata` (add `from typing import Any, Dict` to the imports). Delete
-`test_taylor_and_shapley_are_gated_until_their_tasks` from `test/test_pnlexplain_waterfall.py`.
+merge `**taylor_meta` into `metadata` (add `from typing import Any, Dict, Optional` to the imports).
+Delete `test_taylor_and_shapley_are_gated_until_their_tasks` from `test/test_pnlexplain_waterfall.py`.
 
-- [ ] **Step 5: Run the non-clock tests and commit part 1**
+- [ ] **Step 5: (superseded — see the review amendment at the top of this task)**
 
-Run: `PYTEST test/test_pnlexplain_taylor.py -q -k "not clocks and not terminal"` and `PYTEST test/test_pnlexplain_waterfall.py -q`
-Expected: 5 passed (Taylor) and 8 passed (waterfall; the gate test is gone).
+Do NOT commit here. Continue with Step 6, then run the COMPLETE `test/test_pnlexplain_taylor.py` and
+`test/test_pnlexplain_waterfall.py` and make the single commit of Step 7 (use the Step 7 message; the
+command below is kept only for reference).
 
 ```bash
 git add quantark/pnlexplain/equity/taylor.py quantark/pnlexplain/equity/explain.py test/test_pnlexplain_taylor.py test/test_pnlexplain_waterfall.py
@@ -2982,13 +3021,19 @@ git commit -m "feat(pnlexplain): lifecycle-day tests (KO, coupon, terminal carry
 
 ### Task 10: Trades, position and portfolio layers
 
+**Review amendment (plan review 2):** the test module must import only what exists at each
+commit. Put the `ExplainTrade` tests in `test/test_pnlexplain_trades.py` (commit 1 = `trades.py` + that
+file) and everything else in `test/test_pnlexplain_portfolio.py` (commit 2 = `portfolio.py` +
+`quantark/pnlexplain/__init__.py` exports + that file). Never run a half-implemented module under `-k`:
+a collection-time `ImportError` cannot be deselected.
+
 **Files:**
 - Create: `quantark/pnlexplain/equity/trades.py`, `quantark/pnlexplain/equity/portfolio.py`
-- Modify: `quantark/pnlexplain/__init__.py` (exports), `quantark/pnlexplain/equity/explain.py` (add `"coordinate"` to result metadata)
+- Modify: `quantark/pnlexplain/__init__.py` (exports — staged in the SECOND commit of this task, once `explain_portfolio` exists; `"coordinate"` is already in the explain metadata since Task 5)
 - Test: `test/test_pnlexplain_portfolio.py`
 
 **Interfaces:**
-- Produces: `ExplainTrade(position_id, quantity, price, transaction_cost=0.0, timestamp=None, kind="adjust", instrument_type="", metadata={})`, `ExplainTrade.from_contracts(position_id, contracts, price, multiplier, **kw)`, `ExplainTrade.cash` property (= −quantity·price); `PositionSnapshot(position_id, underlying, snapshot, tombstone=False)`; `QuotedLegSnapshot(position_id, underlying, units, price, spot, date, tombstone=False)`; `BookSnapshot(date, positions, environments, quoted_legs={}, currency=None)` + `BookSnapshot.from_portfolio(portfolio, date, *, lifecycle_manager=None, tombstones=None, currency=None)`; `PositionExplainResult`; `PortfolioExplainResult` with `reconcile(method)`, `by_underlying()`, `to_frame()`; `explain_position(pos_t0, pos_t1, *, trades=(), transition=None, config=None)`; `explain_quoted_leg(leg_t0, leg_t1, *, trades=())`; `explain_portfolio(book_t0, book_t1, *, trades=(), transaction_costs=0.0, transitions={}, config=None)`.
+- Produces: `ExplainTrade(position_id, quantity, price, transaction_cost=0.0, timestamp=None, kind="adjust", instrument_type="", metadata={})`, `ExplainTrade.from_contracts(position_id, contracts, price, multiplier, **kw)`, `ExplainTrade.cash` property (= −quantity·price); `PositionSnapshot(position_id, underlying, snapshot, tombstone=False)`; `QuotedLegSnapshot(position_id, underlying, units, price, spot, date, tombstone=False)`; `BookSnapshot(date, positions, environments, quoted_legs={}, currency=None)` + `BookSnapshot.from_portfolio(portfolio, date, *, tombstones=None, currency=None)` (no `lifecycle_manager` argument, by design — spec §9: a book snapshot is a pure read of the products the portfolio holds on that date; the alive-at-t1 products come from `PortfolioLifecycleManager.pricing_products` and are consumed by the recorders of Tasks 11/12, which build `LifecycleTransition`s, not by the book); `PositionExplainResult`; `PortfolioExplainResult` with `reconcile(method)`, `by_underlying()`, `to_frame()`; `explain_position(pos_t0, pos_t1, *, trades=(), transition=None, config=None)`; `explain_quoted_leg(leg_t0, leg_t1, *, trades=())`; `explain_portfolio(book_t0, book_t1, *, trades=(), transaction_costs=0.0, transitions={}, config=None)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3685,6 +3730,15 @@ git commit -m "feat(pnlexplain): quoted futures legs, explain_portfolio with agg
 
 ### Task 11: Equity `BacktestEngine` recorder
 
+**Review amendment (plan review 2):** `_trade_from_record` must fail closed. Skip a record ONLY
+when it is an explicitly recognised zero-quantity "no trade" row (quantity is exactly zero). For every
+non-zero record require: a non-empty position/contract id, a finite price, a finite quantity, and the
+fields the recorder reads (multiplier / trade_type where applicable); a missing or non-finite value
+raises `ValidationError` (never `TypeError`/`KeyError`, and never a silent `None`). Add
+`test_nonzero_trade_without_position_id_is_rejected` and `test_missing_or_non_finite_trade_price_is_rejected`
+to this task's test file (each feeds one malformed record through the recorder and expects
+`ValidationError`).
+
 **Files:**
 - Create: `quantark/pnlexplain/equity/recorder.py`
 - Modify: `quantark/backtest/equity/config.py` (field), `quantark/backtest/equity/engine.py` (`__init__`, `_step`, `_record_state`, `_finalize`), `quantark/backtest/equity/results.py` (frames)
@@ -4061,7 +4115,7 @@ class PnLExplainRecorder:
 - [ ] **Step 6: Run tests**
 
 Run: `PYTEST test/test_pnlexplain_backtest_equity.py test/test_backtest_lifecycle.py test/test_multi_greek_backtest.py test/test_backtest_engine.py -q`
-Expected: all passed. Debug notes: (a) if `test_lifecycle_ko_with_settlement_lag_reconciles_every_day` shows a non-zero `gap_states` on the KO day only, the states frame's `pending_receivable_pv` uses the lifecycle manager's own discounting; compare `manager.pending_receivable_pv` with `ledger.pending_pv` at the same date and align `value()` to whichever the resolver produces — the ledger is the spec's authority, so if the manager differs, report it as a finding rather than bending `value()`. (b) The `states_df` comparison drops `lifecycle*` columns only because they hold event objects; every numeric column must match exactly.
+Expected: all passed. Debug notes: (a) if `test_lifecycle_ko_with_settlement_lag_reconciles_every_day` shows a non-zero `gap_states` on the KO day only, the states frame's `pending_receivable_pv` uses the lifecycle manager's own discounting; compare `manager.pending_receivable_pv` with `ledger.pending_pv` at the same date and align `value()` to whichever the resolver produces — the ledger is the spec's authority, so if the manager differs, report it as a finding rather than bending `value()`. **Acceptance criterion (fixed, not contingent):** `gap` (value identity minus explained rows) is zero within `1e-8 × max(1, |expected|)` on every day for every executor. `gap_states` (states-frame PnL minus explained rows) is zero within the same tolerance for the average-cost executors (multi-instrument equity, replay) and is REPORTED — finite, uncapped — for the equity simple `HedgeExecutor`, whose adjust-day entry-price behaviour is a pre-existing accounting quirk outside this feature's scope. Neither `value()` nor the states accounting is bent to close a gap; a ledger-vs-engine discounting difference found under (a) leaves `gap_states` reported and goes into the final report. (b) The `states_df` comparison drops `lifecycle*` columns only because they hold event objects; every numeric column must match exactly.
 
 - [ ] **Step 7: Commit**
 
@@ -4073,6 +4127,15 @@ git commit -m "feat(pnlexplain): equity BacktestEngine recorder with tombstones,
 ---
 
 ### Task 12: Replay engine recorder
+
+**Review amendment (plan review 2):** `_trade_from_record` must fail closed. Skip a record ONLY
+when it is an explicitly recognised zero-quantity "no trade" row (quantity is exactly zero). For every
+non-zero record require: a non-empty position/contract id, a finite price, a finite quantity, and the
+fields the recorder reads (multiplier / trade_type where applicable); a missing or non-finite value
+raises `ValidationError` (never `TypeError`/`KeyError`, and never a silent `None`). Add
+`test_nonzero_trade_without_position_id_is_rejected` and `test_missing_or_non_finite_trade_price_is_rejected`
+to this task's test file (each feeds one malformed record through the recorder and expects
+`ValidationError`).
 
 **Files:**
 - Modify: `quantark/pnlexplain/equity/recorder.py` (add `ReplayPnLExplainRecorder`), `quantark/backtest/replay/config.py` (both configs), `quantark/backtest/replay/product_replay.py` (`events_today`), `quantark/backtest/replay/engine.py` (hooks), `quantark/backtest/replay/single.py` (pass-through), `quantark/backtest/replay/results.py` (frames)
@@ -4292,26 +4355,32 @@ In `__init__` (after `self._pricing_engines` is built):
             for replay in self._replays:
                 replay.record_events = True
 ```
-In `run()`: right after `pricing_started = time.perf_counter()` add
+In `run()` the per-day sequence is exactly this (NEW lines marked; everything else already exists):
+
+1. `date = ...normalize()`
+2. NEW — first statement after the normalisation, BEFORE the roll block, so roll-close / roll-open
+   trades are captured: `trades_before = len(self._trades)`
+3. the roll block
+4. `env = build_env(...)` and `_calibrate_day` (fresh engines)
+5. NEW — right after `pricing_started = time.perf_counter()`:
 ```python
-            trades_before = len(self._trades)
             if self._explain_recorder is not None:
                 self._explain_recorder.begin_day(self, date, env)
 ```
-and right after the `self._record_day(...)` call add
+6. lifecycle events, pricing, `self._record_day(...)`
+7. NEW — right after the `self._record_day(...)` call:
 ```python
             if self._explain_recorder is not None:
                 self._explain_recorder.end_day(
                     self, date, env, market, selected, self._trades[trades_before:], self._states[-1],
                 )
 ```
-Note the roll trades are executed BEFORE `build_env` in the loop, so `trades_before` must be captured **before** the roll block: move `trades_before = len(self._trades)` to the top of the `for date in dates:` body (first statement after `date = ...normalize()`), and keep `begin_day` after the calibration block.
 At the end of `run()` set `self._explain_frames = self._explain_recorder.frames() if self._explain_recorder is not None else None` and pass `explain_frames=self._explain_frames` to `BookBacktestResults(...)`. In `single.py` pass `explain_frames=inner._explain_frames` to `AutocallableBacktestResults(...)`.
 
 - [ ] **Step 6: Run tests**
 
 Run: `PYTEST test/test_pnlexplain_backtest_replay.py test/test_replay_greeks_failclosed.py test/replay_golden -q`
-Expected: all passed. Debug notes: (a) if `gap_states` is non-zero on days with a pending KO receivable, the replay values it as `pending × DF((settlement − date).days/365)` while the ledger resolves through `SettlementResolver`; print both on that date and report the difference as a finding (the ledger is the spec's authority). (b) The two fixture products share `position_id` 1 and 2; the recorder keys by `str(position_id)`.
+Expected: all passed. Debug notes: (a) if `gap_states` is non-zero on days with a pending KO receivable, the replay values it as `pending × DF((settlement − date).days/365)` while the ledger resolves through `SettlementResolver`; print both on that date and report the difference as a finding (the ledger is the spec's authority). **Acceptance criterion (fixed, not contingent):** `gap` (value identity minus explained rows) is zero within `1e-8 × max(1, |expected|)` on every day for every executor. `gap_states` (states-frame PnL minus explained rows) is zero within the same tolerance for the average-cost executors (multi-instrument equity, replay) and is REPORTED — finite, uncapped — for the equity simple `HedgeExecutor`, whose adjust-day entry-price behaviour is a pre-existing accounting quirk outside this feature's scope. Neither `value()` nor the states accounting is bent to close a gap; a ledger-vs-engine discounting difference found under (a) leaves `gap_states` reported and goes into the final report. (b) The two fixture products share `position_id` 1 and 2; the recorder keys by `str(position_id)`.
 
 - [ ] **Step 7: Commit**
 
@@ -4323,6 +4392,14 @@ git commit -m "feat(pnlexplain): replay engine recorder with quoted futures legs
 ---
 
 ### Task 13: Bucketed vega / rho rows (P5, opt-in)
+
+**Review amendment (plan review 2):** structure compatibility is a RULE, not a hint: both
+snapshots must carry the same term-structure class on the SAME pillar grid (vol `times`, rate pillar
+tenors) or bucketed mode raises `ValidationError`. Add
+`test_bucketed_rejects_mismatched_pillars` (a `TermStructureVolSurface(times=[0.5, 1.0], ...)` at t0
+against `TermStructureVolSurface(times=[0.25, 0.5, 1.0], ...)` at t1 with `bucketed=True` →
+`ValidationError`), next to the existing term-structure-vs-flat rejection test. `_pillars` needs
+`Mapping` from `typing` in `bucketed.py`.
 
 **Files:**
 - Create: `quantark/pnlexplain/equity/bucketed.py`
@@ -4436,10 +4513,30 @@ from quantark.pnlexplain.equity.scenario import ScenarioCache
 from quantark.util.exceptions import ValidationError
 
 
+def _pillars(obj: Any) -> Tuple[float, ...]:
+    """The pillar grid of a term structure (vol: times; rate: tenors), as floats."""
+    for attr in ("times", "tenors", "pillars"):
+        grid = getattr(obj, attr, None)
+        if grid is not None:
+            return tuple(float(t) for t in (grid.keys() if isinstance(grid, Mapping) else grid))
+    raise ValidationError(f"bucketed mode: cannot read the pillar grid of {type(obj).__name__}")
+
+
 def _check_pair(name: str, a: Any, b: Any, cls) -> bool:
+    """True when both snapshots carry a `cls` term structure ON THE SAME PILLAR GRID.
+
+    Rule (spec §7.6): bucketed rows are read on the t0 grid and must sum to the
+    scalar row; no interpolation between grids preserves that identity, so a
+    class mismatch or a pillar mismatch between t0 and t1 is rejected.
+    """
     is_a, is_b = isinstance(a, cls), isinstance(b, cls)
     if is_a != is_b:
         raise ValidationError(f"bucketed mode: {name} is a term structure on one side only")
+    if is_a and _pillars(a) != _pillars(b):
+        raise ValidationError(
+            f"bucketed mode: {name} pillar grids differ between t0 and t1 "
+            f"({_pillars(a)} vs {_pillars(b)}); re-mark both snapshots on one grid"
+        )
     return is_a
 
 
@@ -4558,13 +4655,16 @@ from quantark.asset.equity.product.option.american_option import AmericanOption
 from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.param.div import ContinuousDividendYield
+import quantark.pnlexplain as pnlexplain_pkg
 from quantark.pnlexplain import (
     BookSnapshot, ExplainMethod, ExplainRow, ExplainTrade, Factor, FactorCoordinate, FactorMoves,
-    LifecycleTransition, MARKET_FACTORS, PnLExplainConfig, PnLExplainResult, PnLExplainRecorder,
+    LifecycleTransition, MARKET_FACTORS, PnLExplainConfig, PnLExplainResult,
     PortfolioExplainResult, PositionExplainResult, PositionSnapshot, RowKind, ValuationSnapshot,
     ValueBreakdown, contract_fingerprint, explain, explain_portfolio, explain_position,
     lifecycle_fingerprint, value,
 )
+# `PnLExplainRecorder` and the equity re-exports are looked up INSIDE the export tests via
+# `pnlexplain_pkg` so this module still collects before Step 3 lands them.
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot as VS
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
@@ -4669,32 +4769,40 @@ def test_frame_order_is_hash_seed_independent(tmp_path):
     assert len(outs) == 1
 
 
+EXPECTED_ALL = [
+    "BookSnapshot", "ExplainMethod", "ExplainRow", "ExplainTrade", "FRAME_COLUMNS", "Factor",
+    "FactorCoordinate", "FactorMoves", "LifecycleTransition", "MARKET_FACTORS", "MOVE_KEYS",
+    "PnLExplainConfig", "PnLExplainRecorder", "PnLExplainResult", "PortfolioExplainResult",
+    "PositionExplainResult", "PositionSnapshot", "QuotedLegSnapshot", "RECON_COLUMNS",
+    "ReplayPnLExplainRecorder", "RowKind", "ValuationSnapshot", "ValueBreakdown", "component_sum",
+    "contract_fingerprint", "explain", "explain_portfolio", "explain_position", "explain_quoted_leg",
+    "lifecycle_fingerprint", "make_total_row", "rows_to_frame", "value",
+]
+
+
 def test_public_exports_match_spec():
-    import quantark.pnlexplain as m
-    for name in ("ValuationSnapshot", "ValueBreakdown", "value", "FactorCoordinate", "FactorMoves",
-                 "PnLExplainConfig", "PnLExplainResult", "ExplainRow", "RowKind", "Factor", "MARKET_FACTORS",
-                 "ExplainMethod", "explain", "LifecycleTransition", "lifecycle_fingerprint", "contract_fingerprint",
-                 "ExplainTrade", "PositionSnapshot", "BookSnapshot", "PositionExplainResult",
-                 "PortfolioExplainResult", "explain_position", "explain_portfolio", "PnLExplainRecorder"):
-        assert name in m.__all__, name
+    assert list(pnlexplain_pkg.__all__) == EXPECTED_ALL          # exact, ordered surface
+    for name in EXPECTED_ALL:
+        assert getattr(pnlexplain_pkg, name) is not None, name
 
 
 def test_equity_subpackage_exports():
-    from quantark.pnlexplain.equity import (  # noqa: F401
-        BookSnapshot, ExplainTrade, LifecycleTransition, PnLExplainRecorder, PositionSnapshot,
-        QuotedLegSnapshot, ReplayPnLExplainRecorder, ValuationSnapshot, explain, explain_portfolio,
-        explain_position, explain_quoted_leg, value,
-    )
+    import importlib
+    eq = importlib.import_module("quantark.pnlexplain.equity")
+    for name in ("BookSnapshot", "ExplainTrade", "LifecycleTransition", "PnLExplainRecorder",
+                 "PositionSnapshot", "QuotedLegSnapshot", "ReplayPnLExplainRecorder", "ValuationSnapshot",
+                 "explain", "explain_portfolio", "explain_position", "explain_quoted_leg", "value"):
+        assert hasattr(eq, name), name
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `PYTEST test/test_pnlexplain_matrix.py -q`
-Expected: `test_public_exports_match_spec` and `test_equity_subpackage_exports` FAIL (`PnLExplainRecorder` and the equity re-exports are not exported yet); every other test passes. The constructors used are the real ones: `AmericanOption(strike=, option_type=, maturity=)`, `CashOrNothingDigitalOption(strike=, option_type=, maturity=, payout=)`, `Futures(underlying=, multiplier=, maturity=)`, `SpotInstrument(underlying=, deltaone_type=)`.
+Expected: the module COLLECTS (nothing missing is imported at module scope); `test_public_exports_match_spec` and `test_equity_subpackage_exports` FAIL on their assertions (`PnLExplainRecorder` and the equity re-exports are not exported yet); every other test passes. The constructors used are the real ones: `AmericanOption(strike=, option_type=, maturity=)`, `CashOrNothingDigitalOption(strike=, option_type=, maturity=, payout=)`, `Futures(underlying=, multiplier=, maturity=)`, `SpotInstrument(underlying=, deltaone_type=)`.
 
 - [ ] **Step 3: Final exports**
 
-`quantark/pnlexplain/__init__.py` `__all__` must contain exactly the spec §5.6 names plus `QuotedLegSnapshot`, `explain_quoted_leg`, `ReplayPnLExplainRecorder`, `FRAME_COLUMNS`, `MOVE_KEYS`, `component_sum`, `make_total_row`, `rows_to_frame`, `RECON_COLUMNS`. Import `PnLExplainRecorder`, `ReplayPnLExplainRecorder`, `RECON_COLUMNS` from `quantark.pnlexplain.equity.recorder`.
+`quantark/pnlexplain/__init__.py` `__all__` must be EXACTLY `EXPECTED_ALL` from the test above (the spec §5.6 names plus `QuotedLegSnapshot`, `explain_quoted_leg`, `ReplayPnLExplainRecorder`, `FRAME_COLUMNS`, `MOVE_KEYS`, `component_sum`, `make_total_row`, `rows_to_frame`, `RECON_COLUMNS`, in that sorted order). Import `PnLExplainRecorder`, `ReplayPnLExplainRecorder`, `RECON_COLUMNS` from `quantark.pnlexplain.equity.recorder`.
 
 `quantark/pnlexplain/equity/__init__.py` (created empty in Task 3) re-exports the equity surface:
 
@@ -4732,7 +4840,7 @@ Root `CLAUDE.md` Supporting Modules table (local, untracked): add
 
 Run: `PYTEST test/test_pnlexplain_*.py test/test_greeks_registry.py test/test_backtest_lifecycle.py test/test_multi_greek_backtest.py test/replay_golden test/test_replay_greeks_failclosed.py -q`
 Expected: all passed.
-Then the full suite: `PYTHONPATH=/Users/fuxinyao/quant-ark/.claude/worktrees/pnl-explain /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest -q -x --ignore=test/mo_volmodels` (the mo suite rewrites sample data and is slow; run it separately only if a touched file is imported there). Expected: green. Run `PYTHONPATH=/Users/fuxinyao/quant-ark/.claude/worktrees/pnl-explain /Users/fuxinyao/quant-ark/.venv/bin/python example/pnl_explain_demo.py > /private/tmp/claude-501/-Users-fuxinyao-quant-ark/8cbdbf24-eb5a-4fed-b544-bc4f1df15336/scratchpad/demo_output.txt` once; the commit below embeds its first 20 lines.
+Then the full suite: `PYTHONPATH=/Users/fuxinyao/quant-ark/.claude/worktrees/pnl-explain /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest -n0 -q -x --ignore=test/mo_volmodels` (the mo suite rewrites sample data and is slow; run it separately only if a touched file is imported there). Expected: green. Run `PYTHONPATH=/Users/fuxinyao/quant-ark/.claude/worktrees/pnl-explain /Users/fuxinyao/quant-ark/.venv/bin/python example/pnl_explain_demo.py > /private/tmp/claude-501/-Users-fuxinyao-quant-ark/8cbdbf24-eb5a-4fed-b544-bc4f1df15336/scratchpad/demo_output.txt` once; the commit below embeds its first 20 lines.
 
 - [ ] **Step 6: Commit (demo output in the body)**
 
