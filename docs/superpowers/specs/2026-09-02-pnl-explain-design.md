@@ -548,10 +548,19 @@ definition in both modes; and under `extended` `gamma_theta`, with
 Every equation above is stored verbatim in the row metadata (`"formula"`).
 
 The other time-family greeks (charm, color, vega_theta) are measured **over
-the gap step** in this mode, so their terms use `n = 1` — they are already
-whole-gap quantities and are never multiplied by the day count again. Their
+the gap step** in this mode on the numerical route, so their terms use `n =
+1` — they are already whole-gap quantities and are never multiplied by the
+day count again. On the analytical route the closed forms are per-day
+rates, so the explainer scales them (and `theta_contract`) by
+`calendar_days` once to obtain the gap value (first order in the gap; the
+difference to a true gap step is part of the residual). In both cases the
 `greek` / `cash_greek` display columns are the per-day averages (gap value /
 `calendar_days`) so the table reads in the same units as `per_step`.
+Because the theta sub-rows (`r_theta`, `q_theta`) route numerically in the
+calculator, requesting them forces the numerical route for the whole call:
+the built-in stencils therefore explain vanillas on the numerical route,
+and the analytical route is reached with an explicit stencil that lists only
+closed-form names (e.g. `["delta", "gamma", "vega", "theta", "rho"]`).
 
 Mechanically, the explainer builds one `GreeksCalculator` per call from
 `config.params` (default `engine.params`) with the bump config overridden to
@@ -668,6 +677,9 @@ Rules (all violations raise `ValidationError`):
 - `transition=None` is accepted only when the two snapshots' state
   fingerprints are equal; the kernel then builds the transition itself as
   (`snapshot_t1.product`, `snapshot_t1.engine`, equal states, no events).
+- A position that is terminal at t0 has no contingent leg, so its product
+  is never priced and the contract-roll check (§5.3) is skipped for it; the
+  ledger alone is revalued.
 - Fingerprints differ and `transition=None` → error (guessing the alive
   contract would silently mislabel the event row).
 - A supplied transition is validated against the snapshots:
@@ -740,8 +752,11 @@ class BookSnapshot:
     environments: Mapping[str, PricingEnvironment]   # per underlying, deep copies
     currency: Optional[str] = None                   # single currency per book; None = unlabeled
     @classmethod
-    def from_portfolio(cls, portfolio, date, *, lifecycle_manager=None,
-                       tombstones: Mapping[str, PositionSnapshot] = ...) -> "BookSnapshot"
+    def from_portfolio(cls, portfolio, date, *, tombstones: Mapping[str, PositionSnapshot] = ...,
+                       currency: Optional[str] = None) -> "BookSnapshot"
+    # positions' products are whatever the portfolio holds on `date` (post-event
+    # for lifecycle-managed books); the alive-at-t1 products travel in transitions,
+    # so the factory needs no lifecycle manager. Environments must be dated `date`.
 
 def explain_position(
     pos_t0: Optional[PositionSnapshot],   # None only for a position opened in (t0, t1]

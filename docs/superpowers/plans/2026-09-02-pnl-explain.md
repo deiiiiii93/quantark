@@ -139,6 +139,13 @@ def test_component_sum_excludes_informational_and_summary_and_other_method():
     assert [r.term for r in res.rows_for(ExplainMethod.TAYLOR, kind=RowKind.INFORMATIONAL)] == ["r_theta"]
 
 
+def test_value_breakdown_and_result_reject_non_finite():
+    with pytest.raises(NumericalError):
+        ValueBreakdown(math.nan, 0.0, 0.0)
+    with pytest.raises(NumericalError):
+        _result([], math.inf)
+
+
 def test_frame_schema_and_empty_frame():
     rows = [
         _row(Factor.SPOT, "spot", ExplainMethod.WATERFALL, RowKind.COMPONENT, 2.0,
@@ -363,6 +370,13 @@ class ValueBreakdown:
     pending_receivable_pv: float
     paid_cash: float
 
+    def __post_init__(self) -> None:
+        for name in ("contingent_mtm", "pending_receivable_pv", "paid_cash"):
+            val = float(getattr(self, name))
+            if not math.isfinite(val):
+                raise NumericalError(f"non-finite {name}: {getattr(self, name)!r}")
+            object.__setattr__(self, name, val)
+
     @property
     def total(self) -> float:
         return self.contingent_mtm + self.pending_receivable_pv + self.paid_cash
@@ -389,6 +403,8 @@ class PnLExplainResult:
     metadata: Mapping[str, Any] = field(default_factory=lambda: _EMPTY)
 
     def __post_init__(self) -> None:
+        if not math.isfinite(float(self.total_pnl)):
+            raise NumericalError(f"non-finite total_pnl: {self.total_pnl!r}")
         object.__setattr__(self, "rows", tuple(self.rows))
         object.__setattr__(self, "metadata", _frozen(self.metadata))
 
@@ -424,13 +440,13 @@ class PnLExplainResult:
 - [ ] **Step 4: Run tests**
 
 Run: `PYTEST test/test_pnlexplain_base.py -q`
-Expected: 5 passed
+Expected: 6 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add quantark/pnlexplain/__init__.py quantark/pnlexplain/base.py test/test_pnlexplain_base.py
-git commit -m "feat(pnlexplain): row schema, additivity contract, result container"
+git commit -m "feat(pnlexplain): row schema, additivity contract, result container" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -654,7 +670,7 @@ Expected: all passed (the parametrised invalid-config test has 17 cases)
 
 ```bash
 git add quantark/pnlexplain/config.py test/test_pnlexplain_config.py
-git commit -m "feat(pnlexplain): PnLExplainConfig with full validation and stencil tables"
+git commit -m "feat(pnlexplain): PnLExplainConfig with full validation and stencil tables" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -691,7 +707,7 @@ from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal, 
 from quantark.priceenv import PricingEnvironment
 from quantark.util.calendar import CalendarType, create_calendar
 from quantark.util.enum import OptionType
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 
 D0 = datetime(2026, 6, 26)
 
@@ -774,6 +790,16 @@ def test_contract_fingerprint_and_roll():
     assert contract_fingerprint(p2) == contract_fingerprint(p1)
 
 
+def test_value_rejects_non_finite_price():
+    class NanEngine:
+        def price(self, product, env):
+            return float("nan")
+
+    snap = ValuationSnapshot(_call(), NanEngine(), _env(), date=D0)
+    with pytest.raises(NumericalError):
+        value(snap)
+
+
 def test_lifecycle_fingerprint_is_computed_and_sensitive():
     assert lifecycle_fingerprint(None) == ("v1", None)
     s = AutocallableLifecycleState()
@@ -810,7 +836,6 @@ of a state so a new pricing-relevant field can never be missed (spec §8).
 from __future__ import annotations
 
 import dataclasses
-import math
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Mapping, Tuple
@@ -819,8 +844,10 @@ import numpy as np
 
 from quantark.asset.equity.lifecycle.cashflows import LifecycleCashflowLedger, ValuationPoint
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
 
 LIFECYCLE_FINGERPRINT_VERSION = "v1"
+ROLL_TOL = 1e-12        # spec §5.3 roll equation tolerance
 ROLLED_FIELDS = frozenset({"maturity", "_otc_lifecycle_knocked_in"})
 SCHEDULE_FIELDS = frozenset({
     "barrier_config", "post_barrier_config", "observation_schedule",
@@ -910,31 +937,24 @@ def contract_fingerprint(product: Any) -> tuple:
 
 
 def check_contract_roll(product_t0: Any, product_alive_t1: Any, calendar_days: int) -> None:
-    """Raise unless product_alive_t1 is product_t0 rolled forward calendar_days."""
+    """Raise unless product_alive_t1 is product_t0 rolled forward calendar_days (spec §5.3)."""
     if contract_fingerprint(product_t0) != contract_fingerprint(product_alive_t1):
         raise ValidationError("contract replacement is not a time step")
     m0 = getattr(product_t0, "maturity", None)
     m1 = getattr(product_alive_t1, "maturity", None)
     if m0 is None or m1 is None:
         return
+    date_based = getattr(product_t0, "exercise_date", None) is not None \
+        or getattr(product_t0, "maturity_date", None) is not None
+    if date_based:
+        return                      # dates are in the fingerprint; the float is metadata
     m0, m1 = float(m0), float(m1)
-    expected = calendar_days / 365.0
-    if m1 <= MATURITY_FLOOR + 1e-12:
-        return
-    if abs((m0 - m1) - expected) > 1e-12 and not math.isclose(m0, m1, rel_tol=0.0, abs_tol=0.0):
-        # identical maturities are allowed only when the product is date-based
-        # (exercise_date / maturity_date set): the float is then metadata.
-        if getattr(product_t0, "exercise_date", None) is None and \
-                getattr(product_t0, "maturity_date", None) is None:
-            raise ValidationError(
-                f"alive product maturity {m1} is not {m0} rolled by {calendar_days} days"
-            )
-    elif math.isclose(m0, m1, rel_tol=0.0, abs_tol=0.0) and calendar_days > 0 and \
-            getattr(product_t0, "exercise_date", None) is None and \
-            getattr(product_t0, "maturity_date", None) is None:
+    if m1 <= MATURITY_FLOOR + ROLL_TOL:
+        return                      # clamped at the trackers' floor
+    if not is_close(m0 - m1, calendar_days / 365.0, rel_tol=0.0, abs_tol=ROLL_TOL):
         raise ValidationError(
-            "float-maturity product was not rolled: supply the t0 contract with "
-            f"maturity reduced by {calendar_days}/365"
+            f"alive product maturity {m1} is not {m0} rolled by {calendar_days} days "
+            "(a float-maturity contract must be supplied rolled by calendar_days/365)"
         )
 
 
@@ -974,7 +994,7 @@ from typing import Any, Optional
 
 from quantark.asset.equity.lifecycle.cashflows import ValuationPoint
 from quantark.pnlexplain.base import ValueBreakdown
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 
 _MISSING = object()
 
@@ -1053,7 +1073,12 @@ def value(
     if is_terminal(state):
         contingent = 0.0
     else:
-        contingent = snapshot.quantity * float(engine.price(product, env))
+        price = float(engine.price(product, env))
+        if not math.isfinite(price):
+            raise NumericalError(
+                f"engine {type(engine).__name__} returned a non-finite price {price!r}"
+            )
+        contingent = snapshot.quantity * price
     pending = paid = 0.0
     if state is not None:
         ledger = getattr(state, "ledger", None)
@@ -1068,13 +1093,13 @@ def value(
 - [ ] **Step 5: Run tests**
 
 Run: `PYTEST test/test_pnlexplain_snapshot.py -q`
-Expected: 5 passed. If `test_value_identity_contingent_plus_ledger` fails on the discount factor, print `env.get_discount_factor(2/365)` vs the ledger's `SettlementResolver` result and align the test to the resolver's day count (the ledger is the authority).
+Expected: 6 passed. The ledger discounts a pending receivable through `SettlementResolver.resolve_pending`, which converts the payment date with the environment's own day count (`calculate_year_fraction`; 2/365 on a CALENDAR_DAYS env), so `30 × env.get_discount_factor(2/365)` is the exact expectation.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add quantark/pnlexplain/equity/__init__.py quantark/pnlexplain/equity/snapshot.py quantark/pnlexplain/equity/fingerprints.py test/test_pnlexplain_snapshot.py
-git commit -m "feat(pnlexplain): ValuationSnapshot, value identity, contract/lifecycle fingerprints"
+git commit -m "feat(pnlexplain): ValuationSnapshot, value identity, contract/lifecycle fingerprints" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -1110,10 +1135,13 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.enum import OptionType
 from quantark.util.enum.deltaone_enums import DeltaOneType
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 
 FRI = datetime(2026, 6, 26)
 MON = datetime(2026, 6, 29)
+# MODEL is detected by engine identity (spec §5.1): both snapshots share one engine object.
+ENG = BlackScholesEngine()
+D1 = DeltaOneEngine()
 
 
 def _env(spot, vol, rate, div, date, calendar=None, **kw):
@@ -1131,8 +1159,8 @@ def test_moves_read_at_t1_coordinate_and_changed_set():
     e0 = _env(100.0, TermStructureVolSurface(times=[0.5, 1.0], vols=[0.20, 0.25]), 0.03, 0.01, FRI, cal)
     e1 = _env(102.0, TermStructureVolSurface(times=[0.5, 1.0], vols=[0.21, 0.26]), 0.03, 0.02, MON, cal)
     p0, p1 = _call(1.0), _call(1.0 - 3 / 365)
-    s0 = ValuationSnapshot(p0, BlackScholesEngine(), e0, date=FRI)
-    s1 = ValuationSnapshot(p1, BlackScholesEngine(), e1, date=MON)
+    s0 = ValuationSnapshot(p0, ENG, e0, date=FRI)
+    s1 = ValuationSnapshot(p1, ENG, e1, date=MON)
     coord = resolve_coordinate(p0, 100.0, p1, e1)
     assert coord.reference_strike == 100.0
     assert coord.tenor_t1 == pytest.approx(1.0 - 3 / 365)
@@ -1149,9 +1177,12 @@ def test_moves_read_at_t1_coordinate_and_changed_set():
     assert mv.display(Factor.SPOT) == {"spot_return": pytest.approx(0.02)}
     assert mv.display(Factor.TIME) == {"days": 3.0, "trading_days": 1.0}
     assert "trading_days" not in build_factor_moves(
-        ValuationSnapshot(p0, BlackScholesEngine(), _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, FRI), date=FRI),
-        ValuationSnapshot(p1, BlackScholesEngine(), _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON), date=MON),
+        ValuationSnapshot(p0, ENG, _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, FRI), date=FRI),
+        ValuationSnapshot(p1, ENG, _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON), date=MON),
         coord, engine_alive_t1=None, lifecycle_changed=False).display(Factor.TIME)
+    # two distinct but equivalent engine objects ARE a model change (identity rule)
+    other = build_factor_moves(s0, s1, coord, engine_alive_t1=BlackScholesEngine(), lifecycle_changed=False)
+    assert Factor.MODEL in other.changed
 
 
 def test_delta_one_coordinates():
@@ -1164,8 +1195,8 @@ def test_delta_one_coordinates():
     fut1 = Futures(underlying="X", multiplier=300.0, maturity=0.5 - 3 / 365)
     c2 = resolve_coordinate(fut, 100.0, fut1, e1)
     assert Factor.VOL not in c2.applicable and Factor.BASIS in c2.applicable
-    s0 = ValuationSnapshot(spot, DeltaOneEngine(), e0, date=FRI)
-    s1 = ValuationSnapshot(spot, DeltaOneEngine(), e1, date=MON)
+    s0 = ValuationSnapshot(spot, D1, e0, date=FRI)
+    s1 = ValuationSnapshot(spot, D1, e1, date=MON)
     mv = build_factor_moves(s0, s1, c, engine_alive_t1=s1.engine, lifecycle_changed=False)
     assert mv.vol_t0 is None and mv.d_vol is None and mv.display(Factor.VOL) == {}
     assert Factor.VOL not in mv.changed
@@ -1198,6 +1229,20 @@ def test_validate_pair_rejects_order_clock_quantity_currency():
     with pytest.raises(ValidationError):
         validate_pair(ValuationSnapshot(_call(1.0), BlackScholesEngine(), e0, date=FRI, currency="CNY"),
                       ValuationSnapshot(_call(1.0 - 3 / 365), BlackScholesEngine(), e1, date=MON, currency="USD"))
+
+
+def test_non_finite_sample_raises():
+    class InfSurface(FlatVolSurface):
+        def get_vol(self, strike, time_to_maturity, spot=None):
+            return float("inf")
+
+    e0 = _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, FRI)
+    e1 = _env(100.0, InfSurface(0.2), 0.03, 0.01, MON)
+    p0, p1 = _call(1.0), _call(1.0 - 3 / 365)
+    coord = resolve_coordinate(p0, 100.0, p1, e1)
+    with pytest.raises(NumericalError):
+        build_factor_moves(ValuationSnapshot(p0, ENG, e0, date=FRI), ValuationSnapshot(p1, ENG, e1, date=MON),
+                           coord, engine_alive_t1=ENG, lifecycle_changed=False)
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -1217,6 +1262,7 @@ from typing import Any, FrozenSet, Optional
 
 from quantark.asset.equity.product.deltaone import Futures, SpotInstrument
 from quantark.pnlexplain.base import MARKET_FACTORS, Factor
+from quantark.pnlexplain.equity.fingerprints import MATURITY_FLOOR
 from quantark.util.exceptions import ValidationError
 
 _TERM_FACTORS = frozenset({Factor.VOL, Factor.RATE, Factor.DIVIDEND, Factor.BASIS})
@@ -1261,7 +1307,7 @@ def resolve_coordinate(product_t0: Any, spot_t0: float, product_alive_t1: Any, e
         strike = _positive(getattr(product_t0, "strike", None)) \
             or _positive(getattr(product_t0, "initial_price", None)) or float(spot_t0)
     tenor = _tenor(product_alive_t1, env_t1)
-    if tenor is not None and tenor <= 0.0:
+    if tenor is not None and tenor <= MATURITY_FLOOR:     # at or below the trackers' 1e-8 floor = expired
         applicable = applicable - _TERM_FACTORS
     return FactorCoordinate(reference_strike=strike, tenor_t1=tenor, applicable=applicable)
 ```
@@ -1273,6 +1319,7 @@ def resolve_coordinate(product_t0: Any, spot_t0: float, product_alive_t1: Any, e
 """FactorMoves: scalar moves at the product coordinate + change detection (spec §5.3)."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Optional
 
@@ -1282,7 +1329,10 @@ from quantark.pnlexplain.equity.coordinate import FactorCoordinate
 from quantark.pnlexplain.equity.fingerprints import calendars_equal
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
 from quantark.util.calendar import calculate_year_fraction
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.numerical import is_close, safe_divide
+
+POINT_TOL = 1e-12       # spec §5.2: numeric valuation points advance by calendar_days/365
 
 
 def objects_equal(a: Any, b: Any) -> bool:
@@ -1369,7 +1419,7 @@ def validate_pair(snap0: ValuationSnapshot, snap1: ValuationSnapshot) -> None:
         raise ValidationError("valuation points must share one representation (date or time)")
     if p0.date is None:
         days = (snap1.date - snap0.date).days
-        if abs((p1.time - p0.time) - days / 365.0) > 1e-12:
+        if not is_close(p1.time - p0.time, days / 365.0, rel_tol=0.0, abs_tol=POINT_TOL):
             raise ValidationError("numeric valuation points must advance by calendar_days/365")
 
 
@@ -1414,6 +1464,10 @@ def build_factor_moves(
     rate = pair(Factor.RATE)
     div = pair(Factor.DIVIDEND)
     basis = pair(Factor.BASIS)
+    for label, triple in (("vol", vol), ("rate", rate), ("dividend", div), ("basis", basis)):
+        for v in triple:
+            if v is not None and not math.isfinite(v):
+                raise NumericalError(f"non-finite {label} sample at the product coordinate: {v!r}")
 
     changed = {Factor.TIME}
     app = coordinate.applicable
@@ -1434,7 +1488,7 @@ def build_factor_moves(
         changed.add(Factor.LIFECYCLE_EVENT)
 
     return FactorMoves(
-        coordinate=coordinate, spot_t0=s0, spot_t1=s1, d_spot=s1 - s0, spot_return=(s1 - s0) / s0,
+        coordinate=coordinate, spot_t0=s0, spot_t1=s1, d_spot=s1 - s0, spot_return=safe_divide(s1 - s0, s0),
         vol_t0=vol[0], vol_t1=vol[1], d_vol=vol[2],
         rate_t0=rate[0], rate_t1=rate[1], d_rate=rate[2],
         div_t0=div[0], div_t1=div[1], d_div=div[2],
@@ -1446,13 +1500,13 @@ def build_factor_moves(
 - [ ] **Step 5: Run tests**
 
 Run: `PYTEST test/test_pnlexplain_factor_diff.py -q`
-Expected: 4 passed. If `get_basis_yield` raises for an environment without `basis_yield`, treat that as `0.0` inside `_sample` only for `Factor.BASIS` when `env.basis_yield is None` (PricingEnvironment documents None as no basis).
+Expected: 5 passed. (`PricingEnvironment.get_basis_yield` returns `0.0` when no basis object is set, so `basis_t0` / `basis_t1` are `0.0` and BASIS is unchanged in these fixtures.)
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add quantark/pnlexplain/equity/coordinate.py quantark/pnlexplain/equity/factor_diff.py test/test_pnlexplain_factor_diff.py
-git commit -m "feat(pnlexplain): factor coordinate resolver and FactorMoves with change detection"
+git commit -m "feat(pnlexplain): factor coordinate resolver and FactorMoves with change detection" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -1493,6 +1547,7 @@ from quantark.util.exceptions import ValidationError
 FRI = datetime(2026, 6, 26)
 MON = datetime(2026, 6, 29)
 WF = PnLExplainConfig(methods=(ExplainMethod.WATERFALL,))
+ENG = BlackScholesEngine()      # one engine object on both sides: MODEL is identity-detected
 
 
 class SkewSurface(BlackImpliedVolSurface):
@@ -1520,13 +1575,21 @@ def _call(m=None, exercise_date=None):
 def _pair(vol0=FlatVolSurface(0.20), vol1=FlatVolSurface(0.22), spot1=103.0, rate1=0.032, div1=0.012):
     e0 = _env(100.0, vol0, 0.03, 0.01, FRI)
     e1 = _env(spot1, vol1, rate1, div1, MON)
-    s0 = ValuationSnapshot(_call(1.0), BlackScholesEngine(), e0, date=FRI, quantity=2.0)
-    s1 = ValuationSnapshot(_call(1.0 - 3 / 365), BlackScholesEngine(), e1, date=MON, quantity=2.0)
+    s0 = ValuationSnapshot(_call(1.0), ENG, e0, date=FRI, quantity=2.0)
+    s1 = ValuationSnapshot(_call(1.0 - 3 / 365), ENG, e1, date=MON, quantity=2.0)
     return s0, s1
 
 
 def _tol(total):
     return 1e-10 * max(1.0, abs(total))
+
+
+def test_taylor_and_shapley_are_gated_until_their_tasks():
+    s0, s1 = _pair()
+    with pytest.raises(NotImplementedError):
+        explain(s0, s1)                                     # the default config requests Taylor
+    with pytest.raises(NotImplementedError):
+        explain(s0, s1, config=PnLExplainConfig(methods=(ExplainMethod.WATERFALL,), interaction="shapley"))
 
 
 def test_waterfall_is_exact_and_time_row_is_time_pure():
@@ -1584,9 +1647,9 @@ def test_sticky_moneyness_is_order_independent(order):
 
 def test_date_based_and_float_rolls_give_the_same_time_row():
     s0, s1 = _pair()
-    dated0 = ValuationSnapshot(_call(exercise_date=FRI + timedelta(days=365)), BlackScholesEngine(),
+    dated0 = ValuationSnapshot(_call(exercise_date=FRI + timedelta(days=365)), ENG,
                                s0.pricing_env, date=FRI, quantity=2.0)
-    dated1 = ValuationSnapshot(dated0.product, BlackScholesEngine(), s1.pricing_env, date=MON, quantity=2.0)
+    dated1 = ValuationSnapshot(dated0.product, ENG, s1.pricing_env, date=MON, quantity=2.0)
     a = explain(s0, s1, config=WF).by_factor(ExplainMethod.WATERFALL)
     b = explain(dated0, dated1, config=WF).by_factor(ExplainMethod.WATERFALL)
     for k in a:
@@ -1596,10 +1659,10 @@ def test_date_based_and_float_rolls_give_the_same_time_row():
 def test_contract_replacement_and_unrolled_float_are_rejected():
     s0, s1 = _pair()
     bad = ValuationSnapshot(EuropeanVanillaOption(strike=105.0, option_type=OptionType.CALL, maturity=1.0 - 3 / 365),
-                            BlackScholesEngine(), s1.pricing_env, date=MON, quantity=2.0)
+                            ENG, s1.pricing_env, date=MON, quantity=2.0)
     with pytest.raises(ValidationError, match="contract replacement"):
         explain(s0, bad, config=WF)
-    unrolled = ValuationSnapshot(_call(1.0), BlackScholesEngine(), s1.pricing_env, date=MON, quantity=2.0)
+    unrolled = ValuationSnapshot(_call(1.0), ENG, s1.pricing_env, date=MON, quantity=2.0)
     with pytest.raises(ValidationError):
         explain(s0, unrolled, config=WF)
 
@@ -1640,7 +1703,7 @@ import pandas as pd
 
 from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
 from quantark.pnlexplain.equity.fingerprints import check_contract_roll, lifecycle_fingerprint
-from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
+from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal
 from quantark.util.exceptions import ValidationError
 
 
@@ -1679,7 +1742,8 @@ def resolve_transition(
                 "lifecycle state changed between the snapshots: supply a LifecycleTransition "
                 "with the alive-at-t1 product (guessing it would mislabel the event row)"
             )
-        check_contract_roll(snap0.product, snap1.product, calendar_days)
+        if not is_terminal(snap0.lifecycle_state):    # a terminal position has no contract to roll (spec §8)
+            check_contract_roll(snap0.product, snap1.product, calendar_days)
         return LifecycleTransition(
             product_alive_t1=snap1.product, engine_alive_t1=snap1.engine,
             state_before=snap0.lifecycle_state, state_after=snap1.lifecycle_state, events=(),
@@ -1688,7 +1752,9 @@ def resolve_transition(
         raise ValidationError("transition.state_before does not match snapshot_t0.lifecycle_state")
     if lifecycle_fingerprint(transition.state_after) != fp1:
         raise ValidationError("transition.state_after does not match snapshot_t1.lifecycle_state")
-    check_contract_roll(snap0.product, transition.product_alive_t1, calendar_days)
+    terminal_t0 = is_terminal(snap0.lifecycle_state)
+    if not terminal_t0:
+        check_contract_roll(snap0.product, transition.product_alive_t1, calendar_days)
     if fp0 == fp1:
         if transition.events:
             raise ValidationError("transition carries events but the lifecycle state is unchanged")
@@ -1697,7 +1763,8 @@ def resolve_transition(
                 "engine substitution without a lifecycle event is a MODEL change: "
                 "set engine_alive_t1 to snapshot_t1.engine"
             )
-        check_contract_roll(transition.product_alive_t1, snap1.product, 0)
+        if not terminal_t0:
+            check_contract_roll(transition.product_alive_t1, snap1.product, 0)
         return transition
     if not transition.events:
         raise ValidationError("lifecycle state changed but the transition carries no events")
@@ -1878,7 +1945,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from quantark.pnlexplain.base import ExplainMethod, ExplainRow, PnLExplainResult, make_total_row
+from quantark.pnlexplain.base import MARKET_FACTORS, ExplainMethod, ExplainRow, PnLExplainResult, make_total_row
 from quantark.pnlexplain.config import PnLExplainConfig
 from quantark.pnlexplain.equity.coordinate import resolve_coordinate
 from quantark.pnlexplain.equity.factor_diff import build_factor_moves, validate_pair
@@ -1917,21 +1984,23 @@ def explain(
     pv_t1 = cache.value_t1()
     total_pnl = pv_t1.total - pv_t0.total
 
+    # Explicit gates for modes built by later tasks (each is removed by the task that
+    # implements the mode; a gate is never a fallback, it refuses).
+    if ExplainMethod.TAYLOR in config.methods:
+        raise NotImplementedError("the Taylor explainer lands in Task 8")
+    if config.interaction == "shapley":
+        raise NotImplementedError("interaction='shapley' lands in Task 6")
     rows: List[ExplainRow] = []
     if ExplainMethod.WATERFALL in config.methods:
-        if config.interaction == "sequential":
-            rows.extend(sequential_rows(cache, config.waterfall_order, LEVEL))
-        else:
-            from quantark.pnlexplain.equity.waterfall import shapley_rows   # Task 6
-            rows.extend(shapley_rows(cache, LEVEL))
+        rows.extend(sequential_rows(cache, config.waterfall_order, LEVEL))
     rows.append(event_row(cache, transition, LEVEL))
     unexplained = None
-    # Task 8 inserts the Taylor branch here.
     rows.append(make_total_row(LEVEL, total_pnl))
 
     metadata = {
         "time_pure": cache.time_pure(),
-        "effective_factors": tuple(f.value for f in cache.effective),
+        "effective_factors": tuple(f.value for f in MARKET_FACTORS if f in cache.effective),
+        "coordinate": (coordinate.reference_strike, coordinate.tenor_t1),
         "transition_changed": transition.changed,
         "interaction": config.interaction,
     }
@@ -1963,13 +2032,13 @@ and extend `__all__` with `"PnLExplainConfig", "ValuationSnapshot", "value", "Fa
 - [ ] **Step 7: Run tests**
 
 Run: `PYTEST test/test_pnlexplain_waterfall.py -q`
-Expected: 7 passed (`test_unchanged_factors_are_not_priced` counts exactly 4 `price` calls: `()`, `{TIME}`, `{TIME,SPOT}`, and the t1 endpoint; the `all_market()` call reuses the `{TIME, SPOT}` memo key because VOL/RATE/DIVIDEND/BASIS/MODEL are not effective).
+Expected: 8 passed (`test_unchanged_factors_are_not_priced` counts exactly 4 `price` calls: `()`, `{TIME}`, `{TIME,SPOT}`, and the t1 endpoint; the `all_market()` call reuses the `{TIME, SPOT}` memo key because VOL/RATE/DIVIDEND/BASIS/MODEL are not effective, and MODEL is unchanged because both snapshots hold the same `ENG` object).
 
 - [ ] **Step 8: Commit**
 
 ```bash
 git add quantark/pnlexplain/__init__.py quantark/pnlexplain/equity/lifecycle.py quantark/pnlexplain/equity/scenario.py quantark/pnlexplain/equity/waterfall.py quantark/pnlexplain/equity/explain.py test/test_pnlexplain_waterfall.py
-git commit -m "feat(pnlexplain): scenario cache, sequential waterfall, lifecycle transition, explain()"
+git commit -m "feat(pnlexplain): scenario cache, sequential waterfall, lifecycle transition, explain()" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -2029,6 +2098,19 @@ Expected: FAIL with `ImportError: cannot import name 'shapley_rows'`
 
 - [ ] **Step 3: Implement**
 
+In `quantark/pnlexplain/equity/explain.py` replace the gate
+`raise NotImplementedError("interaction='shapley' lands in Task 6")` with the real dispatch:
+
+```python
+    if ExplainMethod.WATERFALL in config.methods:
+        if config.interaction == "sequential":
+            rows.extend(sequential_rows(cache, config.waterfall_order, LEVEL))
+        else:
+            rows.extend(shapley_rows(cache, LEVEL))
+```
+(import `shapley_rows` next to `sequential_rows`), and in `test/test_pnlexplain_waterfall.py` delete the
+shapley half of `test_taylor_and_shapley_are_gated_until_their_tasks` (keep the Taylor assertion).
+
 ```python
 # append to quantark/pnlexplain/equity/waterfall.py
 import itertools
@@ -2055,13 +2137,13 @@ def shapley_rows(cache: ScenarioCache, level: str = "instrument") -> Tuple[Expla
 - [ ] **Step 4: Run tests**
 
 Run: `PYTEST test/test_pnlexplain_waterfall.py -q`
-Expected: 8 passed
+Expected: 9 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add quantark/pnlexplain/equity/waterfall.py test/test_pnlexplain_waterfall.py
-git commit -m "feat(pnlexplain): Shapley allocation over the effective market factors"
+git add quantark/pnlexplain/equity/waterfall.py quantark/pnlexplain/equity/explain.py test/test_pnlexplain_waterfall.py
+git commit -m "feat(pnlexplain): Shapley allocation over the effective market factors" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -2138,7 +2220,7 @@ Expected: all passed (no numeric path touched).
 
 ```bash
 git add quantark/asset/equity/riskmeasures/greeks_calculator.py test/test_greeks_registry.py
-git commit -m "feat(riskmeasures): GreeksCalculator.resolve_route pure routing helper"
+git commit -m "feat(riskmeasures): GreeksCalculator.resolve_route pure routing helper" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -2147,12 +2229,14 @@ git commit -m "feat(riskmeasures): GreeksCalculator.resolve_route pure routing h
 
 **Files:**
 - Create: `quantark/pnlexplain/equity/taylor.py`
-- Modify: `quantark/pnlexplain/equity/explain.py` (Taylor branch + route metadata)
+- Modify: `quantark/pnlexplain/equity/explain.py` (replace the Taylor gate with the branch + route metadata), `test/test_pnlexplain_waterfall.py` (delete the Taylor gate test)
 - Test: `test/test_pnlexplain_taylor.py`
 
 **Interfaces:**
-- Consumes: `ScenarioCache` (Task 5), `resolve_stencil`/`resolved_subrows`/`TERM_FACTOR` (Task 2), `GreeksCalculator.resolve_route` (Task 7).
-- Produces: `taylor_rows(cache, config, level="instrument") -> tuple[tuple[ExplainRow, ...], float, dict]` (rows, unexplained, metadata with `route`, `n_steps`, `vega_scale`); `cash_greek(name, raw_position_greek, spot_t0, per_day_divisor) -> float`; `TERM_SPEC`.
+- Consumes: `ScenarioCache` (Task 5), `resolve_stencil` / `resolved_subrows` / `TERM_FACTOR` (Task 2), `GreeksCalculator.resolve_route` (Task 7).
+- Produces: `taylor_rows(cache, config, level="instrument") -> tuple[tuple[ExplainRow, ...], float, dict]` (rows, unexplained, metadata with `route`, `n_steps`, `clock`, `vega_scale`, `gap_scale`); `cash_greek(name, raw_position_greek, spot_t0, per_day_divisor) -> float`; `TERM_SPEC`; `TIME_GREEKS`.
+
+Routing facts this task is built on (verified in the registry): `vanna`, `volga`, `delta_q`, `dividend_rho` and the theta sub-rows `r_theta` / `q_theta` / `convexity_theta` are numerical-only, so every built-in stencil routes a vanilla **numerically**; the analytical route is reached only with an explicit closed-form stencil such as `["delta", "gamma", "vega", "theta", "rho"]`. On the analytical route time greeks are per-day rates (scaled once by `calendar_days` under `exact_gap`); on the numerical route they are measured over the gap step (`n = 1`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2182,6 +2266,8 @@ FRI = datetime(2026, 6, 26)
 SAT = datetime(2026, 6, 27)
 MON = datetime(2026, 6, 29)
 Q = 5.0
+CLOSED_FORM = ["delta", "gamma", "vega", "theta", "rho"]      # every name auto-routes analytical
+FD = dict(rel=2e-2, abs=1e-6)                                   # spec §12 "FD tolerance"
 
 
 def _env(spot, vol, rate, div, date, calendar=None):
@@ -2207,64 +2293,87 @@ def _rows(res, method=ExplainMethod.TAYLOR):
     return {r.term: r for r in res.rows if r.method is method}
 
 
-def test_taylor_terms_match_closed_form_and_extended_shrinks_residual():
+def _analytical(s0, names):
+    return GreeksCalculator().calculate_analytical_greeks(s0.product, s0.pricing_env, greeks=names)
+
+
+def test_default_stencil_routes_numerical_and_matches_closed_form_to_fd_tolerance():
     s0, s1 = _snaps()
-    g = GreeksCalculator().calculate_analytical_greeks(s0.product, s0.pricing_env,
-                                                       greeks=["delta", "gamma", "vega", "vanna", "volga", "rho", "dividend_rho"])
+    g = _analytical(s0, ["delta", "gamma", "vega", "vanna", "volga", "rho", "dividend_rho"])
     res = explain(s0, s1)
     rows = _rows(res)
-    assert res.metadata["route"] == "analytical"
-    assert rows["delta"].pnl == pytest.approx(Q * g["delta"] * 0.5, rel=1e-12)
-    assert rows["gamma"].pnl == pytest.approx(Q * 0.5 * g["gamma"] * 0.5 ** 2, rel=1e-12)
-    assert rows["vega"].pnl == pytest.approx(Q * (g["vega"] / 0.01) * 0.002, rel=1e-12)
-    assert rows["vanna"].pnl == pytest.approx(Q * g["vanna"] * 0.5 * 0.002, rel=1e-12)
-    assert rows["volga"].pnl == pytest.approx(Q * 0.5 * g["volga"] * 0.002 ** 2, rel=1e-12)
-    assert rows["rho"].pnl == pytest.approx(Q * (g["rho"] / 0.01) * 0.0005, rel=1e-12)
+    assert res.metadata["route"] == "numerical"        # vanna/volga + theta sub-rows are numerical-only
+    assert rows["delta"].pnl == pytest.approx(Q * g["delta"] * 0.5, **FD)
+    assert rows["gamma"].pnl == pytest.approx(Q * 0.5 * g["gamma"] * 0.5 ** 2, **FD)
+    assert rows["vega"].pnl == pytest.approx(Q * (g["vega"] / 0.01) * 0.002, **FD)
+    assert rows["vanna"].pnl == pytest.approx(Q * g["vanna"] * 0.5 * 0.002, **FD)
+    assert rows["volga"].pnl == pytest.approx(Q * 0.5 * g["volga"] * 0.002 ** 2, **FD)
+    assert rows["rho"].pnl == pytest.approx(Q * (g["rho"] / 0.01) * 0.0005, **FD)
     assert rows["theta"].pnl == pytest.approx(res.metadata["time_pure"], abs=1e-12)
     assert rows["theta"].kind is RowKind.COMPONENT and rows["r_theta"].kind is RowKind.INFORMATIONAL
     assert rows["convexity_theta"].pnl == pytest.approx(
         rows["theta_contract"].pnl - rows["r_theta"].pnl - rows["q_theta"].pnl, abs=1e-12)
     assert rows["ledger_carry"].pnl == 0.0
     assert res.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)
-    assert res.unexplained == pytest.approx(
-        (res.pv_alive_t1.total - res.pv_t0.total)
-        - sum(r.pnl for r in res.rows_for(ExplainMethod.TAYLOR, kind=RowKind.COMPONENT)
-              if r.method is ExplainMethod.TAYLOR), abs=1e-12)
+    components = [r.pnl for r in res.rows_for(ExplainMethod.TAYLOR, kind=RowKind.COMPONENT)
+                  if r.method is ExplainMethod.TAYLOR and r.factor is not Factor.UNEXPLAINED]
+    assert res.unexplained == pytest.approx((res.pv_alive_t1.total - res.pv_t0.total) - sum(components), abs=1e-12)
     ext = explain(s0, s1, config=PnLExplainConfig(stencil="extended"))
     assert abs(ext.unexplained) < abs(res.unexplained)
     assert "gamma_theta" in _rows(ext) and "speed" in _rows(ext)
-    # term -> factor
     assert rows["vanna"].factor is Factor.VOL and rows["delta"].factor is Factor.SPOT
+    assert rows["vanna"].moves == {"spot_return": pytest.approx(0.005), "vol_pts": pytest.approx(0.2)}
+
+
+def test_closed_form_stencil_routes_analytical_and_is_exact():
+    s0, s1 = _snaps()
+    res = explain(s0, s1, config=PnLExplainConfig(stencil=CLOSED_FORM))
+    rows = _rows(res)
+    assert res.metadata["route"] == "analytical" and res.metadata["vega_scale"] == pytest.approx(0.01)
+    g = _analytical(s0, ["delta", "gamma", "vega", "theta", "rho"])
+    assert rows["delta"].pnl == pytest.approx(Q * g["delta"] * 0.5, rel=1e-12)
+    assert rows["gamma"].pnl == pytest.approx(Q * 0.5 * g["gamma"] * 0.5 ** 2, rel=1e-12)
+    assert rows["vega"].pnl == pytest.approx(Q * (g["vega"] / 0.01) * 0.002, rel=1e-12)
+    assert rows["rho"].pnl == pytest.approx(Q * (g["rho"] / 0.01) * 0.0005, rel=1e-12)
+    assert rows["theta"].pnl == pytest.approx(res.metadata["time_pure"], abs=1e-12)
+    assert "r_theta" not in rows                      # sub-rows only when requested
+    assert rows["theta_contract"].pnl == pytest.approx(Q * g["theta"] * 1, rel=1e-12)   # per day x 1-day gap
+    assert res.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)
 
 
 def test_numerical_route_with_custom_vol_bump_agrees_with_dv_dsigma():
-    s0, s1 = _snaps(engine=BlackScholesEngine())
+    s0, s1 = _snaps()
     params = EngineParams(bump_config=BumpConfig(vol_bump=0.02))
     res = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", params=params))
     assert res.metadata["route"] == "numerical" and res.metadata["vega_scale"] == pytest.approx(0.02)
-    g = GreeksCalculator().calculate_analytical_greeks(s0.product, s0.pricing_env)
+    g = _analytical(s0, ["vega"])
     vega_row = _rows(res)["vega"]
-    assert vega_row.pnl == pytest.approx(Q * (g["vega"] / 0.01) * 0.002, rel=2e-2)
-    assert vega_row.greek == pytest.approx(Q * g["vega"] / 0.01, rel=2e-2)       # position-level dV/dsigma
+    assert vega_row.pnl == pytest.approx(Q * (g["vega"] / 0.01) * 0.002, **FD)
+    assert vega_row.greek == pytest.approx(Q * g["vega"] / 0.01, **FD)        # position-level dV/dsigma
     assert vega_row.cash_greek == pytest.approx(vega_row.greek * 0.01, rel=1e-12)
     assert vega_row.moves == {"vol_pts": pytest.approx(0.2)}
 
 
 def test_cash_greek_columns_follow_the_desk_table():
     s0, s1 = _snaps()
-    res = explain(s0, s1)
+    res = explain(s0, s1, config=PnLExplainConfig(stencil=CLOSED_FORM))
     rows = _rows(res)
-    g = GreeksCalculator().calculate_analytical_greeks(s0.product, s0.pricing_env,
-                                                       greeks=["delta", "gamma", "vega", "vanna", "rho"])
+    g = _analytical(s0, ["delta", "gamma", "vega", "rho"])
     S = 100.0
-    assert rows["delta"].cash_greek == pytest.approx(Q * g["delta"] * S)
-    assert rows["gamma"].cash_greek == pytest.approx(Q * g["gamma"] * S * S / 100.0)
-    assert rows["vega"].cash_greek == pytest.approx(Q * g["vega"])            # per 1 vol pt
-    assert rows["vanna"].cash_greek == pytest.approx(Q * g["vanna"] * S * 0.01)
-    assert rows["rho"].cash_greek == pytest.approx(Q * g["rho"])              # per 1%
-    assert rows["theta"].cash_greek == pytest.approx(res.metadata["time_pure"] / 1.0)   # 1 day gap
+    assert rows["delta"].cash_greek == pytest.approx(Q * g["delta"] * S, rel=1e-12)
+    assert rows["gamma"].cash_greek == pytest.approx(Q * g["gamma"] * S * S / 100.0, rel=1e-12)
+    assert rows["vega"].cash_greek == pytest.approx(Q * g["vega"], rel=1e-12)            # per 1 vol pt
+    assert rows["rho"].cash_greek == pytest.approx(Q * g["rho"], rel=1e-12)              # per 1%
+    assert rows["theta"].cash_greek == pytest.approx(res.metadata["time_pure"] / 1.0)   # 1-day gap
     assert rows["delta"].moves == {"spot_return": pytest.approx(0.005)}
-    assert rows["vanna"].moves == {"spot_return": pytest.approx(0.005), "vol_pts": pytest.approx(0.2)}
+    vanna = _rows(explain(s0, s1))["vanna"]
+    assert vanna.cash_greek == pytest.approx(Q * _analytical(s0, ["vanna"])["vanna"] * S * 0.01, **FD)
+
+
+def test_bucketed_is_gated_until_task_13():
+    s0, s1 = _snaps()
+    with pytest.raises(NotImplementedError):
+        explain(s0, s1, config=PnLExplainConfig(bucketed=True))
 
 
 def test_clocks_exact_gap_versus_per_step():
@@ -2275,7 +2384,7 @@ def test_clocks_exact_gap_versus_per_step():
     assert r["theta"].pnl == pytest.approx(exact.metadata["time_pure"], abs=1e-12)
     assert r["theta"].moves == {"days": 3.0, "trading_days": 1.0}
     assert r["theta"].greek == pytest.approx(exact.metadata["time_pure"] / 3.0)
-    assert exact.metadata["n_steps"] == 1
+    assert exact.metadata["n_steps"] == 1 and exact.metadata["gap_scale"] == 1.0
 
     calc = GreeksCalculator()
     theta_1d = calc.calculate_numerical_greeks(s0.product, s0.pricing_env, s0.engine, greeks=["theta_1d"])["theta_1d"]
@@ -2286,7 +2395,9 @@ def test_clocks_exact_gap_versus_per_step():
     per_1td = explain(s0, s1, config=PnLExplainConfig(time_term="per_step", clock="1td"))
     assert _rows(per_1td)["theta"].pnl == pytest.approx(Q * theta_1td * 1, rel=1e-9)
     assert per_1td.metadata["n_steps"] == 1
-    assert _rows(per_1d)["theta"].pnl != pytest.approx(r["theta"].pnl, abs=1e-9)   # per_step misexplains the weekend
+    # the calculator rolls a float-maturity product by one day per step (product.time_shift),
+    # so three one-day steps are not the exact three-day revaluation: per_step misexplains the weekend
+    assert _rows(per_1d)["theta"].pnl != pytest.approx(r["theta"].pnl, abs=1e-9)
 
     s0n, s1n = _snaps(d1=MON)                     # no calendar
     with pytest.raises(ValidationError):
@@ -2304,7 +2415,7 @@ def test_terminal_position_has_only_the_time_row():
     rows = _rows(res)
     assert res.pv_t0.contingent_mtm == 0.0
     assert rows["theta"].pnl == pytest.approx(res.metadata["time_pure"], abs=1e-12)
-    assert all(r.pnl == 0.0 for k, r in rows.items() if k not in ("theta", "unexplained"))
+    assert all(r.pnl == 0.0 for k, r in rows.items() if k not in ("theta", "unexplained", "ledger_carry"))
     assert rows["delta"].greek is None
     assert res.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)
 ```
@@ -2312,9 +2423,9 @@ def test_terminal_position_has_only_the_time_row():
 - [ ] **Step 2: Run to verify failure**
 
 Run: `PYTEST test/test_pnlexplain_taylor.py -q`
-Expected: FAIL (`KeyError: 'route'` / missing Taylor rows)
+Expected: every test FAILS with `NotImplementedError: the Taylor explainer lands in Task 8` (the Task 5 gate).
 
-- [ ] **Step 3: Implement `taylor.py`**
+- [ ] **Step 3: Implement the Taylor core (`taylor.py`, part 1: route, units, cash table, non-time terms, theta component, residual)**
 
 ```python
 # quantark/pnlexplain/equity/taylor.py
@@ -2345,12 +2456,12 @@ TERM_SPEC: Dict[str, Tuple[float, Tuple[int, int, int, int, int]]] = {
 VEGA_SCALED = ("vega", "vega_theta")
 PER_PCT = ("rho", "dividend_rho")
 TIME_GREEKS = ("theta", "r_theta", "q_theta", "convexity_theta", "gamma_theta", "charm", "color", "vega_theta")
-_MOVE_KEY = {0: "spot_return", 1: "vol_pts", 2: "rate_pct", 3: "div_pct"}
+SUBROW_NAMES = ("r_theta", "q_theta", "convexity_theta", "gamma_theta", "theta_contract", "ledger_carry")
 
 
 def cash_greek(name: str, raw_position_greek: float, spot_t0: float, per_day_divisor: float) -> float:
-    """Desk cash convention (spec §7.5): raw x S^a / 100^max(a-1,0) x 0.01^(b+c+d), time greeks per day."""
-    if name in ("r_theta", "q_theta", "convexity_theta", "gamma_theta", "theta_contract", "ledger_carry"):
+    """Desk cash convention (spec §7.5): raw x S^a / 100^max(a-1,0) x 0.01^(b+c+d); time greeks per day."""
+    if name in SUBROW_NAMES:
         return raw_position_greek / per_day_divisor
     _, (a, b, c, d, e) = TERM_SPEC[name]
     scale = spot_t0 ** a / (100.0 ** max(a - 1, 0)) * (0.01 ** (b + c + d))
@@ -2359,24 +2470,178 @@ def cash_greek(name: str, raw_position_greek: float, spot_t0: float, per_day_div
     return raw_position_greek * scale
 
 
-def _display_moves(exponents, moves) -> Dict[str, float]:
+def display_moves(exponents, moves) -> Dict[str, float]:
     out: Dict[str, float] = {}
-    for i, e in enumerate(exponents[:4]):
-        if e and (v := _raw_move(i, moves)) is not None:
-            out[_MOVE_KEY[i]] = v if i else moves.spot_return
-            if i == 1:
-                out[_MOVE_KEY[i]] = v * 100.0
-            if i in (2, 3):
-                out[_MOVE_KEY[i]] = v * 100.0
-    if exponents[4]:
+    a, b, c, d, e = exponents
+    if a:
+        out["spot_return"] = moves.spot_return
+    if b and moves.d_vol is not None:
+        out["vol_pts"] = moves.d_vol * 100.0
+    if c and moves.d_rate is not None:
+        out["rate_pct"] = moves.d_rate * 100.0
+    if d and moves.d_div is not None:
+        out["div_pct"] = moves.d_div * 100.0
+    if e:
         out.update(moves.display(Factor.TIME))
     return out
 
 
-def _raw_move(i: int, moves) -> Optional[float]:
-    return (moves.d_spot, moves.d_vol, moves.d_rate, moves.d_div)[i]
+def _resolve_steps(cache: ScenarioCache, config: PnLExplainConfig, bump) -> Tuple[int, str]:
+    """(n, clock_label): exact_gap -> (1, "gap"); per_step is added in Step 6."""
+    if config.time_term == "exact_gap":
+        return 1, "gap"
+    raise NotImplementedError("time_term='per_step' lands in Task 8 Step 6")
 
 
+def _clock_suffix(config: PnLExplainConfig) -> str:
+    return "" if config.time_term == "exact_gap" or config.clock is None else f"_{config.clock}"
+
+
+def _calculator(params, bump, config: PnLExplainConfig, days: int) -> GreeksCalculator:
+    if config.time_term == "exact_gap":
+        bump = dataclasses.replace(bump, time_bump_days=days, time_bump_mode="calendar_days")
+        params = dataclasses.replace(params, bump_config=bump)
+    return GreeksCalculator(params=params, greeks_mode=config.greeks_mode)
+
+
+def _row(level, name, factor, pnl, greek=None, cash=None, kind=RowKind.COMPONENT, extra=None, mv=None):
+    return ExplainRow(factor=factor, term=name, method=ExplainMethod.TAYLOR, kind=kind, level=level,
+                      pnl=pnl, moves=mv if mv is not None else {}, greek=greek, cash_greek=cash,
+                      metadata=extra or {})
+
+
+def _info(level, term, pnl, per_day, moves, formula, extra=None):
+    return ExplainRow(factor=Factor.TIME, term=term, method=ExplainMethod.TAYLOR, kind=RowKind.INFORMATIONAL,
+                      level=level, pnl=pnl, greek=pnl / per_day, cash_greek=pnl / per_day,
+                      moves=moves.display(Factor.TIME), metadata={"formula": formula, **(extra or {})})
+
+
+def _theta_subrows(level, greeks, q, n, days, per_day, gap_scale, config, subrows, time_pure,
+                   theta_pnl, terminal, moves) -> List[ExplainRow]:
+    """Step 3 version: theta_contract and ledger_carry only; Step 6 adds r/q/convexity/gamma_theta."""
+    if terminal:
+        return [_info(level, "theta_contract", 0.0, per_day, moves, "no contingent leg"),
+                _info(level, "ledger_carry", time_pure, per_day, moves, "ledger_carry = time_pure - theta_contract")]
+    theta_contract = q * greeks["theta"] * gap_scale
+    return [_info(level, "theta_contract", theta_contract, per_day, moves,
+                  "calculator theta over the calendar gap x quantity (analytical: per day x days)"),
+            _info(level, "ledger_carry", time_pure - theta_contract, per_day, moves,
+                  "ledger_carry = time_pure - theta_contract")]
+
+
+def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "instrument"
+                ) -> Tuple[Tuple[ExplainRow, ...], float, Dict[str, Any]]:
+    if config.bucketed:
+        raise NotImplementedError("bucketed rows land in Task 13")     # removed in Task 13
+    snap0, moves = cache.snap0, cache.moves
+    q, days, S0 = snap0.quantity, moves.calendar_days, moves.spot_t0
+    terms, subrows = resolve_stencil(config), resolved_subrows(config)
+    alive_move = cache.all_market().total - cache.value_for(()).total
+    time_pure = cache.time_pure()
+    params = config.params if config.params is not None else snap0.engine.params
+    bump = params.get_effective_bump_config()
+    n, clock_label = _resolve_steps(cache, config, bump)
+    per_day = float(days) if config.time_term == "exact_gap" else 1.0
+    terminal = is_terminal(snap0.lifecycle_state)
+
+    greeks: Dict[str, float] = {}
+    route: Optional[str] = None
+    vega_scale: Optional[float] = None
+    gap_scale = 1.0
+    if not terminal:
+        calc = _calculator(params, bump, config, days)
+        wanted = list(terms)
+        if "theta" in terms and subrows:                      # sub-rows are numerical-only in the calculator
+            wanted += ["r_theta", "q_theta"] + (["gamma_theta"] if "gamma_theta" in subrows else [])
+        suffix = _clock_suffix(config)
+        request = [f"{name}{suffix}" if name in TIME_GREEKS else name for name in wanted]
+        route = config.greeks_method if config.greeks_method != "auto" \
+            else calc.resolve_route(snap0.product, request)
+        raw = calc.calculate(snap0.product, snap0.pricing_env, cache.bump_engine_t0, method=route,
+                             greeks=request, theta_decomposition_mode=config.theta_decomposition_mode)
+        greeks = {name: float(raw[f"{name}{suffix}" if name in TIME_GREEKS else name]) for name in wanted}
+        vega_scale = 0.01 if route == "analytical" else float(bump.vol_bump)
+        # analytical time greeks are per-day rates; numerical ones are gap-valued under exact_gap
+        gap_scale = float(days) if (route == "analytical" and config.time_term == "exact_gap") else 1.0
+    meta = {"route": route, "vega_scale": vega_scale, "n_steps": n, "clock": clock_label, "gap_scale": gap_scale}
+
+    def derivative(name: str) -> float:
+        g = greeks[name]
+        if name in VEGA_SCALED:
+            return g / vega_scale
+        if name in PER_PCT:
+            return g / 0.01
+        return g
+
+    raw_moves = (moves.d_spot, moves.d_vol, moves.d_rate, moves.d_div, float(n))
+    rows: List[ExplainRow] = []
+    explained = 0.0
+    for name in terms:
+        factor = TERM_FACTOR[name]
+        coeff, exps = TERM_SPEC[name]
+        applicable = factor in moves.coordinate.applicable and all(
+            raw_moves[i] is not None for i, e in enumerate(exps[:4]) if e)
+        if name == "theta":
+            pnl, greek = time_pure, time_pure / per_day                     # exact_gap; per_step in Step 6
+            extra = {"basis": "revaluation", "formula": "time_pure = V(alive@t1, t0 market) - V(t0)"}
+            rows.append(_row(level, name, factor, pnl, greek=greek, cash=greek, extra=extra,
+                             mv=moves.display(Factor.TIME)))
+            explained += pnl
+            rows.extend(_theta_subrows(level, greeks, q, n, days, per_day, gap_scale, config, subrows,
+                                       time_pure, pnl, terminal, moves))
+            continue
+        if terminal or not applicable:
+            rows.append(_row(level, name, factor, 0.0, extra={"applicable": applicable}))
+            continue
+        g_pos = q * derivative(name) * (gap_scale if exps[4] else 1.0)
+        move_product = 1.0
+        for i, e in enumerate(exps):
+            if e:
+                move_product *= raw_moves[i] ** e
+        pnl = coeff * g_pos * move_product
+        greek_disp = g_pos / per_day if exps[4] else g_pos
+        rows.append(_row(level, name, factor, pnl, greek=greek_disp,
+                         cash=cash_greek(name, g_pos, S0, per_day), mv=display_moves(exps, moves)))
+        explained += pnl
+    unexplained = alive_move - explained
+    rows.append(_row(level, "unexplained", Factor.UNEXPLAINED, unexplained,
+                     extra={"basis_and_model_effects_included": True}))
+    return tuple(rows), unexplained, meta
+```
+
+- [ ] **Step 4: Wire the Taylor branch into `explain.py`**
+
+Replace the gate `raise NotImplementedError("the Taylor explainer lands in Task 8")` with:
+
+```python
+    taylor_meta: Dict[str, Any] = {"route": None, "vega_scale": None, "n_steps": None, "clock": None, "gap_scale": None}
+    if ExplainMethod.TAYLOR in config.methods:
+        from quantark.pnlexplain.equity.taylor import taylor_rows
+```
+and after the event row is appended:
+```python
+    if ExplainMethod.TAYLOR in config.methods:
+        trows, unexplained, taylor_meta = taylor_rows(cache, config, LEVEL)
+        rows.extend(trows)
+```
+merge `**taylor_meta` into `metadata` (add `from typing import Any, Dict` to the imports). Delete
+`test_taylor_and_shapley_are_gated_until_their_tasks` from `test/test_pnlexplain_waterfall.py`.
+
+- [ ] **Step 5: Run the non-clock tests and commit part 1**
+
+Run: `PYTEST test/test_pnlexplain_taylor.py -q -k "not clocks and not terminal"` and `PYTEST test/test_pnlexplain_waterfall.py -q`
+Expected: 5 passed (Taylor) and 8 passed (waterfall; the gate test is gone).
+
+```bash
+git add quantark/pnlexplain/equity/taylor.py quantark/pnlexplain/equity/explain.py test/test_pnlexplain_taylor.py test/test_pnlexplain_waterfall.py
+git commit -m "feat(pnlexplain): Taylor explainer core (route, units, cash columns, non-time terms, residual)" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
+```
+
+- [ ] **Step 6: Add the theta sub-rows and the per-step clock (`taylor.py`, part 2)**
+
+Replace `_resolve_steps` and `_theta_subrows` with:
+
+```python
 def _resolve_steps(cache: ScenarioCache, config: PnLExplainConfig, bump) -> Tuple[int, str]:
     """(n, clock_label) for the Taylor time terms."""
     mv = cache.moves
@@ -2393,70 +2658,48 @@ def _resolve_steps(cache: ScenarioCache, config: PnLExplainConfig, bump) -> Tupl
     return mv.calendar_days, "1d"
 
 
-def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "instrument"
-                ) -> Tuple[Tuple[ExplainRow, ...], float, Dict[str, Any]]:
-    snap0, moves = cache.snap0, cache.moves
-    q = snap0.quantity
-    days = moves.calendar_days
-    S0 = moves.spot_t0
-    terms = resolve_stencil(config)
-    subrows = resolved_subrows(config)
-    alive_move = cache.all_market().total - cache.value_for(()).total
-    time_pure = cache.time_pure()
-    params = config.params if config.params is not None else snap0.engine.params
-    bump = params.get_effective_bump_config()
-    n, clock_label = _resolve_steps(cache, config, bump)
-    per_day = float(days) if config.time_term == "exact_gap" else 1.0
-
-    meta: Dict[str, Any] = {"n_steps": n, "clock": clock_label, "route": None, "vega_scale": None}
-    rows: List[ExplainRow] = []
-
-    def row(name, factor, pnl, greek=None, cash=None, kind=RowKind.COMPONENT, extra=None, mv=None):
-        return ExplainRow(factor=factor, term=name, method=ExplainMethod.TAYLOR, kind=kind, level=level,
-                          pnl=pnl, moves=mv if mv is not None else {}, greek=greek, cash_greek=cash,
-                          metadata=extra or {})
-
-    terminal = is_terminal(snap0.lifecycle_state)
-    greeks: Dict[str, float] = {}
-    route = None
-    vega_scale = None
-    if not terminal:
+def _theta_subrows(level, greeks, q, n, days, per_day, gap_scale, config, subrows, time_pure,
+                   theta_pnl, terminal, moves) -> List[ExplainRow]:
+    if terminal:
+        out = [_info(level, "ledger_carry", time_pure, per_day, moves, "ledger_carry = time_pure - theta_contract")]
         if config.time_term == "exact_gap":
-            bump2 = dataclasses.replace(bump, time_bump_days=days, time_bump_mode="calendar_days")
-            params2 = dataclasses.replace(params, bump_config=bump2)
-        else:
-            params2 = params
-        calc = GreeksCalculator(params=params2, greeks_mode=config.greeks_mode)
-        wanted = list(terms)
-        if "theta" in terms:
-            wanted += ["r_theta", "q_theta"]
-            if "gamma_theta" in subrows:
-                wanted.append("gamma_theta")
-        suffix = "" if config.time_term == "exact_gap" or config.clock is None else f"_{config.clock}"
-        request = [f"{name}{suffix}" if name in TIME_GREEKS else name for name in wanted]
-        route = config.greeks_method if config.greeks_method != "auto" \
-            else calc.resolve_route(snap0.product, request)
-        raw = calc.calculate(snap0.product, snap0.pricing_env, cache.bump_engine_t0, method=route,
-                             greeks=request, theta_decomposition_mode=config.theta_decomposition_mode)
-        greeks = {name: float(raw[f"{name}{suffix}" if name in TIME_GREEKS else name]) for name in wanted}
-        vega_scale = 0.01 if route == "analytical" else float(bump.vol_bump)
-    meta["route"], meta["vega_scale"] = route, vega_scale
+            out.insert(0, _info(level, "theta_contract", 0.0, per_day, moves, "no contingent leg"))
+        return out
+    out: List[ExplainRow] = []
+    exact_gap = config.time_term == "exact_gap"
+    if exact_gap:
+        theta_contract = q * greeks["theta"] * gap_scale
+        out.append(_info(level, "theta_contract", theta_contract, per_day, moves,
+                         "calculator theta over the calendar gap x quantity (analytical: per day x days)"))
+        out.append(_info(level, "ledger_carry", time_pure - theta_contract, per_day, moves,
+                         "ledger_carry = time_pure - theta_contract"))
+        base = theta_contract
+    else:
+        base = theta_pnl
+    if not subrows:
+        return out
+    # r_theta / q_theta are numerical-only: estimate mode returns per-day values (x days under
+    # exact_gap), exact mode reprices over the configured step (x1 under exact_gap); per_step x n.
+    estimate = config.theta_decomposition_mode == "estimate"
+    step_scale = (float(days) if estimate else 1.0) if exact_gap else float(n)
+    r_theta = q * greeks["r_theta"] * step_scale
+    q_theta = q * greeks["q_theta"] * step_scale
+    if "r_theta" in subrows:
+        out.append(_info(level, "r_theta", r_theta, per_day, moves, "calculator r_theta x steps"))
+    if "q_theta" in subrows:
+        out.append(_info(level, "q_theta", q_theta, per_day, moves, "calculator q_theta x steps"))
+    convexity = base - r_theta - q_theta
+    if "convexity_theta" in subrows:
+        out.append(_info(level, "convexity_theta", convexity, per_day, moves, "theta_contract - r_theta - q_theta"))
+    if "gamma_theta" in subrows:
+        gamma_theta = q * greeks["gamma_theta"] * (float(days) if exact_gap else float(n))
+        out.append(_info(level, "gamma_theta", gamma_theta, per_day, moves,
+                         "-1/2 sigma^2 S^2 Gamma per day x days", {"theta_residual": convexity - gamma_theta}))
+    return out
+```
+and in `taylor_rows` replace the theta branch's first line with the per-step-aware version:
 
-    def derivative(name):
-        g = greeks[name]
-        if name in VEGA_SCALED:
-            return g / vega_scale
-        if name in PER_PCT:
-            return g / 0.01
-        return g
-
-    raw_moves = (moves.d_spot, moves.d_vol, moves.d_rate, moves.d_div, float(n))
-    explained = 0.0
-    for name in terms:
-        factor = TERM_FACTOR[name]
-        coeff, exps = TERM_SPEC[name]
-        applicable = factor in moves.coordinate.applicable and all(
-            raw_moves[i] is not None for i, e in enumerate(exps[:4]) if e)
+```python
         if name == "theta":
             if config.time_term == "exact_gap":
                 pnl, greek = time_pure, time_pure / per_day
@@ -2465,113 +2708,17 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
                 greek = q * greeks["theta"] if not terminal else 0.0
                 pnl = greek * n
                 extra = {"basis": "greek", "formula": "theta_per_step x n"}
-            rows.append(row(name, factor, pnl, greek=greek, cash=greek, extra=extra, mv=moves.display(Factor.TIME)))
-            explained += pnl
-            rows.extend(_theta_subrows(name, greeks, q, n, days, per_day, config, subrows, time_pure,
-                                       pnl, terminal, level, moves))
-            continue
-        if terminal or not applicable:
-            rows.append(row(name, factor, 0.0, extra={"applicable": applicable}))
-            continue
-        g_pos = q * derivative(name)
-        move_product = 1.0
-        for i, e in enumerate(exps):
-            if e:
-                move_product *= raw_moves[i] ** e
-        pnl = coeff * g_pos * move_product
-        greek_disp = g_pos / per_day if exps[4] else g_pos
-        rows.append(row(name, factor, pnl, greek=greek_disp,
-                        cash=cash_greek(name, g_pos, S0, per_day), mv=_display_moves(exps, moves)))
-        explained += pnl
-    unexplained = alive_move - explained
-    rows.append(row("unexplained", Factor.UNEXPLAINED, unexplained,
-                    extra={"basis_and_model_effects_included": True}))
-    return tuple(rows), unexplained, meta
-
-
-def _theta_subrows(name, greeks, q, n, days, per_day, config, subrows, time_pure, theta_pnl,
-                   terminal, level, moves):
-    def info(term, pnl, formula):
-        return ExplainRow(factor=Factor.TIME, term=term, method=ExplainMethod.TAYLOR,
-                          kind=RowKind.INFORMATIONAL, level=level, pnl=pnl, greek=pnl / per_day,
-                          cash_greek=pnl / per_day, moves=moves.display(Factor.TIME),
-                          metadata={"formula": formula})
-    out = []
-    if terminal:
-        if config.time_term == "exact_gap":
-            out.append(info("theta_contract", 0.0, "no contingent leg"))
-            out.append(info("ledger_carry", time_pure, "ledger_carry = time_pure - theta_contract"))
-        return out
-    estimate = config.theta_decomposition_mode == "estimate"
-    step_scale = float(days) if (config.time_term == "exact_gap" and estimate) else float(n)
-    if config.time_term == "exact_gap":
-        theta_contract = q * greeks["theta"]
-        out.append(info("theta_contract", theta_contract, "calculator theta over the calendar gap x quantity"))
-        out.append(info("ledger_carry", time_pure - theta_contract, "ledger_carry = time_pure - theta_contract"))
-        base = theta_contract
-    else:
-        base = theta_pnl
-    r_theta = q * greeks["r_theta"] * step_scale
-    q_theta = q * greeks["q_theta"] * step_scale
-    if "r_theta" in subrows:
-        out.append(info("r_theta", r_theta, "calculator r_theta x steps"))
-    if "q_theta" in subrows:
-        out.append(info("q_theta", q_theta, "calculator q_theta x steps"))
-    convexity = base - r_theta - q_theta
-    if "convexity_theta" in subrows:
-        out.append(info("convexity_theta", convexity, "theta_contract - r_theta - q_theta"))
-    if "gamma_theta" in subrows:
-        gamma_theta = q * greeks["gamma_theta"] * (float(days) if config.time_term == "exact_gap" else float(n))
-        row = info("gamma_theta", gamma_theta, "-1/2 sigma^2 S^2 Gamma per day x days")
-        row = dataclasses.replace(row, metadata={**row.metadata, "theta_residual": convexity - gamma_theta})
-        out.append(row)
-    return out
 ```
 
-Replace the `_display_moves` helper above with this exact, simpler version (the sketch above has a redundant branch):
-
-```python
-def _display_moves(exponents, moves) -> Dict[str, float]:
-    out: Dict[str, float] = {}
-    a, b, c, d, e = exponents
-    if a:
-        out["spot_return"] = moves.spot_return
-    if b and moves.d_vol is not None:
-        out["vol_pts"] = moves.d_vol * 100.0
-    if c and moves.d_rate is not None:
-        out["rate_pct"] = moves.d_rate * 100.0
-    if d and moves.d_div is not None:
-        out["div_pct"] = moves.d_div * 100.0
-    if e:
-        out.update(moves.display(Factor.TIME))
-    return out
-```
-
-- [ ] **Step 4: Wire the Taylor branch into `explain.py`**
-
-Replace the comment `# Task 8 inserts the Taylor branch here.` with:
-
-```python
-    taylor_meta = {}
-    if ExplainMethod.TAYLOR in config.methods:
-        from quantark.pnlexplain.equity.taylor import taylor_rows
-        trows, unexplained, taylor_meta = taylor_rows(cache, config, LEVEL)
-        rows.extend(trows)
-```
-and merge `**taylor_meta` into `metadata` (keys `route`, `vega_scale`, `n_steps`, `clock`; when Taylor is not requested set `"route": None, "n_steps": None`).
-
-- [ ] **Step 5: Run tests**
+- [ ] **Step 7: Run all Taylor tests and commit part 2**
 
 Run: `PYTEST test/test_pnlexplain_taylor.py test/test_pnlexplain_waterfall.py -q`
-Expected: all passed. If `test_clocks_exact_gap_versus_per_step` fails on `per_1d` because the calculator's `theta_1d` for a float-maturity product does not roll the product, compare against `calc.calculate_numerical_theta(product, env, engine, time_bump_days=1, time_bump_mode="calendar_days")` instead — the per-step term is defined as the calculator's own per-step theta times steps, whatever its scenario is.
-
-- [ ] **Step 6: Commit**
+Expected: all passed (7 Taylor + 8 waterfall).
 
 ```bash
-git add quantark/pnlexplain/equity/taylor.py quantark/pnlexplain/equity/explain.py test/test_pnlexplain_taylor.py
-git commit -m "feat(pnlexplain): Taylor explainer with explicit route, unit normalisation, cash columns, clocks"
+git add quantark/pnlexplain/equity/taylor.py
+git commit -m "feat(pnlexplain): theta sub-rows (contract/ledger carry/r/q/convexity/gamma_theta) and per-step clocks" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
-
 ---
 
 ### Task 9: Lifecycle days and the manager accessor
@@ -2729,6 +2876,8 @@ def test_terminal_position_carries_receivable_then_pays_inside_time():
     prod = _snowball()
     eng = SnowballPDESolver(PDEParams(accuracy="fast"))
     d0, d1, d2 = START + timedelta(days=91), START + timedelta(days=92), START + timedelta(days=96)
+    # the same (unrolled) product on every date: a terminal position is never priced, so the
+    # contract-roll check is skipped for it (spec §8)
     s0 = ValuationSnapshot(prod, eng, _env(d0, 100.0), date=d0, quantity=Q, lifecycle_state=st)
     s1 = ValuationSnapshot(prod, eng, _env(d1, 101.0), date=d1, quantity=Q, lifecycle_state=st)
     res = explain(s0, s1, config=WF)
@@ -2789,7 +2938,7 @@ def test_manager_pricing_products_is_pure():
 - [ ] **Step 2: Run to verify failure**
 
 Run: `PYTEST test/test_pnlexplain_lifecycle.py -q`
-Expected: `test_manager_pricing_products_is_pure` FAILS with `AttributeError: ... has no attribute 'pricing_products'`; the others may already pass (they exercise Task 5 code). If `test_phoenix_coupon_day_books_cash_and_reconciles` fails inside `PhoenixQuadEngine` because the helper builds a float-based schedule the QUAD route rejects, switch the engine to `PhoenixPDESolver(PDEParams(accuracy="fast"))` from `quantark.asset.equity.engine.pde`; the assertions are engine-agnostic.
+Expected: `test_manager_pricing_products_is_pure` FAILS with `AttributeError: ... has no attribute 'pricing_products'`; the other four pass (they exercise Task 5–8 code). `PhoenixQuadEngine` accepts the float-based schedule `create_standard_phoenix` builds (its validation covers vol, dividend and time-step bounds only); `PhoenixQuadEngine(QuadParams())` is the pinned engine.
 
 - [ ] **Step 3: Implement `pricing_products`**
 
@@ -2826,7 +2975,7 @@ Expected: all passed (the two existing suites prove `process_day` is untouched).
 
 ```bash
 git add quantark/asset/equity/lifecycle/manager.py test/test_pnlexplain_lifecycle.py
-git commit -m "feat(pnlexplain): lifecycle-day tests (KO, coupon, terminal carry, KI substitution) + manager.pricing_products"
+git commit -m "feat(pnlexplain): lifecycle-day tests (KO, coupon, terminal carry, KI substitution) + manager.pricing_products" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -3011,6 +3160,37 @@ def test_portfolio_aggregation_costs_and_reconciliation():
     assert srow.greek is not None and "vol_pts" in srow.moves
 
 
+def test_from_portfolio_snapshots_rolled_products_without_mutation():
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+    from quantark.asset.equity.lifecycle.manager import PortfolioLifecycleManager
+    from quantark.asset.equity.param import PDEParams
+    from quantark.portfolio import Portfolio
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_pnlexplain_lifecycle import _snowball, _env as _lc_env
+
+    start = datetime(2024, 1, 1)
+    day = datetime(2024, 1, 31)
+    portfolio = Portfolio(portfolio_name="book", pricing_environments={"IDX": _lc_env(start, 100.0)})
+    note = portfolio.add_position(product=_snowball(), quantity=-3.0, entry_price=0.0, underlying="IDX",
+                                  engine=SnowballPDESolver(PDEParams(accuracy="fast")), entry_timestamp=start)
+    manager = PortfolioLifecycleManager(base_date=start)
+    manager.register_positions(portfolio)
+    portfolio.pricing_environments["IDX"] = _lc_env(day, 101.0)
+    manager.process_day(portfolio, day_index=30, day_date=day)          # substitutes the rolled product
+    before = {pid: (p.product, p.engine, p.quantity) for pid, p in portfolio.positions.items()}
+    book = BookSnapshot.from_portfolio(portfolio, day)
+    snap = book.positions[note.position_id].snapshot
+    assert snap.product is portfolio.positions[note.position_id].product     # the rolled product
+    assert snap.product.maturity == pytest.approx(1.0 - 30 / 365)
+    assert snap.pricing_env is not portfolio.pricing_environments["IDX"]     # a copy, same date
+    assert snap.pricing_env.valuation_date == day and snap.lifecycle_state is not note.lifecycle_state
+    assert {pid: (p.product, p.engine, p.quantity) for pid, p in portfolio.positions.items()} == before
+    with pytest.raises(ValidationError):                                      # env dated differently
+        BookSnapshot.from_portfolio(portfolio, day + timedelta(days=1))
+
+
 def test_portfolio_errors():
     pos0 = {"a": _pos("a", _call(), 2.0)}
     b0 = BookSnapshot(date=T0, positions=pos0, environments={"IDX": E0})
@@ -3174,11 +3354,16 @@ class BookSnapshot:
             raise ValidationError("a position id cannot be both a priced position and a quoted leg")
 
     @classmethod
-    def from_portfolio(cls, portfolio, date: datetime, *, lifecycle_manager=None,
+    def from_portfolio(cls, portfolio, date: datetime, *,
                        tombstones: Optional[Mapping[str, PositionSnapshot]] = None,
                        currency: Optional[str] = None) -> "BookSnapshot":
+        """Snapshot the portfolio as it stands on `date` (post-event products; the alive
+        contracts travel in transitions). Environments must already be dated `date`."""
         from copy import deepcopy
         envs = {u: deepcopy(env) for u, env in portfolio.pricing_environments.items()}
+        for u, env in envs.items():
+            if env.valuation_date != date:
+                raise ValidationError(f"environment for {u} is dated {env.valuation_date}, book date is {date}")
         positions: Dict[str, PositionSnapshot] = {}
         for pid, pos in portfolio.positions.items():
             state = deepcopy(getattr(pos, "lifecycle_state", None))
@@ -3390,7 +3575,7 @@ def _aggregate(results: Sequence[PositionExplainResult], level_underlying: Optio
         pnl = sum(r.pnl for r, _ in items)
         coords = {(pr.underlying, pr.coordinate) for _, pr in items}
         steps = {r.step for r, _ in items}
-        same = len(coords) == 1 and len(steps) == 1 and level_underlying is not None
+        same = len(coords) == 1 and len(steps) == 1     # one underlying + one coordinate + one step
         greek = cash = None
         moves: Dict[str, float] = {}
         if same:
@@ -3466,22 +3651,34 @@ def explain_portfolio(
     )
 ```
 
-In `explain.py` add to the result metadata:
-```python
-        "coordinate": (coordinate.reference_strike, coordinate.tenor_t1),
-```
-Export from `quantark/pnlexplain/__init__.py`: `ExplainTrade`, `PositionSnapshot`, `QuotedLegSnapshot`, `BookSnapshot`, `PositionExplainResult`, `PortfolioExplainResult`, `explain_position`, `explain_quoted_leg`, `explain_portfolio` (and add them to `__all__`).
+(`explain()` already records `"coordinate"` in its metadata since Task 5.) Export from
+`quantark/pnlexplain/__init__.py`: `ExplainTrade`, `PositionSnapshot`, `QuotedLegSnapshot`, `BookSnapshot`,
+`PositionExplainResult`, `PortfolioExplainResult`, `explain_position`, `explain_quoted_leg`, `explain_portfolio`
+(and add them to `__all__`).
 
-- [ ] **Step 5: Run tests**
+This task is reviewed in two halves. First land `trades.py` plus the snapshot types, `from_portfolio` and
+`explain_position` (everything above `explain_quoted_leg`), run the position-level tests, and commit:
 
-Run: `PYTEST test/test_pnlexplain_portfolio.py test/test_pnlexplain_waterfall.py test/test_pnlexplain_taylor.py -q`
-Expected: all passed
+- [ ] **Step 5: Run the position-level tests and commit part 1**
 
-- [ ] **Step 6: Commit**
+Run: `PYTEST test/test_pnlexplain_portfolio.py -q -k "unchanged or quantity_change or opened_today or from_portfolio"`
+Expected: 4 passed
 
 ```bash
-git add quantark/pnlexplain/__init__.py quantark/pnlexplain/equity/trades.py quantark/pnlexplain/equity/portfolio.py quantark/pnlexplain/equity/explain.py test/test_pnlexplain_portfolio.py
-git commit -m "feat(pnlexplain): ExplainTrade, position/portfolio layers with tombstones, quoted legs, aggregation, reconciliation"
+git add quantark/pnlexplain/__init__.py quantark/pnlexplain/equity/trades.py quantark/pnlexplain/equity/portfolio.py test/test_pnlexplain_portfolio.py
+git commit -m "feat(pnlexplain): ExplainTrade, PositionSnapshot/BookSnapshot, explain_position with tombstones" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
+```
+
+- [ ] **Step 6: Add the quoted leg, the portfolio layer and aggregation; run everything; commit part 2**
+
+Append `explain_quoted_leg`, `_aggregate`, `explain_portfolio` (from the listing above), then:
+
+Run: `PYTEST test/test_pnlexplain_portfolio.py test/test_pnlexplain_waterfall.py test/test_pnlexplain_taylor.py -q`
+Expected: all passed (7 portfolio tests)
+
+```bash
+git add quantark/pnlexplain/equity/portfolio.py test/test_pnlexplain_portfolio.py
+git commit -m "feat(pnlexplain): quoted futures legs, explain_portfolio with aggregation tiers and reconciliation" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -3538,15 +3735,34 @@ def _frames(results):
     return results.states_df, results.trades_df, results.explain_df, results.explain_reconciliation_df
 
 
+def _normalized(frame):
+    """Object columns (lifecycle event records) compared by their string form; numbers exactly."""
+    out = frame.copy()
+    for col in out.columns:
+        if out[col].dtype == object:
+            out[col] = out[col].astype(str)
+    return out
+
+
 def test_explain_off_is_byte_identical_and_frames_are_empty():
     off = BacktestEngine(_lifecycle_config()).run()
     states, trades, explain_df, recon = _frames(off)
     assert list(explain_df.columns) == ["date", *FRAME_COLUMNS] and explain_df.empty
     assert list(recon.columns) == RECON_COLUMNS and recon.empty
     on = BacktestEngine(_lifecycle_config(PnLExplainConfig())).run()
-    pd.testing.assert_frame_equal(on.states_df.drop(columns=[c for c in on.states_df.columns if c.startswith("lifecycle")]),
-                                  states.drop(columns=[c for c in states.columns if c.startswith("lifecycle")]))
+    pd.testing.assert_frame_equal(_normalized(on.states_df), _normalized(states))     # every column
     pd.testing.assert_frame_equal(on.trades_df, trades)
+    pd.testing.assert_frame_equal(_normalized(on.get_lifecycle_events()), _normalized(off.get_lifecycle_events()))
+
+
+def test_unknown_trade_type_is_rejected():
+    from quantark.backtest.equity.state import TradeRecord
+    from quantark.pnlexplain.equity.recorder import _trade_from_record
+    from quantark.util.exceptions import ValidationError
+    rec = TradeRecord(timestamp=START, trade_type="bogus", instrument_type="spot", underlying=UNDERLYING,
+                      quantity=1.0, price=100.0, notional=100.0, transaction_cost=0.0, reason="x", position_id="p")
+    with pytest.raises(ValidationError, match="unknown backtest trade type"):
+        _trade_from_record(rec)
 
 
 def test_lifecycle_ko_with_settlement_lag_reconciles_every_day():
@@ -3644,12 +3860,22 @@ from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal
 from quantark.pnlexplain.equity.trades import ExplainTrade
 from quantark.asset.equity.lifecycle.cashflows import ValuationPoint
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import is_close, is_zero
 
 RECON_COLUMNS = ["date", "method", "level", "position_id", "expected", "explained", "gap", "ok",
                  "expected_states", "gap_states"]
+# every trade type the two executors and the replay engine emit; anything else is an error
 _KIND_MAP = {"open": "open", "adjust": "adjust", "close": "close", "roll_close": "roll_close",
              "roll_open": "roll_open", "hedge": "adjust", "hedge_rebalance": "adjust", "hedge_close": "close"}
+
+
+def trade_kind(trade_type: str) -> str:
+    try:
+        return _KIND_MAP[trade_type]
+    except KeyError:
+        raise ValidationError(
+            f"unknown backtest trade type {trade_type!r}; known {sorted(_KIND_MAP)}"
+        ) from None
 
 
 def _midnight(ts) -> datetime:
@@ -3690,11 +3916,11 @@ class _RowSink:
 
 
 def _trade_from_record(rec: Any) -> Optional[ExplainTrade]:
-    if float(rec.quantity) == 0.0 or not rec.position_id:
-        return None
+    if is_zero(float(rec.quantity)) or not rec.position_id:
+        return None                       # the executors' zero-quantity "no trade" records
     return ExplainTrade(position_id=rec.position_id, quantity=float(rec.quantity), price=float(rec.price),
                         transaction_cost=float(rec.transaction_cost), timestamp=_midnight(rec.timestamp),
-                        kind=_KIND_MAP.get(rec.trade_type, "adjust"), instrument_type=rec.instrument_type)
+                        kind=trade_kind(rec.trade_type), instrument_type=rec.instrument_type)
 
 
 class PnLExplainRecorder:
@@ -3780,7 +4006,7 @@ class PnLExplainRecorder:
         book_t1 = BookSnapshot(date=ts, positions={**live, **tombstones}, environments=envs)
         day_costs = float(cumulative_costs) - self._prev_costs
         extra_costs = day_costs - sum(t.transaction_cost for t in trades)
-        if abs(extra_costs) < 1e-12:
+        if is_zero(extra_costs):
             extra_costs = 0.0
         result = explain_portfolio(self._prev_book, book_t1, trades=trades, transaction_costs=extra_costs,
                                    transitions=transitions, config=self.config)
@@ -3824,7 +4050,12 @@ class PnLExplainRecorder:
                 self._lifecycle_events_today, self._last_net_pnl,
             )
 ```
-- `_record_state`: after computing `net_pnl`, add `self._last_net_pnl = net_pnl`.
+- `_record_state`: after computing `net_pnl`, add
+  ```python
+        if self._explain_recorder is not None:
+            self._last_net_pnl = net_pnl
+  ```
+  (no state is written when the explain is off).
 - `_finalize`: pass `explain_frames=self._explain_recorder.frames() if self._explain_recorder is not None else None` to `BacktestResults(...)`.
 
 - [ ] **Step 6: Run tests**
@@ -3836,7 +4067,7 @@ Expected: all passed. Debug notes: (a) if `test_lifecycle_ko_with_settlement_lag
 
 ```bash
 git add quantark/pnlexplain/equity/recorder.py quantark/backtest/equity/config.py quantark/backtest/equity/engine.py quantark/backtest/equity/results.py test/test_pnlexplain_backtest_equity.py
-git commit -m "feat(pnlexplain): equity BacktestEngine recorder with tombstones, explain_df and reconciliation frames"
+git commit -m "feat(pnlexplain): equity BacktestEngine recorder with tombstones, explain_df and reconciliation frames" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
@@ -3911,6 +4142,13 @@ def test_single_engine_passthrough():
     assert results.explain_reconciliation_df.query("level == 'portfolio'")["ok"].all()
 
 
+def test_unknown_replay_trade_type_is_rejected():
+    from quantark.pnlexplain.equity.recorder import trade_kind
+    from quantark.util.exceptions import ValidationError
+    with pytest.raises(ValidationError, match="unknown backtest trade type"):
+        trade_kind("hedge_swap")
+
+
 def test_localvol_recalibration_lands_in_model_row(tmp_path):
     root = fixtures.write_localvol_history(tmp_path / "lv")
     cfg = fixtures.make_localvol_config(root)
@@ -3935,7 +4173,7 @@ Expected: FAIL with `AttributeError: ... has no attribute 'explain_df'` / unexpe
 
 `quantark/backtest/replay/config.py`: add `pnl_explain: Optional[Any] = None` to both `AutocallableBacktestConfig` (after `terminate_on_lifecycle_end`) and `ReplayBacktestConfig` (same place). `single.py`: pass `pnl_explain=config.pnl_explain` into the `ReplayBacktestConfig(...)` it builds.
 
-`quantark/backtest/replay/product_replay.py`: in `__init__` add `self.events_today: list = []`; in `apply_lifecycle_events` start with `self.events_today = []` and append each event before `self.actions_sink.append(...)`; in `settle_maturity_if_due` append `event` when not None.
+`quantark/backtest/replay/product_replay.py`: in `__init__` add `self.record_events: bool = False` and `self.events_today: list = []`; in `apply_lifecycle_events` start with `if self.record_events: self.events_today = []` and append each event before `self.actions_sink.append(...)` only when `self.record_events`; in `settle_maturity_if_due` append `event` when not None and `self.record_events`. The recorder-owning engine sets `replay.record_events = True` for every replay when `pnl_explain` is configured, so an explain-off run writes no new state.
 
 `quantark/backtest/replay/results.py`: both result classes take `explain_frames=None`; `BookBacktestResults` gets methods `explain_df(self)` / `explain_reconciliation_df(self)`; `AutocallableBacktestResults` gets the same as `@property`. Empty defaults exactly as in Task 11 Step 3. `single.py` forwards `explain_frames=inner._explain_frames` (set in `run`).
 
@@ -3994,14 +4232,14 @@ class ReplayPnLExplainRecorder:
         trades: List[ExplainTrade] = []
         closed_contracts: Dict[str, float] = {}
         for row in trades_today:
-            kind = _KIND_MAP.get(row["trade_type"], "adjust")
+            kind = trade_kind(str(row["trade_type"]))
             trades.append(ExplainTrade.from_contracts(
                 f"hedge:{row['contract']}", row["quantity"], row["price"], row["multiplier"],
                 transaction_cost=float(row["transaction_cost"]), timestamp=ts, kind=kind,
                 instrument_type=row["instrument_type"]))
             if kind in ("close", "roll_close"):
                 closed_contracts[str(row["contract"])] = float(row["price"])
-        if hp.contract is not None and abs(hp.quantity) > 0.0:
+        if hp.contract is not None and not is_zero(hp.quantity):
             legs[f"hedge:{hp.contract}"] = self._leg(engine, ts, spot, float(selected["futures_price"]),
                                                      str(hp.contract), hp.quantity * hp.multiplier, False)
         prev_legs = self._prev_book.quoted_legs if self._prev_book is not None else {}
@@ -4027,7 +4265,7 @@ class ReplayPnLExplainRecorder:
         book_t1 = BookSnapshot(date=ts, positions=live, environments={underlying: env_copy}, quoted_legs=legs)
         day_costs = float(engine._transaction_costs) - self._prev_costs
         extra = day_costs - sum(t.transaction_cost for t in trades)
-        if abs(extra) < 1e-12:
+        if is_zero(extra):
             extra = 0.0
         result = explain_portfolio(self._prev_book, book_t1, trades=trades, transaction_costs=extra,
                                    transitions=transitions, config=self.config)
@@ -4051,6 +4289,8 @@ In `__init__` (after `self._pricing_engines` is built):
         if getattr(config, "pnl_explain", None) is not None:
             from quantark.pnlexplain.equity.recorder import ReplayPnLExplainRecorder
             self._explain_recorder = ReplayPnLExplainRecorder(config.pnl_explain)
+            for replay in self._replays:
+                replay.record_events = True
 ```
 In `run()`: right after `pricing_started = time.perf_counter()` add
 ```python
@@ -4077,12 +4317,218 @@ Expected: all passed. Debug notes: (a) if `gap_states` is non-zero on days with 
 
 ```bash
 git add quantark/pnlexplain/equity/recorder.py quantark/backtest/replay/config.py quantark/backtest/replay/product_replay.py quantark/backtest/replay/engine.py quantark/backtest/replay/single.py quantark/backtest/replay/results.py test/test_pnlexplain_backtest_replay.py
-git commit -m "feat(pnlexplain): replay engine recorder with quoted futures legs, rolls and model rows"
+git commit -m "feat(pnlexplain): replay engine recorder with quoted futures legs, rolls and model rows" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
 ---
 
-### Task 13: Support-matrix acceptance cases, exports, README, demo
+### Task 13: Bucketed vega / rho rows (P5, opt-in)
+
+**Files:**
+- Create: `quantark/pnlexplain/equity/bucketed.py`
+- Modify: `quantark/pnlexplain/equity/taylor.py` (replace scalar vega / rho rows when `config.bucketed`)
+- Test: `test/test_pnlexplain_bucketed.py`
+
+**Interfaces:**
+- Consumes: `GreeksCalculator.calculate_bucketed_greeks(product, env, engine, BucketedGreeksRequest(coordinates=..., vol_bump=..., rate_bump=...))` returning `BucketedGreeksResult.points` with `coordinate`, `name`, `derivative`, `maturity`, `bump_size`, `metadata`.
+- Produces: `bucketed_rows(cache, calc, bump, level) -> tuple[Mapping[Factor, tuple[ExplainRow, ...]], frozenset[Factor]]` — rows partitioned by factor (`Factor.VOL` → the `vega.<τ>` COMPONENT rows; `Factor.RATE` → the `rho.<τ>` COMPONENT rows followed by the informational `rate_keyrate.parallel` row) and the set of factors covered; `taylor_rows` inserts `rows[Factor.VOL]` where the scalar `vega` row would have been and `rows[Factor.RATE]` where `rho` would have been, emitting no scalar row for a covered factor. This task also removes the `bucketed` gate in `taylor_rows` and `test_bucketed_is_gated_until_task_13`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+# test/test_pnlexplain_bucketed.py
+"""Spec test 9: bucket rows replace the scalar rows and sum to them within FD tolerance."""
+from datetime import datetime
+
+import pytest
+
+from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+from quantark.asset.equity.product.option.european_vanilla_option import EuropeanVanillaOption
+from quantark.param import FlatRateCurve, LinearRateCurve, SpotQuote, TermStructureVolSurface
+from quantark.param.div import ContinuousDividendYield
+from quantark.pnlexplain import ExplainMethod, PnLExplainConfig, RowKind, ValuationSnapshot, explain
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.exceptions import ValidationError
+
+T0, T1 = datetime(2026, 6, 26), datetime(2026, 6, 29)
+
+
+ENG = BlackScholesEngine()
+
+
+def _env(spot, date, vols, rates):
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=spot),
+        vol_surface=TermStructureVolSurface(times=[0.5, 1.0, 2.0], vols=list(vols)),
+        rate_curve=LinearRateCurve(pillars=list(zip([0.5, 1.0, 2.0], rates))),
+        div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=date)
+
+
+def _snaps():
+    s0 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0),
+                           ENG, _env(100.0, T0, (0.20, 0.22, 0.24), (0.030, 0.032, 0.034)), date=T0)
+    s1 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0 - 3 / 365),
+                           ENG, _env(101.0, T1, (0.21, 0.225, 0.24), (0.031, 0.032, 0.035)), date=T1)
+    return s0, s1
+
+
+def test_bucket_rows_replace_scalar_rows_and_reconcile():
+    s0, s1 = _snaps()
+    scalar = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical"))
+    bucketed = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", bucketed=True))
+    terms = [r.term for r in bucketed.rows if r.method is ExplainMethod.TAYLOR]
+    assert "vega" not in terms and "rho" not in terms
+    vega_rows = [r for r in bucketed.rows if r.term.startswith("vega.") and r.kind is RowKind.COMPONENT]
+    rho_rows = [r for r in bucketed.rows if r.term.startswith("rho.") and r.kind is RowKind.COMPONENT]
+    assert [r.term for r in vega_rows] == ["vega.0.5", "vega.1", "vega.2"]        # each pillar exactly once
+    assert [r.term for r in rho_rows] == ["rho.0.5", "rho.1", "rho.2"]
+    assert len(terms) == len(set(terms))
+    assert all("tenor" in r.moves for r in vega_rows + rho_rows)
+    scalar_vega = [r for r in scalar.rows if r.term == "vega"][0].pnl
+    assert sum(r.pnl for r in vega_rows) == pytest.approx(scalar_vega, rel=5e-2, abs=1e-6)
+    par = [r for r in bucketed.rows if r.term == "rate_keyrate.parallel"][0]
+    assert par.kind is RowKind.INFORMATIONAL and "sum_of_buckets" in par.metadata
+    assert bucketed.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)
+    # the vega row order: bucket rows sit where the scalar vega row would have been (after delta)
+    assert terms.index("vega.0.5") == terms.index("delta") + 1
+
+
+def test_bucketed_honours_configured_bumps():
+    from quantark.asset.equity.param import BumpConfig, EngineParams
+    s0, s1 = _snaps()
+    params = EngineParams(bump_config=BumpConfig(vol_bump=0.02, rate_bump=0.0005))
+    res = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", bucketed=True, params=params))
+    vega_rows = [r for r in res.rows if r.term.startswith("vega.")]
+    rho_rows = [r for r in res.rows if r.term.startswith("rho.") and r.kind is RowKind.COMPONENT]
+    assert all(r.metadata["bump_size"] == pytest.approx(0.02) for r in vega_rows)
+    assert all(r.metadata["bump_size"] == pytest.approx(0.0005) for r in rho_rows)
+
+
+def test_bucketed_rejects_mismatched_structures():
+    s0, s1 = _snaps()
+    flat = ValuationSnapshot(s1.product, BlackScholesEngine(), PricingEnvironment(
+        spot_quote=SpotQuote(spot=101.0), vol_surface=__import__("quantark.param", fromlist=["FlatVolSurface"]).FlatVolSurface(0.22),
+        rate_curve=FlatRateCurve(rate=0.032), div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=T1), date=T1)
+    with pytest.raises(ValidationError):
+        explain(s0, flat, config=PnLExplainConfig(bucketed=True))
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `PYTEST test/test_pnlexplain_bucketed.py -q`
+Expected: FAIL (`vega` still present; no `ValidationError`)
+
+- [ ] **Step 3: Implement `bucketed.py` and wire it**
+
+```python
+# quantark/pnlexplain/equity/bucketed.py
+"""Opt-in tenor-vega / key-rate rows (spec §7.6)."""
+from __future__ import annotations
+
+from typing import Any, List, Tuple
+
+from quantark.asset.equity.riskmeasures.bucketed_greeks import BucketedGreekCoordinate, BucketedGreeksRequest
+from quantark.param import TermStructureVolSurface
+from quantark.param.rrf.rate_curve import InterpolatedRateCurve
+from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
+from quantark.pnlexplain.equity.scenario import ScenarioCache
+from quantark.util.exceptions import ValidationError
+
+
+def _check_pair(name: str, a: Any, b: Any, cls) -> bool:
+    is_a, is_b = isinstance(a, cls), isinstance(b, cls)
+    if is_a != is_b:
+        raise ValidationError(f"bucketed mode: {name} is a term structure on one side only")
+    return is_a
+
+
+def bucketed_rows(cache: ScenarioCache, calc: Any, bump: Any, level: str
+                  ) -> Tuple[Mapping[Factor, Tuple[ExplainRow, ...]], FrozenSet[Factor]]:
+    """Rows partitioned by factor + the covered factors (⊆ {VOL, RATE})."""
+    snap0, snap1, moves = cache.snap0, cache.snap1, cache.moves
+    e0, e1 = snap0.pricing_env, snap1.pricing_env
+    q, K, T = snap0.quantity, moves.coordinate.reference_strike, moves.coordinate.tenor_t1
+    coords = []
+    if _check_pair("vol_surface", e0.vol_surface, e1.vol_surface, TermStructureVolSurface) \
+            and Factor.VOL in moves.coordinate.applicable:
+        coords.append(BucketedGreekCoordinate.VOL_TENOR_VEGA)
+    if _check_pair("rate_curve", e0.rate_curve, e1.rate_curve, InterpolatedRateCurve) \
+            and Factor.RATE in moves.coordinate.applicable:
+        coords.append(BucketedGreekCoordinate.RATE_KEYRATE)
+    if not coords:
+        return {}, frozenset()
+    request = BucketedGreeksRequest(coordinates=tuple(coords), vol_bump=float(bump.vol_bump),
+                                    rate_bump=float(bump.rate_bump))
+    result = calc.calculate_bucketed_greeks(snap0.product, e0, cache.bump_engine_t0, request)
+    by_factor: Dict[Factor, List[ExplainRow]] = {Factor.VOL: [], Factor.RATE: []}
+    for pt in result.points:
+        tau = float(pt.maturity)
+        if pt.coordinate is BucketedGreekCoordinate.VOL_TENOR_VEGA:
+            d = float(e1.get_vol(K, tau)) - float(e0.get_vol(K, tau))
+            g = q * float(pt.derivative)
+            by_factor[Factor.VOL].append(ExplainRow(
+                factor=Factor.VOL, term=f"vega.{tau:g}", method=ExplainMethod.TAYLOR, kind=RowKind.COMPONENT,
+                level=level, pnl=g * d, greek=g, cash_greek=g * 0.01,
+                moves={"vol_pts": d * 100.0, "tenor": tau},
+                metadata={"pillar": tau, "bump_size": float(pt.bump_size), "difference_mode": pt.difference_mode}))
+        elif pt.coordinate is BucketedGreekCoordinate.RATE_KEYRATE:
+            if pt.name == "rate_keyrate.parallel":
+                d = float(e1.get_rate(T)) - float(e0.get_rate(T)) if T is not None else 0.0
+                g = q * float(pt.derivative)
+                by_factor[Factor.RATE].append(ExplainRow(
+                    factor=Factor.RATE, term="rate_keyrate.parallel", method=ExplainMethod.TAYLOR,
+                    kind=RowKind.INFORMATIONAL, level=level, pnl=g * d, greek=g, cash_greek=g * 0.01,
+                    moves={"rate_pct": d * 100.0}, metadata=dict(pt.metadata)))
+                continue
+            d = float(e1.get_rate(tau)) - float(e0.get_rate(tau))
+            g = q * float(pt.derivative)
+            by_factor[Factor.RATE].append(ExplainRow(
+                factor=Factor.RATE, term=f"rho.{tau:g}", method=ExplainMethod.TAYLOR, kind=RowKind.COMPONENT,
+                level=level, pnl=g * d, greek=g, cash_greek=g * 0.01,
+                moves={"rate_pct": d * 100.0, "tenor": tau},
+                metadata={"pillar": tau, "bump_size": float(pt.bump_size), "difference_mode": pt.difference_mode}))
+    rows = {f: tuple(r) for f, r in by_factor.items() if r}
+    return rows, frozenset(rows)
+```
+(`Dict`, `FrozenSet`, `List`, `Mapping` from `typing`.) The key-rate parallel row is emitted after the
+`rho.<τ>` rows because `calculate_bucketed_greeks` appends it last.
+
+Wiring in `taylor_rows` (Task 8): delete the gate `if config.bucketed: raise NotImplementedError(...)`;
+right after the greeks are computed (inside `if not terminal:`) add
+```python
+        if config.bucketed:
+            from quantark.pnlexplain.equity.bucketed import bucketed_rows
+            bucket_rows, covered = bucketed_rows(cache, calc, bump, level)
+```
+(initialise `bucket_rows, covered = {}, frozenset()` before the `if not terminal:` block), and at the top
+of the `for name in terms:` loop body add
+```python
+        if (name == "vega" and Factor.VOL in covered) or (name == "rho" and Factor.RATE in covered):
+            for row in bucket_rows[TERM_FACTOR[name]]:
+                rows.append(row)
+                if row.kind is RowKind.COMPONENT:
+                    explained += row.pnl
+            continue
+```
+so the bucket rows take the scalar row's slot exactly once. Delete `test_bucketed_is_gated_until_task_13`
+from `test/test_pnlexplain_taylor.py`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `PYTEST test/test_pnlexplain_bucketed.py test/test_pnlexplain_taylor.py -q`
+Expected: all passed (3 bucketed + 6 Taylor; `LinearRateCurve(pillars=[(tenor, rate), ...])` is the real constructor).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add quantark/pnlexplain/equity/bucketed.py quantark/pnlexplain/equity/taylor.py test/test_pnlexplain_bucketed.py test/test_pnlexplain_taylor.py
+git commit -m "feat(pnlexplain): opt-in tenor-vega / key-rate bucket rows (P5)" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
+```
+
+---
+
+### Task 14: Support-matrix acceptance cases, exports, README, demo
 
 **Files:**
 - Create: `quantark/pnlexplain/README.md`, `example/pnl_explain_demo.py`, `test/test_pnlexplain_matrix.py`
@@ -4178,15 +4624,22 @@ def test_mc_common_random_numbers_make_the_waterfall_exact():
     p1.maturity = 1.0 - 3 / 365
     s0 = ValuationSnapshot(p0, eng, _env(100.0, T0, vol=0.22), date=T0, quantity=-2.0)
     s1 = ValuationSnapshot(p1, eng, _env(101.0, T1, vol=0.23), date=T1, quantity=-2.0)
-    res = explain(s0, s1, config=PnLExplainConfig(methods=(ExplainMethod.WATERFALL, ExplainMethod.TAYLOR),
-                                                  stencil="first_order"))
+    cfg = PnLExplainConfig(methods=(ExplainMethod.WATERFALL, ExplainMethod.TAYLOR), stencil="first_order")
+    res = explain(s0, s1, config=cfg)
     assert res.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=_tol(res.total_pnl))
+    # No lifecycle event: the t1 endpoint and state(all) are the same market priced on the same
+    # seed-frozen context, so the event row is zero. Independent MC noise would show up here.
+    event = [r for r in res.rows if r.factor is Factor.LIFECYCLE_EVENT][0]
+    assert event.pnl == pytest.approx(0.0, abs=_tol(res.total_pnl))
     assert res.unexplained is not None          # reported, not asserted small
+    again = explain(s0, s1, config=cfg)          # seeded: row for row identical
+    assert [(r.term, r.pnl) for r in again.rows] == [(r.term, r.pnl) for r in res.rows]
 
 
 def test_frame_order_is_hash_seed_independent(tmp_path):
     script = tmp_path / "order.py"
     script.write_text(
+        "import json\n"
         "from datetime import datetime\n"
         "from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine\n"
         "from quantark.asset.equity.product.option.european_vanilla_option import EuropeanVanillaOption\n"
@@ -4198,9 +4651,15 @@ def test_frame_order_is_hash_seed_independent(tmp_path):
         "def env(s, d, v=0.2):\n"
         "    return PricingEnvironment(spot_quote=SpotQuote(spot=s), vol_surface=FlatVolSurface(volatility=v),\n"
         "        rate_curve=FlatRateCurve(rate=0.03), div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=d)\n"
-        "s0 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0), BlackScholesEngine(), env(100.0, datetime(2026,6,26)), date=datetime(2026,6,26))\n"
-        "s1 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0-3/365), BlackScholesEngine(), env(103.0, datetime(2026,6,29), 0.22), date=datetime(2026,6,29))\n"
-        "print('|'.join(f'{r.method.value}:{r.term}' for r in explain(s0, s1).rows))\n"
+        "eng = BlackScholesEngine()\n"
+        "s0 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0), eng, env(100.0, datetime(2026,6,26)), date=datetime(2026,6,26))\n"
+        "s1 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0-3/365), eng, env(103.0, datetime(2026,6,29), 0.22), date=datetime(2026,6,29))\n"
+        "res = explain(s0, s1)\n"
+        "print(json.dumps(res.to_dict(), default=str))\n"
+        "from quantark.pnlexplain import BookSnapshot, PositionSnapshot, explain_portfolio\n"
+        "b0 = BookSnapshot(datetime(2026,6,26), {'a': PositionSnapshot('a', 'X', s0)}, {'X': s0.pricing_env})\n"
+        "b1 = BookSnapshot(datetime(2026,6,29), {'a': PositionSnapshot('a', 'X', s1)}, {'X': s1.pricing_env})\n"
+        "print(explain_portfolio(b0, b1).to_frame().to_csv(index=False))\n"
     )
     outs = set()
     for seed in ("0", "1", "12345"):
@@ -4218,16 +4677,47 @@ def test_public_exports_match_spec():
                  "ExplainTrade", "PositionSnapshot", "BookSnapshot", "PositionExplainResult",
                  "PortfolioExplainResult", "explain_position", "explain_portfolio", "PnLExplainRecorder"):
         assert name in m.__all__, name
+
+
+def test_equity_subpackage_exports():
+    from quantark.pnlexplain.equity import (  # noqa: F401
+        BookSnapshot, ExplainTrade, LifecycleTransition, PnLExplainRecorder, PositionSnapshot,
+        QuotedLegSnapshot, ReplayPnLExplainRecorder, ValuationSnapshot, explain, explain_portfolio,
+        explain_position, explain_quoted_leg, value,
+    )
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `PYTEST test/test_pnlexplain_matrix.py -q`
-Expected: `test_public_exports_match_spec` FAILS on `PnLExplainRecorder` (not yet exported); family cases may fail on product constructor names — fix the test to the real constructor signatures (check `american_option.py`, `digital_option.py`) rather than the library.
+Expected: `test_public_exports_match_spec` and `test_equity_subpackage_exports` FAIL (`PnLExplainRecorder` and the equity re-exports are not exported yet); every other test passes. The constructors used are the real ones: `AmericanOption(strike=, option_type=, maturity=)`, `CashOrNothingDigitalOption(strike=, option_type=, maturity=, payout=)`, `Futures(underlying=, multiplier=, maturity=)`, `SpotInstrument(underlying=, deltaone_type=)`.
 
 - [ ] **Step 3: Final exports**
 
 `quantark/pnlexplain/__init__.py` `__all__` must contain exactly the spec §5.6 names plus `QuotedLegSnapshot`, `explain_quoted_leg`, `ReplayPnLExplainRecorder`, `FRAME_COLUMNS`, `MOVE_KEYS`, `component_sum`, `make_total_row`, `rows_to_frame`, `RECON_COLUMNS`. Import `PnLExplainRecorder`, `ReplayPnLExplainRecorder`, `RECON_COLUMNS` from `quantark.pnlexplain.equity.recorder`.
+
+`quantark/pnlexplain/equity/__init__.py` (created empty in Task 3) re-exports the equity surface:
+
+```python
+"""Equity PnL explain."""
+from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal, value  # noqa: F401
+from quantark.pnlexplain.equity.coordinate import FactorCoordinate, resolve_coordinate  # noqa: F401
+from quantark.pnlexplain.equity.factor_diff import FactorMoves, build_factor_moves, validate_pair  # noqa: F401
+from quantark.pnlexplain.equity.fingerprints import (  # noqa: F401
+    calendars_equal, check_contract_roll, contract_fingerprint, lifecycle_fingerprint,
+)
+from quantark.pnlexplain.equity.lifecycle import LifecycleTransition, resolve_transition  # noqa: F401
+from quantark.pnlexplain.equity.explain import explain  # noqa: F401
+from quantark.pnlexplain.equity.trades import ExplainTrade  # noqa: F401
+from quantark.pnlexplain.equity.portfolio import (  # noqa: F401
+    BookSnapshot, PortfolioExplainResult, PositionExplainResult, PositionSnapshot, QuotedLegSnapshot,
+    explain_portfolio, explain_position, explain_quoted_leg,
+)
+from quantark.pnlexplain.equity.recorder import (  # noqa: F401
+    RECON_COLUMNS, PnLExplainRecorder, ReplayPnLExplainRecorder, trade_kind,
+)
+```
+with a matching `__all__`.
 
 - [ ] **Step 4: README and demo**
 
@@ -4236,197 +4726,29 @@ Expected: `test_public_exports_match_spec` FAILS on `PnLExplainRecorder` (not ye
 `example/pnl_explain_demo.py`: build a vanilla and a barrier (analytical engines) and a snowball (PDE fast) across a Friday→Monday gap with spot/vol/rate moves; print `res.to_frame()[["method","kind","factor","term","pnl","greek","cash_greek","spot_return","vol_pts","days"]]` for each; then a KO day using the `_find_event_day` pattern from `test_pnlexplain_lifecycle.py` (copy the helper, do not import tests) showing the event row; finish with `explain_portfolio` over the three positions and print the reconciliation dict.
 
 Root `CLAUDE.md` Supporting Modules table (local, untracked): add
-`| PnL explain | \`quantark/pnlexplain/\` | Two-snapshot PnL explain: full-revaluation waterfall + greeks-based Taylor on one factor model, lifecycle event term, portfolio aggregation, daily series from both backtests; see \`pnlexplain/README.md\` |`.
+`| PnL explain | \`quantark/pnlexplain/\` | Two-snapshot PnL explain: full-revaluation waterfall + greeks-based Taylor on one factor model, lifecycle event term, portfolio aggregation, daily series from both backtests; see \`quantark/pnlexplain/README.md\` |`.
 
 - [ ] **Step 5: Run everything touched**
 
 Run: `PYTEST test/test_pnlexplain_*.py test/test_greeks_registry.py test/test_backtest_lifecycle.py test/test_multi_greek_backtest.py test/replay_golden test/test_replay_greeks_failclosed.py -q`
 Expected: all passed.
-Then the full suite: `PYTHONPATH=/Users/fuxinyao/quant-ark/.claude/worktrees/pnl-explain /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest -q -x --ignore=test/mo_volmodels` (the mo suite rewrites sample data and is slow; run it separately only if a touched file is imported there). Expected: green. Run `python example/pnl_explain_demo.py` once and paste its first 20 lines into the commit body.
+Then the full suite: `PYTHONPATH=/Users/fuxinyao/quant-ark/.claude/worktrees/pnl-explain /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest -q -x --ignore=test/mo_volmodels` (the mo suite rewrites sample data and is slow; run it separately only if a touched file is imported there). Expected: green. Run `PYTHONPATH=/Users/fuxinyao/quant-ark/.claude/worktrees/pnl-explain /Users/fuxinyao/quant-ark/.venv/bin/python example/pnl_explain_demo.py > /private/tmp/claude-501/-Users-fuxinyao-quant-ark/8cbdbf24-eb5a-4fed-b544-bc4f1df15336/scratchpad/demo_output.txt` once; the commit below embeds its first 20 lines.
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add quantark/pnlexplain/__init__.py quantark/pnlexplain/README.md example/pnl_explain_demo.py test/test_pnlexplain_matrix.py
-git commit -m "docs(pnlexplain): README, demo, public exports; support-matrix acceptance tests"
-```
-(`CLAUDE.md` is untracked in this repo; edit it locally, never `git add` it.)
-
----
-
-### Task 14: Bucketed vega / rho rows (P5, opt-in)
-
-**Files:**
-- Create: `quantark/pnlexplain/equity/bucketed.py`
-- Modify: `quantark/pnlexplain/equity/taylor.py` (replace scalar vega / rho rows when `config.bucketed`)
-- Test: `test/test_pnlexplain_bucketed.py`
-
-**Interfaces:**
-- Consumes: `GreeksCalculator.calculate_bucketed_greeks(product, env, engine, BucketedGreeksRequest(coordinates=..., vol_bump=..., rate_bump=...))` returning `BucketedGreeksResult.points` with `coordinate`, `name`, `derivative`, `maturity`, `metadata`.
-- Produces: `bucketed_rows(cache, config, calc, route_engine, per_unit_scale) -> tuple[ExplainRow, ...]` returning the `vega.<τ>` / `rho.<τ>` COMPONENT rows and the informational `rate_keyrate.parallel` row; `taylor_rows` skips the scalar `vega` / `rho` rows when bucket rows were produced for that factor.
-
-- [ ] **Step 1: Write the failing tests**
-
-```python
-# test/test_pnlexplain_bucketed.py
-"""Spec test 9: bucket rows replace the scalar rows and sum to them within FD tolerance."""
-from datetime import datetime
-
-import pytest
-
-from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
-from quantark.asset.equity.product.option.european_vanilla_option import EuropeanVanillaOption
-from quantark.param import FlatRateCurve, LinearRateCurve, SpotQuote, TermStructureVolSurface
-from quantark.param.div import ContinuousDividendYield
-from quantark.pnlexplain import ExplainMethod, PnLExplainConfig, RowKind, ValuationSnapshot, explain
-from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import OptionType
-from quantark.util.exceptions import ValidationError
-
-T0, T1 = datetime(2026, 6, 26), datetime(2026, 6, 29)
-
-
-def _env(spot, date, vols, rates):
-    return PricingEnvironment(
-        spot_quote=SpotQuote(spot=spot),
-        vol_surface=TermStructureVolSurface(times=[0.5, 1.0, 2.0], vols=list(vols)),
-        rate_curve=LinearRateCurve(tenors=[0.5, 1.0, 2.0], rates=list(rates)),
-        div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=date)
-
-
-def _snaps():
-    s0 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0),
-                           BlackScholesEngine(), _env(100.0, T0, (0.20, 0.22, 0.24), (0.030, 0.032, 0.034)), date=T0)
-    s1 = ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0 - 3 / 365),
-                           BlackScholesEngine(), _env(101.0, T1, (0.21, 0.225, 0.24), (0.031, 0.032, 0.035)), date=T1)
-    return s0, s1
-
-
-def test_bucket_rows_replace_scalar_rows_and_reconcile():
-    s0, s1 = _snaps()
-    scalar = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical"))
-    bucketed = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", bucketed=True))
-    terms = [r.term for r in bucketed.rows if r.method is ExplainMethod.TAYLOR]
-    assert "vega" not in terms and "rho" not in terms
-    vega_rows = [r for r in bucketed.rows if r.term.startswith("vega.") and r.kind is RowKind.COMPONENT]
-    rho_rows = [r for r in bucketed.rows if r.term.startswith("rho.") and r.kind is RowKind.COMPONENT]
-    assert len(vega_rows) == 3 and len(rho_rows) == 3
-    assert all("tenor" in r.moves for r in vega_rows + rho_rows)
-    scalar_vega = [r for r in scalar.rows if r.term == "vega"][0].pnl
-    assert sum(r.pnl for r in vega_rows) == pytest.approx(scalar_vega, rel=5e-2, abs=1e-6)
-    par = [r for r in bucketed.rows if r.term == "rate_keyrate.parallel"][0]
-    assert par.kind is RowKind.INFORMATIONAL and "sum_of_buckets" in par.metadata
-    assert bucketed.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)
-
-
-def test_bucketed_rejects_mismatched_structures():
-    s0, s1 = _snaps()
-    flat = ValuationSnapshot(s1.product, BlackScholesEngine(), PricingEnvironment(
-        spot_quote=SpotQuote(spot=101.0), vol_surface=__import__("quantark.param", fromlist=["FlatVolSurface"]).FlatVolSurface(0.22),
-        rate_curve=FlatRateCurve(rate=0.032), div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=T1), date=T1)
-    with pytest.raises(ValidationError):
-        explain(s0, flat, config=PnLExplainConfig(bucketed=True))
-```
-
-- [ ] **Step 2: Run to verify failure**
-
-Run: `PYTEST test/test_pnlexplain_bucketed.py -q`
-Expected: FAIL (`vega` still present; no `ValidationError`)
-
-- [ ] **Step 3: Implement `bucketed.py` and wire it**
-
-```python
-# quantark/pnlexplain/equity/bucketed.py
-"""Opt-in tenor-vega / key-rate rows (spec §7.6)."""
-from __future__ import annotations
-
-from typing import Any, List, Tuple
-
-from quantark.asset.equity.riskmeasures.bucketed_greeks import BucketedGreekCoordinate, BucketedGreeksRequest
-from quantark.param import TermStructureVolSurface
-from quantark.param.rrf.rate_curve import InterpolatedRateCurve
-from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
-from quantark.pnlexplain.equity.scenario import ScenarioCache
-from quantark.util.exceptions import ValidationError
-
-
-def _check_pair(name: str, a: Any, b: Any, cls) -> bool:
-    is_a, is_b = isinstance(a, cls), isinstance(b, cls)
-    if is_a != is_b:
-        raise ValidationError(f"bucketed mode: {name} is a term structure on one side only")
-    return is_a
-
-
-def bucketed_rows(cache: ScenarioCache, calc: Any, level: str) -> Tuple[Tuple[ExplainRow, ...], set]:
-    """Returns (rows, factors_covered). factors_covered ⊆ {VOL, RATE}."""
-    snap0, snap1, moves = cache.snap0, cache.snap1, cache.moves
-    e0, e1 = snap0.pricing_env, snap1.pricing_env
-    q, K, T = snap0.quantity, moves.coordinate.reference_strike, moves.coordinate.tenor_t1
-    coords = []
-    if _check_pair("vol_surface", e0.vol_surface, e1.vol_surface, TermStructureVolSurface) and Factor.VOL in moves.coordinate.applicable:
-        coords.append(BucketedGreekCoordinate.VOL_TENOR_VEGA)
-    if _check_pair("rate_curve", e0.rate_curve, e1.rate_curve, InterpolatedRateCurve) and Factor.RATE in moves.coordinate.applicable:
-        coords.append(BucketedGreekCoordinate.RATE_KEYRATE)
-    if not coords:
-        return (), set()
-    result = calc.calculate_bucketed_greeks(snap0.product, e0, cache.bump_engine_t0,
-                                            BucketedGreeksRequest(coordinates=tuple(coords)))
-    rows: List[ExplainRow] = []
-    covered = set()
-    for pt in result.points:
-        tau = float(pt.maturity)
-        if pt.coordinate is BucketedGreekCoordinate.VOL_TENOR_VEGA:
-            d = float(e1.get_vol(K, tau)) - float(e0.get_vol(K, tau))
-            g = q * float(pt.derivative)
-            rows.append(ExplainRow(factor=Factor.VOL, term=f"vega.{tau:g}", method=ExplainMethod.TAYLOR,
-                                   kind=RowKind.COMPONENT, level=level, pnl=g * d, greek=g, cash_greek=g * 0.01,
-                                   moves={"vol_pts": d * 100.0, "tenor": tau}, metadata={"pillar": tau}))
-            covered.add(Factor.VOL)
-        elif pt.coordinate is BucketedGreekCoordinate.RATE_KEYRATE:
-            if pt.name == "rate_keyrate.parallel":
-                d = float(e1.get_rate(T)) - float(e0.get_rate(T)) if T is not None else 0.0
-                g = q * float(pt.derivative)
-                rows.append(ExplainRow(factor=Factor.RATE, term="rate_keyrate.parallel", method=ExplainMethod.TAYLOR,
-                                       kind=RowKind.INFORMATIONAL, level=level, pnl=g * d, greek=g, cash_greek=g * 0.01,
-                                       moves={"rate_pct": d * 100.0}, metadata=dict(pt.metadata)))
-                continue
-            d = float(e1.get_rate(tau)) - float(e0.get_rate(tau))
-            g = q * float(pt.derivative)
-            rows.append(ExplainRow(factor=Factor.RATE, term=f"rho.{tau:g}", method=ExplainMethod.TAYLOR,
-                                   kind=RowKind.COMPONENT, level=level, pnl=g * d, greek=g, cash_greek=g * 0.01,
-                                   moves={"rate_pct": d * 100.0, "tenor": tau}, metadata={"pillar": tau}))
-            covered.add(Factor.RATE)
-    return tuple(rows), covered
-```
-
-In `taylor_rows` (Task 8), before the `for name in terms:` loop add:
-```python
-    bucket_rows, covered = ((), set())
-    if config.bucketed and not terminal:
-        from quantark.pnlexplain.equity.bucketed import bucketed_rows
-        bucket_rows, covered = bucketed_rows(cache, calc, level)
-```
-and inside the loop skip `name == "vega"` when `Factor.VOL in covered` and `name == "rho"` when `Factor.RATE in covered`, appending `bucket_rows` in their place (vega buckets where the scalar vega row would have been, rho buckets + the parallel row where `rho` would have been) and adding each COMPONENT bucket pnl to `explained`.
-
-- [ ] **Step 4: Run tests**
-
-Run: `PYTEST test/test_pnlexplain_bucketed.py test/test_pnlexplain_taylor.py -q`
-Expected: all passed. If `LinearRateCurve`'s constructor differs (`tenors`/`rates` names), use the names in `quantark/param/rrf/rate_curve.py` and keep the assertions.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit (demo output in the body)**
 
 ```bash
-git add quantark/pnlexplain/equity/bucketed.py quantark/pnlexplain/equity/taylor.py test/test_pnlexplain_bucketed.py
-git commit -m "feat(pnlexplain): opt-in tenor-vega / key-rate bucket rows (P5)"
+git add quantark/pnlexplain/__init__.py quantark/pnlexplain/equity/__init__.py quantark/pnlexplain/README.md example/pnl_explain_demo.py test/test_pnlexplain_matrix.py
+git commit -m "docs(pnlexplain): README, demo, public exports; support-matrix acceptance tests" -m "Demo output (first 20 lines of example/pnl_explain_demo.py):" -m "$(head -20 /private/tmp/claude-501/-Users-fuxinyao-quant-ark/8cbdbf24-eb5a-4fed-b544-bc4f1df15336/scratchpad/demo_output.txt)" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
+(`CLAUDE.md` is untracked in this repo; edit it locally, never `git add` it. If the sandbox refuses the `$(...)` substitution, paste the 20 lines literally into the third `-m` argument.)
 
 ---
 
 ## Self-review notes (run after Task 14)
 
-1. **Spec coverage**: §5.1–5.6 → Tasks 1–5, 10; §6 → Tasks 5–6; §7.1 → Task 7; §7.2–7.5 → Task 8; §7.6 → Task 14; §8 → Tasks 5, 9; §9 → Task 10; §10 → Tasks 11–12; §11 error table → the `ValidationError` tests spread across Tasks 2, 3, 4, 5, 9, 10, 11, 12, 14; §12 tests 1–10 → Tasks 5, 6, 5, 8, 9, 11/12, 8, 12, 14, 13; §13 phases → task order; §14 → Tasks 7, 9, 11, 12 gates.
-2. **Type consistency** to re-check while executing: `ExplainRow.moves` keys ⊆ `MOVE_KEYS` (the bucket rows use `tenor`); `PositionExplainResult.coordinate` filled from `PnLExplainResult.metadata["coordinate"]` (Task 10 adds it in `explain.py`); `ScenarioCache.value_for` normalises keys so the pricing-count test in Task 5 holds; `_KIND_MAP` in the recorder must cover every `trade_type` both executors and the replay emit.
-3. **Known risks to report, not paper over**: the equity simple `HedgeExecutor` entry-price quirk (reported via `gap_states`); ledger vs replay receivable discounting (Task 12 debug note); TradingClock-wrapped environments are untested.
+1. **Spec coverage**: §5.1–5.6 → Tasks 1–5, 10; §6 → Tasks 5–6; §7.1 → Task 7; §7.2–7.5 → Task 8; §7.6 → Task 13; §8 → Tasks 5, 9; §9 → Task 10; §10 → Tasks 11–12; §11 error table → the `ValidationError` tests spread across Tasks 2, 3, 4, 5, 9, 10, 11, 12, 13; §12 tests 1–10 → Tasks 5, 6, 5, 8, 9, 11/12, 8, 12, 13, 14; §13 phases → task order (bucketed P5 is Task 13, the final acceptance pass is Task 14); §14 → Tasks 7, 9, 11, 12 gates.
+2. **Type consistency** to re-check while executing: `ExplainRow.moves` keys ⊆ `MOVE_KEYS` (the bucket rows use `tenor`); `PositionExplainResult.coordinate` filled from `PnLExplainResult.metadata["coordinate"]` (set in `explain.py` since Task 5); `ScenarioCache.value_for` normalises keys so the pricing-count test in Task 5 holds; `trade_kind` must cover every `trade_type` both executors and the replay emit (unknown types raise); gates (`NotImplementedError`) exist only between the task that adds a config option and the task that implements it, and each implementing task deletes its gate and gate test.
+3. **Known risks to report, not paper over**: the equity simple `HedgeExecutor` entry-price quirk (reported via `gap_states`); ledger vs replay receivable discounting (Task 12 debug note); TradingClock-wrapped environments are untested; MODEL is identity-detected, so two equivalent engine instances read as a model change (documented in the README).
 
 
 
