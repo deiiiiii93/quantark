@@ -26,7 +26,7 @@ level, and emitted as a daily series by both backtest engines.
 | Question | Decision |
 |---|---|
 | Attribution method | Both: Taylor (greeks × moves, with residual) and sequential full-revaluation waterfall (exact by construction). One `FactorDiff` feeds both so they reconcile row by row. |
-| Product scope | Everything the `GreeksCalculator` handles (vanilla, American, barrier, digital, autocallables via PDE/QUAD/MC, delta-one hedges) **including** lifecycle cash flows. |
+| Product scope | Everything the `GreeksCalculator` handles (vanilla, American, barrier, digital, autocallables via PDE/QUAD/MC, delta-one hedges) for the market-factor explain, **including** lifecycle cash flows for every product the lifecycle trackers back (snowball, phoenix, the barrier family: KO / KI / coupon / maturity / expiry / settlement). Products without a tracker (vanilla, American, digital, delta-one) have no cashflow ledger in the library today; their expiry shows up as the engine's own intrinsic value at T = 0 and is explained as market moves, and a generic expiry / exercise / settlement transition for them is a follow-up (§15). |
 | Layers | Instrument two-snapshot API, position/portfolio aggregation with trade and cost rows, daily explain series from both backtest engines. |
 | Factor granularity | Scalar factors at the product coordinate by default; tenor-vega and key-rate rows opt-in via the bucketed-greeks machinery. |
 | Architecture | New top-level `quantark/pnlexplain/` with an `equity/` subpackage (same shape as var / stresstest / dynamicscenario), an immutable `ValuationSnapshot`, a `FactorDiff` kernel, two explainers, a thin backtest recorder. |
@@ -98,12 +98,26 @@ class ValuationSnapshot:
     quantity: float = 1.0
     lifecycle_state: Optional[EquityOptionLifecycleState] = None
     valuation_point: Optional[ValuationPoint] = None   # default: ValuationPoint(date=date)
+    currency: Optional[str] = None      # label only; a book must be single-currency (§9)
     label: str = ""
 ```
 
+Validation on construction: `date` is a naive, midnight `datetime` equal to
+`pricing_env.valuation_date` (timezone-aware or intraday values raise;
+fractional-day intervals are not supported); `spot` is positive and finite;
+`quantity` is non-zero and finite; a date-based `valuation_point` must equal
+`date`, and a numeric one is accepted as the caller's clock (§5.2 states the
+consistency rule across two snapshots).
+
 The module never mutates a snapshot's objects; every revaluation works on a
 `deepcopy` of the environment. Callers whose loops mutate in place (both
-backtests) pass copies, exactly as they do today for bump repricing.
+backtests) pass copies, exactly as they do today for bump repricing. The
+dataclass is frozen but the referenced product and engine are not: an engine
+mutated **in place** between two snapshots is unsupported (both snapshots
+would see the new state and `MODEL` would read unchanged). `MODEL` is
+detected by engine identity, which is sufficient for the two backtests: the
+replay creates fresh engine objects on every calibration day and the equity
+backtest never recalibrates.
 
 ### 5.2 Value identity
 
@@ -126,10 +140,28 @@ the contingent leg is multiplied by `quantity`. This is the identity both
 backtests already use for portfolio value, so the explain reconciles to
 their daily PnL by construction.
 
+**Unit contract.** `engine.price` is a per-unit value and `quantity` counts
+those units: an option contract (the product's `contract_multiplier` is
+inside the engine price), a share for `SpotInstrument`, and for `Futures`
+one unit of the quoted price (the delta-one engine returns the futures
+price per unit **without** the contract multiplier, and the hedge executor
+books futures positions in those units). Trade prices (§9) are per unit in
+the same convention; contract multipliers appear only where a recorder
+converts a contract count into units.
+
+**One scenario cache.** `pv_t0`, `pv_alive_t1` and `pv_t1` are read from
+the same per-call scenario cache the waterfall rows use (`value(state({}))`,
+`value(state(all))`, and the t1 snapshot valued on the same bump-context
+engine), never recomputed separately, so the exactness claims of §6 hold
+for MC engines as well.
+
 Ledger entries carrying numeric-time (not date) payment representations
 require the caller to supply a time-based `valuation_point`; the replay
-recorder does (it knows the start date). A missing representation raises
-`ValidationError`, never silently assumes zero.
+recorder does (it knows the start date). The two snapshots' numeric points
+must share one origin: `time_t1 − time_t0 == calendar_days / 365` within
+1e-12 (the replay's own elapsed-time convention), otherwise
+`ValidationError`. A missing representation raises `ValidationError`, never
+silently assumes zero.
 
 ### 5.3 `FactorDiff` / `FactorMoves`
 
@@ -172,13 +204,28 @@ product_alive_t1, env_t1) -> FactorCoordinate`:
 - `tenor_t1`: `product_alive_t1.get_maturity(env_t1)` for any product with a
   maturity (date-based or float), the expiry for `Futures`, `None` for a
   `SpotInstrument`.
-- `applicable`: options → all seven market factors; `Futures` → TIME, SPOT,
-  RATE, DIVIDEND, BASIS, MODEL; `SpotInstrument` → SPOT, MODEL. A
+- `applicable`: options → all seven market factors; engine-priced `Futures`
+  → TIME, SPOT, RATE, DIVIDEND, BASIS, MODEL; `SpotInstrument` → SPOT,
+  MODEL; the replay's quoted futures hedge leg (§9) → SPOT, BASIS. A
   non-applicable factor's moves are `None` and its rows are emitted as zero
   without pricing.
 - Autocallables with several observation strikes still get one coordinate
   (initial-price strike, final maturity): the scalar vol move is a summary
   at that coordinate; the bucketed opt-in (§7.6) is the term-structure view.
+
+**Sampling rules.** `vol_t*` = `env.get_vol(K*, T1)` (spot argument as the
+surface requires), `rate_t*` = `env.get_rate(T1)`, `div_t*` =
+`env.get_div_yield(T1)`, `basis_t*` = `env.get_basis_yield(T1)`; each
+environment interpolates or extrapolates with its own objects' rules. On an
+expiry day (`tenor_t1 <= 0`) VOL / RATE / DIVIDEND / BASIS are not
+applicable and their moves are `None`. A `None` dividend or basis object is
+normalised to the environment's zero-yield object before comparison, so
+`None → ContinuousDividendYield(0.0)` is unchanged; any other structural
+change (flat → term structure) is simply a changed object. Display units:
+`spot_return = d_spot / spot_t0`, `vol_pts = d_vol × 100`, `rate_pct` /
+`div_pct` / `basis_pct` = move × 100, `days = calendar_days`,
+`trading_days` present only when a calendar exists. `moves` mappings omit
+unavailable keys rather than carrying `None`.
 
 Δσ, Δr, Δq are read **at T1 on both sides** deliberately: TIME is the first
 step of the default order, so roll-down along the t0 term structure belongs
@@ -205,12 +252,23 @@ snapshots (`day_count_convention`, `bus_days_in_year`, calendar), otherwise
 deep-copied calendars therefore compare equal; different calendars do not.
 
 **Contract identity.** The alive-at-t1 product must be the t0 contract rolled
-in time: same class, same `contract_multiplier`, and equal `strike`,
-`initial_price`, `option_type`, `barrier` and `barrier_type` wherever those
-attributes exist. Anything else (a different strike, a replaced product with
-no lifecycle transition) raises `ValidationError("contract replacement is not
-a time step")`. Contract replacements enter only as lifecycle transitions
-(§8) or trades (§9).
+in time, checked by `contract_fingerprint(product)`: the product's class
+name plus every dataclass field, with the **rolled fields** excluded and the
+schedule-bearing fields reduced to their static terms. Rolled fields are the
+ones the trackers legitimately change day to day: `maturity` (float),
+`_otc_lifecycle_knocked_in`, and the observation *timing* inside
+`barrier_config` / `post_barrier_config` / `observation_schedule` /
+coupon schedules (their barrier levels, rates, counts and indices stay in
+the fingerprint). Everything else — notional, `contract_multiplier`,
+strikes, `initial_price`, coupon and rebate rates, option type, barrier
+levels and types, exercise style, settlement convention, `maturity_date` —
+must be equal. In addition the roll itself is checked: for float
+maturities `maturity_alive_t1 == maturity_t0 − calendar_days / 365` within
+1e-12 unless both are at the tracker's `1e-8` floor; date-based products
+keep identical dates. Any mismatch raises `ValidationError("contract
+replacement is not a time step")`. Contract replacements enter only as
+lifecycle transitions (§8) or as disappearance / appearance of position ids
+with trades (§9).
 
 **Change detection.** A market object is unchanged when it is the same object
 or compares equal (`==`; dataclass equality for the flat / term-structure
@@ -254,7 +312,7 @@ class PnLExplainResult:
     total_pnl: float               # pv_t1.total − pv_t0.total
     moves: FactorMoves
     rows: tuple[ExplainRow, ...]
-    unexplained: float             # taylor residual on the alive-contract move (a COMPONENT row too)
+    unexplained: Optional[float]   # taylor residual on the alive-contract move (a COMPONENT row too); None when Taylor is not requested
     metadata: Mapping[str, Any]
 
     def rows_for(self, method: ExplainMethod, *, kind: Optional[RowKind] = None) -> tuple[ExplainRow, ...]
@@ -298,19 +356,36 @@ class PnLExplainConfig:
     params: Optional[EngineParams] = None    # bump sizes; default engine.params
 ```
 
-Validation requires `waterfall_order` to be a permutation of all seven
-`MARKET_FACTORS` (zero rows are kept for unchanged or non-applicable
-factors, so a sequential path always reaches the t1 state and the exactness
-claim in §6 holds for every accepted order), and rejects unknown stencil
-names and `clock` set together with `time_term="exact_gap"`.
+Validation: `methods` is a non-empty, duplicate-free subset of `{WATERFALL,
+TAYLOR}` (`SHARED` is never requestable); `waterfall_order` is a
+permutation of all seven `MARKET_FACTORS` (zero rows are kept for unchanged
+or non-applicable factors, so a sequential path always reaches the t1 state
+and the exactness claim in §6 holds for every accepted order);
+`interaction ∈ {"sequential", "shapley"}`, `time_term ∈ {"exact_gap",
+"per_step"}`, `theta_decomposition_mode ∈ {"estimate", "exact"}`,
+`greeks_method ∈ {"auto", "analytical", "numerical"}`, `clock ∈ {None,
+"1d", "1td"}` and only with `per_step`; an explicit `stencil` list is
+normalised through the greeks registry (aliases resolved, clock qualifiers
+rejected because the explainer owns the clock, duplicates rejected, the
+theta sub-rows `r_theta` / `q_theta` / `convexity_theta` / `gamma_theta`
+accepted only together with `theta`). All violations raise
+`ValidationError`.
 
 ### 5.6 Public API
 
 ```python
 from quantark.pnlexplain import (
-    ValuationSnapshot, PnLExplainConfig, PnLExplainResult, ExplainRow, Factor,
-    ExplainMethod, explain, explain_position, explain_portfolio,
-    PositionSnapshot, BookSnapshot, PnLExplainRecorder,
+    # kernel
+    ValuationSnapshot, ValueBreakdown, value, FactorCoordinate, FactorMoves,
+    PnLExplainConfig, PnLExplainResult, ExplainRow, RowKind, Factor,
+    MARKET_FACTORS, ExplainMethod, explain,
+    # lifecycle
+    LifecycleTransition, lifecycle_fingerprint, contract_fingerprint,
+    # position / portfolio
+    ExplainTrade, PositionSnapshot, BookSnapshot, PositionExplainResult,
+    PortfolioExplainResult, explain_position, explain_portfolio,
+    # backtest
+    PnLExplainRecorder,
 )
 
 def explain(
@@ -322,10 +397,11 @@ def explain(
 ) -> PnLExplainResult
 ```
 
-Rows are position-level (the contingent leg scaled by `snapshot_t0.quantity`,
-ledger amounts as booked). A quantity change between the snapshots is a
-trade and belongs to the position layer (§9), so `explain` raises
-`ValidationError` when the quantities differ.
+Rows carry `level="instrument"` and money amounts for the whole position
+(the contingent leg scaled by `snapshot_t0.quantity`, ledger amounts as
+booked); the position layer relabels them (§9). A quantity change between
+the snapshots is a trade and belongs to the position layer, so `explain`
+raises `ValidationError` when the quantities differ.
 
 ## 6. Waterfall explainer
 
@@ -427,6 +503,23 @@ unexplained = (pv_alive_t1 − pv_t0) − Σ terms
 Greeks requested from the calculator in one call so the scenario memo dedupes
 pricings; greeks not in the stencil are not requested.
 
+**Term → factor.** Every Taylor row carries the factor of its highest-order
+market input, cross terms included:
+
+| Factor | Terms |
+|---|---|
+| TIME | theta (+ informational sub-rows), charm, color, vega_theta |
+| SPOT | delta, gamma, speed |
+| VOL | vega, volga, vanna, zomma |
+| RATE | rho |
+| DIVIDEND | dividend_rho, dividend_volga, delta_q |
+| BASIS, MODEL | no Taylor rows; their effect is part of `unexplained` (documented) |
+
+**Scaling.** `greek` and `cash_greek` are **position-level** (per-unit value
+× `quantity`), so `pnl = coefficient × greek × moves` holds row by row with
+the moves in raw units (`ΔS`, `Δσ`, `Δr`, `Δq`, `n`); the display `moves`
+mapping carries the same moves in display units.
+
 ### 7.4 Time term
 
 `time_term="exact_gap"` (default): the `theta` component row **is**
@@ -435,15 +528,24 @@ the sequential TIME row whenever TIME is the first step. Its `greek` and
 `cash_greek` columns show the average per calendar day, `time_pure /
 calendar_days`, with `moves = {"days": calendar_days, "trading_days": …}`;
 the PnL is a full revaluation including ledger carry, not a derivative, and
-the metadata says so (`"basis": "revaluation"`). Sub-rows `r_theta`,
-`q_theta`, `convexity_theta` (and `gamma_theta` under `extended`) are
-`INFORMATIONAL`: they are shown under `theta`, never summed, and never enter
-the residual. `r_theta` and `q_theta` come from the calculator's
-decomposition over the same calendar gap (`theta_decomposition_mode` passed
-through; `estimate` components are per day and are multiplied by
-`calendar_days`, `exact` reprices with the gap step directly), and
-`convexity_theta := theta − r_theta − q_theta` by definition in both modes;
-`theta_residual = convexity_theta − gamma_theta` is recorded in metadata.
+the metadata says so (`"basis": "revaluation"`). Two theta bases are named
+and kept apart:
+
+- `time_pure` — the `theta` **component** row: alive contract **and** t0
+  ledger revalued at t1 on the t0 market (§6).
+- `theta_contract` — an **informational** sub-row: the calculator's theta
+  of the contingent contract alone over the same calendar gap (no ledger).
+
+Informational sub-rows under `theta`, never summed, never in the residual:
+`theta_contract`; `ledger_carry := time_pure − theta_contract` (receivable
+accretion and payments inside the gap; zero without a ledger); `r_theta`
+and `q_theta` from the calculator's decomposition of `theta_contract`
+(`theta_decomposition_mode` passed through; `estimate` components are per
+day and are multiplied by `calendar_days`, `exact` reprices with the gap
+step directly); `convexity_theta := theta_contract − r_theta − q_theta` by
+definition in both modes; and under `extended` `gamma_theta`, with
+`theta_residual := convexity_theta − gamma_theta` recorded in metadata.
+Every equation above is stored verbatim in the row metadata (`"formula"`).
 
 The other time-family greeks (charm, color, vega_theta) are measured **over
 the gap step** in this mode, so their terms use `n = 1` — they are already
@@ -498,15 +600,27 @@ two methods side by side per factor. `S` in the cash columns is `spot_t0`.
 
 ### 7.6 Bucketed opt-in
 
-With `bucketed=True`: if the t0 vol surface is a `TermStructureVolSurface`,
-the scalar `vega` row is replaced by one `vega.<tenor>` row per pillar
-(`VOL_TENOR_VEGA` bucket × `σ1(K*, τ) − σ0(K*, τ)`); if the rate curve is an
-`InterpolatedRateCurve`, the scalar `rho` row is replaced by
-`rho.<tenor>` rows (`RATE_KEYRATE` bucket, per-1bp reported, × Δr(τ) in bp)
-plus the parallel reconciliation as an `INFORMATIONAL` row. The bucket rows
-are the `COMPONENT` rows (the scalar row they replace is not emitted, so
-nothing is counted twice). Objects that are not term structures keep the
-scalar rows.
+Opt-in, delivered last (phase P5) behind `bucketed=True`; the default daily
+explain never depends on it.
+
+- **Canonical pillars** are the t0 object's pillars (`vol_surface.times`,
+  `rate_curve.tenors`); the t1 object is sampled at those same pillars with
+  its own interpolation / extrapolation, so differing t1 grids are allowed
+  and the move at pillar τ is `σ1(K*, τ) − σ0(K*, τ)` (resp. `r1(τ) −
+  r0(τ)`). A t0 object that is a term structure while the t1 object is not
+  (or vice versa) raises `ValidationError` in bucketed mode.
+- **Derivatives**: each `BucketedGreekPoint.derivative` from the existing
+  machinery (already the signed-bump-normalised derivative, central or
+  one-sided per the coordinate's difference mode) is multiplied by
+  `quantity` and by the pillar move: `vega.<τ>` = `dV/dσ_τ × Δσ_τ`,
+  `rho.<τ>` = `dV/dr_τ × Δr_τ`. The display columns follow §7.5 with the
+  pillar in `moves["tenor"]`.
+- **Rows**: bucket rows are the `COMPONENT` rows and the scalar `vega` /
+  `rho` row they replace is not emitted, so nothing is counted twice; the
+  key-rate parallel (`rate_keyrate.parallel × Δr_parallel`) is an
+  `INFORMATIONAL` row with `sum_of_buckets` and `reconciles` in metadata.
+  Reconciliation is unchanged: bucket rows sum into the Taylor components.
+- Objects that are not term structures keep the scalar rows.
 
 ## 8. Lifecycle event term
 
@@ -518,36 +632,53 @@ class LifecycleTransition:
     state_before: Optional[EquityOptionLifecycleState]   # deep copy at t0
     state_after: Optional[EquityOptionLifecycleState]    # deep copy at t1
     events: tuple[LifecycleEvent, ...] = ()      # fired in (t0, t1], chronological
-    fingerprint_before: tuple = ()               # lifecycle_fingerprint(state_before)
-    fingerprint_after: tuple = ()
 
-def lifecycle_fingerprint(state) -> tuple
+    @property
+    def changed(self) -> bool: ...               # fingerprints differ (computed, never supplied)
+
+def lifecycle_fingerprint(state) -> tuple        # versioned: ("v1", ...)
 ```
 
 `product_alive_t1` is the contract as it would be priced at t1 had no event
 fired in (t0, t1], carrying the **t0** lifecycle state. `engine_alive_t1` is
-the engine that prices it and is the target of the `model` step.
+the engine that prices it and is the target of the `model` step. The
+post-event product and engine are `snapshot_t1.product` /
+`snapshot_t1.engine`; the transition never carries copies of them, it is
+validated against them (below).
 
-`lifecycle_fingerprint` is the semantic identity used for change detection:
-`(type name, alive, knocked_in, knocked_out, matured, expired,
-coupon_memory_count, sorted observed KO / KI / coupon indices,
-pending_settlement_cashflow, settlement_date, settled, tuple of (cashflow_id,
-event_type, amount, determination, payment) over the ledger)`; attributes a
-state type lacks are omitted. `None` states fingerprint to `()`.
-`LIFECYCLE_EVENT` is changed iff the two fingerprints differ.
+`lifecycle_fingerprint` is the semantic identity used for change detection
+and is always **computed**, never accepted as an input. It is generic over
+the state dataclasses so that a new pricing-relevant field can never be
+missed: `("v1", type name, then every dataclass field of the state in
+declaration order, normalised)` where a `LifecycleCashflowLedger` becomes
+the tuple of its cashflows as `(cashflow_id, event_type.value, amount,
+determination_date.isoformat() | determination_time, payment_date.isoformat()
+| payment_time, sorted metadata items)`, a `ValuationPoint` becomes
+`("date", iso)` or `("time", float)`, sets become sorted tuples, datetimes
+become ISO strings, floats are kept exact. `None` states fingerprint to
+`("v1", None)`. `LIFECYCLE_EVENT` is changed iff the two fingerprints
+differ.
 
-Rules:
+Rules (all violations raise `ValidationError`):
 
-- `transition=None` is accepted only when
-  `lifecycle_fingerprint(snapshot_t0.lifecycle_state) ==
-  lifecycle_fingerprint(snapshot_t1.lifecycle_state)`; the kernel then
-  builds the transition itself as (`snapshot_t1.product`,
-  `snapshot_t1.engine`, equal states, no events). The t1 product must still
-  pass the contract-identity check of §5.3.
-- Fingerprints differ and `transition=None` → `ValidationError` (guessing
-  the alive contract would silently mislabel the event row).
-- A supplied transition's fingerprints must match the snapshots' states,
-  otherwise `ValidationError`.
+- `transition=None` is accepted only when the two snapshots' state
+  fingerprints are equal; the kernel then builds the transition itself as
+  (`snapshot_t1.product`, `snapshot_t1.engine`, equal states, no events).
+- Fingerprints differ and `transition=None` → error (guessing the alive
+  contract would silently mislabel the event row).
+- A supplied transition is validated against the snapshots:
+  `lifecycle_fingerprint(state_before) == fingerprint(snapshot_t0.state)`
+  and `lifecycle_fingerprint(state_after) == fingerprint(snapshot_t1.state)`;
+  `product_alive_t1` passes the contract-identity check against
+  `snapshot_t0.product` (§5.3).
+- **No event, no substitution**: when the fingerprints are equal the
+  transition must carry no events, `snapshot_t1.engine is engine_alive_t1`,
+  and `snapshot_t1.product` must pass contract identity against
+  `product_alive_t1` — so an engine or product replacement can never be
+  smuggled into the event row; it is `MODEL` (engine) or a trade (§9).
+- When the fingerprints differ, `events` must be non-empty, chronological,
+  with dates in `(t0, t1]`, and `snapshot_t1.product` / `engine` may differ
+  from the alive pair (the substitution lands in the event row).
 - Recorders build transitions from the one tracker method both backtests
   already use, `tracker.product_for_pricing(t1, env_t1)` (the replay's
   `product_for_date` is a thin wrapper around it), evaluated **before**
@@ -580,33 +711,38 @@ its event row is zero.
 @dataclass(frozen=True)
 class ExplainTrade:                      # the module's normalised trade schema
     position_id: str
-    quantity: float                      # signed position units: buy > 0, sell < 0
-    price: float                         # per quoted unit
-    multiplier: float = 1.0              # contract multiplier (futures); 1 for options/spot
-    transaction_cost: float = 0.0        # >= 0, reduces PnL
-    timestamp: Optional[datetime] = None
+    quantity: float                      # signed position UNITS (§5.2): buy > 0, sell < 0
+    price: float                         # per unit, same convention as engine.price
+    transaction_cost: float = 0.0        # >= 0, reduces PnL at the portfolio level
+    timestamp: Optional[datetime] = None # in (t0, t1] when given
     kind: str = "adjust"                 # "open" | "adjust" | "close" | "roll_close" | "roll_open"
     instrument_type: str = ""
     metadata: Mapping[str, Any] = MappingProxyType({})
-    # cash flow of the trade = -quantity * price * multiplier (buying costs cash)
+    # cash flow of the trade = -quantity * price (buying costs cash)
+
+    @classmethod
+    def from_contracts(cls, position_id, contracts, price, multiplier, **kw) -> "ExplainTrade":
+        """contracts × multiplier units at the quoted price (futures recorders)."""
 
 @dataclass(frozen=True)
 class PositionSnapshot:
     position_id: str; underlying: str; snapshot: ValuationSnapshot
+    tombstone: bool = False              # counterfactual / terminal snapshot for a position no longer in the book
 
 @dataclass(frozen=True)
 class BookSnapshot:
     date: datetime
-    positions: Mapping[str, PositionSnapshot]
+    positions: Mapping[str, PositionSnapshot]        # live positions AND tombstones
     environments: Mapping[str, PricingEnvironment]   # per underlying, deep copies
+    currency: Optional[str] = None                   # single currency per book; None = unlabeled
     @classmethod
-    def from_portfolio(cls, portfolio, date, *, lifecycle_manager=None) -> "BookSnapshot"
+    def from_portfolio(cls, portfolio, date, *, lifecycle_manager=None,
+                       tombstones: Mapping[str, PositionSnapshot] = ...) -> "BookSnapshot"
 
 def explain_position(
-    pos_t0: Optional[PositionSnapshot],
-    pos_t1: Optional[PositionSnapshot],
+    pos_t0: Optional[PositionSnapshot],   # None only for a position opened in (t0, t1]
+    pos_t1: PositionSnapshot,             # live, or a tombstone (see the case table)
     *,
-    env_t1: Optional[PricingEnvironment] = None,      # required when pos_t1 is None
     trades: Sequence[ExplainTrade] = (),
     transition: Optional[LifecycleTransition] = None,
     config: Optional[PnLExplainConfig] = None,
@@ -627,17 +763,18 @@ class PositionExplainResult:
     position_id: str; underlying: str
     instrument: Optional[PnLExplainResult]   # market + event rows at q0; None for a position opened today
     trade_rows: tuple[ExplainRow, ...]
-    total_pnl: float                          # V1 − V0 + Σ trade cash (position values)
-    rows: tuple[ExplainRow, ...]              # instrument rows + trade rows, level="position"
+    total_pnl: float                          # V1 − V0 + Σ trade cash, GROSS of transaction costs
+    rows: tuple[ExplainRow, ...]              # level="position": relabeled instrument rows (its `total` dropped) + trade rows + one position `total`
 
 @dataclass(frozen=True)
 class PortfolioExplainResult:
     date_t0: datetime; date_t1: datetime
-    positions: Mapping[str, PositionExplainResult]
-    rows: tuple[ExplainRow, ...]          # level="portfolio": aggregated by (method, kind, factor, term) + cost + total
-    total_pnl: float
+    positions: Mapping[str, PositionExplainResult]    # insertion order = sorted position_id
+    rows: tuple[ExplainRow, ...]          # level="portfolio" rows (below) + cost row + one portfolio `total`
+    total_pnl: float                      # Σ position totals − costs
     metadata: Mapping[str, Any]           # includes "reconciliation"
     def reconcile(self, method: ExplainMethod) -> float
+    def by_underlying(self) -> Mapping[str, tuple[ExplainRow, ...]]
     def to_frame(self) -> pd.DataFrame
 ```
 
@@ -646,44 +783,75 @@ position's lifecycle state; products and engines are referenced (the equity
 backtest mutates them only through lifecycle substitution, which the
 transition records). Both backtest recorders map their native trade records
 onto `ExplainTrade` (§10); nothing in this layer reads `TradeRecord`
-directly.
+directly. A book is single-currency by contract: snapshots that carry a
+`currency` label must all agree with the book's, otherwise `ValidationError`
+(no FX conversion; multi-currency books are out of scope, §15).
 
-**Algebra (position values).** `V` is `ValueBreakdown.total`, `q` the
-position quantity, `u = V / q` the per-unit value (multiplier included).
-A position's day PnL is `V1 − V0 + Σ_i(−q_i·p_i·m_i)`; trades must
-reconcile, `Σ_i q_i == q1 − q0` (else `ValidationError`). Market and event
-rows are the instrument explain at `q0`; the **trade** row for trade *i* is
-`q_i · (u1 − p_i·m_i)` (execution vs the t1 model mark), so
-`market rows + event row + trade rows == V1 − V0 + trade cash` holds exactly.
-Cases:
+**Level promotion.** `explain()` emits `level="instrument"` rows.
+`explain_position` copies them relabeled to `level="position"`, drops the
+instrument `total` summary, appends the trade rows and exactly one position
+`total` (= `total_pnl`). `explain_portfolio` keeps every position's rows
+and adds `level="portfolio"` rows plus exactly one portfolio `total`.
+
+**Algebra (position values, units of §5.2).** `V` is
+`ValueBreakdown.total`, `q` the position quantity in units, `u = V / q` the
+per-unit value. A position's day PnL is `V1 − V0 + Σ_i(−q_i·p_i)`; trades
+must reconcile, `Σ_i q_i == q1 − q0` within `1e-9 × max(1, |q1|, |q0|)`
+(else `ValidationError`). Market and event rows are the instrument explain
+at `q0`; the **trade** row for trade *i* is `q_i · (u1 − p_i)` (execution vs
+the t1 model mark), so `market rows + event row + trade rows == V1 − V0 +
+trade cash` holds exactly. Trade validation: finite, non-zero `quantity`;
+finite `price`; `transaction_cost >= 0`; `kind` in the five names;
+`timestamp`, when given, in `(t0, t1]`. Cases:
 
 | Case | Inputs | Rows |
 |---|---|---|
-| unchanged quantity | both sides | instrument rows only |
-| quantity changed, no lifecycle state | both sides + trades | instrument rows on the t1 snapshot rescaled to `q0` (no ledger, so the contingent leg is linear in `q`), plus one trade row per trade |
+| unchanged quantity | both sides live | instrument rows only |
+| quantity changed, no lifecycle state | both sides live + trades | instrument rows on the t1 snapshot rescaled to `q0` (no ledger, so the contingent leg is linear in `q`), plus one trade row per trade |
 | quantity changed, lifecycle state present | — | `ValidationError`: the ledger is booked at the tracker's registered quantity and neither backtest trades a tracked position |
-| opened today | `pos_t0=None`, trades with `Σ q_i == q1` | trade rows only; `instrument=None`; `total = V1 + trade cash` |
-| closed by trading | `pos_t1=None`, `env_t1`, closing trades with `Σ q_i == −q0` | a counterfactual t1 snapshot (alive product from the transition or the t0 product, `engine_alive_t1`, `env_t1`, `q0`) gives the instrument rows; `u1` is its model mark; trade rows are the execution slippage; `total = −V0 + trade cash` |
-| removed by lifecycle termination | `pos_t1=None`, `env_t1`, transition with terminal `state_after`, no trades | the t1 snapshot is the terminal state (contingent 0 + receivable PV + paid cash); instrument rows incl. the event row |
-| rolled hedge | both sides or closed + reopened under a new id, `roll_close` / `roll_open` legs | as above per leg; a roll is never netted into one trade |
-| absent at t1, no terminal transition, no closing trades | — | `ValidationError` |
+| opened today | `pos_t0=None`, live `pos_t1`, trades with `Σ q_i == q1` | trade rows only; `instrument=None`; `total = V1 + trade cash` |
+| closed by trading | live `pos_t0`, **tombstone** `pos_t1` = counterfactual alive snapshot (alive product from the transition or the t0 product, `engine_alive_t1`, `env_t1`, quantity `q0`), closing trades with `Σ q_i == −q0` | instrument rows from the counterfactual; `u1` is its model mark; trade rows are the execution slippage; `total = −V0 + trade cash` |
+| removed by lifecycle termination | live `pos_t0`, **tombstone** `pos_t1` = terminal snapshot (t0 product, engine, `state_after`, `env_t1`, `q0`, its valuation point), transition with terminal `state_after`, no trades | instrument rows incl. the event row; the contingent leg is zero and the value is receivable PV + paid cash |
+| terminal on both sides | tombstone on both sides while the ledger has a pending cashflow | instrument rows: `time` and `rate` only, event row zero |
+| rolled hedge | position ids are **contract-specific**: the old id closes (`roll_close` trades, closed-by-trading case) and the new id opens (`roll_open` trades, opened-today case); a roll is never netted into one trade and never reuses an id |
+| absent at t1 with no tombstone | — | `ValidationError` |
 | present at t1, absent at t0, no trades | — | `ValidationError` |
 
-- **transaction_cost**: one portfolio-level `COMPONENT` / `SHARED` row equal
-  to `Σ trade.transaction_cost + transaction_costs`, negative.
-- **hedge legs** (replay engine): the futures position is a `Futures`
-  delta-one position through the same layer: `spot` =
-  contracts·multiplier·ΔS, `basis` = contracts·multiplier·(ΔF − ΔS), rolls as
-  explicit close / open legs.
+Recorders keep a tombstone for every lifecycle-terminated position until
+its ledger has no pending cashflow (rolling its valuation point forward
+each day) and for every position closed by trading on the day it closes.
 
-`PortfolioExplainResult.rows` are aggregated by (method, kind, factor, term)
-at `level="portfolio"` plus the cost row and a `total` summary; `to_frame()`
-has one row per (position_id or `"portfolio"`, level, method, kind, factor,
-term). Reconciliation is per method: `expected = Σ_positions (V1 − V0 +
-trade cash) − costs`, `explained = Σ portfolio-level COMPONENT rows with
-method ∈ {M, SHARED}`; `metadata["reconciliation"][M] = {"expected",
-"explained", "gap", "ok"}` (checked with `is_close`, surfaced, never
-swallowed).
+- **transaction_cost**: one portfolio-level `COMPONENT` / `SHARED` row with
+  `pnl = −(Σ trade.transaction_cost + transaction_costs)`; position results
+  are gross of costs.
+- **hedge legs** (replay engine): the futures hedge is a **quoted futures
+  leg** — its value is `units × F` with `F` the market futures price, not
+  an engine price — represented as a `Futures` position whose engine
+  returns the quoted price (`use_market_price=True`, `market_price = F`).
+  Its coordinate is `applicable = {SPOT, BASIS}` and its rows are `spot` =
+  `units × ΔS` and `basis` = `units × (ΔF − ΔS)` (the futures curve's
+  carry and basis are not separately identifiable from a quoted price); rolls
+  are contract-specific ids with `roll_close` / `roll_open` legs built by
+  `ExplainTrade.from_contracts`. Engine-priced `Futures` positions (equity
+  backtest) go through the ordinary waterfall with the §5.3 applicable set;
+  the two conventions never mix within one position.
+
+**Aggregation.** `PortfolioExplainResult.rows` are aggregated by
+(`underlying`, method, kind, factor, term) at `level="portfolio"`, with the
+display columns `moves`, `greek`, `cash_greek` and `step` carried **only**
+when every constituent position shares the same coordinate (underlying,
+`reference_strike`, `tenor_t1`) and step, and null otherwise; `metadata =
+{"positions": (ids…), "underlying": …}`. Book-level rows across underlyings
+are aggregated by (method, kind, factor, term) with null display columns;
+`by_underlying()` exposes the per-underlying tier. `to_frame()` has one row
+per (position_id or `"portfolio"`, underlying or `"*"`, level, method, kind,
+factor, term).
+
+**Reconciliation** is per method and per level: `expected = Σ_positions
+(V1 − V0 + trade cash) − costs`, `explained = Σ COMPONENT rows at that level
+with method ∈ {M, SHARED}`; `metadata["reconciliation"][M] = {"expected",
+"explained", "gap", "ok"}` with `ok = is_close(gap, 0, abs_tol = 1e-8 ×
+max(1, |expected|))`, surfaced, never swallowed.
 
 ## 10. Backtest integration
 
@@ -706,29 +874,52 @@ snapshots) and the day's trade records, and emits rows:
   position's engine before `process_day` (`engine_alive_t1`) and a deep copy
   of the pre-event state; after `process_day` it attaches the returned
   `ProcessedLifecycleEvent.event`s and the post-event state copy. After
-  hedging it builds today's `BookSnapshot`, maps the day's `TradeRecord`s to
-  `ExplainTrade` (quantity sign as recorded, buy positive; `price`;
-  `transaction_cost`; `multiplier` from a `Futures` product, else 1;
+  hedging it builds today's `BookSnapshot` (with tombstones for positions
+  the lifecycle manager removed today and for hedge contracts closed
+  today), maps the day's `TradeRecord`s to `ExplainTrade` (quantity in
+  units with the recorded sign, buy positive; `price`; `transaction_cost`;
   `kind` from `trade_type`), calls `explain_portfolio`, then stores today's
   snapshot as tomorrow's t0. Hedge positions are ordinary delta-one
-  positions through the same layer; executor `realized_pnl` on closed /
-  rolled contracts is reproduced by the close / open legs.
+  positions through the same layer; the executor books each hedge contract
+  under its own position id, so rolls are close / open legs on distinct ids
+  and executor `realized_pnl` is reproduced by them.
 - **`ReplayBacktestEngine`** (`run` loop): per replay, call
   `tracker.product_for_pricing(date, env)` (via `product_for_date`) before
   `apply_lifecycle_events` to build the transition's alive product with the
   pre-event state, and read the post-event product / state afterwards; keep
   yesterday's engine reference so the daily recalibrated engine yields a
   `model` row (`engine_alive_t1` = today's engine); map `_trades` rows and
-  roll legs to `ExplainTrade` with the futures multiplier; explain the
-  futures / spot hedge leg as a `Futures` / `SpotInstrument` position (§9).
-  The valuation point for numeric-time ledgers is built from the replay
-  start date.
+  roll legs to `ExplainTrade.from_contracts` with the futures multiplier;
+  explain the futures hedge as the quoted futures leg of §9 under the
+  active contract's id (spot hedges as a `SpotInstrument`). The valuation
+  point for numeric-time ledgers is built from the replay start date.
+
+**Initialisation.** The first replay date has no t0: no explain rows are
+emitted for it and `explain_df` starts on the second date, whose expected
+PnL is the change in `total_pnl` between the first two state rows. Opening
+positions on day one are simply the day-two t0 book. Restart / checkpoint
+of a backtest is not a feature of either engine and none is added.
+
+**Isolation.** All explain pricings run on `resolve_bump_engine` contexts
+(fresh, seed-frozen for MC), so they neither advance a production engine's
+RNG nor touch its caches; test 6 asserts that turning the explain on leaves
+the `states`, `greeks` and `trades` frames byte-identical to the explain-off
+run.
 
 Rows land in `explain_df` on `BacktestResults`, `BookBacktestResults` and
-`AutocallableBacktestResults`: columns `date, position_id, method, factor,
-term, pnl, greek, cash_greek, step` plus one column per move key, and a
-per-day `reconciliation_gap` comparing the row sum with that day's change in
-total PnL from the states frame.
+`AutocallableBacktestResults` with the fixed column order `date, level,
+position_id, underlying, method, kind, factor, term, step, pnl, greek,
+cash_greek, spot_return, vol_pts, rate_pct, div_pct, basis_pct, days,
+trading_days, tenor` (missing moves are NaN; enums serialised as `.value`;
+`date` is `datetime64[ns]`), sorted by (`date`, level rank instrument <
+position < portfolio, `position_id`, method order waterfall < taylor <
+shared, `step`, stencil order). Both position-level and portfolio-level
+rows are emitted. A companion `explain_reconciliation_df` has one row per
+(`date`, `method`, `level`) with `expected` (that day's change in the states
+frame's total PnL for the portfolio level; the position's own `total_pnl`
+for the position level), `explained` (Σ COMPONENT rows with method ∈ {M,
+SHARED} at that level), `gap` and `ok`. An empty result yields empty frames
+with exactly these columns.
 
 ## 11. Error handling
 
@@ -741,8 +932,11 @@ total PnL from the states frame.
 | contract identity check fails (alive product is not the t0 contract rolled in time) | `ValidationError` |
 | lifecycle fingerprints differ, no `transition`; or a transition whose fingerprints do not match the snapshots | `ValidationError` |
 | quantities differ in instrument-level `explain` | `ValidationError` |
-| trades do not reconcile (`Σ q_i ≠ q1 − q0`), or trades on a lifecycle-tracked / lifecycle-terminated position | `ValidationError` |
-| position gone at t1, not terminal, no closing trade; or new at t1 without trades | `ValidationError` |
+| trades do not reconcile (`Σ q_i ≠ q1 − q0`), invalid trade fields (zero / non-finite quantity, non-finite price, negative cost, unknown kind, timestamp outside `(t0, t1]`), or trades on a lifecycle-tracked / lifecycle-terminated position | `ValidationError` |
+| position gone at t1 with no tombstone; new at t1 without trades; a tombstone with trades that is terminal, or without trades that is not | `ValidationError` |
+| transition without events while fingerprints differ, events outside `(t0, t1]` or out of order, or a product / engine substitution with equal fingerprints | `ValidationError` |
+| currency labels disagree within a book | `ValidationError` |
+| bucketed mode with a term-structure object on one side only | `ValidationError` |
 | `"1td"` without `pricing_env.calendar` | the same `ValidationError` theta raises |
 | numeric-time ledger without a time-based valuation point | `ValidationError` |
 | non-finite step PnL | `NumericalError` naming the step |
@@ -789,30 +983,67 @@ price or valuation point is unknown, the module raises.
    futures hedge with close / open legs each reconcile exactly;
    non-reconciling trades, trades on a tracked position, and an
    unexplained disappearance raise.
-6. **Backtest reconciliation gate**: both engines on a short window with the
-   explain on; per-day row sums equal the day's total-PnL change within
-   1e-8 (spot delta hedge, multi-instrument option hedge with a roll, replay
-   futures hedge with a roll); with the explain off, `states` / `greeks`
-   frames are byte-identical to `main` (same-machine invariant script, like
-   the greeks fingerprint gate; not a committed golden).
+6. **Backtest reconciliation and isolation gate**: both engines on a short
+   window with the explain on; `explain_reconciliation_df.ok` is true on
+   every (date, method, level) with `abs_tol = 1e-8 × max(1, |expected|)`
+   (spot delta hedge, multi-instrument option hedge with a roll, replay
+   futures hedge with a roll, a lifecycle KO with a delayed settlement so a
+   tombstone spans several days); the `states` / `greeks` / `trades` frames
+   with the explain **on** are byte-identical to the explain-**off** run,
+   and the explain-off run is byte-identical to `main` (same-machine
+   invariant script, like the greeks fingerprint gate; not a committed
+   golden).
+6b. **MC common random numbers**: a snowball MC engine with a fixed seed;
+   the waterfall reconciles exactly (gap ≤ 1e-10 × |total|) because every
+   endpoint and step comes from one seed-frozen bump context, and the Taylor
+   residual is reported, not asserted small.
 7. **Clock**: Friday→Monday on a calendar env gives `days=3`, `trading_days=1`;
    `per_step` with `"1td"` uses one step, with `"1d"` three.
 8. **Vol-model engine**: LV quick config across a recalibration; `model` row
    carries the surface move and `vol` is near zero.
 9. **Bucketed**: term-structure surface and interpolated curve; bucket rows
    sum to the scalar rows within FD tolerance.
-10. **Row order**: `to_frame()` column and row order stable under several
-    hash seeds (mirrors `test_greeks_key_order.py`).
+10. **Row order and frame schema**: `to_frame()` column and row order stable
+    under several hash seeds (mirrors `test_greeks_key_order.py`); the
+    empty frame has the §10 columns; Shapley rows, bucket pillars and
+    same-timestamp trades keep their canonical sort.
+
+**Tolerances used above.** "Machine precision" / "exactly" = `abs ≤ 1e-10 ×
+max(1, |total_pnl|)`. "FD tolerance" between an analytical and a numerical
+Taylor term = `rel ≤ 2e-2` or `abs ≤ 1e-6` (one-sided vega and the
+second-difference terms carry O(bump) truncation). "Near zero" for the LV
+`vol` row = `abs ≤ 1e-8 × max(1, |total_pnl|)`. "Shrinks" = the `extended`
+residual is strictly smaller in absolute value than the `standard` residual
+at every grid point whose spot or vol move is non-zero.
+
+**Support matrix** (product family × engine family × method), each cell
+covered by at least one acceptance case:
+
+| Family | Engines | Waterfall | Taylor | Lifecycle rows |
+|---|---|---|---|---|
+| European vanilla | analytical, MC, PDE | ✓ (test 1) | ✓ analytical route (test 1, 4) | none (no tracker) |
+| American | analytical BS93, PDE | ✓ | ✓ numerical route | none |
+| Digital, Asian | analytical, MC | ✓ | ✓ numerical | none |
+| Barrier family (barrier, one-touch, sharkfin) | analytical, PDE | ✓ | ✓ numerical | ✓ KI substitution, KO / expiry (test 5) |
+| Autocallables (snowball, phoenix, KO-reset) | PDE, QUAD, MC | ✓ | ✓ numerical | ✓ KO / coupon / maturity / settlement (tests 5, 6, 6b) |
+| Vol-model engines (LV, Heston, SLV) | PDE, MC | ✓ with `model` row (test 8) | ✓ numerical | as the wrapped product |
+| Delta-one (`SpotInstrument`, engine-priced `Futures`) | delta-one analytical | ✓ (test 3b) | ✓ (delta only) | none |
+| Quoted futures hedge leg (replay) | none (market price) | ✓ spot + basis | n/a | none |
+
+Unsupported: products the `GreeksCalculator` cannot bump (raise from the
+calculator, propagated), engines mutated in place (§5.1), multi-currency
+books (§15).
 
 ## 13. Sequencing and gates
 
 | Phase | Content | Gate |
 |---|---|---|
 | P0 | package skeleton, `ValuationSnapshot`, `value`, coordinate resolver, `FactorDiff` (ownership, contract identity, semantic calendar equality), waterfall (state-set construction, sequential + shapley, `time_pure`), row kinds and result types | tests 1–3, 3b, 10 |
-| P1 | Taylor explainer, `resolve_route` helper, unit normalisation, display table, time term modes (gap scaling), bucketed opt-in | tests 4, 7, 9; riskmeasures suite green and its fingerprint byte-identical |
-| P2 | `LifecycleTransition` + fingerprint, event term, `ExplainTrade`, position / portfolio layers incl. the §9 case table, cost / hedge rows | tests 5, 5b |
-| P3 | recorders in both backtest engines, config fields, `explain_df` | tests 6, 8; backtest and replay suites green |
-| P4 | README, root-guide row, demo script | — |
+| P1 | Taylor explainer, `resolve_route` helper, unit normalisation, display table, term → factor table, time term modes (gap scaling, named theta bases) | tests 4, 7; riskmeasures suite green and its fingerprint byte-identical |
+| P2 | `LifecycleTransition` + computed fingerprint, event term, `ExplainTrade`, tombstones, position / portfolio layers incl. the §9 case table, aggregation tiers, cost / hedge rows | tests 5, 5b |
+| P3 | recorders in both backtest engines, config fields, `explain_df` + `explain_reconciliation_df`, isolation | tests 6, 6b, 8; backtest and replay suites green |
+| P4 | README, root-guide row, demo script, support-matrix acceptance cases not yet covered | full suite |
+| P5 | bucketed opt-in (§7.6) — last, experimental, never on the default path | test 9 |
 
 Every phase runs with worktree source shadowing the editable install
 (`PYTHONPATH=$PWD`).
@@ -830,6 +1061,13 @@ Every phase runs with worktree source shadowing the editable install
 
 - Other asset classes (the package shape is ready for `fx/` etc.).
 - Dynamic-scenario integration (same recorder pattern; separate follow-up).
+- A generic expiry / exercise / settlement transition and cashflow ledger
+  for products without a lifecycle tracker (vanilla, American, digital,
+  delta-one): today they have no ledger anywhere in the library, so their
+  expiry is explained as market moves (§2).
+- Multi-currency books and FX conversion (a book is single-currency).
+- Engines mutated in place between snapshots (§5.1).
+- Backtest restart / checkpoint semantics (neither engine has them).
 - Sticky-delta spot convention (rejected upstream in `sticky.py`).
 - Model-parameter attribution inside a vol model (per-Heston-parameter rows);
   `model` is one row.
