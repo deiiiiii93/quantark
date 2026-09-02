@@ -85,10 +85,12 @@ def test_explain_off_is_byte_identical_and_frames_are_empty(lagged, config):
     assert list(explain_df.columns) == ["date", *FRAME_COLUMNS] and explain_df.empty
     assert list(recon.columns) == RECON_COLUMNS and recon.empty
     on = BacktestEngine(_lifecycle_config(config, lagged=lagged)).run()
-    pd.testing.assert_frame_equal(_normalized(on.states_df), _normalized(states))     # every column
-    pd.testing.assert_frame_equal(on.trades_df, trades)
+    # exact comparisons: the explain is an observer and must not move a single bit
+    pd.testing.assert_frame_equal(_normalized(on.states_df), _normalized(states), check_exact=True)
+    pd.testing.assert_frame_equal(on.trades_df, trades, check_exact=True)
     # position ids are fresh UUIDs per constructed Position: compare everything else
-    pd.testing.assert_frame_equal(_normalized(on.get_lifecycle_events()), _normalized(off.get_lifecycle_events()))
+    pd.testing.assert_frame_equal(_normalized(on.get_lifecycle_events()), _normalized(off.get_lifecycle_events()),
+                                  check_exact=True)
     assert not on.explain_df.empty and not on.explain_reconciliation_df.empty
 
 
@@ -128,7 +130,9 @@ def test_lifecycle_ko_with_settlement_lag_reconciles_every_day():
     assert len(ko_rows) == 1 and ko_rows.iloc[0]["pnl"] != 0.0
     # the tombstone lives on for the settlement lag: time rows exist after the KO day, event rows are zero
     later = ex[(ex["date"] > ko_day) & (ex["level"] == "position")]
-    assert (later[later["factor"] == "lifecycle_event"]["pnl"] == 0.0).all()
+    later_events = later[later["factor"] == "lifecycle_event"]
+    assert len(later_events) >= 1 and set(later_events["date"]) == set(later["date"])
+    assert (later_events["pnl"] == 0.0).all()
     assert set(later["term"]) >= {"time", "rate"}
     assert later["date"].nunique() >= 1
     # the receivable is paid inside TIME on the settlement date and the position then leaves the book
@@ -152,8 +156,10 @@ def test_spot_hedge_adjusts_identity_holds_states_gap_documented():
     assert port["ok"].all()
     trades = results.trades_df
     assert len(trades) > 1
-    # the simple executor keeps the original entry price on adjusts: gap_states is reported, not zero
+    # the simple executor keeps the original entry price on adjusts: gap_states is reported, and it
+    # is genuinely non-zero on adjust days (the documented pre-existing accounting quirk)
     assert port["gap_states"].notna().all()
+    assert (port["gap_states"].abs() > 1e-8 * port["expected"].abs().clip(lower=1.0)).any()
     ex = results.explain_df
     assert (ex["method"] == "taylor").any() and (ex["factor"] == "trade").any()
 
@@ -164,6 +170,7 @@ def test_multi_instrument_hedge_states_gap_is_zero():
     cfg.pnl_explain = WF
     results = BacktestEngine(cfg).run()
     port = results.explain_reconciliation_df.query("level == 'portfolio'")
+    assert len(port) == len(results.states_df) - 1               # one method, from day two
     assert port["ok"].all()
     assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
     assert (results.explain_df["level"] == "position").any()

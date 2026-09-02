@@ -66,8 +66,11 @@ def test_component_sum_excludes_informational_and_summary_and_other_method():
 def test_value_breakdown_and_result_reject_non_finite():
     with pytest.raises(NumericalError):
         ValueBreakdown(math.nan, 0.0, 0.0)
+    vb = ValueBreakdown(10.0, 0.0, 0.0)                 # finite endpoints: the RESULT must refuse
     with pytest.raises(NumericalError):
-        _result([], math.inf)
+        PnLExplainResult(date_t0=datetime(2026, 6, 26), date_t1=datetime(2026, 6, 29), pv_t0=vb,
+                         pv_alive_t1=vb, pv_t1=vb, total_pnl=math.inf, moves=None, rows=(),
+                         unexplained=None, metadata={})
 
 
 def test_frame_schema_and_empty_frame():

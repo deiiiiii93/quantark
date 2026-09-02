@@ -31,10 +31,10 @@ def test_replay_book_explain_off_identical_and_on_reconciles():
     cfg = fixtures.make_book_config()
     cfg.pnl_explain = WF
     on = ReplayBacktestEngine(cfg).run()
-    pd.testing.assert_frame_equal(on.states_df(), off.states_df())
-    pd.testing.assert_frame_equal(on.greeks_df(), off.greeks_df())
-    pd.testing.assert_frame_equal(on.trades_df(), off.trades_df())
-    pd.testing.assert_frame_equal(on.actions_df(), off.actions_df())
+    pd.testing.assert_frame_equal(on.states_df(), off.states_df(), check_exact=True)
+    pd.testing.assert_frame_equal(on.greeks_df(), off.greeks_df(), check_exact=True)
+    pd.testing.assert_frame_equal(on.trades_df(), off.trades_df(), check_exact=True)
+    pd.testing.assert_frame_equal(on.actions_df(), off.actions_df(), check_exact=True)
     assert off.explain_df().empty and off.explain_reconciliation_df().empty
     recon = on.explain_reconciliation_df()
     port = recon[recon["level"] == "portfolio"]
@@ -65,14 +65,15 @@ def test_replay_roll_produces_close_and_open_legs():
     assert (ex["position_id"] == "hedge:IF2401").any() and (ex["position_id"] == "hedge:IF2402").any()
     recon = results.explain_reconciliation_df()
     port = recon[recon["level"] == "portfolio"]
+    assert len(port) == len(results.states_df()) - 1
     assert port["ok"].all()
     assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
     # the explain is a pure observer: the same run without it books the same states and trades
     off_cfg = fixtures.make_book_config()
     off_cfg.hedge.roll_policy = FuturesRollPolicy(roll_days_before_expiry=3)
     off = ReplayBacktestEngine(off_cfg).run()
-    pd.testing.assert_frame_equal(results.states_df(), off.states_df())
-    pd.testing.assert_frame_equal(results.trades_df(), off.trades_df())
+    pd.testing.assert_frame_equal(results.states_df(), off.states_df(), check_exact=True)
+    pd.testing.assert_frame_equal(results.trades_df(), off.trades_df(), check_exact=True)
 
 
 def test_single_engine_passthrough():
@@ -80,10 +81,12 @@ def test_single_engine_passthrough():
     cfg.pnl_explain = WF
     results = AutocallableBacktestEngine(cfg).run()
     assert not results.explain_df.empty
-    assert results.explain_reconciliation_df.query("level == 'portfolio'")["ok"].all()
+    port = results.explain_reconciliation_df.query("level == 'portfolio'")
+    assert len(port) == len(results.states_df) - 1
+    assert port["ok"].all()
     off = AutocallableBacktestEngine(fixtures.make_scalar_bsm_config()).run()
     assert off.explain_df.empty and off.explain_reconciliation_df.empty
-    pd.testing.assert_frame_equal(results.states_df, off.states_df)
+    pd.testing.assert_frame_equal(results.states_df, off.states_df, check_exact=True)
 
 
 def test_unknown_replay_trade_type_is_rejected():
@@ -126,7 +129,9 @@ def test_localvol_recalibration_lands_in_model_row(tmp_path):
     total = pos[pos["term"] == "total"]["pnl"].abs().sum()
     assert vol <= 1e-8 * max(1.0, total)
     assert model > 0.0
-    assert results.explain_reconciliation_df.query("level == 'portfolio'")["ok"].all()
+    port = results.explain_reconciliation_df.query("level == 'portfolio'")
+    assert len(port) == len(results.states_df) - 1
+    assert port["ok"].all()
 
 
 def test_pnl_explain_field_is_appended_after_metadata_in_both_replay_configs():
