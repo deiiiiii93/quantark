@@ -7,7 +7,7 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Mapping, Optional
 
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 
 TRADE_KINDS = ("open", "adjust", "close", "roll_close", "roll_open")
 
@@ -26,15 +26,17 @@ class ExplainTrade:
     def __post_init__(self) -> None:
         if not self.position_id:
             raise ValidationError("trade requires a position_id")
-        q, p, c = float(self.quantity), float(self.price), float(self.transaction_cost)
-        if not math.isfinite(q) or q == 0.0:
-            raise ValidationError(f"trade quantity must be non-zero and finite, got {self.quantity}")
-        if not math.isfinite(p):
-            raise ValidationError(f"trade price must be finite, got {self.price}")
-        if not math.isfinite(c) or c < 0.0:
+        q = _number(self.quantity, "trade quantity")
+        p = _number(self.price, "trade price")
+        c = _number(self.transaction_cost, "transaction_cost")
+        if q == 0.0:
+            raise ValidationError(f"trade quantity must be non-zero, got {self.quantity}")
+        if c < 0.0:
             raise ValidationError(f"transaction_cost must be >= 0, got {self.transaction_cost}")
         if self.kind not in TRADE_KINDS:
             raise ValidationError(f"trade kind must be one of {TRADE_KINDS}, got {self.kind!r}")
+        if not math.isfinite(q * p):
+            raise NumericalError(f"trade cash overflows: {q} x {p}")
         object.__setattr__(self, "quantity", q)
         object.__setattr__(self, "price", p)
         object.__setattr__(self, "transaction_cost", c)
@@ -48,7 +50,22 @@ class ExplainTrade:
     @classmethod
     def from_contracts(cls, position_id: str, contracts: float, price: float, multiplier: float,
                        **kw: Any) -> "ExplainTrade":
-        if not math.isfinite(float(multiplier)) or float(multiplier) <= 0.0:
+        m = _number(multiplier, "multiplier")
+        if m <= 0.0:
             raise ValidationError(f"multiplier must be positive, got {multiplier}")
-        return cls(position_id=position_id, quantity=float(contracts) * float(multiplier),
-                   price=float(price), **kw)
+        n = _number(contracts, "contracts")
+        units = n * m
+        if not math.isfinite(units):
+            raise NumericalError(f"contracts x multiplier overflows: {n} x {m}")
+        return cls(position_id=position_id, quantity=units, price=_number(price, "trade price"), **kw)
+
+
+def _number(value: Any, what: str) -> float:
+    """Coerce a trade field to a finite float; anything else is a ValidationError."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{what} must be a number, got {value!r}") from None
+    if not math.isfinite(f):
+        raise ValidationError(f"{what} must be finite, got {value!r}")
+    return f

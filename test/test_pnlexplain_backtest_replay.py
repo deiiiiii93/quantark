@@ -141,3 +141,35 @@ def test_pnl_explain_field_is_appended_after_metadata_in_both_replay_configs():
     for cfg in (AutocallableBacktestConfig, ReplayBacktestConfig):
         names = [f.name for f in fields(cfg)]
         assert names[-2:] == ["metadata", "pnl_explain"], cfg.__name__
+
+
+def test_replay_first_day_intraday_leg_is_not_carried():
+    """A leg opened and closed on day one is a tombstone in the baseline, not a held leg."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+    from quantark.param.div import ContinuousDividendYield
+    from quantark.pnlexplain.equity.recorder import ReplayPnLExplainRecorder
+    from quantark.priceenv import PricingEnvironment
+
+    def env(d):
+        return PricingEnvironment(spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(0.2),
+                                  rate_curve=FlatRateCurve(rate=0.03),
+                                  div_yield=ContinuousDividendYield(div_yield=0.01), valuation_date=d)
+
+    engine = SimpleNamespace(_replays=[], _pricing_engines=[], _quantities=[], _start_date=pd.Timestamp(D),
+                             config=SimpleNamespace(underlying="IDX"),
+                             hedge_position=SimpleNamespace(contract=None, quantity=0.0), _transaction_costs=0.0)
+    rec = ReplayPnLExplainRecorder(WF)
+    market = {"spot": 100.0}
+    selected = {"futures_price": 101.0, "multiplier": 300.0, "contract": "IF2401"}
+    d1, d2 = D, D + timedelta(days=1)
+    rec.begin_day(engine, d1, env(d1))
+    round_trip = [_row(trade_type="hedge_rebalance", quantity=1.0, price=101.0, date=d1),
+                  _row(trade_type="hedge_close", quantity=-1.0, price=101.5, date=d1)]
+    rec.end_day(engine, d1, env(d1), market, selected, round_trip, {"total_pnl": 0.0})
+    assert dict(rec._prev_book.quoted_legs) == {}                 # not carried into tomorrow's t0
+    rec.begin_day(engine, d2, env(d2))
+    rec.end_day(engine, d2, env(d2), market, selected, [], {"total_pnl": 0.0})   # must not raise
+    _, recon = rec.frames()
+    assert len(recon) == 1 and bool(recon.iloc[0]["ok"])

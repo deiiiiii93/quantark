@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
@@ -18,7 +19,7 @@ from quantark.pnlexplain.equity.explain import explain
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal, value
 from quantark.pnlexplain.equity.trades import ExplainTrade
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.util.numerical import is_close
 
 _EMPTY: Mapping = MappingProxyType({})
@@ -32,9 +33,23 @@ class PositionSnapshot:
     tombstone: bool = False
 
 
+def _finite_number(value: Any, what: str) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{what} must be a number, got {value!r}") from None
+    if not math.isfinite(f):
+        raise ValidationError(f"{what} must be finite, got {value!r}")
+    return f
+
+
 @dataclass(frozen=True)
 class QuotedLegSnapshot:
-    """A hedge leg valued at a quoted price (units x price); no engine."""
+    """A hedge leg valued at a quoted price (units x price); no engine.
+
+    ``units`` may be zero only for a tombstone (a leg opened and closed within
+    the step); ``spot`` must be positive because spot returns divide by it.
+    """
     position_id: str
     underlying: str
     units: float
@@ -42,6 +57,22 @@ class QuotedLegSnapshot:
     spot: float
     date: datetime
     tombstone: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.position_id:
+            raise ValidationError("quoted leg requires a position_id")
+        units = _finite_number(self.units, "quoted leg units")
+        price = _finite_number(self.price, "quoted leg price")
+        spot = _finite_number(self.spot, "quoted leg spot")
+        if spot <= 0.0:
+            raise ValidationError(f"quoted leg spot must be positive, got {self.spot!r}")
+        if units == 0.0 and not self.tombstone:
+            raise ValidationError("a live quoted leg must hold a non-zero number of units")
+        if not math.isfinite(units * price):
+            raise NumericalError(f"quoted leg value overflows: {units} x {price}")
+        object.__setattr__(self, "units", units)
+        object.__setattr__(self, "price", price)
+        object.__setattr__(self, "spot", spot)
 
     @property
     def total(self) -> float:
@@ -60,13 +91,27 @@ class BookSnapshot:
         object.__setattr__(self, "positions", MappingProxyType(dict(self.positions)))
         object.__setattr__(self, "environments", MappingProxyType(dict(self.environments)))
         object.__setattr__(self, "quoted_legs", MappingProxyType(dict(self.quoted_legs)))
+        labels = set()
         for pid, ps in self.positions.items():
             if ps.position_id != pid:
                 raise ValidationError(f"position key {pid!r} != position_id {ps.position_id!r}")
             if ps.snapshot.date != self.date:
                 raise ValidationError(f"position {pid} snapshot date differs from the book date")
-            if self.currency is not None and ps.snapshot.currency not in (None, self.currency):
-                raise ValidationError(f"position {pid} currency {ps.snapshot.currency} != book {self.currency}")
+            if ps.snapshot.currency is not None:
+                labels.add(ps.snapshot.currency)
+        # A book is single-currency (spec §9): every label present must agree, with or
+        # without a book-level label; one label present and no book label infers it.
+        if self.currency is not None:
+            labels.add(self.currency)
+        if len(labels) > 1:
+            raise ValidationError(f"mixed currencies in one book: {sorted(labels)}")
+        if self.currency is None and labels:
+            object.__setattr__(self, "currency", next(iter(labels)))
+        for pid, leg in self.quoted_legs.items():
+            if leg.position_id != pid:
+                raise ValidationError(f"quoted leg key {pid!r} != position_id {leg.position_id!r}")
+            if leg.date != self.date:
+                raise ValidationError(f"quoted leg {pid} date differs from the book date")
         if set(self.positions) & set(self.quoted_legs):
             raise ValidationError("a position id cannot be both a priced position and a quoted leg")
 
@@ -207,12 +252,14 @@ def explain_position(
     if pos_t1.tombstone and terminal_t1 and trades:
         raise ValidationError(f"position {pid} terminated by lifecycle; trades are not allowed")
 
-    if q1 != q0:
+    if pos_t1.tombstone and not terminal_t1:
+        # closed by trading: the trades must consume the WHOLE old position, and the
+        # tombstone is priced at q0 whatever quantity it was written with
+        _check_sum(trades, -q0, "closed by trading")
+        s1_at_q0 = s1 if q1 == q0 else dataclasses.replace(s1, quantity=q0)
+    elif q1 != q0:
         _check_sum(trades, q1 - q0, "quantity change")
         s1_at_q0 = dataclasses.replace(s1, quantity=q0)
-    elif pos_t1.tombstone and not terminal_t1:
-        _check_sum(trades, -q0, "closed by trading")
-        s1_at_q0 = s1
     else:
         if trades:
             _check_sum(trades, 0.0, "unchanged quantity")
@@ -245,6 +292,7 @@ def explain_quoted_leg(leg_t0: Optional[QuotedLegSnapshot], leg_t1: QuotedLegSna
     if leg_t0 is None:
         if not trades:
             raise ValidationError(f"quoted leg {pid} is new at t1 but no trades were supplied")
+        _validate_trades(pid, trades, datetime.min, leg_t1.date)
         _check_sum(trades, leg_t1.units, "leg opened today")
         trade_rows = _trade_rows(trades, leg_t1.price)
         total = leg_t1.total + sum(t.cash for t in trades)
@@ -325,6 +373,11 @@ def explain_portfolio(
         raise ValidationError("book currencies differ")
     by_pid: Dict[str, List[ExplainTrade]] = {}
     for t in trades:
+        # every dated trade belongs to this step, whichever position it opens or adjusts
+        if t.timestamp is not None and not (book_t0.date < t.timestamp <= book_t1.date):
+            raise ValidationError(
+                f"trade for {t.position_id} at {t.timestamp} is outside ({book_t0.date}, {book_t1.date}]"
+            )
         by_pid.setdefault(t.position_id, []).append(t)
     results: Dict[str, PositionExplainResult] = {}
     ids = sorted(set(book_t0.positions) | set(book_t1.positions))

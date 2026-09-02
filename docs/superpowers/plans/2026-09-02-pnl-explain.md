@@ -3047,6 +3047,15 @@ file) and everything else in `test/test_pnlexplain_portfolio.py` (commit 2 = `po
 `quantark/pnlexplain/__init__.py` exports + that file). Never run a half-implemented module under `-k`:
 a collection-time `ImportError` cannot be deselected.
 
+**Code review 1a3 (gpt-5.6-sol, 2026-09-03), all applied:** a book infers its currency from the
+positions' labels and rejects mixed labels even without a book label; a trading tombstone must be
+closed by trades summing to `−q0` and is priced at `q0` whatever quantity it was written with; every
+dated trade passed to `explain_portfolio` must lie in `(t0, t1]`; quoted legs are key/date-validated
+in `BookSnapshot` and numerically validated at construction (positive spot, finite fields, zero units
+only for tombstones); the new-leg path validates trade ownership and timestamps; `ExplainTrade`
+coerces fields with `ValidationError` and raises `NumericalError` on overflow; the replay recorder's
+first-day baseline excludes intraday tombstone legs.
+
 **Files:**
 - Create: `quantark/pnlexplain/equity/trades.py`, `quantark/pnlexplain/equity/portfolio.py`
 - Modify: `quantark/pnlexplain/__init__.py` (exports — staged in the SECOND commit of this task, once `explain_portfolio` exists; `"coordinate"` is already in the explain metadata since Task 5)

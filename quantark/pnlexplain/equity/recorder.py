@@ -376,7 +376,10 @@ class ReplayPnLExplainRecorder:
 
         book_t1 = BookSnapshot(date=ts, positions=live, environments={underlying: env_copy}, quoted_legs=legs)
         if self._prev_book is None:
-            self._prev_book = book_t1
+            # the baseline carries only legs still held: a leg opened and closed on day one is
+            # a tombstone and must not be expected to close again tomorrow
+            self._prev_book = BookSnapshot(date=ts, positions=live, environments={underlying: env_copy},
+                                           quoted_legs={p: leg for p, leg in legs.items() if not leg.tombstone})
             self._prev_costs, self._prev_state_pnl = float(engine._transaction_costs), float(state_row["total_pnl"])
             return
 

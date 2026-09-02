@@ -28,3 +28,17 @@ def test_invalid_trades_raise(kw):
 def test_from_contracts_rejects_bad_multiplier():
     with pytest.raises(ValidationError):
         ExplainTrade.from_contracts("a", 1.0, 1.0, multiplier=0.0)
+
+
+def test_trade_numeric_contracts():
+    from quantark.util.exceptions import NumericalError
+    with pytest.raises(ValidationError):
+        ExplainTrade("a", "ten", 1.0)
+    with pytest.raises(ValidationError):
+        ExplainTrade("a", 1.0, None)
+    with pytest.raises(NumericalError):
+        ExplainTrade("a", 1e200, 1e200)                      # finite inputs, overflowing cash
+    with pytest.raises(NumericalError):
+        ExplainTrade.from_contracts("a", 1e200, 1.0, multiplier=1e200)
+    with pytest.raises(ValidationError):
+        ExplainTrade.from_contracts("a", "x", 1.0, multiplier=300.0)

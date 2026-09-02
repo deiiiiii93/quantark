@@ -210,3 +210,63 @@ def test_portfolio_errors():
         explain_portfolio(b0, BookSnapshot(date=T1, positions={"a": _pos("a", _call(), 2.0, env=E1, date=T1)},
                                            environments={"IDX": E1}),
                           trades=[ExplainTrade("zzz", 1.0, 1.0)])
+
+
+def test_book_infers_and_rejects_currencies():
+    usd = ValuationSnapshot(_call(), ENG, E0, date=T0, currency="USD")
+    eur = ValuationSnapshot(_call(), ENG, E0, date=T0, currency="EUR")
+    book = BookSnapshot(date=T0, positions={"a": PositionSnapshot("a", "IDX", usd)}, environments={"IDX": E0})
+    assert book.currency == "USD"                                          # inferred from the positions
+    with pytest.raises(ValidationError):                                   # mixed labels, no book label
+        BookSnapshot(date=T0, positions={"a": PositionSnapshot("a", "IDX", usd),
+                                         "b": PositionSnapshot("b", "IDX", eur)}, environments={"IDX": E0})
+    with pytest.raises(ValidationError):                                   # the book label disagrees
+        BookSnapshot(date=T0, positions={"a": PositionSnapshot("a", "IDX", usd)}, environments={"IDX": E0},
+                     currency="CNY")
+
+
+def test_trading_tombstone_consumes_the_whole_old_position():
+    p0 = _pos("c", _call(), 10.0)
+    half = _pos("c", _call(), 5.0, env=E1, date=T1, tombstone=True)        # written with a stale quantity
+    u1 = _unit_t1(half.snapshot.product)
+    with pytest.raises(ValidationError):                                   # 5 sold, but the position held 10
+        explain_position(p0, half, trades=[ExplainTrade("c", -5.0, u1)])
+    res = explain_position(p0, half, trades=[ExplainTrade("c", -10.0, u1 - 0.2)])
+    v0 = value(p0.snapshot).total
+    assert res.total_pnl == pytest.approx(-v0 + 10.0 * (u1 - 0.2))
+    for m in (ExplainMethod.WATERFALL, ExplainMethod.TAYLOR):
+        assert res.reconcile(m) == pytest.approx(0.0, abs=_tol(v0))
+
+
+def test_quoted_leg_validation():
+    with pytest.raises(ValidationError):                                   # zero spot
+        QuotedLegSnapshot("hedge:X", "IDX", units=300.0, price=100.0, spot=0.0, date=T0)
+    with pytest.raises(ValidationError):                                   # non-finite price
+        QuotedLegSnapshot("hedge:X", "IDX", units=300.0, price=float("nan"), spot=100.0, date=T0)
+    with pytest.raises(ValidationError):                                   # a live leg with zero units
+        QuotedLegSnapshot("hedge:X", "IDX", units=0.0, price=100.0, spot=100.0, date=T0)
+    leg = QuotedLegSnapshot("hedge:X", "IDX", units=300.0, price=100.0, spot=100.0, date=T0)
+    with pytest.raises(ValidationError):                                   # key != position_id
+        BookSnapshot(date=T0, positions={}, environments={"IDX": E0}, quoted_legs={"hedge:Y": leg})
+    with pytest.raises(ValidationError):                                   # off-date leg
+        BookSnapshot(date=T1, positions={}, environments={"IDX": E1}, quoted_legs={"hedge:X": leg})
+    new = QuotedLegSnapshot("hedge:X", "IDX", units=300.0, price=101.0, spot=101.0, date=T1)
+    with pytest.raises(ValidationError):                                   # a foreign trade on a new leg
+        explain_quoted_leg(None, new, trades=[ExplainTrade("hedge:Z", 300.0, 101.0)])
+    with pytest.raises(ValidationError):                                   # a trade dated after the leg
+        explain_quoted_leg(None, new, trades=[ExplainTrade("hedge:X", 300.0, 101.0,
+                                                           timestamp=T1 + timedelta(days=1))])
+
+
+def test_portfolio_rejects_trades_outside_the_step():
+    pos0 = {"a": _pos("a", _call(), 2.0)}
+    b0 = BookSnapshot(date=T0, positions=pos0, environments={"IDX": E0})
+    p1 = _pos("n", _call(), 4.0, env=E1, date=T1)
+    b1 = BookSnapshot(date=T1, positions={"a": _pos("a", _call(), 2.0, env=E1, date=T1), "n": p1},
+                      environments={"IDX": E1})
+    u1 = _unit_t1(p1.snapshot.product)
+    stale = ExplainTrade("n", 4.0, u1, kind="open", timestamp=T0 - timedelta(days=30))
+    with pytest.raises(ValidationError):
+        explain_portfolio(b0, b1, trades=[stale])
+    ok = ExplainTrade("n", 4.0, u1, kind="open", timestamp=T1)
+    assert explain_portfolio(b0, b1, trades=[ok]).positions["n"].instrument is None
