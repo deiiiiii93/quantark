@@ -4905,6 +4905,14 @@ git commit -m "docs(pnlexplain): README, demo, public exports; support-matrix ac
 ```
 (`CLAUDE.md` is untracked in this repo; edit it locally, never `git add` it. If the sandbox refuses the `$(...)` substitution, paste the 20 lines literally into the third `-m` argument.)
 
+**Findings while landing (2026-09-02):** the worktree sandbox refuses edits to the main checkout's
+`CLAUDE.md` (the worktree has no copy: untracked files do not follow), so the Supporting Modules row is
+added at Stage 7 after `ExitWorktree`. The commit message body was assembled from the demo output by a
+scratch script and passed with `git commit -F`. `AmericanOptionAnalyticalEngine` takes
+`method=AmericanAnalyticalMethod.BS93` directly. A snowball's MC time grid is tied to its observation
+schedule, so the MC CRN test rolls the contract through `AutocallableLifecycleTracker.product_for_pricing`
+rather than assigning `maturity`.
+
 ---
 
 ## Self-review notes (run after Task 14)
