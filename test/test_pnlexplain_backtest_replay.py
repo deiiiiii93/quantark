@@ -127,3 +127,12 @@ def test_localvol_recalibration_lands_in_model_row(tmp_path):
     assert vol <= 1e-8 * max(1.0, total)
     assert model > 0.0
     assert results.explain_reconciliation_df.query("level == 'portfolio'")["ok"].all()
+
+
+def test_pnl_explain_field_is_appended_after_metadata_in_both_replay_configs():
+    """Positional construction of the configs must keep its existing slots (review finding)."""
+    from dataclasses import fields
+    from quantark.backtest.replay.config import AutocallableBacktestConfig, ReplayBacktestConfig
+    for cfg in (AutocallableBacktestConfig, ReplayBacktestConfig):
+        names = [f.name for f in fields(cfg)]
+        assert names[-2:] == ["metadata", "pnl_explain"], cfg.__name__

@@ -214,8 +214,9 @@ class AutocallableBacktestConfig:
     calculate_surfaces: bool = True
     calculate_event_probabilities: bool = True
     terminate_on_lifecycle_end: bool = True
-    pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Appended AFTER metadata so existing positional construction keeps its slots.
+    pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
 
     def __post_init__(self) -> None:
         if self.product is None:
@@ -283,8 +284,9 @@ class ReplayBacktestConfig:
     calculate_surfaces: bool = False
     calculate_event_probabilities: bool = True
     terminate_on_lifecycle_end: bool = True
-    pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Appended AFTER metadata so existing positional construction keeps its slots.
+    pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
 
     def __post_init__(self):
         if not self.products:

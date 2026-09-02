@@ -167,3 +167,10 @@ def test_multi_instrument_hedge_states_gap_is_zero():
     assert port["ok"].all()
     assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
     assert (results.explain_df["level"] == "position").any()
+
+
+def test_pnl_explain_field_is_appended_after_metadata():
+    """Positional construction of the config must keep its existing slots (review finding)."""
+    from dataclasses import fields
+    names = [f.name for f in fields(BacktestConfig)]
+    assert names[-2:] == ["metadata", "pnl_explain"]

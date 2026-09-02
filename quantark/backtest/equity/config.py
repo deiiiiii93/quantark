@@ -57,8 +57,9 @@ class BacktestConfig:
     calculate_greeks: bool = True
     greeks_method: str = "analytical"
     handle_lifecycle_events: bool = True
-    pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Appended AFTER metadata so existing positional construction keeps its slots.
+    pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
 
     def __post_init__(self):
         """Validate configuration parameters."""

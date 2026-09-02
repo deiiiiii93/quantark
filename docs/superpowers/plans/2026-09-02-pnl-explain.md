@@ -3770,6 +3770,9 @@ hedge test uses the vanilla short-call book instead. (3) A lagged-settlement bar
 suite's `ConstantEngine` with greeks off and the waterfall method only. (4) The barrier tracker
 re-stamps `valuation_point` daily: it is now a bookkeeping field of the lifecycle fingerprint (spec §8).
 (5) Float-schedule ledgers are read at `(date − manager.base_date)/365`, exactly as the manager does.
+(6) Code review 1b (gpt-5.6-sol): `pnl_explain` must be appended AFTER `metadata` in all three config
+dataclasses (equity `BacktestConfig`, replay `AutocallableBacktestConfig` / `ReplayBacktestConfig`) —
+inserting it before `metadata` shifted the positional constructor slot; field-order guard tests added.
 
 **Files:**
 - Create: `quantark/pnlexplain/equity/recorder.py`
