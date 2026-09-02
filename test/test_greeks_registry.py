@@ -136,3 +136,25 @@ def test_linear_order_matches_default_set():
 
     assert len(LINEAR_ORDER) == len(DEFAULT_SET)
     assert set(LINEAR_ORDER) == set(DEFAULT_SET)
+
+
+def test_resolve_route_mirrors_auto_routing():
+    from quantark.asset.equity.product.option.european_vanilla_option import EuropeanVanillaOption
+    from quantark.asset.equity.product.option.barrier_option import BarrierOption
+    from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+    from quantark.util.enum import OptionType
+    from quantark.util.enum.option_enums import BarrierType
+    from quantark.util.exceptions import ValidationError
+
+    calc = GreeksCalculator()
+    vanilla = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    barrier = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=120.0,
+                            barrier_type=BarrierType.UP_OUT, maturity=1.0)
+    assert calc.resolve_route(vanilla) == "analytical"
+    assert calc.resolve_route(vanilla, ["delta", "gamma", "charm"]) == "analytical"
+    assert calc.resolve_route(vanilla, ["delta", "vanna"]) == "numerical"
+    assert calc.resolve_route(vanilla, ["theta_1td"]) == "numerical"
+    assert calc.resolve_route(vanilla, ["veta"]) == "analytical"
+    assert calc.resolve_route(barrier) == "numerical"
+    with pytest.raises(ValidationError):
+        calc.resolve_route(vanilla, ["bogus"])

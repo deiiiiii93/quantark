@@ -174,6 +174,25 @@ class GreeksCalculator:
             theta_decomposition_mode=theta_decomposition_mode,
         )
 
+    def resolve_route(
+        self,
+        product: BaseEquityProduct,
+        greeks: Optional[Sequence[object]] = None,
+    ) -> str:
+        """The route ``calculate(method="auto")`` takes for this request.
+
+        Pure (no pricing): "analytical" for a European vanilla when every
+        requested name (default set when None) has a closed form under the
+        auto-routing rule, "numerical" otherwise. Lets callers that must know
+        the unit convention of the returned greeks (PnL explain) ask instead
+        of re-deriving the rule.
+        """
+        requests = registry.normalize_greeks(greeks)
+        if isinstance(product, EuropeanVanillaOption):
+            if requests is None or all(analytical.supports_request(r) for r in requests):
+                return "analytical"
+        return "numerical"
+
     def _normalize_greeks(
         self, greeks: Optional[Sequence[object]]
     ) -> Optional[set[str]]:
