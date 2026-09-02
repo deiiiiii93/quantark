@@ -121,6 +121,11 @@ class ProductReplay:
         self.daily_event_sink = daily_event_sink
         self.surfaces_sink = surfaces_sink
 
+        # PnL explain support: the recorder-owning engine flips record_events
+        # on; an explain-off run never touches events_today.
+        self.record_events: bool = False
+        self.events_today: list = []
+
         # Provenance of the IV-surface artifact used by the most recent
         # surface-mode build_env call (None in scalar mode).  The engine
         # folds this into the per-day state row when present.
@@ -531,12 +536,18 @@ class ProductReplay:
     ) -> None:
         event = self._tracker.settle_maturity_if_due(date, product, env, spot)
         if event is not None:
+            if self.record_events:
+                self.events_today.append(event)
             self.actions_sink.append(self._event_to_action_row(event))
 
     def apply_lifecycle_events(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> None:
+        if self.record_events:
+            self.events_today = []
         for event in self._tracker.observe(date, product, env, spot):
+            if self.record_events:
+                self.events_today.append(event)
             self.actions_sink.append(self._event_to_action_row(event))
 
     def _event_to_action_row(self, event) -> dict[str, Any]:

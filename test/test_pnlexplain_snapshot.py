@@ -139,3 +139,14 @@ def test_lifecycle_fingerprint_ignores_the_trackers_clock_stamp():
     assert lifecycle_fingerprint(a) == lifecycle_fingerprint(b)
     b.knocked_in = True
     assert lifecycle_fingerprint(a) != lifecycle_fingerprint(b)
+
+
+def test_lifecycle_fingerprint_ignores_the_replay_settlement_mirrors():
+    """Paying a determined receivable (state.settle()) is a time-step fact, not an event."""
+    s = AutocallableLifecycleState()
+    s.mark_ko(D0, cashflow=30.0, settlement_date=D0 + timedelta(days=2))
+    before = lifecycle_fingerprint(s)
+    assert s.pending_settlement_cashflow == 30.0 and not s.settled
+    s.settle()
+    assert s.settled and s.pending_settlement_cashflow == 0.0
+    assert lifecycle_fingerprint(s) == before

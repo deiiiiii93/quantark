@@ -681,10 +681,13 @@ become ISO strings, floats are kept exact. `None` states fingerprint to
 `("v1", None)`. The only excluded fields are the trackers' bookkeeping fields:
 the index sets `observed_ko_indices`, `observed_ki_indices`,
 `observed_coupon_indices` (they grow on every observation date whether or not
-anything fired) and the clock stamp `valuation_point` (re-stamped on every
-observation; the snapshot carries its own valuation point). They carry no
-pricing information (the pricing product is rolled from the schedule, not
-from these fields), and would otherwise flag a state change with no event.
+anything fired), the clock stamp `valuation_point` (re-stamped on every
+observation; the snapshot carries its own valuation point), and the replay
+engine's ledger mirrors `pending_settlement_cashflow` / `settled` (flipped by
+`state.settle()` when a receivable is PAID, which is a time-step fact read
+from the ledger, not a lifecycle event). They carry no pricing information
+(the pricing product is rolled from the schedule, the receivable is valued
+from the ledger), and would otherwise flag a state change with no event.
 `LIFECYCLE_EVENT` is changed iff the two fingerprints differ.
 
 Rules (all violations raise `ValidationError`):

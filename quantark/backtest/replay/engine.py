@@ -123,6 +123,15 @@ class ReplayBacktestEngine:
             self._replays.append(replay)
             self._quantities.append(float(bp.quantity))
 
+        # Optional daily PnL explain (quantark.pnlexplain); None changes nothing
+        self._explain_recorder = None
+        self._explain_frames = None
+        if getattr(config, "pnl_explain", None) is not None:
+            from quantark.pnlexplain.equity.recorder import ReplayPnLExplainRecorder
+            self._explain_recorder = ReplayPnLExplainRecorder(config.pnl_explain)
+            for replay in self._replays:
+                replay.record_events = True
+
     def run(self) -> "BookBacktestResults":
         dates = self._backtest_dates()
         if len(dates) == 0:
@@ -137,6 +146,8 @@ class ReplayBacktestEngine:
         self._terminated_all_settled = False
         for date in dates:
             date = pd.Timestamp(date).normalize()
+            # PnL explain: every trade from here on (rolls included) belongs to this day
+            trades_before = len(self._trades)
             market = self.config.market_data.get_market_row(date)
 
             if self.hedge.kind == "futures":
@@ -184,6 +195,10 @@ class ReplayBacktestEngine:
             ):
                 day_calibration_record = self._calibrate_day(date)
             pricing_started = time.perf_counter()
+
+            # PnL explain: capture today's alive contracts and engines BEFORE lifecycle events
+            if self._explain_recorder is not None:
+                self._explain_recorder.begin_day(self, date, env)
 
             # Initial book value: priced BEFORE lifecycle on the first day,
             # mirroring the single engine's pre-lifecycle initial value.
@@ -288,6 +303,11 @@ class ReplayBacktestEngine:
                 any_alive=any_alive,
                 receivable_pv=book_receivable_pv,
             )
+            # PnL explain: close the day against the recorded state
+            if self._explain_recorder is not None:
+                self._explain_recorder.end_day(
+                    self, date, env, market, selected, self._trades[trades_before:], self._states[-1],
+                )
             self._days_replayed += 1
             if self.config.terminate_on_lifecycle_end and all(
                 r.lifecycle.settled for r in self._replays
@@ -297,8 +317,12 @@ class ReplayBacktestEngine:
                 self._terminated_all_settled = True
                 break
 
+        self._explain_frames = (
+            self._explain_recorder.frames() if self._explain_recorder is not None else None
+        )
         return BookBacktestResults(
             config=self.config,
+            explain_frames=self._explain_frames,
             calibration_records=self._calibration_records,
             run_info=self._run_info(),
             states=self._states,

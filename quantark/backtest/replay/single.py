@@ -65,6 +65,7 @@ class AutocallableBacktestEngine:
             calculate_surfaces=config.calculate_surfaces,
             calculate_event_probabilities=config.calculate_event_probabilities,
             terminate_on_lifecycle_end=config.terminate_on_lifecycle_end,
+            pnl_explain=config.pnl_explain,
             metadata=config.metadata,
         )
         # Honor the single config's explicit futures roll policy.
@@ -133,6 +134,7 @@ class AutocallableBacktestEngine:
             event_probabilities=inner._event_probabilities,
             calibration_records=inner._calibration_records,
             run_info=inner._run_info(),
+            explain_frames=inner._explain_frames,
         )
         records_path = getattr(
             self.config.engine_config.vol_model_calibration, "records_path", None

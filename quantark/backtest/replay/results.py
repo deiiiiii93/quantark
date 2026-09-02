@@ -7,6 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+from datetime import datetime
+
 import pandas as pd
 
 from quantark.util.io import atomic_write_json
@@ -29,6 +31,7 @@ class AutocallableBacktestResults:
         event_probabilities: list[dict[str, Any]],
         calibration_records: Optional[list[dict[str, Any]]] = None,
         run_info: Optional[dict[str, Any]] = None,
+        explain_frames=None,
     ) -> None:
         self.config = config
         self._run_info = dict(run_info or {})
@@ -42,6 +45,8 @@ class AutocallableBacktestResults:
         self._event_probabilities = event_probabilities
         self._calibration_records = [dict(r) for r in (calibration_records or [])]
         self._run_info = dict(run_info or {})
+        # (explain_df, reconciliation_df) from the PnL explain recorder, or None
+        self._explain_frames = explain_frames
 
     @staticmethod
     def _frame(rows: list[dict[str, Any]], index: str | None = None) -> pd.DataFrame:
@@ -50,6 +55,22 @@ class AutocallableBacktestResults:
             df[index] = pd.to_datetime(df[index])
             df = df.set_index(index)
         return df
+
+    @property
+    def explain_df(self) -> pd.DataFrame:
+        """Daily PnL explain rows (empty, fixed columns, when the explain is off)."""
+        if self._explain_frames is None:
+            from quantark.pnlexplain.base import rows_to_frame
+            return rows_to_frame([], date=datetime(1970, 1, 1)).iloc[0:0]
+        return self._explain_frames[0]
+
+    @property
+    def explain_reconciliation_df(self) -> pd.DataFrame:
+        """Daily explain reconciliation (empty, fixed columns, when the explain is off)."""
+        if self._explain_frames is None:
+            from quantark.pnlexplain.equity.recorder import RECON_COLUMNS
+            return pd.DataFrame(columns=RECON_COLUMNS)
+        return self._explain_frames[1]
 
     @property
     def states_df(self) -> pd.DataFrame:
@@ -200,7 +221,7 @@ class AutocallableBacktestResults:
 class BookBacktestResults:
     def __init__(self, *, config, states, greeks, rebalances, trades, actions,
                  daily_event_summary, event_probabilities, surfaces, products_meta,
-                 calibration_records=None, run_info=None):
+                 calibration_records=None, run_info=None, explain_frames=None):
         self.config = config
         self._states = states
         self._greeks = greeks
@@ -213,6 +234,8 @@ class BookBacktestResults:
         self._products_meta = products_meta
         self._calibration_records = [dict(r) for r in (calibration_records or [])]
         self._run_info = dict(run_info or {})
+        # (explain_df, reconciliation_df) from the PnL explain recorder, or None
+        self._explain_frames = explain_frames
 
     @staticmethod
     def _frame(rows, index=None):
@@ -220,6 +243,20 @@ class BookBacktestResults:
         if index and not df.empty:
             df = df.set_index(index)
         return df
+
+    def explain_df(self) -> pd.DataFrame:
+        """Daily PnL explain rows (empty, fixed columns, when the explain is off)."""
+        if self._explain_frames is None:
+            from quantark.pnlexplain.base import rows_to_frame
+            return rows_to_frame([], date=datetime(1970, 1, 1)).iloc[0:0]
+        return self._explain_frames[0]
+
+    def explain_reconciliation_df(self) -> pd.DataFrame:
+        """Daily explain reconciliation (empty, fixed columns, when the explain is off)."""
+        if self._explain_frames is None:
+            from quantark.pnlexplain.equity.recorder import RECON_COLUMNS
+            return pd.DataFrame(columns=RECON_COLUMNS)
+        return self._explain_frames[1]
 
     def states_df(self): return self._frame(self._states)
     def greeks_df(self): return self._frame(self._greeks)

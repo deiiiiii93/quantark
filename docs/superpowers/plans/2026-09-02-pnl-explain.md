@@ -960,10 +960,13 @@ def check_contract_roll(product_t0: Any, product_alive_t1: Any, calendar_days: i
 
 BOOKKEEPING_FIELDS = frozenset({
     "observed_ko_indices", "observed_ki_indices", "observed_coupon_indices",
-    "valuation_point",
-})   # change on every observation date without an event; pricing-neutral (spec §8).
+    "valuation_point", "pending_settlement_cashflow", "settled",
+})   # change without an event; pricing-neutral (spec §8).
 # ``valuation_point`` is the tracker's last-observation clock stamp: the snapshot
 # carries its own valuation point, so the stamp is bookkeeping, not contract state.
+# ``pending_settlement_cashflow`` / ``settled`` mirror the ledger for the replay
+# engine and flip when a receivable is PAID (``state.settle()``), which is a
+# time-step fact read from the ledger, not a lifecycle event.
 
 
 def lifecycle_fingerprint(state: Any) -> tuple:
@@ -4215,15 +4218,31 @@ def test_replay_book_explain_off_identical_and_on_reconciles():
 
 
 def test_replay_roll_produces_close_and_open_legs():
+    from quantark.backtest.futures_ledger import FuturesRollPolicy
+    # The default policy (roll 5 days before expiry) picks IF2402 from day one, so nothing ever
+    # rolls in the 5-day golden window. Rolling 3 days before the 2024-01-07 expiry holds IF2401
+    # for two days and rolls into IF2402 on 2024-01-04, the day the book knocks out: the new leg
+    # is opened by the roll and closed by the hedge the same afternoon (an intraday round trip,
+    # which the recorder books as a zero-unit tombstone leg priced at its close).
     cfg = fixtures.make_book_config()
+    cfg.hedge.roll_policy = FuturesRollPolicy(roll_days_before_expiry=3)
     cfg.pnl_explain = WF
     results = ReplayBacktestEngine(cfg).run()
     trades = results.trades_df()
-    assert set(trades["trade_type"]) >= {"roll_close", "roll_open"}    # IF2401 expires 2024-01-07 inside the window
+    assert set(trades["trade_type"]) >= {"roll_close", "roll_open"}
     ex = results.explain_df()
     assert (ex["term"] == "trade:roll_close").any() and (ex["term"] == "trade:roll_open").any()
-    port = results.explain_reconciliation_df().query("level == 'portfolio'")
+    assert (ex["position_id"] == "hedge:IF2401").any() and (ex["position_id"] == "hedge:IF2402").any()
+    recon = results.explain_reconciliation_df()
+    port = recon[recon["level"] == "portfolio"]
     assert port["ok"].all()
+    assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
+    # the explain is a pure observer: the same run without it books the same states and trades
+    off_cfg = fixtures.make_book_config()
+    off_cfg.hedge.roll_policy = FuturesRollPolicy(roll_days_before_expiry=3)
+    off = ReplayBacktestEngine(off_cfg).run()
+    pd.testing.assert_frame_equal(results.states_df(), off.states_df())
+    pd.testing.assert_frame_equal(results.trades_df(), off.trades_df())
 
 
 def test_single_engine_passthrough():
