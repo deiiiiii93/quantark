@@ -34,7 +34,7 @@ import warnings
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -131,6 +131,28 @@ class PortfolioLifecycleManager:
                 )
                 self._barrier[position_id] = tracker
                 position.lifecycle_state = tracker.state
+
+
+    def pricing_products(self, portfolio, date) -> Dict[str, Any]:
+        """Per-position pricing product for ``date`` under the CURRENT lifecycle state.
+
+        Pure accessor for the PnL explain recorder: tracked positions return
+        ``tracker.product_for_pricing(date, env)`` (the alive contract rolled
+        to ``date``; call it before ``process_day`` to get the pre-event
+        contract), untracked positions return their current product. Nothing
+        is mutated.
+        """
+        date = pd.Timestamp(date).normalize()
+        out: Dict[str, Any] = {}
+        for position_id, position in portfolio.positions.items():
+            env = portfolio.pricing_environments[position.underlying]
+            if position_id in self._autocallable:
+                out[position_id] = self._autocallable[position_id].product_for_pricing(date, env)
+            elif position_id in self._barrier:
+                out[position_id] = self._barrier[position_id].product_for_pricing(date, env)
+            else:
+                out[position_id] = position.product
+        return out
 
     def date_for_day(self, day_index: int, day_date: Optional[datetime]) -> pd.Timestamp:
         """Resolve the calendar date of a replay day."""

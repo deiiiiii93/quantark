@@ -2774,7 +2774,7 @@ git commit -m "feat(pnlexplain): theta sub-rows (contract/ledger carry/r/q/conve
 
 **Files:**
 - Modify: `quantark/asset/equity/lifecycle/manager.py` (add `pricing_products` after `register_positions`)
-- Test: `test/test_pnlexplain_lifecycle.py`
+- Test: `test/test_pnlexplain_lifecycle_days.py` (the transition unit tests of Task 5 already own `test_pnlexplain_lifecycle.py`)
 
 **Interfaces:**
 - Consumes: `explain`, `LifecycleTransition` (Task 5), trackers `AutocallableLifecycleTracker` / `BarrierLifecycleTracker`.
@@ -2783,7 +2783,7 @@ git commit -m "feat(pnlexplain): theta sub-rows (contract/ledger carry/r/q/conve
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# test/test_pnlexplain_lifecycle.py
+# test/test_pnlexplain_lifecycle_days.py
 """Spec test 5: KO day, coupon day, terminal carry, receivable payment, barrier KI substitution."""
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -2874,8 +2874,12 @@ def _transition_pair(tracker, engine, t0, t1, spot0, spot1):
     override = getattr(tracker, "engine_for_pricing", None)
     if override is not None and override() is not None:
         engine_t1 = override()
-    s0 = ValuationSnapshot(product_t0, engine, e0, date=t0, quantity=Q, lifecycle_state=state_before)
-    s1 = ValuationSnapshot(product_t1, engine_t1, e1, date=t1, quantity=Q, lifecycle_state=state_after)
+    # Float-schedule products keep their ledger in contract time: the tracker stamps a
+    # numeric ValuationPoint on the state at every observation, and the snapshot carries it.
+    s0 = ValuationSnapshot(product_t0, engine, e0, date=t0, quantity=Q, lifecycle_state=state_before,
+                           valuation_point=getattr(state_before, "valuation_point", None))
+    s1 = ValuationSnapshot(product_t1, engine_t1, e1, date=t1, quantity=Q, lifecycle_state=state_after,
+                           valuation_point=getattr(state_after, "valuation_point", None))
     tr = LifecycleTransition(product_alive_t1=product_alive, engine_alive_t1=engine,
                              state_before=state_before, state_after=state_after, events=tuple(events))
     return s0, s1, tr
@@ -2986,7 +2990,7 @@ def test_manager_pricing_products_is_pure():
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `PYTEST test/test_pnlexplain_lifecycle.py -q`
+Run: `PYTEST test/test_pnlexplain_lifecycle_days.py -q`
 Expected: `test_manager_pricing_products_is_pure` FAILS with `AttributeError: ... has no attribute 'pricing_products'`; the other four pass (they exercise Task 5–8 code). `PhoenixQuadEngine` accepts the float-based schedule `create_standard_phoenix` builds (its validation covers vol, dividend and time-step bounds only); `PhoenixQuadEngine(QuadParams())` is the pinned engine.
 
 - [ ] **Step 3: Implement `pricing_products`**
@@ -3017,13 +3021,13 @@ Expected: `test_manager_pricing_products_is_pure` FAILS with `AttributeError: ..
 
 - [ ] **Step 4: Run tests**
 
-Run: `PYTEST test/test_pnlexplain_lifecycle.py test/test_backtest_lifecycle.py test/test_equity_lifecycle_trackers.py -q`
+Run: `PYTEST test/test_pnlexplain_lifecycle_days.py test/test_backtest_lifecycle.py test/test_equity_lifecycle_trackers.py -q`
 Expected: all passed (the two existing suites prove `process_day` is untouched).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add quantark/asset/equity/lifecycle/manager.py test/test_pnlexplain_lifecycle.py
+git add quantark/asset/equity/lifecycle/manager.py test/test_pnlexplain_lifecycle_days.py
 git commit -m "feat(pnlexplain): lifecycle-day tests (KO, coupon, terminal carry, KI substitution) + manager.pricing_products" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_019fnLipZtAJAPAQJLLEXQMb"
 ```
 
