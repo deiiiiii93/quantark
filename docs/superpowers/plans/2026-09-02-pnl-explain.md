@@ -1668,11 +1668,16 @@ def test_sticky_moneyness_is_order_independent(order):
                            spot_convention=GreekConvention.STICKY_MONEYNESS)
     res = explain(s0, s1, config=cfg)
     assert res.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=_tol(res.total_pnl))
-    # sticky-moneyness and sticky-strike distribute differently between SPOT and VOL
     res_strike = explain(s0, s1, config=PnLExplainConfig(methods=(ExplainMethod.WATERFALL,), waterfall_order=order))
-    assert res.by_factor(ExplainMethod.WATERFALL)["spot"] != pytest.approx(
-        res_strike.by_factor(ExplainMethod.WATERFALL)["spot"], abs=1e-9)
     assert res.total_pnl == pytest.approx(res_strike.total_pnl)
+    spot_m = res.by_factor(ExplainMethod.WATERFALL)["spot"]
+    spot_k = res_strike.by_factor(ExplainMethod.WATERFALL)["spot"]
+    if order.index(Factor.SPOT) < order.index(Factor.VOL):
+        # the convention decides how the t0 surface travels with spot: SPOT and VOL split differently
+        assert spot_m != pytest.approx(spot_k, abs=1e-9)
+    else:
+        # once the t1 surface is applied, spot moves under it: the convention is moot by design
+        assert spot_m == pytest.approx(spot_k, abs=1e-12)
 
 
 def test_date_based_and_float_rolls_give_the_same_time_row():
