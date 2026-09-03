@@ -26,6 +26,14 @@ Settlement convention: determination removes the contingent claim, a fixed
 receivable remains until payment, and paid cash then remains in portfolio
 value (``live MTM + pending PV + paid cash``). Paid ledger cash earns no
 interest within the path.
+
+The manager also ages untracked *schedule-free* float-maturity contracts
+(``float_roll.FLOAT_ROLLABLE_PRODUCTS``) by ``days / 365`` from the day it
+first sees the position, so a ``maturity=1.0`` vanilla is not repriced as a
+one-year option on every day of the run. Untracked products with a float
+maturity and no roll rule (schedule-bearing contracts) are repriced with a
+constant maturity and warn once; float-maturity ``Futures`` hedges are a
+constant-maturity proxy by design and never warn.
 """
 
 from __future__ import annotations
@@ -51,6 +59,7 @@ from .cashflows import (
     ValuationPoint,
 )
 from .events import LifecycleEvent
+from .float_roll import FloatMaturityRoller, has_unrolled_float_maturity, is_float_rollable
 
 
 @dataclass(frozen=True)
@@ -85,6 +94,9 @@ class PortfolioLifecycleManager:
         self._cashflow_underlyings: Dict[str, str] = {}
         self._autocallable: Dict[str, AutocallableLifecycleTracker] = {}
         self._barrier: Dict[str, BarrierLifecycleTracker] = {}
+        # Untracked schedule-free float-maturity contracts (patch spec 2026-09-03 §4)
+        self._float_roller = FloatMaturityRoller()
+        self._unrolled_warned: set = set()
 
     @property
     def realized_cash(self) -> float:
@@ -133,14 +145,35 @@ class PortfolioLifecycleManager:
                 position.lifecycle_state = tracker.state
 
 
+    def _roll_untracked(self, position_id: str, position, date: pd.Timestamp):
+        """Rolled copy of a schedule-free float-maturity product, else None.
+
+        Untracked products with a float maturity but no roll rule are repriced with
+        a constant maturity; warn once per position so the choice is visible.
+        """
+        product = position.product
+        if not is_float_rollable(product):
+            if has_unrolled_float_maturity(product) and position_id not in self._unrolled_warned:
+                self._unrolled_warned.add(position_id)
+                warnings.warn(
+                    f"position {position_id} ({type(product).__name__}) has a float maturity and "
+                    "no roll rule; it is repriced with a constant maturity every day",
+                    UserWarning,
+                )
+            return None
+        self._float_roller.register(position_id, product, date)
+        return self._float_roller.rolled(position_id, product, date)
+
     def pricing_products(self, portfolio, date) -> Dict[str, Any]:
         """Per-position pricing product for ``date`` under the CURRENT lifecycle state.
 
         Pure accessor for the PnL explain recorder: tracked positions return
         ``tracker.product_for_pricing(date, env)`` (the alive contract rolled
         to ``date``; call it before ``process_day`` to get the pre-event
-        contract), untracked positions return their current product. Nothing
-        is mutated.
+        contract); untracked schedule-free float-maturity products return a
+        fresh copy rolled to ``date``; other untracked positions return their
+        current product. No position is mutated (the roller only records a
+        position's first-sight base).
         """
         date = pd.Timestamp(date).normalize()
         out: Dict[str, Any] = {}
@@ -151,7 +184,8 @@ class PortfolioLifecycleManager:
             elif position_id in self._barrier:
                 out[position_id] = self._barrier[position_id].product_for_pricing(date, env)
             else:
-                out[position_id] = position.product
+                rolled = self._roll_untracked(position_id, position, date)
+                out[position_id] = position.product if rolled is None else rolled
         return out
 
     def date_for_day(self, day_index: int, day_date: Optional[datetime]) -> pd.Timestamp:
@@ -186,6 +220,11 @@ class PortfolioLifecycleManager:
                         portfolio, position_id, position, env, spot, date
                     )
                 )
+            else:
+                rolled = self._roll_untracked(position_id, position, date)
+                if rolled is not None:
+                    position.product = rolled
+        self._float_roller.retain(portfolio.positions.keys())
         self._revalue_ledger(portfolio, date)
         return processed
 

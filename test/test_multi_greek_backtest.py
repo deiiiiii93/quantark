@@ -45,11 +45,18 @@ def make_config(strategy):
 
 class TestDeltaGammaVegaBacktest:
     def test_backtest_neutralizes_all_greeks(self):
+        from quantark.backtest.strategy.hedge_instruments import OptionHedgeInstrument
+
+        # The book's maturity=1.0 call is rolled daily (patch spec 2026-09-03 §4), so
+        # the default 1Y ATM vega option created on day one would replicate it exactly
+        # and the 3x3 solve would drop the other two instruments. A 9M vega option
+        # keeps the three-instrument system non-degenerate.
         strategy = DeltaGammaVegaNeutralStrategy(
             delta_threshold=1.0,
             gamma_threshold=0.5,
             vega_threshold=0.5,
             rebalance_frequency="continuous",
+            vega_instrument=OptionHedgeInstrument(name="vega_option", tenor=0.75, moneyness=1.0),
         )
         engine = BacktestEngine(make_config(strategy))
         results = engine.run()

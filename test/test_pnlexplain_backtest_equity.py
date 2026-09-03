@@ -173,6 +173,19 @@ def test_ko_book_with_zero_threshold_closes_the_hedge_and_reconciles():
     assert results.states_df["num_positions"].iloc[-1] == 0
 
 
+def test_untracked_vanilla_is_rolled_and_the_time_row_carries_contract_theta():
+    cfg = make_multi_config(DeltaNeutralStrategy(delta_threshold=1e12))       # no hedging: one position
+    cfg.pnl_explain = PnLExplainConfig()
+    results = BacktestEngine(cfg).run()
+    ex = results.explain_df
+    pos = ex[ex["level"] == "position"]
+    contract_theta = pos[(pos["term"] == "theta_contract") & (pos["method"] == "taylor")]
+    assert len(contract_theta) == len(results.states_df) - 1
+    assert (contract_theta["pnl"] != 0.0).all()                              # rolled: the contract ages
+    port = results.explain_reconciliation_df.query("level == 'portfolio'")
+    assert port["ok"].all()
+
+
 def test_multi_instrument_hedge_states_gap_is_zero():
     cfg = make_multi_config(DeltaGammaNeutralStrategy(delta_threshold=1.0, gamma_threshold=0.5,
                                                       rebalance_frequency="continuous"))

@@ -199,14 +199,16 @@ class BacktestEngine:
         # Record initial portfolio value
         self._initial_portfolio_value = self.portfolio.get_portfolio_value()
 
-        # Attach lifecycle trackers to lifecycle-bearing positions. Registered
+        # The lifecycle manager always exists: it also rolls schedule-free
+        # float-maturity contracts (patch spec 2026-09-03 §4). Lifecycle TRACKERS
+        # (Snowball/Phoenix and barrier-family KO/KI/coupon/maturity/expiry
+        # handling) attach only when handle_lifecycle_events is on; registered
         # once, before stepping, so hedge instruments added later stay
-        # untracked. Snowball/Phoenix and barrier-family products get realized
-        # KO/KI/coupon/maturity/expiry handling; everything else is a no-op.
+        # untracked either way.
+        self.lifecycle_manager = PortfolioLifecycleManager(
+            base_date=self.config.start_date
+        )
         if self.config.handle_lifecycle_events:
-            self.lifecycle_manager = PortfolioLifecycleManager(
-                base_date=self.config.start_date
-            )
             self.lifecycle_manager.register_positions(self.portfolio)
             if self.lifecycle_manager.num_tracked > 0:
                 self.logger.logger.info(

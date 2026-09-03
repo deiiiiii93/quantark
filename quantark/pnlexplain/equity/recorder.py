@@ -51,7 +51,12 @@ def _finite(value: Any, what: str) -> float:
 
 
 def _is_unrolled_float_contract(product_alive: Any, product_held: Any) -> bool:
-    """True when the engine hands back the SAME float-maturity contract, unrolled."""
+    """True when the holder hands back the SAME float-maturity contract, unrolled.
+
+    Futures hedges (static maturity by design) and schedule-bearing untracked
+    products are repriced with a constant maturity; schedule-free contracts are
+    rolled by the lifecycle manager and arrive as new objects (patch spec §4).
+    """
     if product_alive is not product_held:
         return False                      # a tracker rolled it (a new object)
     if getattr(product_held, "maturity", None) is None:
@@ -170,9 +175,11 @@ class PnLExplainRecorder:
                 "product_alive": products[pid], "engine_alive": pos.engine, "underlying": pos.underlying,
                 "quantity": float(pos.quantity), "state_ref": getattr(pos, "lifecycle_state", None),
                 "state_before": deepcopy(getattr(pos, "lifecycle_state", None)),
-                # The equity BacktestEngine reprices an untracked float-maturity product with a
-                # CONSTANT time to maturity (it never rolls it). Declare that explicitly so the
-                # time row explains what was booked instead of guessing a roll (spec §8).
+                # Untracked float-maturity products WITHOUT a roll rule (Futures hedges by
+                # design, schedule-bearing contracts) are repriced with a CONSTANT time to
+                # maturity. Declare that explicitly so the time row explains what was booked
+                # instead of guessing a roll (spec §8 as amended); schedule-free contracts
+                # arrive rolled (a new object) and take the ordinary roll check.
                 "roll_days": 0 if _is_unrolled_float_contract(products[pid], pos.product) else None,
             }
 

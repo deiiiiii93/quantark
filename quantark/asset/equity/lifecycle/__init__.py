@@ -15,6 +15,7 @@ from .cashflows import (
     ValuationPoint,
 )
 from .events import LifecycleEvent, LifecycleEventType
+from .float_roll import FLOAT_ROLLABLE_PRODUCTS, FloatMaturityRoller, is_float_rollable
 from .manager import PortfolioLifecycleManager, ProcessedLifecycleEvent
 from .state import (
     AutocallableLifecycleState,
@@ -33,6 +34,9 @@ __all__ = [
     "ValuationPoint",
     "PortfolioLifecycleManager",
     "ProcessedLifecycleEvent",
+    "FloatMaturityRoller",
+    "FLOAT_ROLLABLE_PRODUCTS",
+    "is_float_rollable",
     "AutocallableLifecycleState",
     "BarrierLifecycleState",
     "EquityOptionLifecycleState",

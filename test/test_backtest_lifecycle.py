@@ -14,6 +14,7 @@ adapter's stochastic path is not suitable for an exact event assertion).
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
@@ -183,6 +184,24 @@ class TestBacktestLifecycle:
         events = results.get_lifecycle_events()
         assert len(events) == 0
         assert results.states_df["num_positions"].iloc[-1] == 1
+
+    def test_disabled_flag_still_rolls_schedule_free_products(self):
+        from quantark.asset.equity.engine.analytical import BlackScholesEngine
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+
+        config = _make_config(handle_lifecycle_events=False)
+        vanilla = Position(
+            product=EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0),
+            quantity=1.0, entry_price=5.0, underlying=UNDERLYING, engine=BlackScholesEngine(),
+            entry_timestamp=START,
+        )
+        config.initial_positions.append(vanilla)
+        engine = BacktestEngine(config)
+        engine.run()
+        held = {type(p.product).__name__: p.product for p in engine.portfolio.positions.values()}
+        days = (config.end_date - START).days
+        assert held["EuropeanVanillaOption"].maturity == pytest.approx(1.0 - days / 365.0, abs=1e-15)
+        assert held["BarrierOption"].maturity == 1.0          # untracked barrier: no roll rule, unchanged
 
     def test_delayed_settlement_is_pending_before_it_becomes_cash(self):
         convention = SettlementConvention(
