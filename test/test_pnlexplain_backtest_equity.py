@@ -141,11 +141,9 @@ def test_lifecycle_ko_with_settlement_lag_reconciles_every_day():
     assert states.loc[paid_day, "paid_cash"] != 0.0
 
 
-def test_spot_hedge_adjusts_identity_holds_states_gap_documented():
+def test_spot_hedge_adjusts_states_gap_is_zero():
     # Vanilla short-call book: the delta never vanishes, so the simple executor adjusts daily.
-    # (On the barrier book the executor would try to set its hedge to exactly zero after the
-    # KO and Portfolio.update_position rejects that with the explain OFF as well — a
-    # pre-existing engine limitation, not a fixture for this test.)
+    # Average-cost accounting (patch spec §3) makes the engine's own P&L the value identity.
     cfg = make_multi_config(DeltaNeutralStrategy(delta_threshold=0.0))
     cfg.pnl_explain = PnLExplainConfig()
     results = BacktestEngine(cfg).run()
@@ -154,13 +152,25 @@ def test_spot_hedge_adjusts_identity_holds_states_gap_documented():
     assert len(port) == 2 * (len(results.states_df) - 1)          # two methods, from day two
     assert port["ok"].all()
     trades = results.trades_df
-    assert len(trades) > 1
-    # the simple executor keeps the original entry price on adjusts: gap_states is reported, and it
-    # is genuinely non-zero on adjust days (the documented pre-existing accounting quirk)
-    assert port["gap_states"].notna().all()
-    assert (port["gap_states"].abs() > 1e-8 * port["expected"].abs().clip(lower=1.0)).any()
+    assert len(trades) > 1 and (trades["trade_type"] == "adjust").any()
+    assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
     ex = results.explain_df
     assert (ex["method"] == "taylor").any() and (ex["factor"] == "trade").any()
+
+
+def test_ko_book_with_zero_threshold_closes_the_hedge_and_reconciles():
+    # After the KO the book's delta is exactly the hedge's: the executor nets it to zero.
+    # Before the patch Portfolio.update_position raised "Quantity cannot be zero" here.
+    results = BacktestEngine(_lifecycle_config(WF, delta_threshold=0.0)).run()
+    events = results.get_lifecycle_events()
+    ko_day = pd.Timestamp(events.index[0])
+    trades = results.trades_df
+    closes = trades[trades["trade_type"] == "close"]
+    assert len(closes) == 1 and pd.Timestamp(closes.index[0]).normalize() == ko_day
+    port = results.explain_reconciliation_df.query("level == 'portfolio'")
+    assert port["ok"].all()
+    assert (port["gap_states"].abs() <= 1e-8 * port["expected"].abs().clip(lower=1.0)).all()
+    assert results.states_df["num_positions"].iloc[-1] == 0
 
 
 def test_multi_instrument_hedge_states_gap_is_zero():

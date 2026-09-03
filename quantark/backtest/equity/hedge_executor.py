@@ -15,6 +15,7 @@ from .state import TradeRecord
 from quantark.backtest.transaction_costs import TransactionCostModel
 from quantark.util.enum.deltaone_enums import DeltaOneType
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 
 class HedgeExecutor:
@@ -27,12 +28,19 @@ class HedgeExecutor:
     - Calculating transaction costs
     - Recording trade details
 
+    Average-cost accounting (patch spec 2026-09-03 §3): increases blend the
+    entry price, reductions / flips / closes realise P&L into
+    ``realized_pnl``, and a hedge that nets to exactly zero is closed and
+    removed from the portfolio (a zero quantity is not a position).
+
     Attributes:
         portfolio: Portfolio to manage
         transaction_cost_model: Cost model for trades
         hedge_instrument_type: 'spot' or 'futures'
         futures_maturity: Maturity for futures contracts (if used)
         futures_multiplier: Multiplier for futures contracts
+        realized_pnl: Cumulative realised P&L of reduced, flipped and closed
+            hedge lots (added to the backtest's net P&L)
     """
 
     def __init__(
@@ -75,6 +83,9 @@ class HedgeExecutor:
         # Track hedge positions
         self._hedge_position_ids: Dict[str, str] = {}  # underlying -> position_id
         self._engine = DeltaOneEngine()
+        # Average-cost accounting (patch spec 2026-09-03 §3): realised P&L of reduced,
+        # flipped and closed hedge lots. BacktestEngine adds it to net P&L.
+        self.realized_pnl: float = 0.0
 
     def execute_hedge(
         self,
@@ -215,18 +226,45 @@ class HedgeExecutor:
         current_time: datetime,
         reason: str,
     ) -> TradeRecord:
-        """Update existing hedge position."""
+        """Update an existing hedge position at average cost.
+
+        Mirrors ``MultiInstrumentHedgeExecutor._adjust_contract``: an increase
+        blends the entry price, a reduction realises P&L on the closed part, a
+        sign flip realises the old lot and re-enters at today's price, and a
+        quantity that nets to zero closes and removes the position.
+        """
         position = self.portfolio.positions[position_id]
         old_quantity = position.quantity
+        entry = position.entry_price
         new_quantity = old_quantity + hedge_size
+        entry_after: Optional[float]
 
-        # Update position quantity
-        self.portfolio.update_position(position_id=position_id, quantity=new_quantity)
+        if is_zero(new_quantity):
+            # net to zero: realise the whole lot and drop the position (a zero quantity
+            # is not a position; this used to raise inside Portfolio.update_position)
+            self.realized_pnl += (hedge_price - entry) * old_quantity
+            self.portfolio.remove_position(position_id)
+            del self._hedge_position_ids[underlying]
+            trade_type, action, entry_after = "close", "close_hedge", None
+        elif old_quantity * new_quantity < 0:
+            # sign flip: realise the old lot, re-enter the remainder at today's price
+            self.realized_pnl += (hedge_price - entry) * old_quantity
+            self.portfolio.update_position(position_id, quantity=new_quantity, entry_price=hedge_price)
+            trade_type, action, entry_after = "adjust", "flip_hedge", hedge_price
+        elif abs(new_quantity) > abs(old_quantity):
+            # increase: blend the entry price, realise nothing
+            blended = (entry * old_quantity + hedge_price * hedge_size) / new_quantity
+            self.portfolio.update_position(position_id, quantity=new_quantity, entry_price=blended)
+            trade_type, action, entry_after = "adjust", "increase_hedge", blended
+        else:
+            # reduce: realise P&L on the closed part, keep the entry price
+            self.realized_pnl += (hedge_price - entry) * (old_quantity - new_quantity)
+            self.portfolio.update_position(position_id, quantity=new_quantity)
+            trade_type, action, entry_after = "adjust", "reduce_hedge", entry
 
-        # Create trade record
-        trade_record = TradeRecord(
+        return TradeRecord(
             timestamp=current_time,
-            trade_type="adjust",
+            trade_type=trade_type,
             instrument_type=self.hedge_instrument_type,
             underlying=underlying,
             quantity=hedge_size,
@@ -236,13 +274,12 @@ class HedgeExecutor:
             reason=reason,
             position_id=position_id,
             metadata={
-                "action": "update_hedge",
+                "action": action,
                 "old_quantity": old_quantity,
                 "new_quantity": new_quantity,
+                "entry_price_after": entry_after,
             },
         )
-
-        return trade_record
 
     def _create_zero_trade_record(
         self, underlying: str, current_time: datetime, reason: str
@@ -328,7 +365,8 @@ class HedgeExecutor:
             trade_type="close",
         )
 
-        # Remove position
+        # Realise the lot, then remove the position
+        self.realized_pnl += (close_price - position.entry_price) * position.quantity
         self.portfolio.remove_position(position_id)
         del self._hedge_position_ids[underlying]
 
@@ -360,6 +398,7 @@ class HedgeExecutor:
             "hedge_instrument_type": self.hedge_instrument_type,
             "num_hedge_positions": len(self._hedge_position_ids),
             "underlyings_hedged": list(self._hedge_position_ids.keys()),
+            "realized_pnl": self.realized_pnl,
         }
 
     def __repr__(self) -> str:
