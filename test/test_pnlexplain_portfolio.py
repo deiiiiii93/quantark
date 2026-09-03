@@ -258,6 +258,47 @@ def test_quoted_leg_validation():
                                                            timestamp=T1 + timedelta(days=1))])
 
 
+def test_identity_tombstone_cost_and_timezone_validation():
+    """Review findings: no underlying switch under one id, quoted legs strictly chronological, an
+    opened-and-closed leg is a zero-unit tombstone, standalone costs validated, tz-aware stamps
+    rejected as ValidationError (never TypeError), opening steps have no naive lower bound."""
+    from datetime import timezone
+    p0 = _pos("a", _call(), 2.0)
+    swapped = PositionSnapshot(position_id="a", underlying="OTHER",
+                               snapshot=ValuationSnapshot(_call(days=3), ENG, E1, date=T1, quantity=2.0))
+    with pytest.raises(ValidationError, match="switches underlying"):
+        explain_position(p0, swapped)
+    l0 = QuotedLegSnapshot("hedge:X", "IDX", units=300.0, price=100.0, spot=100.0, date=T0)
+    with pytest.raises(ValidationError, match="switches underlying"):
+        explain_quoted_leg(l0, QuotedLegSnapshot("hedge:X", "OTHER", units=300.0, price=101.0, spot=101.0, date=T1))
+    with pytest.raises(ValidationError, match="must be after"):
+        explain_quoted_leg(l0, QuotedLegSnapshot("hedge:X", "IDX", units=300.0, price=101.0, spot=101.0, date=T0))
+    # opened and closed within the step: a tombstone with units is rejected, a zero-unit one is the round trip
+    round_trip = [ExplainTrade("hedge:X", 300.0, 100.0, kind="open", timestamp=T1),
+                  ExplainTrade("hedge:X", -300.0, 101.0, kind="close", timestamp=T1)]
+    with pytest.raises(ValidationError, match="zero units"):
+        explain_quoted_leg(None, QuotedLegSnapshot("hedge:X", "IDX", units=300.0, price=101.0, spot=101.0,
+                                                   date=T1, tombstone=True), trades=round_trip)
+    res = explain_quoted_leg(None, QuotedLegSnapshot("hedge:X", "IDX", units=0.0, price=101.0, spot=101.0,
+                                                     date=T1, tombstone=True), trades=round_trip)
+    assert res.total_pnl == pytest.approx(300.0) and res.instrument is None and len(res.trade_rows) == 2
+    # standalone transaction costs are validated like a trade's
+    b0 = BookSnapshot(date=T0, positions={"a": p0}, environments={"IDX": E0})
+    b1 = BookSnapshot(date=T1, positions={"a": _pos("a", _call(), 2.0, env=E1, date=T1)}, environments={"IDX": E1})
+    for bad in (-1.0, "x", float("nan")):
+        with pytest.raises(ValidationError, match="transaction_costs"):
+            explain_portfolio(b0, b1, transaction_costs=bad)
+    # a timezone-aware trade stamp cannot be compared to the naive snapshot dates
+    p1 = _pos("n", _call(), 4.0, env=E1, date=T1)
+    u1 = _unit_t1(p1.snapshot.product)
+    aware = ExplainTrade("n", 4.0, u1, kind="open", timestamp=T1.replace(tzinfo=timezone.utc))
+    with pytest.raises(ValidationError, match="timezone"):
+        explain_position(None, p1, trades=[aware])
+    # an opening step has no lower bound (no datetime.min sentinel)
+    old = ExplainTrade("n", 4.0, u1, kind="open", timestamp=T0 - timedelta(days=400))
+    assert explain_position(None, p1, trades=[old]).instrument is None
+
+
 def test_portfolio_rejects_trades_outside_the_step():
     pos0 = {"a": _pos("a", _call(), 2.0)}
     b0 = BookSnapshot(date=T0, positions=pos0, environments={"IDX": E0})

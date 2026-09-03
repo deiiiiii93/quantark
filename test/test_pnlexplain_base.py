@@ -126,6 +126,28 @@ def test_row_and_result_normalise_numeric_fields():
         PnLExplainResult(total_pnl="lots", unexplained=None, **kw)
 
 
+def test_value_breakdown_and_by_factor_use_checked_exact_sums():
+    with pytest.raises(ValidationError, match="contingent_mtm"):
+        ValueBreakdown("x", 0.0, 0.0)
+    with pytest.raises(NumericalError):                       # int too large for a float
+        ValueBreakdown(10 ** 400, 0.0, 0.0)
+    with pytest.raises(NumericalError, match="total"):        # finite parts, overflowing total
+        ValueBreakdown(1e308, 1e308, 0.0)
+    assert ValueBreakdown(1e16, 1.0, -1e16).total == 1.0      # exactly rounded, not left-associative
+    rows = [
+        _row(Factor.SPOT, "delta", ExplainMethod.TAYLOR, RowKind.COMPONENT, 1e16),
+        _row(Factor.SPOT, "gamma", ExplainMethod.TAYLOR, RowKind.COMPONENT, 1.0),
+        _row(Factor.SPOT, "speed", ExplainMethod.TAYLOR, RowKind.COMPONENT, -1e16),
+    ]
+    res = _result(rows, 1.0)
+    assert res.by_factor(ExplainMethod.TAYLOR) == {"spot": 1.0}
+    assert res.reconcile(ExplainMethod.TAYLOR) == 0.0
+    with pytest.raises(ValidationError, match="moves"):
+        _row(Factor.SPOT, "delta", ExplainMethod.TAYLOR, RowKind.COMPONENT, 1.0, moves=None)
+    with pytest.raises(ValidationError, match="moves"):
+        _row(Factor.SPOT, "delta", ExplainMethod.TAYLOR, RowKind.COMPONENT, 1.0, moves=0)
+
+
 def test_reconcile_scale_tracks_endpoints_and_components():
     from quantark.pnlexplain.equity.explain import reconcile_scale
     rows = [

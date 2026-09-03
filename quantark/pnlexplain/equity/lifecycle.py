@@ -143,6 +143,25 @@ def resolve_transition(
         if last is not None and d < last:
             raise ValidationError("lifecycle events must be chronological")
         last = d
+    # Termination must agree between the events and the state endpoints: a
+    # terminal position never comes back, an event that terminates it is the
+    # single last event and leaves a terminal state, and a newly terminal
+    # state needs the event that terminated it.
+    terminal_t1 = is_terminal(snap1.lifecycle_state)
+    if terminal_t0 and not terminal_t1:
+        raise ValidationError("a terminal position cannot become alive again")
+    terminating = [i for i, ev in enumerate(transition.events) if ev.terminates_position]
+    if terminating:
+        if not terminal_t1:
+            raise ValidationError(
+                "an event terminates the position but snapshot_t1.lifecycle_state is not terminal"
+            )
+        if len(terminating) != 1 or terminating[0] != len(transition.events) - 1:
+            raise ValidationError("the terminating lifecycle event must be the single last event")
+    elif terminal_t1 and not terminal_t0:
+        raise ValidationError(
+            "snapshot_t1.lifecycle_state is terminal but no lifecycle event terminates the position"
+        )
     return transition
 
 

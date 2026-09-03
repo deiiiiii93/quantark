@@ -13,6 +13,17 @@ from quantark.util.exceptions import NumericalError, ValidationError
 _MISSING = object()
 
 
+def _number(value: Any, what: str) -> float:
+    """Coerce a snapshot scalar to a finite float; anything else is bad input."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValidationError(f"{what} must be a number, got {value!r}") from None
+    if not math.isfinite(f):
+        raise ValidationError(f"{what} must be finite, got {value!r}")
+    return f
+
+
 def is_terminal(state: Any) -> bool:
     """Same predicate as settlement_support.terminal_lifecycle_pv."""
     if state is None:
@@ -48,11 +59,11 @@ class ValuationSnapshot:
             raise ValidationError(
                 f"snapshot date {d} must equal pricing_env.valuation_date {env_date}"
             )
-        spot = float(self.pricing_env.spot)
-        if not math.isfinite(spot) or spot <= 0.0:
+        spot = _number(self.pricing_env.spot, "spot")
+        if spot <= 0.0:
             raise ValidationError(f"spot must be positive and finite, got {spot}")
-        q = float(self.quantity)
-        if not math.isfinite(q) or q == 0.0:
+        q = _number(self.quantity, "quantity")
+        if q == 0.0:
             raise ValidationError(f"quantity must be non-zero and finite, got {self.quantity}")
         object.__setattr__(self, "quantity", q)
         vp = self.valuation_point

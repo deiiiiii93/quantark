@@ -181,11 +181,22 @@ class PortfolioExplainResult:
         return pd.concat(frames, ignore_index=True) if frames else rows_to_frame([], date=self.date_t1)
 
 
-def _validate_trades(position_id: str, trades: Sequence[ExplainTrade], t0: datetime, t1: datetime) -> None:
+def _validate_trades(position_id: str, trades: Sequence[ExplainTrade], t0: Optional[datetime],
+                     t1: datetime) -> None:
+    """Trades belong to the position and, when dated, fall in (t0, t1]; t0=None means an
+    opening step with no lower bound (no naive sentinel that a tz-aware stamp cannot compare to)."""
     for t in trades:
         if t.position_id != position_id:
             raise ValidationError(f"trade for {t.position_id} passed to position {position_id}")
-        if t.timestamp is not None and not (t0 < t.timestamp <= t1):
+        if t.timestamp is None:
+            continue
+        try:
+            inside = t.timestamp <= t1 and (t0 is None or t0 < t.timestamp)
+        except TypeError:
+            raise ValidationError(
+                f"trade timestamp {t.timestamp!r} and the snapshot dates disagree on timezone-awareness"
+            ) from None
+        if not inside:
             raise ValidationError(f"trade timestamp {t.timestamp} outside ({t0}, {t1}]")
 
 
@@ -227,7 +238,7 @@ def explain_position(
             raise ValidationError(f"position {pid}: a tombstone needs a t0 side")
         if not trades:
             raise ValidationError(f"position {pid} is new at t1 but no trades were supplied")
-        _validate_trades(pid, trades, datetime.min, s1.date)
+        _validate_trades(pid, trades, None, s1.date)
         _check_sum(trades, s1.quantity, "opened today")
         v1 = value(s1).total
         unit = v1 / s1.quantity
@@ -239,6 +250,11 @@ def explain_position(
     s0 = pos_t0.snapshot
     if pos_t0.position_id != pid:
         raise ValidationError("pos_t0 and pos_t1 must share a position_id")
+    if pos_t0.underlying != underlying:
+        raise ValidationError(
+            f"position {pid} switches underlying {pos_t0.underlying!r} -> {underlying!r}; "
+            "a replacement is a close and an open under distinct ids"
+        )
     _validate_trades(pid, trades, s0.date, s1.date)
     q0, q1 = s0.quantity, s1.quantity
     has_lifecycle = s0.lifecycle_state is not None or s1.lifecycle_state is not None
@@ -292,14 +308,29 @@ def explain_quoted_leg(leg_t0: Optional[QuotedLegSnapshot], leg_t1: QuotedLegSna
     if leg_t0 is None:
         if not trades:
             raise ValidationError(f"quoted leg {pid} is new at t1 but no trades were supplied")
-        _validate_trades(pid, trades, datetime.min, leg_t1.date)
-        _check_sum(trades, leg_t1.units, "leg opened today")
+        _validate_trades(pid, trades, None, leg_t1.date)
+        if leg_t1.tombstone:
+            # opened AND closed within the step: nothing is held at t1, the round trip is the PnL
+            if leg_t1.units != 0.0:
+                raise ValidationError(
+                    f"quoted leg {pid} is new at t1 and a tombstone: it must carry zero units"
+                )
+            _check_sum(trades, 0.0, "leg opened and closed within the step")
+        else:
+            _check_sum(trades, leg_t1.units, "leg opened today")
         trade_rows = _trade_rows(trades, leg_t1.price)
-        total = leg_t1.total + sum(t.cash for t in trades)
+        v1 = 0.0 if leg_t1.tombstone else leg_t1.total
+        total = v1 + sum(t.cash for t in trades)
         rows = list(trade_rows) + [make_total_row("position", total)]
         return PositionExplainResult(pid, leg_t1.underlying, None, trade_rows, total, tuple(rows))
     if leg_t0.position_id != pid:
         raise ValidationError("quoted legs must share a position_id (rolls use contract-specific ids)")
+    if leg_t0.underlying != leg_t1.underlying:
+        raise ValidationError(
+            f"quoted leg {pid} switches underlying {leg_t0.underlying!r} -> {leg_t1.underlying!r}"
+        )
+    if not leg_t1.date > leg_t0.date:
+        raise ValidationError(f"quoted leg {pid}: t1 date {leg_t1.date} must be after t0 date {leg_t0.date}")
     _validate_trades(pid, trades, leg_t0.date, leg_t1.date)
     if leg_t1.tombstone:
         _check_sum(trades, -leg_t0.units, "leg closed")
@@ -396,7 +427,12 @@ def explain_portfolio(
     if by_pid:
         raise ValidationError(f"trades for unknown position ids: {sorted(by_pid)}")
 
-    cost_total = sum(t.transaction_cost for t in trades) + float(transaction_costs)
+    standalone_cost = _finite_number(transaction_costs, "transaction_costs")
+    if standalone_cost < 0.0:
+        raise ValidationError(f"transaction_costs must be >= 0, got {transaction_costs!r}")
+    cost_total = math.fsum([t.transaction_cost for t in trades] + [standalone_cost])
+    if not math.isfinite(cost_total):
+        raise NumericalError("transaction cost total overflows")
     ordered = [results[pid] for pid in sorted(results)]
     per_underlying: Dict[str, Tuple[ExplainRow, ...]] = {}
     for u in sorted({pr.underlying for pr in ordered}):

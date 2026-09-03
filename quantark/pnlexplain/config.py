@@ -1,6 +1,7 @@
 """PnLExplainConfig and the stencil / term tables (spec §5.5, §7.3)."""
 from __future__ import annotations
 
+from collections import abc
 from dataclasses import dataclass, field
 from typing import Optional, Sequence, Tuple, Union
 
@@ -73,6 +74,11 @@ class PnLExplainConfig:
                 "methods must be a non-empty, duplicate-free subset of {WATERFALL, TAYLOR}"
             )
         object.__setattr__(self, "methods", methods)
+        if isinstance(self.waterfall_order, (str, bytes)) or not isinstance(self.waterfall_order, abc.Sequence):
+            raise ValidationError(
+                "waterfall_order must be an ORDERED sequence of Factor members (a set has no order, "
+                "and the sequential waterfall's allocation depends on it)"
+            )
         order = tuple(self.waterfall_order)
         if not all(isinstance(f, Factor) for f in order) or len(order) != len(MARKET_FACTORS) \
                 or set(order) != set(MARKET_FACTORS):
@@ -80,6 +86,10 @@ class PnLExplainConfig:
                 "waterfall_order must be a permutation of the seven market Factor members"
             )
         object.__setattr__(self, "waterfall_order", order)
+        if not isinstance(self.stencil, str):
+            if not isinstance(self.stencil, abc.Sequence) or isinstance(self.stencil, bytes):
+                raise ValidationError("stencil must be a stencil name or an ordered sequence of greek names")
+            object.__setattr__(self, "stencil", tuple(self.stencil))      # frozen: no later drift from _terms
         if not isinstance(self.bucketed, bool):
             raise ValidationError(f"bucketed must be a bool, got {self.bucketed!r}")
         if self.interaction not in _INTERACTIONS:

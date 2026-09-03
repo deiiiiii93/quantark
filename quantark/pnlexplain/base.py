@@ -83,9 +83,22 @@ def _finite(value: Any, what: str) -> float:
         f = float(value)
     except (TypeError, ValueError):
         raise ValidationError(f"{what} must be a number, got {value!r}") from None
+    except OverflowError:
+        raise NumericalError(f"{what} overflows a float: {value!r}") from None
     if not math.isfinite(f):
         raise NumericalError(f"non-finite {what}: {value!r}")
     return f
+
+
+def _checked_sum(values: Iterable[float], what: str) -> float:
+    """Exactly rounded sum that refuses to return a non-finite aggregate."""
+    try:
+        total = math.fsum(values)
+    except OverflowError:                       # fsum raises on intermediate overflow
+        raise NumericalError(f"{what} overflows") from None
+    if not math.isfinite(total):
+        raise NumericalError(f"non-finite {what}")
+    return total
 
 
 @dataclass(frozen=True)
@@ -116,7 +129,9 @@ class ExplainRow:
             val = getattr(self, name)
             if val is not None:
                 object.__setattr__(self, name, _finite(val, f"{name} in {where}"))
-        moves = dict(self.moves or {})
+        if not isinstance(self.moves, Mapping):
+            raise ValidationError(f"moves must be a mapping of move keys, got {self.moves!r}")
+        moves = dict(self.moves)
         unknown = sorted(set(moves) - set(MOVE_KEYS))
         if unknown:
             raise ValidationError(f"unknown move keys {unknown}; allowed {MOVE_KEYS}")
@@ -189,14 +204,13 @@ class ValueBreakdown:
 
     def __post_init__(self) -> None:
         for name in ("contingent_mtm", "pending_receivable_pv", "paid_cash"):
-            val = float(getattr(self, name))
-            if not math.isfinite(val):
-                raise NumericalError(f"non-finite {name}: {getattr(self, name)!r}")
-            object.__setattr__(self, name, val)
+            object.__setattr__(self, name, _finite(getattr(self, name), name))
+        self.total                                  # a finite triple can still overflow: refuse now
 
     @property
     def total(self) -> float:
-        return self.contingent_mtm + self.pending_receivable_pv + self.paid_cash
+        return _checked_sum((self.contingent_mtm, self.pending_receivable_pv, self.paid_cash),
+                            "value breakdown total")
 
     def to_dict(self) -> Dict[str, float]:
         return {
@@ -234,10 +248,11 @@ class PnLExplainResult:
         )
 
     def by_factor(self, method: ExplainMethod) -> Dict[str, float]:
-        out: Dict[str, float] = {}
+        """Component PnL per factor (exactly rounded, like component_sum)."""
+        parts: Dict[str, list] = {}
         for r in self.rows_for(method, kind=RowKind.COMPONENT):
-            out[r.factor.value] = out.get(r.factor.value, 0.0) + r.pnl
-        return out
+            parts.setdefault(r.factor.value, []).append(r.pnl)
+        return {name: _checked_sum(vals, f"{name} component sum") for name, vals in parts.items()}
 
     def reconcile(self, method: ExplainMethod) -> float:
         return self.total_pnl - component_sum(self.rows, method)

@@ -78,6 +78,36 @@ def test_waterfall_is_exact_and_time_row_is_time_pure():
     assert basis_row.metadata["changed"] is False
     event = [r for r in res.rows if r.factor is Factor.LIFECYCLE_EVENT][0]
     assert event.method is ExplainMethod.SHARED and event.pnl == 0.0
+
+
+def test_row_metadata_separates_market_change_from_instrument_applicability():
+    """`changed` reports the market, `applicable` the instrument: a vol move on a spot position is
+    changed=True, applicable=False, pnl 0 (review finding)."""
+    from quantark.asset.equity.engine.analytical import DeltaOneEngine
+    from quantark.asset.equity.product.deltaone import SpotInstrument
+    from quantark.util.enum.deltaone_enums import DeltaOneType
+    spot = SpotInstrument(underlying="X", deltaone_type=DeltaOneType.STOCK)
+    d1 = DeltaOneEngine()
+    e0 = PricingEnvironment(spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(0.20),
+                            rate_curve=FlatRateCurve(rate=0.03), div_yield=ContinuousDividendYield(div_yield=0.01),
+                            valuation_date=FRI)
+    e1 = PricingEnvironment(spot_quote=SpotQuote(spot=101.0), vol_surface=FlatVolSurface(0.25),
+                            rate_curve=FlatRateCurve(rate=0.03), div_yield=ContinuousDividendYield(div_yield=0.01),
+                            valuation_date=MON)
+    res = explain(ValuationSnapshot(spot, d1, e0, date=FRI), ValuationSnapshot(spot, d1, e1, date=MON), config=WF)
+    rows = {r.factor: r for r in res.rows_for(ExplainMethod.WATERFALL, kind=RowKind.COMPONENT)}
+    assert rows[Factor.SPOT].metadata == {"changed": True, "applicable": True}
+    assert rows[Factor.SPOT].pnl == pytest.approx(1.0)
+    # the vol surface has no tenor to be read at on a spot position: it is not a move of THIS
+    # instrument's coordinate, so it is neither applicable nor (at this coordinate) changed
+    assert rows[Factor.VOL].metadata == {"changed": False, "applicable": False} and rows[Factor.VOL].pnl == 0.0
+    # an inapplicable factor that DID move at the coordinate is reported as changed but unpriced
+    call = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1e-8)
+    res2 = explain(ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL,
+                                                           maturity=3 / 365), ENG, e0, date=FRI),
+                   ValuationSnapshot(call, ENG, e1, date=MON), config=WF)
+    vol = [r for r in res2.rows_for(ExplainMethod.WATERFALL, kind=RowKind.COMPONENT) if r.factor is Factor.VOL][0]
+    assert vol.metadata["applicable"] is False and vol.pnl == 0.0
     total = [r for r in res.rows if r.kind is RowKind.SUMMARY]
     assert len(total) == 1 and total[0].pnl == pytest.approx(res.total_pnl)
     assert res.unexplained is None

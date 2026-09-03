@@ -61,6 +61,29 @@ def _cache(s0, s1, config=WF):
     return ScenarioCache(s0, s1, t, mv, config)
 
 
+def test_every_engine_context_is_frozen_at_the_t0_state(monkeypatch):
+    """A replacement (MODEL) engine's bump context is resolved at the t0 product and market too:
+    Shapley prices {MODEL} without TIME, i.e. the new engine at the t0 state (review finding)."""
+    import quantark.pnlexplain.equity.scenario as scenario_mod
+    calls = []
+
+    def recording(product, pricing_env, engine):
+        calls.append((product, pricing_env, engine))
+        return engine
+
+    monkeypatch.setattr(scenario_mod, "resolve_bump_engine", recording)
+    s0, s1 = _pair()
+    new_engine = BlackScholesEngine()                       # a different object: a MODEL change
+    s1 = ValuationSnapshot(s1.product, new_engine, s1.pricing_env, date=MON, quantity=2.0)
+    c = _cache(s0, s1)
+    assert Factor.MODEL in c.effective
+    assert c.bump_engine_t0 is ENG and c.bump_engine_alive is new_engine and c.bump_engine_t1 is new_engine
+    assert [eng for _, _, eng in calls] == [ENG, new_engine]           # once per engine object
+    assert all(p is s0.product and e is s0.pricing_env for p, e, _ in calls)
+    product, engine, env, _ = c.build_state((Factor.MODEL,))          # {MODEL} alone: t0 state, new engine
+    assert product is s0.product and engine is new_engine and env.valuation_date == FRI
+
+
 def test_effective_is_changed_and_applicable_and_normalize_drops_the_rest():
     c = _cache(*_pair())
     assert c.effective == frozenset({Factor.TIME, Factor.SPOT, Factor.VOL, Factor.RATE, Factor.DIVIDEND})

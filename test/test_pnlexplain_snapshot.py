@@ -54,6 +54,12 @@ def test_snapshot_validation():
                           valuation_point=ValuationPoint(date=D0 + timedelta(days=1)))
 
 
+def test_snapshot_rejects_non_numeric_scalars_as_validation_errors():
+    for bad in ("two", None, object()):
+        with pytest.raises(ValidationError, match="quantity"):
+            ValuationSnapshot(_call(), BlackScholesEngine(), _env(), date=D0, quantity=bad)
+
+
 def test_value_identity_contingent_plus_ledger():
     env = _env()
     engine = BlackScholesEngine()

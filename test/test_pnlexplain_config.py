@@ -27,6 +27,10 @@ def test_defaults():
     dict(waterfall_order=(ExplainMethod.WATERFALL,) + MARKET_FACTORS[1:]),  # another enum's member
     dict(bucketed="false"),
     dict(bucketed=1),
+    dict(waterfall_order=set(MARKET_FACTORS)),                             # unordered: no waterfall order
+    dict(waterfall_order=frozenset(MARKET_FACTORS)),
+    dict(stencil={"delta", "vega"}),                                       # unordered stencil
+    dict(stencil=b"delta"),
     dict(interaction="random"),
     dict(time_term="gap"),
     dict(theta_decomposition_mode="approx"),
@@ -45,9 +49,12 @@ def test_invalid_configs_raise(kw):
 
 
 def test_explicit_stencil_resolves_aliases_and_keeps_order():
-    cfg = PnLExplainConfig(stencil=["veta", "delta", "rhoq", "theta", "gamma_theta"])
+    names = ["veta", "delta", "rhoq", "theta", "gamma_theta"]
+    cfg = PnLExplainConfig(stencil=names)
     assert resolve_stencil(cfg) == ("vega_theta", "delta", "dividend_rho", "theta")
     assert resolved_subrows(cfg) == ("gamma_theta",)
+    names.append("gamma")                                   # the caller's list no longer reaches the config
+    assert cfg.stencil == ("veta", "delta", "rhoq", "theta", "gamma_theta") and isinstance(cfg.stencil, tuple)
     assert PnLExplainConfig(waterfall_order=tuple(reversed(MARKET_FACTORS))).waterfall_order[0] is Factor.MODEL
 
 

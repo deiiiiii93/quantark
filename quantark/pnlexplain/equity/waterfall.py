@@ -11,8 +11,10 @@ from quantark.pnlexplain.equity.scenario import ScenarioCache
 
 def _row(cache: ScenarioCache, factor: Factor, pnl: float, level: str, step) -> ExplainRow:
     """Build one waterfall row; never prices."""
+    # `changed` reports the market ("did it move?"), `applicable` the instrument
+    # ("can it matter?"); only their intersection (cache.effective) is priced.
     metadata = {
-        "changed": factor in cache.effective,
+        "changed": factor in cache.moves.changed,
         "applicable": factor in cache.moves.coordinate.applicable,
     }
     if factor is Factor.MODEL:

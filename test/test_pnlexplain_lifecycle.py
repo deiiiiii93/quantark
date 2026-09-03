@@ -98,6 +98,41 @@ def test_supplied_transition_with_changed_state_is_validated():
                                                        events=(ki,)), calendar_days=3)
 
 
+def test_transition_termination_must_agree_with_the_state_endpoints():
+    """No resurrection; a terminating event is the single last event and leaves a terminal state;
+    a newly terminal state needs its terminating event (review finding)."""
+    alive = AutocallableLifecycleState()
+    ko_state = deepcopy(alive)
+    ko_state.mark_ko(MON, cashflow=9.5, settlement_date=MON + timedelta(days=2))
+    ki_state = deepcopy(alive)
+    ki_state.mark_ki(MON)
+    p0, p1 = _call(1.0), _call(1.0 - 3 / 365)
+    ko = _event(LifecycleEventType.KNOCK_OUT, MON, payoff=9.5, cashflow=9.5, terminates_position=True)
+    ki = _event(LifecycleEventType.KNOCK_IN, MON)
+    # the well-formed KO day
+    ok = LifecycleTransition(p1, ENG, alive, ko_state, events=(ki, ko))
+    assert resolve_transition(_snap(p0, FRI, alive), _snap(p1, MON, ko_state), ok, calendar_days=3) is ok
+    # terminating event, alive endpoint
+    with pytest.raises(ValidationError, match="not terminal"):
+        resolve_transition(_snap(p0, FRI, alive), _snap(p1, MON, ki_state),
+                           LifecycleTransition(p1, ENG, alive, ki_state, events=(ko,)), calendar_days=3)
+    # terminal endpoint, no terminating event
+    with pytest.raises(ValidationError, match="no lifecycle event terminates"):
+        resolve_transition(_snap(p0, FRI, alive), _snap(p1, MON, ko_state),
+                           LifecycleTransition(p1, ENG, alive, ko_state, events=(ki,)), calendar_days=3)
+    # terminating event must be the single last event
+    with pytest.raises(ValidationError, match="single last"):
+        resolve_transition(_snap(p0, FRI, alive), _snap(p1, MON, ko_state),
+                           LifecycleTransition(p1, ENG, alive, ko_state, events=(ko, ki)), calendar_days=3)
+    with pytest.raises(ValidationError, match="single last"):
+        resolve_transition(_snap(p0, FRI, alive), _snap(p1, MON, ko_state),
+                           LifecycleTransition(p1, ENG, alive, ko_state, events=(ko, ko)), calendar_days=3)
+    # a terminal position never comes back
+    with pytest.raises(ValidationError, match="cannot become alive"):
+        resolve_transition(_snap(p0, FRI, ko_state), _snap(p1, MON, ki_state),
+                           LifecycleTransition(p1, ENG, ko_state, ki_state, events=(ki,)), calendar_days=3)
+
+
 def test_supplied_transition_with_unchanged_state_is_validated():
     st = AutocallableLifecycleState()
     s0, s1 = _snap(_call(1.0), FRI, st), _snap(_call(1.0 - 3 / 365), MON, deepcopy(st))
