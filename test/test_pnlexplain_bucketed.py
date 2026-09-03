@@ -1,5 +1,5 @@
 """Spec test 9: tenor-vega bucket rows replace the scalar vega row and sum to it within FD
-tolerance; key-rate rows are an informational (carry-invariant) view beneath the scalar rho."""
+tolerance; dividend-held key-rate rows replace the scalar rho the same way (patch spec §6)."""
 from datetime import datetime
 
 import pytest
@@ -40,8 +40,8 @@ def test_bucket_rows_replace_scalar_vega_and_reconcile():
     scalar = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical"))
     bucketed = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", bucketed=True))
     terms = [r.term for r in bucketed.rows if r.method is ExplainMethod.TAYLOR]
-    assert "vega" not in terms and "rho" in terms                       # vega replaced, rho kept
-    assert bucketed.metadata["bucketed_factors"] == ("vol",)
+    assert "vega" not in terms and "rho" not in terms                   # both scalar rows replaced
+    assert bucketed.metadata["bucketed_factors"] == ("rate", "vol")
     vega_rows = [r for r in bucketed.rows if r.term.startswith("vega.") and r.kind is RowKind.COMPONENT]
     assert [r.term for r in vega_rows] == ["vega.0.5", "vega.1", "vega.2"]        # each pillar exactly once
     assert len(terms) == len(set(terms))
@@ -51,23 +51,36 @@ def test_bucket_rows_replace_scalar_vega_and_reconcile():
     assert bucketed.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)
     # bucket rows sit where the scalar vega row would have been (right after delta)
     assert terms.index("vega.0.5") == terms.index("delta") + 1
-    # the scalar rho is the component; the key-rate rows are informational and sit beneath it
-    rho = [r for r in bucketed.rows if r.term == "rho"][0]
-    assert rho.kind is RowKind.COMPONENT
+    # rate buckets (dividend-held) take the scalar rho slot, exactly as tenor vega does
     kr = [r for r in bucketed.rows if r.term.startswith("rate_keyrate.")]
     assert [r.term for r in kr] == ["rate_keyrate.0.5", "rate_keyrate.1", "rate_keyrate.2", "rate_keyrate.parallel"]
-    assert all(r.kind is RowKind.INFORMATIONAL and r.metadata["convention"] == "carry_invariant" for r in kr)
-    assert terms.index("rate_keyrate.0.5") == terms.index("rho") + 1
+    assert all(r.kind is RowKind.COMPONENT and r.metadata["convention"] == "dividend_held" for r in kr[:-1])
     par = kr[-1]
-    assert "sum_of_buckets" in par.metadata and "reconciles" in par.metadata
+    assert par.kind is RowKind.INFORMATIONAL and "sum_of_buckets" in par.metadata and "reconciles" in par.metadata
+    # the standard stencil is delta, vega, theta, rho, dividend_rho, ...: the rate buckets sit in rho's
+    # slot, after theta and its informational sub-rows and before dividend_rho
+    assert terms.index("theta") < terms.index("rate_keyrate.0.5") < terms.index("dividend_rho")
+    assert terms.index("rate_keyrate.parallel") == terms.index("rate_keyrate.0.5") + 3
     # the parallel row's move IS the scalar rate move (same coordinate), never a fabricated zero
-    assert par.moves["rate_pct"] == pytest.approx(rho.moves["rate_pct"], rel=1e-12)
+    scalar_rho = [r for r in scalar.rows if r.term == "rho"][0]
+    assert par.moves["rate_pct"] == pytest.approx(scalar_rho.moves["rate_pct"], rel=1e-12)
     assert par.moves["rate_pct"] != 0.0
     # the scalar Taylor rows are unchanged by the opt-in
-    for term in ("delta", "gamma", "rho", "theta"):
+    for term in ("delta", "gamma", "theta"):
         a = [r for r in scalar.rows if r.term == term][0].pnl
         b = [r for r in bucketed.rows if r.term == term][0].pnl
         assert a == pytest.approx(b, abs=1e-12)
+
+
+def test_parallel_rate_move_buckets_sum_to_the_scalar_rho_pnl():
+    s0, s1 = _snaps(_env(101.0, T1, (0.21, 0.225, 0.24), (0.031, 0.033, 0.035)))    # +10bp everywhere
+    scalar = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical"))
+    bucketed = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", bucketed=True))
+    rho_pnl = [r for r in scalar.rows if r.term == "rho"][0].pnl
+    buckets = [r for r in bucketed.rows if r.term.startswith("rate_keyrate.") and r.kind is RowKind.COMPONENT]
+    assert rho_pnl != 0.0
+    assert sum(r.pnl for r in buckets) == pytest.approx(rho_pnl, rel=5e-2)
+    assert bucketed.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)
 
 
 def test_parallel_keyrate_row_requires_the_scalar_rate_move():
@@ -85,7 +98,7 @@ def test_parallel_keyrate_row_requires_the_scalar_rate_move():
     bump = EngineParams().get_effective_bump_config()
     cache = SimpleNamespace(snap0=s0, snap1=s1, moves=moves, bump_engine_t0=ENG)
     rows, covered = bucketed_rows(cache, GreeksCalculator(), bump, "instrument")
-    assert covered == frozenset({Factor.VOL}) and Factor.RATE in rows
+    assert covered == frozenset({Factor.VOL, Factor.RATE}) and Factor.RATE in rows
     broken = dataclasses.replace(moves, d_rate=None,
                                  coordinate=dataclasses.replace(coord, tenor_t1=None))
     cache_broken = SimpleNamespace(snap0=s0, snap1=s1, moves=broken, bump_engine_t0=ENG)

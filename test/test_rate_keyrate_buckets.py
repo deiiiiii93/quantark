@@ -124,3 +124,50 @@ def test_rate_keyrate_carry_invariant_with_none_div_yield():
         return {pt.name: pt.reported for pt in res.points}
 
     assert _points(env_none) == _points(env_zero)
+
+
+def test_rate_keyrate_dividend_held_is_the_forward_moving_sensitivity():
+    """Patch spec 2026-09-03 §6: opt-in DIVIDEND_HELD holds q, so the forward moves with r."""
+    import math
+    from datetime import datetime
+    from scipy.stats import norm
+    from quantark.asset.equity.engine.analytical import BlackScholesEngine
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    from quantark.asset.equity.riskmeasures import RateKeyrateConvention
+    from quantark.param import FlatVolSurface, SpotQuote
+    from quantark.param.div import ContinuousDividendYield
+    from quantark.param.rrf.rate_curve import LinearRateCurve
+    from quantark.priceenv import PricingEnvironment
+    from quantark.util.enum import OptionType
+    from quantark.util.exceptions import ValidationError
+
+    S, K, T, r, q, sig = 100.0, 100.0, 1.0, 0.03, 0.01, 0.2
+    env = PricingEnvironment(spot_quote=SpotQuote(spot=S), vol_surface=FlatVolSurface(sig),
+                             rate_curve=LinearRateCurve([(0.5, r), (1.0, r), (2.0, r)]),
+                             div_yield=ContinuousDividendYield(q), valuation_date=datetime(2026, 1, 5))
+    call = EuropeanVanillaOption(strike=K, option_type=OptionType.CALL, maturity=T)
+    calc = GreeksCalculator()
+
+    def run(conv):
+        return calc.calculate_bucketed_greeks(call, env, BlackScholesEngine(), request=BucketedGreeksRequest(
+            coordinates=(BucketedGreekCoordinate.RATE_KEYRATE,), rate_keyrate_convention=conv))
+
+    held = run(RateKeyrateConvention.DIVIDEND_HELD)
+    carry = run(RateKeyrateConvention.CARRY_INVARIANT)
+    par_held = [p for p in held.points if p.name == "rate_keyrate.parallel"][0]
+    par_carry = [p for p in carry.points if p.name == "rate_keyrate.parallel"][0]
+    d2 = (math.log(S / K) + (r - q - 0.5 * sig**2) * T) / (sig * math.sqrt(T))
+    bs_rho = K * T * math.exp(-r * T) * norm.cdf(d2)                 # dV/dr, dividend held
+    assert par_held.derivative == pytest.approx(bs_rho, rel=1e-6)
+    assert par_held.derivative > 0.0 > par_carry.derivative           # the two conventions differ in sign for a call
+    assert all(p.metadata["convention"] == "dividend_held" for p in held.points)
+    assert all(p.metadata["convention"] == "carry_invariant" for p in carry.points)
+    assert all("dividend yield held" in p.metadata["rebuild_rule"] for p in held.points)
+    assert held.metadata["rate_keyrate_convention"] == "dividend_held"
+    assert carry.metadata["rate_keyrate_convention"] == "carry_invariant"
+    # default request == carry-invariant, bitwise
+    default = calc.calculate_bucketed_greeks(call, env, BlackScholesEngine(),
+                                             request=BucketedGreeksRequest(coordinates=(BucketedGreekCoordinate.RATE_KEYRATE,)))
+    assert [p.reported for p in default.points] == [p.reported for p in carry.points]
+    with pytest.raises(ValidationError, match="rate_keyrate_convention"):
+        BucketedGreeksRequest(coordinates=(BucketedGreekCoordinate.RATE_KEYRATE,), rate_keyrate_convention="dividend_held")

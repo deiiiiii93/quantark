@@ -7,15 +7,30 @@ from quantark.asset.equity.riskmeasures.bucketed_greeks import (
     BucketedGreekCoordinate,
     BucketedGreekDifferenceMode,
     BucketedGreekPoint,
+    RateKeyrateConvention,
 )
 from quantark.util.exceptions import ValidationError
+
+_REBUILD_RULE = {
+    RateKeyrateConvention.CARRY_INVARIANT: (
+        "zero-rate pillar bump; carry-invariant q re-derivation (F unchanged) -> pure discounting"
+    ),
+    RateKeyrateConvention.DIVIDEND_HELD: (
+        "zero-rate pillar bump; dividend yield held (F moves with r)"
+    ),
+}
 
 
 def calculate_points(
     calc, product, pricing_env, engine, request, mode
 ) -> List[BucketedGreekPoint]:
     """Per-CALIBRATED-pillar zero-rate bumps + a parallel reconciliation
-    point (spec WP3.3). Reported per +1bp; central differences."""
+    point (spec WP3.3). Reported per +1bp; central differences.
+
+    ``request.rate_keyrate_convention`` selects what the bump holds fixed:
+    CARRY_INVARIANT (default, unchanged) re-derives the dividend yield so the
+    forward is held; DIVIDEND_HELD (patch spec 2026-09-03 §6) replaces only the
+    rate curve so the forward moves with the rate."""
     from quantark.param.node_roles import NodeRole, resolve_node_roles
     from quantark.param.rrf import ParallelShiftRateCurve
     from quantark.param.rrf.key_rate import key_rate_bumped_zero_curve
@@ -36,10 +51,18 @@ def calculate_points(
         getattr(curve, "last_observable_tenor", None),
     )
     bump = request.rate_bump if request.rate_bump is not None else 1e-4
+    convention = request.rate_keyrate_convention
+    rebuild_rule = _REBUILD_RULE[convention]
     bump_engine = calc._resolve_bump_engine(product, pricing_env, engine)
     base_price = bump_engine.price(product, pricing_env)
 
     def _rate_bumped_env(bumped_curve):
+        env = deepcopy(pricing_env)
+        env.rate_curve = bumped_curve
+        if convention is RateKeyrateConvention.DIVIDEND_HELD:
+            # the dividend yield is held: only the rate curve moves, so the
+            # forward moves with it (the PnL-explain factor model's rate step)
+            return env
         # desk convention (spec WP3.3): carry B(T) is the invariant, so
         # a discount bump re-derives q pointwise and F(0,T) is unchanged
         # -> the bump is pure discounting. This applies ALSO when
@@ -51,8 +74,6 @@ def calculate_points(
             CarryInvariantDividendYield,
         )
 
-        env = deepcopy(pricing_env)
-        env.rate_curve = bumped_curve
         base_div = (
             pricing_env.div_yield
             if pricing_env.div_yield is not None
@@ -98,8 +119,8 @@ def calculate_points(
                 metadata={
                     "unit": "per_1bp",
                     "roles_inferred": info.roles_inferred,
-                    "rebuild_rule": "zero-rate pillar bump; carry-invariant "
-                    "q re-derivation (F unchanged) -> pure discounting",
+                    "rebuild_rule": rebuild_rule,
+                    "convention": convention.value,
                 },
             )
         )
@@ -132,8 +153,8 @@ def calculate_points(
                     <= 0.05 * max(abs(parallel_per_1bp), 1e-12)
                 ),
                 "roles_inferred": info.roles_inferred,
-                "rebuild_rule": "ParallelShiftRateCurve; carry-invariant "
-                "q re-derivation (F unchanged)",
+                "rebuild_rule": "ParallelShiftRateCurve; " + rebuild_rule,
+                "convention": convention.value,
             },
         )
     )

@@ -225,6 +225,14 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
                 if row.kind is RowKind.COMPONENT:
                     explained += row.pnl
             continue
+        if name == "rho" and Factor.RATE in covered:
+            # dividend-held key-rate buckets take the scalar rho slot exactly once
+            # (spec §7.6 as amended by patch spec 2026-09-03 §6)
+            for row in bucket_rows[Factor.RATE]:
+                rows.append(row)
+                if row.kind is RowKind.COMPONENT:
+                    explained += row.pnl
+            continue
         if name == "theta":
             if config.time_term == "exact_gap":
                 pnl, greek = time_pure, time_pure / per_day
@@ -252,9 +260,6 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
         rows.append(_row(level, name, factor, pnl, greek=greek_disp,
                          cash=cash_greek(name, g_pos, S0, per_day), mv=display_moves(exps, moves)))
         explained += pnl
-        if name == "rho" and Factor.RATE in bucket_rows:
-            # carry-invariant key-rate view: informational rows beneath the scalar rho (spec §7.6)
-            rows.extend(bucket_rows[Factor.RATE])
     unexplained = alive_move - explained
     rows.append(_row(level, "unexplained", Factor.UNEXPLAINED, unexplained,
                      extra={"basis_and_model_effects_included": True}))

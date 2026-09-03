@@ -34,6 +34,20 @@ class BucketedGreekDifferenceMode(Enum):
     ONE_SIDED_UP = "one_sided_up"
 
 
+class RateKeyrateConvention(Enum):
+    """What a zero-rate pillar bump holds fixed.
+
+    CARRY_INVARIANT: the forward F(0,T) is held, the dividend yield is re-derived
+        pointwise, so the bump is pure discounting (desk default, spec WP3.3).
+    DIVIDEND_HELD: the dividend yield is held, so the forward moves with the rate;
+        this is the sensitivity a rate-curve replacement with q fixed measures
+        (the PnL-explain factor model; patch spec 2026-09-03 §6).
+    """
+
+    CARRY_INVARIANT = "carry_invariant"
+    DIVIDEND_HELD = "dividend_held"
+
+
 @dataclass(frozen=True)
 class BucketedGreeksRequest:
     coordinates: Optional[Tuple[BucketedGreekCoordinate, ...]] = None
@@ -55,8 +69,14 @@ class BucketedGreeksRequest:
     heston_calibration_spec: Optional[HestonCalibrationSpec] = None
     slv_calibration_spec: Optional[SlvCalibrationSpec] = None
     allow_partial: bool = False
+    # appended after allow_partial so positional construction keeps its slots
+    rate_keyrate_convention: RateKeyrateConvention = RateKeyrateConvention.CARRY_INVARIANT
 
     def __post_init__(self) -> None:
+        if not isinstance(self.rate_keyrate_convention, RateKeyrateConvention):
+            raise ValidationError(
+                "rate_keyrate_convention must be a RateKeyrateConvention"
+            )
         if self.coordinates is not None:
             coordinates = tuple(self.coordinates)
             if len(coordinates) == 0:

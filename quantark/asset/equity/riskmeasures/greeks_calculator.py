@@ -317,6 +317,9 @@ class GreeksCalculator:
                     self, product, pricing_env, engine, request, mode
                 )
                 points.extend(keyrate_points)
+                result_metadata["rate_keyrate_convention"] = (
+                    request.rate_keyrate_convention.value
+                )
                 for pt in keyrate_points:
                     if pt.name == "rate_keyrate.parallel":
                         result_metadata.update(
