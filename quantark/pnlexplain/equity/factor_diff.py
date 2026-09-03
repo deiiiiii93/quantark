@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Optional
 
+from quantark.param.basis.basis_yield import FlatBasisYield, ZeroBasis
 from quantark.param.div import ContinuousDividendYield, NoDividend
 from quantark.pnlexplain.base import Factor
 from quantark.pnlexplain.equity.coordinate import FactorCoordinate
@@ -34,6 +35,19 @@ def _is_zero_yield(obj: Any) -> bool:
 
 def _yields_equal(a: Any, b: Any) -> bool:
     if _is_zero_yield(a) and _is_zero_yield(b):
+        return True
+    return objects_equal(a, b)
+
+
+def _is_zero_basis(obj: Any) -> bool:
+    """None, ZeroBasis and a flat zero basis all price as no basis (spec §5.3)."""
+    if obj is None or isinstance(obj, ZeroBasis):
+        return True
+    return isinstance(obj, FlatBasisYield) and float(obj.basis_yield) == 0.0
+
+
+def _basis_equal(a: Any, b: Any) -> bool:
+    if _is_zero_basis(a) and _is_zero_basis(b):
         return True
     return objects_equal(a, b)
 
@@ -161,8 +175,7 @@ def build_factor_moves(
         changed.add(Factor.RATE)
     if Factor.DIVIDEND in app and not _yields_equal(e0.div_yield, e1.div_yield):
         changed.add(Factor.DIVIDEND)
-    if Factor.BASIS in app and not (e0.basis_yield is None and e1.basis_yield is None) \
-            and not objects_equal(e0.basis_yield, e1.basis_yield):
+    if Factor.BASIS in app and not _basis_equal(e0.basis_yield, e1.basis_yield):
         changed.add(Factor.BASIS)
     if Factor.MODEL in app and engine_alive_t1 is not None and engine_alive_t1 is not snap0.engine:
         changed.add(Factor.MODEL)

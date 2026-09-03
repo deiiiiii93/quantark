@@ -142,6 +142,25 @@ def test_tenor_detects_date_expiry_and_reraises_other_validation_errors():
                            Broken(strike=100.0, option_type=OptionType.CALL, maturity=1.0), e1)
 
 
+def test_basis_none_and_zero_objects_are_the_same_market():
+    """Spec §5.3: a None basis is the zero-basis object for change detection (review finding)."""
+    from quantark.param.basis.basis_yield import FlatBasisYield, ZeroBasis
+    p0, p1 = _call(1.0), _call(1.0 - 3 / 365)
+
+    def moves(b0, b1):
+        e0 = _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, FRI, basis_yield=b0)
+        e1 = _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON, basis_yield=b1)
+        s0, s1 = ValuationSnapshot(p0, ENG, e0, date=FRI), ValuationSnapshot(p1, ENG, e1, date=MON)
+        coord = resolve_coordinate(p0, 100.0, p1, e1)
+        return build_factor_moves(s0, s1, coord, engine_alive_t1=ENG, lifecycle_changed=False)
+
+    assert Factor.BASIS not in moves(None, ZeroBasis()).changed
+    assert Factor.BASIS not in moves(FlatBasisYield(0.0), None).changed
+    assert Factor.BASIS not in moves(ZeroBasis(), FlatBasisYield(0.0)).changed
+    assert Factor.BASIS in moves(None, FlatBasisYield(0.01)).changed
+    assert Factor.BASIS in moves(FlatBasisYield(0.01), FlatBasisYield(0.02)).changed
+
+
 def test_coordinate_rejects_malformed_levels_and_non_finite_tenor():
     e1 = _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON)
 

@@ -31,7 +31,7 @@ SCHEDULE_FIELDS = frozenset({
     "barrier_config", "post_barrier_config", "observation_schedule",
     "coupon_schedule", "ko_observation_schedule", "ki_observation_schedule",
 })
-_TIMING_TOKENS = ("date", "time", "schedule", "record")
+_TIMING_TOKENS = ("date", "time")      # leaf names the trackers advance daily
 MATURITY_FLOOR = 1e-8   # the trackers clamp a rolled float maturity here
 
 
@@ -121,14 +121,30 @@ def _public_fields(obj: Any) -> Tuple[Tuple[str, Any], ...]:
     return tuple((n, getattr(obj, n)) for n in sorted(names))
 
 
+def _timing_name(name: str) -> bool:
+    return any(tok in name for tok in _TIMING_TOKENS)
+
+
 def _static_terms(value: Any) -> Any:
-    """Schedule-bearing config -> its static terms (levels, rates, counts, indices)."""
+    """Schedule-bearing config -> its static terms, recursively.
+
+    Only LEAF fields whose name marks them as timing (``observation_time``,
+    ``settlement_date``, ``ko_observation_dates``, ``time_shift`` ...) are
+    dropped: the trackers advance those every day. Containers are always
+    entered, whatever they are called, so the per-observation barriers,
+    payoffs and return rates inside a schedule's records stay part of the
+    contract's identity.
+    """
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return (type(value).__name__, tuple(
-            (f.name, _normalize(getattr(value, f.name)))
+            (f.name, _static_terms(getattr(value, f.name)))
             for f in dataclasses.fields(value)
-            if not any(tok in f.name for tok in _TIMING_TOKENS)
+            if not _timing_name(f.name)
         ))
+    if isinstance(value, (list, tuple)):
+        return ("seq", tuple(_static_terms(v) for v in value))
+    if isinstance(value, Mapping):
+        return ("map", _sorted_items((_normalize(k), _static_terms(v)) for k, v in value.items()))
     return _normalize(value)
 
 
@@ -139,6 +155,36 @@ def contract_fingerprint(product: Any) -> tuple:
             continue
         items.append((name, _static_terms(val) if name in SCHEDULE_FIELDS else _normalize(val)))
     return (type(product).__name__, tuple(items))
+
+
+def _schedule_node(node: Any) -> bool:
+    return isinstance(node, tuple) and len(node) == 2 and node[0] == "ObservationSchedule"
+
+
+def _rolled_equal(a: Any, b: Any) -> bool:
+    """Fingerprint equality where `b` may be `a` rolled forward in time.
+
+    A rolled observation schedule keeps its non-record terms and its records
+    are a SUFFIX of the original's (the shifter drops observations that have
+    passed); a schedule whose observations have all passed becomes ``None``.
+    Everything else must match exactly.
+    """
+    if _schedule_node(a):
+        if b is None:
+            return True                              # every observation has passed
+        if not _schedule_node(b):
+            return False
+        fa, fb = dict(a[1]), dict(b[1])
+        if set(fa) != set(fb):
+            return False
+        ra, rb = fa.pop("records"), fb.pop("records")
+        if fa != fb:
+            return False
+        recs_a, recs_b = ra[1], rb[1]                # ("seq", (...))
+        return len(recs_b) <= len(recs_a) and recs_a[len(recs_a) - len(recs_b):] == recs_b
+    if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):
+        return all(_rolled_equal(x, y) for x, y in zip(a, b))
+    return a == b
 
 
 def _float_maturity(value: Any, what: str) -> float:
@@ -157,9 +203,13 @@ def check_contract_roll(product_t0: Any, product_alive_t1: Any, calendar_days: i
     A float maturity must equal ``max(MATURITY_FLOOR, m0 - calendar_days/365)``
     within ROLL_TOL: the trackers' floor is only reached when the roll would
     cross it, so a floored maturity is validated, not waved through.
-    ``calendar_days == 0`` declares an unrolled contract (same maturity).
+    ``calendar_days == 0`` declares an unrolled contract (same maturity, same
+    schedules); otherwise a schedule may have lost the observations that
+    passed inside the step (its records are a suffix of the t0 records).
     """
-    if contract_fingerprint(product_t0) != contract_fingerprint(product_alive_t1):
+    fp0, fp1 = contract_fingerprint(product_t0), contract_fingerprint(product_alive_t1)
+    same = fp0 == fp1 if int(calendar_days) == 0 else _rolled_equal(fp0, fp1)
+    if not same:
         raise ValidationError("contract replacement is not a time step")
     date_based = getattr(product_t0, "exercise_date", None) is not None \
         or getattr(product_t0, "maturity_date", None) is not None

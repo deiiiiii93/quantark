@@ -134,7 +134,6 @@ def test_lifecycle_ko_with_settlement_lag_reconciles_every_day():
     assert len(later_events) >= 1 and set(later_events["date"]) == set(later["date"])
     assert (later_events["pnl"] == 0.0).all()
     assert set(later["term"]) >= {"time", "rate"}
-    assert later["date"].nunique() >= 1
     # the receivable is paid inside TIME on the settlement date and the position then leaves the book
     paid_day = ko_day + pd.Timedelta(days=2)
     assert (later["date"] <= paid_day).all()

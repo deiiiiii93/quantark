@@ -192,6 +192,41 @@ def test_fingerprint_rejects_unserialisable_values_and_normalises_calendars():
     assert contract_fingerprint(_Terms(c=cal)) != contract_fingerprint(_Terms(c=create_calendar(CalendarType.US)))
 
 
+def test_schedule_records_are_contract_identity_and_roll_as_a_suffix():
+    """Per-observation barriers/payoffs/rates inside a schedule are contract terms (only timing
+    leaves are dropped); a rolled schedule may have lost the observations that passed (its records
+    are a suffix of the t0 records), never gained or changed one (review finding)."""
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+
+    def sched(barriers, t_first=0.25):
+        return ObservationSchedule(records=[ObservationRecord(observation_time=t_first + 0.25 * i, barrier=b)
+                                            for i, b in enumerate(barriers)])
+
+    p0 = _Terms(maturity=1.0, observation_schedule=sched([105.0, 106.0, 107.0]))
+    same_terms_shifted = _Terms(maturity=1.0 - 3 / 365, observation_schedule=sched([105.0, 106.0, 107.0], 0.25 - 3 / 365))
+    assert contract_fingerprint(p0) == contract_fingerprint(same_terms_shifted)      # timing leaves excluded
+    check_contract_roll(p0, same_terms_shifted, calendar_days=3)
+    other_barrier = _Terms(maturity=1.0 - 3 / 365, observation_schedule=sched([105.0, 106.0, 108.0]))
+    assert contract_fingerprint(p0) != contract_fingerprint(other_barrier)
+    with pytest.raises(ValidationError, match="contract replacement"):
+        check_contract_roll(p0, other_barrier, calendar_days=3)
+    # the first observation passed inside the step: the shifter dropped it
+    past_dropped = _Terms(maturity=1.0 - 3 / 365, observation_schedule=sched([106.0, 107.0]))
+    check_contract_roll(p0, past_dropped, calendar_days=3)
+    with pytest.raises(ValidationError, match="contract replacement"):               # unrolled: exact
+        check_contract_roll(p0, _Terms(maturity=1.0, observation_schedule=sched([106.0, 107.0])), calendar_days=0)
+    with pytest.raises(ValidationError, match="contract replacement"):               # not a suffix
+        check_contract_roll(p0, _Terms(maturity=1.0 - 3 / 365, observation_schedule=sched([105.0, 106.0])),
+                            calendar_days=3)
+    with pytest.raises(ValidationError, match="contract replacement"):               # gained a record
+        check_contract_roll(p0, _Terms(maturity=1.0 - 3 / 365, observation_schedule=sched([104.0, 105.0, 106.0, 107.0])),
+                            calendar_days=3)
+    # every observation passed: the shifter hands back None
+    check_contract_roll(p0, _Terms(maturity=1.0 - 3 / 365, observation_schedule=None), calendar_days=3)
+    with pytest.raises(ValidationError, match="contract replacement"):               # but never the reverse
+        check_contract_roll(_Terms(maturity=1.0, observation_schedule=None), same_terms_shifted, calendar_days=3)
+
+
 def test_contract_roll_validates_floored_and_missing_maturities():
     with pytest.raises(ValidationError, match="rolled by 1 days"):
         check_contract_roll(_call(1.0), _call(1e-8), calendar_days=1)     # floored, but the roll would not floor
