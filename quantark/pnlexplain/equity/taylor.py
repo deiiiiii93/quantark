@@ -57,7 +57,13 @@ def display_moves(exponents, moves) -> Dict[str, float]:
 
 
 def _resolve_steps(cache: ScenarioCache, config: PnLExplainConfig, bump) -> Tuple[int, str]:
-    """(n, clock_label) for the Taylor time terms."""
+    """(n, clock_label) for the Taylor time terms; the label is 'gap', '1d' or '1td'.
+
+    Under ``per_step`` an unset ``config.clock`` is resolved from the bump
+    config's theta mode, and the RESOLVED clock is what the calculator is asked
+    for (``theta_1d`` / ``theta_1td``): the unsuffixed theta is the configured
+    ``time_bump_days`` step, which is not a one-day value.
+    """
     mv = cache.moves
     if config.time_term == "exact_gap":
         return 1, "gap"
@@ -68,12 +74,20 @@ def _resolve_steps(cache: ScenarioCache, config: PnLExplainConfig, bump) -> Tupl
     if clock == "1td":
         if mv.trading_days is None:
             raise ValidationError("time_term='per_step' with the '1td' clock requires pricing_env.calendar")
-        return mv.trading_days, "1td"
-    return mv.calendar_days, "1d"
+        n = mv.trading_days
+    else:
+        n = mv.calendar_days
+    if n <= 0:
+        raise ValidationError(
+            f"time_term='per_step' with the '{clock}' clock: no steps elapsed between the snapshots "
+            "(use clock='1d' or time_term='exact_gap')"
+        )
+    return n, clock
 
 
-def _clock_suffix(config: PnLExplainConfig) -> str:
-    return "" if config.time_term == "exact_gap" or config.clock is None else f"_{config.clock}"
+def _clock_suffix(clock_label: str) -> str:
+    """Registry suffix of the resolved clock: '' for the exact gap, '_1d' / '_1td' per step."""
+    return "" if clock_label == "gap" else f"_{clock_label}"
 
 
 def _calculator(params, bump, config: PnLExplainConfig, days: int) -> GreeksCalculator:
@@ -97,18 +111,21 @@ def _info(level, term, pnl, per_day, moves, formula, extra=None):
 
 def _theta_subrows(level, greeks, q, n, days, per_day, gap_scale, config, subrows, time_pure,
                    theta_pnl, terminal, moves) -> List[ExplainRow]:
+    """Informational time sub-rows: pnl over the whole step, greek/cash per day (exact_gap)
+    or per step (per_step), i.e. pnl divided by the number of clock steps."""
+    exact_gap = config.time_term == "exact_gap"
+    divisor = per_day if exact_gap else float(n)
     if terminal:
-        out = [_info(level, "ledger_carry", time_pure, per_day, moves, "ledger_carry = time_pure - theta_contract")]
-        if config.time_term == "exact_gap":
-            out.insert(0, _info(level, "theta_contract", 0.0, per_day, moves, "no contingent leg"))
+        out = [_info(level, "ledger_carry", time_pure, divisor, moves, "ledger_carry = time_pure - theta_contract")]
+        if exact_gap:
+            out.insert(0, _info(level, "theta_contract", 0.0, divisor, moves, "no contingent leg"))
         return out
     out: List[ExplainRow] = []
-    exact_gap = config.time_term == "exact_gap"
     if exact_gap:
         theta_contract = q * greeks["theta"] * gap_scale
-        out.append(_info(level, "theta_contract", theta_contract, per_day, moves,
+        out.append(_info(level, "theta_contract", theta_contract, divisor, moves,
                          "calculator theta over the calendar gap x quantity (analytical: per day x days)"))
-        out.append(_info(level, "ledger_carry", time_pure - theta_contract, per_day, moves,
+        out.append(_info(level, "ledger_carry", time_pure - theta_contract, divisor, moves,
                          "ledger_carry = time_pure - theta_contract"))
         base = theta_contract
     else:
@@ -122,15 +139,15 @@ def _theta_subrows(level, greeks, q, n, days, per_day, gap_scale, config, subrow
     r_theta = q * greeks["r_theta"] * step_scale
     q_theta = q * greeks["q_theta"] * step_scale
     if "r_theta" in subrows:
-        out.append(_info(level, "r_theta", r_theta, per_day, moves, "calculator r_theta x steps"))
+        out.append(_info(level, "r_theta", r_theta, divisor, moves, "calculator r_theta x steps"))
     if "q_theta" in subrows:
-        out.append(_info(level, "q_theta", q_theta, per_day, moves, "calculator q_theta x steps"))
+        out.append(_info(level, "q_theta", q_theta, divisor, moves, "calculator q_theta x steps"))
     convexity = base - r_theta - q_theta
     if "convexity_theta" in subrows:
-        out.append(_info(level, "convexity_theta", convexity, per_day, moves, "theta_contract - r_theta - q_theta"))
+        out.append(_info(level, "convexity_theta", convexity, divisor, moves, "theta_contract - r_theta - q_theta"))
     if "gamma_theta" in subrows:
         gamma_theta = q * greeks["gamma_theta"] * (float(days) if exact_gap else float(n))
-        out.append(_info(level, "gamma_theta", gamma_theta, per_day, moves,
+        out.append(_info(level, "gamma_theta", gamma_theta, divisor, moves,
                          "-1/2 sigma^2 S^2 Gamma per day x days", {"theta_residual": convexity - gamma_theta}))
     return out
 
@@ -165,7 +182,7 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
         wanted = list(terms)
         if "theta" in terms and subrows:                      # sub-rows are numerical-only in the calculator
             wanted += ["r_theta", "q_theta"] + (["gamma_theta"] if "gamma_theta" in subrows else [])
-        suffix = _clock_suffix(config)
+        suffix = _clock_suffix(clock_label)
         requested = [name for name in wanted if rolled or name not in TIME_GREEKS]
         request = [f"{name}{suffix}" if name in TIME_GREEKS else name for name in requested]
         route = config.greeks_method if config.greeks_method != "auto" \

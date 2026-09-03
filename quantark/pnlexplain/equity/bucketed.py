@@ -79,7 +79,13 @@ def bucketed_rows(cache: ScenarioCache, calc: Any, bump: Any, level: str
                 metadata={"pillar": tau, "bump_size": float(pt.bump_size), "difference_mode": mode}))
         elif pt.coordinate is BucketedGreekCoordinate.RATE_KEYRATE:
             if pt.name == "rate_keyrate.parallel":
-                d = float(e1.get_rate(T)) - float(e0.get_rate(T)) if T is not None else 0.0
+                # the parallel move IS the factor model's scalar rate move, read at the coordinate
+                if moves.d_rate is None or T is None:
+                    raise ValidationError(
+                        "bucketed mode: the parallel key-rate row needs the scalar rate move at the "
+                        "product's tenor, which this coordinate does not define"
+                    )
+                d = float(moves.d_rate)
                 g = q * float(pt.derivative)
                 by_factor[Factor.RATE].append(ExplainRow(
                     factor=Factor.RATE, term="rate_keyrate.parallel", method=ExplainMethod.TAYLOR,

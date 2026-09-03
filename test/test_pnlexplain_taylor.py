@@ -159,6 +159,48 @@ def test_clocks_exact_gap_versus_per_step():
         explain(s0n, s1n, config=PnLExplainConfig(time_term="per_step", clock="1td"))
 
 
+def test_per_step_implicit_clock_requests_one_day_greeks():
+    """An unset clock resolves to '1d'/'1td' and the calculator is asked for THAT clock's theta,
+    never the unsuffixed theta of a multi-day bump config (review finding)."""
+    s0, s1 = _snaps(d1=MON)
+    calc = GreeksCalculator()
+    theta_1d = calc.calculate_numerical_greeks(s0.product, s0.pricing_env, s0.engine, greeks=["theta_1d"])["theta_1d"]
+    two_day = EngineParams(bump_config=BumpConfig(time_bump_days=2, time_bump_mode="calendar_days"))
+    implicit = explain(s0, s1, config=PnLExplainConfig(time_term="per_step", params=two_day))
+    explicit = explain(s0, s1, config=PnLExplainConfig(time_term="per_step", clock="1d", params=two_day))
+    assert implicit.metadata["clock"] == "1d" and implicit.metadata["n_steps"] == 3
+    assert _rows(implicit)["theta"].pnl == pytest.approx(Q * theta_1d * 3, rel=1e-9)
+    assert _rows(implicit)["theta"].pnl == pytest.approx(_rows(explicit)["theta"].pnl, rel=1e-12)
+    # the two-day bump would have been applied three times: a different (wrong) number
+    theta_2d = GreeksCalculator(params=two_day).calculate_numerical_greeks(
+        s0.product, s0.pricing_env, s0.engine, greeks=["theta"])["theta"]
+    assert _rows(implicit)["theta"].pnl != pytest.approx(Q * theta_2d * 3, rel=1e-6)
+    # business-day bump mode with a calendar resolves to the trading-day clock
+    cal = create_calendar(CalendarType.CHINA_SSE)
+    s0c, s1c = _snaps(d1=MON, calendar=cal)
+    bd = EngineParams(bump_config=BumpConfig(time_bump_mode="business_days"))
+    per_td = explain(s0c, s1c, config=PnLExplainConfig(time_term="per_step", params=bd))
+    assert per_td.metadata["clock"] == "1td" and per_td.metadata["n_steps"] == 1
+
+
+def test_per_step_subrows_display_per_step_greeks():
+    """Sub-row pnl covers the whole step; greek / cash_greek are per clock step (review finding)."""
+    s0, s1 = _snaps(d1=MON)
+    res = explain(s0, s1, config=PnLExplainConfig(time_term="per_step", clock="1d", greeks_method="numerical"))
+    rows = _rows(res)
+    assert res.metadata["n_steps"] == 3
+    for term in ("r_theta", "q_theta", "convexity_theta"):
+        row = rows[term]
+        assert row.kind is RowKind.INFORMATIONAL
+        assert row.greek == pytest.approx(row.pnl / 3.0, rel=1e-12)
+        assert row.cash_greek == pytest.approx(row.pnl / 3.0, rel=1e-12)
+    theta = rows["theta"]
+    assert theta.greek == pytest.approx(theta.pnl / 3.0, rel=1e-12)          # per step, like the sub-rows
+    # exact_gap: per day over the calendar gap
+    gap = _rows(explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical")))
+    assert gap["r_theta"].greek == pytest.approx(gap["r_theta"].pnl / 3.0, rel=1e-12)
+
+
 def test_terminal_position_has_only_the_time_row():
     from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
     s0, s1 = _snaps(d1=MON)

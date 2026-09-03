@@ -9,7 +9,7 @@ from quantark.asset.equity.product.option.european_vanilla_option import Europea
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote, TermStructureVolSurface
 from quantark.param.div import ContinuousDividendYield
 from quantark.param.rrf.rate_curve import LinearRateCurve
-from quantark.pnlexplain import ExplainMethod, PnLExplainConfig, RowKind, ValuationSnapshot, explain
+from quantark.pnlexplain import ExplainMethod, Factor, PnLExplainConfig, RowKind, ValuationSnapshot, explain
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import ValidationError
@@ -60,11 +60,37 @@ def test_bucket_rows_replace_scalar_vega_and_reconcile():
     assert terms.index("rate_keyrate.0.5") == terms.index("rho") + 1
     par = kr[-1]
     assert "sum_of_buckets" in par.metadata and "reconciles" in par.metadata
+    # the parallel row's move IS the scalar rate move (same coordinate), never a fabricated zero
+    assert par.moves["rate_pct"] == pytest.approx(rho.moves["rate_pct"], rel=1e-12)
+    assert par.moves["rate_pct"] != 0.0
     # the scalar Taylor rows are unchanged by the opt-in
     for term in ("delta", "gamma", "rho", "theta"):
         a = [r for r in scalar.rows if r.term == term][0].pnl
         b = [r for r in bucketed.rows if r.term == term][0].pnl
         assert a == pytest.approx(b, abs=1e-12)
+
+
+def test_parallel_keyrate_row_requires_the_scalar_rate_move():
+    """No tenor at the coordinate => no defined parallel move => ValidationError, not a zero row."""
+    import dataclasses
+    from types import SimpleNamespace
+    from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+    from quantark.pnlexplain.equity.bucketed import bucketed_rows
+    from quantark.pnlexplain.equity.coordinate import resolve_coordinate
+    from quantark.pnlexplain.equity.factor_diff import build_factor_moves
+    s0, s1 = _snaps()
+    coord = resolve_coordinate(s0.product, 100.0, s1.product, s1.pricing_env)
+    moves = build_factor_moves(s0, s1, coord, engine_alive_t1=ENG, lifecycle_changed=False)
+    from quantark.asset.equity.param import EngineParams
+    bump = EngineParams().get_effective_bump_config()
+    cache = SimpleNamespace(snap0=s0, snap1=s1, moves=moves, bump_engine_t0=ENG)
+    rows, covered = bucketed_rows(cache, GreeksCalculator(), bump, "instrument")
+    assert covered == frozenset({Factor.VOL}) and Factor.RATE in rows
+    broken = dataclasses.replace(moves, d_rate=None,
+                                 coordinate=dataclasses.replace(coord, tenor_t1=None))
+    cache_broken = SimpleNamespace(snap0=s0, snap1=s1, moves=broken, bump_engine_t0=ENG)
+    with pytest.raises(ValidationError, match="parallel key-rate"):
+        bucketed_rows(cache_broken, GreeksCalculator(), bump, "instrument")
 
 
 def test_bucketed_honours_configured_bumps():
