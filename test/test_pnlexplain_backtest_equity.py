@@ -1,6 +1,7 @@
 """Spec test 6 (equity engine): reconciliation, tombstone across a settlement lag, explain-on isolation."""
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -8,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 from test_backtest_lifecycle import (  # noqa: E402
-    ConstantEngine, RampAdapter, _down_out_put_position, UNDERLYING, START,
+    RampAdapter, _down_out_put_position, UNDERLYING, START,
 )
 from test_multi_greek_backtest import make_config as make_multi_config  # noqa: E402
 
@@ -28,23 +29,24 @@ def _lifecycle_config(pnl_explain=None, delta_threshold=1e12, *, lagged=False):
     """Spot ramps 100 -> 70 and knocks the 85 barrier out.
 
     ``lagged`` books the KO cash two calendar days after the hit. The analytical
-    barrier engine cannot price a delayed first-hit payment, so that variant
-    prices on the constant engine with greeks off (as the lifecycle suite does);
-    the immediate-settlement variant keeps the analytical engine and greeks.
+    barrier engine prices that constant first-hit lag exactly (patch spec §5),
+    so both variants keep the analytical engine and greeks; the lagged contract
+    is date-based because a calendar-day lag needs a real expiry date on the
+    terminal leg.
     """
     adapter = RampAdapter(start_spot=100.0, end_spot=70.0, num_days=40)
+    convention, exercise_date = None, None
     if lagged:
         convention = SettlementConvention(lag=2, lag_unit=SettlementLagUnit.CALENDAR_DAYS,
                                           business_day_convention=BusinessDayConvention.UNADJUSTED)
-        position = _down_out_put_position(2.0, 10.0, settlement_convention=convention, engine=ConstantEngine())
-    else:
-        position = _down_out_put_position(2.0, 10.0)
+        exercise_date = datetime(2025, 1, 1)
+    position = _down_out_put_position(2.0, 10.0, settlement_convention=convention, exercise_date=exercise_date)
     return BacktestConfig(
         strategy=DeltaNeutralStrategy(delta_threshold=delta_threshold),
         start_date=START, end_date=adapter.dates[-1].to_pydatetime(), underlying=UNDERLYING,
         initial_positions=[position],
         market_data_adapter=adapter, transaction_cost_model=ZeroCostModel(),
-        handle_lifecycle_events=True, calculate_greeks=not lagged, pnl_explain=pnl_explain,
+        handle_lifecycle_events=True, calculate_greeks=True, pnl_explain=pnl_explain,
     )
 
 
@@ -127,7 +129,10 @@ def test_lifecycle_ko_with_settlement_lag_reconciles_every_day():
     events = results.get_lifecycle_events()             # indexed by event date
     ko_day = pd.Timestamp(events.index[0])
     ko_rows = ex[(ex["date"] == ko_day) & (ex["factor"] == "lifecycle_event") & (ex["level"] == "position")]
-    assert len(ko_rows) == 1 and ko_rows.iloc[0]["pnl"] != 0.0
+    # one event row on the KO day; the analytical engine's already-hit price IS the receivable
+    # PV (rebate x DF(lag)), so the event itself carries no surprise (the ConstantEngine variant
+    # in the lifecycle suite is where a non-zero event jump lives)
+    assert len(ko_rows) == 1 and ko_rows.iloc[0]["pnl"] == 0.0
     # the tombstone lives on for the settlement lag: time rows exist after the KO day, event rows are zero
     later = ex[(ex["date"] > ko_day) & (ex["level"] == "position")]
     later_events = later[later["factor"] == "lifecycle_event"]

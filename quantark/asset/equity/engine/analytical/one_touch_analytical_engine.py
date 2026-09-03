@@ -10,6 +10,7 @@ from scipy import stats
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
+    constant_hit_lag_year_fraction,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -22,7 +23,6 @@ from quantark.asset.equity.settlement import (
     SettlementRequest,
     SettlementResolver,
 )
-from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
@@ -88,16 +88,16 @@ class OneTouchAnalyticalEngine(BaseEngine):
         pay_at_hit = product.payment_at_hit if product.is_one_touch else False
 
         self._validate_inputs(spot, product.barrier, maturity, vol, rebate)
+        # A hit-paid rebate with a CONSTANT settlement lag prices exactly as
+        # exp(-rate * lag) times the pay-at-hit value; hit-date-dependent lags
+        # raise here, before pricing (patch spec 2026-09-03 §5).
+        hit_lag = 0.0
         if (
             pay_at_hit
             and product.observation_type != ObservationType.EXPIRY
             and not product.is_barrier_hit(spot)
-            and self._requests_delayed_hit_payment(product)
         ):
-            raise CapabilityError(
-                "OneTouchAnalyticalEngine cannot represent a delayed "
-                "continuous/discrete first-hit payment"
-            )
+            hit_lag = constant_hit_lag_year_fraction(product, pricing_env)
 
         # Immediate handling for near-expiry or already-hit barriers
         if maturity < self.MIN_MATURITY:
@@ -164,6 +164,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
                 rebate=rebate,
                 pay_at_hit=pay_at_hit,
                 is_up=product.is_up_barrier,
+                hit_lag=hit_lag,
             )
             if not pay_at_hit:
                 value *= terminal_timing.delay_df
@@ -203,24 +204,6 @@ class OneTouchAnalyticalEngine(BaseEngine):
         )
         return self._digital_engine.price(digital, pricing_env)
 
-    @staticmethod
-    def _requests_delayed_hit_payment(product: OneTouchOption) -> bool:
-        convention = product.settlement_convention
-        if convention is not None and convention.lag != 0.0:
-            return True
-        schedule = product.observation_schedule
-        if schedule is None:
-            return False
-        return any(
-            record.settlement_date is not None
-            or (
-                record.settlement_time is not None
-                and record.observation_time is not None
-                and record.settlement_time != record.observation_time
-            )
-            for record in schedule.records
-        )
-
     def _digital_direction(self, product: OneTouchOption) -> OptionType:
         """Map one-touch/no-touch direction to an equivalent digital payoff."""
         if product.is_one_touch:
@@ -239,10 +222,18 @@ class OneTouchAnalyticalEngine(BaseEngine):
         rebate: float,
         pay_at_hit: bool,
         is_up: bool,
+        hit_lag: float = 0.0,
     ) -> float:
-        """Closed-form one-touch price for continuous or shifted discrete barriers."""
+        """Closed-form one-touch price for continuous or shifted discrete barriers.
+
+        ``hit_lag`` is the constant year-fraction delay of a hit-paid rebate:
+        E[R e^{-r(tau+L)} 1{tau<=T}] = e^{-rL} E[R e^{-r tau} 1{tau<=T}] under the
+        formula's flat ``rate`` (the rate read at ``maturity``; under a term
+        structure the factor inherits the flat-r assumption the hit-paid leg
+        already makes). 0.0 leaves the unlagged path bitwise unchanged.
+        """
         if pay_at_hit:
-            return rebate * self._instant_touch_term(
+            value = rebate * self._instant_touch_term(
                 spot=spot,
                 barrier=barrier,
                 maturity=maturity,
@@ -251,6 +242,9 @@ class OneTouchAnalyticalEngine(BaseEngine):
                 vol=vol,
                 is_up=is_up,
             )
+            if hit_lag != 0.0:
+                value *= math.exp(-rate * hit_lag)
+            return value
 
         return rebate * math.exp(-rate * maturity) * self._expiry_touch_term(
             spot=spot,

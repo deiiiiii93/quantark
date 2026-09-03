@@ -16,7 +16,11 @@ from quantark.asset.equity.settlement import (
     SettlementResolver,
 )
 from quantark.execution.errors import CapabilityError
-from quantark.util.calendar import calculate_year_fraction
+from quantark.util.calendar import (
+    BusinessDayConvention,
+    DayCountConvention,
+    calculate_year_fraction,
+)
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
@@ -450,6 +454,70 @@ def terminal_lifecycle_pv(
     return pending_receivable_pv(lifecycle_state, pricing_env)
 
 
+# day counts under which n calendar days is the same year fraction from every start date
+_CONSTANT_DAY_BASIS = {
+    DayCountConvention.CALENDAR_DAYS: 365.0,
+    DayCountConvention.ACT_365: 365.0,
+    DayCountConvention.ACT_360: 360.0,
+}
+
+
+def _schedule_requests_delayed_hit(product) -> bool:
+    schedule = getattr(product, "observation_schedule", None)
+    if schedule is None:
+        return False
+    return any(
+        record.settlement_date is not None
+        or (
+            record.settlement_time is not None
+            and record.observation_time is not None
+            and record.settlement_time != record.observation_time
+        )
+        for record in schedule.records
+    )
+
+
+def constant_hit_lag_year_fraction(product, pricing_env: "PricingEnvironment") -> float:
+    """Year-fraction lag of a first-hit payment when it is the same for EVERY hit time.
+
+    A first-passage formula can carry a delayed hit payment only as the exact
+    factor exp(-r * L) with one constant L (settlement spec, "Mixed-event
+    formulas"; patch spec 2026-09-03 §5). Returns 0.0 when the contract pays at
+    the hit. Raises CapabilityError when the lag depends on the hit date:
+    business-day lags, calendar-day lags with a business-day adjustment,
+    calendar-day lags under a start-date-dependent day count, and
+    per-observation settlement timing.
+    """
+    name = type(product).__name__
+    if _schedule_requests_delayed_hit(product):
+        raise CapabilityError(
+            f"{name}: per-observation settlement timing makes the first-hit payment lag "
+            "hit-date dependent; analytical first-hit formulas need one constant lag "
+            "(use MC, PDE or QUAD)"
+        )
+    convention = getattr(product, "settlement_convention", None)
+    if convention is None or float(convention.lag) == 0.0:
+        return 0.0
+    if convention.lag_unit is SettlementLagUnit.YEAR_FRACTION:
+        return float(convention.lag)
+    if convention.lag_unit is SettlementLagUnit.CALENDAR_DAYS:
+        if convention.business_day_convention is not BusinessDayConvention.UNADJUSTED:
+            raise CapabilityError(
+                f"{name}: a business-day-adjusted calendar-day first-hit lag is hit-date "
+                "dependent (use MC, PDE or QUAD)"
+            )
+        basis = _CONSTANT_DAY_BASIS.get(pricing_env.day_count_convention)
+        if basis is None:
+            raise CapabilityError(
+                f"{name}: a {int(convention.lag)}-calendar-day first-hit lag is not a constant "
+                f"year fraction under {pricing_env.day_count_convention.value} (use MC, PDE or QUAD)"
+            )
+        return float(convention.lag) / basis
+    raise CapabilityError(
+        f"{name}: a business-day first-hit lag is hit-date dependent (use MC, PDE or QUAD)"
+    )
+
+
 def _has_explicit_event_timing(product) -> bool:
     schedules = []
     direct = getattr(product, "observation_schedule", None)
@@ -487,6 +555,7 @@ __all__ = [
     "american_exercise_requires_dates",
     "apply_determination_to_payment",
     "build_american_exercise_date_grid",
+    "constant_hit_lag_year_fraction",
     "pending_receivable_pv",
     "requested_settlement_support",
     "resolve_american_exercise_timings",

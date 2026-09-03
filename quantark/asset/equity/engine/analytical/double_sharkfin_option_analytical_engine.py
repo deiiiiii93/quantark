@@ -14,6 +14,7 @@ from scipy import stats
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
+    constant_hit_lag_year_fraction,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -26,7 +27,6 @@ from quantark.asset.equity.settlement import (
     SettlementRequest,
     SettlementResolver,
 )
-from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
@@ -166,16 +166,19 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 + pending_pv
             )
 
-        if (
-            product.observation_type == ObservationType.CONTINUOUS
-            and product.pay_at_hit
-            and product.settlement_convention is not None
-            and product.settlement_convention.lag != 0.0
-        ):
-            raise CapabilityError(
-                "DoubleSharkfinOptionAnalyticalEngine cannot represent a "
-                "delayed continuous first-hit payment"
+        # Continuous hit-paid cash leg with a CONSTANT settlement lag: exact
+        # exp(-rate * lag) scaling; hit-date-dependent lags raise here (patch
+        # spec 2026-09-03 §5). The discrete leg discounts each node at its own
+        # resolved settlement time and needs no factor.
+        hit_lag = (
+            constant_hit_lag_year_fraction(product, pricing_env)
+            if (
+                product.observation_type == ObservationType.CONTINUOUS
+                and product.pay_at_hit
+                and product.knock_out_rebate > 0.0
             )
+            else 0.0
+        )
 
         option_leg = self._price_no_rebate_knock_out(product, pricing_env)
         survival_prob = self._survival_probability(
@@ -189,6 +192,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             vol=vol,
             pricing_env=pricing_env,
             survival_prob=survival_prob,
+            hit_lag=hit_lag,
         )
         no_hit_cash = (
             product.no_hit_rebate
@@ -310,8 +314,14 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         vol: float,
         pricing_env: PricingEnvironment,
         survival_prob: float,
+        hit_lag: float = 0.0,
     ) -> float:
-        """Value the fixed cash leg paid when either barrier is hit."""
+        """Value the fixed cash leg paid when either barrier is hit.
+
+        ``hit_lag`` is the constant year-fraction settlement delay of the
+        continuous hit-paid leg (0.0 = pays at the hit; the unlagged path is
+        bitwise unchanged).
+        """
         if product.knock_out_rebate <= 0.0:
             return 0.0
 
@@ -343,6 +353,9 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 upper_barrier=product.upper_barrier,
                 survival_at_maturity=survival_prob,
             )
+            if hit_lag != 0.0:
+                # E[e^{-r(tau+L)} 1{tau<=T}] = e^{-rL} E[e^{-r tau} 1{tau<=T}]
+                hit_discount_factor *= safe_exp(-rate * hit_lag)
 
         return product.knock_out_rebate * max(float(hit_discount_factor), 0.0)
 

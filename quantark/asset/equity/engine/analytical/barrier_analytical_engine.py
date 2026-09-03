@@ -15,6 +15,7 @@ from scipy import stats
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
+    constant_hit_lag_year_fraction,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -26,7 +27,6 @@ from quantark.asset.equity.product.option import (
     EuropeanVanillaOption,
     OneTouchOption,
 )
-from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
@@ -94,14 +94,14 @@ class BarrierAnalyticalEngine(BaseEngine):
         if (
             product.is_knock_out
             and product.pay_at_hit
+            and product.rebate > 0
             and product.observation_type != ObservationType.EXPIRY
             and not product.is_barrier_hit(spot)
-            and self._one_touch_engine._requests_delayed_hit_payment(product)
         ):
-            raise CapabilityError(
-                "BarrierAnalyticalEngine cannot represent a delayed "
-                "continuous/discrete first-hit payment"
-            )
+            # Fail closed BEFORE pricing when the first-hit lag is not one constant;
+            # the rebate leg (one-touch engine) applies the exp(-r L) factor itself
+            # (patch spec 2026-09-03 §5).
+            constant_hit_lag_year_fraction(product, pricing_env)
 
         # Immediate handling for zero maturity
         if maturity < self.MIN_MATURITY:

@@ -86,17 +86,22 @@ def _down_out_put_position(
     *,
     settlement_convention=None,
     engine=None,
+    exercise_date=None,
 ):
+    # A day-based settlement lag needs an authoritative expiry date on the
+    # terminal leg (the settlement resolver refuses to infer one from a float
+    # maturity), so such fixtures pass exercise_date instead of maturity.
+    expiry = {"exercise_date": exercise_date} if exercise_date is not None else {"maturity": 1.0}
     option = BarrierOption(
         strike=100.0,
         option_type=OptionType.PUT,
         barrier=85.0,
         barrier_type=BarrierType.DOWN_OUT,
-        maturity=1.0,
         rebate=rebate,
         pay_at_hit=True,
         contract_multiplier=1.0,
         settlement_convention=settlement_convention,
+        **expiry,
     )
     return Position(
         product=option,
@@ -116,6 +121,7 @@ def _make_config(
     settlement_convention=None,
     engine=None,
     calculate_greeks=True,
+    exercise_date=None,
 ):
     # Spot ramps 100 -> 70 over 40 business days; crosses the 85 KO barrier.
     adapter = RampAdapter(start_spot=100.0, end_spot=70.0, num_days=40)
@@ -130,6 +136,7 @@ def _make_config(
                 quantity,
                 settlement_convention=settlement_convention,
                 engine=engine,
+                exercise_date=exercise_date,
             )
         ],
         market_data_adapter=adapter,
@@ -202,6 +209,27 @@ class TestBacktestLifecycle:
         days = (config.end_date - START).days
         assert held["EuropeanVanillaOption"].maturity == pytest.approx(1.0 - days / 365.0, abs=1e-15)
         assert held["BarrierOption"].maturity == 1.0          # untracked barrier: no roll rule, unchanged
+
+    def test_delayed_settlement_prices_on_the_analytical_engine(self):
+        # Sibling of the ConstantEngine test below: the analytical barrier engine now
+        # prices a constant first-hit lag exactly (patch spec 2026-09-03 §5), so the
+        # default engine with greeks on books the same pending PV on the KO day. The
+        # contract is date-based: a calendar-day lag needs a real expiry date on the
+        # terminal leg.
+        convention = SettlementConvention(
+            lag=2,
+            lag_unit=SettlementLagUnit.CALENDAR_DAYS,
+            business_day_convention=BusinessDayConvention.UNADJUSTED,
+        )
+        engine = BacktestEngine(
+            _make_config(settlement_convention=convention, exercise_date=datetime(2025, 1, 1))
+        )
+        results = engine.run()
+        states = results.states_df
+        event_date = results.get_lifecycle_events().index[0]
+        assert is_close(states.loc[event_date, "pending_receivable_pv"], 20.0 * safe_exp(-0.05 * 2.0 / 365.0))
+        assert is_close(states.loc[event_date + pd.Timedelta(days=2), "paid_cash"], 20.0)
+        assert len(results.get_greeks_series()) > 0
 
     def test_delayed_settlement_is_pending_before_it_becomes_cash(self):
         convention = SettlementConvention(

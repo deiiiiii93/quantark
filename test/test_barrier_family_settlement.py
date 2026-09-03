@@ -1,5 +1,7 @@
 """Leg-specific settlement timing across analytical and MC barrier families."""
 
+import math
+from copy import deepcopy
 from datetime import datetime
 
 import numpy as np
@@ -19,7 +21,8 @@ from quantark.asset.equity.engine.mc import (
     SingleSharkfinOptionMCEngine,
 )
 from quantark.asset.equity.engine.mc import barrier_vol_mc_engines
-from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.engine.pde import BarrierPDESolver
+from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.asset.equity.product.option import (
     BarrierOption,
     DoubleBarrierOption,
@@ -36,11 +39,13 @@ from quantark.asset.equity.settlement import (
 from quantark.execution.errors import CapabilityError
 from quantark.param import (
     ContinuousDividendYield,
+    FlatRateCurve,
     FlatVolSurface,
     SpotQuote,
 )
 from quantark.param.rrf.rate_curve import LinearRateCurve
 from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import BusinessDayConvention, CalendarType, DayCountConvention, create_calendar
 from quantark.util.enum import (
     BarrierDirection,
     BarrierType,
@@ -102,20 +107,169 @@ def test_no_touch_analytical_uses_terminal_payment_timing(env):
     )
 
 
-def test_continuous_first_hit_analytical_rejects_unrepresentable_lag(env):
-    product = OneTouchOption(
-        barrier=120.0,
-        barrier_direction=BarrierDirection.UP,
-        maturity=MATURITY,
-        rebate=10.0,
-        payment_at_hit=True,
-        touch_type=TouchType.ONE_TOUCH,
-        observation_type=ObservationType.CONTINUOUS,
-        settlement_convention=_lagged(),
-    )
+EXPIRY_DATE = datetime(2027, 1, 1)          # one CALENDAR_DAYS year after the fixture's valuation date
 
+
+def _expiry(dated):
+    """Day-based settlement lags need an authoritative expiry date on the terminal leg."""
+    return {"exercise_date": EXPIRY_DATE} if dated else {"maturity": MATURITY}
+
+
+def _one_touch(convention, dated=False):
+    return OneTouchOption(barrier=120.0, barrier_direction=BarrierDirection.UP, rebate=10.0,
+                          payment_at_hit=True, touch_type=TouchType.ONE_TOUCH,
+                          observation_type=ObservationType.CONTINUOUS, settlement_convention=convention,
+                          **_expiry(dated))
+
+
+def _up_out_call(convention, rebate=10.0, dated=False):
+    return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
+                         rebate=rebate, pay_at_hit=True, observation_type=ObservationType.CONTINUOUS,
+                         settlement_convention=convention, **_expiry(dated))
+
+
+def _single_sharkfin(convention, knock_out_rebate=2.0, dated=False):
+    return SingleSharkfinOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0,
+                                participation_rate=1.0, knock_out_rebate=knock_out_rebate, no_hit_rebate=0.0,
+                                pay_at_hit=True, observation_type=ObservationType.CONTINUOUS,
+                                settlement_convention=convention, **_expiry(dated))
+
+
+def _double_sharkfin(convention, knock_out_rebate=2.0, dated=False, **kw):
+    return DoubleSharkfinOption(strike=100.0, option_type=OptionType.CALL, upper_barrier=130.0, lower_barrier=70.0,
+                                participation_rate=1.0, knock_out_rebate=knock_out_rebate,
+                                no_hit_rebate=0.0, pay_at_hit=True, settlement_convention=convention,
+                                **({"observation_type": ObservationType.CONTINUOUS} | _expiry(dated) | kw))
+
+
+def test_continuous_first_hit_constant_lag_scales_by_exp_minus_r_lag(env):
+    """E[e^{-r(tau+L)} 1{tau<=T}] = e^{-rL} E[e^{-r tau} 1{tau<=T}] under the formula's flat r (patch spec §5.2)."""
+    factor = math.exp(-env.get_rate(MATURITY) * LAG)
+    touch = OneTouchAnalyticalEngine()
+    immediate = touch.price(_one_touch(None), env)
+    delayed = touch.price(_one_touch(_lagged()), env)
+    assert delayed != immediate
+    assert delayed == pytest.approx(immediate * factor, rel=2e-12)
+    # barrier: the option leg keeps its terminal delay, only the rebate leg carries exp(-r L)
+    eng = BarrierAnalyticalEngine()
+    rebate_leg = eng.price(_up_out_call(None), env) - eng.price(_up_out_call(None, rebate=0.0), env)
+    assert rebate_leg > 0.0
+    assert eng.price(_up_out_call(_lagged()), env) == pytest.approx(
+        eng.price(_up_out_call(_lagged(), rebate=0.0), env) + rebate_leg * factor, rel=2e-12)
+
+
+def test_calendar_day_lag_is_constant_only_under_act_style_day_counts(env):
+    """Day-based lags need a dated contract (terminal leg); the hit leg then scales by exp(-r n/basis)."""
+    unadjusted = SettlementConvention(lag=2, lag_unit=SettlementLagUnit.CALENDAR_DAYS,
+                                      business_day_convention=BusinessDayConvention.UNADJUSTED)
+    engine = OneTouchAnalyticalEngine()
+
+    def check_constant(pricing_env, basis):
+        plain = _one_touch(None, dated=True)
+        r = pricing_env.get_rate(plain.get_maturity(pricing_env))
+        assert engine.price(_one_touch(unadjusted, dated=True), pricing_env) == pytest.approx(
+            engine.price(plain, pricing_env) * math.exp(-r * 2 / basis), rel=2e-12)
+
+    check_constant(env, 365)                                        # CALENDAR_DAYS: days / 365
+    env365 = deepcopy(env)
+    env365.day_count_convention = DayCountConvention.ACT_365
+    check_constant(env365, 365)
+    env360 = deepcopy(env)
+    env360.day_count_convention = DayCountConvention.ACT_360
+    check_constant(env360, 360)
+    env_isda = deepcopy(env)
+    env_isda.day_count_convention = DayCountConvention.ACT_ACT_ISDA
+    with pytest.raises(CapabilityError, match="first-hit"):
+        engine.price(_one_touch(unadjusted, dated=True), env_isda)
+    # adjusted calendar-day and business-day lags are hit-date dependent (a calendar is needed
+    # for the terminal leg to resolve at all)
+    env_cal = deepcopy(env)
+    env_cal.calendar = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+    following = SettlementConvention(lag=2, lag_unit=SettlementLagUnit.CALENDAR_DAYS)     # FOLLOWING adjusts
+    with pytest.raises(CapabilityError, match="first-hit"):
+        engine.price(_one_touch(following, dated=True), env_cal)
+    business = SettlementConvention(lag=2, lag_unit=SettlementLagUnit.BUSINESS_DAYS)
+    with pytest.raises(CapabilityError, match="first-hit"):
+        engine.price(_one_touch(business, dated=True), env_cal)
+    # the same rules guard the barrier and sharkfin cash legs before pricing
+    with pytest.raises(CapabilityError, match="first-hit"):
+        BarrierAnalyticalEngine().price(_up_out_call(following, dated=True), env_cal)
+    with pytest.raises(CapabilityError, match="first-hit"):
+        SingleSharkfinOptionAnalyticalEngine().price(_single_sharkfin(business, dated=True), env_cal)
+    with pytest.raises(CapabilityError, match="first-hit"):
+        DoubleSharkfinOptionAnalyticalEngine().price(_double_sharkfin(following, dated=True), env_cal)
+
+
+def test_per_record_settlement_timing_still_rejected(env):
+    schedule = ObservationSchedule(records=[ObservationRecord(observation_time=0.5, settlement_time=0.6, barrier=120.0,
+                                                              payoff=10.0)],
+                                   aggregation_mode=ObservationAggregation.STOP_FIRST_HIT)
+    product = OneTouchOption(barrier=120.0, barrier_direction=BarrierDirection.UP, maturity=MATURITY, rebate=10.0,
+                             payment_at_hit=True, touch_type=TouchType.ONE_TOUCH,
+                             observation_type=ObservationType.DISCRETE, observation_schedule=schedule)
     with pytest.raises(CapabilityError, match="first-hit"):
         OneTouchAnalyticalEngine().price(product, env)
+
+
+def test_pde_lag_effect_matches_analytical_scaling():
+    """Flat rate: the lag EFFECT (immediate - delayed) agrees across engines; grid error cancels."""
+    flat = PricingEnvironment(spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(volatility=0.20),
+                              rate_curve=FlatRateCurve(rate=0.05), div_yield=ContinuousDividendYield(div_yield=0.0),
+                              valuation_date=datetime(2026, 1, 1))
+    lag = SettlementConvention(lag=0.5, lag_unit=SettlementLagUnit.YEAR_FRACTION)
+    an = BarrierAnalyticalEngine()
+    pde = BarrierPDESolver(PDEParams(accuracy="high"))
+    d_an = an.price(_up_out_call(None), flat) - an.price(_up_out_call(lag), flat)
+    d_pde = pde.price(_up_out_call(None), flat) - pde.price(_up_out_call(lag), flat)
+    assert d_an > 0.0
+    # measured 2026-09-03 (ARM64): analytical 5.555897 -> 5.418722, d_an = 0.137176;
+    # PDE high 5.555843 -> 5.418669, d_pde = 0.137174 (rel diff -1.0e-5; standard: -3.3e-5)
+    assert d_pde == pytest.approx(d_an, rel=1e-3)
+
+
+@pytest.mark.parametrize("engine,make", [(SingleSharkfinOptionAnalyticalEngine(), _single_sharkfin),
+                                         (DoubleSharkfinOptionAnalyticalEngine(), _double_sharkfin)])
+def test_sharkfin_first_hit_constant_lag_scales(env, engine, make):
+    """Only the hit-paid cash leg carries exp(-r L); the option leg keeps its own terminal delay."""
+    factor = math.exp(-env.get_rate(MATURITY) * LAG)
+    base = engine.price(make(None), env)
+    no_cash = engine.price(make(None, knock_out_rebate=0.0), env)
+    assert base > no_cash                                             # the cash leg is material
+    lagged = engine.price(make(_lagged()), env)
+    no_cash_lagged = engine.price(make(_lagged(), knock_out_rebate=0.0), env)
+    assert lagged == pytest.approx(no_cash_lagged + (base - no_cash) * factor, rel=2e-12)
+
+
+def test_discrete_double_sharkfin_lag_discounts_each_node_at_its_settlement_time(env):
+    """The discrete leg discounts every node at its own resolved settlement time (no constant factor).
+
+    Under a flat rate every node ratio DF(t+L)/DF(t) is exp(-r L), so the lagged cash leg is exactly
+    that multiple; under the term-structure fixture the lagged leg is a first-hit-probability-weighted
+    average of the two node ratios and lies strictly between them.
+    """
+    times = (0.25, 0.5)                                       # BGK needs a regular interval: two nodes
+    schedule = ObservationSchedule(records=[ObservationRecord(observation_time=t) for t in times])
+    engine = DoubleSharkfinOptionAnalyticalEngine()
+
+    def make(convention, knock_out_rebate=2.0):
+        return _double_sharkfin(convention, knock_out_rebate, observation_type=ObservationType.DISCRETE,
+                                observation_schedule=schedule)
+
+    def cash_legs(pricing_env):
+        plain = engine.price(make(None), pricing_env) - engine.price(make(None, knock_out_rebate=0.0), pricing_env)
+        lagged = (engine.price(make(_lagged()), pricing_env)
+                  - engine.price(make(_lagged(), knock_out_rebate=0.0), pricing_env))
+        assert plain > 0.0
+        return plain, lagged
+
+    flat = deepcopy(env)
+    flat.rate_curve = FlatRateCurve(rate=0.05)
+    plain, lagged = cash_legs(flat)
+    assert lagged == pytest.approx(plain * math.exp(-0.05 * LAG), rel=2e-12)
+    plain, lagged = cash_legs(env)
+    ratios = [env.get_discount_factor(t + LAG) / env.get_discount_factor(t) for t in times]
+    assert ratios[0] != pytest.approx(ratios[1], rel=1e-6)                     # the curve makes them differ
+    assert min(ratios) * plain < lagged < max(ratios) * plain
 
 
 class _Paths:
