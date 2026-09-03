@@ -47,6 +47,29 @@ def calendars_equal(a: Any, b: Any) -> bool:
     return set(getattr(a, "holidays", ())) == set(getattr(b, "holidays", ()))
 
 
+def engines_equivalent(a: Any, b: Any) -> bool:
+    """Identity, or the same class with equal, normalisable model fingerprints (patch spec §7).
+
+    Engines without a fingerprint (``model_fingerprint()`` is None: MC, PDE, QUAD,
+    vol-model engines) compare by identity; a fingerprint the normaliser cannot
+    represent counts as NOT equivalent. Never raises.
+    """
+    if a is b:
+        return True
+    if a is None or b is None or type(a) is not type(b):
+        return False
+    fa, fb = getattr(a, "model_fingerprint", None), getattr(b, "model_fingerprint", None)
+    if not callable(fa) or not callable(fb):
+        return False
+    ra, rb = fa(), fb()
+    if ra is None or rb is None:
+        return False
+    try:
+        return _normalize(ra) == _normalize(rb)
+    except ValidationError:
+        return False
+
+
 def _sorted_items(pairs: Any) -> tuple:
     """Deterministic order for normalised (key, value) pairs of mixed key types."""
     return tuple(sorted(pairs, key=repr))

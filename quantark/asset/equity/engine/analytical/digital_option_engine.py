@@ -40,6 +40,8 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
+    MODEL_FINGERPRINT_ATTRS = ('params', '_vanilla_engine')
     settlement_support = SettlementSupport.TERMINAL_ONLY
     supports_lifecycle_state = True
 

@@ -9,6 +9,7 @@ from quantark.pnlexplain.base import (
 from quantark.pnlexplain.config import PnLExplainConfig
 from quantark.pnlexplain.equity.coordinate import resolve_coordinate
 from quantark.pnlexplain.equity.factor_diff import build_factor_moves, validate_pair
+from quantark.pnlexplain.equity.fingerprints import engines_equivalent
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition, event_row, resolve_transition
 from quantark.pnlexplain.equity.scenario import ScenarioCache
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
@@ -80,6 +81,7 @@ def explain(
         "effective_factors": tuple(f.value for f in MARKET_FACTORS if f in cache.effective),
         "coordinate": (coordinate.reference_strike, coordinate.tenor_t1),
         "transition_changed": transition.changed,
+        "model_equivalent": engines_equivalent(snapshot_t0.engine, transition.engine_alive_t1),
         "contract_roll_days": days if transition.contract_roll_days is None else int(transition.contract_roll_days),
         "interaction": config.interaction,
         **taylor_meta,

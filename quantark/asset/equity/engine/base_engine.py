@@ -7,7 +7,7 @@ from copy import deepcopy
 from functools import update_wrapper
 import inspect
 from math import isfinite
-from typing import Dict, Optional, Sequence, TYPE_CHECKING
+from typing import Dict, Optional, Sequence, Tuple, TYPE_CHECKING
 import numpy as np
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.priceenv import PricingEnvironment
@@ -89,6 +89,12 @@ class BaseEngine(ABC):
     settlement_support = SettlementSupport.NONE
     supports_lifecycle_state = False
 
+    #: Attribute names that fully determine this engine's pricing function. ``None`` (the
+    #: default) means "identity only": two instances are never equivalent. Engines whose
+    #: instance state is exactly their construction arguments opt in (patch spec
+    #: 2026-09-03 §7); MC, PDE, QUAD and vol-model engines keep ``None``.
+    MODEL_FINGERPRINT_ATTRS: Optional[Tuple[str, ...]] = None
+
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         for method_name in ("price", "price_with_events", "calculate_greeks"):
@@ -102,6 +108,24 @@ class BaseEngine(ABC):
             params: Engine configuration parameters
         """
         self.params = params if params is not None else EngineParams()
+
+    def model_fingerprint(self) -> Optional[tuple]:
+        """(module, qualname, ((attr, value), ...)) or None when this engine compares by identity.
+
+        Sub-engine attributes are replaced by their own fingerprint; a sub-engine without
+        one makes the whole fingerprint None (fail closed).
+        """
+        if self.MODEL_FINGERPRINT_ATTRS is None:
+            return None
+        items = []
+        for name in self.MODEL_FINGERPRINT_ATTRS:
+            value = getattr(self, name)
+            if isinstance(value, BaseEngine):
+                value = value.model_fingerprint()
+                if value is None:
+                    return None
+            items.append((name, value))
+        return (type(self).__module__, type(self).__qualname__, tuple(items))
 
     @abstractmethod
     def price(

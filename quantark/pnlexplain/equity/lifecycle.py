@@ -11,7 +11,7 @@ import pandas as pd
 
 from quantark.asset.equity.lifecycle.events import LifecycleEvent, LifecycleEventType
 from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
-from quantark.pnlexplain.equity.fingerprints import check_contract_roll, lifecycle_fingerprint
+from quantark.pnlexplain.equity.fingerprints import check_contract_roll, engines_equivalent, lifecycle_fingerprint
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal
 from quantark.util.exceptions import NumericalError, ValidationError
 
@@ -125,7 +125,7 @@ def resolve_transition(
     if fp0 == fp1:
         if transition.events:
             raise ValidationError("transition carries events but the lifecycle state is unchanged")
-        if snap1.engine is not transition.engine_alive_t1:
+        if not engines_equivalent(snap1.engine, transition.engine_alive_t1):
             raise ValidationError(
                 "engine substitution without a lifecycle event is a MODEL change: "
                 "set engine_alive_t1 to snapshot_t1.engine"

@@ -142,8 +142,13 @@ def test_supplied_transition_with_unchanged_state_is_validated():
     with pytest.raises(ValidationError, match="unchanged"):
         resolve_transition(s0, s1, LifecycleTransition(_call(1.0 - 3 / 365), ENG, st, st, events=(coupon,)),
                            calendar_days=3)
+    # an EQUIVALENT engine object is accepted (patch spec §7); a non-equivalent one is a MODEL change
+    from quantark.asset.equity.param import EngineParams
+    same = LifecycleTransition(_call(1.0 - 3 / 365), BlackScholesEngine(), st, st)
+    assert resolve_transition(s0, s1, same, calendar_days=3) is same
     with pytest.raises(ValidationError, match="MODEL change"):
-        resolve_transition(s0, s1, LifecycleTransition(_call(1.0 - 3 / 365), BlackScholesEngine(), st, st),
+        resolve_transition(s0, s1, LifecycleTransition(_call(1.0 - 3 / 365),
+                                                       BlackScholesEngine(EngineParams(bus_days_in_year=244)), st, st),
                            calendar_days=3)
     with pytest.raises(ValidationError):                       # t1 must hold the alive contract itself
         resolve_transition(s0, _snap(_call(1.0 - 4 / 365), MON, deepcopy(st)), ok, calendar_days=3)

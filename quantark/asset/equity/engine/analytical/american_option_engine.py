@@ -41,6 +41,8 @@ class AmericanOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
+    MODEL_FINGERPRINT_ATTRS = ('params', 'method')
     settlement_support = SettlementSupport.NONE
     settlement_capability_hint = (
         "use AmericanOptionMCEngine or AmericanPDESolver for delayed exercise"

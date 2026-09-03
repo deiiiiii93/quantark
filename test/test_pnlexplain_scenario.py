@@ -73,7 +73,8 @@ def test_every_engine_context_is_frozen_at_the_t0_state(monkeypatch):
 
     monkeypatch.setattr(scenario_mod, "resolve_bump_engine", recording)
     s0, s1 = _pair()
-    new_engine = BlackScholesEngine()                       # a different object: a MODEL change
+    from quantark.asset.equity.param import EngineParams
+    new_engine = BlackScholesEngine(EngineParams(bus_days_in_year=244))   # NOT equivalent: a MODEL change
     s1 = ValuationSnapshot(s1.product, new_engine, s1.pricing_env, date=MON, quantity=2.0)
     c = _cache(s0, s1)
     assert Factor.MODEL in c.effective
@@ -82,6 +83,27 @@ def test_every_engine_context_is_frozen_at_the_t0_state(monkeypatch):
     assert all(p is s0.product and e is s0.pricing_env for p, e, _ in calls)
     product, engine, env, _ = c.build_state((Factor.MODEL,))          # {MODEL} alone: t0 state, new engine
     assert product is s0.product and engine is new_engine and env.valuation_date == FRI
+
+
+def test_equivalent_fresh_engine_adds_no_model_state(monkeypatch):
+    """A fresh but equivalent engine on the t1 snapshot is not a MODEL change: no extra pricing (patch spec §7)."""
+    s0, s1 = _pair()
+    s1 = ValuationSnapshot(s1.product, BlackScholesEngine(), s1.pricing_env, date=MON, quantity=2.0)
+    calls = []
+    real = BlackScholesEngine.price
+
+    def counting(self, product, env, **kw):
+        calls.append(self)
+        return real(self, product, env, **kw)
+
+    monkeypatch.setattr(BlackScholesEngine, "price", counting)
+    c = _cache(s0, s1)
+    assert Factor.MODEL not in c.effective
+    assert c.normalize((Factor.MODEL,)) == frozenset()
+    c.value_for(())
+    c.all_market()
+    c.value_for((Factor.MODEL,))                                  # normalises to the empty set: memoised
+    assert len(calls) == 2
 
 
 def test_effective_is_changed_and_applicable_and_normalize_drops_the_rest():

@@ -62,9 +62,13 @@ def test_moves_read_at_t1_coordinate_and_changed_set():
         ValuationSnapshot(p0, ENG, _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, FRI), date=FRI),
         ValuationSnapshot(p1, ENG, _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON), date=MON),
         coord, engine_alive_t1=None, lifecycle_changed=False).display(Factor.TIME)
-    # two distinct but equivalent engine objects ARE a model change (identity rule)
+    # two distinct but EQUIVALENT engine objects are not a model change (patch spec §7)
     other = build_factor_moves(s0, s1, coord, engine_alive_t1=BlackScholesEngine(), lifecycle_changed=False)
-    assert Factor.MODEL in other.changed
+    assert Factor.MODEL not in other.changed
+    from quantark.asset.equity.param import EngineParams
+    diff = build_factor_moves(s0, s1, coord, engine_alive_t1=BlackScholesEngine(EngineParams(bus_days_in_year=244)),
+                              lifecycle_changed=False)
+    assert Factor.MODEL in diff.changed
 
 
 def test_delta_one_coordinates():

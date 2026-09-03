@@ -144,8 +144,8 @@ EXPECTED_ALL = [
     "PnLExplainConfig", "PnLExplainRecorder", "PnLExplainResult", "PortfolioExplainResult",
     "PositionExplainResult", "PositionSnapshot", "QuotedLegSnapshot", "RECON_COLUMNS",
     "ReplayPnLExplainRecorder", "RowKind", "ValuationSnapshot", "ValueBreakdown", "component_sum",
-    "contract_fingerprint", "explain", "explain_portfolio", "explain_position", "explain_quoted_leg",
-    "lifecycle_fingerprint", "make_total_row", "rows_to_frame", "value",
+    "contract_fingerprint", "engines_equivalent", "explain", "explain_portfolio", "explain_position",
+    "explain_quoted_leg", "lifecycle_fingerprint", "make_total_row", "rows_to_frame", "value",
 ]
 
 

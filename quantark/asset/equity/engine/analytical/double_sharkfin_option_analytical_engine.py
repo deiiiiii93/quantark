@@ -56,6 +56,8 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
+    MODEL_FINGERPRINT_ATTRS = ('params', 'max_terms', 'quad_points', '_double_barrier_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 

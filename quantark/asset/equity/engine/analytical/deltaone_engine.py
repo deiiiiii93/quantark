@@ -40,6 +40,8 @@ class DeltaOneEngine(BaseEngine):
     """
     
     engine_type = EngineType.ANALYTICAL
+    # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
+    MODEL_FINGERPRINT_ATTRS = ('params', 'use_market_price')
 
     def __init__(self, params: Optional[EngineParams] = None, use_market_price: bool = False):
         """

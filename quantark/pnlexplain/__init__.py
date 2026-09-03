@@ -8,7 +8,9 @@ from quantark.pnlexplain.config import PnLExplainConfig  # noqa: F401
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, value  # noqa: F401
 from quantark.pnlexplain.equity.coordinate import FactorCoordinate  # noqa: F401
 from quantark.pnlexplain.equity.factor_diff import FactorMoves  # noqa: F401
-from quantark.pnlexplain.equity.fingerprints import contract_fingerprint, lifecycle_fingerprint  # noqa: F401
+from quantark.pnlexplain.equity.fingerprints import (  # noqa: F401
+    contract_fingerprint, engines_equivalent, lifecycle_fingerprint,
+)
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition  # noqa: F401
 from quantark.pnlexplain.equity.explain import explain  # noqa: F401
 from quantark.pnlexplain.equity.trades import ExplainTrade  # noqa: F401
@@ -26,6 +28,6 @@ __all__ = [
     "PnLExplainConfig", "PnLExplainRecorder", "PnLExplainResult", "PortfolioExplainResult",
     "PositionExplainResult", "PositionSnapshot", "QuotedLegSnapshot", "RECON_COLUMNS",
     "ReplayPnLExplainRecorder", "RowKind", "ValuationSnapshot", "ValueBreakdown", "component_sum",
-    "contract_fingerprint", "explain", "explain_portfolio", "explain_position", "explain_quoted_leg",
-    "lifecycle_fingerprint", "make_total_row", "rows_to_frame", "value",
+    "contract_fingerprint", "engines_equivalent", "explain", "explain_portfolio", "explain_position",
+    "explain_quoted_leg", "lifecycle_fingerprint", "make_total_row", "rows_to_frame", "value",
 ]
