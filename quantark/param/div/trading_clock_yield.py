@@ -32,5 +32,9 @@ class TradingClockDividendYield(DividendYield):
         c = float(self.time_map.to_calendar(u))
         return self.inner.get_yield(c) * c / u
 
+    def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockDividendYield":
+        """The same inner yield re-expressed through another map (e.g. re-anchored)."""
+        return TradingClockDividendYield(self.inner, time_map)
+
     def __repr__(self) -> str:
         return f"TradingClockDividendYield({self.inner!r}, {self.time_map!r})"

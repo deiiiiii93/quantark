@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Optional
+from typing import Any, Callable, Dict, FrozenSet, Optional
 
 from quantark.param.basis.basis_yield import FlatBasisYield, ZeroBasis
 from quantark.param.div import ContinuousDividendYield, NoDividend
 from quantark.pnlexplain.base import Factor
+from quantark.pnlexplain.equity.clock import (
+    is_clock_wrapped, validate_clock_env, validate_clock_pair, wrapped_equal,
+)
 from quantark.pnlexplain.equity.coordinate import FactorCoordinate
 from quantark.pnlexplain.equity.fingerprints import calendars_equal, engines_equivalent
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
-from quantark.util.calendar import calculate_year_fraction
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.util.numerical import is_close, safe_divide
 
@@ -50,6 +53,19 @@ def _basis_equal(a: Any, b: Any) -> bool:
     if _is_zero_basis(a) and _is_zero_basis(b):
         return True
     return objects_equal(a, b)
+
+
+def market_objects_equal(a: Any, b: Any, base: Callable[[Any, Any], bool] = objects_equal) -> bool:
+    """Clock wrappers compare by (class, inner, clock); everything else by ``base`` (patch spec §8)."""
+    if is_clock_wrapped(a) and is_clock_wrapped(b):
+        return wrapped_equal(a, b, base)
+    return base(a, b)
+
+
+def _float_maturity_only(product: Any) -> bool:
+    return (getattr(product, "exercise_date", None) is None
+            and getattr(product, "maturity_date", None) is None
+            and getattr(product, "maturity", None) is not None)
 
 
 @dataclass(frozen=True)
@@ -104,6 +120,14 @@ def validate_pair(snap0: ValuationSnapshot, snap1: ValuationSnapshot) -> None:
         raise ValidationError("day count convention / bus_days_in_year differ between snapshots")
     if not calendars_equal(getattr(e0, "calendar", None), getattr(e1, "calendar", None)):
         raise ValidationError("calendars differ between snapshots (semantic comparison)")
+    validate_clock_env(e0, "snapshot_t0.pricing_env")
+    validate_clock_env(e1, "snapshot_t1.pricing_env")
+    validate_clock_pair(e0, e1)
+    if e0.day_count_convention is DayCountConvention.BUSINESS_DAYS and _float_maturity_only(snap0.product):
+        raise ValidationError(
+            "a float-maturity product on a BUSINESS_DAYS environment has a trading-time maturity; "
+            "the days/365 roll rule does not describe it (use a date-based product)"
+        )
     if snap0.quantity != snap1.quantity:
         raise ValidationError(
             "quantities differ between snapshots; a quantity change is a trade (use explain_position)"
@@ -169,11 +193,11 @@ def build_factor_moves(
     app = coordinate.applicable
     if Factor.SPOT in app and s0 != s1:
         changed.add(Factor.SPOT)
-    if Factor.VOL in app and not objects_equal(e0.vol_surface, e1.vol_surface):
+    if Factor.VOL in app and not market_objects_equal(e0.vol_surface, e1.vol_surface):
         changed.add(Factor.VOL)
-    if Factor.RATE in app and not objects_equal(e0.rate_curve, e1.rate_curve):
+    if Factor.RATE in app and not market_objects_equal(e0.rate_curve, e1.rate_curve):
         changed.add(Factor.RATE)
-    if Factor.DIVIDEND in app and not _yields_equal(e0.div_yield, e1.div_yield):
+    if Factor.DIVIDEND in app and not market_objects_equal(e0.div_yield, e1.div_yield, _yields_equal):
         changed.add(Factor.DIVIDEND)
     if Factor.BASIS in app and not _basis_equal(e0.basis_yield, e1.basis_yield):
         changed.add(Factor.BASIS)

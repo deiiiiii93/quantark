@@ -44,5 +44,9 @@ class TradingClockRateCurve(RateCurve):
         df = self.get_discount_factor(time_to_maturity)
         return -math.log(df) / float(time_to_maturity)
 
+    def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockRateCurve":
+        """The same inner curve re-expressed through another map (e.g. re-anchored)."""
+        return TradingClockRateCurve(self.inner, time_map)
+
     def __repr__(self) -> str:
         return f"TradingClockRateCurve({self.inner!r}, {self.time_map!r})"

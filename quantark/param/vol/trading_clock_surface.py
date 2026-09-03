@@ -66,5 +66,9 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
         v = float(self.inner.get_vol(float(strike), tau_td, float(spot)))
         return v * float(np.sqrt(tau_td / tau_cal))
 
+    def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockVolSurface":
+        """The same inner surface re-expressed through another map (e.g. re-anchored)."""
+        return TradingClockVolSurface(self.inner, time_map)
+
     def __repr__(self) -> str:
         return f"TradingClockVolSurface({self.inner!r}, {self.time_map!r})"

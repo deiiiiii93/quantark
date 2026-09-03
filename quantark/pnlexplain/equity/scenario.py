@@ -8,6 +8,7 @@ from quantark.asset.equity.riskmeasures.greeks.bump_envs import resolve_bump_eng
 from quantark.param.vol.sticky import shocked_surface
 from quantark.pnlexplain.base import MARKET_FACTORS, Factor, ValueBreakdown
 from quantark.pnlexplain.config import PnLExplainConfig
+from quantark.pnlexplain.equity.clock import re_anchor
 from quantark.pnlexplain.equity.factor_diff import FactorMoves
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, value
@@ -75,6 +76,9 @@ class ScenarioCache:
             env.basis_yield = e1.basis_yield
         if Factor.MODEL in s:
             engine = self.bump_engine_alive
+        # Clock wrappers are anchored at their environment's valuation date: every state sees the
+        # same inner objects and clock from its OWN date (sticky trading tenor, patch spec §8).
+        re_anchor(env)
         return product, engine, env, point
 
     def value_for(self, applied: Iterable[Factor]) -> ValueBreakdown:

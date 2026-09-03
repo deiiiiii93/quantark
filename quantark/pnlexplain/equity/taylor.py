@@ -9,6 +9,7 @@ from quantark.asset.equity.riskmeasures.greeks.bump_envs import resolve_theta_bu
 from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
 from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
 from quantark.pnlexplain.config import PnLExplainConfig, TERM_FACTOR, resolve_stencil, resolved_subrows
+from quantark.pnlexplain.equity.clock import CLOCK_FIELDS, is_clock_wrapped
 from quantark.pnlexplain.equity.scenario import ScenarioCache
 from quantark.pnlexplain.equity.snapshot import is_terminal
 from quantark.util.exceptions import ValidationError
@@ -155,6 +156,12 @@ def _theta_subrows(level, greeks, q, n, days, per_day, gap_scale, config, subrow
 def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "instrument"
                 ) -> Tuple[Tuple[ExplainRow, ...], float, Dict[str, Any]]:
     snap0, moves = cache.snap0, cache.moves
+    if any(is_clock_wrapped(getattr(snap0.pricing_env, f, None)) for f in CLOCK_FIELDS):
+        raise ValidationError(
+            "Taylor method on a TradingClock-wrapped environment is not supported: the calculator's "
+            "vol / dividend / rate bumps replace the wrapper with a calendar-quoted object (a different "
+            "clock); use methods=(ExplainMethod.WATERFALL,)"
+        )
     q, days, S0 = snap0.quantity, moves.calendar_days, moves.spot_t0
     terms, subrows = resolve_stencil(config), resolved_subrows(config)
     alive_move = cache.all_market().total - cache.value_for(()).total

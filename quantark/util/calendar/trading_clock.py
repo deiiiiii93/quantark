@@ -46,6 +46,7 @@ class BusinessTimeMap:
             raise ValidationError("horizon_date must be after anchor_date")
         self.clock = clock
         self.anchor_date = anchor_date
+        self.horizon_date = horizon_date
         self.extend_weekdays = bool(extend_weekdays)
         n_days = (horizon_date - anchor_date).days
         inv_d = 1.0 / float(clock.days_per_year)
@@ -66,6 +67,10 @@ class BusinessTimeMap:
         td_idx = np.nonzero(is_td)[0]
         self._u_knots = np.concatenate(([0.0], td_start[td_idx + 1]))
         self._c_knots = np.concatenate(([0.0], (td_idx + 1) / 365.0))
+
+    def re_anchored(self, anchor_date: datetime) -> "BusinessTimeMap":
+        """The same clock and horizon seen from another valuation date (patch spec 2026-09-03 §8)."""
+        return BusinessTimeMap(self.clock, anchor_date, self.horizon_date, extend_weekdays=self.extend_weekdays)
 
     def _day_frac(self, tau_cal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         f = tau_cal * 365.0
