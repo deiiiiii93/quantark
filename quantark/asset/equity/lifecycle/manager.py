@@ -115,7 +115,10 @@ class PortfolioLifecycleManager:
         Call once, after portfolio construction and before the first
         ``process_day`` call; calling it again would re-register trackers
         with fresh (reset) lifecycle state. Positions added later (e.g.
-        hedge instruments) are intentionally untracked.
+        hedge instruments) are intentionally untracked. Schedule-free
+        float-maturity products present here have their roll measured from
+        ``base_date`` (the trackers' convention); others roll from the first
+        day the manager sees them.
         """
         for position_id, position in portfolio.positions.items():
             product = position.product
@@ -143,6 +146,8 @@ class PortfolioLifecycleManager:
                 )
                 self._barrier[position_id] = tracker
                 position.lifecycle_state = tracker.state
+            elif is_float_rollable(product):
+                self._float_roller.register(position_id, product, self.base_date)
 
 
     def _roll_untracked(self, position_id: str, position, date: pd.Timestamp):

@@ -196,7 +196,10 @@ def test_manager_pricing_products_is_pure():
     before = {pid: p.product for pid, p in portfolio.positions.items()}
     products = manager.pricing_products(portfolio, pd.Timestamp(day))
     assert set(products) == {note.position_id, vanilla.position_id}
-    assert products[vanilla.position_id] is vanilla.product
+    # the untracked schedule-free vanilla is rolled too (patch spec 2026-09-03 §4): a fresh copy
+    assert products[vanilla.position_id] is not vanilla.product
+    assert products[vanilla.position_id].maturity == pytest.approx(1.0 - 30 / 365)
+    assert vanilla.product.maturity == 1.0
     assert products[note.position_id] is not note.product
     assert products[note.position_id].maturity == pytest.approx(1.0 - 30 / 365)
     assert {pid: p.product for pid, p in portfolio.positions.items()} == before   # no mutation
