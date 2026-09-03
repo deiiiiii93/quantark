@@ -96,3 +96,51 @@ def test_relabel_and_to_dict_keep_order():
     d = p.to_dict()
     assert list(d.keys()) == FRAME_COLUMNS
     assert d["term"] == "vega" and d["kind"] == "component"
+
+
+def test_row_and_result_normalise_numeric_fields():
+    from decimal import Decimal
+    r = _row(Factor.VOL, "vega", ExplainMethod.TAYLOR, RowKind.COMPONENT, Decimal("1.5"),
+             greek="0.25", cash_greek=Decimal("2.5"), moves={"vol_pts": "1.0"})
+    assert (r.pnl, r.greek, r.cash_greek, r.moves["vol_pts"]) == (1.5, 0.25, 2.5, 1.0)
+    assert all(type(v) is float for v in (r.pnl, r.greek, r.cash_greek, r.moves["vol_pts"]))
+    with pytest.raises(ValidationError, match="greek"):
+        _row(Factor.VOL, "vega", ExplainMethod.TAYLOR, RowKind.COMPONENT, 1.0, greek="big")
+    with pytest.raises(NumericalError, match="cash_greek"):
+        _row(Factor.VOL, "vega", ExplainMethod.TAYLOR, RowKind.COMPONENT, 1.0, cash_greek=math.inf)
+    with pytest.raises(NumericalError, match="move vol_pts"):
+        _row(Factor.VOL, "vega", ExplainMethod.TAYLOR, RowKind.COMPONENT, 1.0, moves={"vol_pts": math.nan})
+    with pytest.raises(ValidationError, match="move vol_pts"):
+        _row(Factor.VOL, "vega", ExplainMethod.TAYLOR, RowKind.COMPONENT, 1.0, moves={"vol_pts": "x"})
+    with pytest.raises(ValidationError, match="PnL"):
+        _row(Factor.VOL, "vega", ExplainMethod.TAYLOR, RowKind.COMPONENT, "1.0.0")
+    vb = ValueBreakdown(10.0, 0.0, 0.0)
+    kw = dict(date_t0=datetime(2026, 6, 26), date_t1=datetime(2026, 6, 29), pv_t0=vb, pv_alive_t1=vb,
+              pv_t1=vb, moves=None, rows=(), metadata={})
+    res = PnLExplainResult(total_pnl=Decimal("3.5"), unexplained=Decimal("0.5"), **kw)
+    assert type(res.total_pnl) is float and res.total_pnl == 3.5 and res.unexplained == 0.5
+    assert res.reconcile(ExplainMethod.TAYLOR) == 3.5                    # float arithmetic, no Decimal leak
+    with pytest.raises(NumericalError, match="unexplained"):
+        PnLExplainResult(total_pnl=3.5, unexplained=math.inf, **kw)
+    with pytest.raises(ValidationError, match="total_pnl"):
+        PnLExplainResult(total_pnl="lots", unexplained=None, **kw)
+
+
+def test_reconcile_scale_tracks_endpoints_and_components():
+    from quantark.pnlexplain.equity.explain import reconcile_scale
+    rows = [
+        _row(Factor.TIME, "time", ExplainMethod.WATERFALL, RowKind.COMPONENT, 1e9),
+        _row(Factor.SPOT, "spot", ExplainMethod.WATERFALL, RowKind.COMPONENT, -1e9 + 3.5),
+        _row(Factor.TIME, "r_theta", ExplainMethod.TAYLOR, RowKind.INFORMATIONAL, 1e15),   # not summed
+        make_total_row("instrument", 3.5),
+    ]
+    res = _result(rows, 3.5)
+    assert res.total_pnl == 3.5
+    assert reconcile_scale(res, ExplainMethod.WATERFALL) == pytest.approx(2e9 - 3.5)
+    assert reconcile_scale(res, ExplainMethod.TAYLOR) == pytest.approx(13.5)              # pv_alive_t1 = 13.5
+    big = ValueBreakdown(1e12, 0.0, 0.0)
+    res_big = PnLExplainResult(date_t0=datetime(2026, 6, 26), date_t1=datetime(2026, 6, 29), pv_t0=big,
+                               pv_alive_t1=big, pv_t1=big, total_pnl=0.0, moves=None, rows=(),
+                               unexplained=None, metadata={})
+    assert reconcile_scale(res_big, ExplainMethod.WATERFALL) == 1e12
+    assert component_sum(rows, ExplainMethod.WATERFALL) == 3.5                            # exactly rounded (fsum)

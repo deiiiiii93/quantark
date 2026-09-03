@@ -1,12 +1,14 @@
 """Per-product factor coordinate (spec §5.3)."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, FrozenSet, Optional
 
 from quantark.asset.equity.product.deltaone import Futures, SpotInstrument
 from quantark.pnlexplain.base import MARKET_FACTORS, Factor
 from quantark.pnlexplain.equity.fingerprints import MATURITY_FLOOR
+from quantark.util.exceptions import NumericalError, ValidationError
 
 _TERM_FACTORS = frozenset({Factor.VOL, Factor.RATE, Factor.DIVIDEND, Factor.BASIS})
 
@@ -18,12 +20,25 @@ class FactorCoordinate:
     applicable: FrozenSet[Factor]
 
 
-def _positive(value: Any) -> Optional[float]:
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
+def _level(product: Any, name: str) -> Optional[float]:
+    """A positive contract level, or None only when the product has no such term.
+
+    A present-but-malformed level is an error, never a fallback to the next
+    candidate: a NaN strike must not be silently read at the spot.
+    """
+    raw = getattr(product, name, None)
+    if raw is None:
         return None
-    return f if f > 0.0 else None
+    what = f"{type(product).__name__}.{name}"
+    try:
+        f = float(raw)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{what} must be a number, got {raw!r}") from None
+    if not math.isfinite(f):
+        raise ValidationError(f"{what} must be finite, got {raw!r}")
+    if f <= 0.0:
+        raise ValidationError(f"{what} must be positive, got {raw!r}")
+    return f
 
 
 def _tenor(product: Any, env: Any) -> Optional[float]:
@@ -41,7 +56,16 @@ def _tenor(product: Any, env: Any) -> Optional[float]:
         return None
     if expiry is not None and env is not None and env.valuation_date >= expiry:
         return 0.0
-    return float(product.get_maturity(env))
+    raw = product.get_maturity(env)
+    try:
+        tenor = float(raw)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            f"{type(product).__name__}.get_maturity must return a number, got {raw!r}"
+        ) from None
+    if not math.isfinite(tenor):
+        raise NumericalError(f"non-finite remaining tenor for {type(product).__name__}: {raw!r}")
+    return tenor
 
 
 def resolve_coordinate(product_t0: Any, spot_t0: float, product_alive_t1: Any, env_t1: Any
@@ -55,8 +79,11 @@ def resolve_coordinate(product_t0: Any, spot_t0: float, product_alive_t1: Any, e
         strike = float(spot_t0)
     else:
         applicable = frozenset(MARKET_FACTORS)
-        strike = _positive(getattr(product_t0, "strike", None)) \
-            or _positive(getattr(product_t0, "initial_price", None)) or float(spot_t0)
+        strike = _level(product_t0, "strike")
+        if strike is None:
+            strike = _level(product_t0, "initial_price")
+        if strike is None:
+            strike = float(spot_t0)
     tenor = _tenor(product_alive_t1, env_t1)
     if tenor is not None and tenor <= MATURITY_FLOOR:     # at or below the trackers' 1e-8 floor = expired
         applicable = applicable - _TERM_FACTORS

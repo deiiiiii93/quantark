@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from quantark.pnlexplain.base import MARKET_FACTORS, ExplainMethod, ExplainRow, PnLExplainResult, make_total_row
+from quantark.pnlexplain.base import (
+    MARKET_FACTORS, ExplainMethod, ExplainRow, PnLExplainResult, RowKind, make_total_row,
+)
 from quantark.pnlexplain.config import PnLExplainConfig
 from quantark.pnlexplain.equity.coordinate import resolve_coordinate
 from quantark.pnlexplain.equity.factor_diff import build_factor_moves, validate_pair
@@ -16,6 +18,20 @@ from quantark.util.exceptions import NumericalError
 from quantark.util.numerical import is_close
 
 LEVEL = "instrument"
+RECONCILE_TOL = 1e-10
+
+
+def reconcile_scale(result: PnLExplainResult, method: ExplainMethod) -> float:
+    """The magnitude the waterfall's rounding error is proportional to.
+
+    The rows are differences of scenario values and the endpoints are sums of
+    value parts, so floating-point error scales with the endpoint PVs and the
+    absolute component sizes, not with the (possibly offsetting) net PnL.
+    """
+    parts = [1.0, abs(result.total_pnl), abs(result.pv_t0.total), abs(result.pv_alive_t1.total),
+             abs(result.pv_t1.total)]
+    parts.append(sum(abs(r.pnl) for r in result.rows_for(method, kind=RowKind.COMPONENT)))
+    return max(parts)
 
 
 def explain(
@@ -75,6 +91,7 @@ def explain(
     )
     if ExplainMethod.WATERFALL in config.methods:
         gap = result.reconcile(ExplainMethod.WATERFALL)
-        if not is_close(gap, 0.0, rel_tol=0.0, abs_tol=1e-10 * max(1.0, abs(total_pnl))):
-            raise NumericalError(f"waterfall does not reconcile: gap {gap}")
+        tol = RECONCILE_TOL * reconcile_scale(result, ExplainMethod.WATERFALL)
+        if not is_close(gap, 0.0, rel_tol=0.0, abs_tol=tol):
+            raise NumericalError(f"waterfall does not reconcile: gap {gap} exceeds {tol}")
     return result

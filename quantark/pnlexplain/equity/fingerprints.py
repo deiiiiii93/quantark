@@ -3,21 +3,28 @@
 contract_fingerprint excludes the fields the lifecycle trackers change day to
 day (spec §5.3); lifecycle_fingerprint is generic over every dataclass field
 of a state so a new pricing-relevant field can never be missed (spec §8).
+
+Normalisation is TYPE-TAGGED: ``1``, ``1.0``, ``True`` and an ``IntEnum``
+member with value 1 are four different contract terms, and a mapping keyed by
+``1`` differs from one keyed by ``"1"``. Values of a type this module cannot
+serialise canonically are rejected (``ValidationError``) rather than fingerprinted
+by ``repr``, whose default form carries object addresses.
 """
 from __future__ import annotations
 
 import dataclasses
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any, Mapping, Tuple
 
 import numpy as np
 
 from quantark.asset.equity.lifecycle.cashflows import LifecycleCashflowLedger, ValuationPoint
+from quantark.util.calendar.business_calendar import Calendar
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
-LIFECYCLE_FINGERPRINT_VERSION = "v1"
+LIFECYCLE_FINGERPRINT_VERSION = "v2"    # v2: type-tagged normalisation
 ROLL_TOL = 1e-12        # spec §5.3 roll equation tolerance
 ROLLED_FIELDS = frozenset({"maturity", "_otc_lifecycle_knocked_in"})
 SCHEDULE_FIELDS = frozenset({
@@ -40,57 +47,78 @@ def calendars_equal(a: Any, b: Any) -> bool:
     return set(getattr(a, "holidays", ())) == set(getattr(b, "holidays", ()))
 
 
+def _sorted_items(pairs: Any) -> tuple:
+    """Deterministic order for normalised (key, value) pairs of mixed key types."""
+    return tuple(sorted(pairs, key=repr))
+
+
 def _normalize(value: Any) -> Any:
-    if value is None or isinstance(value, (bool, int, str)):
-        return value
+    if value is None:
+        return None
+    if isinstance(value, Enum):             # before the primitives: IntEnum / str-mixin members ARE ints / strs
+        return ("enum", type(value).__name__, _normalize(value.value))
+    if isinstance(value, bool):             # before int: bool is an int subclass
+        return ("bool", value)
+    if isinstance(value, int):
+        return ("int", value)
     if isinstance(value, float):
-        return value
+        return ("float", value)
+    if isinstance(value, str):
+        return ("str", value)
     if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, Enum):
-        return ("enum", type(value).__name__, value.value)
+        return _normalize(value.item())
     if isinstance(value, datetime):
-        return value.isoformat()
+        return ("datetime", value.isoformat())
     if isinstance(value, date):
-        return value.isoformat()
+        return ("date", value.isoformat())
+    if isinstance(value, timedelta):
+        return ("timedelta", value.total_seconds())
     if isinstance(value, ValuationPoint):
-        return ("date", value.date.isoformat()) if value.date is not None else ("time", float(value.time))
+        return ("point", "date", value.date.isoformat()) if value.date is not None \
+            else ("point", "time", float(value.time))
     if isinstance(value, LifecycleCashflowLedger):
         return ("ledger", tuple(
             (cf.cashflow_id, cf.event_type.value, float(cf.amount),
              cf.determination_date.isoformat() if cf.determination_date is not None else cf.determination_time,
              cf.payment_date.isoformat() if cf.payment_date is not None else cf.payment_time,
-             tuple(sorted((k, _normalize(v)) for k, v in cf.metadata.items())))
+             _sorted_items((_normalize(k), _normalize(v)) for k, v in cf.metadata.items()))
             for cf in value.cashflows
         ))
+    if isinstance(value, Calendar):
+        return ("calendar", type(value).__name__, value.name,
+                tuple(sorted((_normalize(d) for d in value.holidays), key=repr)),
+                tuple(sorted(int(d) for d in value.weekend_days)))
     if isinstance(value, (set, frozenset)):
-        return tuple(sorted(_normalize(v) for v in value))
+        return ("set", tuple(sorted((_normalize(v) for v in value), key=repr)))
     if isinstance(value, (list, tuple)):
-        return tuple(_normalize(v) for v in value)
+        return ("seq", tuple(_normalize(v) for v in value))
     if isinstance(value, np.ndarray):
-        return ("ndarray", value.shape, tuple(value.ravel().tolist()))
+        return ("ndarray", value.shape, tuple(_normalize(v) for v in value.ravel().tolist()))
     if isinstance(value, Mapping):
-        return tuple(sorted((str(k), _normalize(v)) for k, v in value.items()))
+        return ("map", _sorted_items((_normalize(k), _normalize(v)) for k, v in value.items()))
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return (type(value).__name__, tuple(
             (f.name, _normalize(getattr(value, f.name))) for f in dataclasses.fields(value)
         ))
-    return ("repr", type(value).__name__, repr(value))
+    raise ValidationError(
+        f"cannot fingerprint a {type(value).__module__}.{type(value).__name__} value: "
+        "contract and lifecycle identity need a canonical normalisation, not repr()"
+    )
 
 
 def _public_fields(obj: Any) -> Tuple[Tuple[str, Any], ...]:
-    """Dataclass fields first, then every public instance attribute.
+    """Dataclass fields plus every public instance attribute, by sorted name.
 
     Several products are decorated ``@dataclass`` without declaring annotated
     fields of their own (the contract terms are plain attributes set by the
     base class ``__init__``), so ``dataclasses.fields`` alone can be empty.
+    Names are sorted: attribute insertion order is not contract semantics.
     """
-    names: list = []
+    names = set()
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        names = [f.name for f in dataclasses.fields(obj)]
-    names += [k for k in vars(obj) if not k.startswith("_") and k not in names]
-    names += [k for k in vars(obj) if k in ROLLED_FIELDS and k not in names]
-    return tuple((n, getattr(obj, n)) for n in names)
+        names.update(f.name for f in dataclasses.fields(obj))
+    names.update(k for k in vars(obj) if not k.startswith("_") or k in ROLLED_FIELDS)
+    return tuple((n, getattr(obj, n)) for n in sorted(names))
 
 
 def _static_terms(value: Any) -> Any:
@@ -113,25 +141,49 @@ def contract_fingerprint(product: Any) -> tuple:
     return (type(product).__name__, tuple(items))
 
 
+def _float_maturity(value: Any, what: str) -> float:
+    try:
+        m = float(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{what} product maturity must be a number, got {value!r}") from None
+    if not np.isfinite(m):
+        raise ValidationError(f"{what} product maturity must be finite, got {value!r}")
+    return m
+
+
 def check_contract_roll(product_t0: Any, product_alive_t1: Any, calendar_days: int) -> None:
-    """Raise unless product_alive_t1 is product_t0 rolled forward calendar_days (spec §5.3)."""
+    """Raise unless product_alive_t1 is product_t0 rolled forward calendar_days (spec §5.3).
+
+    A float maturity must equal ``max(MATURITY_FLOOR, m0 - calendar_days/365)``
+    within ROLL_TOL: the trackers' floor is only reached when the roll would
+    cross it, so a floored maturity is validated, not waved through.
+    ``calendar_days == 0`` declares an unrolled contract (same maturity).
+    """
     if contract_fingerprint(product_t0) != contract_fingerprint(product_alive_t1):
         raise ValidationError("contract replacement is not a time step")
-    m0 = getattr(product_t0, "maturity", None)
-    m1 = getattr(product_alive_t1, "maturity", None)
-    if m0 is None or m1 is None:
-        return
     date_based = getattr(product_t0, "exercise_date", None) is not None \
         or getattr(product_t0, "maturity_date", None) is not None
     if date_based:
-        return                      # dates are in the fingerprint; the float is metadata
-    m0, m1 = float(m0), float(m1)
-    if m1 <= MATURITY_FLOOR + ROLL_TOL:
-        return                      # clamped at the trackers' floor
-    if not is_close(m0 - m1, calendar_days / 365.0, rel_tol=0.0, abs_tol=ROLL_TOL):
+        return                      # dates are in the fingerprint; the float is derived metadata
+    m0 = getattr(product_t0, "maturity", None)
+    m1 = getattr(product_alive_t1, "maturity", None)
+    if m0 is None and m1 is None:
+        return                      # no expiry on either side (spot, perpetual)
+    if m0 is None or m1 is None:
         raise ValidationError(
-            f"alive product maturity {m1} is not {m0} rolled by {calendar_days} days "
-            "(a float-maturity contract must be supplied rolled by calendar_days/365)"
+            "alive product switches between an expiring and a non-expiring contract"
+        )
+    m0 = _float_maturity(m0, "t0")
+    m1 = _float_maturity(m1, "alive-at-t1")
+    days = int(calendar_days)
+    if days < 0:
+        raise ValidationError(f"calendar_days must be non-negative, got {calendar_days}")
+    expected = m0 if days == 0 else max(MATURITY_FLOOR, m0 - days / 365.0)
+    if not is_close(m1, expected, rel_tol=0.0, abs_tol=ROLL_TOL):
+        raise ValidationError(
+            f"alive product maturity {m1} is not {m0} rolled by {days} days (expected {expected}; "
+            "a float-maturity contract must be supplied rolled by calendar_days/365, "
+            f"floored at {MATURITY_FLOOR})"
         )
 
 

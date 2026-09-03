@@ -23,6 +23,15 @@ class ScenarioCache:
         self.effective: FrozenSet[Factor] = frozenset(
             f for f in MARKET_FACTORS if f in moves.changed and f in moves.coordinate.applicable
         )
+        # One bump context PER ENGINE OBJECT, resolved at the t0 product and
+        # market and reused for every state that engine values, including the
+        # t1 endpoint (spec §5.1 "one scenario cache", §6). Re-resolving the
+        # alive or t1 endpoint at its own product/market would hand it a
+        # different frozen PDE grid or MC seed context, and the event row
+        # (pv_t1 - pv_alive_t1) would then carry re-meshing / seed noise
+        # instead of the event. The price of that exactness is that pv_t1 can
+        # differ from the production engine's fresh-grid MTM: the recorders
+        # report that as `gap_states`, they do not hide it.
         self.bump_engine_t0 = resolve_bump_engine(snap0.product, snap0.pricing_env, snap0.engine)
         alive = transition.engine_alive_t1
         self.bump_engine_alive = (

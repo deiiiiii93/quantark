@@ -23,6 +23,10 @@ def test_defaults():
     dict(waterfall_order=(Factor.TIME, Factor.SPOT)),
     dict(waterfall_order=MARKET_FACTORS + (Factor.TIME,)),
     dict(waterfall_order=(Factor.LIFECYCLE_EVENT,) + MARKET_FACTORS[1:]),
+    dict(waterfall_order=tuple(f.value for f in MARKET_FACTORS)),          # strings, not members
+    dict(waterfall_order=(ExplainMethod.WATERFALL,) + MARKET_FACTORS[1:]),  # another enum's member
+    dict(bucketed="false"),
+    dict(bucketed=1),
     dict(interaction="random"),
     dict(time_term="gap"),
     dict(theta_decomposition_mode="approx"),

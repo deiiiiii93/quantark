@@ -112,10 +112,10 @@ def test_value_rejects_non_finite_price():
 
 
 def test_lifecycle_fingerprint_is_computed_and_sensitive():
-    assert lifecycle_fingerprint(None) == ("v1", None)
+    assert lifecycle_fingerprint(None) == ("v2", None)
     s = AutocallableLifecycleState()
     f0 = lifecycle_fingerprint(s)
-    assert f0[0] == "v1" and f0[1] == "AutocallableLifecycleState"
+    assert f0[0] == "v2" and f0[1] == "AutocallableLifecycleState"
     assert lifecycle_fingerprint(deepcopy(s)) == f0
     s.mark_ki(D0)
     assert lifecycle_fingerprint(s) != f0
@@ -150,3 +150,53 @@ def test_lifecycle_fingerprint_ignores_the_replay_settlement_mirrors():
     s.settle()
     assert s.settled and s.pending_settlement_cashflow == 0.0
     assert lifecycle_fingerprint(s) == before
+
+
+class _Terms:
+    """A bare contract: public attributes only, set in the order given."""
+
+    def __init__(self, **terms):
+        for k, v in terms.items():
+            setattr(self, k, v)
+
+
+def test_fingerprint_is_type_tagged_and_attribute_order_free():
+    from enum import IntEnum
+
+    import numpy as np
+
+    class Kind(IntEnum):
+        A = 1
+
+    assert contract_fingerprint(_Terms(a=1, b=2)) == contract_fingerprint(_Terms(b=2, a=1))
+    assert contract_fingerprint(_Terms(x=1)) != contract_fingerprint(_Terms(x=1.0))
+    assert contract_fingerprint(_Terms(x=1)) != contract_fingerprint(_Terms(x=True))
+    assert contract_fingerprint(_Terms(x=Kind.A)) != contract_fingerprint(_Terms(x=1))
+    assert contract_fingerprint(_Terms(x={1: "a"})) != contract_fingerprint(_Terms(x={"1": "a"}))
+    assert contract_fingerprint(_Terms(x=np.int64(3))) == contract_fingerprint(_Terms(x=3))
+    assert contract_fingerprint(_Terms(x=np.float64(3.0))) == contract_fingerprint(_Terms(x=3.0))
+    assert contract_fingerprint(_Terms(x=(1, 2))) == contract_fingerprint(_Terms(x=[1, 2]))  # both are sequences
+
+
+def test_fingerprint_rejects_unserialisable_values_and_normalises_calendars():
+    with pytest.raises(ValidationError, match="cannot fingerprint"):
+        contract_fingerprint(_Terms(x=object()))
+    cal = create_calendar(CalendarType.CHINA_SSE)
+    assert contract_fingerprint(_Terms(c=cal)) == contract_fingerprint(_Terms(c=deepcopy(cal)))
+    assert contract_fingerprint(_Terms(c=cal)) != contract_fingerprint(_Terms(c=create_calendar(CalendarType.US)))
+
+
+def test_contract_roll_validates_floored_and_missing_maturities():
+    with pytest.raises(ValidationError, match="rolled by 1 days"):
+        check_contract_roll(_call(1.0), _call(1e-8), calendar_days=1)     # floored, but the roll would not floor
+    check_contract_roll(_call(2 / 365), _call(1e-8), calendar_days=3)     # the roll crosses the floor
+    check_contract_roll(_call(1.0), _call(1.0), calendar_days=0)          # declared unrolled
+    with pytest.raises(ValidationError, match="rolled by 0 days"):
+        check_contract_roll(_call(1.0), _call(1.0 - 1 / 365), calendar_days=0)
+    with pytest.raises(ValidationError, match="expiring"):
+        check_contract_roll(_Terms(maturity=1.0), _Terms(maturity=None), calendar_days=1)
+    with pytest.raises(ValidationError, match="finite"):
+        check_contract_roll(_Terms(maturity=1.0), _Terms(maturity=float("-inf")), calendar_days=1)
+    with pytest.raises(ValidationError, match="must be a number"):
+        check_contract_roll(_Terms(maturity=1.0), _Terms(maturity="1y"), calendar_days=1)
+    check_contract_roll(_Terms(maturity=None), _Terms(maturity=None), calendar_days=1)   # no expiry at all

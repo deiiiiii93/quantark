@@ -1,16 +1,50 @@
 """LifecycleTransition: the alive-at-t1 contract and the event row (spec §8)."""
 from __future__ import annotations
 
+import math
+import numbers
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
+from quantark.asset.equity.lifecycle.events import LifecycleEvent, LifecycleEventType
 from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
 from quantark.pnlexplain.equity.fingerprints import check_contract_roll, lifecycle_fingerprint
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
+
+
+def _validate_event(event: Any) -> None:
+    """The event protocol the event row reports: a LifecycleEvent with a typed
+    kind, a real date, finite amounts and a boolean termination flag."""
+    if not isinstance(event, LifecycleEvent):
+        raise ValidationError(
+            f"lifecycle events must be LifecycleEvent instances, got {type(event).__name__}"
+        )
+    if not isinstance(event.event_type, LifecycleEventType):
+        raise ValidationError(f"lifecycle event_type must be a LifecycleEventType, got {event.event_type!r}")
+    try:
+        stamp = pd.Timestamp(event.date)
+    except (TypeError, ValueError):
+        raise ValidationError(f"lifecycle event date is not a date: {event.date!r}") from None
+    if pd.isna(stamp):
+        raise ValidationError(f"lifecycle event {event.event_type.value} has no date")
+    for name in ("payoff", "cashflow"):
+        raw = getattr(event, name)
+        try:
+            amount = float(raw)
+        except (TypeError, ValueError):
+            raise ValidationError(
+                f"lifecycle event {event.event_type.value} {name} must be a number, got {raw!r}"
+            ) from None
+        if not math.isfinite(amount):
+            raise NumericalError(f"non-finite {name} on lifecycle event {event.event_type.value}: {raw!r}")
+    if not isinstance(event.terminates_position, bool):
+        raise ValidationError(
+            f"lifecycle event terminates_position must be a bool, got {event.terminates_position!r}"
+        )
 
 
 @dataclass(frozen=True)
@@ -32,9 +66,19 @@ class LifecycleTransition:
     contract_roll_days: Optional[int] = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "events", tuple(self.events))
-        if self.contract_roll_days is not None and int(self.contract_roll_days) < 0:
-            raise ValidationError("contract_roll_days must be None or a non-negative day count")
+        events = tuple(self.events)
+        for ev in events:
+            _validate_event(ev)
+        object.__setattr__(self, "events", events)
+        days = self.contract_roll_days
+        if days is not None:
+            if isinstance(days, bool) or not isinstance(days, numbers.Integral):
+                raise ValidationError(
+                    f"contract_roll_days must be None or an integer day count, got {days!r}"
+                )
+            if int(days) < 0:
+                raise ValidationError("contract_roll_days must be None or a non-negative day count")
+            object.__setattr__(self, "contract_roll_days", int(days))
 
     @property
     def changed(self) -> bool:
@@ -70,7 +114,7 @@ def resolve_transition(
         raise ValidationError("transition.state_before does not match snapshot_t0.lifecycle_state")
     if lifecycle_fingerprint(transition.state_after) != fp1:
         raise ValidationError("transition.state_after does not match snapshot_t1.lifecycle_state")
-    roll_days = calendar_days if transition.contract_roll_days is None else int(transition.contract_roll_days)
+    roll_days = calendar_days if transition.contract_roll_days is None else transition.contract_roll_days
     if roll_days > calendar_days:
         raise ValidationError(
             f"contract_roll_days {roll_days} exceeds the step's {calendar_days} calendar days"
@@ -103,11 +147,12 @@ def resolve_transition(
 
 
 def event_summary(transition: LifecycleTransition) -> Tuple[Dict[str, Any], ...]:
+    """Events as reported in the event row's metadata (validated on construction)."""
     return tuple(
         {
             "event_type": ev.event_type.value, "date": _event_date(ev).isoformat(),
-            "payoff": float(getattr(ev, "payoff", 0.0)), "cashflow": float(getattr(ev, "cashflow", 0.0)),
-            "terminates_position": bool(getattr(ev, "terminates_position", False)),
+            "payoff": float(ev.payoff), "cashflow": float(ev.cashflow),
+            "terminates_position": ev.terminates_position,
         }
         for ev in transition.events
     )

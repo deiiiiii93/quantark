@@ -74,12 +74,14 @@ class PnLExplainConfig:
             )
         object.__setattr__(self, "methods", methods)
         order = tuple(self.waterfall_order)
-        if sorted(f.value for f in order) != sorted(f.value for f in MARKET_FACTORS) \
-                or len(order) != len(MARKET_FACTORS):
+        if not all(isinstance(f, Factor) for f in order) or len(order) != len(MARKET_FACTORS) \
+                or set(order) != set(MARKET_FACTORS):
             raise ValidationError(
-                "waterfall_order must be a permutation of the seven market factors"
+                "waterfall_order must be a permutation of the seven market Factor members"
             )
         object.__setattr__(self, "waterfall_order", order)
+        if not isinstance(self.bucketed, bool):
+            raise ValidationError(f"bucketed must be a bool, got {self.bucketed!r}")
         if self.interaction not in _INTERACTIONS:
             raise ValidationError(f"interaction must be one of {_INTERACTIONS}")
         if self.time_term not in _TIME_TERMS:

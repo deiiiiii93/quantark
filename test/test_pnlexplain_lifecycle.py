@@ -144,3 +144,32 @@ def test_event_row_reads_both_endpoints_from_the_cache():
         "event_type": LifecycleEventType.KNOCK_OUT.value, "date": MON.isoformat(),
         "payoff": 9.5, "cashflow": 9.5, "terminates_position": True,
     },)
+
+
+def test_transition_validates_roll_days_and_the_event_protocol():
+    import numpy as np
+    from quantark.util.exceptions import NumericalError
+    s = AutocallableLifecycleState()
+    ok = LifecycleTransition(_call(1.0), ENG, s, s, contract_roll_days=np.int64(2))
+    assert ok.contract_roll_days == 2 and type(ok.contract_roll_days) is int
+    for bad in (1.9, True, -1, "2", 0.0):
+        with pytest.raises(ValidationError, match="contract_roll_days"):
+            LifecycleTransition(_call(1.0), ENG, s, s, contract_roll_days=bad)
+    s_ki = deepcopy(s)
+    s_ki.mark_ki(MON)
+    with pytest.raises(ValidationError, match="LifecycleEvent instances"):
+        LifecycleTransition(_call(1.0), ENG, s, s_ki, events=("knock_in",))
+    with pytest.raises(ValidationError, match="event_type"):
+        LifecycleTransition(_call(1.0), ENG, s, s_ki, events=(_event("KNOCK_IN", MON),))
+    with pytest.raises(ValidationError, match="no date"):
+        LifecycleTransition(_call(1.0), ENG, s, s_ki, events=(_event(LifecycleEventType.KNOCK_IN, None),))
+    with pytest.raises(ValidationError, match="not a date"):
+        LifecycleTransition(_call(1.0), ENG, s, s_ki, events=(_event(LifecycleEventType.KNOCK_IN, "someday"),))
+    with pytest.raises(NumericalError, match="non-finite payoff"):
+        LifecycleTransition(_call(1.0), ENG, s, s_ki,
+                            events=(_event(LifecycleEventType.KNOCK_IN, MON, payoff=float("nan")),))
+    with pytest.raises(ValidationError, match="cashflow must be a number"):
+        LifecycleTransition(_call(1.0), ENG, s, s_ki, events=(_event(LifecycleEventType.KNOCK_IN, MON, cashflow="x"),))
+    with pytest.raises(ValidationError, match="terminates_position"):
+        LifecycleTransition(_call(1.0), ENG, s, s_ki,
+                            events=(_event(LifecycleEventType.KNOCK_IN, MON, terminates_position=1),))

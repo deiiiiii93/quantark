@@ -73,6 +73,21 @@ def _frozen(mapping: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
     return MappingProxyType(dict(mapping))
 
 
+def _finite(value: Any, what: str) -> float:
+    """Coerce a numeric row field to a finite float.
+
+    A value ``float()`` cannot read is bad input (ValidationError); a value
+    that reads as NaN/inf is a non-finite result (NumericalError).
+    """
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{what} must be a number, got {value!r}") from None
+    if not math.isfinite(f):
+        raise NumericalError(f"non-finite {what}: {value!r}")
+    return f
+
+
 @dataclass(frozen=True)
 class ExplainRow:
     """One attribution row (money amounts for the whole position)."""
@@ -95,21 +110,19 @@ class ExplainRow:
         if not isinstance(self.factor, Factor) or not isinstance(self.method, ExplainMethod) \
                 or not isinstance(self.kind, RowKind):
             raise ValidationError("factor/method/kind must be the pnlexplain enums")
-        pnl = float(self.pnl)
-        if not math.isfinite(pnl):
-            raise NumericalError(
-                f"non-finite PnL in row {self.method.value}/{self.term}: {self.pnl!r}"
-            )
-        object.__setattr__(self, "pnl", pnl)
+        where = f"row {self.method.value}/{self.term}"
+        object.__setattr__(self, "pnl", _finite(self.pnl, f"PnL in {where}"))
         for name in ("greek", "cash_greek"):
             val = getattr(self, name)
-            if val is not None and not math.isfinite(float(val)):
-                raise NumericalError(f"non-finite {name} in row {self.term}")
+            if val is not None:
+                object.__setattr__(self, name, _finite(val, f"{name} in {where}"))
         moves = dict(self.moves or {})
         unknown = sorted(set(moves) - set(MOVE_KEYS))
         if unknown:
             raise ValidationError(f"unknown move keys {unknown}; allowed {MOVE_KEYS}")
-        object.__setattr__(self, "moves", MappingProxyType({k: float(v) for k, v in moves.items()}))
+        object.__setattr__(self, "moves", MappingProxyType(
+            {k: _finite(v, f"move {k} in {where}") for k, v in moves.items()}
+        ))
         object.__setattr__(self, "metadata", _frozen(self.metadata))
 
     def relabel(self, level: str) -> "ExplainRow":
@@ -128,11 +141,11 @@ class ExplainRow:
 
 
 def component_sum(rows: Iterable[ExplainRow], method: ExplainMethod) -> float:
-    total = 0.0
-    for row in rows:
-        if row.kind is RowKind.COMPONENT and row.method in (method, ExplainMethod.SHARED):
-            total += row.pnl
-    return total
+    """Exactly rounded sum of the COMPONENT rows of `method` (and SHARED rows)."""
+    return math.fsum(
+        row.pnl for row in rows
+        if row.kind is RowKind.COMPONENT and row.method in (method, ExplainMethod.SHARED)
+    )
 
 
 def make_total_row(level: str, pnl: float, **metadata: Any) -> ExplainRow:
@@ -207,8 +220,9 @@ class PnLExplainResult:
     metadata: Mapping[str, Any] = field(default_factory=lambda: _EMPTY)
 
     def __post_init__(self) -> None:
-        if not math.isfinite(float(self.total_pnl)):
-            raise NumericalError(f"non-finite total_pnl: {self.total_pnl!r}")
+        object.__setattr__(self, "total_pnl", _finite(self.total_pnl, "total_pnl"))
+        if self.unexplained is not None:
+            object.__setattr__(self, "unexplained", _finite(self.unexplained, "unexplained"))
         object.__setattr__(self, "rows", tuple(self.rows))
         object.__setattr__(self, "metadata", _frozen(self.metadata))
 

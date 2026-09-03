@@ -140,3 +140,30 @@ def test_tenor_detects_date_expiry_and_reraises_other_validation_errors():
     with pytest.raises(ValidationError, match="malformed"):
         resolve_coordinate(_call(1.0), 100.0,
                            Broken(strike=100.0, option_type=OptionType.CALL, maturity=1.0), e1)
+
+
+def test_coordinate_rejects_malformed_levels_and_non_finite_tenor():
+    e1 = _env(100.0, FlatVolSurface(0.2), 0.03, 0.01, MON)
+
+    class Terms:
+        def __init__(self, **kw):
+            for k, v in kw.items():
+                setattr(self, k, v)
+
+    # a present-but-malformed strike is an error, never a fallback to the spot
+    for bad in ("ATM", float("nan"), float("inf"), 0.0, -5.0):
+        with pytest.raises(ValidationError, match="strike"):
+            resolve_coordinate(Terms(strike=bad), 100.0, Terms(strike=bad), e1)
+    with pytest.raises(ValidationError, match="initial_price"):
+        resolve_coordinate(Terms(strike=None, initial_price=-1.0), 100.0, Terms(), e1)
+    # genuinely absent levels fall through: strike -> initial_price -> spot
+    assert resolve_coordinate(Terms(strike=None, initial_price=90.0), 100.0, Terms(), e1).reference_strike == 90.0
+    assert resolve_coordinate(Terms(), 100.0, Terms(), e1).reference_strike == 100.0
+
+    class NanTenor(EuropeanVanillaOption):
+        def get_maturity(self, pricing_env=None):
+            return float("nan")
+
+    with pytest.raises(NumericalError, match="non-finite remaining tenor"):
+        resolve_coordinate(_call(1.0), 100.0,
+                           NanTenor(strike=100.0, option_type=OptionType.CALL, maturity=1.0), e1)
