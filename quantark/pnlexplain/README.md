@@ -104,8 +104,12 @@ snapshot the tracker's `valuation_point` (the recorders do this for you).
 
 `contract_roll_days=0` on a transition declares, explicitly, that the same
 float-maturity contract was repriced without rolling. The equity
-`BacktestEngine` does this for every untracked position; the time row then
-carries only the valuation-date effect and no contract theta.
+`BacktestEngine` does this for untracked positions without a roll rule
+(Futures hedges by design, schedule-bearing float products); the time row
+then carries only the valuation-date effect and no contract theta.
+Schedule-free float contracts (vanilla, American, cash-or-nothing digital)
+are rolled daily by the shared lifecycle manager and take the ordinary roll
+check.
 
 ## Position and portfolio
 
@@ -131,19 +135,21 @@ per explain row per day, `date` first) and `explain_reconciliation_df`
 (`RECON_COLUMNS`: per day, method and level `expected`, `explained`, `gap`,
 `ok`, and at portfolio level `expected_states` / `gap_states`). `expected`
 is the value identity; `expected_states` is the engine's own booked PnL
-change. `gap` is zero by construction. `gap_states` is zero for the
-average-cost executors (multi-instrument equity, replay) and is **reported**
-for the equity simple `HedgeExecutor`, which adjusts a hedge's quantity
-without re-averaging its entry price (a pre-existing accounting quirk).
+change. `gap` is zero by construction. `gap_states` is zero for all three
+hedge paths (the simple `HedgeExecutor` books hedges at average cost with
+realised PnL, like the multi-instrument executor and the replay engine).
 
 ## Vol-model engines
 
 The replay engine calibrates a fresh vol-model engine per day; the recorder
 passes that day's engine as `engine_alive_t1`, so the recalibration lands in
 the `model` row and the surface swap is ~0 (the model prices from its own
-calibrated state). MODEL is detected by engine **identity**: two equivalent
-engine objects read as a model change, so keep one engine object across
-snapshots when nothing changed.
+calibrated state). MODEL is detected by engine **equivalence**: identity,
+or the same class with equal `model_fingerprint()`s (the params-only
+analytical engines declare `MODEL_FINGERPRINT_ATTRS`); engines without a
+fingerprint (MC, PDE, QUAD, vol-model) compare by identity, so keep one
+engine object across snapshots for those when nothing changed.
+`engines_equivalent(a, b)` is exported for callers.
 
 ## Conventions (cash columns and move keys)
 
@@ -175,18 +181,32 @@ per-step theta × steps.
 
 `bucketed=True` replaces the scalar `vega` row by `vega.<τ>` tenor rows on
 the t0 pillars (the t1 surface is sampled there) that sum to the scalar
-vega. The calculator's key-rate rho is *carry-invariant* (forward held,
-dividend re-derived), a different sensitivity from this factor model's rate
-step, so `rate_keyrate.<τ>` rows are **informational** beneath the scalar
-`rho`, tagged `convention="carry_invariant"`.
+vega, and the scalar `rho` row by `rate_keyrate.<τ>` rows requested under
+the calculator's opt-in `RateKeyrateConvention.DIVIDEND_HELD` (dividend
+yield held, the forward moves with the rate: this factor model's rate step
+split by pillar), tagged `convention="dividend_held"`. The desk-default
+carry-invariant key-rate rho (forward held, dividend re-derived) is a
+different sensitivity and is never booked here. `rate_keyrate.parallel`
+stays informational with its `sum_of_buckets` / `reconciles` view.
+
+## TradingClock-wrapped environments
+
+`TradingClockVolSurface` / `TradingClockRateCurve` /
+`TradingClockDividendYield` are supported on the waterfall: wrappers compare
+by (class, inner, clock), each scenario state re-anchors its maps at its own
+valuation date (TIME = the same inner objects seen from the new date), and a
+wrapped field anchored elsewhere, a wrapper on one side only, two clocks, or a
+float-maturity product on a `BUSINESS_DAYS` environment is a
+`ValidationError`. The Taylor method is rejected on a wrapped environment
+(the calculator's bumps replace the wrapper with a calendar-quoted object);
+pass `methods=(ExplainMethod.WATERFALL,)`.
 
 ## Limitations
 
-- Untracked products carry no cashflow ledger; the equity `BacktestEngine`
-  never rolls them (declared via `contract_roll_days=0`).
+- Untracked products carry no cashflow ledger. Futures hedges and
+  schedule-bearing untracked products are repriced with a constant maturity
+  (declared via `contract_roll_days=0`); schedule-free float contracts are
+  rolled.
 - Engines are used as given (mutated in place by the backtests).
-- TradingClock-wrapped environments are untested.
-- The equity simple `HedgeExecutor` entry-price quirk shows up as a non-zero
-  `gap_states`; a delayed first-hit barrier settlement cannot be priced by
-  `BarrierAnalyticalEngine`.
+- Taylor on clock-wrapped environments is rejected (waterfall only).
 - Bucketed mode is experimental and never on the default path.

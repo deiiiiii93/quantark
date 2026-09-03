@@ -250,6 +250,15 @@ snapshots (`day_count_convention`, `bus_days_in_year`, calendar), otherwise
 `ValidationError`: a clock change is not a market move. Calendar equality is
 **semantic**: same class, same `name`, equal `holidays` sets. Independently
 deep-copied calendars therefore compare equal; different calendars do not.
+TradingClock-wrapped fields (amended 2026-09-03, patch spec §8): a wrapped
+field's `time_map.anchor_date` must equal its environment's valuation date;
+the same fields must be wrapped on both sides with the same clock
+(`days_per_year`, semantic calendar); a float-maturity product on a
+`BUSINESS_DAYS` environment is rejected (its maturity is trading years, which
+the days/365 roll rule does not describe); the Taylor method is rejected on a
+wrapped environment (the calculator's bumps replace the wrapper with a
+calendar-quoted object, a different clock). Every scenario state re-anchors
+its wrappers at that state's valuation date.
 
 **Contract identity.** The alive-at-t1 product must be the t0 contract rolled
 in time, checked by `contract_fingerprint(product)`: the product's class
@@ -274,9 +283,13 @@ with trades (§9).
 or compares equal (`==`; dataclass equality for the flat / term-structure
 types; a comparison that raises counts as changed). Unchanged factors emit a
 zero row without pricing. `TIME` is always changed (`date_t1 > date_t0` by
-validation). `MODEL` is changed when `engine_alive_t1 is not engine_t0`.
-`LIFECYCLE_EVENT` is changed when the transition's state fingerprints differ
-(§8).
+validation). `MODEL` is changed when the engines are not equivalent:
+identity, or the same class with equal `model_fingerprint()`s (amended
+2026-09-03, patch spec §7); engines without a fingerprint (MC, PDE, QUAD,
+vol-model) compare by identity. Market objects that are clock wrappers
+compare by (class, inner, clock), the map's anchor excluded (amended
+2026-09-03, patch spec §8). `LIFECYCLE_EVENT` is changed when the
+transition's state fingerprints differ (§8).
 
 **Validation.** `date_t1 <= date_t0` → `ValidationError`.
 
@@ -629,20 +642,22 @@ explain never depends on it.
   node-aligned bumps sum to the scalar vega, so the buckets are the scalar
   row split by pillar. Reconciliation is unchanged: bucket rows sum into
   the Taylor components. `metadata["bucketed_factors"]` lists the factors
-  whose scalar row was replaced (`("vol",)` or `()`).
-- **Rate rows are informational** (amended while implementing P5): the
-  only key-rate machinery in `riskmeasures` is *carry-invariant* — the
-  pillar bump holds the forward fixed and re-derives the dividend yield,
-  a pure discounting sensitivity — whereas this factor model's rate step
-  replaces the rate curve with the dividend yield held (§5.3), so the two
-  are different sensitivities (opposite in sign for a vanilla call).
-  Booking the carry-invariant buckets as the rate component would
-  mis-attribute a rate move, so the scalar `rho` stays the `COMPONENT`
-  and the `rate_keyrate.<τ>` rows plus `rate_keyrate.parallel` (with
-  `sum_of_buckets` and `reconciles`) sit beneath it as `INFORMATIONAL`
-  rows tagged `metadata["convention"] = "carry_invariant"`. A q-held
-  key-rate rho would need new numerics in `riskmeasures`, which this
-  feature does not touch.
+  whose scalar row was replaced (`("vol",)`, `("rate", "vol")`, … or `()`).
+- **Rate rows are components under the dividend-held convention** (amended
+  2026-09-03, patch spec §6; supersedes the P5 amendment that kept them
+  informational). The calculator's default key-rate rho is
+  *carry-invariant* — the pillar bump holds the forward fixed and
+  re-derives the dividend yield, a pure discounting sensitivity — whereas
+  this factor model's rate step replaces the rate curve with the dividend
+  yield held (§5.3), so the two are different sensitivities (opposite in
+  sign for a vanilla call). The explain therefore requests the opt-in
+  `RateKeyrateConvention.DIVIDEND_HELD`, under which the pillar bumps ARE
+  the factor model's rate step split by pillar: the `rate_keyrate.<τ>`
+  rows are `COMPONENT` rows tagged `metadata["convention"] =
+  "dividend_held"` and take the scalar `rho` slot exactly as tenor vega
+  takes `vega`'s (the scalar `rho` row is not emitted);
+  `rate_keyrate.parallel` (with `sum_of_buckets` and `reconciles`) stays
+  `INFORMATIONAL`.
 - Objects that are not term structures keep the scalar rows.
 
 ## 8. Lifecycle event term
@@ -674,9 +689,12 @@ validated against them (below).
 was rolled from `product_t0` for the §5.3 roll check. `None` means the
 step's calendar days. `0` declares, explicitly, that the holder repriced the
 **same** float-maturity contract without rolling it: the equity
-`BacktestEngine` does this for every untracked position (it never rolls a
-float maturity; only lifecycle trackers roll), so the recorder declares it
-rather than guessing. Under `contract_roll_days = 0` the time row carries
+`BacktestEngine` does this for untracked positions without a roll rule
+(Futures hedges by design, schedule-bearing float products); schedule-free
+float contracts (vanilla, American, cash-or-nothing digital) are rolled by
+the shared lifecycle manager and validated by the ordinary roll check
+(amended 2026-09-03, patch spec §4). The recorder declares the `0` rather
+than guessing. Under `contract_roll_days = 0` the time row carries
 only the valuation-date effect (`time_pure` of the unrolled contract), the
 Taylor time greeks are not requested and the `theta_contract` sub-row is 0,
 and the result metadata reports `contract_roll_days` / `contract_rolled`.
@@ -971,15 +989,12 @@ identity: Σ positions (V1 − V0 + trade cash) − costs at the portfolio level
 the position's own `total_pnl` at the position level), `explained` (Σ
 COMPONENT rows with method ∈ {M, SHARED} at that level), `gap`, `ok`, and
 at the portfolio level additionally `expected_states` (that day's change in
-the states frame's total PnL) and `gap_states`. The two expectations differ
-only where the backtest's own accounting departs from the identity: the
-equity engine's simple `HedgeExecutor` adjusts a hedge quantity without
-re-averaging the entry price, so its states PnL jumps by Δq·(p − entry) on
-adjust days (pre-existing, out of scope here); the multi-instrument
-executor (average cost + realised PnL) and the replay engine agree with the
-identity. `ok` gates the identity everywhere; the `gap_states` gate is
-asserted for the multi-instrument executor and the replay engine. An empty
-result yields empty frames with exactly these columns.
+the states frame's total PnL) and `gap_states`. `expected_states` equals
+`expected` for all three hedge paths — the equity simple `HedgeExecutor`
+books hedges at average cost with realised PnL exactly like the
+multi-instrument executor and the replay engine (amended 2026-09-03, patch
+spec §3) — so `ok` gates the identity everywhere and `gap_states` is gated
+everywhere. An empty result yields empty frames with exactly these columns.
 
 ## 11. Error handling
 
@@ -989,6 +1004,7 @@ result yields empty frames with exactly these columns.
 | `date_t1 <= date_t0` | `ValidationError` |
 | invalid `PnLExplainConfig` (non-market factor in the order, duplicates, unknown stencil, `clock` with `exact_gap`) | `ValidationError` |
 | clock mismatch between environments (day count, bus days, semantically different calendars) | `ValidationError` |
+| clock wrapper anchored away from its environment's valuation date; wrapper on one side only or two trading clocks; float-maturity product on a `BUSINESS_DAYS` environment; Taylor method with a wrapped vol / rate / dividend object (amended 2026-09-03, patch spec §8) | `ValidationError` |
 | contract identity check fails (alive product is not the t0 contract rolled in time) | `ValidationError` |
 | lifecycle fingerprints differ, no `transition`; or a transition whose fingerprints do not match the snapshots | `ValidationError` |
 | quantities differ in instrument-level `explain` | `ValidationError` |
@@ -1132,3 +1148,10 @@ Every phase runs with worktree source shadowing the editable install
 - Model-parameter attribution inside a vol model (per-Heston-parameter rows);
   `model` is one row.
 - A report / HTML renderer beyond `to_frame()`.
+- The Taylor method on TradingClock-wrapped environments (amended
+  2026-09-03, patch spec §14): needs wrap-aware bumps in `riskmeasures` and
+  a vega-unit decision (per σ_cal or per σ_td); the waterfall is supported
+  and Taylor fails closed.
+- Dynamic scenario with `handle_lifecycle_events=False` keeps constant float
+  maturities (amended 2026-09-03, patch spec §14); the equity backtest rolls
+  schedule-free float contracts unconditionally.
