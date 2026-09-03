@@ -14,29 +14,28 @@ Key Features:
 - API design ready for future dynamic scenario analysis
 
 Example:
-    >>> from stresstest import StressTestEngine, StressTestConfig, ScenarioBuilder
-    >>> from stresstest.scenario import ScenarioLibrary
-    >>> 
-    >>> # Create stress test configuration
+    >>> from quantark.stresstest import (
+    ...     StressTestEngine, StressTestConfig, ScenarioBuilder)
+    >>> from quantark.stresstest.scenario import ScenarioLibrary
+    >>> from quantark.stresstest.results import ResultExporter
+    >>> from quantark.stresstest.report import ReportGenerator
+    >>>
     >>> config = StressTestConfig(
     ...     calculate_greeks=True,
-    ...     export_format=['parquet', 'csv']
+    ...     export_formats=['parquet', 'csv'],
     ... )
-    >>> 
-    >>> # Build or load scenarios
+    >>>
     >>> scenarios = [
     ...     ScenarioLibrary.market_crash(),
     ...     ScenarioLibrary.vol_spike(),
-    ...     ScenarioBuilder().name("Custom").spot_stress(-0.15).build()
+    ...     ScenarioBuilder().name("Custom").spot_stress(-0.15).build(),
     ... ]
-    >>> 
-    >>> # Run stress test
+    >>>
     >>> engine = StressTestEngine(config)
     >>> results = engine.run_static_scenarios(portfolio, scenarios)
-    >>> 
-    >>> # Generate reports
-    >>> results.to_parquet("stress_results.parquet")
-    >>> results.generate_report("stress_report.html")
+    >>>
+    >>> ResultExporter.export(results, "./output", formats=["parquet", "csv"])
+    >>> ReportGenerator().generate_report(results, "stress_report.html")
 """
 
 from quantark.stresstest.config import StressTestConfig
