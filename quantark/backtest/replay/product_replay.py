@@ -122,7 +122,8 @@ class ProductReplay:
         self.surfaces_sink = surfaces_sink
 
         # PnL explain support: the recorder-owning engine flips record_events
-        # on; an explain-off run never touches events_today.
+        # on and the recorder resets events_today at the start of every engine
+        # date; an explain-off run never touches events_today.
         self.record_events: bool = False
         self.events_today: list = []
 
@@ -543,8 +544,9 @@ class ProductReplay:
     def apply_lifecycle_events(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> None:
-        if self.record_events:
-            self.events_today = []
+        # events_today is reset once per engine date by its owner (the explain
+        # recorder's begin_day), never here: observation and settlement both
+        # append to the same day's buffer in whichever order the engine runs them.
         for event in self._tracker.observe(date, product, env, spot):
             if self.record_events:
                 self.events_today.append(event)

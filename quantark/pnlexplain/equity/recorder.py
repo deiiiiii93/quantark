@@ -311,6 +311,8 @@ class ReplayPnLExplainRecorder:
     def begin_day(self, engine: Any, date, env: Any) -> None:
         """After the day's env is built and engines calibrated, BEFORE apply_lifecycle_events."""
         self._pending = {}
+        for replay in engine._replays:
+            replay.events_today = []          # one buffer per engine date: observation AND settlement
         if self._prev_book is None:
             return
         for replay, day_engine, qty in zip(engine._replays, engine._pricing_engines, engine._quantities):

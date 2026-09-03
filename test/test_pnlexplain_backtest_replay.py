@@ -173,3 +173,21 @@ def test_replay_first_day_intraday_leg_is_not_carried():
     rec.end_day(engine, d2, env(d2), market, selected, [], {"total_pnl": 0.0})   # must not raise
     _, recon = rec.frames()
     assert len(recon) == 1 and bool(recon.iloc[0]["ok"])
+
+
+def test_replay_event_buffer_is_reset_once_per_date_not_per_observation():
+    """A settlement-only day must not inherit yesterday's events, and a settlement recorded
+    before the observation step must not be erased by it (review finding)."""
+    from types import SimpleNamespace
+    from quantark.pnlexplain.equity.recorder import ReplayPnLExplainRecorder
+    stale = SimpleNamespace(events_today=["yesterday"], record_events=True)
+    engine = SimpleNamespace(_replays=[stale], _pricing_engines=[None], _quantities=[1.0])
+    ReplayPnLExplainRecorder(WF).begin_day(engine, D, None)          # first day: no previous book
+    assert stale.events_today == []
+    # the observation step appends without clearing
+    replay = ReplayBacktestEngine(fixtures.make_book_config())._replays[0]
+    replay.record_events = True
+    replay.events_today = ["settlement-before-observation"]
+    replay._tracker = SimpleNamespace(observe=lambda *a: [])
+    replay.apply_lifecycle_events(D, None, None, 100.0)
+    assert replay.events_today == ["settlement-before-observation"]
