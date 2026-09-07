@@ -107,11 +107,21 @@ def test_fail_closed_rules():
     with pytest.raises(ValidationError, match="clock"):
         explain(ValuationSnapshot(CALL, ENG, ok0, date=t0), ValuationSnapshot(CALL, ENG, other_clock, date=t1),
                 config=WF)
+    # A float maturity on a BUSINESS_DAYS environment used to be turned away outright, because
+    # the roll rule was fixed at days/365. It now ages on the environment's clock, so a
+    # calendar-rolled contract fails against the trading-time number instead of being rejected
+    # for existing, and a correctly rolled one goes through.
     floating = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=0.5)
-    with pytest.raises(ValidationError, match="BUSINESS_DAYS"):
+    with pytest.raises(ValidationError, match="environment's own clock"):
         explain(ValuationSnapshot(floating, ENG, _td_env(t0), date=t0),
                 ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL,
                                                         maturity=0.5 - 1 / 365), ENG, _td_env(t1), date=t1),
                 config=WF)
+    rolled = explain(
+        ValuationSnapshot(floating, ENG, _td_env(t0), date=t0),
+        ValuationSnapshot(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL,
+                                                maturity=0.5 - 1 / D), ENG, _td_env(t1), date=t1),
+        config=WF)
+    assert rolled.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=1e-9)
     with pytest.raises(ValidationError, match="Taylor"):
         explain(ValuationSnapshot(CALL, ENG, ok0, date=t0), ValuationSnapshot(CALL, ENG, ok1, date=t1))

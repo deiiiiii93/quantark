@@ -123,10 +123,15 @@ def validate_pair(snap0: ValuationSnapshot, snap1: ValuationSnapshot) -> None:
     validate_clock_env(e0, "snapshot_t0.pricing_env")
     validate_clock_env(e1, "snapshot_t1.pricing_env")
     validate_clock_pair(e0, e1)
-    if e0.day_count_convention is DayCountConvention.BUSINESS_DAYS and _float_maturity_only(snap0.product):
+    # A float maturity on a BUSINESS_DAYS environment was rejected here while the roll rule
+    # was fixed at days/365, which does not describe a trading-time contract. The rule now
+    # takes the decrement from the environment's own clock (lifecycle.float_maturity_decrement),
+    # so the contract is checked against the right number instead of being turned away.
+    if e0.day_count_convention is DayCountConvention.BUSINESS_DAYS \
+            and _float_maturity_only(snap0.product) and getattr(e0, "calendar", None) is None:
         raise ValidationError(
-            "a float-maturity product on a BUSINESS_DAYS environment has a trading-time maturity; "
-            "the days/365 roll rule does not describe it (use a date-based product)"
+            "a float-maturity product on a BUSINESS_DAYS environment ages in trading time, "
+            "which needs a calendar on the pricing environment to measure"
         )
     if snap0.quantity != snap1.quantity:
         raise ValidationError(

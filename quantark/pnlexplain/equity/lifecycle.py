@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 import numbers
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
@@ -13,6 +13,7 @@ from quantark.asset.equity.lifecycle.events import LifecycleEvent, LifecycleEven
 from quantark.pnlexplain.base import ExplainMethod, ExplainRow, Factor, RowKind
 from quantark.pnlexplain.equity.fingerprints import check_contract_roll, engines_equivalent, lifecycle_fingerprint
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal
+from quantark.util.calendar import DayCountConvention
 from quantark.util.exceptions import NumericalError, ValidationError
 
 
@@ -89,6 +90,34 @@ def _event_date(event: Any) -> datetime:
     return pd.Timestamp(event.date).normalize().to_pydatetime()
 
 
+def float_maturity_decrement(pricing_env, start: datetime, days: int) -> Optional[float]:
+    """How much a float maturity ages over ``days``, when the calendar year is not the clock.
+
+    A float maturity carries no clock of its own, so the default rule is
+    ``days/365``. On a BUSINESS_DAYS environment that rule does not describe the
+    contract: it ages by the trading days elapsed over the environment's trading
+    year, and one trading day is 1/244 of a year, not 1/365. Returns None to keep
+    the calendar default.
+
+    This never loosens the check. It replaces one exact expectation with another,
+    so a contract rolled on the wrong clock still fails, it just fails against the
+    right number.
+    """
+    if getattr(pricing_env, "day_count_convention", None) is not DayCountConvention.BUSINESS_DAYS:
+        return None
+    calendar = getattr(pricing_env, "calendar", None)
+    if calendar is None:
+        raise ValidationError(
+            "a BUSINESS_DAYS environment needs a calendar to say how much a float-maturity "
+            "contract ages over the step"
+        )
+    if days <= 0:
+        return 0.0
+    end = start + timedelta(days=int(days))
+    trading_days = len(calendar.get_working_days(start, end, side="right"))
+    return trading_days / float(pricing_env.bus_days_in_year)
+
+
 def resolve_transition(
     snap0: ValuationSnapshot,
     snap1: ValuationSnapshot,
@@ -105,7 +134,10 @@ def resolve_transition(
                 "with the alive-at-t1 product (guessing it would mislabel the event row)"
             )
         if not is_terminal(snap0.lifecycle_state):    # a terminal position has no contract to roll (spec §8)
-            check_contract_roll(snap0.product, snap1.product, calendar_days)
+            check_contract_roll(
+                snap0.product, snap1.product, calendar_days,
+                expected_decrement=float_maturity_decrement(
+                    snap0.pricing_env, snap0.date, calendar_days))
         return LifecycleTransition(
             product_alive_t1=snap1.product, engine_alive_t1=snap1.engine,
             state_before=snap0.lifecycle_state, state_after=snap1.lifecycle_state, events=(),
@@ -121,7 +153,10 @@ def resolve_transition(
         )
     terminal_t0 = is_terminal(snap0.lifecycle_state)
     if not terminal_t0:
-        check_contract_roll(snap0.product, transition.product_alive_t1, roll_days)
+        check_contract_roll(
+            snap0.product, transition.product_alive_t1, roll_days,
+            expected_decrement=float_maturity_decrement(
+                snap0.pricing_env, snap0.date, roll_days))
     if fp0 == fp1:
         if transition.events:
             raise ValidationError("transition carries events but the lifecycle state is unchanged")

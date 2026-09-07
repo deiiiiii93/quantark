@@ -15,7 +15,7 @@ from __future__ import annotations
 import dataclasses
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import Any, Mapping, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -224,15 +224,29 @@ def _float_maturity(value: Any, what: str) -> float:
     return m
 
 
-def check_contract_roll(product_t0: Any, product_alive_t1: Any, calendar_days: int) -> None:
+def check_contract_roll(
+    product_t0: Any,
+    product_alive_t1: Any,
+    calendar_days: int,
+    *,
+    expected_decrement: Optional[float] = None,
+) -> None:
     """Raise unless product_alive_t1 is product_t0 rolled forward calendar_days (spec §5.3).
 
-    A float maturity must equal ``max(MATURITY_FLOOR, m0 - calendar_days/365)``
-    within ROLL_TOL: the trackers' floor is only reached when the roll would
-    cross it, so a floored maturity is validated, not waved through.
-    ``calendar_days == 0`` declares an unrolled contract (same maturity, same
-    schedules); otherwise a schedule may have lost the observations that
-    passed inside the step (its records are a suffix of the t0 records).
+    A float maturity must equal ``max(MATURITY_FLOOR, m0 - decrement)`` within
+    ROLL_TOL, where the decrement defaults to ``calendar_days/365``: the
+    trackers' floor is only reached when the roll would cross it, so a floored
+    maturity is validated, not waved through. ``calendar_days == 0`` declares an
+    unrolled contract (same maturity, same schedules); otherwise a schedule may
+    have lost the observations that passed inside the step (its records are a
+    suffix of the t0 records).
+
+    ``expected_decrement`` overrides the calendar-year default for a contract
+    whose float maturity is quoted on another clock. A trading-day contract ages
+    by (trading days elapsed) / (days in a trading year), which is a different
+    number from calendar days / 365, and the caller is the only one who knows
+    the clock: a float maturity carries none of its own (see
+    ``PricingEnvironment``, whose convention a float maturity bypasses).
     """
     fp0, fp1 = contract_fingerprint(product_t0), contract_fingerprint(product_alive_t1)
     same = fp0 == fp1 if int(calendar_days) == 0 else _rolled_equal(fp0, fp1)
@@ -255,11 +269,16 @@ def check_contract_roll(product_t0: Any, product_alive_t1: Any, calendar_days: i
     days = int(calendar_days)
     if days < 0:
         raise ValidationError(f"calendar_days must be non-negative, got {calendar_days}")
-    expected = m0 if days == 0 else max(MATURITY_FLOOR, m0 - days / 365.0)
+    decrement = days / 365.0 if expected_decrement is None else float(expected_decrement)
+    if decrement < 0.0:
+        raise ValidationError(f"expected_decrement must be non-negative, got {decrement}")
+    expected = m0 if days == 0 else max(MATURITY_FLOOR, m0 - decrement)
     if not is_close(m1, expected, rel_tol=0.0, abs_tol=ROLL_TOL):
+        basis = ("calendar_days/365" if expected_decrement is None
+                 else f"the environment's own clock ({decrement:.10g} of a year)")
         raise ValidationError(
             f"alive product maturity {m1} is not {m0} rolled by {days} days (expected {expected}; "
-            "a float-maturity contract must be supplied rolled by calendar_days/365, "
+            f"a float-maturity contract must be supplied rolled by {basis}, "
             f"floored at {MATURITY_FLOOR})"
         )
 
