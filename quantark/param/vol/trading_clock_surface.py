@@ -68,12 +68,16 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
 
     def parallel_shifted(self, shift: float) -> "TradingClockVolSurface":
         """Fails closed: a vol bump on a clock-wrapped surface needs a unit
-        decision (patch spec 2026-09-03 §14) — one point of the calendar-quoted
-        inner vol (shift the inner) or one point of trading-axis vol (shift on
-        this axis); the two differ by sqrt(tau_td / tau_cal) at every tenor."""
+        decision (patch spec 2026-09-03 §14) — one point of the TRADING-quoted
+        inner vol sigma_td (shift the inner) or one point of the CALENDAR-axis
+        vol sigma_cal this surface returns (shift on this axis); the two differ
+        by sqrt(tau_td / tau_cal), which is tenor-dependent, so only the first is
+        a parallel shift at all and only the first keeps the holiday plateau
+        (a constant shift of sigma_cal accrues variance on closed days)."""
         raise ValidationError(
             "vol bump on a TradingClockVolSurface: the unit is undecided "
-            "(calendar-quoted inner vol point vs trading-axis vol point differ by "
+            "(a point of the trading-quoted inner vol sigma_td vs a point of the "
+            "calendar-axis vol sigma_cal this surface returns; the two differ by "
             "sqrt(tau_td/tau_cal)); the bump fails closed instead of flattening "
             "the surface"
         )
