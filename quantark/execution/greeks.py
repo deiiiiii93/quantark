@@ -192,42 +192,71 @@ def greek_bump_transform(base: TradeState, parameters: dict) -> TradeState:
 
 
 def _vol_summary(env):
-    """Fingerprintable summary of the vol surface using the CONCRETE field
-    names quantark constructs (FlatVolSurface.volatility,
-    TermStructureVolSurface.vols); None for unknown types = conservative
-    invalidation, never misattribution."""
+    """Fingerprintable VALUE identity of the vol surface (see _rate_summary)."""
+    from quantark.param.vol import FlatVolSurface, TermStructureVolSurface
+
     surface = env.vol_surface
-    value = getattr(surface, "volatility", None)
-    if value is not None:
-        return float(value)
-    vols = getattr(surface, "vols", None)
-    if vols is not None:
-        return tuple(float(v) for v in vols)
-    return None
+    if isinstance(surface, FlatVolSurface):
+        return float(surface.volatility)
+    if isinstance(surface, TermStructureVolSurface):
+        return (tuple(float(t) for t in surface.times),
+                tuple(float(v) for v in surface.vols))
+    return surface
 
 
 def _rate_summary(env):
-    curve = env.rate_curve
-    value = getattr(curve, "rate", None)
-    if value is not None:
-        return float(value)
-    rates = getattr(curve, "rates", None)
-    if rates is not None:
-        return tuple(float(r) for r in rates)
-    return None
+    """Fingerprintable VALUE identity of the rate curve.
+
+    The planner attributes a cell's mutation to a tag by fingerprinting each
+    declared component before and after the bump (spec 10.2), so a summary
+    must differ whenever the curve's VALUES differ: a flat curve is its rate
+    (a float, bitwise the legacy summary), an interpolated curve is its
+    interpolation class plus (tenor, rate) pillars — the rates alone would
+    read two curves with the same rates at different tenors as equal — and a
+    ParallelShiftRateCurve is its base's identity plus the shift, so a bumped
+    term curve is distinguishable from its base and from another bump size.
+
+    A family this function does not understand is returned AS IS: the
+    fingerprinter canonicalises it when it can (a value dataclass) and
+    otherwise reports None, which the planner reads as conservative
+    invalidation. Returning None here would be wrong — None fingerprints
+    fine, so two unknown objects would compare "unchanged".
+    """
+    return _rate_curve_summary(env.rate_curve)
+
+
+def _rate_curve_summary(curve):
+    from quantark.param.rrf.rate_curve import (
+        FlatRateCurve, InterpolatedRateCurve, ParallelShiftRateCurve,
+    )
+
+    if isinstance(curve, FlatRateCurve):
+        return float(curve.rate)
+    if isinstance(curve, InterpolatedRateCurve):
+        return (type(curve).__qualname__,
+                tuple((float(t), float(r)) for t, r in curve.pillars))
+    if isinstance(curve, ParallelShiftRateCurve):
+        return ("parallel_shift", _rate_curve_summary(curve.base_curve),
+                float(curve.shift))
+    return curve
 
 
 def _div_summary(env):
+    """Fingerprintable VALUE identity of the dividend yield (see _rate_summary);
+    no dividend, NoDividend and a zero continuous yield are the same value."""
+    from quantark.param.div.dividend_yield import (
+        ContinuousDividendYield, NoDividend, TermStructureDividendYield,
+    )
+
     dy = env.div_yield
-    if dy is None:
+    if dy is None or isinstance(dy, NoDividend):
         return 0.0
-    value = getattr(dy, "div_yield", None)
-    if value is not None:
-        return float(value)
-    yields = getattr(dy, "yields", None)
-    if yields is not None:
-        return tuple(float(y) for y in yields)
-    return None
+    if isinstance(dy, ContinuousDividendYield):
+        return float(dy.div_yield)
+    if isinstance(dy, TermStructureDividendYield):
+        return (tuple(float(t) for t in dy.times),
+                tuple(float(y) for y in dy.yields))
+    return dy
 
 
 _COMPONENTS = (
