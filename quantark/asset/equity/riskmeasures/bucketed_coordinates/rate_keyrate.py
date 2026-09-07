@@ -20,6 +20,15 @@ _REBUILD_RULE = {
     ),
 }
 
+_PARALLEL_RULE = {
+    RateKeyrateConvention.CARRY_INVARIANT: (
+        "flat zero-rate shift; carry-invariant q re-derivation (F unchanged) -> pure discounting"
+    ),
+    RateKeyrateConvention.DIVIDEND_HELD: (
+        "flat zero-rate shift; dividend yield held (F moves with r)"
+    ),
+}
+
 
 def calculate_points(
     calc, product, pricing_env, engine, request, mode
@@ -153,7 +162,9 @@ def calculate_points(
                     <= 0.05 * max(abs(parallel_per_1bp), 1e-12)
                 ),
                 "roles_inferred": info.roles_inferred,
-                "rebuild_rule": "ParallelShiftRateCurve; " + rebuild_rule,
+                # the parallel point shifts the whole curve; it is NOT a pillar bump, so it
+                # carries its own rule rather than the pillar text (Kimi review 2026-09-03)
+                "rebuild_rule": "ParallelShiftRateCurve; " + _PARALLEL_RULE[convention],
                 "convention": convention.value,
             },
         )
