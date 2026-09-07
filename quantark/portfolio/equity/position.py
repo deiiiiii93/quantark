@@ -314,7 +314,7 @@ class EquityPosition:
         # dV/dsigma derivative); do not divide by the bump.
         if "vega" in requested:
             strike = getattr(product, "strike", pricing_env.spot)
-            cur_vol = pricing_env.get_vol(strike, T)
+            cur_vol = gc._bump_unit_vol(pricing_env, strike, T)
             env_v = gc._build_vol_bumped_env(
                 pricing_env, product, cur_vol, bc.vol_bump, direction=1.0
             )

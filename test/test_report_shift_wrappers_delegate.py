@@ -3,8 +3,9 @@
 
 - ``greek_conventions_report``: its private ``_ShiftedVolSurface`` forwarded every
   unknown attribute to the base, so on a TradingClockVolSurface it advertised the
-  exact total-variance protocol of the UNSHIFTED inner; the primitive fails closed
-  there (patch spec 2026-09-03 §14) and keeps the shape everywhere else.
+  exact total-variance protocol of the UNSHIFTED inner; the primitive shifts the
+  trading-quoted inner there (the sigma_td bump unit, desk decision 2026-09-07)
+  and keeps the shape everywhere else.
 - ``autocallable_risk_report._shift_dividend_yield``: kept a ``max(0.0, .)`` zero
   floor on continuous/term yields that b410a30f removed library-wide (signed
   carry), while its own fallback and the report's three direct
@@ -60,7 +61,11 @@ def test_report_shifted_yield_is_the_primitive_with_the_carry_bound():
 
 # --- greek conventions report ------------------------------------------------------------
 
-def test_cash_greeks_vega_on_a_clock_wrapped_surface_fails_closed():
+def test_cash_greeks_vega_on_a_clock_wrapped_surface_bumps_the_trading_vol():
+    """The report's vega on a clock-wrapped surface is per sigma_td point: the
+    wrapper survives the shift and the inner moves by the bump."""
+    from copy import deepcopy
+
     from quantark.asset.equity.engine.mc.dcn_mc_engine import DCNMCEngine
     from quantark.asset.equity.riskmeasures.greek_conventions_report import _reprice_vol
     from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
@@ -73,8 +78,10 @@ def test_cash_greeks_vega_on_a_clock_wrapped_surface_fails_closed():
         div_yield=ContinuousDividendYield(FLAT["q"]),
         day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=244, calendar=cal,
     )
-    with pytest.raises(ValidationError, match="unit"):
-        _reprice_vol(make_dcn(DCN_A), env, DCNMCEngine(num_paths=2 ** 10, seed=42), 0.01)
+    p, e = make_dcn(DCN_A), DCNMCEngine(num_paths=2 ** 10, seed=42)
+    up = deepcopy(env)
+    up.vol_surface = TradingClockVolSurface(FlatVolSurface(0.21), up.vol_surface.time_map)
+    assert _reprice_vol(p, env, e, 0.01) == pytest.approx(e.price(p, up), rel=1e-12)
 
 
 def test_cash_greeks_rho_and_rhoq_on_term_structures_are_parallel_shifts():

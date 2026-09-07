@@ -67,20 +67,18 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
         return v * float(np.sqrt(tau_td / tau_cal))
 
     def parallel_shifted(self, shift: float) -> "TradingClockVolSurface":
-        """Fails closed: a vol bump on a clock-wrapped surface needs a unit
-        decision (patch spec 2026-09-03 §14) — one point of the TRADING-quoted
-        inner vol sigma_td (shift the inner) or one point of the CALENDAR-axis
-        vol sigma_cal this surface returns (shift on this axis); the two differ
-        by sqrt(tau_td / tau_cal), which is tenor-dependent, so only the first is
-        a parallel shift at all and only the first keeps the holiday plateau
-        (a constant shift of sigma_cal accrues variance on closed days)."""
-        raise ValidationError(
-            "vol bump on a TradingClockVolSurface: the unit is undecided "
-            "(a point of the trading-quoted inner vol sigma_td vs a point of the "
-            "calendar-axis vol sigma_cal this surface returns; the two differ by "
-            "sqrt(tau_td/tau_cal)); the bump fails closed instead of flattening "
-            "the surface"
-        )
+        """Shift the TRADING-quoted inner and re-expose it through the same map.
+
+        The bump unit is one point of sigma_td (desk decision 2026-09-07,
+        patch spec 2026-09-03 §14). The calendar-axis vol this surface returns
+        then moves by ``shift * sqrt(tau_td/tau_cal)``, which is tenor-dependent:
+        a constant shift of sigma_cal is not a parallel shift of anything the
+        surface stores, and it would accrue ``2*shift*sqrt(w*tau_cal)`` of
+        variance across a holiday, where the clock's defining property is that
+        total variance is flat. The rate and dividend wrappers shift their
+        (calendar-quoted) inners for the same reason.
+        """
+        return TradingClockVolSurface(self.inner.parallel_shifted(shift), self.time_map)
 
     def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockVolSurface":
         """The same inner surface re-expressed through another map (e.g. re-anchored)."""

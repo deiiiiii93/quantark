@@ -100,8 +100,10 @@ def build_vol_bumped_env(
 ) -> PricingEnvironment:
     """Parallel-shift the vol surface by ``direction * vol_bump``; the SHAPE
     (term structure, smile, grid type) is preserved via ``parallel_shifted``.
-    ``current_vol`` is the (K, T) vol the caller read: it gates the bump (the
-    legacy check that a stressed vol must stay positive)."""
+    ``current_vol`` gates the bump (the legacy check that a stressed vol must
+    stay positive) and must be read in the UNIT the shift moves, i.e. through
+    ``bump_unit_vol`` — on a clock-wrapped surface that is sigma_td, not the
+    sigma_cal ``pricing_env.get_vol`` returns."""
     new_vol = current_vol + direction * vol_bump
     if new_vol <= 0:
         raise ValidationError(
@@ -111,6 +113,30 @@ def build_vol_bumped_env(
     env = deepcopy(pricing_env)
     env.vol_surface = shift_vol_surface(env.vol_surface, direction * vol_bump)
     return env
+
+
+def bump_unit_vol(
+    pricing_env: PricingEnvironment, strike: float, time_to_maturity: float
+) -> float:
+    """The vol level in the UNIT ``shift_vol_surface`` moves.
+
+    Off the trading clock that is the environment's own (K, T) vol, bitwise.
+    On a ``TradingClockVolSurface`` the bump moves the trading-quoted inner
+    (sigma_td) while ``pricing_env.get_vol`` returns the calendar-axis
+    ``sigma_cal = sigma_td * sqrt(tau_td/tau_cal)``; one week over the 2026
+    Spring Festival block has a ratio of 0.21, so a gate or a central/one-sided
+    fallback reading sigma_cal would judge the bump against a level it never
+    touches.
+    """
+    from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
+
+    surface = pricing_env.vol_surface
+    if not isinstance(surface, TradingClockVolSurface):
+        return pricing_env.get_vol(strike, time_to_maturity)
+    tau_td = float(surface.time_map.to_trading(float(time_to_maturity)))
+    if tau_td <= 0.0:
+        return 0.0          # pure-holiday horizon: no variance accrues, get_vol is 0.0 too
+    return float(surface.inner.get_vol(float(strike), tau_td, float(pricing_env.spot)))
 
 
 def shift_vol_surface(surface, shift: float):

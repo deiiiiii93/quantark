@@ -555,19 +555,36 @@ reviewable on its own.
 
 Not done here, listed so they are not lost:
 
-- **Taylor on clock-wrapped environments.** Needs wrap-aware bumps in
-  `riskmeasures` and a unit decision: the factor model's VOL coordinate is
-  σ at (K, T1) read through `env.get_vol`, i.e. σ_cal on the calendar
-  axis, while a bump of the inner surface is per σ_td; the two differ by
-  √(τ_td/τ_cal). (The rho half of this is resolved: since 2026-09-07
-  `build_rate_bumped_env` shifts the calendar-quoted inner of a
-  `TradingClockRateCurve` and re-wraps it, so rho is per calendar year on
-  both axes. Since the vol/div bump-helper fix the vol bump on a
-  `TradingClockVolSurface` fails closed EXPLICITLY — `parallel_shifted`
-  raises with the unit question — instead of silently flattening the
-  surface onto the trading axis; `TradingClockDividendYield` shifts its
-  calendar-quoted inner like the rate curve.) Fails closed for now pending
-  the vega unit decision.
+- **Taylor on clock-wrapped environments.** The **vega unit is decided
+  (desk, 2026-09-07): one point of σ_td**, the trading-quoted inner. So
+  `TradingClockVolSurface.parallel_shifted` shifts the inner and re-wraps,
+  matching `TradingClockRateCurve` / `TradingClockDividendYield`, which
+  shift their calendar-quoted inners (r and q live on the calendar clock).
+  Two properties pick σ_td over the calendar-axis alternative: a constant
+  shift of σ_cal is not a parallel shift of anything the surface stores
+  (the equivalent inner shift varies with tenor by √(τ_cal/τ_td)), and it
+  would accrue 2·s·√(w·τ_cal) + s²·τ_cal of variance across a holiday,
+  where the clock's defining property is that total variance is flat. The
+  gates around the bump were reading the WRONG level for the same reason —
+  `pricing_env.get_vol` returns σ_cal, and one week over the 2026 Spring
+  Festival block has τ_td/τ_cal = 0.21, so a 5-point down bump on a 10%
+  trading vol was rejected as "stressed volatility must be positive" —
+  hence `bump_envs.bump_unit_vol`, the level in the unit the shift moves
+  (bitwise `get_vol` off the clock), routed through the four `numerical.py`
+  vol call sites and the two parity mirrors via `GreeksCalculator
+  ._bump_unit_vol`. Tests: `test/test_vol_div_parallel_shift_bump.py`.
+  **Taylor still fails closed on a wrapped environment**, now for two
+  remaining reasons, neither of them the unit question:
+  (i) the theta bump sets `env.valuation_date` without re-anchoring the
+  wrappers' `BusinessTimeMap` (`numerical.py:253`, `:594`), so every time
+  greek would read the holiday layout of the OLD anchor; and (ii) the
+  factor model still measures its VOL move through `env.get_vol`, i.e. in
+  σ_cal points, so `vega × d_vol` would multiply a σ_td sensitivity by a
+  σ_cal move — and, separately, an unchanged inner surface produces a
+  non-zero `d_vol` purely from the anchor moving, which `changed` correctly
+  reports as no VOL move. Both are follow-ups; (ii) carries a design
+  question (which map samples the inner when t0 and t1 have different
+  anchors).
 - **Scalar numerical rho replaced the whole rate curve** with
   `FlatRateCurve(r(T) + bump)` (`numerical.py:282`), so for a
   term-structure curve it measured a curve *reshaping*, not a parallel

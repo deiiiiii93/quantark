@@ -124,7 +124,7 @@ def apply_greek_bump(bump_id: str, state: TradeState, gc) -> TradeState:
     T = product.get_maturity(env)
     if bump_id == "vol_up":
         strike = getattr(product, "strike", env.spot)
-        cur_vol = env.get_vol(strike, T)
+        cur_vol = gc._bump_unit_vol(env, strike, T)
         env2 = gc._build_vol_bumped_env(
             env, product, cur_vol, bc.vol_bump, direction=1.0
         )

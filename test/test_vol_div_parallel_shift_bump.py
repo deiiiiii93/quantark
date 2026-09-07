@@ -89,14 +89,100 @@ def test_vol_parallel_shifted_unknown_family_is_wrapped_and_keeps_its_smile():
     assert up.is_smile is True
 
 
-def test_vol_parallel_shifted_trading_clock_surface_fails_closed_on_the_unit():
+def _clock_map(anchor=datetime(2026, 2, 9)):
+    cal = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+    return BusinessTimeMap(TradingClock(cal, 244), anchor, datetime(2028, 2, 9))
+
+
+def test_vol_parallel_shifted_trading_clock_shifts_the_trading_quoted_inner():
+    """Desk decision 2026-09-07: the vol bump unit is one point of the
+    TRADING-quoted inner (sigma_td), matching the rate and dividend wrappers,
+    which shift their calendar-quoted inners. The wrapper keeps its type and its
+    map; the calendar-axis vol it returns moves by shift * sqrt(tau_td/tau_cal),
+    which is tenor-dependent and is NOT the shift."""
     from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
 
-    cal = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
-    m = BusinessTimeMap(TradingClock(cal, 244), datetime(2026, 2, 9), datetime(2028, 2, 9))
+    m = _clock_map()
     wrapped = TradingClockVolSurface(FlatVolSurface(0.2), m)
-    with pytest.raises(ValidationError, match="unit"):
-        wrapped.parallel_shifted(BUMP)
+    up = wrapped.parallel_shifted(BUMP)
+    assert type(up) is TradingClockVolSurface and up.time_map is m
+    assert type(up.inner) is FlatVolSurface and up.inner.volatility == 0.2 + BUMP
+    for tau in (0.05, 0.25, 1.0):
+        ratio = float(m.to_trading(tau)) / tau
+        assert up.get_vol(100.0, tau, 100.0) - wrapped.get_vol(100.0, tau, 100.0) == pytest.approx(
+            BUMP * ratio ** 0.5, rel=1e-12
+        )
+
+
+def test_vol_clock_bump_moves_total_variance_on_the_trading_axis():
+    """w_cal(tau) = (sigma_td + shift)^2 * tau_td: the bump is a variance move
+    per TRADING year at every calendar tenor."""
+    from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
+
+    m = _clock_map()
+    up = TradingClockVolSurface(FlatVolSurface(0.2), m).parallel_shifted(BUMP)
+    for tau in (0.05, 0.25, 1.0):
+        assert up.total_variance(100.0, tau, 100.0) == pytest.approx(
+            (0.2 + BUMP) ** 2 * float(m.to_trading(tau)), rel=1e-14
+        )
+
+
+def test_vol_clock_bump_keeps_the_holiday_plateau_exact():
+    """The reason the unit is sigma_td: a constant shift of the calendar-axis vol
+    would accrue variance on closed days. Feb 14-22 2026 is a weekend + Spring
+    Festival block, so total variance is bitwise flat across it, bumped or not."""
+    from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
+
+    m = _clock_map()
+    wrapped = TradingClockVolSurface(FlatVolSurface(0.2), m)
+    up = wrapped.parallel_shifted(BUMP)
+    a, b = 6 / 365.0, 12 / 365.0                       # both inside the closed block
+    assert wrapped.total_variance(100.0, a, 100.0) == wrapped.total_variance(100.0, b, 100.0)
+    assert up.total_variance(100.0, a, 100.0) == up.total_variance(100.0, b, 100.0)
+    assert up.total_variance(100.0, a, 100.0) > wrapped.total_variance(100.0, a, 100.0)
+
+
+def _short_clock_env(sigma_td=0.10):
+    """One week over the 2026 Spring Festival: tau_td/tau_cal = 0.21, so the
+    calendar-axis vol is 0.46 * sigma_td."""
+    from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
+
+    m = _clock_map(datetime(2026, 2, 13))
+    return PricingEnvironment(
+        spot_quote=SpotQuote(100.0), vol_surface=TradingClockVolSurface(FlatVolSurface(sigma_td), m),
+        rate_curve=FlatRateCurve(0.03), div_yield=ContinuousDividendYield(0.01),
+        valuation_date=datetime(2026, 2, 13),
+    ), 7 / 365.0
+
+
+def test_bump_unit_vol_is_the_trading_level_on_a_clock_surface():
+    """The gates around the bump read a level; it has to be the level the bump
+    moves. On a clock surface that is sigma_td, not the sigma_cal get_vol returns."""
+    env, tau = _short_clock_env()
+    assert bump_envs.bump_unit_vol(env, 100.0, tau) == pytest.approx(0.10, abs=1e-15)
+    assert env.get_vol(100.0, tau) < 0.05
+
+
+def test_bump_unit_vol_is_bitwise_get_vol_off_the_clock():
+    env = _env()
+    for k in (80.0, 100.0, 120.0):
+        for t in (0.25, 1.0, 2.0):
+            assert bump_envs.bump_unit_vol(env, k, t) == env.get_vol(k, t)
+
+
+def test_vol_bumped_env_on_a_clock_surface_gates_in_the_trading_unit():
+    """A 5-point down bump on a 10% TRADING vol reads negative on the calendar
+    axis and is nowhere near zero on the axis the bump actually moves."""
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
+    from quantark.util.enum import OptionType
+
+    env, tau = _short_clock_env()
+    option = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=tau)
+    level = bump_envs.bump_unit_vol(env, 100.0, tau)
+    down = bump_envs.build_vol_bumped_env(env, option, level, 0.05, direction=-1.0)
+    assert type(down.vol_surface) is TradingClockVolSurface
+    assert down.vol_surface.inner.volatility == pytest.approx(0.05, abs=1e-15)
 
 
 # --- div primitive ------------------------------------------------------------------

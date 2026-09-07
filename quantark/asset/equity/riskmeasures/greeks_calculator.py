@@ -1250,6 +1250,14 @@ class GreeksCalculator:
             reuse=reuse,
         )
 
+    def _bump_unit_vol(
+        self,
+        pricing_env: PricingEnvironment,
+        strike: float,
+        time_to_maturity: float,
+    ) -> float:
+        return bump_envs.bump_unit_vol(pricing_env, strike, time_to_maturity)
+
     def _build_vol_bumped_env(
         self,
         pricing_env: PricingEnvironment,

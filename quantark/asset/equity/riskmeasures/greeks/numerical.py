@@ -88,7 +88,7 @@ def numerical_vega(
     base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
     T = product.get_maturity(pricing_env)
     strike = getattr(product, "strike", pricing_env.spot)
-    current_vol = pricing_env.get_vol(strike, T)
+    current_vol = bump_envs.bump_unit_vol(pricing_env, strike, T)
     env_up_vol = bump_envs.build_vol_bumped_env(
         pricing_env, product, current_vol, vol_bump, direction=1.0
     )
@@ -112,7 +112,7 @@ def numerical_volga(
     base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
     T = product.get_maturity(pricing_env)
     strike = getattr(product, "strike", pricing_env.spot)
-    current_vol = pricing_env.get_vol(strike, T)
+    current_vol = bump_envs.bump_unit_vol(pricing_env, strike, T)
 
     if current_vol - vol_bump <= 0:
         env_up = bump_envs.build_vol_bumped_env(
@@ -153,7 +153,7 @@ def numerical_vanna(
     base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
     T = product.get_maturity(pricing_env)
     strike = getattr(product, "strike", pricing_env.spot)
-    current_vol = pricing_env.get_vol(strike, T)
+    current_vol = bump_envs.bump_unit_vol(pricing_env, strike, T)
 
     env_up = bump_envs.build_vol_bumped_env(
         pricing_env, product, current_vol, vol_bump, direction=1.0
@@ -423,7 +423,7 @@ def numerical_zomma(
     base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
     T = product.get_maturity(pricing_env)
     strike = getattr(product, "strike", pricing_env.spot)
-    current_vol = pricing_env.get_vol(strike, T)
+    current_vol = bump_envs.bump_unit_vol(pricing_env, strike, T)
 
     env_up = bump_envs.build_vol_bumped_env(
         pricing_env, product, current_vol, vol_bump, direction=1.0
