@@ -173,7 +173,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         # spec 2026-09-03 §5). The discrete leg discounts each node at its own
         # resolved settlement time and needs no factor.
         hit_lag = (
-            constant_hit_lag_year_fraction(product, pricing_env)
+            constant_hit_lag_year_fraction(product, pricing_env, maturity)
             if (
                 product.observation_type == ObservationType.CONTINUOUS
                 and product.pay_at_hit

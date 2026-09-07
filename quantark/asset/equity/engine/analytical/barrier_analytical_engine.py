@@ -103,7 +103,7 @@ class BarrierAnalyticalEngine(BaseEngine):
             # Fail closed BEFORE pricing when the first-hit lag is not one constant;
             # the rebate leg (one-touch engine) applies the exp(-r L) factor itself
             # (patch spec 2026-09-03 §5).
-            constant_hit_lag_year_fraction(product, pricing_env)
+            constant_hit_lag_year_fraction(product, pricing_env, maturity)
 
         # Immediate handling for zero maturity
         if maturity < self.MIN_MATURITY:

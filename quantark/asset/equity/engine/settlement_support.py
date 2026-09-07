@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional, Sequence, TYPE_CHECKING
@@ -454,6 +455,9 @@ def terminal_lifecycle_pv(
     return pending_receivable_pv(lifecycle_state, pricing_env)
 
 
+# a flat curve reproduces exp(-r L) bitwise; the tolerance only absorbs curve interpolation
+_FLAT_CURVE_REL_TOL = 1e-12
+
 # day counts under which n calendar days is the same year fraction from every start date
 _CONSTANT_DAY_BASIS = {
     DayCountConvention.CALENDAR_DAYS: 365.0,
@@ -477,7 +481,26 @@ def _schedule_requests_delayed_hit(product) -> bool:
     )
 
 
-def constant_hit_lag_year_fraction(product, pricing_env: "PricingEnvironment") -> float:
+def _lag_factor_matches_the_curve(pricing_env: "PricingEnvironment", lag: float, maturity: float) -> bool:
+    """exp(-r(T) * L) is the curve's own DF(L): true exactly on a flat curve.
+
+    The first-passage formula discounts with ONE rate read at maturity, while the
+    already-hit branch and the lifecycle receivable discount the same deferred
+    cashflow on the true curve. Under a term structure the two disagree, so the
+    price jumps at the barrier by rebate * (DF(L) - exp(-r(T) L)).
+    """
+    rate = float(pricing_env.get_rate(maturity))
+    return is_close(
+        float(pricing_env.get_discount_factor(lag)),
+        math.exp(-rate * lag),
+        rel_tol=_FLAT_CURVE_REL_TOL,
+        abs_tol=0.0,
+    )
+
+
+def constant_hit_lag_year_fraction(
+    product, pricing_env: "PricingEnvironment", maturity: float
+) -> float:
     """Year-fraction lag of a first-hit payment when it is the same for EVERY hit time.
 
     A first-passage formula can carry a delayed hit payment only as the exact
@@ -487,6 +510,13 @@ def constant_hit_lag_year_fraction(product, pricing_env: "PricingEnvironment") -
     business-day lags, calendar-day lags with a business-day adjustment,
     calendar-day lags under a start-date-dependent day count, and
     per-observation settlement timing.
+
+    A non-zero lag also requires a FLAT rate curve. The formula defers the hit
+    payment at the single rate it reads at ``maturity``, but the already-hit
+    branch and the lifecycle receivable defer the identical cashflow on the true
+    curve; under a term structure the price is discontinuous at the barrier and
+    a knock-out event books a spurious PnL, so the curve is gated here rather
+    than approximated (patch spec 2026-09-03 §5, Kimi review 2026-09-03).
     """
     name = type(product).__name__
     if _schedule_requests_delayed_hit(product):
@@ -499,8 +529,8 @@ def constant_hit_lag_year_fraction(product, pricing_env: "PricingEnvironment") -
     if convention is None or float(convention.lag) == 0.0:
         return 0.0
     if convention.lag_unit is SettlementLagUnit.YEAR_FRACTION:
-        return float(convention.lag)
-    if convention.lag_unit is SettlementLagUnit.CALENDAR_DAYS:
+        lag = float(convention.lag)
+    elif convention.lag_unit is SettlementLagUnit.CALENDAR_DAYS:
         if convention.business_day_convention is not BusinessDayConvention.UNADJUSTED:
             raise CapabilityError(
                 f"{name}: a business-day-adjusted calendar-day first-hit lag is hit-date "
@@ -512,10 +542,19 @@ def constant_hit_lag_year_fraction(product, pricing_env: "PricingEnvironment") -
                 f"{name}: a {int(convention.lag)}-calendar-day first-hit lag is not a constant "
                 f"year fraction under {pricing_env.day_count_convention.value} (use MC, PDE or QUAD)"
             )
-        return float(convention.lag) / basis
-    raise CapabilityError(
-        f"{name}: a business-day first-hit lag is hit-date dependent (use MC, PDE or QUAD)"
-    )
+        lag = float(convention.lag) / basis
+    else:
+        raise CapabilityError(
+            f"{name}: a business-day first-hit lag is hit-date dependent (use MC, PDE or QUAD)"
+        )
+    if not _lag_factor_matches_the_curve(pricing_env, lag, maturity):
+        raise CapabilityError(
+            f"{name}: a delayed first-hit payment needs a FLAT rate curve; this environment's "
+            f"discount factor at the {lag:g}y lag is not exp(-r({maturity:g}) * {lag:g}), so the "
+            "first-passage formula and the already-hit / receivable legs would discount the same "
+            "cashflow differently and the price would jump at the barrier (use MC, PDE or QUAD)"
+        )
+    return lag
 
 
 def _has_explicit_event_timing(product) -> bool:

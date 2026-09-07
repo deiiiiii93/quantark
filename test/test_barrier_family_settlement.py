@@ -74,6 +74,18 @@ def env():
     )
 
 
+@pytest.fixture
+def flat_env():
+    """A delayed first-hit payment is only admitted on a FLAT curve (patch spec §5)."""
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.05),
+        div_yield=ContinuousDividendYield(div_yield=0.01),
+        valuation_date=datetime(2026, 1, 1),
+    )
+
+
 def _lagged():
     return SettlementConvention(
         lag=LAG,
@@ -142,23 +154,49 @@ def _double_sharkfin(convention, knock_out_rebate=2.0, dated=False, **kw):
                                 **({"observation_type": ObservationType.CONTINUOUS} | _expiry(dated) | kw))
 
 
-def test_continuous_first_hit_constant_lag_scales_by_exp_minus_r_lag(env):
+def test_continuous_first_hit_constant_lag_scales_by_exp_minus_r_lag(flat_env):
     """E[e^{-r(tau+L)} 1{tau<=T}] = e^{-rL} E[e^{-r tau} 1{tau<=T}] under the formula's flat r (patch spec §5.2)."""
-    factor = math.exp(-env.get_rate(MATURITY) * LAG)
+    factor = math.exp(-flat_env.get_rate(MATURITY) * LAG)
     touch = OneTouchAnalyticalEngine()
-    immediate = touch.price(_one_touch(None), env)
-    delayed = touch.price(_one_touch(_lagged()), env)
+    immediate = touch.price(_one_touch(None), flat_env)
+    delayed = touch.price(_one_touch(_lagged()), flat_env)
     assert delayed != immediate
     assert delayed == pytest.approx(immediate * factor, rel=2e-12)
     # barrier: the option leg keeps its terminal delay, only the rebate leg carries exp(-r L)
     eng = BarrierAnalyticalEngine()
-    rebate_leg = eng.price(_up_out_call(None), env) - eng.price(_up_out_call(None, rebate=0.0), env)
+    rebate_leg = eng.price(_up_out_call(None), flat_env) - eng.price(_up_out_call(None, rebate=0.0), flat_env)
     assert rebate_leg > 0.0
-    assert eng.price(_up_out_call(_lagged()), env) == pytest.approx(
-        eng.price(_up_out_call(_lagged(), rebate=0.0), env) + rebate_leg * factor, rel=2e-12)
+    assert eng.price(_up_out_call(_lagged()), flat_env) == pytest.approx(
+        eng.price(_up_out_call(_lagged(), rebate=0.0), flat_env) + rebate_leg * factor, rel=2e-12)
 
 
-def test_calendar_day_lag_is_constant_only_under_act_style_day_counts(env):
+def test_delayed_first_hit_payment_is_rejected_on_a_sloped_curve(env, flat_env):
+    """The formula defers at r(T) but the already-hit leg defers on the curve: gate, don't approximate.
+
+    Admitting the lag under a term structure makes the price jump at the barrier by
+    rebate * (DF(L) - exp(-r(T) L)), which a knock-out day would book as a spurious PnL.
+    """
+    touch = OneTouchAnalyticalEngine()
+    with pytest.raises(CapabilityError, match="FLAT rate curve"):
+        touch.price(_one_touch(_lagged()), env)
+    # the same gate guards the barrier and both sharkfin cash legs
+    with pytest.raises(CapabilityError, match="FLAT rate curve"):
+        BarrierAnalyticalEngine().price(_up_out_call(_lagged()), env)
+    with pytest.raises(CapabilityError, match="FLAT rate curve"):
+        SingleSharkfinOptionAnalyticalEngine().price(_single_sharkfin(_lagged()), env)
+    with pytest.raises(CapabilityError, match="FLAT rate curve"):
+        DoubleSharkfinOptionAnalyticalEngine().price(_double_sharkfin(_lagged()), env)
+    # a pay-at-hit contract with NO lag is unaffected by the curve's shape
+    assert touch.price(_one_touch(None), env) > 0.0
+    # and a flat curve quoted through a term-curve class still passes: the gate tests the
+    # discount factor, not the curve's type
+    sloped_but_flat = deepcopy(env)
+    sloped_but_flat.rate_curve = LinearRateCurve([(0.25, 0.05), (0.5, 0.05), (1.0, 0.05), (1.2, 0.05)])
+    assert touch.price(_one_touch(_lagged()), sloped_but_flat) == pytest.approx(
+        touch.price(_one_touch(_lagged()), flat_env), rel=2e-12)
+
+
+def test_calendar_day_lag_is_constant_only_under_act_style_day_counts(flat_env):
     """Day-based lags need a dated contract (terminal leg); the hit leg then scales by exp(-r n/basis)."""
     unadjusted = SettlementConvention(lag=2, lag_unit=SettlementLagUnit.CALENDAR_DAYS,
                                       business_day_convention=BusinessDayConvention.UNADJUSTED)
@@ -170,20 +208,20 @@ def test_calendar_day_lag_is_constant_only_under_act_style_day_counts(env):
         assert engine.price(_one_touch(unadjusted, dated=True), pricing_env) == pytest.approx(
             engine.price(plain, pricing_env) * math.exp(-r * 2 / basis), rel=2e-12)
 
-    check_constant(env, 365)                                        # CALENDAR_DAYS: days / 365
-    env365 = deepcopy(env)
+    check_constant(flat_env, 365)                                        # CALENDAR_DAYS: days / 365
+    env365 = deepcopy(flat_env)
     env365.day_count_convention = DayCountConvention.ACT_365
     check_constant(env365, 365)
-    env360 = deepcopy(env)
+    env360 = deepcopy(flat_env)
     env360.day_count_convention = DayCountConvention.ACT_360
     check_constant(env360, 360)
-    env_isda = deepcopy(env)
+    env_isda = deepcopy(flat_env)
     env_isda.day_count_convention = DayCountConvention.ACT_ACT_ISDA
     with pytest.raises(CapabilityError, match="first-hit"):
         engine.price(_one_touch(unadjusted, dated=True), env_isda)
     # adjusted calendar-day and business-day lags are hit-date dependent (a calendar is needed
     # for the terminal leg to resolve at all)
-    env_cal = deepcopy(env)
+    env_cal = deepcopy(flat_env)
     env_cal.calendar = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
     following = SettlementConvention(lag=2, lag_unit=SettlementLagUnit.CALENDAR_DAYS)     # FOLLOWING adjusts
     with pytest.raises(CapabilityError, match="first-hit"):
@@ -222,21 +260,21 @@ def test_pde_lag_effect_matches_analytical_scaling():
     d_an = an.price(_up_out_call(None), flat) - an.price(_up_out_call(lag), flat)
     d_pde = pde.price(_up_out_call(None), flat) - pde.price(_up_out_call(lag), flat)
     assert d_an > 0.0
-    # measured 2026-09-03 (ARM64): analytical 5.555897 -> 5.418722, d_an = 0.137176;
-    # PDE high 5.555843 -> 5.418669, d_pde = 0.137174 (rel diff -1.0e-5; standard: -3.3e-5)
+    # The PDE reproduces the analytical lag effect to well inside this gate; the tolerance is
+    # set by the solver's own discretisation error, not by the size of the effect.
     assert d_pde == pytest.approx(d_an, rel=1e-3)
 
 
 @pytest.mark.parametrize("engine,make", [(SingleSharkfinOptionAnalyticalEngine(), _single_sharkfin),
                                          (DoubleSharkfinOptionAnalyticalEngine(), _double_sharkfin)])
-def test_sharkfin_first_hit_constant_lag_scales(env, engine, make):
+def test_sharkfin_first_hit_constant_lag_scales(flat_env, engine, make):
     """Only the hit-paid cash leg carries exp(-r L); the option leg keeps its own terminal delay."""
-    factor = math.exp(-env.get_rate(MATURITY) * LAG)
-    base = engine.price(make(None), env)
-    no_cash = engine.price(make(None, knock_out_rebate=0.0), env)
+    factor = math.exp(-flat_env.get_rate(MATURITY) * LAG)
+    base = engine.price(make(None), flat_env)
+    no_cash = engine.price(make(None, knock_out_rebate=0.0), flat_env)
     assert base > no_cash                                             # the cash leg is material
-    lagged = engine.price(make(_lagged()), env)
-    no_cash_lagged = engine.price(make(_lagged(), knock_out_rebate=0.0), env)
+    lagged = engine.price(make(_lagged()), flat_env)
+    no_cash_lagged = engine.price(make(_lagged(), knock_out_rebate=0.0), flat_env)
     assert lagged == pytest.approx(no_cash_lagged + (base - no_cash) * factor, rel=2e-12)
 
 

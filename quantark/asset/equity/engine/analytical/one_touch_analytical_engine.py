@@ -99,7 +99,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
             and product.observation_type != ObservationType.EXPIRY
             and not product.is_barrier_hit(spot)
         ):
-            hit_lag = constant_hit_lag_year_fraction(product, pricing_env)
+            hit_lag = constant_hit_lag_year_fraction(product, pricing_env, maturity)
 
         # Immediate handling for near-expiry or already-hit barriers
         if maturity < self.MIN_MATURITY:
