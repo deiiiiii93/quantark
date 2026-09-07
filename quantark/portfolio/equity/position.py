@@ -203,8 +203,8 @@ class EquityPosition:
         vol_bump = bumps.vol_bump
         env_vol_up = deepcopy(pricing_env)
         env_vol_down = deepcopy(pricing_env)
-        self._bump_flat_or_term_vol(env_vol_up, vol_bump)
-        self._bump_flat_or_term_vol(env_vol_down, -vol_bump)
+        self._bump_vol_surface(env_vol_up, vol_bump)
+        self._bump_vol_surface(env_vol_down, -vol_bump)
         vega = (
             self.get_trade_value(env_vol_up) - self.get_trade_value(env_vol_down)
         ) / (2.0 * vol_bump)
@@ -421,17 +421,12 @@ class EquityPosition:
         return self.get_actual_notional(pricing_env) / self.quantity
 
     @staticmethod
-    def _bump_flat_or_term_vol(pricing_env: PricingEnvironment, bump: float) -> None:
-        vol_surface = pricing_env.vol_surface
-        if hasattr(vol_surface, "volatility"):
-            vol_surface.volatility += bump
-            return
-        if hasattr(vol_surface, "vols"):
-            vol_surface.vols = [float(vol) + bump for vol in vol_surface.vols]
-            return
-        raise ValidationError(
-            f"Unsupported volatility surface bump for {type(vol_surface).__name__}"
-        )
+    def _bump_vol_surface(pricing_env: PricingEnvironment, bump: float) -> None:
+        """Parallel-shift the (private copy's) vol surface in place; the surface
+        keeps its shape (see bump_envs.shift_vol_surface)."""
+        from quantark.asset.equity.riskmeasures.greeks.bump_envs import shift_vol_surface
+
+        pricing_env.vol_surface = shift_vol_surface(pricing_env.vol_surface, bump)
     
     def get_pnl(self, pricing_env: PricingEnvironment) -> float:
         """

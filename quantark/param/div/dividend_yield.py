@@ -29,6 +29,28 @@ class DividendYield(ABC):
         """
         pass
 
+    def parallel_shifted(self, shift: float) -> "DividendYield":
+        """This yield with ``shift`` added at every tenor; the term SHAPE is
+        preserved. Subclasses that can express the shift in their own
+        parameters override this (a continuous yield stays continuous with the
+        legacy floats); the default wraps in ``ParallelShiftDividendYield``.
+        """
+        return ParallelShiftDividendYield(self, shift)
+
+
+@dataclass(frozen=True)
+class ParallelShiftDividendYield(DividendYield):
+    """Parallel shift wrapper: ``get_yield = base.get_yield + shift`` (array-safe)."""
+
+    base: DividendYield
+    shift: float
+
+    def get_yield(self, time_to_maturity):
+        return self.base.get_yield(time_to_maturity) + float(self.shift)
+
+    def __repr__(self):
+        return f"ParallelShiftDividendYield(shift={self.shift:+.4%}, base={self.base!r})"
+
 
 @dataclass
 class ContinuousDividendYield(DividendYield):
@@ -68,6 +90,9 @@ class ContinuousDividendYield(DividendYield):
         """
         return self.div_yield
     
+    def parallel_shifted(self, shift: float) -> "ContinuousDividendYield":
+        return ContinuousDividendYield(self.div_yield + shift)
+
     def __repr__(self):
         return f"ContinuousDividendYield(yield={self.div_yield:.2%})"
 
@@ -109,6 +134,11 @@ class TermStructureDividendYield(DividendYield):
             return float(out)
         return out
 
+    def parallel_shifted(self, shift: float) -> "TermStructureDividendYield":
+        return TermStructureDividendYield(
+            times=list(self.times), yields=[float(y) + shift for y in self.yields]
+        )
+
     def __repr__(self):
         return "TermStructureDividendYield(points=%d)" % len(self.times)
 
@@ -133,6 +163,10 @@ class NoDividend(DividendYield):
         """
         return 0.0
     
+    def parallel_shifted(self, shift: float) -> "ContinuousDividendYield":
+        """The legacy bump of a zero yield: a continuous constant."""
+        return ContinuousDividendYield(0.0 + shift)
+
     def __repr__(self):
         return "NoDividend()"
 

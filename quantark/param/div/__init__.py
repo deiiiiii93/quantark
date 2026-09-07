@@ -7,6 +7,7 @@ from .dividend_yield import (
     ContinuousDividendYield,
     NoDividend,
     TermStructureDividendYield,
+    ParallelShiftDividendYield,
 )
 from .trading_clock_yield import TradingClockDividendYield
 
@@ -17,4 +18,5 @@ __all__ = [
     "ContinuousDividendYield",
     "NoDividend",
     "TermStructureDividendYield",
+    "ParallelShiftDividendYield",
 ]

@@ -32,6 +32,11 @@ class TradingClockDividendYield(DividendYield):
         c = float(self.time_map.to_calendar(u))
         return self.inner.get_yield(c) * c / u
 
+    def parallel_shifted(self, shift: float) -> "TradingClockDividendYield":
+        """Shift the CALENDAR-quoted inner (q lives on the calendar clock) and
+        re-expose it through the same map."""
+        return TradingClockDividendYield(self.inner.parallel_shifted(shift), self.time_map)
+
     def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockDividendYield":
         """The same inner yield re-expressed through another map (e.g. re-anchored)."""
         return TradingClockDividendYield(self.inner, time_map)

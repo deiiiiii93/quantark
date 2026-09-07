@@ -44,6 +44,50 @@ class BlackImpliedVolSurface(ABC):
         """
         pass
 
+    def parallel_shifted(self, shift: float) -> "BlackImpliedVolSurface":
+        """This surface with ``shift`` added to every implied vol; the SHAPE
+        (term structure, smile) is preserved.
+
+        The one primitive for vol bumps (vega, vanna, volga, ...): replacing a
+        surface with ``FlatVolSurface(sigma(K, T) + shift)`` drops the term
+        structure and the skew of the bumped state. Subclasses that can express
+        the shift in their own parameters override this (a flat surface stays
+        flat with the legacy floats, a grid stays a GridVolSurface for the
+        local-vol engines that isinstance-gate on it); the default wraps in
+        ``ParallelShiftVolSurface``.
+        """
+        return ParallelShiftVolSurface(self, shift)
+
+
+class ParallelShiftVolSurface(BlackImpliedVolSurface):
+    """Parallel shift wrapper: ``get_vol = base.get_vol + shift``.
+
+    ``is_smile`` follows the base. The exact total-variance protocol is NOT
+    exposed: a term sampler reads the shifted vol through ``get_vol``.
+    """
+
+    def __init__(self, base: BlackImpliedVolSurface, shift: float):
+        if base is None:
+            raise ValidationError("base surface is required")
+        self.base = base
+        self.shift = float(shift)
+
+    @property
+    def is_smile(self) -> bool:  # type: ignore[override]
+        return bool(getattr(self.base, "is_smile", False))
+
+    def get_vol(self, strike: float, time_to_maturity: float, spot: float) -> float:
+        vol = float(self.base.get_vol(strike, time_to_maturity, spot)) + self.shift
+        if vol <= 0.0:
+            raise ValidationError(
+                f"Shifted volatility must be positive, got {vol} "
+                f"(base {vol - self.shift}, shift {self.shift})"
+            )
+        return vol
+
+    def __repr__(self):
+        return f"ParallelShiftVolSurface(shift={self.shift:+.4f}, base={self.base!r})"
+
 
 @dataclass
 class FlatVolSurface(BlackImpliedVolSurface):
@@ -82,6 +126,9 @@ class FlatVolSurface(BlackImpliedVolSurface):
             Constant volatility
         """
         return self.volatility
+
+    def parallel_shifted(self, shift: float) -> "FlatVolSurface":
+        return FlatVolSurface(self.volatility + shift)
 
     def __repr__(self):
         return f"FlatVolSurface(vol={self.volatility:.2%})"
@@ -135,6 +182,11 @@ class TermStructureVolSurface(BlackImpliedVolSurface):
         if t.ndim == 0:
             return float(out)
         return out
+
+    def parallel_shifted(self, shift: float) -> "TermStructureVolSurface":
+        return TermStructureVolSurface(
+            times=list(self.times), vols=[float(v) + shift for v in self.vols]
+        )
 
     def __repr__(self):
         return "TermStructureVolSurface(points=%d)" % len(self.times)
@@ -205,6 +257,13 @@ class GridVolSurface(BlackImpliedVolSurface):
             return float(vols_by_T[-1])
         w = float(np.interp(t, mats, vols_by_T ** 2 * mats))
         return float(safe_sqrt(safe_divide(w, t)))
+
+    def parallel_shifted(self, shift: float) -> "GridVolSurface":
+        """Every cell shifted; stays a GridVolSurface (the Dupire builders and the
+        local-vol engines isinstance-gate on the type)."""
+        import dataclasses
+
+        return dataclasses.replace(self, iv_grid=self.iv_grid + shift)
 
     def __repr__(self):
         return f"GridVolSurface(nK={len(self.strikes)}, nT={len(self.maturities)})"

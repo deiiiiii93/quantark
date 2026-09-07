@@ -98,8 +98,10 @@ def build_vol_bumped_env(
     *,
     direction: float,
 ) -> PricingEnvironment:
-    from quantark.param.vol import FlatVolSurface, TermStructureVolSurface
-
+    """Parallel-shift the vol surface by ``direction * vol_bump``; the SHAPE
+    (term structure, smile, grid type) is preserved via ``parallel_shifted``.
+    ``current_vol`` is the (K, T) vol the caller read: it gates the bump (the
+    legacy check that a stressed vol must stay positive)."""
     new_vol = current_vol + direction * vol_bump
     if new_vol <= 0:
         raise ValidationError(
@@ -107,16 +109,21 @@ def build_vol_bumped_env(
         )
 
     env = deepcopy(pricing_env)
-    if isinstance(pricing_env.vol_surface, TermStructureVolSurface):
-        new_vols = [float(v) + direction * vol_bump for v in pricing_env.vol_surface.vols]
-        if any(v <= 0 for v in new_vols):
-            raise ValidationError("Stressed term-structure vol must be positive.")
-        env.vol_surface = TermStructureVolSurface(
-            times=list(pricing_env.vol_surface.times), vols=new_vols
-        )
-    else:
-        env.vol_surface = FlatVolSurface(new_vol)
+    env.vol_surface = shift_vol_surface(env.vol_surface, direction * vol_bump)
     return env
+
+
+def shift_vol_surface(surface, shift: float):
+    """``surface.parallel_shifted(shift)`` for the BlackImpliedVolSurface
+    hierarchy (flat stays flat with the legacy floats, a grid stays a grid);
+    any other surface object (SVIVolSurface, a sticky-moneyness view — whose
+    ``__getattr__`` would forward ``parallel_shifted`` to its base and drop the
+    view) is wrapped so ``get_vol`` reads base + shift."""
+    from quantark.param.vol import BlackImpliedVolSurface, ParallelShiftVolSurface
+
+    if isinstance(surface, BlackImpliedVolSurface):
+        return surface.parallel_shifted(shift)
+    return ParallelShiftVolSurface(surface, shift)
 
 
 def build_div_bumped_env(
@@ -127,21 +134,26 @@ def build_div_bumped_env(
     *,
     direction: float,
 ) -> PricingEnvironment:
-    from quantark.param.div import ContinuousDividendYield, TermStructureDividendYield
-
-    new_div = current_div + direction * div_bump
-
+    """Parallel-shift the dividend yield by ``direction * div_bump``; the term
+    SHAPE is preserved via ``parallel_shifted``. ``current_div`` is kept for
+    signature symmetry with the vol helper (the shift needs no level)."""
     env = deepcopy(pricing_env)
-    if isinstance(pricing_env.div_yield, TermStructureDividendYield):
-        new_yields = [
-            float(y) + direction * div_bump for y in pricing_env.div_yield.yields
-        ]
-        env.div_yield = TermStructureDividendYield(
-            times=list(pricing_env.div_yield.times), yields=new_yields
-        )
-    else:
-        env.div_yield = ContinuousDividendYield(new_div)
+    env.div_yield = shift_dividend_yield(env.div_yield, direction * div_bump)
     return env
+
+
+def shift_dividend_yield(div_yield, shift: float):
+    """``div_yield.parallel_shifted(shift)``; ``None`` (PricingEnvironment reads
+    it as a zero yield) becomes the legacy continuous constant."""
+    from quantark.param.div import (
+        ContinuousDividendYield, DividendYield, ParallelShiftDividendYield,
+    )
+
+    if div_yield is None:
+        return ContinuousDividendYield(0.0 + shift)
+    if isinstance(div_yield, DividendYield):
+        return div_yield.parallel_shifted(shift)
+    return ParallelShiftDividendYield(div_yield, shift)
 
 
 def build_rate_bumped_env(

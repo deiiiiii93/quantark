@@ -562,7 +562,12 @@ Not done here, listed so they are not lost:
   √(τ_td/τ_cal). (The rho half of this is resolved: since 2026-09-07
   `build_rate_bumped_env` shifts the calendar-quoted inner of a
   `TradingClockRateCurve` and re-wraps it, so rho is per calendar year on
-  both axes.) Fails closed for now pending the vega unit decision.
+  both axes. Since the vol/div bump-helper fix the vol bump on a
+  `TradingClockVolSurface` fails closed EXPLICITLY — `parallel_shifted`
+  raises with the unit question — instead of silently flattening the
+  surface onto the trading axis; `TradingClockDividendYield` shifts its
+  calendar-quoted inner like the rate curve.) Fails closed for now pending
+  the vega unit decision.
 - **Scalar numerical rho replaced the whole rate curve** with
   `FlatRateCurve(r(T) + bump)` (`numerical.py:282`), so for a
   term-structure curve it measured a curve *reshaping*, not a parallel
@@ -590,6 +595,18 @@ Not done here, listed so they are not lost:
   `key_rate_durations` keeps its documented bump-all-rates approximation, now
   honestly tenor-independent, with a TODO pointing at
   `key_rate_bumped_zero_curve`. Tests: `test/test_fi_dv01_parallel_shift.py`.
+  The equity vol and dividend bump helpers had the same defect one level
+  up: any surface that was not flat or ATM-term-structure was replaced by
+  `FlatVolSurface(sigma(K, T) + bump)` (a smile lost its skew — a digital's
+  vega came out 8x too small — and a GridVolSurface lost the type the
+  local-vol engines isinstance-gate on, so vega on those engines raised),
+  and any yield that was not continuous or term-structure became a
+  constant. Fixed via `BlackImpliedVolSurface.parallel_shifted` /
+  `DividendYield.parallel_shifted` (flat stays flat bitwise, term nodes
+  shift, a grid stays a grid, other families are wrapped by
+  `ParallelShiftVolSurface` / `ParallelShiftDividendYield`); the position
+  central-vega mirror uses the same primitive. Tests:
+  `test/test_vol_div_parallel_shift_bump.py`.
 - **Simple executor futures hedges are filled at spot**
   (`hedge_price = pricing_env.spot` for `hedge_instrument_type="futures"`)
   while the position is marked at the forward, so the open day books

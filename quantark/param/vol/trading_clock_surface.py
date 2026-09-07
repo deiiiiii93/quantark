@@ -66,6 +66,18 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
         v = float(self.inner.get_vol(float(strike), tau_td, float(spot)))
         return v * float(np.sqrt(tau_td / tau_cal))
 
+    def parallel_shifted(self, shift: float) -> "TradingClockVolSurface":
+        """Fails closed: a vol bump on a clock-wrapped surface needs a unit
+        decision (patch spec 2026-09-03 §14) — one point of the calendar-quoted
+        inner vol (shift the inner) or one point of trading-axis vol (shift on
+        this axis); the two differ by sqrt(tau_td / tau_cal) at every tenor."""
+        raise ValidationError(
+            "vol bump on a TradingClockVolSurface: the unit is undecided "
+            "(calendar-quoted inner vol point vs trading-axis vol point differ by "
+            "sqrt(tau_td/tau_cal)); the bump fails closed instead of flattening "
+            "the surface"
+        )
+
     def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockVolSurface":
         """The same inner surface re-expressed through another map (e.g. re-anchored)."""
         return TradingClockVolSurface(self.inner, time_map)
