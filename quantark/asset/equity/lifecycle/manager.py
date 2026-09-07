@@ -123,6 +123,7 @@ class PortfolioLifecycleManager:
         for position_id, position in portfolio.positions.items():
             product = position.product
             if isinstance(product, KnockOutResetSnowballOption):
+                self._unrolled_warned.add(position_id)   # this message replaces the generic one
                 warnings.warn(
                     "KO-reset snowball lifecycle (barrier reset on KO) is not "
                     f"tracked; position {position_id} will be repriced as of "
@@ -149,6 +150,19 @@ class PortfolioLifecycleManager:
             elif is_float_rollable(product):
                 self._float_roller.register(position_id, product, self.base_date)
 
+    def register_float_rolls(self, portfolio) -> None:
+        """Anchor every schedule-free float-maturity position at ``base_date``.
+
+        Call once, before the first ``process_day``, WHETHER OR NOT lifecycle
+        trackers are attached: without it these positions would first be seen by
+        ``_roll_untracked`` and anchored at the first market date instead, so the
+        same book would age differently depending on whether the backtest handles
+        lifecycle events (Kimi review 2026-09-03). First sight wins, so calling
+        this and ``register_positions`` in either order is idempotent.
+        """
+        for position_id, position in portfolio.positions.items():
+            if is_float_rollable(position.product):
+                self._float_roller.register(position_id, position.product, self.base_date)
 
     def _roll_untracked(self, position_id: str, position, date: pd.Timestamp):
         """Rolled copy of a schedule-free float-maturity product, else None.

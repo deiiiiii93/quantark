@@ -97,3 +97,62 @@ def test_ids_that_leave_the_book_are_forgotten():
     portfolio.remove_position(pid)
     manager.process_day(portfolio, 1, datetime(2026, 1, 6))
     assert pid not in manager._float_roller._base
+
+
+def test_the_roll_anchor_does_not_depend_on_the_lifecycle_flag():
+    """Both backtest modes anchor initial positions at start_date (Kimi review 2026-09-03).
+
+    register_positions runs only when the engine handles lifecycle events; without the
+    unconditional register_float_rolls the same book would otherwise anchor at the first
+    market date instead, so the flag would silently change every day's theta.
+    """
+    late = datetime(2026, 1, 15)                       # first bar, 10 days after start_date
+    maturities = []
+    for handle_lifecycle in (True, False):
+        call = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+        portfolio, env, (pid,) = _book(call)
+        manager = PortfolioLifecycleManager(base_date=START)
+        manager.register_float_rolls(portfolio)        # the engine does this in BOTH modes
+        if handle_lifecycle:
+            manager.register_positions(portfolio)
+        env.valuation_date = late
+        manager.process_day(portfolio, day_index=10, day_date=late)
+        maturities.append(portfolio.positions[pid].product.maturity)
+    assert maturities[0] == pytest.approx(1.0 - 10 / 365, abs=1e-15)
+    assert maturities[0] == maturities[1]
+
+
+def test_an_untracked_snowball_warns_even_when_registration_never_ran():
+    """The KO-reset snowball's specific warning comes from registration, which the flag can skip.
+
+    With handle_lifecycle_events off, register_positions never runs, so excluding the snowball
+    from the generic "no roll rule" warning left it silently repriced at a constant maturity
+    (Kimi review 2026-09-03).
+    """
+    from quantark.asset.equity.lifecycle.float_roll import has_unrolled_float_maturity
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import (
+        KnockOutResetSnowballOption,
+        PostKOScheduleMode,
+    )
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.util.enum import ObservationType
+
+    def _cfg(ko):
+        return BarrierConfig(ko_barrier=ko, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+                             ko_observation_dates=[0.25, 0.5, 0.75, 1.0])
+
+    snowball = KnockOutResetSnowballOption(
+        initial_price=100.0, strike=100.0, barrier_config=_cfg(105.0), post_barrier_config=_cfg(98.0),
+        contract_multiplier=1.0, maturity=1.0, is_reverse=False,
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE)
+
+    assert has_unrolled_float_maturity(snowball)      # no longer excluded from the generic warning
+    portfolio, env, (pid,) = _book(snowball)
+    manager = PortfolioLifecycleManager(base_date=START)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        manager.process_day(portfolio, day_index=0, day_date=START)
+        manager.process_day(portfolio, day_index=1, day_date=datetime(2026, 1, 6))
+    msgs = [str(x.message) for x in w if "no roll rule" in str(x.message)]
+    assert len(msgs) == 1                             # warned once, from the roll path
+    assert portfolio.positions[pid].product.maturity == 1.0    # and still repriced unrolled

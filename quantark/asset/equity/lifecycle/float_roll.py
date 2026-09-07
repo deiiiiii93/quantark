@@ -18,7 +18,6 @@ from quantark.asset.equity.product.deltaone.base_deltaone_product import BaseDel
 from quantark.asset.equity.product.option.american_option import AmericanOption
 from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
 from quantark.asset.equity.product.option.european_vanilla_option import EuropeanVanillaOption
-from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 
 FLOAT_ROLLABLE_PRODUCTS = (EuropeanVanillaOption, AmericanOption, CashOrNothingDigitalOption)
 MATURITY_FLOOR = 1e-8          # the trackers' floor (AutocallableLifecycleTracker / BarrierLifecycleTracker)
@@ -38,10 +37,13 @@ def is_float_rollable(product: Any) -> bool:
 def has_unrolled_float_maturity(product: Any) -> bool:
     """Float maturity, no dates, and no roll rule: repriced with a constant maturity.
 
-    Delta-one products (the futures hedge is static by design) and the KO-reset
-    snowball (already warned at registration) are excluded from the warning.
+    Delta-one products are excluded: the futures hedge is a constant-maturity
+    proxy by design. The KO-reset snowball is NOT excluded here — registration
+    warns about it with a more specific message and marks it warned, but
+    registration only runs when the backtest handles lifecycle events, so the
+    generic warning has to cover the flag-off case (Kimi review 2026-09-03).
     """
-    if is_float_rollable(product) or isinstance(product, (BaseDeltaOneProduct, KnockOutResetSnowballOption)):
+    if is_float_rollable(product) or isinstance(product, BaseDeltaOneProduct):
         return False
     return _float_only(product)
 

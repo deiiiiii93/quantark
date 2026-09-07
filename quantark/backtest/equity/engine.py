@@ -208,6 +208,8 @@ class BacktestEngine:
         self.lifecycle_manager = PortfolioLifecycleManager(
             base_date=self.config.start_date
         )
+        # Anchored at start_date in BOTH modes: the flag must not change how a contract ages.
+        self.lifecycle_manager.register_float_rolls(self.portfolio)
         if self.config.handle_lifecycle_events:
             self.lifecycle_manager.register_positions(self.portfolio)
             if self.lifecycle_manager.num_tracked > 0:
