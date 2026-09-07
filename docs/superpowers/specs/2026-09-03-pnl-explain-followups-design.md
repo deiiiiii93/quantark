@@ -559,14 +559,28 @@ Not done here, listed so they are not lost:
   `riskmeasures` and a unit decision: the factor model's VOL coordinate is
   σ at (K, T1) read through `env.get_vol`, i.e. σ_cal on the calendar
   axis, while a bump of the inner surface is per σ_td; the two differ by
-  √(τ_td/τ_cal). The rho bump on the trading axis has the same problem
-  (`FlatRateCurve` replacement of a `TradingClockRateCurve`). Fails closed
-  for now.
-- **Scalar numerical rho replaces the whole rate curve** with
+  √(τ_td/τ_cal). (The rho half of this is resolved: since 2026-09-07
+  `build_rate_bumped_env` shifts the calendar-quoted inner of a
+  `TradingClockRateCurve` and re-wraps it, so rho is per calendar year on
+  both axes.) Fails closed for now pending the vega unit decision.
+- **Scalar numerical rho replaced the whole rate curve** with
   `FlatRateCurve(r(T) + bump)` (`numerical.py:282`), so for a
-  term-structure curve it measures a curve *reshaping*, not a parallel
-  shift. The tenor-vega bump has the term-structure branch that rho
-  lacks. Unrelated to the six items but discovered here.
+  term-structure curve it measured a curve *reshaping*, not a parallel
+  shift: the bumped curve differs from the base by r(T) − r(t) + bump at
+  every t < T. Measured on DCN_A with a 1%/3%/5% linear curve the library
+  rho was 98× the parallel-shift rho and flipped sign on the inverted
+  curve; on a flat curve the two are bitwise equal, which is why no test
+  caught it. **FIXED 2026-09-07 as a separate commit on this branch:**
+  `bump_envs.build_rate_bumped_env` mirrors the vol/div helpers — a flat
+  curve keeps `FlatRateCurve(rate + shift)` (legacy floats, bitwise), any
+  other curve is wrapped in `ParallelShiftRateCurve` (the primitive the
+  key-rate parallel reconciliation point already uses), a
+  `TradingClockRateCurve` gets its calendar-quoted inner shifted. Routed
+  through it: `numerical_rho`, `EquityPosition.get_trade_greeks` (central)
+  and `get_trade_risk`, and the execution `rate_up` bump cell — the three
+  parity-pinned siblings carried the same code. Tests:
+  `test/test_rho_term_structure_bump.py`. Bond/rate-engine DV01 bumps use
+  the same flat replacement and are out of scope here.
 - **Simple executor futures hedges are filled at spot**
   (`hedge_price = pricing_env.spot` for `hedge_instrument_type="futures"`)
   while the position is marked at the forward, so the open day books

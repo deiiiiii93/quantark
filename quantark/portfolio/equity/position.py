@@ -181,7 +181,9 @@ class EquityPosition:
     ) -> Dict[str, float]:
         """Calculate trade-level Greeks by bumping get_trade_value()."""
         from copy import deepcopy
-        from quantark.param import FlatRateCurve
+        from quantark.asset.equity.riskmeasures.greeks.bump_envs import (
+            build_rate_bumped_env,
+        )
 
         bumps = self.engine.params.get_effective_bump_config()
         base_value = self.get_trade_value(pricing_env)
@@ -208,11 +210,8 @@ class EquityPosition:
         ) / (2.0 * vol_bump)
 
         rate_bump = bumps.rate_bump
-        current_rate = pricing_env.get_rate(self.product.get_maturity(pricing_env))
-        env_rate_up = deepcopy(pricing_env)
-        env_rate_down = deepcopy(pricing_env)
-        env_rate_up.rate_curve = FlatRateCurve(current_rate + rate_bump)
-        env_rate_down.rate_curve = FlatRateCurve(current_rate - rate_bump)
+        env_rate_up = build_rate_bumped_env(pricing_env, rate_bump, direction=1.0)
+        env_rate_down = build_rate_bumped_env(pricing_env, rate_bump, direction=-1.0)
         rho = (
             self.get_trade_value(env_rate_up) - self.get_trade_value(env_rate_down)
         ) / (2.0 * rate_bump)
@@ -244,8 +243,6 @@ class EquityPosition:
         direction and are not scaled by the note quantity sign.
         """
         from copy import deepcopy
-
-        from quantark.param.rrf import FlatRateCurve
 
         gc = greeks_calculator
         bc = gc._bump_config
@@ -324,13 +321,12 @@ class EquityPosition:
             nv, lv = reprice(product, env_v, self.cash_legs)
             record("vega", nv - base_npv, lv - base_legs)
 
-        # Rho: one-sided rate bump, rescaled to per 1% change — exactly matching
-        # GreeksCalculator.calculate_numerical_rho (`(price_up - base) * 0.01/rate_bump`,
-        # a SINGLE rescale, not a derivative-then-rescale).
+        # Rho: one-sided PARALLEL rate-curve shift, rescaled to per 1% change —
+        # exactly matching GreeksCalculator.calculate_numerical_rho
+        # (`(price_up - base) * 0.01/rate_bump`, a SINGLE rescale, not a
+        # derivative-then-rescale).
         if "rho" in requested:
-            cur_rate = pricing_env.get_rate(T)
-            env_r = deepcopy(pricing_env)
-            env_r.rate_curve = FlatRateCurve(cur_rate + bc.rate_bump)
+            env_r = gc._build_rate_bumped_env(pricing_env, bc.rate_bump, direction=1.0)
             nr, lr = reprice(product, env_r, self.cash_legs)
             scale = 0.01 / bc.rate_bump
             record("rho", (nr - base_npv) * scale, (lr - base_legs) * scale)

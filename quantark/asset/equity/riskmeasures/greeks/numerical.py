@@ -270,16 +270,12 @@ def numerical_rho(
     base_price: Optional[float] = None,
     rate_bump: Optional[float] = None,
 ) -> float:
-    """Numerical rho from a rate bump (per 1% rate change)."""
+    """Numerical rho from a one-sided PARALLEL rate-curve shift (per 1% rate
+    change); the curve's shape is preserved (see bump_envs.build_rate_bumped_env)."""
     engine = bump_envs.resolve_bump_engine(product, pricing_env, engine)
     rate_bump = rate_bump if rate_bump is not None else calc._bump_config.rate_bump
     base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
-    env_up_rate = deepcopy(pricing_env)
-    from quantark.param.rrf import FlatRateCurve
-
-    T = product.get_maturity(pricing_env)
-    current_rate = pricing_env.get_rate(T)
-    env_up_rate.rate_curve = FlatRateCurve(current_rate + rate_bump)
+    env_up_rate = bump_envs.build_rate_bumped_env(pricing_env, rate_bump, direction=1.0)
     price_up_rate = engine.price(product, env_up_rate)
     raw = bump_envs.calculate_sensitivity(
         base_price, price_up_rate, bump=rate_bump, mode="one_sided"

@@ -130,11 +130,7 @@ def apply_greek_bump(bump_id: str, state: TradeState, gc) -> TradeState:
         )
         return dataclasses.replace(state, pricing_env=env2)
     if bump_id == "rate_up":
-        from quantark.param.rrf import FlatRateCurve
-
-        cur_rate = env.get_rate(T)
-        env2 = deepcopy(env)
-        env2.rate_curve = FlatRateCurve(cur_rate + bc.rate_bump)
+        env2 = gc._build_rate_bumped_env(env, bc.rate_bump, direction=1.0)
         return dataclasses.replace(state, pricing_env=env2)
     if bump_id == "div_up":
         cur_div = env.get_div_yield(T)

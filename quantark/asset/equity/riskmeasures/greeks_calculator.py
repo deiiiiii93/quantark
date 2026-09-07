@@ -1276,6 +1276,17 @@ class GreeksCalculator:
             pricing_env, product, current_div, div_bump, direction=direction
         )
 
+    def _build_rate_bumped_env(
+        self,
+        pricing_env: PricingEnvironment,
+        rate_bump: float,
+        *,
+        direction: float,
+    ) -> PricingEnvironment:
+        return bump_envs.build_rate_bumped_env(
+            pricing_env, rate_bump, direction=direction
+        )
+
     def _greeks_for_linear(
         self, product: BaseEquityProduct, price: float
     ) -> Dict[str, float]:
