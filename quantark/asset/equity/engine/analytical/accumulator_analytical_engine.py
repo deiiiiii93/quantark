@@ -73,6 +73,9 @@ class AccumulatorAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    # params-only engine: instance state == construction arguments plus sub-engines that
+    # are themselves fingerprinted (patch spec 2026-09-03 §7)
+    MODEL_FINGERPRINT_ATTRS = ('params', '_barrier_engine', '_bs_engine', '_one_touch_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 

@@ -61,12 +61,16 @@ def engines_equivalent(a: Any, b: Any) -> bool:
     fa, fb = getattr(a, "model_fingerprint", None), getattr(b, "model_fingerprint", None)
     if not callable(fa) or not callable(fb):
         return False
-    ra, rb = fa(), fb()
-    if ra is None or rb is None:
-        return False
     try:
+        # model_fingerprint() reads each declared attribute directly, so a subclass that
+        # declares MODEL_FINGERPRINT_ATTRS without setting one raises AttributeError here;
+        # an unrepresentable value raises ValidationError in _normalize. Neither may turn a
+        # comparison into a hard failure (Kimi review 2026-09-03).
+        ra, rb = fa(), fb()
+        if ra is None or rb is None:
+            return False
         return _normalize(ra) == _normalize(rb)
-    except ValidationError:
+    except (AttributeError, ValidationError):
         return False
 
 

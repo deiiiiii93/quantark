@@ -75,6 +75,9 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    # params-only engine (patch spec 2026-09-03 §7); _last_result is a pricing-neutral
+    # result cache, so it is deliberately outside the fingerprint
+    MODEL_FINGERPRINT_ATTRS = ('params',)
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
