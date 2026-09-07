@@ -108,5 +108,12 @@ def bucketed_rows(cache: ScenarioCache, calc: Any, bump: Any, level: str
                 metadata={"pillar": tau, "bump_size": float(pt.bump_size), "difference_mode": mode,
                           "convention": RATE_CONVENTION.value}))
     rows = {f: tuple(r) for f, r in by_factor.items() if r}
-    covered = frozenset(f for f in (Factor.VOL, Factor.RATE) if f in rows)
+    # A factor is COVERED only when it has a component row to replace the scalar term with.
+    # rate_keyrate always emits the informational parallel row, so a curve whose pillars are
+    # all uncalibrated would otherwise drop the scalar rho and leave the rate move unexplained
+    # (Kimi review 2026-09-03).
+    covered = frozenset(
+        f for f in (Factor.VOL, Factor.RATE)
+        if any(r.kind is RowKind.COMPONENT for r in rows.get(f, ()))
+    )
     return rows, covered

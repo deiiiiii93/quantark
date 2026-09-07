@@ -26,6 +26,7 @@ TERM_SPEC: Dict[str, Tuple[float, Tuple[int, int, int, int, int]]] = {
 }
 VEGA_SCALED = ("vega", "vega_theta")
 PER_PCT = ("rho", "dividend_rho")
+BUCKET_SLOT = {Factor.VOL: "vega", Factor.RATE: "rho"}   # scalar term a bucket set replaces
 TIME_GREEKS = ("theta", "r_theta", "q_theta", "convexity_theta", "gamma_theta", "charm", "color", "vega_theta")
 SUBROW_NAMES = ("r_theta", "q_theta", "convexity_theta", "gamma_theta", "theta_contract", "ledger_carry")
 
@@ -206,6 +207,10 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
         if config.bucketed:
             from quantark.pnlexplain.equity.bucketed import bucketed_rows
             bucket_rows, covered = bucketed_rows(cache, calc, bump, level)
+            # Buckets are spliced into a scalar term's slot, so a factor whose slot the
+            # stencil omits cannot be emitted at all: do not claim to cover it, and do not
+            # advertise it in bucketed_factors (Kimi review 2026-09-03).
+            covered = frozenset(f for f in covered if BUCKET_SLOT[f] in terms)
     meta = {"route": route, "vega_scale": vega_scale, "n_steps": n, "clock": clock_label, "gap_scale": gap_scale,
             "contract_rolled": rolled, "bucketed_factors": tuple(sorted(f.value for f in covered))}
 
@@ -267,6 +272,13 @@ def taylor_rows(cache: ScenarioCache, config: PnLExplainConfig, level: str = "in
         rows.append(_row(level, name, factor, pnl, greek=greek_disp,
                          cash=cash_greek(name, g_pos, S0, per_day), mv=display_moves(exps, moves)))
         explained += pnl
+    # A factor with bucket points but no COMPONENT row (e.g. a curve whose pillars are all
+    # uncalibrated) keeps its scalar term; its informational rows still travel with the
+    # explain, as they did before the buckets could take the slot (Kimi review 2026-09-03).
+    for f, brs in bucket_rows.items():
+        if f in covered or BUCKET_SLOT.get(f) not in terms:
+            continue
+        rows.extend(r for r in brs if r.kind is RowKind.INFORMATIONAL)
     unexplained = alive_move - explained
     rows.append(_row(level, "unexplained", Factor.UNEXPLAINED, unexplained,
                      extra={"basis_and_model_effects_included": True}))

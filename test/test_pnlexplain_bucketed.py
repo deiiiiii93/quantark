@@ -149,3 +149,45 @@ def test_bucketed_rejects_mismatched_structures():
     res = explain(flat0, flat, config=PnLExplainConfig(bucketed=True))
     terms = [r.term for r in res.rows if r.method is ExplainMethod.TAYLOR]
     assert "vega" in terms and "rho" in terms and res.metadata["bucketed_factors"] == ()
+
+
+def _model_only_env(spot, date, vols, rates):
+    """Same curve, but every pillar is a MODEL node: rate_keyrate emits no bucket."""
+    from quantark.param.node_roles import NodeRole
+    env = _env(spot, date, vols, rates)
+    env.rate_curve = LinearRateCurve(pillars=list(zip([0.5, 1.0, 2.0], rates)),
+                                     node_roles=[NodeRole.MODEL] * 3)
+    return env
+
+
+def test_a_curve_with_no_calibrated_pillars_keeps_the_scalar_rho():
+    """Buckets take the rho slot only when they have a COMPONENT row (Kimi review 2026-09-03).
+
+    rate_keyrate always appends the INFORMATIONAL parallel point, so covering RATE on its own
+    would drop the scalar rho and leave the whole rate move in `unexplained`.
+    """
+    s0 = ValuationSnapshot(
+        EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0), ENG,
+        _model_only_env(100.0, T0, (0.20, 0.22, 0.24), (0.030, 0.032, 0.034)), date=T0)
+    s1 = ValuationSnapshot(
+        EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0 - 3 / 365), ENG,
+        _model_only_env(101.0, T1, (0.21, 0.225, 0.24), (0.031, 0.033, 0.035)), date=T1)
+    res = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", bucketed=True))
+    terms = {r.term: r for r in res.rows}
+    assert not any(t.startswith("rate_keyrate.") and terms[t].kind is RowKind.COMPONENT for t in terms)
+    assert "rho" in terms and terms["rho"].kind is RowKind.COMPONENT and terms["rho"].pnl != 0.0
+    assert "rate" not in res.metadata["bucketed_factors"]
+    assert "rate_keyrate.parallel" in terms                      # still reported, informational
+    assert terms["rate_keyrate.parallel"].kind is RowKind.INFORMATIONAL
+    assert res.reconcile(ExplainMethod.TAYLOR) == pytest.approx(0.0, abs=1e-12)
+    # vega buckets are unaffected: they have component rows
+    assert "vol" in res.metadata["bucketed_factors"]
+
+
+def test_a_stencil_without_the_scalar_slot_does_not_claim_its_buckets():
+    """Buckets are spliced into a scalar term's slot; without that term they cannot be emitted."""
+    s0, s1 = _snaps()
+    res = explain(s0, s1, config=PnLExplainConfig(greeks_method="numerical", bucketed=True,
+                                                  stencil=("delta", "theta")))
+    assert res.metadata["bucketed_factors"] == ()
+    assert not any(r.term.startswith("rate_keyrate.") or r.term.startswith("vega.") for r in res.rows)
