@@ -24,7 +24,21 @@ class _StickyMoneynessView:
         if s_base <= 0.0 or s_shocked <= 0.0:
             raise ValidationError("spots must be positive")
         self._base = base
+        self._s_base = float(s_base)
+        self._s_shocked = float(s_shocked)
         self._ratio = float(s_base) / float(s_shocked)
+
+    def with_time_map(self, time_map):
+        """Re-anchor the wrapped base, KEEPING the moneyness rescale.
+
+        ``__getattr__`` would otherwise delegate this to the clock wrapper,
+        whose ``with_time_map`` returns a plain wrapper and silently drops the
+        spot shock (Kimi review 2026-09-03). A view over a non-wrapped base has
+        no time map, so the delegation still raises there.
+        """
+        return _StickyMoneynessView(
+            self._base.with_time_map(time_map), self._s_base, self._s_shocked
+        )
 
     def get_vol(self, strike, time_to_maturity, spot=None):
         try:

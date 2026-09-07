@@ -125,3 +125,38 @@ def test_fail_closed_rules():
     assert rolled.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=1e-9)
     with pytest.raises(ValidationError, match="Taylor"):
         explain(ValuationSnapshot(CALL, ENG, ok0, date=t0), ValuationSnapshot(CALL, ENG, ok1, date=t1))
+
+
+def test_re_anchoring_keeps_the_sticky_moneyness_spot_shock():
+    """re_anchor must not turn a shocked surface back into the plain wrapper (Kimi review 2026-09-03).
+
+    `_StickyMoneynessView` delegates unknown attributes to its base, so it LOOKS clock-wrapped;
+    without its own `with_time_map` the re-anchor would rebuild the bare wrapper and silently
+    drop the strike rescale, mispricing every {TIME, SPOT} state on a skewed smile.
+    """
+    from quantark.param.vol.sticky import _StickyMoneynessView, shocked_surface
+    from quantark.param.vol.vol_surface import BlackImpliedVolSurface
+    from quantark.pnlexplain.equity.clock import is_clock_wrapped, re_anchor
+    from quantark.util.enum.greek_conventions import GreekConvention
+
+    class Skew(BlackImpliedVolSurface):
+        is_smile = True
+
+        def get_vol(self, strike, time_to_maturity, spot=None):
+            return 0.20 - 0.001 * (float(strike) - 100.0)
+
+    t0, t1 = datetime(2026, 6, 26), datetime(2026, 6, 29)
+    wrapped = TradingClockVolSurface(Skew(), _map(t0))
+    view = shocked_surface(wrapped, 100.0, 110.0, GreekConvention.STICKY_MONEYNESS)
+    assert is_clock_wrapped(view)                       # delegation makes the guard fire
+    intended = view.get_vol(100.0, 0.5, 110.0)
+
+    env = PricingEnvironment(rate_curve=FlatRateCurve(0.02), valuation_date=t1, spot_quote=SpotQuote(110.0),
+                             vol_surface=view, div_yield=ContinuousDividendYield(0.01))
+    re_anchor(env)
+    assert isinstance(env.vol_surface, _StickyMoneynessView)
+    assert env.vol_surface.time_map.anchor_date == t1   # the base really was re-anchored
+    assert env.vol_surface.get_vol(100.0, 0.5, 110.0) == pytest.approx(intended, rel=1e-12)
+    # and the shock is what makes it differ from the unshocked surface on a skew
+    assert env.vol_surface.get_vol(100.0, 0.5, 110.0) != pytest.approx(
+        wrapped.with_time_map(_map(t1)).get_vol(100.0, 0.5, 110.0), rel=1e-9)
