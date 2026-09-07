@@ -23,6 +23,13 @@ the product coordinate: the strike and the alive-at-t1 tenor) and share one
 
 ## Quick start
 
+`example/pnl_explain_demo.py` runs one risk day at desk notionals on a delta-hedged
+index book: a vanilla, an American put whose engine changes pricing method, a barrier
+put near its barrier, a snowball and a front-future hedge, plus a snowball knock-out
+day. The move is driven by the rate and the futures basis, with the dividend yield
+implied by cost of carry (`q = r - b`) rather than moved on its own. Pass
+`--html-output` for a self-contained teaching page drawing each as a waterfall bridge.
+
 ```python
 from datetime import datetime
 from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
@@ -221,3 +228,12 @@ moves. So on a wrapped environment `vol_pts` is a move of the trading-quoted
 - Engines are used as given (mutated in place by the backtests).
 - Taylor on clock-wrapped environments is rejected (waterfall only).
 - Bucketed mode is experimental and never on the default path.
+- Funded (prepaid) positions are not modelled. An OTC trade booked with
+  `capitalParticipation` and a `PRE_PAYMENT_INITIAL` cashflow carries a
+  deposit leg repaid when the structure terminates; for a seller its rho is
+  roughly the size of the option's and of the opposite sign. Every rate row
+  here, like the calculator's rho, is the unfunded derivative's. A desk's
+  quoted position rho therefore reconciles to this rho plus the deposit
+  leg's, not to this rho alone; compare like with like before reading a rate
+  row as wrong. `quantark.cashleg` and `EquityPosition.get_trade_risk` price
+  the deposit leg when it is attached to the position.

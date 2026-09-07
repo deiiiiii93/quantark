@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where did the money go? &mdash; quantark.pnlexplain</title>
+<style>
+:root {
+  color-scheme: light;
+  --paper: #f5f7f4; --ink: #17211f; --muted: #5d6964; --line: #cfd8d1;
+  --panel: #ffffff; --panel2: #eef4f0; --teal: #006d77; --red: #b23a48;
+  --amber: #9b6a08; --blue: #3559a6; --shadow: 0 18px 50px rgba(23, 33, 31, .08);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(0,109,119,.07) 0 1px, transparent 1px 100%),
+    linear-gradient(180deg, rgba(0,109,119,.06) 0 1px, transparent 1px 100%),
+    var(--paper);
+  background-size: 44px 44px;
+  color: var(--ink);
+  font-family: "Avenir Next", "Gill Sans", "Segoe UI", sans-serif;
+  line-height: 1.55;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 32px 28px 70px; }
+h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; line-height: 1.1; }
+h1 { margin: 0; font-size: 3.8rem; font-weight: 700; max-width: 900px; }
+h2 { margin: 0 0 14px; font-size: 2.05rem; }
+h3 { margin: 22px 0 8px; font-size: 1.2rem; }
+p { max-width: 860px; margin: 0 0 14px; }
+code { background: var(--panel2); padding: 1px 5px; border-radius: 3px; font-size: .88em; }
+.eyebrow {
+  margin: 0 0 10px; color: var(--teal); font-size: .76rem; font-weight: 800;
+  letter-spacing: .13em; text-transform: uppercase;
+}
+header.hero {
+  display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr);
+  gap: 34px; align-items: center; border-bottom: 1px solid var(--line); padding: 26px 0 38px;
+}
+.lede { margin-top: 20px; color: var(--muted); font-size: 1.12rem; max-width: 740px; }
+.chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+.chip {
+  border: 1px solid var(--line); background: rgba(255,255,255,.7);
+  padding: 7px 11px; border-radius: 999px; font-size: .86rem;
+}
+.hero-panel {
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+  border-radius: 8px; padding: 22px;
+}
+.hero-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.metric {
+  border: 1px solid var(--line); background: var(--panel2);
+  border-radius: 7px; padding: 12px; min-height: 78px;
+}
+.metric small {
+  display: block; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .08em; font-weight: 700; font-size: .66rem;
+}
+.metric b { display: block; margin-top: 5px; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.metric.good b { color: var(--teal); }
+.metric.warn b { color: var(--amber); }
+section { padding: 42px 0; border-bottom: 1px solid var(--line); }
+.section-grid {
+  display: grid; grid-template-columns: minmax(240px, .68fr) minmax(0, 1.32fr);
+  gap: 30px; align-items: start;
+}
+.rail { position: sticky; top: 18px; }
+.rail p { color: var(--muted); }
+.panel {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 20px; box-shadow: var(--shadow); overflow-x: auto;
+}
+.panel + .panel { margin-top: 18px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.pair figure, figure { margin: 0; }
+figcaption, .chart-caption {
+  margin: 6px 0 0; color: var(--muted); font-size: .82rem; text-align: center;
+}
+svg.bridge { width: 100%; height: auto; display: block; }
+svg.bridge .tick { fill: #5d6964; font-size: 10px; font-family: inherit; }
+svg.bridge .val { fill: #17211f; font-size: 10.5px; font-weight: 700; font-family: inherit;
+                  font-variant-numeric: tabular-nums; }
+svg.bridge .cat { fill: #5d6964; font-size: 10.5px; font-family: inherit; }
+table {
+  width: 100%; border-collapse: collapse; margin: 12px 0 4px;
+  font-size: .88rem; font-variant-numeric: tabular-nums;
+}
+th, td { border-bottom: 1px solid var(--line); padding: 7px 9px; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+thead th {
+  border-bottom: 2px solid var(--line); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em; font-size: .68rem;
+}
+tbody tr:hover { background: var(--panel2); }
+td.pos { color: var(--teal); }
+td.neg { color: var(--red); }
+td.flag { color: var(--amber); font-weight: 700; }
+.identity { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 14px 0 4px; }
+.identity .term {
+  flex: 1 1 150px; border: 1px solid var(--line); border-left: 4px solid var(--teal);
+  background: #f8fbf9; padding: 10px 12px;
+}
+.identity .term.cash { border-left-color: var(--amber); }
+.identity .term.total { border-left-color: var(--ink); background: var(--panel2); }
+.identity .term small { display: block; color: var(--muted); font-size: .68rem;
+  text-transform: uppercase; letter-spacing: .07em; font-weight: 700; }
+.identity .term b { display: block; margin-top: 4px; font-size: 1.14rem;
+  font-variant-numeric: tabular-nums; }
+.identity .op { align-self: center; color: var(--muted); font-size: 1.3rem; font-weight: 700; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: .8rem;
+  margin-top: 10px; }
+.legend span { display: flex; align-items: center; gap: 6px; }
+.swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.callout {
+  border-left: 4px solid var(--amber); background: #fdf8ee; padding: 12px 14px;
+  margin: 16px 0 0; color: var(--ink);
+}
+.callout p:last-child { margin-bottom: 0; }
+footer { padding: 26px 0 0; color: var(--muted); font-size: .84rem; }
+@media (max-width: 900px) {
+  header.hero, .section-grid, .pair { grid-template-columns: 1fr; }
+  .rail { position: static; }
+  h1 { font-size: 2.6rem; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+<header class="hero">
+  <div>
+    <p class="eyebrow">quantark.pnlexplain</p>
+    <h1>Where did the money go?</h1>
+    <p class="lede">One risk day on an index structured-products desk, explained two ways.
+      Both must add up to the yuan; only one of them survives a barrier.</p>
+    <div class="chips">
+      <span class="chip">Fri 26 Jun 2026 &rarr; Mon 29 Jun 2026</span>
+      <span class="chip">index 6,000 &rarr; 5,580 (-7.0%)</span>
+      <span class="chip">vol 18% &rarr; 26% (+8 pts)</span>
+      <span class="chip">rate 2.20% &rarr; 2.55%</span>
+      <span class="chip">futures basis -3.00% &rarr; -4.50%</span>
+      <span class="chip">implied q = r &minus; b: 5.20% &rarr; 7.05%</span>
+      <span class="chip">five positions, delta-hedged in the front future</span>
+    </div>
+  </div>
+  <div class="hero-panel">
+    <div class="hero-metrics">
+      <div class="metric"><small>book PnL on the day</small><b>+1.82m</b></div>
+      <div class="metric good"><small>waterfall reconciles</small>
+        <b>yes</b></div>
+      <div class="metric good"><small>Taylor reconciles</small>
+        <b>yes</b></div>
+      <div class="metric warn"><small>Taylor unexplained, KO day</small><b>+104k</b></div>
+    </div>
+  </div>
+</header>
+<section id="identity"><div class="section-grid"><div class="rail"><p class="eyebrow">step one</p><h2>The identity everything must satisfy</h2><p>A position is worth three things at once: what the live contract is worth, the present value of cash already earned but not yet paid, and cash already banked. PnL explain attributes the change in that sum, never in the contract price alone.</p><p>The vanilla never leaves the first box. The snowball, once it knocks out, empties the first box into the third. Attribution that watched only the contract price would report a twenty-million-yuan catastrophe on knock-out day.</p></div><div><div class="panel"><h3>vanilla call x2,000, 29 Jun: all contingent</h3><div class="identity"><div class="term"><small>contingent MTM</small><b>605,499</b></div><div class="op">+</div><div class="term"><small>pending receivable PV</small><b>0</b></div><div class="op">+</div><div class="term cash"><small>paid cash</small><b>0</b></div><div class="op">=</div><div class="term total"><small>position value</small><b>605,499</b></div></div><h3>snowball x-3,400, 01 Apr 2024, after knock-out: the cash has moved</h3><div class="identity"><div class="term"><small>contingent MTM</small><b>0</b></div><div class="op">+</div><div class="term"><small>pending receivable PV</small><b>0</b></div><div class="op">+</div><div class="term cash"><small>paid cash</small><b>-20,910,000</b></div><div class="op">=</div><div class="term total"><small>position value</small><b>-20,910,000</b></div></div></div></div></div></section><section id="methods"><div class="section-grid"><div class="rail"><p class="eyebrow">step two</p><h2>Two methods, one day</h2><p>The waterfall reprices the position once per factor, moving one thing at a time from the old market to the new. Every step is a real price, so the steps add up by construction.</p><p>Taylor multiplies today's greeks by today's moves. It is cheaper, it names the risk in the language a desk hedges in, and it is an approximation, so it needs a residual row to close.</p><p>Shown on the American put, because it is the only position that moves the model row: the desk repriced its American book from the BS93 approximation to BAW over the weekend. That row is worth 220, which is small, and that is the point. Without it the repricing would have leaked into the market rows, and nobody could have told a market move from a change of method.</p><p>Both charts are value bridges: they start at what the position was worth and end at what it is worth now.</p></div><div><div class="panel"><div class="pair"><figure><svg class="bridge" viewBox="0 0 560 300" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg0-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="226.0" x2="546" y2="226.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="229.5" text-anchor="end" class="tick">-163k</text>
+<line x1="62" y1="176.0" x2="546" y2="176.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="179.5" text-anchor="end" class="tick">210k</text>
+<line x1="62" y1="126.0" x2="546" y2="126.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="129.5" text-anchor="end" class="tick">584k</text>
+<line x1="62" y1="76.0" x2="546" y2="76.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="79.5" text-anchor="end" class="tick">957k</text>
+<line x1="62" y1="26.0" x2="546" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">1,331k</text>
+<line x1="62" y1="204.1" x2="546" y2="204.1" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="71.7" y="122.7" width="29.0" height="81.4" fill="#3f4f4a" rx="1.5"/>
+<text x="86.2" y="115.7" text-anchor="middle" class="val">609k</text>
+<text x="86.2" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 86.2 242.0)">V(t0)</text>
+<rect x="120.1" y="122.7" width="29.0" height="1.6" fill="#b23a48" rx="1.5"/>
+<text x="134.6" y="138.1" text-anchor="middle" class="val">-2.8k</text>
+<text x="134.6" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 134.6 242.0)">time</text>
+<rect x="168.5" y="84.1" width="29.0" height="39.0" fill="#006d77" rx="1.5"/>
+<line x1="149.1" y1="123.1" x2="168.5" y2="123.1" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="183.0" y="77.1" text-anchor="middle" class="val">+291k</text>
+<text x="183.0" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 183.0 242.0)">spot</text>
+<rect x="216.9" y="58.8" width="29.0" height="25.3" fill="#006d77" rx="1.5"/>
+<line x1="197.5" y1="84.1" x2="216.9" y2="84.1" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="231.4" y="51.8" text-anchor="middle" class="val">+189k</text>
+<text x="231.4" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 231.4 242.0)">vol</text>
+<rect x="265.3" y="58.8" width="29.0" height="2.3" fill="#b23a48" rx="1.5"/>
+<line x1="245.9" y1="58.8" x2="265.3" y2="58.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="279.8" y="76.1" text-anchor="middle" class="val">-17k</text>
+<text x="279.8" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 279.8 242.0)">rate</text>
+<rect x="313.7" y="51.6" width="29.0" height="9.5" fill="#006d77" rx="1.5"/>
+<line x1="294.3" y1="61.1" x2="313.7" y2="61.1" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="328.2" y="44.6" text-anchor="middle" class="val">+71k</text>
+<text x="328.2" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 328.2 242.0)">dividend</text>
+<rect x="362.1" y="51.6" width="29.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="342.7" y1="51.6" x2="362.1" y2="51.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="376.6" y="44.6" text-anchor="middle" class="val">0</text>
+<text x="376.6" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 376.6 242.0)">basis</text>
+<rect x="410.5" y="51.6" width="29.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="391.1" y1="51.6" x2="410.5" y2="51.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="425.0" y="44.6" text-anchor="middle" class="val">+0.2k</text>
+<text x="425.0" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 425.0 242.0)">model</text>
+<rect x="458.9" y="51.6" width="29.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="439.5" y1="51.6" x2="458.9" y2="51.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="473.4" y="44.6" text-anchor="middle" class="val">0</text>
+<text x="473.4" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 473.4 242.0)">lifecycle_event</text>
+<rect x="507.3" y="51.6" width="29.0" height="152.6" fill="#3f4f4a" rx="1.5"/>
+<text x="521.8" y="44.6" text-anchor="middle" class="val">1,140k</text>
+<text x="521.8" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 521.8 242.0)">V(t1)</text>
+</svg><figcaption>waterfall &mdash; full revaluation, one factor at a time</figcaption></figure><figure><svg class="bridge" viewBox="0 0 560 300" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg1-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="226.0" x2="546" y2="226.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="229.5" text-anchor="end" class="tick">-163k</text>
+<line x1="62" y1="176.0" x2="546" y2="176.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="179.5" text-anchor="end" class="tick">210k</text>
+<line x1="62" y1="126.0" x2="546" y2="126.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="129.5" text-anchor="end" class="tick">584k</text>
+<line x1="62" y1="76.0" x2="546" y2="76.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="79.5" text-anchor="end" class="tick">957k</text>
+<line x1="62" y1="26.0" x2="546" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">1,331k</text>
+<line x1="62" y1="204.1" x2="546" y2="204.1" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="70.1" y="122.7" width="24.2" height="81.4" fill="#3f4f4a" rx="1.5"/>
+<text x="82.2" y="115.7" text-anchor="middle" class="val">609k</text>
+<text x="82.2" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 82.2 242.0)">V(t0)</text>
+<rect x="110.4" y="122.7" width="24.2" height="1.6" fill="#006d77" rx="1.5"/>
+<text x="122.5" y="115.7" text-anchor="middle" class="val">0</text>
+<text x="122.5" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 122.5 242.0)">lifecycle_event</text>
+<rect x="150.7" y="88.7" width="24.2" height="34.0" fill="#006d77" rx="1.5"/>
+<line x1="134.6" y1="122.7" x2="150.7" y2="122.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="162.8" y="81.7" text-anchor="middle" class="val">+254k</text>
+<text x="162.8" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 162.8 242.0)">delta</text>
+<rect x="191.1" y="59.6" width="24.2" height="29.1" fill="#006d77" rx="1.5"/>
+<line x1="174.9" y1="88.7" x2="191.1" y2="88.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="203.2" y="52.6" text-anchor="middle" class="val">+218k</text>
+<text x="203.2" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 203.2 242.0)">vega</text>
+<g><title>theta_contract -2800.2801, ledger_carry +0.0000, r_theta +765.6109, q_theta -1550.1744, convexity_theta -2015.7166</title><rect x="231.4" y="59.6" width="24.2" height="1.6" fill="#b23a48" rx="1.5"/></g>
+<line x1="215.3" y1="59.6" x2="231.4" y2="59.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="243.5" y="75.0" text-anchor="middle" class="val">-2.8k</text>
+<text x="243.5" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 243.5 242.0)">theta</text>
+<rect x="271.7" y="60.0" width="24.2" height="2.0" fill="#b23a48" rx="1.5"/>
+<line x1="255.6" y1="60.0" x2="271.7" y2="60.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="283.8" y="76.9" text-anchor="middle" class="val">-15k</text>
+<text x="283.8" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 283.8 242.0)">rho</text>
+<rect x="312.1" y="53.0" width="24.2" height="9.0" fill="#006d77" rx="1.5"/>
+<line x1="295.9" y1="61.9" x2="312.1" y2="61.9" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="324.2" y="46.0" text-anchor="middle" class="val">+67k</text>
+<text x="324.2" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 324.2 242.0)">dividend_rho</text>
+<rect x="352.4" y="48.0" width="24.2" height="5.0" fill="#006d77" rx="1.5"/>
+<line x1="336.3" y1="53.0" x2="352.4" y2="53.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="364.5" y="41.0" text-anchor="middle" class="val">+37k</text>
+<text x="364.5" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 364.5 242.0)">gamma</text>
+<rect x="392.7" y="47.9" width="24.2" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="376.6" y1="48.0" x2="392.7" y2="48.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="404.8" y="40.9" text-anchor="middle" class="val">+1.0k</text>
+<text x="404.8" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 404.8 242.0)">volga</text>
+<rect x="433.1" y="47.9" width="24.2" height="2.9" fill="#b23a48" rx="1.5"/>
+<line x1="416.9" y1="47.9" x2="433.1" y2="47.9" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="445.2" y="65.8" text-anchor="middle" class="val">-22k</text>
+<text x="445.2" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 445.2 242.0)">vanna</text>
+<rect x="473.4" y="50.8" width="24.2" height="1.6" fill="url(#bg1-hatch)" rx="1.5"/>
+<line x1="457.3" y1="50.8" x2="473.4" y2="50.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="485.5" y="66.6" text-anchor="middle" class="val">-5.9k</text>
+<text x="485.5" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 485.5 242.0)">unexplained</text>
+<rect x="513.7" y="51.6" width="24.2" height="152.6" fill="#3f4f4a" rx="1.5"/>
+<text x="525.8" y="44.6" text-anchor="middle" class="val">1,140k</text>
+<text x="525.8" y="242.0" text-anchor="end" class="cat" transform="rotate(-32 525.8 242.0)">V(t1)</text>
+</svg><figcaption>Taylor &mdash; greeks times moves, plus what is left over</figcaption></figure></div><div class="legend"><span><i class="swatch" style="background:#3f4f4a"></i>value anchor</span><span><i class="swatch" style="background:#006d77"></i>gain</span><span><i class="swatch" style="background:#b23a48"></i>loss</span><span><i class="swatch" style="background:#9b6a08"></i>Taylor residual</span></div><table><thead><tr><th>factor</th><th>waterfall</th><th>Taylor</th><th>Taylor − waterfall</th></tr></thead><tbody><tr><td>time</td><td class="neg">-2,800</td><td class="neg">-2,800</td><td>0</td></tr><tr><td>spot</td><td class="pos">291,090</td><td class="pos">290,858</td><td class="neg">-232</td></tr><tr><td>vol</td><td class="pos">188,947</td><td class="pos">196,829</td><td class="pos">7,882</td></tr><tr><td>rate</td><td class="neg">-17,031</td><td class="neg">-14,819</td><td class="pos">2,212</td></tr><tr><td>dividend</td><td class="pos">70,891</td><td class="pos">67,100</td><td class="neg">-3,791</td></tr><tr><td>model</td><td class="pos">220</td><td>0</td><td class="neg">-220</td></tr><tr><td>basis</td><td>0</td><td>0</td><td>0</td></tr><tr><td>unexplained</td><td>0</td><td class="neg">-5,850</td><td class="neg">-5,850</td></tr><tr><td><b>total</b></td><td class="pos">531,317</td><td class="pos">531,317</td><td>0</td></tr></tbody></table><div class="callout"><p><b>The dividend row is the carry row.</b> An index desk does not quote a dividend yield. It observes the futures basis, and the yield that prices the product is implied by cost of carry: <code>q = r &minus; b</code>. This day widens the futures discount from -3.00% to -4.50% while the rate firms 35bp, so implied q rises from 5.20% to 7.05%. That is why q is never moved on its own in this demo: move the rate and the basis, and q follows.</p><p>The basis row itself stays zero, and structurally so. With q implied that way the delta-one forward already reproduces the discounted future, <code>F = S&middot;e<sup>(r&minus;q)T</sup> = S&middot;e<sup>bT</sup></code>, so no equity engine needs to read the environment&rsquo;s basis yield and none does. The factor is still declared and checked on every run; only the stress-test and dynamic-scenario engines read that field today.</p></div></div></div></div></section><section id="breaks"><div class="section-grid"><div class="rail"><p class="eyebrow">step three</p><h2>Where Taylor breaks</h2><p>A Taylor expansion assumes the payoff is smooth over the move. A barrier is a discontinuity, and a knock-out is the discontinuity actually firing.</p><p>Read the amber bar down these four charts. The vanilla and the American are smooth payoffs and hold the residual at 0.8% and 0.9% of the risk they carry. The barrier put, which the day pushed to within 3.3% of its barrier, reaches 16.3%, and the snowball on the day it terminated reaches 7.3%.</p><p>Measure the residual against the gross attribution, not against the total. The barrier put made almost nothing on the day because its spot gain and its vol loss nearly cancelled, and dividing by that near-zero total would have called a 16% miss 59%.</p><p>The waterfall has no residual on any of the four, because it never approximates. These charts plot PnL from zero rather than value from the book level, so the small rows stay legible next to a twenty-million-yuan snowball.</p></div><div><div class="panel"><figure><svg class="bridge" viewBox="0 0 760 290" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg2-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="216.0" x2="746" y2="216.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="219.5" text-anchor="end" class="tick">-427k</text>
+<line x1="62" y1="168.5" x2="746" y2="168.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="172.0" text-anchor="end" class="tick">-306k</text>
+<line x1="62" y1="121.0" x2="746" y2="121.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="124.5" text-anchor="end" class="tick">-186k</text>
+<line x1="62" y1="73.5" x2="746" y2="73.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="77.0" text-anchor="end" class="tick">-65k</text>
+<line x1="62" y1="26.0" x2="746" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">56k</text>
+<line x1="62" y1="47.9" x2="746" y2="47.9" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="74.4" y="47.9" width="37.3" height="1.6" fill="#006d77" rx="1.5"/>
+<text x="93.1" y="40.9" text-anchor="middle" class="val">0</text>
+<text x="93.1" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 93.1 232.0)">lifecycle_event</text>
+<rect x="136.6" y="47.9" width="37.3" height="147.3" fill="#b23a48" rx="1.5"/>
+<line x1="111.7" y1="47.9" x2="136.6" y2="47.9" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="155.3" y="210.2" text-anchor="middle" class="val">-374k</text>
+<text x="155.3" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 155.3 232.0)">delta</text>
+<rect x="198.8" y="52.5" width="37.3" height="142.7" fill="#006d77" rx="1.5"/>
+<line x1="173.9" y1="195.2" x2="198.8" y2="195.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="217.5" y="45.5" text-anchor="middle" class="val">+363k</text>
+<text x="217.5" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 217.5 232.0)">vega</text>
+<g><title>theta_contract -1920.0455, ledger_carry -0.0000, r_theta -846.5231, q_theta +2285.0192, convexity_theta -3358.5416</title><rect x="261.0" y="52.5" width="37.3" height="1.6" fill="#b23a48" rx="1.5"/></g>
+<line x1="236.1" y1="52.5" x2="261.0" y2="52.5" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="279.6" y="68.2" text-anchor="middle" class="val">-1.9k</text>
+<text x="279.6" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 279.6 232.0)">theta</text>
+<rect x="323.2" y="46.8" width="37.3" height="6.4" fill="#006d77" rx="1.5"/>
+<line x1="298.3" y1="53.2" x2="323.2" y2="53.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="341.8" y="39.8" text-anchor="middle" class="val">+16k</text>
+<text x="341.8" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 341.8 232.0)">rho</text>
+<rect x="385.3" y="46.8" width="37.3" height="38.9" fill="#b23a48" rx="1.5"/>
+<line x1="360.5" y1="46.8" x2="385.3" y2="46.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="404.0" y="100.7" text-anchor="middle" class="val">-99k</text>
+<text x="404.0" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 404.0 232.0)">dividend_rho</text>
+<rect x="447.5" y="61.4" width="37.3" height="24.3" fill="#006d77" rx="1.5"/>
+<line x1="422.7" y1="85.7" x2="447.5" y2="85.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="466.2" y="54.4" text-anchor="middle" class="val">+62k</text>
+<text x="466.2" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 466.2 232.0)">gamma</text>
+<rect x="509.7" y="60.8" width="37.3" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="484.8" y1="61.4" x2="509.7" y2="61.4" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="528.4" y="53.8" text-anchor="middle" class="val">+1.6k</text>
+<text x="528.4" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 528.4 232.0)">volga</text>
+<rect x="571.9" y="60.8" width="37.3" height="14.3" fill="#b23a48" rx="1.5"/>
+<line x1="547.0" y1="60.8" x2="571.9" y2="60.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="590.5" y="90.1" text-anchor="middle" class="val">-36k</text>
+<text x="590.5" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 590.5 232.0)">vanna</text>
+<rect x="634.1" y="72.2" width="37.3" height="2.8" fill="url(#bg2-hatch)" rx="1.5"/>
+<line x1="609.2" y1="75.1" x2="634.1" y2="75.1" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="652.7" y="65.2" text-anchor="middle" class="val">+7.2k</text>
+<text x="652.7" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 652.7 232.0)">unexplained</text>
+<rect x="696.3" y="47.9" width="37.3" height="24.4" fill="#3f4f4a" rx="1.5"/>
+<text x="714.9" y="40.9" text-anchor="middle" class="val">-62k</text>
+<text x="714.9" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 714.9 232.0)">total PnL</text>
+</svg><figcaption>vanilla call x2,000</figcaption></figure><figure><svg class="bridge" viewBox="0 0 760 290" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg3-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="216.0" x2="746" y2="216.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="219.5" text-anchor="end" class="tick">-78k</text>
+<line x1="62" y1="168.5" x2="746" y2="168.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="172.0" text-anchor="end" class="tick">101k</text>
+<line x1="62" y1="121.0" x2="746" y2="121.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="124.5" text-anchor="end" class="tick">279k</text>
+<line x1="62" y1="73.5" x2="746" y2="73.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="77.0" text-anchor="end" class="tick">458k</text>
+<line x1="62" y1="26.0" x2="746" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">637k</text>
+<line x1="62" y1="195.2" x2="746" y2="195.2" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="74.4" y="195.2" width="37.3" height="1.6" fill="#006d77" rx="1.5"/>
+<text x="93.1" y="188.2" text-anchor="middle" class="val">0</text>
+<text x="93.1" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 93.1 232.0)">lifecycle_event</text>
+<rect x="136.6" y="127.8" width="37.3" height="67.4" fill="#006d77" rx="1.5"/>
+<line x1="111.7" y1="195.2" x2="136.6" y2="195.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="155.3" y="120.8" text-anchor="middle" class="val">+254k</text>
+<text x="155.3" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 155.3 232.0)">delta</text>
+<rect x="198.8" y="70.0" width="37.3" height="57.8" fill="#006d77" rx="1.5"/>
+<line x1="173.9" y1="127.8" x2="198.8" y2="127.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="217.5" y="63.0" text-anchor="middle" class="val">+218k</text>
+<text x="217.5" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 217.5 232.0)">vega</text>
+<g><title>theta_contract -2800.2801, ledger_carry +0.0000, r_theta +765.6109, q_theta -1550.1744, convexity_theta -2015.7166</title><rect x="261.0" y="70.0" width="37.3" height="1.6" fill="#b23a48" rx="1.5"/></g>
+<line x1="236.1" y1="70.0" x2="261.0" y2="70.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="279.6" y="85.7" text-anchor="middle" class="val">-2.8k</text>
+<text x="279.6" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 279.6 232.0)">theta</text>
+<rect x="323.2" y="70.7" width="37.3" height="3.9" fill="#b23a48" rx="1.5"/>
+<line x1="298.3" y1="70.7" x2="323.2" y2="70.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="341.8" y="89.7" text-anchor="middle" class="val">-15k</text>
+<text x="341.8" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 341.8 232.0)">rho</text>
+<rect x="385.3" y="56.9" width="37.3" height="17.8" fill="#006d77" rx="1.5"/>
+<line x1="360.5" y1="74.7" x2="385.3" y2="74.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="404.0" y="49.9" text-anchor="middle" class="val">+67k</text>
+<text x="404.0" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 404.0 232.0)">dividend_rho</text>
+<rect x="447.5" y="47.0" width="37.3" height="9.8" fill="#006d77" rx="1.5"/>
+<line x1="422.7" y1="56.9" x2="447.5" y2="56.9" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="466.2" y="40.0" text-anchor="middle" class="val">+37k</text>
+<text x="466.2" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 466.2 232.0)">gamma</text>
+<rect x="509.7" y="46.8" width="37.3" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="484.8" y1="47.0" x2="509.7" y2="47.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="528.4" y="39.8" text-anchor="middle" class="val">+1.0k</text>
+<text x="528.4" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 528.4 232.0)">volga</text>
+<rect x="571.9" y="46.8" width="37.3" height="5.8" fill="#b23a48" rx="1.5"/>
+<line x1="547.0" y1="46.8" x2="571.9" y2="46.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="590.5" y="67.6" text-anchor="middle" class="val">-22k</text>
+<text x="590.5" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 590.5 232.0)">vanna</text>
+<rect x="634.1" y="52.6" width="37.3" height="1.6" fill="url(#bg3-hatch)" rx="1.5"/>
+<line x1="609.2" y1="52.6" x2="634.1" y2="52.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="652.7" y="69.1" text-anchor="middle" class="val">-5.9k</text>
+<text x="652.7" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 652.7 232.0)">unexplained</text>
+<rect x="696.3" y="54.1" width="37.3" height="141.1" fill="#3f4f4a" rx="1.5"/>
+<text x="714.9" y="47.1" text-anchor="middle" class="val">531k</text>
+<text x="714.9" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 714.9 232.0)">total PnL</text>
+</svg><figcaption>American put x1,200</figcaption></figure><figure><svg class="bridge" viewBox="0 0 760 290" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg4-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="216.0" x2="746" y2="216.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="219.5" text-anchor="end" class="tick">-5.0k</text>
+<line x1="62" y1="168.5" x2="746" y2="168.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="172.0" text-anchor="end" class="tick">6.5k</text>
+<line x1="62" y1="121.0" x2="746" y2="121.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="124.5" text-anchor="end" class="tick">18k</text>
+<line x1="62" y1="73.5" x2="746" y2="73.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="77.0" text-anchor="end" class="tick">30k</text>
+<line x1="62" y1="26.0" x2="746" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">41k</text>
+<line x1="62" y1="195.2" x2="746" y2="195.2" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="74.4" y="195.2" width="37.3" height="1.6" fill="#006d77" rx="1.5"/>
+<text x="93.1" y="188.2" text-anchor="middle" class="val">0</text>
+<text x="93.1" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 93.1 232.0)">lifecycle_event</text>
+<rect x="136.6" y="149.8" width="37.3" height="45.4" fill="#006d77" rx="1.5"/>
+<line x1="111.7" y1="195.2" x2="136.6" y2="195.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="155.3" y="142.8" text-anchor="middle" class="val">+11k</text>
+<text x="155.3" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 155.3 232.0)">delta</text>
+<rect x="198.8" y="59.6" width="37.3" height="90.2" fill="#006d77" rx="1.5"/>
+<line x1="173.9" y1="149.8" x2="198.8" y2="149.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="217.5" y="52.6" text-anchor="middle" class="val">+22k</text>
+<text x="217.5" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 217.5 232.0)">vega</text>
+<g><title>theta_contract -226.1714, ledger_carry -0.0000, r_theta -4.5508, q_theta +2.0682, convexity_theta -223.6888</title><rect x="261.0" y="59.6" width="37.3" height="1.6" fill="#b23a48" rx="1.5"/></g>
+<line x1="236.1" y1="59.6" x2="261.0" y2="59.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="279.6" y="75.5" text-anchor="middle" class="val">-0.2k</text>
+<text x="279.6" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 279.6 232.0)">theta</text>
+<rect x="323.2" y="60.2" width="37.3" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="298.3" y1="60.5" x2="323.2" y2="60.5" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="341.8" y="53.2" text-anchor="middle" class="val">+0.1k</text>
+<text x="341.8" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 341.8 232.0)">rho</text>
+<rect x="385.3" y="60.2" width="37.3" height="1.6" fill="#b23a48" rx="1.5"/>
+<line x1="360.5" y1="60.2" x2="385.3" y2="60.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="404.0" y="75.5" text-anchor="middle" class="val">-0.1k</text>
+<text x="404.0" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 404.0 232.0)">dividend_rho</text>
+<rect x="447.5" y="46.8" width="37.3" height="13.8" fill="#006d77" rx="1.5"/>
+<line x1="422.7" y1="60.5" x2="447.5" y2="60.5" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="466.2" y="39.8" text-anchor="middle" class="val">+3.3k</text>
+<text x="466.2" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 466.2 232.0)">gamma</text>
+<rect x="509.7" y="46.8" width="37.3" height="75.4" fill="#b23a48" rx="1.5"/>
+<line x1="484.8" y1="46.8" x2="509.7" y2="46.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="528.4" y="137.2" text-anchor="middle" class="val">-18k</text>
+<text x="528.4" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 528.4 232.0)">volga</text>
+<rect x="571.9" y="122.2" width="37.3" height="42.8" fill="#b23a48" rx="1.5"/>
+<line x1="547.0" y1="122.2" x2="571.9" y2="122.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="590.5" y="180.0" text-anchor="middle" class="val">-10k</text>
+<text x="590.5" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 590.5 232.0)">vanna</text>
+<rect x="634.1" y="121.0" width="37.3" height="44.0" fill="url(#bg4-hatch)" rx="1.5"/>
+<line x1="609.2" y1="165.0" x2="634.1" y2="165.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="652.7" y="114.0" text-anchor="middle" class="val">+11k</text>
+<text x="652.7" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 652.7 232.0)">unexplained</text>
+<rect x="696.3" y="121.0" width="37.3" height="74.2" fill="#3f4f4a" rx="1.5"/>
+<text x="714.9" y="114.0" text-anchor="middle" class="val">18k</text>
+<text x="714.9" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 714.9 232.0)">total PnL</text>
+</svg><figcaption>down-and-out put x-1,500</figcaption></figure><figure><svg class="bridge" viewBox="0 0 760 290" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg5-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="216.0" x2="746" y2="216.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="219.5" text-anchor="end" class="tick">-1,415k</text>
+<line x1="62" y1="168.5" x2="746" y2="168.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="172.0" text-anchor="end" class="tick">-1,018k</text>
+<line x1="62" y1="121.0" x2="746" y2="121.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="124.5" text-anchor="end" class="tick">-620k</text>
+<line x1="62" y1="73.5" x2="746" y2="73.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="77.0" text-anchor="end" class="tick">-223k</text>
+<line x1="62" y1="26.0" x2="746" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">174k</text>
+<line x1="62" y1="46.8" x2="746" y2="46.8" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="74.4" y="46.8" width="37.3" height="59.0" fill="#b23a48" rx="1.5"/>
+<text x="93.1" y="120.8" text-anchor="middle" class="val">-493k</text>
+<text x="93.1" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 93.1 232.0)">lifecycle_event</text>
+<rect x="136.6" y="105.8" width="37.3" height="55.8" fill="#b23a48" rx="1.5"/>
+<line x1="111.7" y1="105.8" x2="136.6" y2="105.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="155.3" y="176.6" text-anchor="middle" class="val">-466k</text>
+<text x="155.3" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 155.3 232.0)">delta</text>
+<rect x="198.8" y="161.6" width="37.3" height="29.6" fill="#b23a48" rx="1.5"/>
+<line x1="173.9" y1="161.6" x2="198.8" y2="161.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="217.5" y="206.2" text-anchor="middle" class="val">-248k</text>
+<text x="217.5" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 217.5 232.0)">vega</text>
+<g><title>theta_contract -3296.9958, ledger_carry -0.0000, r_theta -376.2883, q_theta -1106.3817, convexity_theta -1814.3258</title><rect x="261.0" y="191.2" width="37.3" height="1.6" fill="#b23a48" rx="1.5"/></g>
+<line x1="236.1" y1="191.2" x2="261.0" y2="191.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="279.6" y="206.6" text-anchor="middle" class="val">-3.3k</text>
+<text x="279.6" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 279.6 232.0)">theta</text>
+<rect x="323.2" y="190.7" width="37.3" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="298.3" y1="191.6" x2="323.2" y2="191.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="341.8" y="183.7" text-anchor="middle" class="val">+7.8k</text>
+<text x="341.8" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 341.8 232.0)">rho</text>
+<rect x="385.3" y="190.7" width="37.3" height="4.5" fill="#b23a48" rx="1.5"/>
+<line x1="360.5" y1="190.7" x2="385.3" y2="190.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="404.0" y="210.2" text-anchor="middle" class="val">-38k</text>
+<text x="404.0" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 404.0 232.0)">dividend_rho</text>
+<rect x="447.5" y="184.2" width="37.3" height="11.0" fill="#006d77" rx="1.5"/>
+<line x1="422.7" y1="195.2" x2="447.5" y2="195.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="466.2" y="177.2" text-anchor="middle" class="val">+92k</text>
+<text x="466.2" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 466.2 232.0)">gamma</text>
+<rect x="509.7" y="183.3" width="37.3" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="484.8" y1="184.2" x2="509.7" y2="184.2" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="528.4" y="176.3" text-anchor="middle" class="val">+7.4k</text>
+<text x="528.4" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 528.4 232.0)">volga</text>
+<rect x="571.9" y="176.6" width="37.3" height="6.7" fill="#006d77" rx="1.5"/>
+<line x1="547.0" y1="183.3" x2="571.9" y2="183.3" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="590.5" y="169.6" text-anchor="middle" class="val">+56k</text>
+<text x="590.5" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 590.5 232.0)">vanna</text>
+<rect x="634.1" y="164.2" width="37.3" height="12.4" fill="url(#bg5-hatch)" rx="1.5"/>
+<line x1="609.2" y1="176.6" x2="634.1" y2="176.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="652.7" y="157.2" text-anchor="middle" class="val">+104k</text>
+<text x="652.7" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 652.7 232.0)">unexplained</text>
+<rect x="696.3" y="46.8" width="37.3" height="117.4" fill="#3f4f4a" rx="1.5"/>
+<text x="714.9" y="39.8" text-anchor="middle" class="val">-982k</text>
+<text x="714.9" y="232.0" text-anchor="end" class="cat" transform="rotate(-32 714.9 232.0)">total PnL</text>
+</svg><figcaption>snowball x-3,400, KO day 2024-04-01</figcaption></figure><div class="legend"><span><i class="swatch" style="background:#3f4f4a"></i>value anchor</span><span><i class="swatch" style="background:#006d77"></i>gain</span><span><i class="swatch" style="background:#b23a48"></i>loss</span><span><i class="swatch" style="background:#9b6a08"></i>Taylor residual</span></div><table><thead><tr><th>case</th><th>total PnL</th><th>gross attribution</th><th>Taylor unexplained</th><th>share of gross</th></tr></thead><tbody><tr><td>vanilla call x2,000</td><td class="neg">-61,881</td><td class="pos">953,732</td><td class="pos">7,186</td><td class="">0.8%</td></tr><tr><td>American put x1,200</td><td class="pos">531,317</td><td class="pos">615,890</td><td class="neg">-5,850</td><td class="">0.9%</td></tr><tr><td>down-and-out put x-1,500</td><td class="pos">17,998</td><td class="pos">65,280</td><td class="pos">10,666</td><td class="flag">16.3%</td></tr><tr><td>snowball x-3,400, KO day 2024-04-01</td><td class="neg">-981,509</td><td class="pos">1,412,104</td><td class="pos">103,688</td><td class="flag">7.3%</td></tr></tbody></table><div class="callout"><p>This is the argument for keeping a full-revaluation method on the desk even when greeks are already computed. On the day it matters most, the cheap method is least trustworthy.</p></div></div></div></div></section><section id="order"><div class="section-grid"><div class="rail"><p class="eyebrow">step four</p><h2>The order is a choice, not a fact</h2><p>Move time first and the time step is pure theta; the spot step then inherits every interaction between time and spot. Move spot first and the same interaction lands on time instead.</p><p>No order is more correct. Each is a complete, exactly-reconciling story about a move that genuinely happened all at once. Shapley averages over every order, which spreads interaction evenly and costs a factorial.</p><p>Notice what does not move: the total. The gap stays zero for the sequential orders and lands on float noise for Shapley, which averages over many orderings before it closes.</p></div><div><div class="panel"><h3>down-and-out put x-1,500</h3><div class="pair" style="grid-template-columns:repeat(3,1fr)"><figure><svg class="bridge" viewBox="0 0 430 270" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg6-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="196.0" x2="416" y2="196.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="199.5" text-anchor="end" class="tick">-2.8k</text>
+<line x1="62" y1="153.5" x2="416" y2="153.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="157.0" text-anchor="end" class="tick">3.1k</text>
+<line x1="62" y1="111.0" x2="416" y2="111.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="114.5" text-anchor="end" class="tick">8.9k</text>
+<line x1="62" y1="68.5" x2="416" y2="68.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="72.0" text-anchor="end" class="tick">15k</text>
+<line x1="62" y1="26.0" x2="416" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">21k</text>
+<line x1="62" y1="175.8" x2="416" y2="175.8" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="69.9" y="175.8" width="23.6" height="1.6" fill="#b23a48" rx="1.5"/>
+<text x="81.7" y="192.4" text-anchor="middle" class="val">-0.2k</text>
+<text x="81.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 81.7 212.0)">time</text>
+<rect x="109.2" y="76.8" width="23.6" height="100.6" fill="#006d77" rx="1.5"/>
+<line x1="93.5" y1="177.4" x2="109.2" y2="177.4" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="121.0" y="69.8" text-anchor="middle" class="val">+14k</text>
+<text x="121.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 121.0 212.0)">spot</text>
+<rect x="148.5" y="45.0" width="23.6" height="31.8" fill="#006d77" rx="1.5"/>
+<line x1="132.8" y1="76.8" x2="148.5" y2="76.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="160.3" y="38.0" text-anchor="middle" class="val">+4.4k</text>
+<text x="160.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 160.3 212.0)">vol</text>
+<rect x="187.9" y="45.0" width="23.6" height="1.6" fill="#b23a48" rx="1.5"/>
+<line x1="172.1" y1="45.0" x2="187.9" y2="45.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="199.7" y="60.0" text-anchor="middle" class="val">-0.0k</text>
+<text x="199.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 199.7 212.0)">rate</text>
+<rect x="227.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="211.5" y1="45.0" x2="227.2" y2="45.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="239.0" y="37.6" text-anchor="middle" class="val">+0.1k</text>
+<text x="239.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 239.0 212.0)">dividend</text>
+<rect x="266.5" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="250.8" y1="44.6" x2="266.5" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="278.3" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="278.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 278.3 212.0)">basis</text>
+<rect x="305.9" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="290.1" y1="44.6" x2="305.9" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="317.7" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="317.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 317.7 212.0)">model</text>
+<rect x="345.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="329.5" y1="44.6" x2="345.2" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="357.0" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="357.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 357.0 212.0)">lifecycle_event</text>
+<rect x="384.5" y="44.6" width="23.6" height="131.2" fill="#3f4f4a" rx="1.5"/>
+<text x="396.3" y="37.6" text-anchor="middle" class="val">18k</text>
+<text x="396.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 396.3 212.0)">total PnL</text>
+</svg><figcaption>time first (default)</figcaption></figure><figure><svg class="bridge" viewBox="0 0 430 270" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg7-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="196.0" x2="416" y2="196.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="199.5" text-anchor="end" class="tick">-2.5k</text>
+<line x1="62" y1="153.5" x2="416" y2="153.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="157.0" text-anchor="end" class="tick">3.2k</text>
+<line x1="62" y1="111.0" x2="416" y2="111.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="114.5" text-anchor="end" class="tick">9.0k</text>
+<line x1="62" y1="68.5" x2="416" y2="68.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="72.0" text-anchor="end" class="tick">15k</text>
+<line x1="62" y1="26.0" x2="416" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">21k</text>
+<line x1="62" y1="177.4" x2="416" y2="177.4" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="69.9" y="76.6" width="23.6" height="100.8" fill="#006d77" rx="1.5"/>
+<text x="81.7" y="69.6" text-anchor="middle" class="val">+14k</text>
+<text x="81.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 81.7 212.0)">spot</text>
+<rect x="109.2" y="44.8" width="23.6" height="31.8" fill="#006d77" rx="1.5"/>
+<line x1="93.5" y1="76.6" x2="109.2" y2="76.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="121.0" y="37.8" text-anchor="middle" class="val">+4.3k</text>
+<text x="121.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 121.0 212.0)">vol</text>
+<rect x="148.5" y="44.8" width="23.6" height="1.6" fill="#b23a48" rx="1.5"/>
+<line x1="132.8" y1="44.8" x2="148.5" y2="44.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="160.3" y="60.0" text-anchor="middle" class="val">-0.0k</text>
+<text x="160.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 160.3 212.0)">time</text>
+<rect x="187.9" y="45.0" width="23.6" height="1.6" fill="#b23a48" rx="1.5"/>
+<line x1="172.1" y1="45.0" x2="187.9" y2="45.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="199.7" y="60.0" text-anchor="middle" class="val">-0.0k</text>
+<text x="199.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 199.7 212.0)">rate</text>
+<rect x="227.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="211.5" y1="45.0" x2="227.2" y2="45.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="239.0" y="37.6" text-anchor="middle" class="val">+0.1k</text>
+<text x="239.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 239.0 212.0)">dividend</text>
+<rect x="266.5" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="250.8" y1="44.6" x2="266.5" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="278.3" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="278.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 278.3 212.0)">basis</text>
+<rect x="305.9" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="290.1" y1="44.6" x2="305.9" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="317.7" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="317.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 317.7 212.0)">model</text>
+<rect x="345.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="329.5" y1="44.6" x2="345.2" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="357.0" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="357.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 357.0 212.0)">lifecycle_event</text>
+<rect x="384.5" y="44.6" width="23.6" height="132.8" fill="#3f4f4a" rx="1.5"/>
+<text x="396.3" y="37.6" text-anchor="middle" class="val">18k</text>
+<text x="396.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 396.3 212.0)">total PnL</text>
+</svg><figcaption>spot first</figcaption></figure><figure><svg class="bridge" viewBox="0 0 430 270" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg8-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="196.0" x2="416" y2="196.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="199.5" text-anchor="end" class="tick">-2.6k</text>
+<line x1="62" y1="153.5" x2="416" y2="153.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="157.0" text-anchor="end" class="tick">3.1k</text>
+<line x1="62" y1="111.0" x2="416" y2="111.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="114.5" text-anchor="end" class="tick">8.9k</text>
+<line x1="62" y1="68.5" x2="416" y2="68.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="72.0" text-anchor="end" class="tick">15k</text>
+<line x1="62" y1="26.0" x2="416" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">21k</text>
+<line x1="62" y1="176.6" x2="416" y2="176.6" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="69.9" y="176.6" width="23.6" height="1.6" fill="#b23a48" rx="1.5"/>
+<text x="81.7" y="192.4" text-anchor="middle" class="val">-0.1k</text>
+<text x="81.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 81.7 212.0)">time</text>
+<rect x="109.2" y="108.3" width="23.6" height="69.1" fill="#006d77" rx="1.5"/>
+<line x1="93.5" y1="177.4" x2="109.2" y2="177.4" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="121.0" y="101.3" text-anchor="middle" class="val">+9.4k</text>
+<text x="121.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 121.0 212.0)">spot</text>
+<rect x="148.5" y="45.3" width="23.6" height="63.0" fill="#006d77" rx="1.5"/>
+<line x1="132.8" y1="108.3" x2="148.5" y2="108.3" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="160.3" y="38.3" text-anchor="middle" class="val">+8.6k</text>
+<text x="160.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 160.3 212.0)">vol</text>
+<rect x="187.9" y="45.1" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="172.1" y1="45.3" x2="187.9" y2="45.3" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="199.7" y="38.1" text-anchor="middle" class="val">+0.0k</text>
+<text x="199.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 199.7 212.0)">rate</text>
+<rect x="227.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="211.5" y1="45.1" x2="227.2" y2="45.1" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="239.0" y="37.6" text-anchor="middle" class="val">+0.1k</text>
+<text x="239.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 239.0 212.0)">dividend</text>
+<rect x="266.5" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="250.8" y1="44.6" x2="266.5" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="278.3" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="278.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 278.3 212.0)">basis</text>
+<rect x="305.9" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="290.1" y1="44.6" x2="305.9" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="317.7" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="317.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 317.7 212.0)">model</text>
+<rect x="345.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="329.5" y1="44.6" x2="345.2" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="357.0" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="357.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 357.0 212.0)">lifecycle_event</text>
+<rect x="384.5" y="44.6" width="23.6" height="132.0" fill="#3f4f4a" rx="1.5"/>
+<text x="396.3" y="37.6" text-anchor="middle" class="val">18k</text>
+<text x="396.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 396.3 212.0)">total PnL</text>
+</svg><figcaption>Shapley</figcaption></figure></div><div class="legend"><span><i class="swatch" style="background:#3f4f4a"></i>value anchor</span><span><i class="swatch" style="background:#006d77"></i>gain</span><span><i class="swatch" style="background:#b23a48"></i>loss</span></div><table><thead><tr><th>order</th><th>time</th><th>spot</th><th>vol</th><th>total</th><th>gap</th></tr></thead><tbody><tr><td>time first (default)</td><td class="neg">-226</td><td class="pos">13,807</td><td class="pos">4,364</td><td class="pos">17,998</td><td>+0.0e+00</td></tr><tr><td>spot first</td><td class="neg">-29</td><td class="pos">13,663</td><td class="pos">4,311</td><td class="pos">17,998</td><td>+0.0e+00</td></tr><tr><td>Shapley</td><td class="neg">-114</td><td class="pos">9,425</td><td class="pos">8,592</td><td class="pos">17,998</td><td>+3.6e-12</td></tr></tbody></table></div><div class="panel"><h3>American put x1,200</h3><div class="pair" style="grid-template-columns:repeat(3,1fr)"><figure><svg class="bridge" viewBox="0 0 430 270" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg9-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="196.0" x2="416" y2="196.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="199.5" text-anchor="end" class="tick">-78k</text>
+<line x1="62" y1="153.5" x2="416" y2="153.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="157.0" text-anchor="end" class="tick">93k</text>
+<line x1="62" y1="111.0" x2="416" y2="111.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="114.5" text-anchor="end" class="tick">264k</text>
+<line x1="62" y1="68.5" x2="416" y2="68.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="72.0" text-anchor="end" class="tick">435k</text>
+<line x1="62" y1="26.0" x2="416" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">606k</text>
+<line x1="62" y1="176.7" x2="416" y2="176.7" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="69.9" y="176.7" width="23.6" height="1.6" fill="#b23a48" rx="1.5"/>
+<text x="81.7" y="192.4" text-anchor="middle" class="val">-2.8k</text>
+<text x="81.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 81.7 212.0)">time</text>
+<rect x="109.2" y="105.0" width="23.6" height="72.4" fill="#006d77" rx="1.5"/>
+<line x1="93.5" y1="177.4" x2="109.2" y2="177.4" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="121.0" y="98.0" text-anchor="middle" class="val">+291k</text>
+<text x="121.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 121.0 212.0)">spot</text>
+<rect x="148.5" y="58.0" width="23.6" height="47.0" fill="#006d77" rx="1.5"/>
+<line x1="132.8" y1="105.0" x2="148.5" y2="105.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="160.3" y="51.0" text-anchor="middle" class="val">+189k</text>
+<text x="160.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 160.3 212.0)">vol</text>
+<rect x="187.9" y="58.0" width="23.6" height="4.2" fill="#b23a48" rx="1.5"/>
+<line x1="172.1" y1="58.0" x2="187.9" y2="58.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="199.7" y="77.3" text-anchor="middle" class="val">-17k</text>
+<text x="199.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 199.7 212.0)">rate</text>
+<rect x="227.2" y="44.6" width="23.6" height="17.6" fill="#006d77" rx="1.5"/>
+<line x1="211.5" y1="62.3" x2="227.2" y2="62.3" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="239.0" y="37.6" text-anchor="middle" class="val">+71k</text>
+<text x="239.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 239.0 212.0)">dividend</text>
+<rect x="266.5" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="250.8" y1="44.6" x2="266.5" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="278.3" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="278.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 278.3 212.0)">basis</text>
+<rect x="305.9" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="290.1" y1="44.6" x2="305.9" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="317.7" y="37.6" text-anchor="middle" class="val">+0.2k</text>
+<text x="317.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 317.7 212.0)">model</text>
+<rect x="345.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="329.5" y1="44.6" x2="345.2" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="357.0" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="357.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 357.0 212.0)">lifecycle_event</text>
+<rect x="384.5" y="44.6" width="23.6" height="132.1" fill="#3f4f4a" rx="1.5"/>
+<text x="396.3" y="37.6" text-anchor="middle" class="val">531k</text>
+<text x="396.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 396.3 212.0)">total PnL</text>
+</svg><figcaption>time first (default)</figcaption></figure><figure><svg class="bridge" viewBox="0 0 430 270" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg10-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="196.0" x2="416" y2="196.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="199.5" text-anchor="end" class="tick">-74k</text>
+<line x1="62" y1="153.5" x2="416" y2="153.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="157.0" text-anchor="end" class="tick">96k</text>
+<line x1="62" y1="111.0" x2="416" y2="111.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="114.5" text-anchor="end" class="tick">266k</text>
+<line x1="62" y1="68.5" x2="416" y2="68.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="72.0" text-anchor="end" class="tick">436k</text>
+<line x1="62" y1="26.0" x2="416" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">606k</text>
+<line x1="62" y1="177.4" x2="416" y2="177.4" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="69.9" y="104.7" width="23.6" height="72.7" fill="#006d77" rx="1.5"/>
+<text x="81.7" y="97.7" text-anchor="middle" class="val">+291k</text>
+<text x="81.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 81.7 212.0)">spot</text>
+<rect x="109.2" y="57.3" width="23.6" height="47.4" fill="#006d77" rx="1.5"/>
+<line x1="93.5" y1="104.7" x2="109.2" y2="104.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="121.0" y="50.3" text-anchor="middle" class="val">+190k</text>
+<text x="121.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 121.0 212.0)">vol</text>
+<rect x="148.5" y="57.3" width="23.6" height="1.6" fill="#b23a48" rx="1.5"/>
+<line x1="132.8" y1="57.3" x2="148.5" y2="57.3" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="160.3" y="73.1" text-anchor="middle" class="val">-3.4k</text>
+<text x="160.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 160.3 212.0)">time</text>
+<rect x="187.9" y="58.1" width="23.6" height="4.3" fill="#b23a48" rx="1.5"/>
+<line x1="172.1" y1="58.1" x2="187.9" y2="58.1" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="199.7" y="77.4" text-anchor="middle" class="val">-17k</text>
+<text x="199.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 199.7 212.0)">rate</text>
+<rect x="227.2" y="44.6" width="23.6" height="17.7" fill="#006d77" rx="1.5"/>
+<line x1="211.5" y1="62.4" x2="227.2" y2="62.4" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="239.0" y="37.6" text-anchor="middle" class="val">+71k</text>
+<text x="239.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 239.0 212.0)">dividend</text>
+<rect x="266.5" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="250.8" y1="44.6" x2="266.5" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="278.3" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="278.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 278.3 212.0)">basis</text>
+<rect x="305.9" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="290.1" y1="44.6" x2="305.9" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="317.7" y="37.6" text-anchor="middle" class="val">+0.2k</text>
+<text x="317.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 317.7 212.0)">model</text>
+<rect x="345.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="329.5" y1="44.6" x2="345.2" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="357.0" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="357.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 357.0 212.0)">lifecycle_event</text>
+<rect x="384.5" y="44.6" width="23.6" height="132.8" fill="#3f4f4a" rx="1.5"/>
+<text x="396.3" y="37.6" text-anchor="middle" class="val">531k</text>
+<text x="396.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 396.3 212.0)">total PnL</text>
+</svg><figcaption>spot first</figcaption></figure><figure><svg class="bridge" viewBox="0 0 430 270" role="img" aria-label="waterfall bridge">
+<defs><pattern id="bg11-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="196.0" x2="416" y2="196.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="199.5" text-anchor="end" class="tick">-78k</text>
+<line x1="62" y1="153.5" x2="416" y2="153.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="157.0" text-anchor="end" class="tick">93k</text>
+<line x1="62" y1="111.0" x2="416" y2="111.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="114.5" text-anchor="end" class="tick">264k</text>
+<line x1="62" y1="68.5" x2="416" y2="68.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="72.0" text-anchor="end" class="tick">435k</text>
+<line x1="62" y1="26.0" x2="416" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">606k</text>
+<line x1="62" y1="176.6" x2="416" y2="176.6" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="69.9" y="176.6" width="23.6" height="1.6" fill="#b23a48" rx="1.5"/>
+<text x="81.7" y="192.4" text-anchor="middle" class="val">-3.3k</text>
+<text x="81.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 81.7 212.0)">time</text>
+<rect x="109.2" y="107.7" width="23.6" height="69.7" fill="#006d77" rx="1.5"/>
+<line x1="93.5" y1="177.4" x2="109.2" y2="177.4" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="121.0" y="100.7" text-anchor="middle" class="val">+280k</text>
+<text x="121.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 121.0 212.0)">spot</text>
+<rect x="148.5" y="58.1" width="23.6" height="49.7" fill="#006d77" rx="1.5"/>
+<line x1="132.8" y1="107.7" x2="148.5" y2="107.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="160.3" y="51.1" text-anchor="middle" class="val">+200k</text>
+<text x="160.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 160.3 212.0)">vol</text>
+<rect x="187.9" y="58.1" width="23.6" height="4.1" fill="#b23a48" rx="1.5"/>
+<line x1="172.1" y1="58.1" x2="187.9" y2="58.1" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="199.7" y="77.1" text-anchor="middle" class="val">-16k</text>
+<text x="199.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 199.7 212.0)">rate</text>
+<rect x="227.2" y="44.6" width="23.6" height="17.5" fill="#006d77" rx="1.5"/>
+<line x1="211.5" y1="62.1" x2="227.2" y2="62.1" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="239.0" y="37.6" text-anchor="middle" class="val">+71k</text>
+<text x="239.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 239.0 212.0)">dividend</text>
+<rect x="266.5" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="250.8" y1="44.6" x2="266.5" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="278.3" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="278.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 278.3 212.0)">basis</text>
+<rect x="305.9" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="290.1" y1="44.6" x2="305.9" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="317.7" y="37.6" text-anchor="middle" class="val">+0.2k</text>
+<text x="317.7" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 317.7 212.0)">model</text>
+<rect x="345.2" y="44.6" width="23.6" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="329.5" y1="44.6" x2="345.2" y2="44.6" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="357.0" y="37.6" text-anchor="middle" class="val">0</text>
+<text x="357.0" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 357.0 212.0)">lifecycle_event</text>
+<rect x="384.5" y="44.6" width="23.6" height="132.0" fill="#3f4f4a" rx="1.5"/>
+<text x="396.3" y="37.6" text-anchor="middle" class="val">531k</text>
+<text x="396.3" y="212.0" text-anchor="end" class="cat" transform="rotate(-32 396.3 212.0)">total PnL</text>
+</svg><figcaption>Shapley</figcaption></figure></div><div class="legend"><span><i class="swatch" style="background:#3f4f4a"></i>value anchor</span><span><i class="swatch" style="background:#006d77"></i>gain</span><span><i class="swatch" style="background:#b23a48"></i>loss</span></div><table><thead><tr><th>order</th><th>time</th><th>spot</th><th>vol</th><th>total</th><th>gap</th></tr></thead><tbody><tr><td>time first (default)</td><td class="neg">-2,800</td><td class="pos">291,090</td><td class="pos">188,947</td><td class="pos">531,317</td><td>+0.0e+00</td></tr><tr><td>spot first</td><td class="neg">-3,373</td><td class="pos">290,876</td><td class="pos">189,734</td><td class="pos">531,317</td><td>+0.0e+00</td></tr><tr><td>Shapley</td><td class="neg">-3,287</td><td class="pos">280,385</td><td class="pos">199,885</td><td class="pos">531,317</td><td>+0.0e+00</td></tr></tbody></table></div></div></div></section><section id="lifecycle"><div class="section-grid"><div class="rail"><p class="eyebrow">step five</p><h2>The day the contract ended</h2><p>Knock-out day is two things happening together: the market moved, and the contract terminated. The waterfall separates them by construction.</p><p>The market rows carry the value from where it opened to what it would have been worth had nothing fired. That is the alive value. The single lifecycle row carries it the rest of the way to what the position is actually booked at.</p><p>That is the definition of the event row, and the chart is the definition drawn.</p></div><div><div class="panel"><svg class="bridge" viewBox="0 0 760 330" role="img" aria-label="snowball x-3,400, 2024-03-31 to 2024-04-01, index 6,000 to 6,320 (PnL from zero; the levels are in the table)">
+<defs><pattern id="bg12-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="256.0" x2="746" y2="256.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="259.5" text-anchor="end" class="tick">-1,119k</text>
+<line x1="62" y1="198.5" x2="746" y2="198.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="202.0" text-anchor="end" class="tick">-805k</text>
+<line x1="62" y1="141.0" x2="746" y2="141.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="144.5" text-anchor="end" class="tick">-491k</text>
+<line x1="62" y1="83.5" x2="746" y2="83.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="87.0" text-anchor="end" class="tick">-177k</text>
+<line x1="62" y1="26.0" x2="746" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">137k</text>
+<line x1="62" y1="51.2" x2="746" y2="51.2" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="78.0" y="51.2" width="44.0" height="1.6" fill="#b23a48" rx="1.5"/>
+<text x="100.0" y="66.8" text-anchor="middle" class="val">-3.3k</text>
+<text x="100.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 100.0 272.0)">time</text>
+<rect x="154.0" y="51.8" width="44.0" height="78.9" fill="#b23a48" rx="1.5"/>
+<line x1="122.0" y1="51.8" x2="154.0" y2="51.8" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="176.0" y="145.7" text-anchor="middle" class="val">-431k</text>
+<text x="176.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 176.0 272.0)">spot</text>
+<rect x="230.0" y="130.7" width="44.0" height="9.3" fill="#b23a48" rx="1.5"/>
+<line x1="198.0" y1="130.7" x2="230.0" y2="130.7" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="252.0" y="155.0" text-anchor="middle" class="val">-51k</text>
+<text x="252.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 252.0 272.0)">vol</text>
+<rect x="306.0" y="139.5" width="44.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="274.0" y1="140.0" x2="306.0" y2="140.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="328.0" y="132.5" text-anchor="middle" class="val">+2.5k</text>
+<text x="328.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 328.0 272.0)">rate</text>
+<rect x="382.0" y="139.5" width="44.0" height="1.6" fill="#b23a48" rx="1.5"/>
+<line x1="350.0" y1="139.5" x2="382.0" y2="139.5" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="404.0" y="155.5" text-anchor="middle" class="val">-5.5k</text>
+<text x="404.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 404.0 272.0)">dividend</text>
+<rect x="458.0" y="140.5" width="44.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="426.0" y1="140.5" x2="458.0" y2="140.5" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="480.0" y="133.5" text-anchor="middle" class="val">0</text>
+<text x="480.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 480.0 272.0)">basis</text>
+<rect x="534.0" y="140.5" width="44.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="502.0" y1="140.5" x2="534.0" y2="140.5" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="556.0" y="133.5" text-anchor="middle" class="val">0</text>
+<text x="556.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 556.0 272.0)">model</text>
+<rect x="610.0" y="140.5" width="44.0" height="90.3" fill="#b23a48" rx="1.5"/>
+<line x1="578.0" y1="140.5" x2="610.0" y2="140.5" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="632.0" y="245.8" text-anchor="middle" class="val">-493k</text>
+<text x="632.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 632.0 272.0)">lifecycle_event</text>
+<rect x="686.0" y="51.2" width="44.0" height="179.7" fill="#3f4f4a" rx="1.5"/>
+<text x="708.0" y="44.2" text-anchor="middle" class="val">-982k</text>
+<text x="708.0" y="272.0" text-anchor="end" class="cat" transform="rotate(-32 708.0 272.0)">total PnL</text>
+</svg>
+<p class="chart-caption">snowball x-3,400, 2024-03-31 to 2024-04-01, index 6,000 to 6,320 (PnL from zero; the levels are in the table)</p><div class="legend"><span><i class="swatch" style="background:#3f4f4a"></i>value anchor</span><span><i class="swatch" style="background:#006d77"></i>gain</span><span><i class="swatch" style="background:#b23a48"></i>loss</span></div><table><thead><tr><th>quantity</th><th>value</th></tr></thead><tbody><tr><td>value at t0</td><td class="neg">-19,928,491</td></tr><tr><td>alive value at t1 (had nothing fired)</td><td class="neg">-20,416,704</td></tr><tr><td>market rows</td><td class="neg">-488,213</td></tr><tr><td>lifecycle event row</td><td class="neg">-493,296</td></tr><tr><td>booked value at t1</td><td class="neg">-20,910,000</td></tr><tr><td><b>total PnL</b></td><td class="neg">-981,509</td></tr></tbody></table><div class="callout"><p>A receivable being paid is not an event. Cash that was already owed simply moves from the pending box to the paid box inside the time step, which is why the identity in step one has three terms and not two.</p></div></div></div></div></section><section id="book"><div class="section-grid"><div class="rail"><p class="eyebrow">step six</p><h2>The book, and the gate</h2><p>Positions aggregate two ways. By position, which is what a desk head reads. By factor, which is what a risk manager reads. They are projections of one set of rows and they agree to the yuan.</p><p>The book is hedged with 1,285 index units of the front future, sized on its delta at the open. That hedge is why the book PnL is smaller than the snowball's alone, and it is where the two methods stop agreeing about what spot did.</p><p>The reconciliation dictionary is the gate. It compares what the value identity says the book made against what the attribution rows explain, per method. The gap is float noise on a two-million-yuan move, and it is checked on every run rather than assumed.</p></div><div><div class="panel"><svg class="bridge" viewBox="0 0 760 310" role="img" aria-label="by position">
+<defs><pattern id="bg13-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="236.0" x2="746" y2="236.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="239.5" text-anchor="end" class="tick">-275k</text>
+<line x1="62" y1="183.5" x2="746" y2="183.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="187.0" text-anchor="end" class="tick">329k</text>
+<line x1="62" y1="131.0" x2="746" y2="131.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="134.5" text-anchor="end" class="tick">933k</text>
+<line x1="62" y1="78.5" x2="746" y2="78.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="82.0" text-anchor="end" class="tick">1,537k</text>
+<line x1="62" y1="26.0" x2="746" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">2,141k</text>
+<line x1="62" y1="212.1" x2="746" y2="212.1" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="97.0" y="165.9" width="44.0" height="46.2" fill="#006d77" rx="1.5"/>
+<text x="119.0" y="158.9" text-anchor="middle" class="val">+531k</text>
+<text x="119.0" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 119.0 252.0)">american</text>
+<rect x="211.0" y="164.4" width="44.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="141.0" y1="165.9" x2="211.0" y2="165.9" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="233.0" y="157.4" text-anchor="middle" class="val">+18k</text>
+<text x="233.0" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 233.0 252.0)">barrier</text>
+<rect x="325.0" y="164.4" width="44.0" height="48.6" fill="#b23a48" rx="1.5"/>
+<line x1="255.0" y1="164.4" x2="325.0" y2="164.4" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="347.0" y="228.0" text-anchor="middle" class="val">-560k</text>
+<text x="347.0" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 347.0 252.0)">hedge</text>
+<rect x="439.0" y="49.0" width="44.0" height="164.1" fill="#006d77" rx="1.5"/>
+<line x1="369.0" y1="213.0" x2="439.0" y2="213.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="461.0" y="42.0" text-anchor="middle" class="val">+1,888k</text>
+<text x="461.0" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 461.0 252.0)">snowball</text>
+<rect x="553.0" y="49.0" width="44.0" height="5.4" fill="#b23a48" rx="1.5"/>
+<line x1="483.0" y1="49.0" x2="553.0" y2="49.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="575.0" y="69.3" text-anchor="middle" class="val">-62k</text>
+<text x="575.0" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 575.0 252.0)">vanilla</text>
+<rect x="667.0" y="54.3" width="44.0" height="157.8" fill="#3f4f4a" rx="1.5"/>
+<text x="689.0" y="47.3" text-anchor="middle" class="val">1,815k</text>
+<text x="689.0" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 689.0 252.0)">total PnL</text>
+</svg>
+<p class="chart-caption">by position</p><table><thead><tr><th>position</th><th>value t0</th><th>value t1</th><th>PnL</th></tr></thead><tbody><tr><td>American put x1,200</td><td class="pos">608,590</td><td class="pos">1,139,907</td><td class="pos">531,317</td></tr><tr><td>down-and-out put x-1,500</td><td class="neg">-20,269</td><td class="neg">-2,270</td><td class="pos">17,998</td></tr><tr><td>index futures hedge x1,285</td><td class="pos">7,652,391</td><td class="pos">7,092,709</td><td class="neg">-559,682</td></tr><tr><td>snowball x-3,400</td><td class="neg">-19,986,671</td><td class="neg">-18,099,157</td><td class="pos">1,887,514</td></tr><tr><td>vanilla call x2,000</td><td class="pos">667,381</td><td class="pos">605,499</td><td class="neg">-61,881</td></tr><tr><td><b>book</b></td><td class="neg">-11,078,577</td><td class="neg">-9,263,312</td><td class="pos">1,815,265</td></tr></tbody></table></div><div class="panel"><svg class="bridge" viewBox="0 0 760 310" role="img" aria-label="by factor, waterfall">
+<defs><pattern id="bg14-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f6ecd6"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9b6a08" stroke-width="2.4"/></pattern></defs>
+<line x1="62" y1="236.0" x2="746" y2="236.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="239.5" text-anchor="end" class="tick">-266k</text>
+<line x1="62" y1="183.5" x2="746" y2="183.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="187.0" text-anchor="end" class="tick">318k</text>
+<line x1="62" y1="131.0" x2="746" y2="131.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="134.5" text-anchor="end" class="tick">903k</text>
+<line x1="62" y1="78.5" x2="746" y2="78.5" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="82.0" text-anchor="end" class="tick">1,487k</text>
+<line x1="62" y1="26.0" x2="746" y2="26.0" stroke="#cfd8d1" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="54" y="29.5" text-anchor="end" class="tick">2,071k</text>
+<line x1="62" y1="212.1" x2="746" y2="212.1" stroke="#5d6964" stroke-width="1.2"/>
+<rect x="75.7" y="212.1" width="41.0" height="1.6" fill="#b23a48" rx="1.5"/>
+<text x="96.2" y="228.0" text-anchor="middle" class="val">-10k</text>
+<text x="96.2" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 96.2 252.0)">time</text>
+<rect x="144.1" y="186.5" width="41.0" height="26.6" fill="#006d77" rx="1.5"/>
+<line x1="116.7" y1="213.0" x2="144.1" y2="213.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="164.6" y="179.5" text-anchor="middle" class="val">+296k</text>
+<text x="164.6" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 164.6 252.0)">spot</text>
+<rect x="212.5" y="66.3" width="41.0" height="120.1" fill="#006d77" rx="1.5"/>
+<line x1="185.1" y1="186.5" x2="212.5" y2="186.5" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="233.0" y="59.3" text-anchor="middle" class="val">+1,337k</text>
+<text x="233.0" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 233.0 252.0)">vol</text>
+<rect x="280.9" y="65.4" width="41.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="253.5" y1="66.3" x2="280.9" y2="66.3" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="301.4" y="58.4" text-anchor="middle" class="val">+10k</text>
+<text x="301.4" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 301.4 252.0)">rate</text>
+<rect x="349.3" y="49.0" width="41.0" height="16.4" fill="#006d77" rx="1.5"/>
+<line x1="321.9" y1="65.4" x2="349.3" y2="65.4" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="369.8" y="42.0" text-anchor="middle" class="val">+183k</text>
+<text x="369.8" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 369.8 252.0)">dividend</text>
+<rect x="417.7" y="49.0" width="41.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="390.3" y1="49.0" x2="417.7" y2="49.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="438.2" y="42.0" text-anchor="middle" class="val">0</text>
+<text x="438.2" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 438.2 252.0)">basis</text>
+<rect x="486.1" y="49.0" width="41.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="458.7" y1="49.0" x2="486.1" y2="49.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="506.6" y="42.0" text-anchor="middle" class="val">+0.2k</text>
+<text x="506.6" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 506.6 252.0)">model</text>
+<rect x="554.5" y="49.0" width="41.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="527.1" y1="49.0" x2="554.5" y2="49.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="575.0" y="42.0" text-anchor="middle" class="val">0</text>
+<text x="575.0" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 575.0 252.0)">lifecycle_event</text>
+<rect x="622.9" y="49.0" width="41.0" height="1.6" fill="#006d77" rx="1.5"/>
+<line x1="595.5" y1="49.0" x2="622.9" y2="49.0" stroke="#5d6964" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="643.4" y="42.0" text-anchor="middle" class="val">0</text>
+<text x="643.4" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 643.4 252.0)">transaction_cost</text>
+<rect x="691.3" y="49.0" width="41.0" height="163.1" fill="#3f4f4a" rx="1.5"/>
+<text x="711.8" y="42.0" text-anchor="middle" class="val">1,815k</text>
+<text x="711.8" y="252.0" text-anchor="end" class="cat" transform="rotate(-32 711.8 252.0)">total PnL</text>
+</svg>
+<p class="chart-caption">by factor, waterfall</p><div class="legend"><span><i class="swatch" style="background:#3f4f4a"></i>value anchor</span><span><i class="swatch" style="background:#006d77"></i>gain</span><span><i class="swatch" style="background:#b23a48"></i>loss</span></div><table><thead><tr><th>method</th><th>expected</th><th>explained</th><th>gap</th><th>status</th></tr></thead><tbody><tr><td>waterfall</td><td class="pos">1,815,265</td><td class="pos">1,815,265</td><td>+2.33e-10</td><td class="pos">ok</td></tr><tr><td>taylor</td><td class="pos">1,815,265</td><td class="pos">1,815,265</td><td>+2.33e-10</td><td class="pos">ok</td></tr></tbody></table><div class="callout"><p><b>Delta-neutral is not spot-neutral.</b> Taylor&rsquo;s delta row for the whole book is -3,952, which is the hedge doing its job: to first order the book has no view on the index. The waterfall&rsquo;s spot row is still 295,583.</p><p>The difference is not an error in either method. It is every higher-order spot effect on a seven percent move &mdash; the gamma, the vanna, the barrier proximity &mdash; which a full revaluation prices and a first-order hedge does not remove. A desk reading only the delta row would think it had no spot exposure on the day it made 296k from spot.</p></div></div></div></div></section>
+<footer>Generated by <code>example/pnl_explain_demo.py</code> on 2026-09-04 09:59:02. Every number on this
+page came from the run that wrote it; nothing is hand-entered.</footer>
+</main>
+</body>
+</html>
