@@ -173,9 +173,22 @@ class GridLayerMixin:
             q_ref=float(pricing_env.get_div_yield(tau)),
         )
 
+    @staticmethod
+    def _prepare_grid_request(engine, product, pricing_env) -> None:
+        """Resolve the solve state grid_request depends on, when the solver has one.
+
+        Mirrors pde_session_prep: a solver whose geometry depends on the
+        environment (a date-based observation schedule, say) cannot declare its
+        grid until this has run.
+        """
+        prep = getattr(engine, "_prepare_for_request", None)
+        if prep is not None:
+            prep(product, pricing_env)
+
     def _external_layout_check(self, product, pricing_env, layout) -> None:
         market = self.market_snapshot(product, pricing_env)
         tau = product.get_maturity(pricing_env)
+        self._prepare_grid_request(self, product, pricing_env)
         validate_external_layout(
             layout, self.grid_request(product, market, tau), market
         )
@@ -190,6 +203,7 @@ class GridLayerMixin:
         clone = copy.deepcopy(self)
         clone._grid_binder = None
         market = clone.market_snapshot(product, pricing_env)
+        self._prepare_grid_request(clone, product, pricing_env)
         request = clone.grid_request(product, market, tau)
         clone._frozen_base_layout = clone._grid_layer_binder(
             getattr(clone, "params", None)

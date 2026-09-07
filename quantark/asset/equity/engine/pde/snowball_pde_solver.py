@@ -336,6 +336,10 @@ class SnowballPDESolver(BasePDESolver):
         self._profile_stats: Dict[str, float] = {}
         self._ko_records_cache: "OrderedDict[Tuple, List[ResolvedObservationRecord]]" = OrderedDict()
         self._ki_profile_cache: "OrderedDict[Tuple, Dict[str, List[Optional[float]]]]" = OrderedDict()
+        # Environment for the NEXT grid_request. grid_request takes only (product, market,
+        # tau), but a date-based observation schedule can only be turned into year fractions
+        # against a pricing environment, so the prepare step stashes it here.
+        self._grid_request_env: Optional[PricingEnvironment] = None
         # Per-solve memo of _product_cache_token: the token is a pure function
         # of the product's serialized state, which cannot change inside one
         # solve, but its construction re-serializes every KO/KI schedule record
@@ -1984,8 +1988,11 @@ class SnowballPDESolver(BasePDESolver):
 
         Must run before ``_build_grids`` so ``_time_grid_spec`` /
         ``_get_event_times`` see ``self._bgk_active`` and drop the interior daily
-        KI nodes.
+        KI nodes. It is also the last hook the base solver calls before
+        ``grid_request``, so it records the environment that a date-based
+        observation schedule needs to resolve its times.
         """
+        self._grid_request_env = pricing_env
         self._bgk_active = False
         self._bgk_ki_barrier = 0.0
         if not self._bgk_requested():
@@ -2127,14 +2134,24 @@ class SnowballPDESolver(BasePDESolver):
 
         These MUST be grid nodes exactly — they drive the value KO jumps and the
         event-distribution resets, so a misalignment here is a correctness bug.
-        Reads the barrier config directly (no pricing env / instance state), so
-        it is safe to call during grid construction.
+
+        A schedule stated in DATES carries no year fraction of its own: only the
+        pricing environment can supply one. Those schedules are therefore resolved
+        through the same cached resolver ``_populate_observation_maps`` uses, so
+        grid geometry and event indices come from one source. Reading the raw
+        config alone silently yielded no nodes for a date-based schedule, and the
+        map then looked up a time the grid had never been told about.
         """
         out = []
         cfg = getattr(product, "barrier_config", None)
         if cfg is not None:
             sched = cfg.ko_observation_schedule
-            if sched is not None:
+            if sched is not None and sched.uses_dates():
+                out += [
+                    rec.observation_time
+                    for rec in self._resolved_ko_records_for_grid(product, "knock-out")
+                ]
+            elif sched is not None:
                 out += [
                     rec.observation_time
                     for rec in sched.records
@@ -2144,6 +2161,25 @@ class SnowballPDESolver(BasePDESolver):
                 out += list(cfg.ko_observation_dates)
         return sorted({float(t) for t in out if t is not None and 0.0 < float(t) < tau})
 
+    def _grid_request_environment(self, what: str):
+        """The environment stashed by the prepare step, or a loud failure.
+
+        ``grid_request`` cannot take one (it is a frozen geometry declaration
+        shared by every solver), so the caller must have run
+        ``_prepare_for_request`` or ``_configure_bgk`` first. Both do.
+        """
+        env = self._grid_request_env
+        if env is None:
+            raise ValidationError(
+                f"a date-based {what} observation schedule needs a pricing environment to "
+                "resolve its observation times, but the grid was requested without one: "
+                "call _prepare_for_request(product, pricing_env) before grid_request"
+            )
+        return env
+
+    def _resolved_ko_records_for_grid(self, product, what: str):
+        return self._get_cached_ko_records(self._grid_request_environment(what), product)
+
     def _ki_monitor_times(
         self, product: BaseEquityProduct, tau: float
     ) -> List[float]:
@@ -2151,8 +2187,10 @@ class SnowballPDESolver(BasePDESolver):
 
         Empty for every other regime (spec §4 table): European (maturity-only
         => no interior dates), continuous, no-KI, and already-knocked-in
-        (monitoring moot).  Reads config directly; ``ki_continuous`` here is
-        derived identically to the solver's ``self._ki_continuous``.
+        (monitoring moot).  ``ki_continuous`` here is derived identically to the
+        solver's ``self._ki_continuous``. A DATE-based schedule is resolved
+        against the prepared environment, for the reason given on
+        ``_ko_coupon_align_times``.
         """
         cfg = getattr(product, "barrier_config", None)
         if cfg is None or not getattr(product, "has_ki_barrier", False):
@@ -2167,7 +2205,12 @@ class SnowballPDESolver(BasePDESolver):
             return []
         out = []
         sched = cfg.ki_observation_schedule
-        if sched is not None:
+        if sched is not None and sched.uses_dates():
+            profile = self._get_cached_ki_profile(
+                self._grid_request_environment("knock-in"), product
+            )
+            out += list(profile.get("observation_times") or [])
+        elif sched is not None:
             out += [
                 rec.observation_time
                 for rec in sched.records
@@ -2221,6 +2264,7 @@ class SnowballPDESolver(BasePDESolver):
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
         """Resolve the solve state grid_request depends on; returns tau."""
+        self._grid_request_env = pricing_env
         tau = product.get_maturity(pricing_env)
         self._prepare_solve_state(product, pricing_env)
         sigma = pricing_env.get_vol(product.strike, tau)
