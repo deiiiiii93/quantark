@@ -12,8 +12,10 @@ import dataclasses
 from copy import deepcopy
 from dataclasses import dataclass
 
-from quantark.param.div.dividend_yield import DividendYield
-from quantark.param.rrf import ParallelShiftRateCurve
+from quantark.asset.equity.riskmeasures.greeks.bump_envs import (
+    shift_dividend_yield,
+    shift_vol_surface,
+)
 from quantark.util.exceptions import ValidationError
 
 
@@ -32,34 +34,6 @@ class CashGreeksReport:
         return dict(self.__dict__)
 
 
-class _ShiftedVolSurface:
-    """get_vol-compatible view returning base vol + an absolute shift."""
-
-    def __init__(self, base, shift: float):
-        self._base = base
-        self._shift = float(shift)
-
-    def get_vol(self, strike, time_to_maturity, spot=None):
-        return self._base.get_vol(strike, time_to_maturity, spot) + self._shift
-
-    def __getattr__(self, name):
-        return getattr(self._base, name)
-
-
-class _ShiftedDividendYield(DividendYield):
-    """Dividend yield shifted by a constant (r held fixed by construction)."""
-
-    def __init__(self, base, shift: float):
-        self._base = base
-        self._shift = float(shift)
-
-    def get_yield(self, time_to_maturity: float) -> float:
-        base = 0.0 if self._base is None else self._base.get_yield(
-            time_to_maturity
-        )
-        return base + self._shift
-
-
 def _reprice_spot(product, env, engine, rel_bump):
     e = deepcopy(env)
     e.spot_quote = dataclasses.replace(
@@ -68,21 +42,27 @@ def _reprice_spot(product, env, engine, rel_bump):
     return engine.price(product, e)
 
 
+# The three market bumps are PARALLEL shifts through the shared primitives
+# (shape preserved; a flat object stays flat). A TradingClockVolSurface fails
+# closed on the vega unit (patch spec 2026-09-03 §14) instead of the old
+# attribute-forwarding view that advertised the UNSHIFTED inner's exact
+# total-variance protocol.
 def _reprice_vol(product, env, engine, abs_bump):
     e = deepcopy(env)
-    e.vol_surface = _ShiftedVolSurface(env.vol_surface, abs_bump)
+    e.vol_surface = shift_vol_surface(e.vol_surface, abs_bump)
     return engine.price(product, e)
 
 
 def _reprice_rate(product, env, engine, abs_bump):
     e = deepcopy(env)
-    e.rate_curve = ParallelShiftRateCurve(env.rate_curve, abs_bump)
+    e.rate_curve = e.rate_curve.parallel_shifted(abs_bump)
     return engine.price(product, e)
 
 
 def _reprice_div(product, env, engine, abs_bump):
+    """q shifted with r held fixed by construction (rhoq convention)."""
     e = deepcopy(env)
-    e.div_yield = _ShiftedDividendYield(env.div_yield, abs_bump)
+    e.div_yield = shift_dividend_yield(e.div_yield, abs_bump)
     return engine.price(product, e)
 
 

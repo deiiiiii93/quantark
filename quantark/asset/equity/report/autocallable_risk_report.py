@@ -51,7 +51,7 @@ from quantark.asset.equity.riskmeasures import (
 )
 from quantark.param import FlatVolSurface, SpotQuote
 from quantark.param import TermStructureVolSurface
-from quantark.param.div import ContinuousDividendYield, DividendYield, TermStructureDividendYield
+from quantark.param.div import ContinuousDividendYield, DividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import EquityGreek
 from quantark.util.exceptions import ValidationError
@@ -124,17 +124,16 @@ def _clone_env(
 def _shift_dividend_yield(
     base_div_yield: DividendYield, shift: float
 ) -> DividendYield:
+    """Parallel shift of the dividend yield through the report's bounded
+    wrapper (the ``parallel_shifted`` primitive + the |q| <= 1 policy).
+
+    SIGNED: the ``max(0.0, .)`` zero floor that used to clamp continuous and
+    term yields here had survived the library-wide removal in b410a30f and
+    contradicted this report's own direct ``ShiftedDividendYield`` paths, so a
+    "q - 300bp" scenario on a 1% yield silently priced q = 0.
+    """
     if shift == 0.0:
         return base_div_yield
-    if isinstance(base_div_yield, TermStructureDividendYield):
-        yields = [max(0.0, float(y) + shift) for y in base_div_yield.yields]
-        return TermStructureDividendYield(
-            times=list(base_div_yield.times), yields=yields
-        )
-    if isinstance(base_div_yield, ContinuousDividendYield):
-        return ContinuousDividendYield(
-            div_yield=max(0.0, float(base_div_yield.div_yield) + shift)
-        )
     return ShiftedDividendYield(base=base_div_yield, shift=shift)
 
 

@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import ClassVar, List
 
-from quantark.param.div import DividendYield
+from quantark.param.div import DividendYield, ParallelShiftDividendYield
 from quantark.param.vol import VolatilitySurface
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_log, validate_positive
@@ -119,9 +119,10 @@ class BucketedDividendYield(DividendYield):
 
 
 @dataclass(frozen=True)
-class ShiftedDividendYield(DividendYield):
-    base: DividendYield
-    shift: float
+class ShiftedDividendYield(ParallelShiftDividendYield):
+    """The report's parallel yield shift: the ``ParallelShiftDividendYield``
+    primitive plus the signed-carry policy bound |q| <= 1 on the output (and
+    on the shift itself). Signed: no zero floor (b410a30f)."""
 
     def __post_init__(self) -> None:
         if not math.isfinite(float(self.shift)) or abs(float(self.shift)) > 1.0:
@@ -130,8 +131,10 @@ class ShiftedDividendYield(DividendYield):
             )
 
     def get_yield(self, time_to_maturity: float) -> float:
-        base_yield = float(self.base.get_yield(time_to_maturity))
-        return _check_carry_bound(base_yield + float(self.shift))
+        return _check_carry_bound(float(super().get_yield(time_to_maturity)))
+
+    def __repr__(self) -> str:
+        return f"ShiftedDividendYield(shift={self.shift:+.4%}, base={self.base!r})"
 
 
 @dataclass(frozen=True)

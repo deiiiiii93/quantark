@@ -606,7 +606,17 @@ Not done here, listed so they are not lost:
   shift, a grid stays a grid, other families are wrapped by
   `ParallelShiftVolSurface` / `ParallelShiftDividendYield`); the position
   central-vega mirror uses the same primitive. Tests:
-  `test/test_vol_div_parallel_shift_bump.py`.
+  `test/test_vol_div_parallel_shift_bump.py`. The two reports that carried
+  their own shift wrappers now delegate: `greek_conventions_report` drops its
+  attribute-forwarding `_ShiftedVolSurface` / `_ShiftedDividendYield` for the
+  primitives (so its vega on a clock-wrapped surface fails closed instead of
+  advertising the unshifted inner's total-variance protocol), and the report
+  `ShiftedDividendYield` is the `ParallelShiftDividendYield` primitive plus
+  the |q| <= 1 carry bound. `autocallable_risk_report._shift_dividend_yield`
+  lost a `max(0.0, .)` zero floor on continuous/term yields that b410a30f had
+  removed library-wide but never reached here — the report's own direct
+  shift paths never floored, so a "q − 300bp" scenario on a 1% yield
+  silently priced q = 0. Tests: `test/test_report_shift_wrappers_delegate.py`.
 - **Simple executor futures hedges are filled at spot**
   (`hedge_price = pricing_env.spot` for `hedge_instrument_type="futures"`)
   while the position is marked at the forward, so the open day books
