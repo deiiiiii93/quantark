@@ -579,8 +579,17 @@ Not done here, listed so they are not lost:
   through it: `numerical_rho`, `EquityPosition.get_trade_greeks` (central)
   and `get_trade_risk`, and the execution `rate_up` bump cell — the three
   parity-pinned siblings carried the same code. Tests:
-  `test/test_rho_term_structure_bump.py`. Bond/rate-engine DV01 bumps use
-  the same flat replacement and are out of scope here.
+  `test/test_rho_term_structure_bump.py`. The bond/rate-engine DV01, convexity
+  and key-rate-duration bumps (swaption, cap/floor, FRA, IRS, bond option
+  greeks, bond forward, bond futures, FRN effective duration) flattened the
+  curve at r(1y) the same way and were fixed in the follow-up commit via the
+  new `RateCurve.parallel_shifted` primitive (flat stays flat bitwise,
+  `TradingClockRateCurve` shifts its calendar-quoted inner); the rate engines
+  now shift discount and projection curves independently and the IRS engine
+  restores its projection curve to the original object. IRS
+  `key_rate_durations` keeps its documented bump-all-rates approximation, now
+  honestly tenor-independent, with a TODO pointing at
+  `key_rate_bumped_zero_curve`. Tests: `test/test_fi_dv01_parallel_shift.py`.
 - **Simple executor futures hedges are filled at spot**
   (`hedge_price = pricing_env.spot` for `hedge_instrument_type="futures"`)
   while the position is marked at the forward, so the open day books

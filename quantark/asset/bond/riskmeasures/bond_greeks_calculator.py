@@ -14,7 +14,6 @@ from scipy import stats
 from quantark.asset.bond.product.option.euro_short_term_bond_option import EuroShortTermBondOption
 from quantark.asset.bond.engine.analytical.black_engine import BlackBondOptionEngine
 from quantark.priceenv import PricingEnvironment
-from quantark.param.rrf.rate_curve import FlatRateCurve
 from quantark.param.vol import FlatVolSurface
 from quantark.util.exceptions import ValidationError, NumericalError
 
@@ -223,10 +222,13 @@ class BondGreeksCalculator:
         # Bump rates to change forward price
         base_rate = pricing_env.rate_curve.get_rate(1.0)
         bump = self.bump_size * base_rate if base_rate > 0 else 0.001
+        # The legacy floor kept the (flat) down rate at >= 0.1%; expressed as
+        # a shift so a term curve keeps its shape (parallel_shifted).
+        down_shift = -bump if base_rate - bump >= 0.001 else 0.001 - base_rate
         
         # Up bump
         env_up = deepcopy(pricing_env)
-        env_up.rate_curve = FlatRateCurve(rate=base_rate + bump)
+        env_up.rate_curve = env_up.rate_curve.parallel_shifted(bump)
         engine_up = BlackBondOptionEngine(env_up)
         results_up = engine_up.price_with_details(option, volatility, pricing_env.valuation_date)
         price_up = results_up.price
@@ -234,7 +236,7 @@ class BondGreeksCalculator:
         
         # Down bump
         env_down = deepcopy(pricing_env)
-        env_down.rate_curve = FlatRateCurve(rate=max(0.001, base_rate - bump))
+        env_down.rate_curve = env_down.rate_curve.parallel_shifted(down_shift)
         engine_down = BlackBondOptionEngine(env_down)
         results_down = engine_down.price_with_details(option, volatility, pricing_env.valuation_date)
         price_down = results_down.price
@@ -307,12 +309,10 @@ class BondGreeksCalculator:
         base_price: float,
         volatility: Optional[float]
     ) -> float:
-        """Calculate rho (1% rate bump)."""
-        base_rate = pricing_env.rate_curve.get_rate(1.0)
-        
-        # Bump rate up by 1%
+        """Calculate rho (1% parallel rate bump)."""
+        # Bump the curve up by 1% (parallel shift; shape preserved)
         env_up = deepcopy(pricing_env)
-        env_up.rate_curve = FlatRateCurve(rate=base_rate + 0.01)
+        env_up.rate_curve = env_up.rate_curve.parallel_shifted(0.01)
         engine_up = BlackBondOptionEngine(env_up)
         price_up = engine_up.price(option, volatility, pricing_env.valuation_date)
         
@@ -326,12 +326,10 @@ class BondGreeksCalculator:
         base_price: float,
         volatility: Optional[float]
     ) -> float:
-        """Calculate DV01 (1 basis point rate bump)."""
-        base_rate = pricing_env.rate_curve.get_rate(1.0)
-        
-        # Bump rate up by 1bp
+        """Calculate DV01 (1 basis point parallel rate bump)."""
+        # Bump the curve up by 1bp (parallel shift; shape preserved)
         env_up = deepcopy(pricing_env)
-        env_up.rate_curve = FlatRateCurve(rate=base_rate + 0.0001)
+        env_up.rate_curve = env_up.rate_curve.parallel_shifted(0.0001)
         engine_up = BlackBondOptionEngine(env_up)
         price_up = engine_up.price(option, volatility, pricing_env.valuation_date)
         
@@ -422,11 +420,9 @@ class BondGreeksCalculator:
         sensitivities["underlying_dv01"] = underlying_dv01
         sensitivities["underlying_duration"] = underlying_duration
         
-        # Option DV01 (via FDM)
-        base_rate = pricing_env.rate_curve.get_rate(1.0)
-        
+        # Option DV01 (via FDM, 1bp parallel shift of the curve)
         env_up = deepcopy(pricing_env)
-        env_up.rate_curve = FlatRateCurve(rate=base_rate + 0.0001)
+        env_up.rate_curve = env_up.rate_curve.parallel_shifted(0.0001)
         engine_up = BlackBondOptionEngine(env_up)
         price_up = engine_up.price(option, volatility, valuation_date)
         

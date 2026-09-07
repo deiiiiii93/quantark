@@ -153,27 +153,16 @@ def build_rate_bumped_env(
     """Parallel-shift the rate curve by ``direction * rate_bump``
     (continuously compounded, per CALENDAR year).
 
-    A flat curve stays flat (``FlatRateCurve(rate + shift)``, the legacy
-    formula, bitwise). Any other curve is wrapped in ``ParallelShiftRateCurve``
-    so its SHAPE is preserved: ``FlatRateCurve(r(T) + bump)`` differs from the
-    base by ``r(T) - r(t) + bump`` at every ``t < T`` and measures a curve
-    reshaping of hundreds of bp, not a 1bp rate move. A TradingClock wrapper
+    Delegates to ``RateCurve.parallel_shifted``: a flat curve stays flat
+    (``FlatRateCurve(rate + shift)``, the legacy formula, bitwise), any other
+    curve keeps its SHAPE (``FlatRateCurve(r(T) + bump)`` differs from the base
+    by ``r(T) - r(t) + bump`` at every ``t < T`` and measures a curve reshaping
+    of hundreds of bp, not a 1bp rate move), and a TradingClock wrapper
     re-exposes the shifted calendar-quoted inner through the same time map.
     """
     env = deepcopy(pricing_env)
-    env.rate_curve = _parallel_shifted(env.rate_curve, direction * rate_bump)
+    env.rate_curve = env.rate_curve.parallel_shifted(direction * rate_bump)
     return env
-
-
-def _parallel_shifted(curve, shift: float):
-    from quantark.param.rrf import FlatRateCurve, ParallelShiftRateCurve
-    from quantark.param.rrf.trading_clock_curve import TradingClockRateCurve
-
-    if isinstance(curve, FlatRateCurve):
-        return FlatRateCurve(curve.rate + shift)
-    if isinstance(curve, TradingClockRateCurve):
-        return TradingClockRateCurve(_parallel_shifted(curve.inner, shift), curve.time_map)
-    return ParallelShiftRateCurve(curve, shift)
 
 
 def advance_theta_bump(

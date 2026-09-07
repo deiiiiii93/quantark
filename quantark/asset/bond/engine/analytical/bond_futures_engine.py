@@ -279,15 +279,8 @@ class BondFuturesEngine:
         valuation_date: datetime,
         base_price: float,
     ) -> float:
-        """Calculate DV01 of futures (CTD-adjusted)."""
-        from quantark.param.rrf.rate_curve import FlatRateCurve
-
-        # Get base rate
-        base_rate = self.pricing_env.rate_curve.get_rate(1.0)
-
-        # Create bumped environment with a new flat curve
-        bumped_rate = base_rate + self.bump_size
-        bumped_curve = FlatRateCurve(rate=bumped_rate)
+        """Calculate DV01 of futures (CTD-adjusted) via a parallel curve shift."""
+        bumped_curve = self.pricing_env.rate_curve.parallel_shifted(self.bump_size)
 
         env_up = PricingEnvironment(
             rate_curve=bumped_curve,
@@ -328,18 +321,12 @@ class BondFuturesEngine:
         valuation_date: datetime,
         futures_price: float,
     ) -> float:
-        """Calculate convexity of futures (CTD-adjusted)."""
-        from quantark.param.rrf.rate_curve import FlatRateCurve
-
+        """Calculate convexity of futures (CTD-adjusted) via parallel curve shifts."""
         if futures_price == 0:
             return 0.0
 
-        # Get base rate
-        base_rate = self.pricing_env.rate_curve.get_rate(1.0)
-
         # Bump up
-        bumped_rate_up = base_rate + self.bump_size
-        curve_up = FlatRateCurve(rate=bumped_rate_up)
+        curve_up = self.pricing_env.rate_curve.parallel_shifted(self.bump_size)
         env_up = PricingEnvironment(
             rate_curve=curve_up,
             valuation_date=self.pricing_env.valuation_date,
@@ -351,8 +338,7 @@ class BondFuturesEngine:
         results_up = engine_up.price(futures, valuation_date, calculate_greeks=False)
 
         # Bump down
-        bumped_rate_down = base_rate - self.bump_size
-        curve_down = FlatRateCurve(rate=bumped_rate_down)
+        curve_down = self.pricing_env.rate_curve.parallel_shifted(-self.bump_size)
         env_down = PricingEnvironment(
             rate_curve=curve_down,
             valuation_date=self.pricing_env.valuation_date,

@@ -703,16 +703,11 @@ class FRNDiscountEngine:
         if base_price <= 0:
             return 0.0
 
-        # Price with rates bumped up
-        from quantark.param.rrf import FlatRateCurve
-
         original_curve = self.pricing_env.rate_curve
 
-        # Create bumped curve (simple flat bump)
-        base_rate = original_curve.get_rate(1.0)
-
-        up_curve = FlatRateCurve(rate=base_rate + rate_bump)
-        down_curve = FlatRateCurve(rate=base_rate - rate_bump)
+        # Parallel shift of the curve (shape preserved; a flat curve stays flat)
+        up_curve = original_curve.parallel_shifted(rate_bump)
+        down_curve = original_curve.parallel_shifted(-rate_bump)
 
         # Price with up curve
         self.pricing_env.rate_curve = up_curve

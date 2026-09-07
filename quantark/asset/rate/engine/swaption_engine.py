@@ -35,7 +35,7 @@ from dateutil.relativedelta import relativedelta
 
 from quantark.asset.rate.product.swaption import Swaption, SwaptionType
 from quantark.priceenv import PricingEnvironment
-from quantark.param.rrf import RateCurve, FlatRateCurve
+from quantark.param.rrf import RateCurve
 from quantark.util.calendar import calculate_day_count_fraction
 from quantark.util.exceptions import ValidationError, MarketDataError
 from quantark.util.numerical import safe_log, safe_sqrt, safe_divide, is_zero
@@ -219,17 +219,15 @@ class SwaptionEngine:
 
         original_curve = self.pricing_env.rate_curve
         original_projection = self.projection_curve
-        base_rate = original_curve.get_rate(1.0)
 
         try:
-            up_curve = FlatRateCurve(rate=base_rate + bump_size)
-            self.pricing_env.rate_curve = up_curve
-            self.projection_curve = up_curve
+            # parallel shift of BOTH curves (shape preserved; a flat curve stays flat)
+            self.pricing_env.rate_curve = original_curve.parallel_shifted(bump_size)
+            self.projection_curve = original_projection.parallel_shifted(bump_size)
             npv_up = self.price(swaption, valuation_date)
 
-            down_curve = FlatRateCurve(rate=base_rate - bump_size)
-            self.pricing_env.rate_curve = down_curve
-            self.projection_curve = down_curve
+            self.pricing_env.rate_curve = original_curve.parallel_shifted(-bump_size)
+            self.projection_curve = original_projection.parallel_shifted(-bump_size)
             npv_down = self.price(swaption, valuation_date)
         finally:
             self.pricing_env.rate_curve = original_curve

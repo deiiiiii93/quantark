@@ -20,7 +20,7 @@ from quantark.asset.rate.product.irs import (
 )
 from quantark.asset.bond.schedule.cashflow import CashFlow, FloatingCashFlow
 from quantark.priceenv import PricingEnvironment
-from quantark.param.rrf import RateCurve, FlatRateCurve
+from quantark.param.rrf import RateCurve
 from quantark.util.exceptions import ValidationError, MarketDataError
 
 
@@ -522,26 +522,23 @@ class IRSDiscountEngine:
         # Base NPV
         base_npv = self.price(swap, valuation_date)
 
-        # Create bumped curve
+        # Parallel shift of BOTH curves (shape preserved; a flat curve stays flat)
         original_curve = self.pricing_env.rate_curve
-        base_rate = original_curve.get_rate(1.0)  # Use 1Y rate as reference
+        original_projection = self.projection_curve
 
-        up_curve = FlatRateCurve(rate=base_rate + bump_size)
-        down_curve = FlatRateCurve(rate=base_rate - bump_size)
-
-        # Price with up curve
-        self.pricing_env.rate_curve = up_curve
-        self.projection_curve = up_curve
+        # Price with up curves
+        self.pricing_env.rate_curve = original_curve.parallel_shifted(bump_size)
+        self.projection_curve = original_projection.parallel_shifted(bump_size)
         npv_up = self.price(swap, valuation_date)
 
-        # Price with down curve
-        self.pricing_env.rate_curve = down_curve
-        self.projection_curve = down_curve
+        # Price with down curves
+        self.pricing_env.rate_curve = original_curve.parallel_shifted(-bump_size)
+        self.projection_curve = original_projection.parallel_shifted(-bump_size)
         npv_down = self.price(swap, valuation_date)
 
-        # Restore original curve
+        # Restore original curves
         self.pricing_env.rate_curve = original_curve
-        self.projection_curve = original_curve
+        self.projection_curve = original_projection
 
         # DV01 = (P_down - P_up) / (2 * bump)
         # Note: swap value increases when rates decrease
@@ -620,9 +617,9 @@ class IRSDiscountEngine:
         if valuation_date is None:
             valuation_date = self.pricing_env.valuation_date
 
-        # Get prices at different rate levels
+        # Get prices at different rate levels (parallel shift of BOTH curves)
         original_curve = self.pricing_env.rate_curve
-        base_rate = original_curve.get_rate(1.0)
+        original_projection = self.projection_curve
 
         # Base price
         base_npv = self.price(swap, valuation_date)
@@ -631,20 +628,18 @@ class IRSDiscountEngine:
             return 0.0
 
         # Up price
-        up_curve = FlatRateCurve(rate=base_rate + bump_size)
-        self.pricing_env.rate_curve = up_curve
-        self.projection_curve = up_curve
+        self.pricing_env.rate_curve = original_curve.parallel_shifted(bump_size)
+        self.projection_curve = original_projection.parallel_shifted(bump_size)
         npv_up = self.price(swap, valuation_date)
 
         # Down price
-        down_curve = FlatRateCurve(rate=base_rate - bump_size)
-        self.pricing_env.rate_curve = down_curve
-        self.projection_curve = down_curve
+        self.pricing_env.rate_curve = original_curve.parallel_shifted(-bump_size)
+        self.projection_curve = original_projection.parallel_shifted(-bump_size)
         npv_down = self.price(swap, valuation_date)
 
         # Restore
         self.pricing_env.rate_curve = original_curve
-        self.projection_curve = original_curve
+        self.projection_curve = original_projection
 
         # Convexity = (P_up + P_down - 2*P_base) / (P_base * dy^2)
         convexity = (npv_up + npv_down - 2 * base_npv) / (
@@ -682,37 +677,34 @@ class IRSDiscountEngine:
         if key_tenors is None:
             key_tenors = [0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0, 30.0]
 
-        # For a flat curve implementation, KRDs are approximate
-        # A full implementation would use a bootstrapped curve
+        # APPROXIMATION (unchanged contract): "bump all rates" is a PARALLEL
+        # shift of both curves, so every key tenor carries the same value; the
+        # old code flattened the curve at r(tenor), which on a term curve
+        # measured a reshaping, not a rate move.
+        # TODO: a real per-pillar KRD needs key_rate_bumped_zero_curve on an
+        # InterpolatedRateCurve (see riskmeasures/bucketed_coordinates/rate_keyrate.py).
 
         npv = abs(self.price(swap, valuation_date))
         if npv < 1e-10:
             return {tenor: 0.0 for tenor in key_tenors}
 
-        krds = {}
         original_curve = self.pricing_env.rate_curve
+        original_projection = self.projection_curve
 
-        for tenor in key_tenors:
-            base_rate = original_curve.get_rate(tenor)
+        self.pricing_env.rate_curve = original_curve.parallel_shifted(bump_size)
+        self.projection_curve = original_projection.parallel_shifted(bump_size)
+        npv_up = self.price(swap, valuation_date)
 
-            # Simple approximation: bump all rates
-            # A proper implementation would bump only the specific tenor
-            up_curve = FlatRateCurve(rate=base_rate + bump_size)
-            self.pricing_env.rate_curve = up_curve
-            self.projection_curve = up_curve
-            npv_up = self.price(swap, valuation_date)
-
-            down_curve = FlatRateCurve(rate=base_rate - bump_size)
-            self.pricing_env.rate_curve = down_curve
-            self.projection_curve = down_curve
-            npv_down = self.price(swap, valuation_date)
-
-            krd = (npv_down - npv_up) / (2 * bump_size * npv)
-            krds[tenor] = krd
+        self.pricing_env.rate_curve = original_curve.parallel_shifted(-bump_size)
+        self.projection_curve = original_projection.parallel_shifted(-bump_size)
+        npv_down = self.price(swap, valuation_date)
 
         # Restore
         self.pricing_env.rate_curve = original_curve
-        self.projection_curve = original_curve
+        self.projection_curve = original_projection
+
+        krd = (npv_down - npv_up) / (2 * bump_size * npv)
+        krds = {tenor: krd for tenor in key_tenors}
 
         return krds
 

@@ -44,6 +44,11 @@ class TradingClockRateCurve(RateCurve):
         df = self.get_discount_factor(time_to_maturity)
         return -math.log(df) / float(time_to_maturity)
 
+    def parallel_shifted(self, shift: float) -> "TradingClockRateCurve":
+        """Shift the CALENDAR-quoted inner (r/q live on the calendar clock, so
+        the bump is per calendar year) and re-expose it through the same map."""
+        return TradingClockRateCurve(self.inner.parallel_shifted(shift), self.time_map)
+
     def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockRateCurve":
         """The same inner curve re-expressed through another map (e.g. re-anchored)."""
         return TradingClockRateCurve(self.inner, time_map)

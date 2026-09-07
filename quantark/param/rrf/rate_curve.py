@@ -60,6 +60,19 @@ class RateCurve(ABC):
         
         return -math.log(df2 / df1) / (t2 - t1)
 
+    def parallel_shifted(self, shift: float) -> "RateCurve":
+        """This curve with every continuously-compounded zero rate moved by
+        ``shift``: DF(T) -> DF(T) * exp(-shift * T), the SHAPE is preserved.
+
+        The one primitive for rate bumps (rho, DV01, convexity): replacing a
+        term curve with ``FlatRateCurve(r(T*) + shift)`` differs from the base
+        by r(T*) - r(t) + shift at every other t and measures a curve
+        reshaping, not a rate move. Subclasses that can express the shift in
+        their own parameters override this (a flat curve stays flat, with the
+        legacy floats); the default wraps in ``ParallelShiftRateCurve``.
+        """
+        return ParallelShiftRateCurve(self, shift)
+
 
 class ParallelShiftRateCurve(RateCurve):
     """
@@ -139,6 +152,9 @@ class FlatRateCurve(RateCurve):
         if time_to_maturity < 0:
             raise ValidationError(f"Time to maturity must be non-negative, got {time_to_maturity}")
         return math.exp(-self.rate * time_to_maturity)
+
+    def parallel_shifted(self, shift: float) -> "FlatRateCurve":
+        return FlatRateCurve(self.rate + shift)
     
     def __repr__(self):
         return f"FlatRateCurve(rate={self.rate:.2%})"

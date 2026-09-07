@@ -219,13 +219,8 @@ class BondForwardEngine:
         valuation_date: datetime,
         base_results: BondForwardResults,
     ) -> float:
-        """Calculate DV01 using parallel rate bump."""
-        from quantark.param.rrf.rate_curve import FlatRateCurve
-
-        # Get base rate and create bumped curve
-        base_rate = self.pricing_env.rate_curve.get_rate(1.0)
-        bumped_rate = base_rate + self.bump_size
-        bumped_curve = FlatRateCurve(rate=bumped_rate)
+        """Calculate DV01 using a parallel rate-curve shift (shape preserved)."""
+        bumped_curve = self.pricing_env.rate_curve.parallel_shifted(self.bump_size)
 
         env_up = PricingEnvironment(
             rate_curve=bumped_curve,
@@ -267,18 +262,12 @@ class BondForwardEngine:
         valuation_date: datetime,
         base_results: BondForwardResults,
     ) -> float:
-        """Calculate convexity using central difference."""
-        from quantark.param.rrf.rate_curve import FlatRateCurve
-
+        """Calculate convexity using central difference (parallel curve shifts)."""
         if base_results.forward_dirty_price == 0:
             return 0.0
 
-        # Get base rate
-        base_rate = self.pricing_env.rate_curve.get_rate(1.0)
-
         # Bump up
-        bumped_rate_up = base_rate + self.bump_size
-        curve_up = FlatRateCurve(rate=bumped_rate_up)
+        curve_up = self.pricing_env.rate_curve.parallel_shifted(self.bump_size)
         env_up = PricingEnvironment(
             rate_curve=curve_up,
             valuation_date=self.pricing_env.valuation_date,
@@ -290,8 +279,7 @@ class BondForwardEngine:
         results_up = engine_up.price(forward, valuation_date)
 
         # Bump down
-        bumped_rate_down = base_rate - self.bump_size
-        curve_down = FlatRateCurve(rate=bumped_rate_down)
+        curve_down = self.pricing_env.rate_curve.parallel_shifted(-self.bump_size)
         env_down = PricingEnvironment(
             rate_curve=curve_down,
             valuation_date=self.pricing_env.valuation_date,
