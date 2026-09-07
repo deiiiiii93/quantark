@@ -143,6 +143,10 @@ def validate_pair(snap0: ValuationSnapshot, snap1: ValuationSnapshot) -> None:
             raise ValidationError("numeric valuation points must advance by calendar_days/365")
 
 
+#: the environment field a factor reads, for the three clock-wrappable objects
+_CLOCK_FIELD = {Factor.VOL: "vol_surface", Factor.RATE: "rate_curve", Factor.DIVIDEND: "div_yield"}
+
+
 def _sample(env: Any, coordinate: FactorCoordinate, factor: Factor) -> Optional[float]:
     tenor = coordinate.tenor_t1
     if factor not in coordinate.applicable or tenor is None:
@@ -156,6 +160,44 @@ def _sample(env: Any, coordinate: FactorCoordinate, factor: Factor) -> Optional[
     if factor is Factor.BASIS:
         return float(env.get_basis_yield(tenor))
     return None
+
+
+def _read_inner(inner: Any, factor: Factor, point: float, strike: Any, spot: float) -> float:
+    if factor is Factor.VOL:
+        return float(inner.get_vol(strike, point, spot))
+    if factor is Factor.RATE:
+        return float(inner.get_rate(point))
+    return float(inner.get_yield(point))                      # DIVIDEND
+
+
+def sample_pair(e0: Any, e1: Any, coordinate: FactorCoordinate, factor: Factor):
+    """(t0 level, t1 level, move) for one factor at ONE shared coordinate.
+
+    A clock wrapper converts the coordinate with its OWN anchor, and the two
+    snapshots are anchored at their own valuation dates, so sampling through the
+    environment reads two different points of one unchanged market (patch spec
+    2026-09-03 §14). Both sides therefore read the INNER at the t1 coordinate
+    mapped onto the inner's axis: an unchanged market differences to exactly
+    zero, matching ``changed`` (which ignores the anchor) and the waterfall
+    (which re-anchors on the TIME step, so the anchor slide is time, like the
+    tenor slide the shared coordinate already keeps out of the market moves).
+    The move then carries the unit the bump moves: sigma_td for vol, the
+    calendar-quoted r and q for the rate and dividend wrappers.
+    """
+    tenor = coordinate.tenor_t1
+    if factor in _CLOCK_FIELD and tenor is not None and factor in coordinate.applicable:
+        o0, o1 = getattr(e0, _CLOCK_FIELD[factor], None), getattr(e1, _CLOCK_FIELD[factor], None)
+        # validate_clock_pair has already rejected a wrapper on one side only
+        if is_clock_wrapped(o0) and is_clock_wrapped(o1):
+            point = float(o1.to_inner_time(float(tenor)))
+            if point > 0.0:
+                a = _read_inner(o0.inner, factor, point, coordinate.reference_strike, float(e0.spot))
+                b = _read_inner(o1.inner, factor, point, coordinate.reference_strike, float(e1.spot))
+                return a, b, b - a
+            # a horizon with no trading time left has no inner coordinate: fall
+            # through to the wrapper's own documented degenerate reading
+    a, b = _sample(e0, coordinate, factor), _sample(e1, coordinate, factor)
+    return a, b, (None if a is None or b is None else b - a)
 
 
 def build_factor_moves(
@@ -176,14 +218,10 @@ def build_factor_moves(
     yf = float(calculate_year_fraction(snap0.date, snap1.date, e0.day_count_convention,
                                        e0.bus_days_in_year, calendar=cal))
 
-    def pair(factor):
-        a, b = _sample(e0, coordinate, factor), _sample(e1, coordinate, factor)
-        return a, b, (None if a is None or b is None else b - a)
-
-    vol = pair(Factor.VOL)
-    rate = pair(Factor.RATE)
-    div = pair(Factor.DIVIDEND)
-    basis = pair(Factor.BASIS)
+    vol = sample_pair(e0, e1, coordinate, Factor.VOL)
+    rate = sample_pair(e0, e1, coordinate, Factor.RATE)
+    div = sample_pair(e0, e1, coordinate, Factor.DIVIDEND)
+    basis = sample_pair(e0, e1, coordinate, Factor.BASIS)
     for label, triple in (("vol", vol), ("rate", rate), ("dividend", div), ("basis", basis)):
         for v in triple:
             if v is not None and not math.isfinite(v):

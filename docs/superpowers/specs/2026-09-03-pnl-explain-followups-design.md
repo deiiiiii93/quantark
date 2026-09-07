@@ -575,16 +575,28 @@ Not done here, listed so they are not lost:
   ._bump_unit_vol`. Tests: `test/test_vol_div_parallel_shift_bump.py`.
   **Taylor still fails closed on a wrapped environment**, now for two
   remaining reasons, neither of them the unit question:
-  (i) the theta bump sets `env.valuation_date` without re-anchoring the
+  the theta bump sets `env.valuation_date` without re-anchoring the
   wrappers' `BusinessTimeMap` (`numerical.py:253`, `:594`), so every time
-  greek would read the holiday layout of the OLD anchor; and (ii) the
-  factor model still measures its VOL move through `env.get_vol`, i.e. in
-  σ_cal points, so `vega × d_vol` would multiply a σ_td sensitivity by a
-  σ_cal move — and, separately, an unchanged inner surface produces a
-  non-zero `d_vol` purely from the anchor moving, which `changed` correctly
-  reports as no VOL move. Both are follow-ups; (ii) carries a design
-  question (which map samples the inner when t0 and t1 have different
-  anchors).
+  greek would read the holiday layout of the OLD anchor. Measured on a 30d
+  tenor anchored the Friday before the 2026 Spring Festival: 15 trading days
+  against the re-anchored 14, 17.59% vol against 17.00%.
+
+  **The factor-move half is FIXED (desk decision 2026-09-07).** A wrapped
+  factor is sampled on its INNER's axis at the t1 coordinate mapped there by
+  the t1 wrapper (`to_inner_time` on the three wrappers; `sample_pair` in
+  `factor_diff`). Reading through the environment converted with each
+  snapshot's own anchor, and the two snapshots are anchored at their own
+  valuation dates by construction, so an unchanged market reported a move:
+  measured −0.57 vol points over one day into the 2026 Spring Festival, and
+  a real +1% rate move on the trading axis read as +0.81%. The anchor slide
+  belongs to TIME, where the waterfall already books it by re-anchoring on
+  the time step, exactly as the shared t1 coordinate already keeps the
+  ordinary tenor slide out of the market moves; and `changed`, which ignores
+  the anchor, already said no market move. The move now carries the unit the
+  bump moves (σ_td for vol; calendar-quoted r and q for the rate and
+  dividend wrappers), so `vega × d_vol` is dimensionally sound once the
+  theta anchor is fixed. Tests:
+  `test/test_pnlexplain_clock_coordinate.py`.
 - **Scalar numerical rho replaced the whole rate curve** with
   `FlatRateCurve(r(T) + bump)` (`numerical.py:282`), so for a
   term-structure curve it measured a curve *reshaping*, not a parallel

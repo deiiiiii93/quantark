@@ -49,6 +49,12 @@ class TradingClockRateCurve(RateCurve):
         the bump is per calendar year) and re-expose it through the same map."""
         return TradingClockRateCurve(self.inner.parallel_shifted(shift), self.time_map)
 
+    def to_inner_time(self, time_to_maturity: float) -> float:
+        """A time on THIS curve's axis (trading) expressed on the inner's axis
+        (calendar). Lets a caller read the inner at one shared coordinate
+        instead of letting each wrapper's own anchor pick a different point."""
+        return float(self.time_map.to_calendar(float(time_to_maturity)))
+
     def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockRateCurve":
         """The same inner curve re-expressed through another map (e.g. re-anchored)."""
         return TradingClockRateCurve(self.inner, time_map)

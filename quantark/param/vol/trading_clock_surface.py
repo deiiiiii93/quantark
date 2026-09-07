@@ -80,6 +80,12 @@ class TradingClockVolSurface(BlackImpliedVolSurface):
         """
         return TradingClockVolSurface(self.inner.parallel_shifted(shift), self.time_map)
 
+    def to_inner_time(self, time_to_maturity: float) -> float:
+        """A time on THIS surface's axis (calendar) expressed on the inner's
+        axis (trading). Lets a caller read the inner at one shared coordinate
+        instead of letting each wrapper's own anchor pick a different point."""
+        return float(self.time_map.to_trading(float(time_to_maturity)))
+
     def with_time_map(self, time_map: BusinessTimeMap) -> "TradingClockVolSurface":
         """The same inner surface re-expressed through another map (e.g. re-anchored)."""
         return TradingClockVolSurface(self.inner, time_map)

@@ -198,8 +198,19 @@ valuation date (TIME = the same inner objects seen from the new date), and a
 wrapped field anchored elsewhere, a wrapper on one side only, two clocks, or a
 float-maturity product on a `BUSINESS_DAYS` environment is a
 `ValidationError`. The Taylor method is rejected on a wrapped environment
-(the calculator's bumps replace the wrapper with a calendar-quoted object);
-pass `methods=(ExplainMethod.WATERFALL,)`.
+(its theta bump does not re-anchor the map); pass
+`methods=(ExplainMethod.WATERFALL,)`.
+
+A wrapped factor is SAMPLED on its inner's own axis, at the t1 coordinate
+mapped there by the t1 wrapper (`to_inner_time`). Reading through the
+environment instead would convert with each snapshot's own anchor and report a
+market move on an unchanged market, because the two snapshots are anchored at
+their own valuation dates by construction. The anchor slide belongs to TIME,
+where the waterfall already books it by re-anchoring on the time step, exactly
+as the shared t1 coordinate keeps the ordinary tenor slide out of the market
+moves. So on a wrapped environment `vol_pts` is a move of the trading-quoted
+`sigma_td`, and `rate_pct` / `div_pct` are moves of the calendar-quoted inner
+`r` and `q`. Those are the units the corresponding bumps move.
 
 ## Limitations
 
