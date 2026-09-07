@@ -190,7 +190,7 @@ class AccrualBasis(Enum):
 @dataclass(frozen=True)
 class AutocallableCashLeg(CashLeg):          # inherits direction(sign), name, leg_id
     leg_type: AutocallableLegType
-    notional: float                          # absolute, per-unit (position scales by quantity)
+    notional: float                          # absolute for the TRADE; not scaled by the position quantity (§11.8 position-level contract, amended 2026-09-07)
     rate: float
     # --- schedule identity & accrual (all REQUIRED, all sourced from the workbook) ---
     observation_schedule: Sequence[float]    # FUTURE KO (or coupon) observation year-fractions

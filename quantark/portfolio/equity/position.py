@@ -117,6 +117,11 @@ class EquityPosition:
         Calculate full trade value including product and attached cash legs.
 
         For positions without cash legs, this is exactly get_market_value().
+
+        Contract [§11.8], shared with get_trade_risk and the execution kernel: the
+        product PV scales by the signed quantity; cash legs are absolute for the
+        trade, carry the position holder's direction and are not scaled by the
+        quantity or its sign.
         """
         if not self.cash_legs:
             return self.get_market_value(pricing_env)
@@ -135,12 +140,16 @@ class EquityPosition:
             value_leg(leg, result.event_distribution, pricing_env, unit_notional)
             for leg in self.cash_legs
         )
-        return (result.npv + leg_pv_total) * self.quantity
+        return result.npv * self.quantity + leg_pv_total
 
     def get_trade_value_breakdown(
         self, pricing_env: PricingEnvironment
     ) -> TradeValueBreakdown:
-        """Return product and per-leg PV attribution."""
+        """Return product and per-leg PV attribution.
+
+        Product PV is scaled by the signed quantity; leg PVs are absolute [§11.8],
+        so ``total`` equals get_trade_value.
+        """
         if not self.cash_legs:
             return TradeValueBreakdown(
                 product_npv=self.get_market_value(pricing_env),
@@ -159,10 +168,7 @@ class EquityPosition:
         unit_notional = self._get_unit_notional(pricing_env)
         leg_pvs = {}
         for leg in self.cash_legs:
-            pv = (
-                value_leg(leg, result.event_distribution, pricing_env, unit_notional)
-                * self.quantity
-            )
+            pv = value_leg(leg, result.event_distribution, pricing_env, unit_notional)
             leg_pvs[leg.leg_id] = LegPV(
                 name=leg.name,
                 direction=leg.direction,
@@ -417,7 +423,9 @@ class EquityPosition:
         return self.quantity * base_price * contract_multiplier
 
     def _get_unit_notional(self, pricing_env: PricingEnvironment) -> float:
-        """Return per-unit notional so quantity scales product and leg PV once."""
+        """Per-unit notional (initial price x multiplier, sign-free) that fraction-based
+        leg amounts resolve against. Legs are absolute [§11.8]: the quantity scales the
+        product only, never a leg."""
         return self.get_actual_notional(pricing_env) / self.quantity
 
     @staticmethod

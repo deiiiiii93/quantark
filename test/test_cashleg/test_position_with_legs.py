@@ -86,8 +86,11 @@ def test_get_trade_value_breakdown_attributes_per_leg():
     assert len(breakdown.leg_pvs) == 2
     premium_pv = next(v.pv for v in breakdown.leg_pvs.values() if v.name == "Premium")
     backend_pv = next(v.pv for v in breakdown.leg_pvs.values() if v.name == "Backend")
-    assert premium_pv == pytest.approx(-100.0 * 2.0, rel=1e-9)
-    assert backend_pv == pytest.approx(50.0 * math.exp(-0.05) * 2.0, rel=1e-9)
+    # Legs are absolute [§11.8]: quantity 2 scales the product, never a leg.
+    assert premium_pv == pytest.approx(-100.0, rel=1e-9)
+    assert backend_pv == pytest.approx(50.0 * math.exp(-0.05), rel=1e-9)
+    assert breakdown.product_npv == pytest.approx(
+        2.0 * BlackScholesEngine().price(_option(), _env()), rel=1e-9)
 
 
 def test_two_deterministic_legs_of_same_type_both_priced():

@@ -40,14 +40,21 @@ def test_margin_leg_pv_and_greeks_finite(asset, kind):
     assert np.isfinite(greeks["gamma"])
 
 
-def test_quantity_scales_trade_value_linearly():
+def test_quantity_scales_the_product_not_the_legs():
+    # [§11.8] the product PV scales by quantity; the margin leg is absolute for the
+    # trade, so going from one lot to three adds exactly two product units.
     env = make_env()
     product = make_snowball()
     engine = make_engine("pde", "snowball")
     obs = future_event_times(product, engine, env)
-    v1 = _pos(product, engine, [make_margin_leg(obs)], quantity=1.0).get_trade_value(env)
-    v3 = _pos(product, engine, [make_margin_leg(obs)], quantity=3.0).get_trade_value(env)
-    assert abs(v3 - 3.0 * v1) <= 1e-6 * max(1.0, abs(v1))
+    one = _pos(product, engine, [make_margin_leg(obs)], quantity=1.0)
+    three = _pos(product, engine, [make_margin_leg(obs)], quantity=3.0)
+    v1, v3 = one.get_trade_value(env), three.get_trade_value(env)
+    leg = sum(v.pv for v in one.get_trade_value_breakdown(env).leg_pvs.values())
+    assert leg != 0.0
+    assert abs((v3 - v1) - 2.0 * (v1 - leg)) <= 1e-6 * max(1.0, abs(v1))
+    assert abs(sum(v.pv for v in three.get_trade_value_breakdown(env).leg_pvs.values()) - leg) \
+        <= 1e-9 * max(1.0, abs(leg))
 
 
 def test_fail_loud_when_engine_emits_no_ko_stream():

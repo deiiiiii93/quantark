@@ -14,7 +14,12 @@ if TYPE_CHECKING:
 
 
 class LegDirection(Enum):
-    """Cash-flow direction from the buyer's perspective."""
+    """Cash-flow direction for the position holder.
+
+    Legs are absolute [§11.8]: they are not scaled by the position quantity or its
+    sign, so a seller books its legs with the seller's own direction. The BUYER_*
+    names read as "the holder receives" / "the holder pays".
+    """
 
     BUYER_RECEIVES = +1
     BUYER_PAYS = -1
