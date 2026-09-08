@@ -99,5 +99,9 @@ def test_public_api_is_exported():
     for name in ("MarketPath", "StartState", "trading_calendar", "DEFAULT_TENOR_GRID", "PathHistory",
                  "StationaryBlockBootstrap", "GBMPaths", "ConstantVol", "StickyRealisedVol",
                  "market_path_from_day_path", "SnowballStressLibrary", "stress_set", "DayChain", "day_chain",
-                 "carry_at", "curve_from_chain", "listed_im_contracts", "dividend_yield_for_day", "to_market_dataset"):
+                 "carry_at", "curve_from_chain", "listed_im_contracts", "dividend_yield_for_day", "to_market_dataset",
+                 "EnsembleConfig", "PricingProviderConfig", "CacheConfig", "GateConfig",
+                 "EnsembleBacktestEngine", "EnsembleResults", "StateCube", "RepricingPricer",
+                 "StateCache", "DayStates", "StateKey", "GateReport", "VectorLifecycle",
+                 "VectorHedgeLedger", "OracleReport", "run_oracle"):
         assert hasattr(sim, name), name
