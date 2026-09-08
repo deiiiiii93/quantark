@@ -84,3 +84,39 @@ def test_listed_im_contracts_follow_the_cffex_cycle():
     assert [c for c, _ in listed_im_contracts(pd.Timestamp("2024-11-11"), cal)] == ["IM2411", "IM2412", "IM2503", "IM2506"]
     # after the November expiry (15th) the December contract is nearest and January follows
     assert [c for c, _ in listed_im_contracts(pd.Timestamp("2024-11-18"), cal)] == ["IM2412", "IM2501", "IM2503", "IM2506"]
+
+
+from quantark.backtest.simulation.carry import FUTURES_MULTIPLIER, DayChain, day_chain
+from .conftest import SPOT, make_market_path
+
+
+def test_day_chain_prices_each_path_off_its_own_curve():
+    mp = make_market_path(n_paths=2, n_days=30, start=date(2024, 1, 2))
+    chain = day_chain(mp, 0)
+    assert isinstance(chain, DayChain)
+    assert chain.contracts == ("IM2401", "IM2402", "IM2403", "IM2406")
+    assert chain.prices.shape == (2, 4)
+    assert chain.multiplier == FUTURES_MULTIPLIER
+    for i in range(2):
+        for j, t in enumerate(chain.tenors):
+            expected = mp.spot[i, 0] * np.exp(carry_at(mp.carry[i, 0], mp.tenor_grid, np.array([t]))[0])
+            assert chain.prices[i, j] == pytest.approx(expected, rel=1e-14)
+    assert chain.tenors[0] == pytest.approx((date(2024, 1, 19) - date(2024, 1, 2)).days / 365.0)
+
+
+def test_day_chain_frame_has_the_replay_columns():
+    mp = make_market_path(n_paths=2, n_days=30)
+    frame = day_chain(mp, 3).frame(1)
+    assert list(frame.columns) == ["date", "contract", "futures_price", "expiry_date", "multiplier"]
+    assert len(frame) == 4
+    assert (frame["date"] == mp.dates[3]).all()
+    assert frame["futures_price"].iloc[2] == pytest.approx(day_chain(mp, 3).prices[1, 2])
+
+
+def test_expiring_contract_prices_at_spot_on_its_expiry_day():
+    mp = make_market_path(n_paths=1, n_days=30, start=date(2024, 1, 2))
+    day = list(mp.dates).index(pd.Timestamp("2024-01-19"))
+    chain = day_chain(mp, day)
+    assert chain.contracts[0] == "IM2401"
+    assert chain.tenors[0] == 0.0
+    assert chain.prices[0, 0] == pytest.approx(mp.spot[0, day])

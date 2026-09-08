@@ -102,3 +102,66 @@ def listed_im_contracts(day: pd.Timestamp, calendar: pd.DatetimeIndex) -> List[T
         if m in _QUARTERLY:
             months.append((y, m))
     return [(f"IM{y % 100:02d}{m:02d}", im_expiry(y, m, calendar)) for y, m in months]
+
+
+FUTURES_MULTIPLIER = 200.0
+
+
+def _extended_calendar(dates: pd.DatetimeIndex, *, years_beyond: float = 1.5) -> pd.DatetimeIndex:
+    """``dates`` followed by plain weekdays for ``years_beyond`` years.
+
+    ``listed_im_contracts`` needs the calendar to reach the far contract's
+    expiry, up to nine months past the day.  Holidays after the path's own
+    calendar are unknown and treated as trading days; that only moves the
+    expiry date of contracts that expire after the path ends, which never
+    trade in the run.
+    """
+    last = pd.Timestamp(dates[-1])
+    tail = pd.bdate_range(last + pd.Timedelta(days=1), last + pd.Timedelta(days=int(365 * years_beyond)))
+    return dates.append(tail)
+
+
+@dataclass(frozen=True)
+class DayChain:
+    """The listed IM chain on one day, priced for every path (spec 6)."""
+
+    date: pd.Timestamp
+    contracts: Tuple[str, ...]
+    expiries: Tuple[pd.Timestamp, ...]
+    tenors: np.ndarray      # (n_contracts,) ACT/365 from ``date``
+    prices: np.ndarray      # (n_paths, n_contracts)
+    multiplier: float
+
+    def frame(self, path_index: int) -> pd.DataFrame:
+        """One path's chain in the replay engine's futures-frame layout."""
+        return pd.DataFrame(
+            {
+                "date": [self.date] * len(self.contracts),
+                "contract": list(self.contracts),
+                "futures_price": self.prices[path_index].astype(float).tolist(),
+                "expiry_date": list(self.expiries),
+                "multiplier": [float(self.multiplier)] * len(self.contracts),
+            }
+        )
+
+
+def day_chain(path: MarketPath, day_index: int, *, multiplier: float = FUTURES_MULTIPLIER) -> DayChain:
+    """Price the four listed contracts on ``path.dates[day_index]`` for every path.
+
+    ``F_i = S * exp(B(T_i))`` with ``T_i`` the contract's remaining tenor read
+    off each path's constant-maturity curve; a contract expiring today has
+    ``T = 0`` and prices at spot.
+    """
+    if not 0 <= day_index < path.n_days:
+        raise ValidationError(f"day_index {day_index} out of range for {path.n_days} days")
+    if multiplier <= 0.0:
+        raise ValidationError("multiplier must be positive")
+    day = pd.Timestamp(path.dates[day_index])
+    listed = listed_im_contracts(day, _extended_calendar(path.dates))
+    contracts = tuple(code for code, _ in listed)
+    expiries = tuple(exp for _, exp in listed)
+    tenors = np.array([(exp - day).days / 365.0 for exp in expiries])
+    b = carry_at(path.carry[:, day_index, :], path.tenor_grid, tenors)   # (n_paths, n_contracts)
+    prices = path.spot[:, day_index][:, None] * np.exp(b)
+    return DayChain(date=day, contracts=contracts, expiries=expiries, tenors=tenors,
+                    prices=prices, multiplier=float(multiplier))
