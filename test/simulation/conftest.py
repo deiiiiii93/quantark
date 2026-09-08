@@ -61,9 +61,18 @@ KO_BARRIER = 1.03 * SPOT
 KI_BARRIER = 0.75 * SPOT
 
 
-def short_snowball(maturity_days: int = 6, *, ko_days=(2, 5), ki_days=(1, 3), continuous_ki: bool = False):
-    """A snowball short enough to run a whole life inside a test."""
-    return create_standard_snowball(
+def short_snowball(maturity_days: int = 6, *, ko_days=(2, 5), ki_days=(1, 3), continuous_ki: bool = False,
+                   settlement_lag_days: int = 0):
+    """A snowball short enough to run a whole life inside a test.
+
+    ``settlement_lag_days`` puts a YEAR_FRACTION settlement lag on the
+    contract (the numeric clock: the schedule is in year fractions, so the
+    tracker keeps a time-based valuation point).  The factory does not take
+    a convention, so it is set after construction and re-validated.
+    """
+    from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+
+    product = create_standard_snowball(
         initial_price=SPOT, strike=SPOT, maturity=maturity_days / 365.0, contract_multiplier=1.0,
         ko_barrier=KO_BARRIER, ki_barrier=KI_BARRIER, ko_rate=0.20, num_observations=len(ko_days),
         ko_observation_dates=[d / 365.0 for d in ko_days],
@@ -72,6 +81,12 @@ def short_snowball(maturity_days: int = 6, *, ko_days=(2, 5), ki_days=(1, 3), co
         ki_observation_dates=None if continuous_ki else [d / 365.0 for d in ki_days],
         include_principal=True,
     )
+    if settlement_lag_days:
+        product.settlement_convention = SettlementConvention(
+            lag=settlement_lag_days / 365.0, lag_unit=SettlementLagUnit.YEAR_FRACTION,
+        )
+        product._validate_settlement_convention()
+    return product
 
 
 def pde_engine_config(**overrides) -> AutocallableEngineConfig:

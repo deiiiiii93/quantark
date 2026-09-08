@@ -382,13 +382,14 @@ class AutocallableLifecycleTracker:
             )
 
         ko_records = self._scheduled_records(product, env, "ko")
-        ko_due, ko_barrier, ko_payoff, ko_settle = [], [], [], []
+        ko_due, ko_barrier, ko_payoff, ko_settle, ko_delay = [], [], [], [], []
         for rec in ko_records:
             due = first_due(lambda day, vp, rec=rec: self._record_is_due(day, vp, rec))
             ko_due.append(due)
             ko_barrier.append(float(rec["barrier"]) if rec["barrier"] is not None else np.nan)
             ko_payoff.append(float(rec["payoff"]))
             ko_settle.append(settlement_position(rec["settlement_date"], due))
+            ko_delay.append(float(rec["settlement_time"]) - float(rec["time"]))
 
         ki_observation_type = getattr(product.barrier_config, "ki_observation_type", None)
         ki_continuous = bool(
@@ -415,6 +416,7 @@ class AutocallableLifecycleTracker:
             lambda day, vp: self._timing_is_due(day, vp, timing)
         )
         terminal_settle = settlement_position(terminal_payment_date(timing), terminal_due)
+        terminal_delay = float(timing.payment_time) - float(timing.determination_time)
         return CalendarSchedule(
             dates=dates,
             ko_due_day=np.array(ko_due, dtype=np.int64),
@@ -431,6 +433,9 @@ class AutocallableLifecycleTracker:
             disable_ko_after_ki=bool(
                 getattr(product.barrier_config, "disable_ko_after_ki", False)
             ),
+            uses_date_timing=bool(self._uses_date_timing(product)),
+            ko_settlement_delay=np.array(ko_delay, dtype=float),
+            terminal_settlement_delay=terminal_delay,
         )
 
     # ------------------------------------------------------------------
@@ -679,6 +684,13 @@ class CalendarSchedule:
     :meth:`AutocallableLifecycleTracker.resolve_calendar_schedule` from the
     same records and due rule ``observe`` uses, so a caller that fires on
     these days fires exactly when the tracker does.
+
+    ``uses_date_timing`` says which clock the tracker keeps for this
+    product (``_uses_date_timing``).  On the numeric clock a terminal
+    cashflow's payment time is its determination time plus the record's
+    ``settlement_time - time`` (``ko_settlement_delay`` per observation,
+    ``terminal_settlement_delay`` for maturity), and that is what the ledger
+    compares the valuation point against.
     """
 
     dates: pd.DatetimeIndex
@@ -694,3 +706,6 @@ class CalendarSchedule:
     terminal_settlement_day: int
     is_reverse: bool
     disable_ko_after_ki: bool
+    uses_date_timing: bool
+    ko_settlement_delay: np.ndarray
+    terminal_settlement_delay: float

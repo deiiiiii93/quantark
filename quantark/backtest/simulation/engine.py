@@ -31,7 +31,7 @@ from .hedge import (
     should_rebalance_vector,
     target_contracts_vector,
 )
-from .lifecycle import LifecycleRecord, VectorLifecycle
+from .lifecycle import LifecycleRecord, VectorLifecycle, receivable_pv
 from .paths.market_path import MarketPath
 from .pricing.base import DayStates, row_keys
 from .pricing.cache import StateCache
@@ -399,34 +399,8 @@ class EnsembleBacktestEngine:
         return out
 
     def _receivable_pv(self, lifecycle, rate, d, schedules) -> np.ndarray:
-        """Determined-but-unpaid cash, discounted the replay's way.
-
-        ``(settlement - date).days / 365`` through the day's flat rate curve
-        is the arithmetic ``ProductReplay.pending_receivable_pv`` uses for a
-        date-timed product.  A product on the numeric clock (year-fraction
-        schedules, the tracker's ``ValuationPoint(time=...)``) is discounted
-        there through the ledger's ``payment_time - point.time`` instead,
-        which agrees with the date arithmetic only up to float rounding.
-        TODO(plan 3): carry the record's ``settlement_time - time`` delay on
-        ``CalendarSchedule`` and use the ledger's arithmetic for numeric
-        products; the plan-2 fixtures settle at determination, so no
-        receivable is ever pending here and the oracle cannot see the gap.
-        """
-        out = np.zeros(rate.size)
-        for p, schedule in enumerate(schedules):
-            live = np.flatnonzero(lifecycle.pending[p] != 0.0)
-            for i in live:
-                i = int(i)
-                settle_day = int(lifecycle.settlement_day[p][i])
-                if settle_day < 0:
-                    continue
-                tau = max((schedule.dates[settle_day] - schedule.dates[d]).days / 365.0, 0.0)
-                out[i] += float(lifecycle.pending[p][i]) * float(
-                    FlatRateCurve(rate=float(rate[i])).get_discount_factor(tau)
-                )
-        return out
-
-    # -- hedge ---------------------------------------------------------
+        """``ProductReplay.pending_receivable_pv`` per path, both clocks (see ``receivable_pv``)."""
+        return receivable_pv(lifecycle, rate, d)
 
     def _rebalance(self, ledger, net_delta, any_alive, futures_price, code, multiplier,
                    d, day, trades, costs) -> None:

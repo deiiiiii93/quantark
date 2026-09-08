@@ -14,6 +14,8 @@ from typing import Callable, Dict, List, Sequence, Tuple
 import numpy as np
 
 from quantark.asset.equity.lifecycle.autocallable import CalendarSchedule
+from quantark.asset.equity.settlement import _TIME_TOLERANCE  # the resolver's own bound, for bit-identity
+from quantark.param import FlatRateCurve
 from quantark.util.exceptions import ValidationError
 
 PayoffFn = Callable[[int, np.ndarray, np.ndarray], np.ndarray]
@@ -67,6 +69,10 @@ class VectorLifecycle:
         self.terminal_day = np.full(shape, -1, dtype=np.int64)
         self.settlement_day = np.full(shape, -1, dtype=np.int64)
         self.ko_index = np.full(shape, -1, dtype=np.int64)
+        self.cashflow = np.zeros(shape)                  # the terminal amount, quantity-signed
+        self.paid = np.zeros(shape, dtype=bool)           # the ledger has paid it
+        self.determination_time = np.full(shape, np.nan)  # numeric clock, years from day 0
+        self.payment_time = np.full(shape, np.nan)
         self.observed_ko = [
             np.zeros((self.n_paths, s.ko_due_day.size), dtype=bool) for s in self.schedules
         ]
@@ -91,8 +97,14 @@ class VectorLifecycle:
             records += ko_records
             records += self._knock_in(p, schedule, day_index, spot, today_ko)
             records += self._maturity(p, schedule, day_index, spot, payoff_fn)
-            records += self._settle(p, day_index)
+            records += self._settle(p, schedule, day_index)
         return records
+
+    @staticmethod
+    def elapsed_time(schedule: CalendarSchedule, d: int) -> float:
+        """``AutocallableLifecycleTracker._valuation_point``'s time for day ``d``."""
+        days = (schedule.dates[d].normalize() - schedule.dates[0].normalize()).days
+        return max(0.0, days / 365.0)
 
     # -- the day's three blocks, in the tracker's order -----------------
 
@@ -113,13 +125,10 @@ class VectorLifecycle:
             if not hit.any():
                 continue
             cashflow = float(self.quantities[p]) * float(schedule.ko_payoff[idx])
-            self.knocked_out[p][hit] = True
-            self.alive[p][hit] = False
+            self._terminate(p, schedule, d, hit, cashflow,
+                            settle_day=int(schedule.ko_settlement_day[idx]),
+                            delay=float(schedule.ko_settlement_delay[idx]), knocked_out=True)
             self.ko_index[p][hit] = idx
-            self.terminal_day[p][hit] = d
-            settle_day = int(schedule.ko_settlement_day[idx])
-            self.settlement_day[p][hit] = settle_day
-            self.pending[p][hit] = cashflow
             today_ko |= hit
             for i in np.flatnonzero(hit):
                 records.append(LifecycleRecord(p, int(i), d, "knock_out", idx, float(spot[i]),
@@ -159,28 +168,71 @@ class VectorLifecycle:
             return []
         payoffs = np.asarray(payoff_fn(p, due, self.knocked_in[p][due]), dtype=float)
         cashflows = float(self.quantities[p]) * payoffs
-        self.matured[p][due] = True
-        self.alive[p][due] = False
-        self.terminal_day[p][due] = d
-        self.settlement_day[p][due] = int(schedule.terminal_settlement_day)
-        self.pending[p][due] = cashflows
+        for i, c in zip(due, cashflows):
+            one = np.zeros(self.n_paths, dtype=bool)
+            one[int(i)] = True
+            self._terminate(p, schedule, d, one, float(c),
+                            settle_day=int(schedule.terminal_settlement_day),
+                            delay=float(schedule.terminal_settlement_delay), knocked_out=False)
         return [
             LifecycleRecord(p, int(i), d, "maturity", -1, float(spot[i]), float("nan"), float(c))
             for i, c in zip(due, cashflows)
         ]
 
-    def _settle(self, p, d) -> List[LifecycleRecord]:
-        # A terminal cashflow counts as paid from the first day on or after
-        # its payment day (``ProductReplay.settle_pending_if_due``); before
-        # that it sits in ``pending``.
-        landing = (
-            ~self.settled[p] & (self.settlement_day[p] >= 0) & (self.settlement_day[p] <= d)
-            & (self.terminal_day[p] >= 0)
-        )
+    def _terminate(self, p, schedule, d, mask, cashflow: float, *, settle_day: int,
+                   delay: float, knocked_out: bool) -> None:
+        """Book a terminal cashflow the way ``mark_ko`` / ``mark_maturity`` do.
+
+        A flow whose payment is not after its determination is paid and
+        settled on the event day; a delayed one is parked in ``pending``
+        until the settlement day, and on the numeric clock the ledger pays
+        it as soon as the valuation point reaches its payment time.
+        """
+        if knocked_out:
+            self.knocked_out[p][mask] = True
+        else:
+            self.matured[p][mask] = True
+        self.alive[p][mask] = False
+        self.terminal_day[p][mask] = d
+        self.settlement_day[p][mask] = settle_day
+        self.cashflow[p][mask] = cashflow
+        det = self.elapsed_time(schedule, d)
+        self.determination_time[p][mask] = det
+        self.payment_time[p][mask] = det + delay        # _record_cashflow: determination + delay
+        if schedule.uses_date_timing:
+            delayed = settle_day > d                    # payment_date > determination_date
+        else:
+            delayed = (det + delay) > det               # payment_time > determination_time
+        if delayed:
+            self.pending[p][mask] = cashflow
+        else:
+            self.paid[p][mask] = True
+            self.settled[p][mask] = True
+            self.realized[p][mask] += cashflow
+
+    def _settle(self, p, schedule, d) -> List[LifecycleRecord]:
+        live = self.terminal_day[p] >= 0
+        by_date = live & (self.settlement_day[p] >= 0) & (self.settlement_day[p] <= d)
+        # The ledger's paid test: on the date clock payment_date <= today,
+        # on the numeric clock NOT (payment_time > point.time).
+        if schedule.uses_date_timing:
+            paid_now = by_date
+        else:
+            cur = self.elapsed_time(schedule, d)
+            paid_now = live & ~(self.payment_time[p] > cur)
+        newly = paid_now & ~self.paid[p]
+        self.paid[p][newly] = True
+        self.realized[p][newly] += self.cashflow[p][newly]
+        # settle_pending_if_due is date-keyed on both clocks; settle() then
+        # moves the numeric point past the payment time, so a flow one ulp
+        # short of paid is paid on its settlement day.
+        landing = ~self.settled[p] & by_date
         if not landing.any():
             return []
+        late = landing & ~self.paid[p]
+        self.paid[p][late] = True
+        self.realized[p][late] += self.cashflow[p][late]
         amounts = self.pending[p][landing]
-        self.realized[p][landing] += amounts
         self.pending[p][landing] = 0.0
         self.settled[p][landing] = True
         return [
@@ -199,3 +251,43 @@ class VectorLifecycle:
             "matured": self.matured.all(axis=0),
             "settled": self.settled.all(axis=0),
         }
+
+
+def receivable_pv(lifecycle: VectorLifecycle, rate: np.ndarray, day_index: int) -> np.ndarray:
+    """Determined-but-unpaid cash discounted the replay's way, per path.
+
+    Date clock: the parked scalar through ``(settlement - date).days / 365``
+    on the day's flat curve (``ProductReplay.pending_receivable_pv``).
+    Numeric clock: every unpaid ledger flow through ``payment_time -
+    point.time`` (``SettlementResolver.resolve_pending``), which refuses a
+    remaining time at or below ``_TIME_TOLERANCE`` exactly as the resolver
+    does -- a state the replay would abort on is not silently zeroed here.
+    """
+    out = np.zeros(rate.size)
+    for p, schedule in enumerate(lifecycle.schedules):
+        if schedule.uses_date_timing:
+            live = np.flatnonzero((lifecycle.pending[p] != 0.0) & ~lifecycle.settled[p])
+            for i in live:
+                i = int(i)
+                settle_day = int(lifecycle.settlement_day[p][i])
+                if settle_day < 0:
+                    continue
+                tau = max((schedule.dates[settle_day] - schedule.dates[day_index]).days / 365.0, 0.0)
+                out[i] += float(lifecycle.pending[p][i]) * float(
+                    FlatRateCurve(rate=float(rate[i])).get_discount_factor(tau)
+                )
+            continue
+        cur = lifecycle.elapsed_time(schedule, day_index)
+        live = np.flatnonzero((lifecycle.terminal_day[p] >= 0) & ~lifecycle.paid[p])
+        for i in live:
+            i = int(i)
+            tau = float(lifecycle.payment_time[p][i]) - cur
+            if not np.isfinite(tau) or tau <= _TIME_TOLERANCE:
+                raise ValidationError(
+                    f"pending cashflow of product {p} on path {i} must pay strictly after "
+                    f"day {day_index} (remaining time {tau!r})"
+                )
+            out[i] += float(lifecycle.cashflow[p][i]) * float(
+                FlatRateCurve(rate=float(rate[i])).get_discount_factor(tau)
+            )
+    return out

@@ -8,7 +8,7 @@ import pytest
 
 from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
 from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
-from quantark.backtest.simulation.lifecycle import VectorLifecycle
+from quantark.backtest.simulation.lifecycle import VectorLifecycle, receivable_pv
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 
@@ -134,3 +134,53 @@ def test_records_report_each_event_once():
         events += vec.step(d, np.array([spot]), lambda p, paths, ki: np.zeros(paths.size))
     kinds = [e.event for e in events]
     assert kinds.count("knock_in") == 1 and kinds.count("knock_out") == 1
+
+
+@pytest.mark.parametrize("name, spots", [
+    ("ko_then_two_days_of_receivable", [SPOT, SPOT, KO + 1.0, SPOT, SPOT, SPOT, SPOT, SPOT]),
+    ("late_ko_settles_after_maturity", [SPOT] * 5 + [KO + 1.0, SPOT, SPOT]),
+    ("maturity_with_a_lag", [SPOT] * 8),
+    ("ki_then_maturity_with_a_lag", [SPOT, KI - 1.0, SPOT, SPOT, SPOT, SPOT, SPOT * 0.8, SPOT * 0.8]),
+])
+def test_a_settlement_lag_matches_the_tracker_day_by_day(name, spots):
+    product = short_snowball(settlement_lag_days=2)
+    expected = _walk_tracker(product, spots)
+    actual = _walk_vector(product, spots)
+    assert any(day["pending"] != 0.0 for day in expected), "the fixture must actually park a receivable"
+    for d, (e, a) in enumerate(zip(expected, actual)):
+        assert a == pytest.approx(e), f"{name} day {d}: {a} != {e}"
+
+
+def test_the_receivable_pv_matches_the_ledger_on_the_numeric_clock():
+    product = short_snowball(settlement_lag_days=2)
+    spots = [SPOT, SPOT, KO + 1.0, SPOT, SPOT, SPOT, SPOT, SPOT]
+    tracker = _tracker(product)
+    lifecycle_product = tracker.product_for_lifecycle()
+    vec = _vector(product)
+    rate = np.array([0.02])
+    seen_pending = False
+    for d, (day, spot) in enumerate(zip(DATES, spots)):
+        env = _env(day)
+        tracker.observe(day, lifecycle_product, env, float(spot))
+        tracker.settle_maturity_if_due(day, lifecycle_product, env, float(spot))
+        if not tracker.lifecycle.settled and tracker.lifecycle.settlement_date is not None:
+            if pd.Timestamp(day).normalize() >= pd.Timestamp(tracker.lifecycle.settlement_date).normalize():
+                tracker.lifecycle.settle()
+        vec.step(d, np.array([float(spot)]), lambda p, paths, ki: np.zeros(paths.size))
+        point = tracker.lifecycle.valuation_point
+        expected = float(tracker.lifecycle.ledger.pending_pv(point, env)) if point is not None else 0.0
+        got = receivable_pv(vec, rate, d)
+        assert got[0] == expected, f"day {d}: {got[0]!r} != {expected!r}"
+        seen_pending |= expected != 0.0
+    assert seen_pending
+
+
+def test_the_schedule_carries_the_delays():
+    product = short_snowball(settlement_lag_days=2)
+    schedule = _tracker(product).resolve_calendar_schedule(DATES, _env(DATES[0]))
+    assert schedule.uses_date_timing is False
+    assert schedule.ko_settlement_delay == pytest.approx([2.0 / 365.0] * 2)
+    assert schedule.terminal_settlement_delay == pytest.approx(2.0 / 365.0)
+    plain = _tracker(short_snowball()).resolve_calendar_schedule(DATES, _env(DATES[0]))
+    assert plain.ko_settlement_delay == pytest.approx([0.0, 0.0])
+    assert plain.terminal_settlement_delay == 0.0
