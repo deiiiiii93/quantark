@@ -161,6 +161,9 @@ class RepricingPricer:
         self._x_ref = math.log(float(product.initial_price))
         self._engine_fp = engine_fingerprint(engine_config, delta_bump_size, gamma_bump_size,
                                              spot_step=self.spot_step, vol_step=vol_step, q_step=q_step)
+        # The exact-mode identity: the gate's exact leg is keyed here, so
+        # its entries are the same entries an exact-mode run would write.
+        self._exact_fp = engine_fingerprint(engine_config, delta_bump_size, gamma_bump_size)
         self._product_fp = product_fingerprint(product)
         # Built from the ORIGINAL contract, exactly as
         # ``ReplayBacktestEngine.__init__`` does (the factory reads only the
@@ -405,7 +408,7 @@ class RepricingPricer:
         return self._exact_keys(states)
 
     def _exact_keys(self, states: DayStates) -> List[StateKey]:
-        """The exact state's own keys, whatever the mode (the gate's exact leg seeds from these)."""
+        """The exact state's own keys under the EXACT-mode fingerprint, whatever the mode."""
         spot_keys = float_key(states.spot)
         vol_keys = float_key(states.vol)
         return [
@@ -413,10 +416,32 @@ class RepricingPricer:
                 product_fingerprint=self._product_fp, day_index=int(states.day_index),
                 knocked_in=bool(states.knocked_in[n]), spot_key=int(spot_keys[n]),
                 vol_key=int(vol_keys[n]), env_key=int(states.env_key[n]),
-                engine_fingerprint=self._engine_fp,
+                engine_fingerprint=self._exact_fp,
             )
             for n in range(len(states))
         ]
+
+    def price_exact(self, row: DayStates) -> Tuple[float, float, float]:
+        """One state priced exactly, through the cache under its exact-mode key.
+
+        The gate's exact leg: a second run finds these on disk, and an
+        exact-mode run of the same book finds them too.
+        """
+        if len(row) != 1:
+            raise ValidationError("price_exact takes one-row DayStates (see state_row)")
+        key = self._exact_keys(row)[0]
+        hit = self.cache.get(key)
+        if hit is not None:
+            return hit
+        date = pd.Timestamp(row.date).normalize()
+        values = self._price_env(
+            date, knocked_in=bool(row.knocked_in[0]), key=key,
+            spot=float(row.spot[0]), vol=float(row.vol[0]), rate=float(row.rate[0]),
+            div_yield=row.div_yield[0], basis_yield=ImpliedBasisYield(float(row.basis_yield[0])),
+            label=f"gate sample day {row.day_index} path {int(row.path_index[0])}",
+        )
+        self.cache.put(key, *values)
+        return values
 
     # -- reporting -----------------------------------------------------
 
@@ -435,13 +460,7 @@ class RepricingPricer:
         for row in samples:
             if len(row) != 1:
                 raise ValidationError("verify takes one-row DayStates (see state_row)")
-            date = pd.Timestamp(row.date).normalize()
-            exact = self._price_env(
-                date, knocked_in=bool(row.knocked_in[0]), key=self._exact_keys(row)[0],
-                spot=float(row.spot[0]), vol=float(row.vol[0]), rate=float(row.rate[0]),
-                div_yield=row.div_yield[0], basis_yield=ImpliedBasisYield(float(row.basis_yield[0])),
-                label=f"gate sample day {row.day_index} path {int(row.path_index[0])}",
-            )
+            exact = self.price_exact(row)
             pv, delta, _ = self._price_ladder(row, sample=False)
             worst_pv = max(worst_pv, abs(float(pv[0]) - exact[0]) / float(scale.unit_notional) * 1e4)
             worst_delta = max(worst_delta, abs(float(delta[0]) - exact[1]) * float(scale.hands_per_unit_delta))

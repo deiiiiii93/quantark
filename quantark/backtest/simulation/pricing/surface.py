@@ -161,6 +161,7 @@ class LifeSurfacePricer:
         self, product: Any, *, engine_config: Any, start_date: pd.Timestamp, dates: pd.DatetimeIndex,
         underlying: str, vol_step: float, q_step: float, surface_cache_bytes: int, gate: GateConfig,
         delta_bump_size: Optional[float] = None, gamma_bump_size: Optional[float] = None,
+        cache: Optional[StateCache] = None,
     ) -> None:
         self.product = product
         self.engine_config = engine_config
@@ -175,10 +176,11 @@ class LifeSurfacePricer:
         if not hasattr(self._engine, "solve_life_surface"):
             raise ValidationError("the life_surface provider needs a PDE engine")
         # The exact side of the gate, and the aged-product memo the engine's
-        # helpers use; its own small cache never meets the run's states.
+        # helpers use.  Given the run's cache, its exact repricings are keyed
+        # like an exact-mode run's and survive on the disk tier.
         self._exact = RepricingPricer(
             product, engine_config=engine_config, start_date=start_date, underlying=underlying,
-            cache=StateCache(CacheConfig(memory_bytes=8_000_000)),
+            cache=cache if cache is not None else StateCache(CacheConfig(memory_bytes=8_000_000)),
             delta_bump_size=delta_bump_size, gamma_bump_size=gamma_bump_size,
         )
         self._surfaces = SurfaceCache(surface_cache_bytes)
@@ -299,11 +301,10 @@ class LifeSurfacePricer:
         for row in samples:
             if len(row) != 1:
                 raise ValidationError("verify takes one-row DayStates (see state_row)")
-            pv_e, delta_e, _ = self._exact.price_day(row)
+            pv_e, delta_e, _ = self._exact.price_exact(row)
             pv_s, delta_s, _ = self._readout_only(row)
-            worst_pv = max(worst_pv, abs(float(pv_s[0]) - float(pv_e[0])) / float(scale.unit_notional) * 1e4)
-            worst_delta = max(worst_delta,
-                              abs(float(delta_s[0]) - float(delta_e[0])) * float(scale.hands_per_unit_delta))
+            worst_pv = max(worst_pv, abs(float(pv_s[0]) - pv_e) / float(scale.unit_notional) * 1e4)
+            worst_delta = max(worst_delta, abs(float(delta_s[0]) - delta_e) * float(scale.hands_per_unit_delta))
             count += 1
         return GateReport(
             mode="life_surface", sampled=count, max_pv_gap_bp=worst_pv, max_delta_gap_hands=worst_delta,

@@ -6,12 +6,14 @@ import numpy as np
 import pytest
 
 from quantark.backtest.replay import ReplayProduct
+from quantark.backtest.simulation.config import PricingProviderConfig
 from quantark.backtest.simulation.engine import EnsembleBacktestEngine, EnsembleResults
 from quantark.backtest.simulation.paths.market_path import DEFAULT_TENOR_GRID, StartState, trading_calendar
 from quantark.backtest.simulation.paths.gbm import ConstantVol, GBMPaths
 from quantark.util.exceptions import ValidationError
 
-from .conftest import RATE, SPOT, VOL, ensemble_config, flat_carry, short_snowball
+from .conftest import (RATE, SPOT, VOL, ensemble_config, flat_carry, ladder_pricing, short_snowball,
+                       surface_pricing)
 
 START = date(2024, 1, 2)
 
@@ -118,3 +120,40 @@ def test_the_manifest_records_the_run():
     assert manifest["path_fingerprint"] and manifest["engine_fingerprint"]
     assert manifest["gate"]["mode"] == "exact"
     assert manifest["cache"]["hits"] >= 0 and manifest["engine_calls"] > 0
+
+
+def test_ladder_and_surface_runs_keep_the_accounting_identity():
+    for pricing in (ladder_pricing(), surface_pricing()):
+        results = EnsembleBacktestEngine(ensemble_config(pricing=pricing)).run(_paths(n_paths=6))
+        cube = results.cube
+        assert cube.total_pnl == pytest.approx(cube.portfolio_value - results.initial_book_value[:, None], abs=1e-6)
+        assert results.manifest["mode"] == pricing.mode
+        assert results.manifest["gate"]["mode"] == pricing.mode and results.manifest["gate"]["passed"]
+
+
+def test_the_surface_run_makes_far_fewer_engine_calls():
+    exact = EnsembleBacktestEngine(ensemble_config()).run(_paths(n_paths=6))
+    surface = EnsembleBacktestEngine(ensemble_config(pricing=surface_pricing())).run(_paths(n_paths=6))
+    assert surface.manifest["solves"] >= 1
+    assert surface.manifest["solves"] < exact.manifest["engine_calls"] / 4
+
+
+def test_a_failed_gate_aborts_the_cell_with_its_report():
+    from quantark.backtest.simulation.config import GateConfig
+    from quantark.backtest.simulation.pricing.base import GateFailure
+
+    coarse = ladder_pricing(spot_step=0.05)
+    strict = PricingProviderConfig(provider="repricing", cache=coarse.cache, spot_step=0.05, vol_step=0.0, q_step=0.0,
+                                   gate=GateConfig(sample_states=8, pv_tolerance_bp=1e-6, delta_tolerance_hands=1e-6))
+    with pytest.raises(GateFailure) as excinfo:
+        EnsembleBacktestEngine(ensemble_config(pricing=strict)).run(_paths(n_paths=4))
+    assert excinfo.value.report.mode == "ladder" and not excinfo.value.report.passed
+
+
+def test_a_disk_cache_serves_a_second_run(tmp_path):
+    pricing = ladder_pricing(disk_dir=str(tmp_path))
+    first = EnsembleBacktestEngine(ensemble_config(pricing=pricing)).run(_paths(n_paths=4))
+    second = EnsembleBacktestEngine(ensemble_config(pricing=pricing)).run(_paths(n_paths=4))
+    assert second.manifest["engine_calls"] == 0
+    assert second.manifest["cache"]["disk"]["disk_hits"] > 0
+    assert second.cube.total_pnl == pytest.approx(first.cube.total_pnl)

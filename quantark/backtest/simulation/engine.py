@@ -36,6 +36,7 @@ from .paths.market_path import MarketPath
 from .pricing.base import DayStates, GateFailure, GateReport, GateScale, row_keys, state_row
 from .pricing.cache import StateCache
 from .pricing.repricing import RepricingPricer
+from .pricing.surface import LifeSurfacePricer
 
 FLOAT_COLUMNS = (
     "portfolio_value", "product_mtm", "hedge_mtm", "cash", "cashflows", "transaction_costs",
@@ -138,16 +139,7 @@ class EnsembleBacktestEngine:
         multiplier = float(cfg.hedge.multiplier)
 
         cache = StateCache(cfg.pricing.cache)
-        pricers = [
-            RepricingPricer(
-                bp.product, engine_config=cfg.engine_config, start_date=dates[0],
-                underlying=cfg.underlying, cache=cache,
-                delta_bump_size=cfg.delta_bump_size, gamma_bump_size=cfg.gamma_bump_size,
-                spot_step=cfg.pricing.spot_step, vol_step=cfg.pricing.vol_step, q_step=cfg.pricing.q_step,
-                gate=cfg.pricing.gate,
-            )
-            for bp in cfg.products
-        ]
+        pricers = self._make_pricers(cache, dates)
         gate_reports: List[GateReport] = []
         schedule_env = self._schedule_env(dates[0])
         schedules = [
@@ -262,6 +254,28 @@ class EnsembleBacktestEngine:
                                last_day=last_day, initial_book_value=initial_book_value)
 
     # -- setup ---------------------------------------------------------
+
+    def _make_pricers(self, cache: StateCache, dates: pd.DatetimeIndex) -> List[Any]:
+        """One provider per product, of the kind ``config.pricing`` names."""
+        cfg = self.config
+        out: List[Any] = []
+        for bp in cfg.products:
+            if cfg.pricing.provider == "life_surface":
+                out.append(LifeSurfacePricer(
+                    bp.product, engine_config=cfg.engine_config, start_date=dates[0], dates=dates,
+                    underlying=cfg.underlying, vol_step=cfg.pricing.vol_step, q_step=cfg.pricing.q_step,
+                    surface_cache_bytes=cfg.pricing.surface_cache_bytes, gate=cfg.pricing.gate,
+                    delta_bump_size=cfg.delta_bump_size, gamma_bump_size=cfg.gamma_bump_size,
+                    cache=cache,
+                ))
+            else:
+                out.append(RepricingPricer(
+                    bp.product, engine_config=cfg.engine_config, start_date=dates[0], underlying=cfg.underlying,
+                    cache=cache, delta_bump_size=cfg.delta_bump_size, gamma_bump_size=cfg.gamma_bump_size,
+                    spot_step=cfg.pricing.spot_step, vol_step=cfg.pricing.vol_step, q_step=cfg.pricing.q_step,
+                    gate=cfg.pricing.gate,
+                ))
+        return out
 
     def _gate_scale(self, bp) -> GateScale:
         """bp of the product's unit notional; hands of the hedge per unit delta."""
@@ -516,6 +530,8 @@ class EnsembleBacktestEngine:
             "mode": self.config.pricing.mode,
             "gate": gate.as_dict(),
             "engine_calls": sum(p.stats()["engine_calls"] for p in pricers),
+            "solves": sum(int(p.stats().get("solves", 0)) for p in pricers),
+            "surface_cache": [p.stats()["surface_cache"] for p in pricers if "surface_cache" in p.stats()],
             "cache": cache.stats().as_dict(),
             "dividend_builds": dividend_builds,
             "data_end_paths": int(np.count_nonzero(~lifecycle.settled.all(axis=0))),

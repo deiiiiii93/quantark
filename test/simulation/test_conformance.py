@@ -10,7 +10,8 @@ from quantark.backtest.simulation.paths.gbm import ConstantVol, GBMPaths
 from quantark.backtest.simulation.paths.market_path import DEFAULT_TENOR_GRID, StartState, trading_calendar
 from quantark.backtest.strategy.futures_delta_strategy import AutocallableDeltaHedgeStrategy
 
-from .conftest import RATE, SPOT, VOL, ensemble_config, flat_carry, pde_engine_config, short_snowball
+from .conftest import (RATE, SPOT, VOL, ensemble_config, flat_carry, ladder_pricing, pde_engine_config,
+                       short_snowball, surface_pricing)
 
 START = date(2024, 1, 2)
 
@@ -77,3 +78,23 @@ def test_the_report_summary_names_the_path_and_the_day_count():
     report = run_oracle(ensemble_config(), _paths(n_paths=1), 0)
     text = report.summary()
     assert "path 0" in text and str(report.days) in text
+
+
+@pytest.mark.parametrize("pricing, pv_bp, delta_hands", [
+    (ladder_pricing(spot_step=0.002), 2.0, 0.5),
+    (surface_pricing(vol_step=0.0, q_step=0.0), 50.0, 3.0),
+])
+def test_approximate_providers_match_the_replay_within_their_gate(pricing, pv_bp, delta_hands):
+    cfg = ensemble_config(pricing=pricing)
+    book_notional = 1000.0 * SPOT
+    report = run_oracle(cfg, _paths(n_paths=3), 1,
+                        pv_tolerance=pv_bp * 1e-4 * book_notional,
+                        delta_tolerance=delta_hands * 200.0, contracts_tolerance=delta_hands)
+    assert report.passed, report.summary()
+    assert report.exact_columns_match                      # lifecycle flags and the contract never differ
+    assert report.max_pv_gap > 0.0                         # it is an approximation, and the report says so
+
+
+def test_an_approximate_provider_is_not_bit_exact_by_default():
+    report = run_oracle(ensemble_config(pricing=ladder_pricing(spot_step=0.002)), _paths(n_paths=2), 0)
+    assert not report.passed and report.max_pv_gap > 0.0

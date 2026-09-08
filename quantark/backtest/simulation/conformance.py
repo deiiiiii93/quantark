@@ -25,8 +25,10 @@ from .engine import EnsembleBacktestEngine
 from .paths.market_path import MarketPath
 
 #: Columns that must agree exactly, whatever the tolerances.
-EXACT_COLUMNS = ("alive", "knocked_in", "knocked_out", "matured", "active_contract",
-                 "futures_contracts")
+LIFECYCLE_COLUMNS = ("alive", "knocked_in", "knocked_out", "matured", "active_contract")
+#: ...plus the hedge size, exact unless a ``contracts_tolerance`` is stated
+#: (an approximate delta can round to a different hand).
+EXACT_COLUMNS = LIFECYCLE_COLUMNS + ("futures_contracts",)
 #: Columns compared against the tolerances.
 NUMERIC_COLUMNS = ("product_mtm", "total_pnl")
 
@@ -44,12 +46,14 @@ class OracleReport:
     trade_mismatches: int
     first_mismatch: Optional[str]
     passed: bool
+    max_contracts_gap: float = 0.0
 
     def as_dict(self) -> Dict[str, Any]:
         return {
             "path_index": self.path_index, "days": self.days,
             "exact_columns_match": self.exact_columns_match, "max_pv_gap": self.max_pv_gap,
             "max_delta_gap": self.max_delta_gap, "max_total_pnl_gap": self.max_total_pnl_gap,
+            "max_contracts_gap": self.max_contracts_gap,
             "trade_mismatches": self.trade_mismatches, "first_mismatch": self.first_mismatch,
             "passed": self.passed,
         }
@@ -61,6 +65,7 @@ class OracleReport:
             f"  max product mark gap : {self.max_pv_gap:.6g}",
             f"  max delta gap        : {self.max_delta_gap:.6g}",
             f"  max total P&L gap    : {self.max_total_pnl_gap:.6g}",
+            f"  max contracts gap    : {self.max_contracts_gap:.6g}",
             f"  trade mismatches     : {self.trade_mismatches}",
         ]
         if self.first_mismatch:
@@ -75,13 +80,17 @@ def run_oracle(
     *,
     pv_tolerance: float = 0.0,
     delta_tolerance: float = 0.0,
+    contracts_tolerance: float = 0.0,
     _replay_strategy: Any = None,
 ) -> OracleReport:
     """Compare the ensemble engine with the replay engine on one path.
 
-    ``_replay_strategy`` overrides the strategy on the replay side only; it
-    exists so a test can introduce a known disagreement and check that this
-    function reports it.
+    The lifecycle flags and the active contract must always agree exactly.
+    ``futures_contracts`` and the trade sizes are exact too unless
+    ``contracts_tolerance`` (hands) is stated, for an approximate provider
+    whose delta can round to a different hand.  ``_replay_strategy``
+    overrides the strategy on the replay side only; it exists so a test can
+    introduce a known disagreement and check that this function reports it.
     """
     if not 0 <= path_index < paths.n_paths:
         raise ValidationError(f"path index {path_index} out of range for {paths.n_paths} paths")
@@ -112,7 +121,8 @@ def run_oracle(
     days = min(len(simulated), len(expected))
     mismatches: List[str] = []
     exact_ok = True
-    for name in EXACT_COLUMNS:
+    columns = EXACT_COLUMNS if contracts_tolerance == 0.0 else LIFECYCLE_COLUMNS
+    for name in columns:
         left = simulated[name].to_numpy()[:days]
         right = expected[name].to_numpy()[:days]
         bad = np.flatnonzero(left != right)
@@ -132,8 +142,10 @@ def run_oracle(
     max_pv_gap = gap("product_mtm", expected)
     max_total_pnl_gap = gap("total_pnl", expected)
     max_delta_gap = gap("delta", expected_greeks)
+    max_contracts_gap = 0.0 if contracts_tolerance == 0.0 else gap("futures_contracts", expected)
 
-    trade_mismatches = _compare_trades(sim_trades, replay.trades_df(), mismatches)
+    trade_mismatches = _compare_trades(sim_trades, replay.trades_df(), mismatches,
+                                       contracts_tolerance=contracts_tolerance)
 
     passed = (
         exact_ok
@@ -141,18 +153,24 @@ def run_oracle(
         and max_pv_gap <= pv_tolerance
         and max_delta_gap <= delta_tolerance
         and max_total_pnl_gap <= pv_tolerance
+        and max_contracts_gap <= contracts_tolerance
     )
     return OracleReport(
         path_index=int(path_index), days=days, exact_columns_match=exact_ok,
         max_pv_gap=max_pv_gap, max_delta_gap=max_delta_gap, max_total_pnl_gap=max_total_pnl_gap,
         trade_mismatches=trade_mismatches,
         first_mismatch=mismatches[0] if mismatches else None, passed=passed,
+        max_contracts_gap=max_contracts_gap,
     )
 
 
 def _compare_trades(simulated: pd.DataFrame, expected: pd.DataFrame,
-                    mismatches: List[str]) -> int:
-    """Trade for trade: same day, type, contract, size and price."""
+                    mismatches: List[str], *, contracts_tolerance: float = 0.0) -> int:
+    """Trade for trade: same day, type, contract, size and price.
+
+    With a ``contracts_tolerance`` the size may differ by up to that many
+    hands (a rounding difference is a size difference, not a missing trade).
+    """
     fields = ("trade_type", "contract", "quantity", "price")
 
     def rows(frame: pd.DataFrame) -> list:
@@ -166,7 +184,11 @@ def _compare_trades(simulated: pd.DataFrame, expected: pd.DataFrame,
     left, right = rows(simulated), rows(expected)
     bad = 0
     for n, (a, b) in enumerate(zip(left, right)):
-        if a != b:
+        if contracts_tolerance == 0.0:
+            same = a == b
+        else:
+            same = a[0] == b[0] and a[1] == b[1] and a[2] == b[2] and abs(a[3] - b[3]) <= contracts_tolerance
+        if not same:
             bad += 1
             if len(mismatches) < 5:
                 mismatches.append(f"trade {n}: {a} vs {b}")
