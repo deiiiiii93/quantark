@@ -1,6 +1,8 @@
 """The ONE time builder (spec §4.3).
 
-Every ``event_times`` entry becomes a grid node exactly; fill between nodes is
+Every ``event_times`` entry becomes a grid node exactly (indexed and damped),
+and every ``extra_times`` entry a node only (indexed, never damped, no event
+keyed on it); fill between nodes is
 sized solely by ``steps_per_day`` (no per-interval floor beyond 1 — the ≥10
 floor caused the historical ~10x grid inflation); ``max_steps`` caps fill via
 extras-scaling and can never move or drop a node. Damping schedules for the
@@ -63,7 +65,8 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
     when its index is ``node_index - j`` for ``j = 1..count``.
     """
     tau, events = request.tau, request.event_times
-    boundaries = np.array([0.0, *events, tau], dtype=float)
+    nodes = tuple(sorted(set(events) | set(request.extra_times)))
+    boundaries = np.array([0.0, *nodes, tau], dtype=float)
     lengths = np.diff(boundaries)
     days = np.maximum(1.0, lengths * float(config.day_count))
     fill = np.maximum(1, np.round(days * float(config.steps_per_day)).astype(int))
@@ -110,18 +113,20 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
     dt = np.concatenate(dts)
 
     step_of = {}
-    for e in events:
+    for e in nodes:
         k = int(np.searchsorted(t, e))
         # linspace endpoints reproduce the boundary values exactly, so the
         # verbatim request float IS the node value.
         assert t[k] == e
         step_of[e] = k
 
+    # Damping restarts follow EVENT nodes only; an extra node is a readout
+    # point and must not degrade the scheme around it.
     event_damp = frozenset(
-        k - j
-        for k in step_of.values()
+        step_of[e] - j
+        for e in events
         for j in range(1, int(config.event_damping_steps) + 1)
-        if k - j >= 0
+        if step_of[e] - j >= 0
     )
     n_steps = len(dt)
     term_damp = frozenset(

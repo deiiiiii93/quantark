@@ -126,3 +126,43 @@ def test_immutability_and_identity():
         tl.step_of[0.5] = 1  # proxy over a private copy
     other = build_time(req(), CFG())
     assert tl != other and tl == tl  # eq=False → identity semantics
+
+
+def test_the_default_request_is_unchanged_by_the_new_field():
+    plain, explicit = req(), GridRequest(
+        tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None, hard_upper=None,
+        event_times=(0.25, 0.5, 0.75), extra_times=(),
+    )
+    assert plain == explicit and hash(plain) == hash(explicit)
+    a, b = build_time(plain, CFG()), build_time(explicit, CFG())
+    assert np.array_equal(a.t, b.t) and np.array_equal(a.dt, b.dt)
+    assert a.event_damping_steps == b.event_damping_steps
+
+
+def test_extra_times_are_exact_nodes_without_damping():
+    extras = tuple(d / 365.0 for d in range(1, 365))
+    request = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None,
+                          hard_upper=None, event_times=(0.25, 0.5, 0.75), extra_times=extras)
+    tl = build_time(request, CFG())
+    for t in extras:
+        assert tl.t[tl.step_at(t)] == pytest.approx(t, abs=1e-15)
+    plain = build_time(req(), CFG())
+    assert tl.event_damping_steps.issubset(set(range(tl.actual_steps)))
+    assert len(tl.event_damping_steps) == len(plain.event_damping_steps)    # three events, damped alike
+    assert tl.terminal_damping_steps == {tl.actual_steps - 1}
+
+
+def test_an_extra_time_on_an_event_is_folded_into_it():
+    request = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None,
+                          hard_upper=None, event_times=(0.5,), extra_times=(0.5 + 1e-13, 0.25))
+    assert request.extra_times == (0.25,)
+    tl = build_time(request, CFG())
+    assert tl.step_at(0.5) == tl.step_of[0.5]
+
+
+def test_extra_times_at_the_endpoints_are_rejected():
+    from quantark.util.exceptions import ValidationError
+
+    with pytest.raises(ValidationError):
+        GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None,
+                    hard_upper=None, event_times=(), extra_times=(1.0,))

@@ -64,6 +64,10 @@ class GridRequest:
         hard_upper: Absorbing upper domain edge, or None.
         event_times: ALL interior event-bearing dates (KO, coupon, discrete KI)
             — each becomes an exact grid node, indexed and damped.
+        extra_times: Additional interior times that must be exact grid
+            nodes but carry NO event and NO damping (a life-surface readout
+            along a path).  One within ``is_close`` of an event time is
+            dropped: the event's node serves it.
     """
 
     tau: float
@@ -72,6 +76,7 @@ class GridRequest:
     hard_lower: Optional[float]
     hard_upper: Optional[float]
     event_times: Tuple[float, ...]
+    extra_times: Tuple[float, ...] = ()
 
     def __post_init__(self):
         if self.tau <= 0.0:
@@ -101,6 +106,10 @@ class GridRequest:
                 f"hard_lower ({self.hard_lower}) must be < "
                 f"hard_upper ({self.hard_upper})"
             )
+        events = _dedup_sorted_interior(self.event_times, self.tau)
+        object.__setattr__(self, "event_times", events)
+        extras = _dedup_sorted_interior(self.extra_times, self.tau)
         object.__setattr__(
-            self, "event_times", _dedup_sorted_interior(self.event_times, self.tau)
+            self, "extra_times",
+            tuple(t for t in extras if not any(is_close(t, e) for e in events)),
         )
