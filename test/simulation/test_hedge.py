@@ -77,3 +77,64 @@ def test_trading_a_different_contract_without_a_roll_fails_closed():
     ledger.trade(np.array([1.0]), np.array([100.0]), "IM2403", MULT)
     with pytest.raises(ValidationError):
         ledger.trade(np.array([1.0]), np.array([100.0]), "IM2406", MULT)
+
+
+# --- Task 8: roll selection and the delta target over arrays ---------------
+
+from datetime import date  # noqa: E402
+
+import pandas as pd  # noqa: E402
+
+from quantark.backtest.futures_ledger import FuturesRollPolicy  # noqa: E402
+from quantark.backtest.simulation.carry import day_chain  # noqa: E402
+from quantark.backtest.simulation.hedge import (  # noqa: E402
+    day_active_contract,
+    should_rebalance_vector,
+    target_contracts_vector,
+)
+from quantark.backtest.strategy.futures_delta_strategy import AutocallableDeltaHedgeStrategy  # noqa: E402
+
+from .conftest import make_market_path  # noqa: E402
+
+
+def test_the_roll_policy_picks_the_same_contract_for_every_path():
+    mp = make_market_path(n_paths=3, n_days=30, start=date(2024, 1, 2))
+    policy = FuturesRollPolicy()
+    for d in range(mp.n_days):
+        chain = day_chain(mp, d)
+        picked = {str(policy.select_contract(chain.frame(i), chain.date, None)["contract"])
+                  for i in range(mp.n_paths)}
+        assert len(picked) == 1
+        code, column = day_active_contract(chain, policy, None)
+        assert code == picked.pop() and chain.contracts[column] == code
+
+
+def test_the_active_contract_is_sticky_until_the_roll_window():
+    mp = make_market_path(n_paths=1, n_days=30, start=date(2024, 1, 2))
+    policy = FuturesRollPolicy(roll_days_before_expiry=5)
+    chain = day_chain(mp, 0)
+    assert day_active_contract(chain, policy, None)[0] == "IM2401"
+    # inside the window the front contract is dropped
+    late = day_chain(mp, list(mp.dates).index(pd.Timestamp("2024-01-16")))
+    assert day_active_contract(late, policy, "IM2401")[0] == "IM2402"
+
+
+@pytest.mark.parametrize("round_contracts", [True, False])
+@pytest.mark.parametrize("hedge_ratio, target_delta", [(1.0, 0.0), (0.8, 3.0)])
+def test_the_target_matches_the_scalar_strategy(round_contracts, hedge_ratio, target_delta):
+    strategy = AutocallableDeltaHedgeStrategy(delta_threshold=0.5, hedge_ratio=hedge_ratio,
+                                              target_delta=target_delta, round_contracts=round_contracts)
+    net_delta = np.array([-1234.5, 0.0, 987.6, -1.0])
+    got = target_contracts_vector(strategy, net_delta, MULT)
+    expected = [strategy.target_contracts(product_delta=float(x), product_quantity=1.0,
+                                          futures_multiplier=MULT) for x in net_delta]
+    assert got == pytest.approx(expected)
+
+
+def test_the_threshold_matches_the_scalar_strategy():
+    strategy = AutocallableDeltaHedgeStrategy(delta_threshold=2.0, hedge_ratio=1.0, target_delta=0.0)
+    current = np.array([0.0, 5.0, 5.0])
+    target = np.array([1.0, 8.0, 5.5])
+    got = should_rebalance_vector(strategy, current, target)
+    expected = [strategy.should_rebalance(float(c), float(t)) for c, t in zip(current, target)]
+    assert list(got) == expected

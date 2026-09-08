@@ -94,3 +94,37 @@ class VectorHedgeLedger:
         traded = -self.quantity.copy()
         self.trade(traded, price, contract, multiplier)
         return traded
+
+
+def day_active_contract(chain, roll_policy, current_contract: Optional[str]):
+    """The day's hedge contract and its column in ``chain``.
+
+    ``FuturesRollPolicy.select_contract`` reads only ``expiry_date`` and the
+    contract code, never a price, and every path shares the listing
+    calendar -- so one selection serves the whole batch and only the
+    execution price differs per path.  Path 0's frame is therefore
+    representative, and the roll test pins that.
+    """
+    selected = roll_policy.select_contract(chain.frame(0), chain.date, current_contract)
+    code = str(selected["contract"])
+    return code, chain.contracts.index(code)
+
+
+def target_contracts_vector(strategy, net_delta: np.ndarray, multiplier: float) -> np.ndarray:
+    """``AutocallableDeltaHedgeStrategy.target_contracts`` over an array."""
+    if multiplier <= 0:
+        raise ValidationError("futures_multiplier must be positive")
+    target = -((np.asarray(net_delta, dtype=float) - float(strategy.target_delta)) / float(multiplier))
+    target = target * float(strategy.hedge_ratio)
+    if getattr(strategy, "round_contracts", True):
+        # np.round is half-to-even, like Python's round(), which the scalar
+        # strategy uses; a half-up rule would differ on exact halves.
+        return np.round(target)
+    return target
+
+
+def should_rebalance_vector(strategy, current: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """``strategy.should_rebalance`` over arrays."""
+    return np.abs(np.asarray(target, dtype=float) - np.asarray(current, dtype=float)) > float(
+        strategy.delta_threshold
+    )
