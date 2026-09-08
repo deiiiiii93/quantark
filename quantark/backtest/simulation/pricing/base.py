@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple, Protocol, Tuple
+from typing import Any, Dict, NamedTuple, Optional, Protocol, Tuple
 
 import numpy as np
 
@@ -24,6 +24,25 @@ def _normalised(values: np.ndarray) -> np.ndarray:
 def float_key(values: np.ndarray) -> np.ndarray:
     """The float64 bit pattern of each value as an int64 key (exact bucketing)."""
     return _normalised(np.asarray(values)).view(np.int64)
+
+
+def bucket_key(values: np.ndarray, step: Optional[float]) -> np.ndarray:
+    """Integer bucket per value: ``round(v / step)``, or the float bits when the step is None/0.
+
+    ``np.round`` is half-to-even on every platform, so a value on a bucket
+    edge lands in the same bucket on every machine.
+    """
+    arr = np.asarray(values, dtype=np.float64)
+    if step is None or float(step) == 0.0:
+        return float_key(arr)
+    return np.round(arr / float(step)).astype(np.int64)
+
+
+def bucket_centre(values: np.ndarray, step: Optional[float]) -> np.ndarray:
+    """The bucket centre each value prices at; the values themselves when the step is None/0."""
+    if step is None or float(step) == 0.0:
+        return values
+    return np.round(np.asarray(values, dtype=np.float64) / float(step)) * float(step)
 
 
 def row_keys(rows: np.ndarray) -> np.ndarray:
