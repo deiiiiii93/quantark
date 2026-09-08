@@ -8,8 +8,10 @@ grid measured from that day.  ``B(0) = 0`` is implicit.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Dict, Sequence
 
 import numpy as np
@@ -32,6 +34,17 @@ def trading_calendar(start: date, n_days: int, *, holidays: Sequence[date] = ())
             out.append(pd.Timestamp(cur))
         cur += timedelta(days=1)
     return pd.DatetimeIndex(out)
+
+
+def _dates_as_ns(dates: pd.DatetimeIndex) -> np.ndarray:
+    """Dates as int64 nanoseconds.
+
+    ``DatetimeIndex.asi8`` counts in the index's OWN resolution, which pandas
+    infers (seconds for whole days, nanoseconds elsewhere), so a fingerprint
+    or an npz built on it would depend on how the index happened to be
+    constructed.  Pin the unit here instead.
+    """
+    return np.asarray(dates.values, dtype="datetime64[ns]").astype(np.int64)
 
 
 def _validate_tenor_grid(tenor_grid: np.ndarray) -> np.ndarray:
@@ -131,8 +144,24 @@ class MarketPath:
     def fingerprint(self) -> str:
         """sha256 of the arrays, dates and tenor grid; ``meta`` is excluded."""
         h = hashlib.sha256()
-        h.update(np.ascontiguousarray(self.dates.asi8).tobytes())
+        h.update(_dates_as_ns(self.dates).tobytes())
         for arr in (self.tenor_grid, self.spot, self.atm_vol, self.rate, self.carry):
             h.update(str(arr.shape).encode())
             h.update(np.ascontiguousarray(arr, dtype=np.float64).tobytes())
         return h.hexdigest()
+
+    def to_npz(self, path) -> None:
+        """Write the batch to a compressed npz (``meta`` as a JSON string)."""
+        np.savez_compressed(
+            Path(path), dates=_dates_as_ns(self.dates), spot=self.spot, atm_vol=self.atm_vol, rate=self.rate,
+            carry=self.carry, tenor_grid=self.tenor_grid, meta=np.array(json.dumps(self.meta, default=str)),
+        )
+
+    @classmethod
+    def from_npz(cls, path) -> "MarketPath":
+        """Read a batch written by :meth:`to_npz`; the fingerprint round trips."""
+        with np.load(Path(path), allow_pickle=False) as z:
+            return cls(
+                dates=pd.DatetimeIndex(z["dates"].astype("datetime64[ns]")), spot=z["spot"], atm_vol=z["atm_vol"],
+                rate=z["rate"], carry=z["carry"], tenor_grid=z["tenor_grid"], meta=json.loads(str(z["meta"])),
+            )

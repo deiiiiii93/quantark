@@ -82,3 +82,13 @@ def test_start_state_validates():
         StartState(spot=0.0, atm_vol=0.2, rate=0.02, carry=np.zeros(3))
     with pytest.raises(ValidationError):
         StartState(spot=100.0, atm_vol=0.2, rate=0.02, carry=np.array([[0.0]]))
+
+
+def test_npz_round_trip_keeps_arrays_dates_meta_and_fingerprint(tmp_path):
+    mp = make_market_path()
+    file = tmp_path / "paths.npz"
+    mp.to_npz(file)
+    back = MarketPath.from_npz(file)
+    assert back.fingerprint() == mp.fingerprint()
+    assert back.dates.equals(mp.dates) and back.meta == mp.meta
+    assert np.array_equal(back.carry, mp.carry)
