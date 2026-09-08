@@ -95,6 +95,7 @@ from quantark.volmodels.calibration import (
 from quantark.param.vol.surface_history import IvSurfaceArtifact, VolSurfaceHistory
 from quantark.param import FlatRateCurve, FlatVolSurface, GridVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.montecarlo import run_paired_rqmc_greeks
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
@@ -177,6 +178,95 @@ MC_MARTINGALE = True
 MC_FULL = {"paths_per_batch": 8192, "batches": 16, "substeps_per_interval": 4}
 MC_QUICK = {"paths_per_batch": 512, "batches": 4, "substeps_per_interval": 1}
 
+# The localvol reference samples the Dupire surface's TIME axis exactly:
+# lv_time_sampling="integrated" replaces the left-endpoint sigma freeze with the
+# closed-form per-step time-averaged variance (exact on time-only surfaces; the
+# CRN-paired measurement on a daily grid puts the left-freeze bias at
+# -1.26 cents of notional, removed at zero per-step cost -- see
+# docs/lv-mc-scheme-demos/RESULTS.md).  This attacks the SAME sigma_loc-freezing
+# error the delta ladder above chases with substeps, from the time axis instead
+# of the step count.  Operating points (substeps, paths, seed) are deliberately
+# UNCHANGED: the upgrade tightens the reference at the certified budget, it does
+# not respend it.  Applies to the localvol pair only -- the QE references have
+# no surface time axis to sample.
+LV_TIME_SAMPLING = "integrated"
+
+# Reference config for a LOAD-BEARING delta (see GatePair.build_delta_reference).
+#
+# TWO knobs, and the order they were found in matters.
+#
+# (1) DISCRETIZATION.  The reference's DELTA converges later than its PRICE.
+#     PV is read at the base spot, where the sigma_loc-freezing error of the
+#     log-Euler step largely cancels; the delta differences two bumped prices,
+#     where it does not.  Measured on 2024-02-08/full (the steepest surface in
+#     the sample), the reference delta against the same fixed PDE reads:
+#
+#       substeps= 1 : -0.8590 +/- 0.1497 contracts
+#       substeps= 4 : -0.3854 +/- 0.1262      <- MC_FULL's level, still biased
+#       substeps= 8 : +0.2151 +/- 0.1014
+#       substeps=16 : +0.2065 +/- 0.1689      <- 0.04 sigma from substeps=8
+#
+#     It has stopped moving by 8, so that is the level recorded.  Note the
+#     ladder CROSSES zero rather than decaying to it: a one-sided reading at
+#     any single level mis-signs the error, which is how substeps=1 made the
+#     PDE look 1.27 contracts wrong in the opposite direction.  Meanwhile the
+#     PV was already flat from substeps=2 -- so "the PV ladder is flat" is not
+#     evidence that a delta reference has converged.
+#
+# (2) PATHS.  The delta rule widens by 2 x the reference's standard error, the
+#     way the PV rule widens by 2 x mc_se.  That term is meant to be a safety
+#     net under a desk bound that normally binds -- as PV behaves, where
+#     2 x mc_se ~ 0.069% never reaches the 0.25% floor.  At MC_FULL's paths the
+#     delta SE is 0.59 contracts against a 0.5-contract bound, so 2 x SE would
+#     bind at ~1.19 and the gate would lose the power to see a real
+#     one-contract error.
+#
+#     MEASURED SE vs paths (2024-02-08/full, paired RQMC, 16 batches):
+#
+#                      substeps=4      substeps=8
+#       x1  131,072      0.5939            -
+#       x2  262,144      0.4364          0.3228
+#       x4  524,288      0.3275          0.1832   <- 2 x SE = 0.366 < 0.5
+#       x8 1,048,576     0.2146          0.1314
+#
+#     Refining substeps REDUCES the SE at unchanged paths (1.35x at x2, 1.63x
+#     at x8): with one step per observation the integrand is dominated by
+#     discrete barrier flips, and finer stepping resolves each crossing more
+#     gradually, handing some of QMC's low-discrepancy advantage back.  So the
+#     two knobs are not independent, and substeps is the better value in both
+#     currencies -- it removes bias AND variance for comparable cost.
+#
+#     x4 at substeps=8 is therefore the operating point: cheaper than x8 at
+#     substeps=4 (524s vs 727s per cell), more precise (0.183 vs 0.215), and
+#     unbiased where the latter is not.
+#
+# With both set, the converged gap on the worst cell is +0.2128 +/- 0.0869
+# contracts -- upper 95% bound 0.387, DEMONSTRABLY inside the 0.5 desk bound.
+MC_DELTA_SUBSTEPS = 8
+MC_DELTA_PATH_FACTOR = 4
+MC_DELTA_FULL = {
+    **MC_FULL,
+    "paths_per_batch": MC_DELTA_PATH_FACTOR * MC_FULL["paths_per_batch"],
+    "substeps_per_interval": MC_DELTA_SUBSTEPS,
+}
+
+
+def delta_mc_config(mc: Dict[str, Any]) -> Dict[str, Any]:
+    """The delta reference's config, derived from whichever config is active.
+
+    Derived rather than pinned to MC_DELTA_FULL so ``--quick`` stays quick.
+    The pair table used to close over MC_FULL directly, which meant quick mode
+    reported MC_QUICK in its payload while executing MC_FULL -- the same
+    declared-is-not-executed defect that let the localvol reference run at
+    substeps=1.  Quick mode is marked non-production-valid, but a smoke test
+    that silently runs the production reference is not a smoke test.
+    """
+    return {
+        **mc,
+        "paths_per_batch": MC_DELTA_PATH_FACTOR * int(mc["paths_per_batch"]),
+        "substeps_per_interval": MC_DELTA_SUBSTEPS,
+    }
+
 # PDE ladder (n_x, n_v, n_t).  Coarse mirrors the stage-08 grid (90/36/96 at
 # T=3).  Medium uses n_t = ceil(400*T) so dt <= 1/400y: strictly finer than the
 # minimum 1-calendar-day gap between KI observation dates, which guarantees no
@@ -215,7 +305,12 @@ DECAY_TARGET_MONTHS = 24
 DECAY_MIN_REMAINING = 0.5
 DECAY_MAX_REMAINING = 2.0
 
-SCHEMA_VERSION = 1
+# 2: delta rows gained reference_std_error / tolerance_contracts, and the
+#    localvol reference gained the substeps_per_interval it always declared.
+#    Schema-1 evidence must NOT be rescored under this contract -- its delta
+#    rows never measured a reference standard error, so a schema-1 rescore
+#    would report uncertainty-aware admission it never performed.
+SCHEMA_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -601,6 +696,18 @@ def _make_mc_params(mc_cfg: Dict[str, Any], seed: int) -> MCParams:
 
 
 def _make_mc_engine(variant: str, model, mcp: MCParams, substeps: int):
+    if variant == VOL_MODEL_LOCALVOL:
+        # substeps refines this engine's log-Euler steps the same way it
+        # refines the QE engines': _SubstepRefinementMixin is on the shared
+        # base.  Under a Dupire surface it is the knob that matters most,
+        # because one step per observation freezes sigma_loc(S, t) at the
+        # step's left endpoint.
+        return LocalVolSnowballMCEngine(
+            local_vol_surface=model.local_vol_surface,
+            params=mcp,
+            method=MonteCarloMethod.RANDOMIZED_QUASI,
+            substeps_per_interval=substeps,
+        )
     if variant == VOL_MODEL_HESTON:
         return QESnowballMCEngine(
             model.heston_params,
@@ -656,17 +763,32 @@ class GatePair:
     builders are what actually run.  The two must be different numerical
     methods, or the cell is a common-mode comparison and proves nothing.
 
-    Builder signature: ``(model, grid) -> engine``.  ``model`` is the
+    Builder signatures: production is ``(model, grid) -> engine``; the two
+    reference builders are ``(model, grid, mc) -> engine``.  ``model`` is the
     CalibratedVolModel for calibrated variants and ``None`` for the BSM ones;
     ``grid`` is the ladder level's knob dict (see _production_grid below) for
-    the production builder, and ``None`` for the reference builder (the
+    the production builder, and ``None`` for the reference builders (the
     reference is priced once at a fixed, finer configuration -- it is never
-    laddered).  ``reference_is_mc`` drives whether a std error is expected: a
-    deterministic reference has ``mc_se = None`` and the flat TOL_ABS floor.
+    laddered).  ``mc`` is the ACTIVE mc config (``cfg["mc"]``), passed rather
+    than closed over so ``--quick`` genuinely quickens the reference and the
+    payload's reported config is the one that ran; deterministic builders
+    accept and ignore it.  ``reference_is_mc`` drives whether a std error is
+    expected: a deterministic reference has ``mc_se = None`` and the flat
+    TOL_ABS floor.
 
     ``surface_vol_mode`` must match the fleet's ``VariantSpec.surface_vol_mode``
     for the same variant (see ``build_pricing_env`` and Task 9) -- no default,
     since defaulting is how a new variant silently gets the wrong surface.
+
+    ``build_delta_reference`` is the SAME engine at MC_DELTA_FULL's higher path
+    count, and is required exactly where the delta decides the route against a
+    Monte-Carlo reference.  The delta rule widens by 2 x the reference's own
+    standard error (``delta_tolerance_per_unit``); at MC_FULL's path count that
+    term measures ~1.19 contracts on the steep-surface cells and would swamp
+    the 0.5-contract desk bound, so the reference is made quiet enough that the
+    desk bound stays the binding constraint.  ``None`` where the delta is only
+    a diagnostic -- the ADI pair delegates Greek admission to Stage 16, so
+    those paths would buy nothing.
     """
 
     production: str
@@ -675,12 +797,14 @@ class GatePair:
     build_reference: Callable[..., Any]
     reference_is_mc: bool
     surface_vol_mode: str
+    build_delta_reference: Optional[Callable[..., Any]] = None
 
 
 def _bsm_pde(accuracy: str = "standard"):
     """1D BSM PDE builder.  ``grid`` (production) overrides ``accuracy``;
-    ``grid=None`` (reference) keeps the factory-bound fixed profile."""
-    def build(model, grid):
+    ``grid=None`` (reference) keeps the factory-bound fixed profile.
+    ``mc`` is accepted and ignored: a deterministic engine has no MC config."""
+    def build(model, grid, mc=None):
         acc = accuracy if grid is None else grid["accuracy"]
         return SnowballPDESolver(PDEParams(accuracy=acc))
     return build
@@ -688,8 +812,9 @@ def _bsm_pde(accuracy: str = "standard"):
 
 def _bsm_quad(grid_points: Optional[int] = None):
     """BSM quadrature builder.  ``grid`` (production) overrides ``grid_points``;
-    ``grid=None`` (reference) keeps the factory-bound fixed count."""
-    def build(model, grid):
+    ``grid=None`` (reference) keeps the factory-bound fixed count.
+    ``mc`` is accepted and ignored: a deterministic engine has no MC config."""
+    def build(model, grid, mc=None):
         gp = grid_points if grid is None else grid["grid_points"]
         params = QuadParams() if gp is None else QuadParams(grid_points=gp)
         return SnowballQuadEngine(params=params)
@@ -728,10 +853,25 @@ GATE_PAIRS: Dict[str, GatePair] = {
         build_production=lambda model, grid: LocalVolSnowballPDESolver(
             params=PDEParams(accuracy=grid["accuracy"]),
             local_vol_surface=model.local_vol_surface),
-        build_reference=lambda model, grid: LocalVolSnowballMCEngine(
+        build_reference=lambda model, grid, mc: LocalVolSnowballMCEngine(
             local_vol_surface=model.local_vol_surface,
-            params=_make_mc_params(MC_FULL, SEED),
-            method=MonteCarloMethod.RANDOMIZED_QUASI),
+            params=_make_mc_params(mc, SEED),
+            method=MonteCarloMethod.RANDOMIZED_QUASI,
+            # NOT a Heston-only knob.  _SubstepRefinementMixin sits on
+            # _VolModelSnowballMCBase, so this engine refines its log-Euler
+            # steps exactly like the QE engines do.  Omitting it ran the
+            # reference at the class default of 1 while the decision payload
+            # advertised MC_FULL's value -- and a one-step-per-observation
+            # Dupire MC freezes sigma_loc(S, t) at each step's left endpoint,
+            # which biases the estimate in proportion to surface steepness.
+            substeps_per_interval=mc["substeps_per_interval"],
+            lv_time_sampling=LV_TIME_SAMPLING),
+        build_delta_reference=lambda model, grid, mc: LocalVolSnowballMCEngine(
+            local_vol_surface=model.local_vol_surface,
+            params=_make_mc_params(delta_mc_config(mc), SEED),
+            method=MonteCarloMethod.RANDOMIZED_QUASI,
+            substeps_per_interval=delta_mc_config(mc)["substeps_per_interval"],
+            lv_time_sampling=LV_TIME_SAMPLING),
         reference_is_mc=True,
         surface_vol_mode="full_grid",
     ),
@@ -739,9 +879,9 @@ GATE_PAIRS: Dict[str, GatePair] = {
         production="pde_2d_adi", reference="qe_m_rqmc",
         build_production=lambda model, grid: _make_pde_engine(
             VOL_MODEL_HESTON, model, PDEParams(), (grid["n_x"], grid["n_v"], grid["n_t"])),
-        build_reference=lambda model, grid: _make_mc_engine(
-            VOL_MODEL_HESTON, model, _make_mc_params(MC_FULL, SEED),
-            MC_FULL["substeps_per_interval"]),
+        build_reference=lambda model, grid, mc: _make_mc_engine(
+            VOL_MODEL_HESTON, model, _make_mc_params(mc, SEED),
+            mc["substeps_per_interval"]),
         reference_is_mc=True,
         surface_vol_mode="full_grid",
     ),
@@ -749,9 +889,9 @@ GATE_PAIRS: Dict[str, GatePair] = {
         production="pde_2d_adi_slv", reference="slv_qe_m_rqmc",
         build_production=lambda model, grid: _make_pde_engine(
             VOL_MODEL_HESTON_SLV, model, PDEParams(), (grid["n_x"], grid["n_v"], grid["n_t"])),
-        build_reference=lambda model, grid: _make_mc_engine(
-            VOL_MODEL_HESTON_SLV, model, _make_mc_params(MC_FULL, SEED),
-            MC_FULL["substeps_per_interval"]),
+        build_reference=lambda model, grid, mc: _make_mc_engine(
+            VOL_MODEL_HESTON_SLV, model, _make_mc_params(mc, SEED),
+            mc["substeps_per_interval"]),
         reference_is_mc=True,
         surface_vol_mode="full_grid",
     ),
@@ -974,9 +1114,40 @@ def delta_quantum_per_unit(
     return float(safe_divide(float(multiplier) * float(s0), float(notional)))
 
 
-def delta_cell_passed(abs_diff: float, s0: float, **kw) -> bool:
-    """Delta agreement within half a futures contract's worth of per-unit delta."""
-    return abs(float(abs_diff)) <= DELTA_CELL_CONTRACTS * delta_quantum_per_unit(s0, **kw)
+def delta_tolerance_per_unit(
+    se: Optional[float], s0: float, **kw
+) -> float:
+    """Per-unit delta tolerance: max(2 x reference SE, half a futures contract).
+
+    The exact mirror of ``gate_tolerance_pct`` for the delta rule, and for the
+    same reason: a Monte-Carlo reference has sampling error of its own, and
+    charging it to the engine under test measures the reference, not the
+    engine.  Measured on 2024-02-08, the localvol reference delta's standard
+    error is ~0.56 contracts against a 0.5-contract bound -- so without this
+    term a perfectly converged PDE fails roughly a third of the time on the
+    steep-surface cells, purely on which Sobol scramble it drew.
+
+    ``se=None`` means the reference is DETERMINISTIC (QUAD or a finer PDE),
+    not that its error is zero: the tolerance is then the flat desk bound,
+    exactly as before.  The desk bound is a floor, never a ceiling, so a quiet
+    reference cannot loosen the gate.
+    """
+    bound = DELTA_CELL_CONTRACTS * delta_quantum_per_unit(s0, **kw)
+    if se is None:
+        return bound
+    return max(MC_SE_FACTOR * float(se), bound)
+
+
+def delta_cell_passed(
+    abs_diff: float, s0: float, se: Optional[float] = None, **kw
+) -> bool:
+    """Delta agreement within the reference-aware tolerance.
+
+    ``se`` is the reference delta's standard error in the SAME per-unit delta
+    units as ``abs_diff`` (not contracts), so the comparison needs no
+    conversion.
+    """
+    return abs(float(abs_diff)) <= delta_tolerance_per_unit(se, s0, **kw)
 
 
 def detect_delta_bias(rows: Sequence[Dict[str, Any]]) -> Tuple[bool, Dict[str, Any]]:
@@ -989,17 +1160,46 @@ def detect_delta_bias(rows: Sequence[Dict[str, Any]]) -> Tuple[bool, Dict[str, A
     like detect_systematic_bias_bucketed's thin buckets, they can neither
     flag bias nor mask it.
     """
+    usable = [
+        r for r in rows
+        if r.get("signed_diff") is not None and r.get("s0")
+    ]
     contracts = [
         float(safe_divide(float(r["signed_diff"]), delta_quantum_per_unit(float(r["s0"]))))
-        for r in rows
-        if r.get("signed_diff") is not None and r.get("s0")
+        for r in usable
     ]
     if not contracts:
         return False, {"n_rows": 0, "mean_signed_contracts": None}
     mean_signed = float(np.mean(contracts))
+    # The mean inherits the reference's sampling error as sqrt(sum(se^2))/n.
+    # Reported so a reader can see whether the 0.1-contract bound is even
+    # resolvable: under the schema-1 configuration it was 0.20 contracts,
+    # twice its own bound, so "delta_biased: false" carried no information.
+    # None where any contributing reference is deterministic (no error to
+    # propagate) -- not 0.0, which would read as a measured absence of noise.
+    ses = [r.get("reference_std_error") for r in usable]
+    if any(se is None for se in ses):
+        mean_se = None
+        resolvable = None
+    else:
+        mean_se = float(
+            math.sqrt(
+                sum(
+                    float(
+                        safe_divide(float(se), delta_quantum_per_unit(float(r["s0"])))
+                    )
+                    ** 2
+                    for se, r in zip(ses, usable)
+                )
+            )
+            / len(usable)
+        )
+        resolvable = bool(MC_SE_FACTOR * mean_se <= DELTA_BIAS_CONTRACTS)
     return abs(mean_signed) > DELTA_BIAS_CONTRACTS, {
         "n_rows": len(contracts),
         "mean_signed_contracts": mean_signed,
+        "mean_signed_se_contracts": mean_se,
+        "bias_bound_is_resolvable": resolvable,
         "max_abs_contracts": max(abs(c) for c in contracts),
         "bound_contracts": DELTA_BIAS_CONTRACTS,
     }
@@ -1033,8 +1233,16 @@ def decide_route(
     PDE is admitted only if: every medium cell passes, no systematic bias at
     medium, every fine cell passes, and |fine - medium| <= TOL_ABS on every
     paired cell (no drift). When ``require_delta`` is true, the production
-    engine's delta must also agree with the reference within half a futures
-    contract on every sampled date with no systematic one-sided bias. The two
+    engine's delta must also agree with the reference within
+    ``delta_tolerance_per_unit`` -- max(2 x the reference's own standard error,
+    half a futures contract) -- on every sampled date, with no systematic
+    one-sided bias.  The SE term mirrors the PV rule's max(2 x mc_se, TOL_ABS)
+    and exists for the same reason: against a Monte-Carlo reference, a fixed
+    bound charges the reference's sampling noise to the engine under test.
+    ``build_delta_reference`` keeps that term from binding by running the
+    load-bearing delta reference quiet enough that the desk bound stays the
+    constraint -- which also keeps ``detect_delta_bias``' 0.1-contract mean
+    bound meaningful, since the mean over 8 cells inherits SE/sqrt(8). The two
     2-D ADI variants set ``require_delta=False`` because Stage 16 is their
     stronger, separately hashed Greek authority; these legacy delta rows stay
     diagnostic. Any cell carrying an ``error`` counts as failed. Zero
@@ -1121,7 +1329,8 @@ def decide_route(
                 f"{r['date']}/{r.get('case', '?')}" for r in delta_rows if r.get("passed") is not True
             ]
             reasons.append(
-                f"delta disagreement exceeds half a futures contract on "
+                f"delta disagreement exceeds max(2 x reference SE, "
+                f"{DELTA_CELL_CONTRACTS} contracts) on "
                 f"{len(failing)} cell(s): {', '.join(failing)}"
             )
     if require_delta and delta_biased:
@@ -1140,8 +1349,8 @@ def decide_route(
             rationale = (
                 "medium grid inside tolerance on all sampled dates/cases, no sign "
                 "bias, fine grid confirms (pass + no drift), and delta agrees "
-                "with the reference within half a futures contract with no "
-                "systematic bias"
+                "with the reference within max(2 x its standard error, "
+                f"{DELTA_CELL_CONTRACTS} contracts) with no systematic bias"
             )
         else:
             rationale = (
@@ -1247,11 +1456,22 @@ _CELL_REQUIRED = (
 
 def validate_gate_payload(payload: Dict[str, Any]) -> None:
     """Fail-closed schema check on pde_convergence_gate.json before writing."""
-    for key in ("schema_version", "study", "config", "dates", "cells", "sanity"):
+    for key in (
+        "schema_version", "study", "config", "dates", "cells", "deltas", "sanity"
+    ):
         if key not in payload:
             raise ValueError(f"gate payload missing key {key!r}")
     if payload["study"] != "pde_convergence_gate":
         raise ValueError("gate payload study tag mismatch")
+    if int(payload["schema_version"]) != SCHEMA_VERSION:
+        raise ValueError(
+            f"gate evidence is schema {payload['schema_version']}, this gate "
+            f"is schema {SCHEMA_VERSION}; rerun the study rather than "
+            "rescoring -- schema-1 delta rows carry no reference standard "
+            "error, so they cannot be judged under the uncertainty-aware "
+            "delta rule"
+        )
+    validate_delta_rows(payload["deltas"])
     for cell in payload["cells"]:
         missing = [k for k in _CELL_REQUIRED if k not in cell]
         if missing:
@@ -1271,6 +1491,44 @@ def validate_gate_payload(payload: Dict[str, Any]) -> None:
             for key in required_finite:
                 if cell[key] is None or not math.isfinite(float(cell[key])):
                     raise ValueError(f"gate cell {key} not finite without an error tag")
+
+
+_DELTA_ROW_REQUIRED = (
+    "date", "case", "variant", "level", "s0", "delta_production",
+    "delta_reference", "reference_std_error", "signed_diff", "abs_diff",
+    "diff_contracts", "tolerance_contracts", "passed",
+)
+
+
+def validate_delta_rows(rows: Sequence[Dict[str, Any]]) -> None:
+    """Fail-closed schema check on the delta rows.
+
+    An MC-referenced row MUST carry a finite ``reference_std_error``: it is
+    what ``delta_tolerance_per_unit`` widens by, and a missing one would drop
+    the cell back to the noise-blind bound that charged reference sampling
+    noise to the engine under test.  A deterministic reference has no such
+    error by construction and must report ``None``, not ``0.0``.
+    """
+    for row in rows:
+        missing = [k for k in _DELTA_ROW_REQUIRED if k not in row]
+        if missing:
+            raise ValueError(f"delta row missing keys {missing}")
+        if row["variant"] not in VARIANTS:
+            raise ValueError(f"delta row with unknown variant {row['variant']!r}")
+        se = row["reference_std_error"]
+        if GATE_PAIRS[row["variant"]].reference_is_mc:
+            if row["error"] is None and (
+                se is None or not math.isfinite(float(se)) or float(se) < 0.0
+            ):
+                raise ValueError(
+                    f"delta row {row['date']}/{row['variant']}: MC reference "
+                    "reference_std_error must be finite and non-negative"
+                )
+        elif se is not None:
+            raise ValueError(
+                f"delta row {row['date']}/{row['variant']}: a deterministic "
+                "reference must report reference_std_error=None, not a number"
+            )
 
 
 def validate_decision_payload(payload: Dict[str, Any]) -> None:
@@ -1330,26 +1588,44 @@ def _bumped_pde_delta(engine, product, env, bump: float = SPOT_BUMP) -> float:
     ) / (2.0 * s0 * bump)
 
 
-def _bumped_mc_delta(build_reference, model, product, env, bump: float = SPOT_BUMP) -> float:
-    """Central bumped MC delta with common random numbers (same fixed seed).
+def _bumped_mc_delta(
+    build_reference, model, product, env, mc, bump: float = SPOT_BUMP
+) -> Tuple[float, float]:
+    """Central bumped MC delta with CRN, and its batch-spread standard error.
 
-    ``build_reference`` is ``GATE_PAIRS[variant].build_reference`` -- called
-    here with ``grid=None`` (the reference is never laddered), driving this
-    off the pair table instead of assuming a Heston/Heston-SLV engine.  Each
-    reference builder bakes in the fixed module-level SEED, so rebuilding it
-    fresh for each bump reproduces identical random draws (CRN) with no
-    extra seed plumbing.
+    Returns ``(delta, std_error)`` in per-unit delta.
+
+    Routed through ``run_paired_rqmc_greeks`` -- the same paired construction
+    Stage 16 uses for the ADI Greek certificate -- because the delta rule has
+    to widen by the reference's own sampling noise the way the PV rule widens
+    by ``mc_se``, and two bare ``price()`` calls cannot report one.  The three
+    specs are driven with a shared ``batch_id``, so the bumped runs reuse one
+    scrambled Sobol point set: the same CRN the two-price bump relied on, and
+    the same ``(up - down) / (2 * spot * bump)`` estimator.  Verified
+    bit-identical to the two-price form on 2024-02-08/full (0.5554460169).
+
+    ``build_reference`` is called with ``grid=None`` (the reference is never
+    laddered), driving this off the pair table rather than assuming an engine
+    family.  Each builder bakes in the fixed module-level SEED.
     """
     s0 = float(env.spot)
-    env_up = deepcopy(env)
-    env_up.spot_quote.spot = s0 * (1.0 + bump)
-    env_dn = deepcopy(env)
-    env_dn.spot_quote.spot = s0 * (1.0 - bump)
-    eng_up = build_reference(model, None)
-    eng_dn = build_reference(model, None)
-    return (float(eng_up.price(product, env_up)) - float(eng_dn.price(product, env_dn))) / (
-        2.0 * s0 * bump
+    specs = []
+    for shifted in (s0 * (1.0 - bump), s0, s0 * (1.0 + bump)):
+        shifted_env = deepcopy(env)
+        shifted_env.spot_quote.spot = shifted
+        spec = build_reference(model, None, mc).build_rqmc_session_spec(
+            product, shifted_env
+        )
+        if spec is None:
+            raise RuntimeError(
+                "MC reference did not produce an RQMC run spec; the paired "
+                "delta needs per-batch estimates to report a standard error"
+            )
+        specs.append(spec)
+    result = run_paired_rqmc_greeks(
+        specs[0], specs[1], specs[2], spot=s0, relative_bump=bump
     )
+    return float(result.delta), float(result.delta_std_error)
 
 
 def _evaluate_case(
@@ -1389,7 +1665,7 @@ def _evaluate_case(
             t0 = time.perf_counter()
             # Reference is priced once at its own fixed, finer configuration
             # (grid=None): it is never laddered, unlike the production engine.
-            ref_engine = pair.build_reference(model, None)
+            ref_engine = pair.build_reference(model, None, cfg["mc"])
             raw_price = float(ref_engine.price(product, env))
             ref_seconds = time.perf_counter() - t0
             if pair.reference_is_mc:
@@ -1513,9 +1789,14 @@ def _evaluate_case(
                 "s0": float(s0_inception),
                 "delta_production": None,
                 "delta_reference": None,
+                # None for a DETERMINISTIC reference (QUAD / finer PDE), which
+                # has no sampling error -- not zero, which would read as a
+                # measured absence of noise.
+                "reference_std_error": None,
                 "signed_diff": None,
                 "abs_diff": None,
                 "diff_contracts": None,
+                "tolerance_contracts": None,
                 "passed": False,        # fail closed until proven otherwise
                 "error": None,
                 "timings": {},
@@ -1530,11 +1811,20 @@ def _evaluate_case(
             try:
                 t1 = time.perf_counter()
                 if pair.reference_is_mc:
-                    delta_row["delta_reference"] = _bumped_mc_delta(
-                        pair.build_reference, model, product, env
+                    # Load-bearing MC deltas run the quieter MC_DELTA_FULL
+                    # reference so the desk bound, not 2 x SE, stays binding.
+                    (
+                        delta_row["delta_reference"],
+                        delta_row["reference_std_error"],
+                    ) = _bumped_mc_delta(
+                        pair.build_delta_reference or pair.build_reference,
+                        model,
+                        product,
+                        env,
+                        cfg["mc"],
                     )
                 else:
-                    ref_engine = pair.build_reference(model, None)
+                    ref_engine = pair.build_reference(model, None, cfg["mc"])
                     delta_row["delta_reference"] = _bumped_pde_delta(ref_engine, product, env)
                 delta_row["timings"]["reference_delta_seconds"] = time.perf_counter() - t1
             except Exception as exc:
@@ -1543,7 +1833,12 @@ def _evaluate_case(
                     if delta_row["error"]
                     else f"reference delta: {type(exc).__name__}: {exc}"
                 )
-            for key in ("delta_production", "delta_reference"):
+            finite_keys = ["delta_production", "delta_reference"]
+            if pair.reference_is_mc:
+                # Without a finite SE the tolerance would silently collapse to
+                # the noise-blind desk bound -- fail the cell instead.
+                finite_keys.append("reference_std_error")
+            for key in finite_keys:
                 err = _finite_or_error(delta_row[key], key)
                 if err is not None:
                     delta_row["error"] = (
@@ -1554,10 +1849,17 @@ def _evaluate_case(
                 signed = delta_row["delta_production"] - delta_row["delta_reference"]
                 delta_row["signed_diff"] = signed
                 delta_row["abs_diff"] = abs(signed)
-                delta_row["diff_contracts"] = float(
-                    safe_divide(signed, delta_quantum_per_unit(float(s0_inception)))
+                quantum = delta_quantum_per_unit(float(s0_inception))
+                delta_row["diff_contracts"] = float(safe_divide(signed, quantum))
+                se = delta_row["reference_std_error"]
+                delta_row["tolerance_contracts"] = float(
+                    safe_divide(
+                        delta_tolerance_per_unit(se, float(s0_inception)), quantum
+                    )
                 )
-                delta_row["passed"] = delta_cell_passed(abs(signed), float(s0_inception))
+                delta_row["passed"] = delta_cell_passed(
+                    abs(signed), float(s0_inception), se=se
+                )
             else:
                 delta_row["signed_diff"] = None
                 delta_row["diff_contracts"] = None
@@ -1585,14 +1887,28 @@ def _extras_first_date(
     # (a) substeps_per_interval sensitivity.  The MC time grid already contains
     # every contractual (daily KI) observation date, so there is no discrete-
     # monitoring bias to remove; this documents the residual SDE-step
-    # sensitivity of the QE discretization at one business day spacing.
+    # sensitivity of each reference's discretization at one business day
+    # spacing -- i.e. whether the REFERENCE has converged, which is the half of
+    # the comparison the production ladder cannot speak to.
+    #
+    # Scoped to every MC reference, not just the QE pair.  Scoping it to the
+    # 2-D pair is how a substeps=1 localvol reference went unmeasured while the
+    # PDE it disagreed with was blamed for the difference: at MC_FULL's 4
+    # substeps that reference moves 0.099% of notional and 1.27 contracts of
+    # delta on the steepest surface in the sample.
+    #
+    # READ THIS ROW AS A PRICE STATEMENT ONLY.  A price-converged reference is
+    # NOT necessarily a delta-converged one, and the localvol reference is a
+    # measured counterexample: its PV is flat from substeps=2 onward, while its
+    # DELTA still shifts +0.69 +/- 0.18 contracts (3.8 sigma) between substeps
+    # 4 and 8 -- more than the whole 0.5-contract desk bound.  PV is read at the
+    # base spot, where the sigma_loc-freezing error largely cancels; the delta
+    # differences two bumped prices, where it does not.  Delta convergence is
+    # established separately and pinned in MC_DELTA_SUBSTEPS, not inferred from
+    # this row.
     substeps_rows = []
     for variant in VARIANTS:
-        # QE substeps_per_interval is a Heston/Heston-SLV discretization knob;
-        # _make_mc_engine only builds those two engines, so (unlike the Gate
-        # G2 delta check, which now runs for all six variants) this stays
-        # scoped to the 2D-ADI pair.
-        if not GATE_PAIRS[variant].production.startswith("pde_2d"):
+        if not GATE_PAIRS[variant].reference_is_mc:
             continue
         env = envs[GATE_PAIRS[variant].surface_vol_mode]  # both are full_grid
         row = {
@@ -1990,6 +2306,10 @@ def _reference_params_block(pair: GatePair, cfg: Dict[str, Any]) -> Dict[str, An
         "rqmc_min_batches": cfg["mc"]["batches"],
         "rqmc_max_batches": cfg["mc"]["batches"],
         "rqmc_target_std": 1e-12,
+        # Recorded for EVERY MC reference, not just the QE pair: stage 12
+        # forwards this key verbatim into the replay engine factory, so an
+        # absent entry silently drops the fleet to the engine default.
+        "substeps_per_interval": cfg["mc"]["substeps_per_interval"],
         "note": "REFERENCE-quality config used for the gate: RQMC pinned "
         "(rqmc_min_batches == rqmc_max_batches, rqmc_target_std ~ 0) so "
         "every batch runs and the batch-spread SE is honest. The "
@@ -2025,13 +2345,19 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
         if pair.reference_is_mc:
             mc_params["engine"] = _MC_ENGINE_NAME.get(variant, pair.reference)
             if variant in (VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV):
+                # The QE scheme IS Heston-only (LocalVolSnowballMCEngine has
+                # no scheme).  substeps_per_interval is not, and is recorded
+                # for every MC reference in _reference_params_block.
                 mc_params.update(
                     {
-                        "substeps_per_interval": cfg["mc"]["substeps_per_interval"],
                         "scheme": "QUADEXP_M" if MC_MARTINGALE else "QUADEXP",
                         "martingale_correction": MC_MARTINGALE,
                     }
                 )
+            elif variant == VOL_MODEL_LOCALVOL:
+                # Recorded so stage 12 forwards it verbatim on an MC route --
+                # same declared-is-executed contract as substeps_per_interval.
+                mc_params["lv_time_sampling"] = LV_TIME_SAMPLING
         variants[variant] = {
             "route": decision["route"],
             "pde_params": _production_params_block(pair, medium_grid),
@@ -2218,31 +2544,50 @@ def build_report(cfg: Dict[str, Any], gate: Dict[str, Any], decision: Dict[str, 
             )
         lines.append("")
 
-    lines.append("## Legacy delta agreement diagnostic (spec §5.3)")
+    lines.append("## Delta agreement (spec §5.3)")
     lines.append("")
     lines.append(
         "For Heston and Heston-SLV these 16-scramble point rows are diagnostic; "
-        "Stage 16 is the authoritative, fail-closed delta/gamma admission gate."
+        "Stage 16 is the authoritative, fail-closed delta/gamma admission gate. "
+        "For the other four variants the rows are load-bearing: they decide the "
+        "route."
+    )
+    lines.append("")
+    lines.append(
+        f"Tolerance is max(2 x reference SE, {DELTA_CELL_CONTRACTS} contracts) - "
+        "the desk bound is a floor, and the SE term only lifts it where the "
+        "reference is genuinely noisy. A DETERMINISTIC reference (QUAD / finer "
+        "PDE) has no SE and is held to the flat desk bound."
     )
     lines.append("")
     deltas = gate.get("deltas") or []
     if deltas:
         lines.append(
             "| date | variant | delta production | delta reference | abs diff | "
-            "diff (contracts) | pass |"
+            "diff (contracts) | ref SE (contracts) | tolerance (contracts) | pass |"
         )
-        lines.append("|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|")
         for d in deltas:
             if d["delta_production"] is None or d["delta_reference"] is None:
                 lines.append(
                     f"| {d['date']} | {d['variant']} | n/a ({d.get('error')}) | | | | "
-                    f"{d['passed']} |"
+                    f"| | {d['passed']} |"
                 )
             else:
+                quantum = delta_quantum_per_unit(float(d["s0"]))
+                se = d.get("reference_std_error")
+                se_txt = (
+                    f"{float(safe_divide(float(se), quantum)):.3f}"
+                    if se is not None
+                    else "deterministic"
+                )
+                tol = d.get("tolerance_contracts")
+                tol_txt = f"{float(tol):.3f}" if tol is not None else "n/a"
                 lines.append(
                     f"| {d['date']} | {d['variant']} | {d['delta_production']:+.4f} | "
                     f"{d['delta_reference']:+.4f} | {d['abs_diff']:.4f} | "
-                    f"{d['diff_contracts']:+.3f} | {d['passed']} |"
+                    f"{d['diff_contracts']:+.3f} | {se_txt} | {tol_txt} | "
+                    f"{d['passed']} |"
                 )
         lines.append("")
     sanity = gate["sanity"]

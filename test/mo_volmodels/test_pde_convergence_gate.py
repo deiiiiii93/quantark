@@ -492,7 +492,9 @@ def _stub_gate_pairs(mc_price, pde_price):
     pair = gate11.GatePair(
         production="pde_2d_stub", reference="mc_stub",
         build_production=lambda model, grid: _StubPDEEngine(pde_price),
-        build_reference=lambda model, grid: _StubMCEngine(mc_price),
+        # Reference builders take the ACTIVE mc config as a third argument so
+        # --quick genuinely quickens the reference; the stub ignores it.
+        build_reference=lambda model, grid, mc: _StubMCEngine(mc_price),
         reference_is_mc=True,
         surface_vol_mode="full_grid",  # matches heston/heston_slv's real mode
     )
@@ -516,11 +518,15 @@ def _evaluate_with_stubs(monkeypatch, mc_price, pde_price):
 
 def _assert_cells_survive_assembly(cells):
     payload = {
-        "schema_version": 1,
+        # Schema 2 onward: validate_gate_payload pins the version and requires
+        # "deltas", so schema-1 evidence cannot be rescored under the
+        # uncertainty-aware delta rule it never measured against.
+        "schema_version": gate11.SCHEMA_VERSION,
         "study": "pde_convergence_gate",
         "config": {},
         "dates": [],
         "cells": cells,
+        "deltas": [],
         "sanity": {},
     }
     gate11.validate_gate_payload(payload)
@@ -570,7 +576,7 @@ def test_strip_timings_and_canonical_hash():
 
 def test_validate_gate_payload_roundtrip_and_failures():
     good = {
-        "schema_version": 1,
+        "schema_version": gate11.SCHEMA_VERSION,
         "study": "pde_convergence_gate",
         "config": {},
         "dates": [],
@@ -582,6 +588,7 @@ def test_validate_gate_payload_roundtrip_and_failures():
                 "tol_pct": 0.25, "passed": True, "error": None,
             }
         ],
+        "deltas": [],
         "sanity": {},
     }
     gate11.validate_gate_payload(good)

@@ -502,8 +502,15 @@ def test_mc_paths_and_seed_come_from_the_gate_decision():
 
 
 def test_localvol_gets_no_heston_only_options():
-    """scheme/substeps are null for localvol; passing None would TypeError
-    inside LocalVolSnowballMCEngine(**options)."""
+    """A decision that OMITS a key must not forward it as None.
+
+    Note what this does and does not say.  "scheme" is genuinely Heston-only.
+    "substeps_per_interval" is not -- LocalVolSnowballMCEngine accepts it, and
+    test_localvol_gated_mc_options_construct_the_factory_s_engine builds the
+    real engine with it.  This test is about None-filtering, not about which
+    kwargs the LV engine supports; reading it as the latter is how the gate
+    came to run its localvol reference at substeps=1.
+    """
     s12 = _load_stage12()
     routing = _routing_with_mc(
         s12, "localvol", substeps_per_interval=None, scheme=None
@@ -591,3 +598,229 @@ def test_gated_mc_options_actually_construct_the_factory_s_engines():
         ).vol_model_engine_options)
     assert e2.substeps_per_interval == 4
     assert e2.martingale_correction is True
+
+
+# ---------------------------------------------------------------------------
+# The localvol reference must run at its DECLARED resolution, and its delta
+# must be judged against its own sampling noise.
+#
+# Both defects shipped together: the gate built LocalVolSnowballMCEngine
+# without substeps_per_interval (class default 1, while heston/heston_slv got
+# MC_FULL's 4), then charged the resulting discretization bias to the PDE
+# through a delta rule that -- unlike its PV sibling gate_tolerance_pct --
+# carries no reference-uncertainty term.
+# ---------------------------------------------------------------------------
+
+
+def _lv_model_stub():
+    """The localvol reference builder only reads ``local_vol_surface``."""
+    return types.SimpleNamespace(local_vol_surface=object())
+
+
+def test_localvol_reference_runs_at_the_declared_substeps():
+    """substeps_per_interval is NOT a Heston-only knob.
+
+    _SubstepRefinementMixin sits on _VolModelSnowballMCBase, so
+    LocalVolSnowballMCEngine refines its SDE steps exactly like the QE
+    engines -- test_mc_substeps_per_interval.py already proves it for
+    'lv-snowball'.  Building the reference without the kwarg silently gates
+    against substeps=1 while the decision payload advertises MC_FULL's value.
+    """
+    gate = _load_gate()
+    engine = gate.GATE_PAIRS["localvol"].build_reference(
+        _lv_model_stub(), None, gate.MC_FULL
+    )
+    assert engine.substeps_per_interval == gate.MC_FULL["substeps_per_interval"]
+
+
+def test_every_mc_reference_records_its_substeps():
+    """Whatever the fleet reruns must be the discretization G2 measured.
+
+    Recorded for every MC reference, not just the Heston pair: stage 12
+    forwards this key verbatim into the replay engine factory, so an absent
+    entry means the fleet falls back to the engine default.
+    """
+    gate = _load_gate()
+    cfg = {"mc": dict(gate.MC_FULL), "seed": gate.SEED}
+    for variant, pair in gate.GATE_PAIRS.items():
+        block = gate._reference_params_block(pair, cfg)
+        if pair.reference_is_mc:
+            assert block["substeps_per_interval"] == gate.MC_FULL[
+                "substeps_per_interval"
+            ], variant
+        else:
+            assert "substeps_per_interval" not in block, variant
+
+
+def test_localvol_gated_mc_options_construct_the_factory_s_engine():
+    """The Heston-pair equivalent of this test is what let the gap survive:
+    it never built the LV engine, so nothing contradicted the comment
+    claiming LocalVolSnowballMCEngine 'accepts neither kwarg'."""
+    from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
+        LocalVolSnowballMCEngine,
+    )
+    s12 = _load_stage12()
+    opts = s12.make_engine_config(
+        "localvol", routing=_routing_with_mc(s12, "localvol")
+    ).vol_model_engine_options
+    assert opts["substeps_per_interval"] == 4
+    assert "scheme" not in opts  # genuinely Heston-only
+    engine = LocalVolSnowballMCEngine(**opts)
+    assert engine.substeps_per_interval == 4
+
+
+def test_delta_tolerance_widens_by_the_reference_standard_error():
+    """Mirror of gate_tolerance_pct for the delta rule.
+
+    A deterministic reference (QUAD / finer PDE) keeps the flat desk bound;
+    an MC reference cannot have its own sampling noise charged to the engine
+    under test.  Measured on 2024-02-08, the localvol reference delta's SE is
+    ~0.56 contracts against a 0.5-contract bound, so this is not academic.
+    """
+    gate = _load_gate()
+    s0 = 4993.105
+    quantum = gate.delta_quantum_per_unit(s0)
+    bound = gate.DELTA_CELL_CONTRACTS * quantum
+
+    # deterministic reference: the desk bound, unchanged
+    assert gate.delta_tolerance_per_unit(None, s0) == bound
+
+    # noisy reference: 2 x SE once it exceeds the bound
+    noisy = 0.56 * quantum
+    assert gate.delta_tolerance_per_unit(noisy, s0) == gate.MC_SE_FACTOR * noisy
+
+    # quiet reference: the desk bound still binds
+    quiet = 0.10 * quantum
+    assert gate.delta_tolerance_per_unit(quiet, s0) == bound
+
+
+def test_delta_cell_passes_when_the_gap_is_inside_the_reference_noise():
+    """A 0.57-contract gap against a 0.56-contract SE is the reference
+    wandering, not the engine being wrong -- exactly the substeps=16 draw."""
+    gate = _load_gate()
+    s0 = 4993.105
+    quantum = gate.delta_quantum_per_unit(s0)
+    assert gate.delta_cell_passed(0.57 * quantum, s0, se=0.56 * quantum)
+    # ... but a deterministic reference still holds the engine to the bound
+    assert not gate.delta_cell_passed(0.57 * quantum, s0, se=None)
+
+
+def test_a_load_bearing_mc_delta_gets_its_own_quieter_reference():
+    """Tied to the admission rule, not to the name 'localvol'.
+
+    Where the delta decides the route (require_delta true) AND the reference
+    is Monte Carlo, the reference must be quiet enough that 2 x SE stays under
+    the desk bound -- otherwise the noise term binds and the gate loses the
+    power to see a real one-contract error.  Where the delta is only a
+    diagnostic (the ADI pair delegates to Stage 16), paying for those paths
+    would buy nothing.
+    """
+    gate = _load_gate()
+    for variant, pair in gate.GATE_PAIRS.items():
+        load_bearing = (
+            pair.reference_is_mc
+            and variant not in gate.ADI_GREEK_CERTIFICATION_VARIANTS
+        )
+        if load_bearing:
+            assert pair.build_delta_reference is not None, variant
+        else:
+            assert pair.build_delta_reference is None, variant
+
+
+def test_the_delta_reference_runs_more_paths_than_the_pv_reference():
+    gate = _load_gate()
+    assert (
+        gate.MC_DELTA_FULL["paths_per_batch"]
+        > gate.MC_FULL["paths_per_batch"]
+    )
+    # ... and a FINER discretization than the PV reference, because the delta
+    # converges later than the price.  substeps discretizes the REFERENCE, not
+    # the engine under test, so refining it makes the reference more accurate
+    # rather than measuring something else -- that conflation is why the delta
+    # reference inherited a price-converged substeps level.  Measured on
+    # 2024-02-08: the reference delta reads -0.859 / -0.385 / +0.215 / +0.207
+    # contracts at substeps 1 / 4 / 8 / 16, so it is unconverged at 4 and
+    # settled by 8, while the PV was already flat from substeps=2.
+    assert (
+        gate.MC_DELTA_SUBSTEPS > gate.MC_FULL["substeps_per_interval"]
+    )
+    engine = gate.GATE_PAIRS["localvol"].build_delta_reference(
+        _lv_model_stub(), None, gate.MC_FULL
+    )
+    assert engine.params.num_paths == gate.MC_DELTA_FULL["paths_per_batch"]
+    assert engine.substeps_per_interval == gate.MC_DELTA_SUBSTEPS
+
+    # ... and it tracks whichever config is active, so --quick stays quick
+    quick = gate.GATE_PAIRS["localvol"].build_delta_reference(
+        _lv_model_stub(), None, gate.MC_QUICK
+    )
+    assert quick.params.num_paths == (
+        gate.MC_DELTA_PATH_FACTOR * gate.MC_QUICK["paths_per_batch"]
+    )
+    assert quick.substeps_per_interval == gate.MC_DELTA_SUBSTEPS
+
+
+def test_an_mc_delta_row_without_a_standard_error_is_rejected():
+    """The SE is what the tolerance widens by; a missing one must not
+    silently fall back to the noise-blind bound."""
+    gate = _load_gate()
+    row = {
+        "date": "2024-02-08", "case": "full", "variant": "localvol",
+        "level": "medium", "s0": 4993.105,
+        "delta_production": 0.5462, "delta_reference": 0.5554,
+        "reference_std_error": None,     # <-- the defect
+        "signed_diff": -0.0092, "abs_diff": 0.0092, "diff_contracts": -0.46,
+        "tolerance_contracts": 0.5, "passed": True, "error": None,
+    }
+    with pytest.raises(ValueError, match="reference_std_error"):
+        gate.validate_delta_rows([row])
+
+
+def test_the_documented_delta_config_matches_the_derived_one():
+    """MC_DELTA_FULL is the production value written down for readers;
+    delta_mc_config is what actually runs.  If they drift, the comment block
+    documenting the measured SE ladder describes a config nothing uses."""
+    gate = _load_gate()
+    assert gate.MC_DELTA_FULL == gate.delta_mc_config(gate.MC_FULL)
+
+
+def test_schema_1_evidence_cannot_be_rescored_under_the_new_delta_rule():
+    """--rescore-evidence reuses banked cells and rebuilds the decision.
+
+    Schema-1 delta rows carry no reference_std_error, so rescoring them would
+    emit a decision claiming uncertainty-aware delta admission that was never
+    performed -- and, for localvol, against a reference that ran at substeps=1.
+    """
+    gate = _load_gate()
+    stale = {
+        "schema_version": 1, "study": "pde_convergence_gate", "config": {},
+        "dates": [], "cells": [], "deltas": [], "sanity": {},
+    }
+    with pytest.raises(ValueError, match="rerun the study rather than rescoring"):
+        gate.validate_gate_payload(stale)
+
+
+def test_delta_bias_reports_the_uncertainty_of_its_own_mean():
+    """detect_delta_bias tests a mean against a 0.1-contract bound.
+
+    That mean inherits the reference's noise as sqrt(sum(se^2))/n.  Reporting
+    the mean without it is how the schema-1 evidence showed
+    'mean_signed -0.0551, delta_biased false' while carrying a 5.7-sigma
+    per-cell bias on 2024-02-08 -- the bound was tighter than the statistic's
+    own error bar, so passing it meant nothing.
+    """
+    gate = _load_gate()
+    s0 = 4993.105
+    q = gate.delta_quantum_per_unit(s0)
+    rows = [
+        {"signed_diff": +0.30 * q, "s0": s0, "reference_std_error": 0.40 * q},
+        {"signed_diff": -0.30 * q, "s0": s0, "reference_std_error": 0.40 * q},
+    ]
+    _, info = gate.detect_delta_bias(rows)
+    # sqrt(0.40^2 + 0.40^2) / 2 = 0.2828 contracts -- nearly 3x the 0.1 bound
+    assert info["mean_signed_se_contracts"] == pytest.approx(0.2828, abs=1e-3)
+    assert info["bias_bound_is_resolvable"] is False
+
+    quiet = [dict(r, reference_std_error=0.05 * q) for r in rows]
+    _, qinfo = gate.detect_delta_bias(quiet)
+    assert qinfo["bias_bound_is_resolvable"] is True

@@ -120,6 +120,19 @@ Invariants, validated on construction: finite arrays, positive spot and vol,
 calendar (the history's calendar when bootstrapped, a generated
 Mon–Fri calendar with an explicit holiday list otherwise).
 
+`carry[i, d, :]` is the **constant-maturity carry curve** of path `i` on
+day `d`: `B(T_k)` at tenors measured from day `d` itself, not to fixed
+calendar dates. It is the futures-market analogue of a constant-maturity
+yield curve. `B(0) = 0` is an implicit first node. A listed contract's
+carry on that day is the curve read at the contract's *actual* remaining
+tenor, which shrinks daily, so a contract's basis converges to zero at its
+expiry automatically; the generators only model how the constant-maturity
+curve moves. The history side builds the same object: `PathHistory`
+derives each historical day's curve from that day's listed chain with the
+`ForwardCarryCurve` rules (log-forward interpolation between contracts,
+flat forward carry beyond the last), so a bootstrap resamples changes of a
+consistently defined curve rather than of contracts whose tenors drift.
+
 Every day of a path is a full market snapshot, so the ensemble engine
 never needs to look at another path or another day to price.
 
@@ -217,9 +230,12 @@ engine already applies to real data:
   new contract is listed the trading day after one expires. The calendar
   is a pure function of the date, so it is common to all paths.
 - **Prices**: `F_i = S · exp(B(T_i))`, `T_i` ACT/365 from the day to the
-  contract expiry, `B(T_i)` read from the day's curve by log-forward
-  interpolation on the tenor grid (flat forward carry beyond the last
-  tenor). `multiplier = 200`.
+  contract expiry, `B(T_i)` read from the path's constant-maturity curve
+  for that day (`carry[i, d, :]`, section 4.1) by piecewise-linear
+  interpolation of `B` in `T` between the grid tenors, with `B(0) = 0` as
+  the first node and the last segment's slope continued beyond the last
+  tenor (constant forward carry between grid tenors, i.e. log-forward
+  interpolation). `multiplier = 200`.
 - **`q(T)` for the pricer**: built from the day's chain by the same rule
   as `ProductReplay._term_dividend` for the configured `dividend_source`
   (`None`/`active_contract`: floored simple-compounded yield from the

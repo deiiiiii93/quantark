@@ -16,6 +16,12 @@ probes:
   - dir: output/timing_on              # study 7.4 event-stats timing, --quick
   - dir: output/timing_off             # study 7.4 control, --quick
   - dir: output/volmodel_backtest_g3   # dead G3 probe, 1 failed run
+  - dir: output/volmodel_ramprobe      # workers=4 RAM worst case: 2 inceptions
+                                       # x heston,heston_slv x --max-days 3.
+                                       # Measured 4.5 GB/worker at T~3.0, the
+                                       # largest ADI grids this study builds.
+  - dir: output/volmodel_timing_quad   # flat_bsm_quad per-replay-day cost, the
+                                       # last unmeasured variant: ~11.7 s/day
 
 # Scoped invalidations.  These replace the hand-maintained
 # gate_decision_pre_*.json renaming convention.  A DOCUMENTATION commit can

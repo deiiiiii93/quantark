@@ -39,7 +39,7 @@ import sys
 import traceback
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
@@ -55,7 +55,16 @@ NOT_COVERED = [
     "2-D ADI variance-axis grid (n_v / variance_grid_mode) -- the vol-model "
     "solvers build it from calibrated Heston params, which this sweep does "
     "not load",
-    "QUAD grid_points and unreachable-barrier filtering (flat_bsm_quad)",
+    "the 2-D route's own SPATIAL grid, which is a different grid from the one "
+    "swept here: the vol-model solver binds GridConfig(points=n_x=200, "
+    "num_std=8.0) while inheriting the 1-D `standard` profile's "
+    "eps_crit=0.003, so it can resolve ~2x coarser than that target on the "
+    "same date this sweep passes.  Measured on the fleet, and resolved by "
+    "declaring the affected cells out of scope -- see SCOPE_EXCLUSIONS in "
+    "12_snowball_volmodel_backtest.py",
+    "QUAD unreachable-barrier filtering: filter_unreachable_barriers "
+    "SUPPRESSES a KO trigger rather than raising, so it is a silent policy "
+    "choice, not an under-resolution this gate can fail on",
     "full-grid and term-structure vol surfaces; the spatial grid's vol "
     "dependence enters through representative_vol, which this exercises at "
     "the day's ATM level",
@@ -91,6 +100,7 @@ def build_artifact(
     failures: List[Dict[str, Any]],
     scope: Dict[str, Any],
     config: Dict[str, Any],
+    arms: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """The G5 artifact.
 
@@ -99,11 +109,12 @@ def build_artifact(
     INCOMPLETE rather than satisfied, so both are always written.
     """
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "gate": "G5",
         "study": "snowball_volmodel_backtest",
         "n_operating_points": len(points),
         "under_resolved": list(failures),
+        "arms": dict(arms or {}),
         "scope": dict(scope),
         "config": dict(config),
     }
@@ -130,6 +141,78 @@ def _grid_builds(solver_engine, product, env) -> Optional[str]:
     return None
 
 
+class _StopAfterGrid(Exception):
+    """Sentinel: the grid is resolved, so stop before paying for the solve."""
+
+
+def quad_grid_probe(engine, product, env) -> Dict[str, Any]:
+    """Resolve the quadrature grid for one operating point, and stop there.
+
+    The quadrature engine's under-resolution guard is its own
+    ``_resolve_grid_points``: it raises ``NumericalError`` when resolving the
+    shortest diffusion step would need more nodes than
+    ``max_adaptive_grid_points``.  That is the same class of mid-fleet failure
+    the PDE arm looks for, and flat_bsm_quad is 27 of the fleet's 162 cells.
+
+    The method is intercepted ON THE INSTANCE, and ``price`` is then driven
+    normally.  Rebuilding the quadrature prologue out here to call it with
+    hand-made arguments would validate a setup the fleet never performs --
+    the trap the PDE arm avoids by taking ``solver.grid_binder`` rather than
+    constructing a binder of its own.  The prologue is O(observations) vector
+    work; everything expensive is the stacked recursion AFTER this point.
+    """
+    captured: Dict[str, Any] = {
+        "grid_points": None, "requested": None, "cap": None,
+        "adapted": None, "headroom": None,
+        "stopped_at": None, "error": None,
+    }
+    original = engine._resolve_grid_points
+
+    def intercept(maturity, vol, times):
+        used = int(original(maturity, vol, times))
+        params = getattr(engine, "params", None)
+        requested = int(getattr(params, "grid_points", 0) or 0)
+        cap = int(getattr(params, "max_adaptive_grid_points", 5001) or 5001)
+        adapted = used > requested
+        captured.update(
+            grid_points=used,
+            requested=requested,
+            cap=cap,
+            adapted=adapted,
+            # Only an adapted grid reveals the REQUIRED count -- when
+            # adaptation does not fire, `used` is just what was asked for and
+            # says nothing about how close the point sat to the cap.  Deriving
+            # headroom from the return value keeps the engine's formula in one
+            # place; a second copy here would drift away from it.
+            headroom=(cap - used) if adapted else None,
+            stopped_at="resolve_grid_points",
+        )
+        raise _StopAfterGrid
+
+    engine._resolve_grid_points = intercept
+    try:
+        engine.price(product, env)
+    except _StopAfterGrid:
+        pass
+    except Exception as exc:  # noqa: BLE001 - the point is to catch and record
+        captured["error"] = f"{type(exc).__name__}: {exc}"
+    else:
+        # price() returned without ever resolving a grid: the seam moved.
+        captured["error"] = (
+            "quadrature price() completed without calling _resolve_grid_points; "
+            "the probe seam no longer matches the engine"
+        )
+    finally:
+        try:
+            del engine._resolve_grid_points
+        except AttributeError:
+            engine._resolve_grid_points = original
+    return captured
+
+
+ARMS = ("flat_bsm", "flat_bsm_quad")
+
+
 def probe_one_inception(
     *,
     inception: str,
@@ -137,8 +220,17 @@ def probe_one_inception(
     limit_days: Optional[int] = None,
     inceptions_path: Path = DEFAULT_INCEPTIONS,
     rate: float = 0.02,
+    arms: Sequence[str] = ARMS,
+    days_out: Optional[List[Any]] = None,
+    quad_stats: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Sweep one inception's replay days. Returns the failing points."""
+    """Sweep one inception's replay days. Returns the failing points.
+
+    ``days_out``, when given, is filled with the dates actually visited, so
+    the caller never has to re-derive the schedule -- two copies of that
+    derivation is two chances to count a different set of points than the
+    sweep tested.
+    """
     s12 = stage12()
     s11 = stage11()
 
@@ -176,11 +268,19 @@ def probe_one_inception(
     if limit_days is not None:
         days = days[: int(limit_days)]
 
+    quad_config = s12.make_engine_config(
+        "flat_bsm_quad",
+        routing=s12.GateRouting("", None, {"flat_bsm_quad": "pde"}, {}),
+        calibration_cache_dir=None,
+    )
+
     failures: List[Dict[str, Any]] = []
     for day in days:
         remaining = (terms.maturity_date - day).days / 365.0
         if remaining <= 0:
             continue
+        if days_out is not None:
+            days_out.append(day)
         env = s12.inception_pricing_env(
             history=history,
             inception=day,
@@ -188,12 +288,11 @@ def probe_one_inception(
             rate=rate,
             remaining_years=remaining,
         )
-        engine = s12.create_pricing_engine(product, config)
-        error = _grid_builds(engine, product, env)
-        if error is not None:
+
+        def record(variant: str, error: str) -> None:
             failures.append(
                 {
-                    "variant": "flat_bsm",
+                    "variant": variant,
                     "inception": inception,
                     "date": day.isoformat(),
                     "tau_years": round(remaining, 6),
@@ -201,7 +300,41 @@ def probe_one_inception(
                     "error": error,
                 }
             )
+
+        if "flat_bsm" in arms:
+            engine = s12.create_pricing_engine(product, config)
+            error = _grid_builds(engine, product, env)
+            if error is not None:
+                record("flat_bsm", error)
+
+        if "flat_bsm_quad" in arms:
+            quad_engine = s12.create_pricing_engine(product, quad_config)
+            result = quad_grid_probe(quad_engine, product, env)
+            if result["error"] is not None:
+                record("flat_bsm_quad", result["error"])
+            elif quad_stats is not None:
+                _accumulate_quad(quad_stats, result)
+
     return failures
+
+
+def _accumulate_quad(stats: Dict[str, Any], result: Dict[str, Any]) -> None:
+    """Running QUAD grid statistics.
+
+    ``min_headroom`` is the number to read: a sweep whose tightest point sat
+    a few hundred nodes under max_adaptive_grid_points is one market move
+    away from failing mid-fleet, and a bare pass would not say so.
+    """
+    stats["n"] = int(stats.get("n", 0)) + 1
+    points = result.get("grid_points")
+    if points is not None:
+        stats["max_grid_points"] = max(int(stats.get("max_grid_points", 0)), points)
+    if result.get("adapted"):
+        stats["n_adapted"] = int(stats.get("n_adapted", 0)) + 1
+        head = result.get("headroom")
+        if head is not None:
+            current = stats.get("min_headroom")
+            stats["min_headroom"] = head if current is None else min(current, head)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -215,6 +348,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="cap replay days per inception (smoke only; a capped sweep is "
              "recorded as such and must not be read as a clean pre-flight)",
     )
+    parser.add_argument(
+        "--arms", default=",".join(ARMS),
+        help=f"comma-separated subset of {list(ARMS)}; a partial sweep is "
+             "recorded in the artifact's `arms` block",
+    )
     args = parser.parse_args(argv)
 
     history_dir = Path(args.history_dir)
@@ -222,54 +360,49 @@ def main(argv: Optional[List[str]] = None) -> int:
     all_points: List[str] = []
     all_failures: List[Dict[str, Any]] = []
 
+    arms = tuple(a.strip() for a in str(args.arms).split(",") if a.strip())
+    unknown = [a for a in arms if a not in ARMS]
+    if unknown:
+        raise SystemExit(f"unknown arm(s) {unknown}; choose from {list(ARMS)}")
+    quad_stats: Dict[str, Any] = {}
+
     for index, record in enumerate(records, start=1):
         inception = record["inception"]
+        days: List[Any] = []
         failures = probe_one_inception(
             inception=inception,
             history_dir=history_dir,
             limit_days=args.limit_days,
             inceptions_path=Path(args.inceptions),
             rate=float(args.rate),
+            arms=arms,
+            days_out=days,
+            quad_stats=quad_stats,
         )
-        # Re-derive the day count the sweep actually visited.
-        s12 = stage12()
-        s11 = stage11()
-        calendar = s11.TradingCalendar.from_spot_csv(
-            history_dir / "csi1000_spot.csv"
-        )
-        history = s12.surface_history(history_dir)
-        spot = s12.load_spot_frame(history_dir)
-        spot_by_date = {
-            pd.Timestamp(row.date).date(): float(row.spot)
-            for row in spot.itertuples(index=False)
-        }
-        terms = s11.build_snowball_terms(date.fromisoformat(inception), calendar)
-        admitted = set(history.admitted_dates)
-        window_end = min(terms.maturity_date, max(spot_by_date))
-        days = [
-            d for d in calendar.trading_days_between(
-                date.fromisoformat(inception), window_end
-            )
-            if d in admitted and d in spot_by_date
-            and (terms.maturity_date - d).days > 0
-        ]
-        if args.limit_days is not None:
-            days = days[: int(args.limit_days)]
+        # The sweep reports the days it VISITED; re-deriving the schedule out
+        # here is how a gate comes to count a different set of points than it
+        # actually tested.
         all_points.extend(f"{inception}:{d.isoformat()}" for d in days)
         all_failures.extend(failures)
         print(
-            f"  [{index}/{len(records)}] {inception}: {len(days)} points, "
-            f"{len(failures)} under-resolved",
+            f"  [{index}/{len(records)}] {inception}: {len(days)} points x "
+            f"{len(arms)} arm(s), {len(failures)} under-resolved",
             flush=True,
         )
 
     doc = build_artifact(
         points=all_points,
         failures=all_failures,
+        arms={
+            "requested": list(arms),
+            "operating_points_per_arm": len(all_points),
+            "quad": dict(quad_stats),
+        },
         scope={
-            "covered": "1-D PDE spatial grid on every admitted replay day of "
-                       "every inception, under the flat-ATM-at-remaining-tenor "
-                       "environment",
+            "covered": "1-D PDE spatial grid AND the quadrature engine's "
+                       "adaptive grid resolution, on every admitted replay day "
+                       "of every inception, under the "
+                       "flat-ATM-at-remaining-tenor environment",
             "why_this_grid": "stage 12 pins surface_engine_type=PDE and "
                              "event_stats_engine_type=PDE for EVERY variant, so "
                              "this grid is built on every replay day regardless "
@@ -287,8 +420,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(doc, indent=1, sort_keys=True))
-    print(f"[G5] {doc['n_operating_points']} operating points, "
-          f"{len(doc['under_resolved'])} under-resolved")
+    print(f"[G5] {doc['n_operating_points']} operating points x "
+          f"{len(arms)} arm(s), {len(doc['under_resolved'])} under-resolved")
+    if quad_stats:
+        print(f"[G5] quad: {quad_stats.get('n', 0)} resolved, "
+              f"{quad_stats.get('n_adapted', 0)} adapted, "
+              f"max grid_points {quad_stats.get('max_grid_points')}, "
+              f"min headroom {quad_stats.get('min_headroom')}")
     print(f"[G5] wrote {out}")
     return 0 if not doc["under_resolved"] else 1
 
