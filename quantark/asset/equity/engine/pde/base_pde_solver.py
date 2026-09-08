@@ -135,6 +135,27 @@ class PDESolutionResult(NamedTuple):
     readout_override: Optional[float] = None
 
 
+class LifeSurfaceSolution(NamedTuple):
+    """Both value surfaces of one solve on every time node (life-surface readout).
+
+    ``v0`` / ``v1`` are the alive and knocked-in surfaces, shape
+    ``(n_x, n_t)``; column ``k`` is the value at ``t[k]`` after that node's
+    event transforms.  ``step_of`` maps every event and extra time to its
+    column.  ``t0_readout`` is the smooth valuation-date column for the
+    alive surface when the valuation date itself carries events (the same
+    column ``calculate_greeks`` reads), else ``None``.
+    """
+
+    t: np.ndarray
+    x: np.ndarray
+    s: np.ndarray
+    v0: np.ndarray
+    v1: np.ndarray
+    step_of: Dict[float, int]
+    t0_readout: Optional[np.ndarray]
+    knocked_in_at_valuation: bool
+
+
 class PDESessionOutputs(NamedTuple):
     """One-solve session output bundle (spec sections 8/9.3 native seam).
 

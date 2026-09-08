@@ -300,5 +300,13 @@ class PDEEngine(BaseEngine):
         solver = self._get_solver(product)
         return solver.calculate_spot_greeks_curve(product, pricing_env, spot_levels)
 
+    def solve_life_surface(self, product, pricing_env, *, extra_times):
+        """One solve with extra time nodes, both value slabs (life-surface providers)."""
+        solver = self._get_solver(product)
+        seam = getattr(solver, "solve_life_surface", None)
+        if seam is None:
+            raise ValidationError(f"{type(solver).__name__} does not expose a life surface")
+        return seam(product, pricing_env, extra_times=extra_times)
+
     def __repr__(self):
         return f"PDEEngine(method={self.method.value})"

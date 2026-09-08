@@ -15,7 +15,7 @@ For detailed design, see: asset/equity/engine/docs/snowball_pde_engine.md
 import logging
 from collections import OrderedDict
 from time import perf_counter
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import scipy.sparse as sp
@@ -27,6 +27,7 @@ _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
 from quantark.asset.equity.engine.pde.base_pde_solver import (
     BasePDESolver,
+    LifeSurfaceSolution,
     PDESessionOutputs,
     PDESolutionResult,
 )
@@ -282,6 +283,9 @@ class SnowballPDESolver(BasePDESolver):
     #: Kept as a hook for solvers whose barrier treatment must stay pinned.
     _first_passage_ki_supported: bool = True
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    #: Interior times that must be grid nodes for a life-surface readout
+    #: (no event, no damping).  Empty for every ordinary solve.
+    _extra_time_nodes: Tuple[float, ...] = ()
 
     def __init__(
         self, params: Optional[PDEParams] = None, enable_profiling: bool = False
@@ -1494,6 +1498,45 @@ class SnowballPDESolver(BasePDESolver):
 
         return {"price": price, "delta": delta, "gamma": gamma}
 
+    def solve_life_surface(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, *, extra_times: Sequence[float]
+    ) -> LifeSurfaceSolution:
+        """One two-surface solve with ``extra_times`` as grid nodes; both slabs returned.
+
+        The solve is the ordinary one (same grid layer, same schedule, same
+        stepping); the extra nodes carry no event and no damping.  The
+        solver's request state is restored afterwards, so a later ``price``
+        is byte-identical to one on a fresh solver.
+        """
+        self._product_token_memo.clear()
+        self._check_product_type(product)
+        if pricing_env is None:
+            raise ValidationError(f"PricingEnvironment is required for {self._solver_name}")
+        self._validate_product(product)
+        tau = product.get_maturity(pricing_env)
+        if tau <= 0 or is_zero(tau):
+            raise ValidationError("a life surface needs a product with time to maturity")
+        if self._is_knocked_out_at_valuation(product, pricing_env.spot, pricing_env):
+            raise ValidationError("a life surface needs a product that is alive at valuation")
+        nodes = tuple(sorted(float(t) for t in extra_times))
+        if any(t <= 0.0 or t >= tau for t in nodes):
+            raise ValidationError(f"extra_times must lie strictly inside (0, {tau})")
+        self._extra_time_nodes = nodes
+        try:
+            result = self._solve(product, pricing_env)
+            layout = self._active_layout
+            if layout is None:
+                raise PricingError("the life surface needs the declarative grid layer")
+            return LifeSurfaceSolution(
+                t=np.array(layout.time.t, dtype=float), x=np.array(result.x_vec, dtype=float),
+                s=np.array(result.s_vec, dtype=float), v0=np.array(self._grid_v0, dtype=float),
+                v1=np.array(self._grid_v1, dtype=float), step_of=dict(layout.time.step_of),
+                t0_readout=None if result.readout_vec is None else np.array(result.readout_vec, dtype=float),
+                knocked_in_at_valuation=bool(self._knocked_in_at_valuation),
+            )
+        finally:
+            self._extra_time_nodes = ()
+
     def _validate_product(self, product: SnowballOption) -> None:
         """
         Validate that product configuration is compatible with PDE solver.
@@ -2258,6 +2301,7 @@ class SnowballPDESolver(BasePDESolver):
             hard_lower=None,
             hard_upper=None,
             event_times=tuple(sorted(set(align) | set(monitor))),
+            extra_times=self._extra_time_nodes,
         )
 
     def _prepare_for_request(
