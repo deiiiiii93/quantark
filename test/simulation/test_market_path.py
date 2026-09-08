@@ -103,7 +103,9 @@ def test_public_api_is_exported():
                  "EnsembleConfig", "PricingProviderConfig", "CacheConfig", "GateConfig",
                  "EnsembleBacktestEngine", "EnsembleResults", "StateCube", "RepricingPricer",
                  "StateCache", "DayStates", "StateKey", "GateReport", "VectorLifecycle",
-                 "VectorHedgeLedger", "OracleReport", "run_oracle"):
+                 "VectorHedgeLedger", "OracleReport", "run_oracle",
+                 "LifeSurfacePricer", "SurfaceCache", "GateScale", "GateFailure", "run_ensemble",
+                 "concat_results", "batch_ranges", "DiskTier", "bucket_key", "bucket_centre"):
         assert hasattr(sim, name), name
 
 
