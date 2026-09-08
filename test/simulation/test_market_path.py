@@ -92,3 +92,12 @@ def test_npz_round_trip_keeps_arrays_dates_meta_and_fingerprint(tmp_path):
     assert back.fingerprint() == mp.fingerprint()
     assert back.dates.equals(mp.dates) and back.meta == mp.meta
     assert np.array_equal(back.carry, mp.carry)
+
+
+def test_public_api_is_exported():
+    import quantark.backtest.simulation as sim
+    for name in ("MarketPath", "StartState", "trading_calendar", "DEFAULT_TENOR_GRID", "PathHistory",
+                 "StationaryBlockBootstrap", "GBMPaths", "ConstantVol", "StickyRealisedVol",
+                 "market_path_from_day_path", "SnowballStressLibrary", "stress_set", "DayChain", "day_chain",
+                 "carry_at", "curve_from_chain", "listed_im_contracts", "dividend_yield_for_day", "to_market_dataset"):
+        assert hasattr(sim, name), name

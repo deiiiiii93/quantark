@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import List, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,8 @@ import pandas as pd
 from quantark.param.div.forward_carry_curve import ForwardCarryCurve
 from quantark.util.exceptions import ValidationError
 
-from .paths.market_path import MarketPath
+if TYPE_CHECKING:  # the curve layer is below the batch type: annotation only,
+    from .paths.market_path import MarketPath  # so ``paths`` can import back.
 
 
 def carry_at(carry: np.ndarray, tenor_grid: np.ndarray, tenors: np.ndarray) -> np.ndarray:
@@ -145,7 +146,7 @@ class DayChain:
         )
 
 
-def day_chain(path: MarketPath, day_index: int, *, multiplier: float = FUTURES_MULTIPLIER) -> DayChain:
+def day_chain(path: "MarketPath", day_index: int, *, multiplier: float = FUTURES_MULTIPLIER) -> DayChain:
     """Price the four listed contracts on ``path.dates[day_index]`` for every path.
 
     ``F_i = S * exp(B(T_i))`` with ``T_i`` the contract's remaining tenor read
