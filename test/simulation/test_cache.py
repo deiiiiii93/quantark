@@ -55,3 +55,50 @@ def test_clear_empties_the_cache_and_the_counters():
 def test_a_budget_below_one_entry_is_rejected():
     with pytest.raises(Exception):
         StateCache(CacheConfig(memory_bytes=ENTRY_BYTES - 1))
+
+
+from quantark.backtest.simulation.pricing.cache import DiskTier, shard_name  # noqa: E402
+
+
+def test_the_disk_tier_round_trips_between_two_caches(tmp_path):
+    first = StateCache(CacheConfig(memory_bytes=10 * ENTRY_BYTES, disk_dir=str(tmp_path)))
+    first.put(_key(1), 1.5, -0.2, 0.01)
+    first.put(_key(2), 2.5, -0.3, 0.02)
+    assert first.flush() == 2
+    second = StateCache(CacheConfig(memory_bytes=10 * ENTRY_BYTES, disk_dir=str(tmp_path)))
+    assert second.get(_key(1)) == (1.5, -0.2, 0.01)
+    assert second.get(_key(3)) is None
+    stats = second.stats()
+    assert stats.disk["disk_hits"] == 1 and stats.disk["shards_loaded"] == 1
+    assert stats.entries == 1                       # the hit was promoted to memory
+
+
+def test_flush_merges_with_what_another_process_wrote(tmp_path):
+    a = StateCache(CacheConfig(memory_bytes=10 * ENTRY_BYTES, disk_dir=str(tmp_path)))
+    b = StateCache(CacheConfig(memory_bytes=10 * ENTRY_BYTES, disk_dir=str(tmp_path)))
+    a.put(_key(1), 1.0, 0.0, 0.0)
+    b.put(_key(2), 2.0, 0.0, 0.0)
+    a.flush()
+    b.flush()
+    c = StateCache(CacheConfig(memory_bytes=10 * ENTRY_BYTES, disk_dir=str(tmp_path)))
+    assert c.get(_key(1)) == (1.0, 0.0, 0.0) and c.get(_key(2)) == (2.0, 0.0, 0.0)
+
+
+def test_a_foreign_shard_is_a_miss_and_is_left_alone(tmp_path):
+    path = tmp_path / shard_name("prod", "eng")
+    np.savez(path, keys=np.zeros((1, 5), dtype=np.int64), values=np.ones((1, 3)),
+             library_version=np.array("0.0.0"), engine_fingerprint=np.array("eng"),
+             product_fingerprint=np.array("prod"))
+    before = path.read_bytes()
+    cache = StateCache(CacheConfig(memory_bytes=10 * ENTRY_BYTES, disk_dir=str(tmp_path)))
+    assert cache.get(StateKey("prod", 0, False, 0, 0, 0, "eng")) is None
+    cache.put(StateKey("prod", 0, False, 0, 0, 0, "eng"), 5.0, 0.0, 0.0)
+    cache.flush()
+    assert path.read_bytes() == before
+    assert cache.stats().disk["foreign_shards"] == 1
+
+
+def test_a_memory_only_cache_has_no_disk_stats():
+    cache = StateCache(CacheConfig(memory_bytes=10 * ENTRY_BYTES))
+    assert cache.stats().disk is None
+    assert cache.flush() == 0
