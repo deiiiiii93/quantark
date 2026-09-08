@@ -100,6 +100,35 @@ class ForwardCarryCurve:
         """
         return _CarryImpliedDividendYield(carry_curve=self, rate_curve=rate_curve)
 
+    def extended_with(self, tail: "ForwardCarryCurve") -> "ForwardCarryCurve":
+        """Continue this curve past its last node with ``tail``'s FORWARD carry.
+
+        For every node of ``tail`` beyond this curve's last tenor ``T_n`` a
+        node ``B(T_n) + B_tail(T_j) - B_tail(T_n)`` is appended: the level
+        stays this curve's, only the calendar-spread slope is borrowed, so
+        ``tail``'s own level (e.g. an option surface struck off a different
+        spot) never enters.  Beyond ``tail``'s last node the last borrowed
+        segment's forward carry continues (FLAT_FORWARD_CARRY).  A ``tail``
+        that ends at or before ``T_n`` leaves the curve unchanged.
+        ``last_observable_tenor`` stays this curve's: the borrowed nodes are
+        not observations of this curve's market.
+        """
+        t_n = float(self._t[-1])
+        b_n = float(self._b[-1])
+        base = tail.carry(t_n)
+        nodes = list(self.nodes)
+        for t_j, b_j in tail.nodes:
+            if t_j > t_n:
+                nodes.append((float(t_j), b_n + float(b_j) - base))
+        from quantark.param.extrapolation import CarryExtrapolation
+
+        return ForwardCarryCurve(
+            nodes,
+            node_roles=self.node_roles,
+            last_observable_tenor=self.last_observable_tenor,
+            extrapolation=CarryExtrapolation.FLAT_FORWARD_CARRY,
+        )
+
     @classmethod
     def from_index_futures(cls, futures_curve, rate_curve) -> "ForwardCarryCurve":
         """B(T_i) = (r(T_i) - q_i) * T_i from futures-implied yields."""

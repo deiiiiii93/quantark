@@ -71,6 +71,40 @@ class AutocallableEngineConfig:
     both through one field.  ``vol_model_mc_method`` is that second slot; it
     falls back to ``method`` when unset, so existing configurations are
     unchanged.
+
+    ``dividend_source`` selects the daily dividend/carry channel:
+
+    - ``None`` (default): the historical behaviour — scalar vol mode prices
+      off ONE flat yield implied from the active hedge contract (simple
+      compounding, floored at zero); surface vol mode prices off the
+      artifact's option-implied forward pillars.
+    - ``"active_contract"``: the scalar-mode flat yield, explicitly.
+    - ``"futures_curve"``: every listed contract on the day with at least
+      ``futures_curve_min_tenor_days`` calendar days to expiry inverted
+      through ``IndexFuturesCurve`` — continuous compounding, signed, linear
+      in nodal q.  Beyond the last listed tenor ``futures_curve_extrapolation``
+      picks ``"flat_q"`` (the endpoint zero yield is held) or
+      ``"flat_forward_carry"`` (the last segment's forward carry continues,
+      via ``ForwardCarryCurve``) or ``"surface_forward_carry"`` (the chain is
+      held in log-forward space and continued past its last contract with
+      the admitted IV-surface artifact's option-implied FORWARD carry, level
+      matched at the join, then flat forward carry; needs
+      ``market_data.surface_history``).  The minimum tenor (default one week,
+      at least one day: a contract expiring today has no defined yield)
+      drops delivery-week contracts, whose annualised basis is noise (a 1%
+      basis two days out reads as a 180% yield); a day left with ONE eligible
+      contract prices off that node as a flat continuous signed yield — the
+      exact one-node limit of both extrapolation conventions — and a day
+      with none fails closed.  The state row's ``pricing_q`` is the term
+      yield at the product's remaining maturity (for a multi-product book:
+      the FIRST product's; pricing itself samples each product's own).
+    - ``"surface_forwards"``: the admitted IV-surface artifact's parity
+      forward pillars as a ``TermStructureDividendYield``, usable with the
+      scalar vol channel (requires ``market_data.surface_history``).
+
+    The two term sources are incompatible with ``fixed_dividend_yield`` and
+    with the flat-q surface grid (``calculate_surfaces``); both are rejected
+    at config time rather than silently swapping the model.
     """
 
     pricing_engine_type: EngineType = EngineType.PDE
@@ -90,6 +124,18 @@ class AutocallableEngineConfig:
     vol_model_calibration: Optional[VolModelCalibrationConfig] = None
     vol_model_engine_options: dict[str, Any] = field(default_factory=dict)
     event_stats_fallback: Literal["none", "mc"] = "none"
+    dividend_source: Optional[
+        Literal["active_contract", "futures_curve", "surface_forwards"]
+    ] = None
+    futures_curve_extrapolation: Literal[
+        "flat_q", "flat_forward_carry", "surface_forward_carry"
+    ] = "flat_q"
+    futures_curve_min_tenor_days: int = 7
+
+    def uses_term_dividend_source(self) -> bool:
+        """True when the day's dividend object is a term structure chosen by
+        ``dividend_source`` (as opposed to the legacy scalar channel)."""
+        return self.dividend_source in ("futures_curve", "surface_forwards")
 
     def __post_init__(self) -> None:
         supported = {
@@ -132,6 +178,26 @@ class AutocallableEngineConfig:
             raise ValidationError("vol_model_solver must be 'pde' or 'mc'")
         if self.event_stats_fallback not in ("none", "mc"):
             raise ValidationError("event_stats_fallback must be 'none' or 'mc'")
+        if self.dividend_source not in (
+            None,
+            "active_contract",
+            "futures_curve",
+            "surface_forwards",
+        ):
+            raise ValidationError(
+                "dividend_source must be None, 'active_contract', "
+                "'futures_curve', or 'surface_forwards'"
+            )
+        if self.futures_curve_extrapolation not in (
+            "flat_q", "flat_forward_carry", "surface_forward_carry"
+        ):
+            raise ValidationError(
+                "futures_curve_extrapolation must be 'flat_q', 'flat_forward_carry' "
+                "or 'surface_forward_carry'"
+            )
+        if int(self.futures_curve_min_tenor_days) < 1:
+            # a contract expiring today has T = 0 and no defined yield
+            raise ValidationError("futures_curve_min_tenor_days must be at least 1")
         if self.vol_model_calibration is None:
             self.vol_model_calibration = VolModelCalibrationConfig()
         elif not isinstance(self.vol_model_calibration, VolModelCalibrationConfig):
@@ -166,6 +232,34 @@ class AutocallableEngineConfig:
         if self.event_stats_engine_type is not None:
             return self.event_stats_engine_type
         return self.pricing_engine_type
+
+
+def _validate_term_dividend_source(
+    engine_config: AutocallableEngineConfig,
+    *,
+    fixed_dividend_yield: Optional[float],
+    calculate_surfaces: bool,
+) -> None:
+    """Reject run options that would silently flatten a term dividend source.
+
+    ``fixed_dividend_yield`` is a scalar override of the active-contract
+    yield, and the spot x q surface grid reprices on flat ``q`` nodes around a
+    scalar centre; under ``futures_curve`` / ``surface_forwards`` either one
+    would swap the pricing model behind the recorded provenance.
+    """
+    if not engine_config.uses_term_dividend_source():
+        return
+    source = engine_config.dividend_source
+    if fixed_dividend_yield is not None:
+        raise ValidationError(
+            f"fixed_dividend_yield cannot be combined with dividend_source="
+            f"{source!r}; the term structure IS the dividend input"
+        )
+    if calculate_surfaces:
+        raise ValidationError(
+            f"calculate_surfaces is not supported with dividend_source={source!r}: "
+            "the spot x q surface grid prices on flat q nodes"
+        )
 
 
 @dataclass
@@ -229,6 +323,11 @@ class AutocallableBacktestConfig:
             float(self.fixed_dividend_yield)
         ):
             raise ValidationError("fixed_dividend_yield must be finite")
+        _validate_term_dividend_source(
+            self.engine_config,
+            fixed_dividend_yield=self.fixed_dividend_yield,
+            calculate_surfaces=self.calculate_surfaces,
+        )
         for field_name in ("delta_bump_size", "gamma_bump_size"):
             bump = getattr(self, field_name)
             if bump is None:
@@ -295,6 +394,11 @@ class ReplayBacktestConfig:
             raise ValidationError("market_data is required")
         if self.strategy is None:
             self.strategy = AutocallableDeltaHedgeStrategy()
+        _validate_term_dividend_source(
+            self.engine_config,
+            fixed_dividend_yield=self.fixed_dividend_yield,
+            calculate_surfaces=self.calculate_surfaces,
+        )
         if self.engine_config.vol_model != "bsm":
             # create_vol_model_engine builds Snowball engines only; pricing a
             # Phoenix/European with one would be silently wrong (fail-closed).

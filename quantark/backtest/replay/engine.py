@@ -174,15 +174,20 @@ class ReplayBacktestEngine:
                 # (futures_price == spot), which collapses implied_q ≈ rate.
                 # That is economically wrong: override with an explicit dividend
                 # yield so the pricer receives a dividend, not the risk-free rate.
+                # A term dividend source never touched that synthetic future,
+                # so it keeps its curve; only the recorded scalar is reset.
                 implied_q = (
                     float(self.config.fixed_dividend_yield)
                     if self.config.fixed_dividend_yield is not None
                     else 0.0
                 )
                 basis_yield = 0.0
-                env.div_yield = SignedDividendYield(implied_q)
+                if not self._replays[0].uses_term_dividend_source():
+                    env.div_yield = SignedDividendYield(implied_q)
                 env.basis_yield = ImpliedBasisYield(0.0)
-            pricing_q = self._replays[0].pricing_dividend_yield(implied_q)
+            pricing_q = self._replays[0].recorded_pricing_q(
+                env, date, market, implied_q
+            )
 
             # Vol-model variants: calibrate once per surface artifact and swap
             # every replay's engine before ANY pricing of the day (initial

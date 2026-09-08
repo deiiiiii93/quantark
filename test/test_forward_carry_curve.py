@@ -93,3 +93,41 @@ def test_to_dividend_yield_pointwise_between_and_beyond_nodes():
     assert arr[1] * 0.75 == pytest.approx(r * 0.75 - c.carry(0.75), abs=1e-14)
     # metadata carried through
     assert dy.last_observable_tenor == 2.0
+
+
+# ---------------------------------------------------------------------------
+# extended_with: continue this curve past its last node with another curve's
+# FORWARD carry (calendar-spread slope), level-matched at the join
+# ---------------------------------------------------------------------------
+def test_extended_with_appends_the_tail_curve_forward_carry_level_matched():
+    im = ForwardCarryCurve([(0.1, -0.01), (0.5, -0.06)])
+    opt = ForwardCarryCurve([(0.25, -0.005), (1.0, -0.035), (2.0, -0.075)])  # a different level
+    out = im.extended_with(opt)
+    # own nodes untouched
+    assert out.carry(0.1) == pytest.approx(-0.01)
+    assert out.carry(0.5) == pytest.approx(-0.06)
+    assert out.carry(0.3) == pytest.approx(im.carry(0.3))
+    # beyond 0.5 the increments are the tail curve's, not its level
+    assert out.carry(1.0) == pytest.approx(-0.06 + (opt.carry(1.0) - opt.carry(0.5)))
+    assert out.carry(2.0) == pytest.approx(-0.06 + (opt.carry(2.0) - opt.carry(0.5)))
+    assert out.interval_carry(1.0, 2.0) == pytest.approx(opt.interval_carry(1.0, 2.0))
+    # past the tail curve's last node: flat forward carry of its last segment
+    assert out.interval_carry(2.0, 3.0) == pytest.approx(opt.interval_carry(1.0, 2.0))
+    assert out.nodes == [(0.1, -0.01), (0.5, -0.06), (1.0, pytest.approx(out.carry(1.0))), (2.0, pytest.approx(out.carry(2.0)))]
+    assert out.last_observable_tenor == pytest.approx(0.5)
+
+
+def test_extended_with_is_a_no_op_when_the_tail_curve_ends_first():
+    im = ForwardCarryCurve([(0.1, -0.01), (0.5, -0.06)])
+    opt = ForwardCarryCurve([(0.25, -0.005)])
+    out = im.extended_with(opt)
+    assert out.nodes == im.nodes
+    assert out.interval_carry(0.5, 1.0) == pytest.approx(im.interval_carry(0.1, 0.5))
+
+
+def test_extended_with_from_a_one_node_curve():
+    im = ForwardCarryCurve([(0.03, -0.028)])  # a delivery-week front contract alone
+    opt = ForwardCarryCurve([(0.25, -0.02), (1.0, -0.09)])
+    out = im.extended_with(opt)
+    assert out.carry(0.03) == pytest.approx(-0.028)
+    assert out.carry(1.0) == pytest.approx(-0.028 + (opt.carry(1.0) - opt.carry(0.03)))

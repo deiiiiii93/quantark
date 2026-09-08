@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 
+import math
 from copy import deepcopy
 from datetime import timedelta
 from typing import Any, Optional
@@ -27,7 +28,10 @@ import pandas as pd
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
+from quantark.asset.equity.market import IndexFuturesCurve, IndexFuturesQuote
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.param.div import ContinuousDividendYield
+from quantark.param.div.forward_carry_curve import ForwardCarryCurve
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close
@@ -64,6 +68,36 @@ def _env_with(
         basis_yield=env.basis_yield,
         valuation_date=env.valuation_date,
     )
+
+
+def surface_tail_carry_yield(
+    *,
+    spot: float,
+    forward_nodes: list[tuple[float, float]],
+    artifact,
+    rate_curve,
+):
+    """Dividend view of the IM chain in log-forward space with an option-forward tail.
+
+    ``forward_nodes`` are the eligible contracts' ``(T_i, F_i)``; they become
+    ``B(T_i) = ln(F_i / spot)`` nodes of a ``ForwardCarryCurve`` (piecewise
+    linear in B, i.e. piecewise-constant forward carry between contracts:
+    the calendar-spread slope).  Beyond the last contract the artifact's
+    parity-forward pillars supply the forward carry, level matched at the
+    join (``ForwardCarryCurve.extended_with``), then the last option segment's
+    carry continues flat.  Shared by the replay engine and the standalone
+    study so the two can never drift.
+    """
+    im = ForwardCarryCurve.from_forward_nodes(spot, forward_nodes)
+    # the pillars come back as q_j = r0 - ln(F_j/s0)/T_j for the flat r0 we
+    # pass, so (r0 - q_j) * T_j is exactly ln(F_j/s0) whatever r0 is: the
+    # option curve is pure forward carry, independent of the rate channel
+    r0 = float(rate_curve.get_rate(1.0))
+    times, yields = artifact.implied_q_pillars(rate=r0)
+    option = ForwardCarryCurve(
+        [(float(t), (r0 - float(q)) * float(t)) for t, q in zip(times, yields)]
+    )
+    return im.extended_with(option).to_dividend_yield(rate_curve)
 
 
 class ProductReplay:
@@ -169,6 +203,8 @@ class ProductReplay:
         pricing_q = self.pricing_dividend_yield(implied_q)
         vol_surface, div_yield = self._vol_and_dividend(date, market, pricing_q)
         rate_curve = FlatRateCurve(rate=market["rate"])
+        if self._dividend_source() in ("futures_curve", "surface_forwards"):
+            div_yield = self._term_dividend(date, market, rate_curve)
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=market["spot"], asset_name=self.underlying),
             vol_surface=vol_surface,
@@ -178,6 +214,126 @@ class ProductReplay:
             valuation_date=date.to_pydatetime(),
         )
         return env, basis_yield, implied_q, futures_ttm
+
+    def _dividend_source(self) -> Optional[str]:
+        return getattr(self.engine_config, "dividend_source", None)
+
+    def uses_term_dividend_source(self) -> bool:
+        return self._dividend_source() in ("futures_curve", "surface_forwards")
+
+    def _term_dividend(self, date: pd.Timestamp, market: dict[str, float], rate_curve):
+        """The day's term-structured dividend object for ``dividend_source``.
+
+        ``futures_curve``: every contract in the day's chain with at least
+        ``futures_curve_min_tenor_days`` calendar days to expiry becomes an
+        ``IndexFuturesQuote`` (ACT/365 year fractions, the same day count the
+        active-contract channel uses); ``IndexFuturesCurve`` inverts them
+        with continuous compounding, signed (strictly increasing maturities,
+        fail-closed).  ``flat_q`` holds the endpoint zero yield beyond the
+        last node; ``flat_forward_carry`` continues the last segment's
+        forward carry through the ``ForwardCarryCurve`` view.  One eligible
+        contract is the one-node limit of both conventions: a flat
+        continuous signed yield at that node.  None fails closed.
+
+        ``surface_forwards``: the admitted artifact's parity forward pillars,
+        recorded with the same provenance fields surface vol mode writes.
+        """
+        source = self._dividend_source()
+        if source == "futures_curve":
+            min_days = int(getattr(self.engine_config, "futures_curve_min_tenor_days", 7))
+            if min_days < 1:
+                raise ValidationError("futures_curve_min_tenor_days must be at least 1")
+            chain = self.market_data.get_futures_slice(date)
+            days = (pd.to_datetime(chain["expiry_date"]) - date).dt.days
+            chain = chain[days >= min_days].sort_values(["expiry_date", "contract"])
+            quotes = [
+                IndexFuturesQuote(
+                    contract=str(row["contract"]),
+                    maturity=(pd.Timestamp(row["expiry_date"]) - date).days / 365.0,
+                    price=float(row["futures_price"]),
+                    multiplier=float(row["multiplier"]),
+                    expiry_date=pd.Timestamp(row["expiry_date"]).to_pydatetime(),
+                )
+                for _, row in chain.iterrows()
+            ]
+            if not quotes:
+                raise ValidationError(
+                    f"dividend_source='futures_curve' found no contract with at "
+                    f"least {min_days} days to expiry on {date.date()}"
+                )
+            extrapolation = getattr(
+                self.engine_config, "futures_curve_extrapolation", "flat_q"
+            )
+            if extrapolation == "surface_forward_carry":
+                artifact = self._surface_artifact(date, "surface_forward_carry")
+                return surface_tail_carry_yield(
+                    spot=float(market["spot"]),
+                    forward_nodes=[(q.maturity, q.price) for q in quotes],
+                    artifact=artifact,
+                    rate_curve=rate_curve,
+                )
+            if len(quotes) == 1:
+                q = quotes[0]
+                return ContinuousDividendYield(
+                    float(rate_curve.get_rate(q.maturity))
+                    - math.log(q.price / float(market["spot"])) / q.maturity
+                )
+            curve = IndexFuturesCurve(
+                underlying=self.underlying or "index", spot=float(market["spot"]),
+                quotes=quotes,
+            )
+            if extrapolation == "flat_forward_carry":
+                return ForwardCarryCurve.from_index_futures(
+                    curve, rate_curve
+                ).to_dividend_yield(rate_curve)
+            return curve.to_dividend_yield_curve(rate_curve)
+        if source == "surface_forwards":
+            artifact = self._surface_artifact(date, "surface_forwards")
+            return artifact.term_structure_dividend_yield(rate=market["rate"])
+        raise ValidationError(f"Unknown dividend_source: {source!r}")
+
+    def _surface_artifact(self, date: pd.Timestamp, needed_by: str):
+        """The day's admitted IV-surface artifact, recording its provenance."""
+        history = getattr(self.market_data, "surface_history", None)
+        if history is None:
+            raise ValidationError(
+                f"{needed_by!r} requires market_data.surface_history"
+            )
+        artifact = history.surface_for(date)
+        self.last_surface_provenance = {
+            "surface_date": artifact.trade_date.isoformat(),
+            "surface_sha": artifact.sha256,
+            "surface_extrapolation": artifact.extrapolation_policy.get(
+                "beyond_last_listed_expiry"
+            ),
+            "surface_max_listed_T": artifact.max_listed_T,
+        }
+        return artifact
+
+    def recorded_pricing_q(
+        self,
+        env: PricingEnvironment,
+        date: pd.Timestamp,
+        market: dict[str, float],
+        implied_q: float,
+    ) -> float:
+        """Scalar ``pricing_q`` for the state row.
+
+        Legacy channels record the flat yield the pricer received.  A term
+        source has no single number, so the row carries the zero yield to the
+        product's remaining maturity — the carry that actually discounts the
+        terminal leg — sampled off the very object the engines price with.
+
+        The engine calls this once per day on its first replay, so in a
+        multi-product book the column follows the first product's maturity
+        (each product's PRICING samples its own).  The remaining maturity is
+        read through the tracker's time-decayed product copy: one small
+        deepcopy per day, negligible next to a pricing call.
+        """
+        if not self.uses_term_dividend_source():
+            return self.pricing_dividend_yield(implied_q)
+        remaining = self._remaining_maturity_years(date, market)
+        return float(env.div_yield.get_yield(remaining))
 
     def _vol_source(self) -> str:
         return getattr(self.engine_config, "vol_source", "scalar")
