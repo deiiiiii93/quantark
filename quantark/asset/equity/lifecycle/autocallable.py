@@ -19,9 +19,11 @@ observation method is called.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 from quantark.asset.equity.engine.settlement_support import (
@@ -334,6 +336,104 @@ class AutocallableLifecycleTracker:
         return None
 
     # ------------------------------------------------------------------
+    # Calendar resolution (consumed by the simulated-path ensemble)
+    # ------------------------------------------------------------------
+
+    def resolve_calendar_schedule(
+        self, dates: pd.DatetimeIndex, env: PricingEnvironment
+    ) -> "CalendarSchedule":
+        """Map this product's observations onto ``dates`` (one resolution).
+
+        A vectorised replay needs to know, once, which day each observation
+        first becomes due on; walking ``observe`` day by day would answer
+        the same question one path at a time.  The records and the due rule
+        here are the ones ``observe`` and ``settle_maturity_if_due`` use.
+        """
+        dates = pd.DatetimeIndex(dates)
+        product = self.product
+
+        def first_due(is_due) -> int:
+            for d, day in enumerate(dates):
+                if is_due(day, self._valuation_point(day, product)):
+                    return d
+            return -1
+
+        def settlement_position(settlement_date, due_day: int) -> int:
+            if due_day < 0:
+                return -1
+            if settlement_date is None:
+                return due_day
+            stamp = pd.Timestamp(settlement_date).normalize()
+            later = np.flatnonzero(dates >= stamp)
+            return int(later[0]) if later.size else -1
+
+        def terminal_payment_date(timing) -> Optional[pd.Timestamp]:
+            """The terminal payment day, on the same clock ``_scheduled_records`` uses."""
+            if getattr(timing, "payment_date", None) is not None:
+                return pd.Timestamp(timing.payment_date).normalize()
+            base = getattr(product, "initial_date", None) or self.start_date
+            if base is None:
+                return None
+            payment_time = float(timing.payment_time)
+            if payment_time <= float(timing.determination_time):
+                return None          # pays at determination
+            return self._date_resolver(
+                (pd.Timestamp(base) + timedelta(days=int(round(payment_time * 365)))).normalize()
+            )
+
+        ko_records = self._scheduled_records(product, env, "ko")
+        ko_due, ko_barrier, ko_payoff, ko_settle = [], [], [], []
+        for rec in ko_records:
+            due = first_due(lambda day, vp, rec=rec: self._record_is_due(day, vp, rec))
+            ko_due.append(due)
+            ko_barrier.append(float(rec["barrier"]) if rec["barrier"] is not None else np.nan)
+            ko_payoff.append(float(rec["payoff"]))
+            ko_settle.append(settlement_position(rec["settlement_date"], due))
+
+        ki_observation_type = getattr(product.barrier_config, "ki_observation_type", None)
+        ki_continuous = bool(
+            getattr(product, "has_ki_barrier", False)
+            and (
+                product.barrier_config.ki_continuous
+                or getattr(ki_observation_type, "name", None) == "CONTINUOUS"
+            )
+        )
+        ki_due, ki_barrier = [], []
+        continuous_barrier: Optional[float] = None
+        if ki_continuous:
+            barrier = product.barrier_config.ki_barrier
+            if isinstance(barrier, list):
+                barrier = barrier[0]
+            continuous_barrier = float(barrier)
+        else:
+            for rec in self._scheduled_records(product, env, "ki"):
+                ki_due.append(first_due(lambda day, vp, rec=rec: self._record_is_due(day, vp, rec)))
+                ki_barrier.append(float(rec["barrier"]) if rec["barrier"] is not None else np.nan)
+
+        timing = resolve_terminal_timing(product, self._schedule_resolution_env(product, env))
+        terminal_due = first_due(
+            lambda day, vp: self._timing_is_due(day, vp, timing)
+        )
+        terminal_settle = settlement_position(terminal_payment_date(timing), terminal_due)
+        return CalendarSchedule(
+            dates=dates,
+            ko_due_day=np.array(ko_due, dtype=np.int64),
+            ko_barrier=np.array(ko_barrier, dtype=float),
+            ko_payoff=np.array(ko_payoff, dtype=float),
+            ko_settlement_day=np.array(ko_settle, dtype=np.int64),
+            ki_due_day=np.array(ki_due, dtype=np.int64),
+            ki_barrier=np.array(ki_barrier, dtype=float),
+            ki_continuous=ki_continuous,
+            ki_continuous_barrier=continuous_barrier,
+            terminal_due_day=int(terminal_due),
+            terminal_settlement_day=int(terminal_settle),
+            is_reverse=bool(product.is_reverse),
+            disable_ko_after_ki=bool(
+                getattr(product.barrier_config, "disable_ko_after_ki", False)
+            ),
+        )
+
+    # ------------------------------------------------------------------
     # Schedule resolution helpers (mirrors ProductReplay)
     # ------------------------------------------------------------------
 
@@ -568,3 +668,29 @@ class AutocallableLifecycleTracker:
         if is_ko:
             return spot <= barrier if is_reverse else spot >= barrier
         return spot >= barrier if is_reverse else spot <= barrier
+
+
+@dataclass(frozen=True)
+class CalendarSchedule:
+    """When a product's observations fall on a given run calendar.
+
+    Every ``*_day`` is a position in ``dates``, or ``-1`` when the day lies
+    beyond the calendar's end.  Built by
+    :meth:`AutocallableLifecycleTracker.resolve_calendar_schedule` from the
+    same records and due rule ``observe`` uses, so a caller that fires on
+    these days fires exactly when the tracker does.
+    """
+
+    dates: pd.DatetimeIndex
+    ko_due_day: np.ndarray
+    ko_barrier: np.ndarray
+    ko_payoff: np.ndarray
+    ko_settlement_day: np.ndarray
+    ki_due_day: np.ndarray
+    ki_barrier: np.ndarray
+    ki_continuous: bool
+    ki_continuous_barrier: Optional[float]
+    terminal_due_day: int
+    terminal_settlement_day: int
+    is_reverse: bool
+    disable_ko_after_ki: bool
