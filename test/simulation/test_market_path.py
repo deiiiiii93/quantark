@@ -105,3 +105,15 @@ def test_public_api_is_exported():
                  "StateCache", "DayStates", "StateKey", "GateReport", "VectorLifecycle",
                  "VectorHedgeLedger", "OracleReport", "run_oracle"):
         assert hasattr(sim, name), name
+
+
+def test_take_selects_paths_and_records_them():
+    mp = make_market_path(n_paths=5)
+    sub = mp.take([4, 1])
+    assert sub.n_paths == 2 and sub.n_days == mp.n_days
+    assert np.array_equal(sub.spot[0], mp.spot[4]) and np.array_equal(sub.carry[1], mp.carry[1])
+    assert sub.meta["path_indices"] == [4, 1]
+    with pytest.raises(ValidationError):
+        mp.take([5])
+    with pytest.raises(ValidationError):
+        mp.take([])

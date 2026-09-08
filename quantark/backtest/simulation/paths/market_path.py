@@ -141,6 +141,18 @@ class MarketPath:
             meta={**self.meta, "path_index": int(i)},
         )
 
+    def take(self, indices: Sequence[int]) -> "MarketPath":
+        """The sub-batch of the given paths, in the given order (meta carries ``path_indices``)."""
+        idx = [int(i) for i in indices]
+        if not idx:
+            raise ValidationError("take needs at least one path index")
+        if any(not 0 <= i < self.n_paths for i in idx):
+            raise ValidationError(f"path indices {idx} out of range for {self.n_paths} paths")
+        return MarketPath(
+            dates=self.dates, spot=self.spot[idx], atm_vol=self.atm_vol[idx], rate=self.rate[idx],
+            carry=self.carry[idx], tenor_grid=self.tenor_grid, meta={**self.meta, "path_indices": idx},
+        )
+
     def fingerprint(self) -> str:
         """sha256 of the arrays, dates and tenor grid; ``meta`` is excluded."""
         h = hashlib.sha256()
