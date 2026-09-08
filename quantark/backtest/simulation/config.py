@@ -17,7 +17,8 @@ from quantark.backtest.replay import AutocallableEngineConfig, HedgeSpec, Replay
 from quantark.backtest.transaction_costs import TransactionCostModel
 from quantark.util.exceptions import ValidationError
 
-PROVIDERS = ("repricing",)  # "life_surface" joins this when that provider lands
+PROVIDERS = ("repricing", "life_surface")
+MODES = ("exact", "ladder", "life_surface")
 
 
 @dataclass(frozen=True)
@@ -42,28 +43,77 @@ class GateConfig:
 
 @dataclass(frozen=True)
 class CacheConfig:
-    """State-cache budget (spec 7.4); the on-disk tier arrives with the ladder."""
+    """State-cache budget (spec 7.4).
+
+    ``disk_dir`` names the on-disk tier; ``None`` means memory only.  A
+    shard written by another library version or engine is a miss, never
+    reinterpreted (see ``pricing.cache.DiskTier``).
+    """
 
     memory_bytes: int
+    disk_dir: Optional[str] = None
 
     def __post_init__(self) -> None:
         if int(self.memory_bytes) <= 0:
             raise ValidationError("CacheConfig.memory_bytes must be positive")
+        if self.disk_dir is not None and not str(self.disk_dir):
+            raise ValidationError("CacheConfig.disk_dir must be a directory path or None")
 
 
 @dataclass(frozen=True)
 class PricingProviderConfig:
-    """Which pricer runs and how much it may spend."""
+    """Which pricer runs, how coarsely, and how much it may spend.
 
-    provider: Literal["repricing"]
+    ``spot_step`` (log-spot) switches the repricing provider from exact to
+    ladder mode; ``vol_step`` / ``q_step`` bucket vol and the flat dividend
+    yield in either approximate mode (0 keeps them exact); the life
+    surface additionally needs ``surface_cache_bytes``.  A step that a
+    mode cannot honour is rejected, not ignored.
+    """
+
+    provider: Literal["repricing", "life_surface"]
     cache: CacheConfig
     gate: GateConfig
+    spot_step: Optional[float] = None
+    vol_step: Optional[float] = None
+    q_step: Optional[float] = None
+    surface_cache_bytes: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.provider not in PROVIDERS:
-            raise ValidationError(
-                f"provider must be one of {PROVIDERS}, got {self.provider!r}"
-            )
+            raise ValidationError(f"provider must be one of {PROVIDERS}, got {self.provider!r}")
+        steps_given = self.vol_step is not None or self.q_step is not None
+        if self.provider == "repricing":
+            if self.surface_cache_bytes is not None:
+                raise ValidationError("surface_cache_bytes belongs to the life_surface provider")
+            if self.spot_step is None:
+                if steps_given:
+                    raise ValidationError(
+                        "vol_step / q_step have no meaning in exact repricing mode; set spot_step for the ladder"
+                    )
+                return
+            if float(self.spot_step) <= 0.0:
+                raise ValidationError("spot_step must be positive (log-spot) or None for exact mode")
+            self._require_bucket_steps("ladder")
+            return
+        if self.spot_step is not None:
+            raise ValidationError("spot_step has no meaning for the life_surface provider")
+        self._require_bucket_steps("life_surface")
+        if self.surface_cache_bytes is None or int(self.surface_cache_bytes) <= 0:
+            raise ValidationError("life_surface requires a positive surface_cache_bytes")
+
+    def _require_bucket_steps(self, mode: str) -> None:
+        if self.vol_step is None or self.q_step is None:
+            raise ValidationError(f"{mode} mode requires vol_step and q_step (0 means exact)")
+        if float(self.vol_step) < 0.0 or float(self.q_step) < 0.0:
+            raise ValidationError("vol_step and q_step must be non-negative")
+
+    @property
+    def mode(self) -> str:
+        """``exact`` | ``ladder`` | ``life_surface``."""
+        if self.provider == "life_surface":
+            return "life_surface"
+        return "exact" if self.spot_step is None else "ladder"
 
 
 @dataclass
@@ -71,8 +121,8 @@ class EnsembleConfig:
     """A book, an engine, a hedge and a pricer: one cell of a simulated run.
 
     The rate comes from the ``MarketPath`` (per path, per day), so there is
-    no rate schedule here.  Batch parallelism is not part of this
-    configuration yet; the engine runs the whole batch in process.
+    no rate schedule here.  ``workers`` and ``batch_paths`` split the batch
+    into index ranges for ``run_ensemble``; the split is bit-inert.
     """
 
     products: List[ReplayProduct]
@@ -85,6 +135,8 @@ class EnsembleConfig:
     delta_bump_size: Optional[float] = None
     gamma_bump_size: Optional[float] = None
     allow_data_end: bool = False
+    workers: int = 1
+    batch_paths: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -116,6 +168,18 @@ class EnsembleConfig:
             raise ValidationError(
                 "a simulated path carries one ATM vol per day: vol_source must be 'scalar'"
             )
+        if int(self.workers) < 1:
+            raise ValidationError("workers must be at least 1")
+        if self.batch_paths is not None and int(self.batch_paths) < 1:
+            raise ValidationError("batch_paths must be at least 1 or None (one batch)")
+        if self.pricing.provider == "life_surface":
+            from quantark.util.enum.engine_enums import EngineType
+
+            if self.engine_config.pricing_engine_type != EngineType.PDE:
+                raise ValidationError(
+                    "the life_surface provider needs a PDE engine; use provider='repricing' for "
+                    f"{self.engine_config.pricing_engine_type!r}"
+                )
 
     @property
     def quantities(self) -> np.ndarray:

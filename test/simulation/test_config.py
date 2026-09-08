@@ -9,7 +9,10 @@ from quantark.backtest.simulation.config import CacheConfig, EnsembleConfig, Gat
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import ValidationError
 
-from .conftest import SPOT, ensemble_config, short_snowball
+from quantark.util.enum.engine_enums import EngineType
+
+from .conftest import (SPOT, ensemble_config, ladder_pricing, pde_engine_config, short_snowball,
+                       surface_pricing)
 
 
 def test_a_valid_config_exposes_its_quantities():
@@ -54,3 +57,55 @@ def test_provider_literal_admits_only_what_is_implemented():
         PricingProviderConfig(provider="life_surface",
                               cache=CacheConfig(memory_bytes=1024),
                               gate=GateConfig(sample_states=0, pv_tolerance_bp=0.0, delta_tolerance_hands=0.0))
+
+
+def _gate():
+    return GateConfig(sample_states=0, pv_tolerance_bp=0.0, delta_tolerance_hands=0.0)
+
+
+def test_exact_mode_is_the_default_and_rejects_bucket_steps():
+    exact = PricingProviderConfig(provider="repricing", cache=CacheConfig(memory_bytes=1024), gate=_gate())
+    assert exact.mode == "exact"
+    with pytest.raises(ValidationError):
+        PricingProviderConfig(provider="repricing", cache=CacheConfig(memory_bytes=1024), gate=_gate(), vol_step=0.01)
+
+
+def test_ladder_mode_requires_both_bucket_steps_and_a_positive_spot_step():
+    assert ladder_pricing().mode == "ladder"
+    with pytest.raises(ValidationError):
+        PricingProviderConfig(provider="repricing", cache=CacheConfig(memory_bytes=1024), gate=_gate(), spot_step=0.002)
+    with pytest.raises(ValidationError):
+        ladder_pricing(spot_step=0.0)
+    with pytest.raises(ValidationError):
+        ladder_pricing(vol_step=-0.01)
+    with pytest.raises(ValidationError):
+        PricingProviderConfig(provider="repricing", cache=CacheConfig(memory_bytes=1024), gate=_gate(),
+                              spot_step=0.002, vol_step=0.0, q_step=0.0, surface_cache_bytes=10)
+
+
+def test_life_surface_requires_its_budget_and_a_pde_engine():
+    assert surface_pricing().mode == "life_surface"
+    with pytest.raises(ValidationError):
+        PricingProviderConfig(provider="life_surface", cache=CacheConfig(memory_bytes=1024), gate=_gate(),
+                              vol_step=0.01, q_step=0.0025)
+    with pytest.raises(ValidationError):
+        PricingProviderConfig(provider="life_surface", cache=CacheConfig(memory_bytes=1024), gate=_gate(),
+                              vol_step=0.01, q_step=0.0025, surface_cache_bytes=1024, spot_step=0.002)
+    with pytest.raises(ValidationError):
+        ensemble_config(pricing=surface_pricing(),
+                        engine_config=pde_engine_config(pricing_engine_type=EngineType.QUADRATURE))
+
+
+def test_batching_fields_are_validated():
+    cfg = ensemble_config(workers=2, batch_paths=8)
+    assert (cfg.workers, cfg.batch_paths) == (2, 8)
+    with pytest.raises(ValidationError):
+        ensemble_config(workers=0)
+    with pytest.raises(ValidationError):
+        ensemble_config(batch_paths=0)
+
+
+def test_a_disk_dir_is_optional_and_kept(tmp_path):
+    cache = CacheConfig(memory_bytes=1024, disk_dir=str(tmp_path))
+    assert cache.disk_dir == str(tmp_path)
+    assert CacheConfig(memory_bytes=1024).disk_dir is None

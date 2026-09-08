@@ -123,3 +123,23 @@ def ensemble_config(products=None, **overrides):
     )
     kwargs.update(overrides)
     return EnsembleConfig(**kwargs)
+
+
+def ladder_pricing(spot_step: float = 0.002, vol_step: float = 0.0, q_step: float = 0.0, **cache):
+    from quantark.backtest.simulation.config import CacheConfig, GateConfig, PricingProviderConfig
+
+    return PricingProviderConfig(
+        provider="repricing", cache=CacheConfig(memory_bytes=8_000_000, **cache),
+        gate=GateConfig(sample_states=8, pv_tolerance_bp=5.0, delta_tolerance_hands=1.0),
+        spot_step=spot_step, vol_step=vol_step, q_step=q_step,
+    )
+
+
+def surface_pricing(vol_step: float = 0.01, q_step: float = 0.0025, **cache):
+    from quantark.backtest.simulation.config import CacheConfig, GateConfig, PricingProviderConfig
+
+    return PricingProviderConfig(
+        provider="life_surface", cache=CacheConfig(memory_bytes=8_000_000, **cache),
+        gate=GateConfig(sample_states=8, pv_tolerance_bp=50.0, delta_tolerance_hands=3.0),
+        vol_step=vol_step, q_step=q_step, surface_cache_bytes=200_000_000,
+    )
