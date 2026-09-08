@@ -49,3 +49,38 @@ def test_curve_from_chain_round_trips_a_curve_and_drops_expired_contracts():
         assert b == pytest.approx(ref.carry(float(t)), abs=1e-15)
     with pytest.raises(ValidationError):
         curve_from_chain(spot, [0.0], [spot], DEFAULT_TENOR_GRID)
+
+
+from quantark.backtest.simulation.carry import im_expiry, listed_im_contracts, third_friday
+from quantark.backtest.simulation.paths.market_path import trading_calendar
+
+
+def test_third_friday():
+    assert third_friday(2024, 1) == date(2024, 1, 19)
+    assert third_friday(2024, 2) == date(2024, 2, 16)
+    assert third_friday(2024, 3) == date(2024, 3, 15)
+    assert third_friday(2024, 6) == date(2024, 6, 21)
+    assert third_friday(2024, 9) == date(2024, 9, 20)
+
+
+def test_im_expiry_rolls_a_holiday_friday_to_the_next_trading_day():
+    cal = trading_calendar(date(2024, 1, 2), 300, holidays=[date(2024, 2, 16)])
+    assert im_expiry(2024, 1, cal) == pd.Timestamp("2024-01-19")
+    assert im_expiry(2024, 2, cal) == pd.Timestamp("2024-02-19")  # Monday after the holiday Friday
+
+
+def test_listed_im_contracts_follow_the_cffex_cycle():
+    cal = trading_calendar(date(2024, 1, 2), 400)
+    listed = listed_im_contracts(pd.Timestamp("2024-01-02"), cal)
+    assert [c for c, _ in listed] == ["IM2401", "IM2402", "IM2403", "IM2406"]
+    assert [e.date() for _, e in listed] == [date(2024, 1, 19), date(2024, 2, 16), date(2024, 3, 15), date(2024, 6, 21)]
+    # the expiring contract is still listed on its expiry day ...
+    assert [c for c, _ in listed_im_contracts(pd.Timestamp("2024-01-19"), cal)][0] == "IM2401"
+    # ... and gone the next trading day, when a new quarterly is listed
+    assert [c for c, _ in listed_im_contracts(pd.Timestamp("2024-01-22"), cal)] == ["IM2402", "IM2403", "IM2406", "IM2409"]
+    # after the March expiry the two nearest months are April and May
+    assert [c for c, _ in listed_im_contracts(pd.Timestamp("2024-03-18"), cal)] == ["IM2404", "IM2405", "IM2406", "IM2409"]
+    # December wraps the year
+    assert [c for c, _ in listed_im_contracts(pd.Timestamp("2024-11-11"), cal)] == ["IM2411", "IM2412", "IM2503", "IM2506"]
+    # after the November expiry (15th) the December contract is nearest and January follows
+    assert [c for c, _ in listed_im_contracts(pd.Timestamp("2024-11-18"), cal)] == ["IM2412", "IM2501", "IM2503", "IM2506"]

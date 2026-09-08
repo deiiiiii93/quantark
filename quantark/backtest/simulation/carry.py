@@ -62,3 +62,43 @@ def curve_from_chain(
     nodes.sort()
     curve = ForwardCarryCurve(nodes)
     return np.array([curve.carry(float(t)) for t in np.asarray(tenor_grid, dtype=float)])
+
+
+_QUARTERLY = (3, 6, 9, 12)
+
+
+def third_friday(year: int, month: int) -> date:
+    first = date(year, month, 1)
+    offset = (4 - first.weekday()) % 7      # Friday is weekday 4
+    return first + timedelta(days=offset + 14)
+
+
+def im_expiry(year: int, month: int, calendar: pd.DatetimeIndex) -> pd.Timestamp:
+    """Third Friday of the month, or the next trading day in ``calendar`` if it does not trade."""
+    friday = pd.Timestamp(third_friday(year, month))
+    if friday in calendar:
+        return friday
+    later = calendar[calendar > friday]
+    if len(later) == 0:
+        raise ValidationError(f"calendar ends before the IM{year % 100:02d}{month:02d} expiry {friday.date()}")
+    return pd.Timestamp(later[0])
+
+
+def _next_month(year: int, month: int) -> Tuple[int, int]:
+    return (year + 1, 1) if month == 12 else (year, month + 1)
+
+
+def listed_im_contracts(day: pd.Timestamp, calendar: pd.DatetimeIndex) -> List[Tuple[str, pd.Timestamp]]:
+    """The four IM contracts CFFEX lists on ``day``: current month, next month, next two quarterlies."""
+    day = pd.Timestamp(day).normalize()
+    year, month = day.year, day.month
+    if im_expiry(year, month, calendar) < day:       # this month's contract has expired
+        year, month = _next_month(year, month)
+    months = [(year, month)]
+    months.append(_next_month(year, month))
+    y, m = months[-1]
+    while len(months) < 4:
+        y, m = _next_month(y, m)
+        if m in _QUARTERLY:
+            months.append((y, m))
+    return [(f"IM{y % 100:02d}{m:02d}", im_expiry(y, m, calendar)) for y, m in months]
