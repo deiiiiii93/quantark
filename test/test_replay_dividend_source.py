@@ -35,9 +35,11 @@ from quantark.backtest.replay import (
     ReplayBacktestEngine,
     ReplayProduct,
 )
+from quantark.asset.equity.market import IndexFuturesQuote
+from quantark.backtest.replay.dividend_source import term_dividend_yield
 from quantark.backtest.replay.market import SignedDividendYield
 from quantark.backtest.replay.product_replay import ProductReplay
-from quantark.param import FlatVolSurface
+from quantark.param import FlatRateCurve, FlatVolSurface
 from quantark.param.vol.surface_history import VolSurfaceHistory
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import EngineType
@@ -575,3 +577,34 @@ class TestSurfaceForwardCarryTail:
         assert env.div_yield.get_yield(t3) == pytest.approx(q3, abs=1e-12)
         # not a flat yield: the tail follows the option forward carry
         assert env.div_yield.get_yield(1.0) != pytest.approx(q3, abs=1e-6)
+
+
+class TestSharedDividendRule:
+    """The extracted ``term_dividend_yield`` is the engine's own rule."""
+
+    def test_term_dividend_yield_equals_the_engine_for_every_extrapolation(self, history_dir):
+        dataset = _market_data(surface_history=VolSurfaceHistory(history_dir))
+        d = DATES[0]
+        quotes = [
+            IndexFuturesQuote(contract=c, maturity=_ttm(e, d), price=SPOT * math.exp((RATE - q) * _ttm(e, d)),
+                              multiplier=200.0, expiry_date=e.to_pydatetime())
+            for c, e, q in CHAIN
+        ]
+        artifact = VolSurfaceHistory(history_dir).surface_for(d)
+        for extrapolation in ("flat_q", "flat_forward_carry", "surface_forward_carry"):
+            replay = _replay(dataset, AutocallableEngineConfig(
+                dividend_source="futures_curve", futures_curve_extrapolation=extrapolation,
+                futures_curve_min_tenor_days=1))
+            env, *_ = _build_env(replay, dataset, d)
+            shared = term_dividend_yield(quotes, spot=SPOT, rate_curve=FlatRateCurve(rate=RATE),
+                                         extrapolation=extrapolation, underlying="CSI1000", artifact=artifact)
+            for t in (0.05, 0.1, 0.2, 0.5, 1.0, 2.0):
+                assert shared.get_yield(t) == pytest.approx(env.div_yield.get_yield(t), abs=1e-15)
+
+    def test_surface_forward_carry_without_an_artifact_fails_closed(self):
+        quotes = [IndexFuturesQuote(contract="IM2403", maturity=0.2, price=SPOT * 0.99, multiplier=200.0)]
+        with pytest.raises(ValidationError):
+            term_dividend_yield(quotes, spot=SPOT, rate_curve=FlatRateCurve(rate=RATE),
+                                extrapolation="surface_forward_carry")
+        with pytest.raises(ValidationError):
+            term_dividend_yield(quotes, spot=SPOT, rate_curve=FlatRateCurve(rate=RATE), extrapolation="cubic")

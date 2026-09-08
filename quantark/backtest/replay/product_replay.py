@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 
-import math
 from copy import deepcopy
 from datetime import timedelta
 from typing import Any, Optional
@@ -28,14 +27,14 @@ import pandas as pd
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
-from quantark.asset.equity.market import IndexFuturesCurve, IndexFuturesQuote
+from quantark.asset.equity.market import IndexFuturesQuote
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
-from quantark.param.div import ContinuousDividendYield
 from quantark.param.div.forward_carry_curve import ForwardCarryCurve
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close
 
+from .dividend_source import term_dividend_yield
 from .engine_factory import create_mc_event_stats_engine
 from .market import (
     ImpliedBasisYield,
@@ -264,29 +263,19 @@ class ProductReplay:
             extrapolation = getattr(
                 self.engine_config, "futures_curve_extrapolation", "flat_q"
             )
-            if extrapolation == "surface_forward_carry":
-                artifact = self._surface_artifact(date, "surface_forward_carry")
-                return surface_tail_carry_yield(
-                    spot=float(market["spot"]),
-                    forward_nodes=[(q.maturity, q.price) for q in quotes],
-                    artifact=artifact,
-                    rate_curve=rate_curve,
-                )
-            if len(quotes) == 1:
-                q = quotes[0]
-                return ContinuousDividendYield(
-                    float(rate_curve.get_rate(q.maturity))
-                    - math.log(q.price / float(market["spot"])) / q.maturity
-                )
-            curve = IndexFuturesCurve(
-                underlying=self.underlying or "index", spot=float(market["spot"]),
-                quotes=quotes,
+            artifact = (
+                self._surface_artifact(date, "surface_forward_carry")
+                if extrapolation == "surface_forward_carry"
+                else None
             )
-            if extrapolation == "flat_forward_carry":
-                return ForwardCarryCurve.from_index_futures(
-                    curve, rate_curve
-                ).to_dividend_yield(rate_curve)
-            return curve.to_dividend_yield_curve(rate_curve)
+            return term_dividend_yield(
+                quotes,
+                spot=float(market["spot"]),
+                rate_curve=rate_curve,
+                extrapolation=extrapolation,
+                underlying=self.underlying or "index",
+                artifact=artifact,
+            )
         if source == "surface_forwards":
             artifact = self._surface_artifact(date, "surface_forwards")
             return artifact.term_structure_dividend_yield(rate=market["rate"])

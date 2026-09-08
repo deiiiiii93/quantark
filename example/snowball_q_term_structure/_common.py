@@ -49,14 +49,12 @@ from quantark.backtest.replay import (
     AutocallableEngineConfig,
     AutocallableMarketDataSet,
 )
+from quantark.backtest.replay.dividend_source import term_dividend_yield
 from quantark.backtest.replay.market import (
     SignedDividendYield,
     derive_implied_dividend_yield,
 )
 from quantark.param import FlatRateCurve
-from quantark.param.div import ContinuousDividendYield
-from quantark.backtest.replay.product_replay import surface_tail_carry_yield
-from quantark.param.div.forward_carry_curve import ForwardCarryCurve
 from quantark.param.vol.surface_history import VolSurfaceHistory
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import EngineType
@@ -306,26 +304,14 @@ def dividend_for(
                 f"no contract with at least {model.min_tenor_days} days to "
                 f"expiry on {valuation.date()}"
             )
-        if model.extrapolation == "surface_forward_carry":
-            if artifact is None:
-                raise ValidationError(f"{model.name} needs the day's IV-surface artifact")
-            return surface_tail_carry_yield(
-                spot=float(spot),
-                forward_nodes=[(q.maturity, q.price) for q in quotes],
-                artifact=artifact,
-                rate_curve=rate_curve,
-            )
-        if len(quotes) == 1:
-            q = quotes[0]
-            return ContinuousDividendYield(
-                float(rate_curve.get_rate(q.maturity)) - math.log(q.price / float(spot)) / q.maturity
-            )
-        curve = futures_curve(chain_slice, valuation, spot)
-        if model.extrapolation == "flat_forward_carry":
-            return ForwardCarryCurve.from_index_futures(curve, rate_curve).to_dividend_yield(
-                rate_curve
-            )
-        return curve.to_dividend_yield_curve(rate_curve)
+        return term_dividend_yield(
+            quotes,
+            spot=float(spot),
+            rate_curve=rate_curve,
+            extrapolation=model.extrapolation,
+            underlying=UNDERLYING_NAME,
+            artifact=artifact,
+        )
     if model.dividend_source == "surface_forwards":
         if artifact is None:
             raise ValidationError("surface_fwd needs the day's IV-surface artifact")
