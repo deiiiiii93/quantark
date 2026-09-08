@@ -52,10 +52,11 @@ class DayStates(NamedTuple):
     records.
 
     ``env_key`` identifies everything the pricing environment holds beyond
-    spot and vol: the rate and the day's carry curve, which between them
-    fix the dividend object AND the basis yield.  Keying on those inputs
-    rather than on the objects keeps the cache exact without asking a
-    dividend curve to hash itself.
+    vol: the rate, the spot and the day's carry curve, which between them
+    fix the dividend object AND the basis yield (spot is in it because the
+    replay's basis arithmetic is not spot-free at the last ulp).  Keying on
+    those inputs rather than on the objects keeps the cache exact without
+    asking a dividend curve to hash itself.
     """
 
     day_index: int

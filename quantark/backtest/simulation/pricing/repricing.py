@@ -115,7 +115,16 @@ def product_fingerprint(product: Any) -> str:
 
 
 class RepricingPricer:
-    """Prices each distinct ``(spot, vol, env, knocked_in)`` state once, exactly."""
+    """Prices each distinct ``(spot, vol, env, knocked_in)`` state once, exactly.
+
+    One engine per product, shared by every path, exactly as
+    ``ReplayBacktestEngine`` shares one engine across a path's days.  The
+    PDE solver keeps per-instance caches (critical points by spot, banded
+    factorisations by step, grid layouts), so a shared engine was checked
+    rather than assumed: sixty single-path oracle comparisons, discrete and
+    continuous knock-in, matched the replay to the bit through one engine.
+    One engine per path was tried too and bought nothing but ~0.5 MB a path.
+    """
 
     def __init__(
         self,
@@ -137,9 +146,9 @@ class RepricingPricer:
         self.gamma_bump_size = gamma_bump_size
         self._engine_fp = engine_fingerprint(engine_config, delta_bump_size, gamma_bump_size)
         self._product_fp = product_fingerprint(product)
-        # One engine per product, built from the ORIGINAL contract, exactly
-        # as ``ReplayBacktestEngine.__init__`` does: the factory reads only
-        # the product's type, and the aged copy is passed to every call.
+        # Built from the ORIGINAL contract, exactly as
+        # ``ReplayBacktestEngine.__init__`` does (the factory reads only the
+        # product's type); the aged copy is passed to every call.
         self._engine = create_pricing_engine(
             product, engine_config,
             delta_bump_size=delta_bump_size, gamma_bump_size=gamma_bump_size,
@@ -214,7 +223,8 @@ class RepricingPricer:
         self, states: DayStates, n: int, date: pd.Timestamp, key: StateKey
     ) -> Tuple[float, float, float]:
         product = self.aged_product(date, knocked_in=bool(states.knocked_in[n]))
-        self._seed_engine(key)
+        engine = self._engine
+        self._seed_engine(engine, key)
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=float(states.spot[n]), asset_name=self.underlying),
             vol_surface=FlatVolSurface(volatility=float(states.vol[n])),
@@ -224,8 +234,8 @@ class RepricingPricer:
             valuation_date=pd.Timestamp(date).to_pydatetime(),
         )
         try:
-            price = float(self._engine.price(product, env))
-            greeks = self._engine.calculate_greeks(product, env)
+            price = float(engine.price(product, env))
+            greeks = engine.calculate_greeks(product, env)
         except Exception as exc:  # fail closed with the state in the message
             raise ValidationError(
                 f"pricing failed on day {states.day_index} at spot={states.spot[n]!r}, "
@@ -237,13 +247,13 @@ class RepricingPricer:
         # separate calls here.
         return price, float(greeks["delta"]), float(greeks["gamma"])
 
-    def _seed_engine(self, key: StateKey) -> None:
+    def _seed_engine(self, engine: Any, key: StateKey) -> None:
         """Give an MC engine this state's own seed (spec 7.3).
 
         A recomputed state then matches its cached value bit for bit, and
         the seed is a function of the state, not of iteration order.
         """
-        params = getattr(self._engine, "params", None)
+        params = getattr(engine, "params", None)
         if params is not None and hasattr(params, "random_seed"):
             params.random_seed = key.seed()
 

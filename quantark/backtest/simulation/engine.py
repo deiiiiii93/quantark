@@ -273,15 +273,18 @@ class EnsembleBacktestEngine:
     def _day_market(self, paths, d, chain, column, code, rate):
         """Dividend object, basis and legacy scalar yield per distinct state.
 
-        None of the three depends on spot.  The chain is ``F_j = S exp(B_j)``
-        and every consumer takes the ratio ``F_j / S``: the term curve
-        inverts ``q_j = r - B_j / T_j``, the legacy channel takes
-        ``max(0, r - (F/S - 1)/T)`` and the basis is ``(F/S - 1)/T``.  So
-        ``(rate, carry row)`` -- the ``env_key`` the cache keys on -- fixes
-        all of them, and one build serves every path that shares it.
+        Mathematically none of the three depends on spot: the chain is
+        ``F_j = S exp(B_j)`` and every consumer takes the ratio ``F_j / S``.
+        Bitwise they do -- ``calculate_basis_yield`` evaluates ``(F - S) / S``
+        and the curve inverts ``ln(F_j / S)``, neither of which reduces to
+        ``exp(B_j) - 1`` exactly -- and a one-ulp difference in ``q`` moves a
+        PDE price by ~1e-11, which the oracle sees.  So the key that
+        identifies the environment carries the spot too: one build serves
+        every path with the same ``(rate, spot, carry row)`` (all of them on
+        day 0; each on its own afterwards), never a path with another spot.
         """
         n_paths = paths.n_paths
-        env_key = row_keys(np.column_stack([rate, paths.carry[:, d, :]]))
+        env_key = row_keys(np.column_stack([rate, paths.spot[:, d], paths.carry[:, d, :]]))
         div_yield: List[Any] = [None] * n_paths
         basis = np.zeros(n_paths)
         implied_q = np.zeros(n_paths)

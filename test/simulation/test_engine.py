@@ -51,12 +51,16 @@ def test_portfolio_value_is_its_own_parts():
     assert cube.cash == pytest.approx(cube.cashflows - cube.transaction_costs, abs=1e-9)
 
 
-def test_the_dividend_object_is_built_once_per_distinct_env_key():
-    # a held carry curve and a flat rate: every path shares one env_key a day,
-    # so the build count is the number of days the loop actually executed
-    results = EnsembleBacktestEngine(ensemble_config()).run(_paths(n_paths=6))
-    assert results.manifest["dividend_builds"] == results.manifest["days_run"]
-    assert results.manifest["days_run"] >= 1
+def test_the_dividend_object_is_built_once_per_distinct_environment():
+    # A held carry curve and a flat rate: on day 0 every path shares one
+    # (rate, spot, carry) row, so one build serves the batch; afterwards the
+    # GBM spots differ and each path needs its own (the replay's basis
+    # arithmetic is not spot-free at the last ulp, see _day_market).
+    paths = _paths(n_paths=6)
+    results = EnsembleBacktestEngine(ensemble_config()).run(paths)
+    days_run = results.manifest["days_run"]
+    assert days_run >= 2
+    assert results.manifest["dividend_builds"] == 1 + (days_run - 1) * paths.n_paths
 
 
 def test_a_dead_path_carries_no_product_mark_and_no_hedge():
@@ -90,7 +94,7 @@ def test_a_path_stops_updating_once_it_settles():
 
 def test_an_initial_price_on_the_product_replaces_the_day_zero_mark():
     cfg = ensemble_config(products=[
-        ReplayProduct(product=short_snowball(), quantity=-1.0, position_id=1,
+        ReplayProduct(product=short_snowball(), quantity=-1000.0, position_id=1,
                       has_lifecycle=True, initial_price=0.0)
     ])
     results = EnsembleBacktestEngine(cfg).run(_paths())

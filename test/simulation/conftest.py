@@ -83,11 +83,16 @@ def pde_engine_config(**overrides) -> AutocallableEngineConfig:
 
 
 def ensemble_config(products=None, **overrides):
-    """A one-snowball seller book with a zero-cost front-month futures hedge."""
+    """A one-snowball seller book with a zero-cost front-month futures hedge.
+
+    The book is 1000 units short: one unit of a 6000-spot snowball carries a
+    delta well under one 200-multiplier hand, so a one-unit book would round
+    to zero contracts every day and never exercise the hedge.
+    """
     from quantark.backtest.simulation.config import CacheConfig, EnsembleConfig, GateConfig, PricingProviderConfig
 
     if products is None:
-        products = [ReplayProduct(product=short_snowball(), quantity=-1.0, position_id=1, has_lifecycle=True)]
+        products = [ReplayProduct(product=short_snowball(), quantity=-1000.0, position_id=1, has_lifecycle=True)]
     kwargs = dict(
         products=products,
         engine_config=pde_engine_config(),
