@@ -13,7 +13,7 @@ import datetime as _dt
 import enum
 import hashlib
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -27,7 +27,9 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
 
 from ..config import GateConfig
-from .base import DayStates, GateReport, StateKey, bucket_centre, bucket_key, float_key, row_keys
+from .base import (
+    DayStates, GateReport, GateScale, StateKey, bucket_centre, bucket_key, float_key, row_keys, state_row,
+)
 from .cache import StateCache
 
 #: Engine settings that can change a price for a given state.
@@ -142,6 +144,7 @@ class RepricingPricer:
         spot_step: Optional[float] = None,
         vol_step: Optional[float] = None,
         q_step: Optional[float] = None,
+        gate: Optional[GateConfig] = None,
     ) -> None:
         self.product = product
         self.engine_config = engine_config
@@ -168,6 +171,16 @@ class RepricingPricer:
         )
         self._aged: Dict[Tuple[pd.Timestamp, bool], Any] = {}
         self._engine_calls = 0
+        # The gate's reservoir (Algorithm R): a uniform sample of the states
+        # priced approximately, seeded from the fingerprints so the same run
+        # samples the same states on every machine.
+        self.gate = gate
+        self._reservoir: List[DayStates] = []
+        self._seen = 0
+        seed = int.from_bytes(
+            hashlib.blake2b((self._product_fp + self._engine_fp).encode(), digest_size=4).digest(), "big"
+        )
+        self._rng = np.random.default_rng(seed)
 
     # -- aging ---------------------------------------------------------
 
@@ -256,7 +269,9 @@ class RepricingPricer:
         self._sample(states)
         return pv, delta, gamma
 
-    def _price_ladder(self, states: DayStates) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _price_ladder(
+        self, states: DayStates, *, sample: bool = True
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Price the two bracketing nodes of every state, then interpolate in log-spot."""
         date = pd.Timestamp(states.date).normalize()
         keys, rows, node_j, w, vol_c, q_c = self._ladder_layout(states)
@@ -281,7 +296,8 @@ class RepricingPricer:
             self.cache.put(key, *values)
             for pos in positions:
                 pv_n[pos], delta_n[pos], gamma_n[pos] = values
-        self._sample(states)
+        if sample:
+            self._sample(states)
         lo, hi = slice(0, None, 2), slice(1, None, 2)
         on_node = w == 0.0
 
@@ -318,8 +334,22 @@ class RepricingPricer:
         return self._ladder_layout(states)[0]
 
     def _sample(self, states: DayStates) -> None:
-        """Hook for the gate's reservoir; nothing to record until the gate lands."""
-        return None
+        """Algorithm R over every approximately priced state (ladder mode only)."""
+        if self.spot_step is None or self.gate is None or int(self.gate.sample_states) <= 0:
+            return
+        capacity = int(self.gate.sample_states)
+        for n in range(len(states)):
+            self._seen += 1
+            if len(self._reservoir) < capacity:
+                self._reservoir.append(state_row(states, n))
+                continue
+            slot = int(self._rng.integers(0, self._seen))
+            if slot < capacity:
+                self._reservoir[slot] = state_row(states, n)
+
+    def sample_visited(self) -> List[DayStates]:
+        """The reservoir so far (one-row ``DayStates``); empty in exact mode."""
+        return list(self._reservoir)
 
     def _price_one(
         self, states: DayStates, n: int, date: pd.Timestamp, key: StateKey
@@ -372,6 +402,10 @@ class RepricingPricer:
         """One ``StateKey`` per state in exact mode; two per state (lower, upper node) in ladder mode."""
         if self.spot_step is not None:
             return self._ladder_keys(states)
+        return self._exact_keys(states)
+
+    def _exact_keys(self, states: DayStates) -> List[StateKey]:
+        """The exact state's own keys, whatever the mode (the gate's exact leg seeds from these)."""
         spot_keys = float_key(states.spot)
         vol_keys = float_key(states.vol)
         return [
@@ -386,10 +420,36 @@ class RepricingPricer:
 
     # -- reporting -----------------------------------------------------
 
-    def verify(self, states: DayStates, gate: GateConfig) -> GateReport:
-        """Exact mode prices the states themselves: the gap is zero by construction."""
-        return GateReport(mode="exact", sampled=0, max_pv_gap_bp=0.0,
-                          max_delta_gap_hands=0.0, passed=True)
+    def verify(self, samples: Sequence[DayStates], gate: GateConfig, scale: GateScale) -> GateReport:
+        """Exact mode: the zero report.  Ladder mode: reprice each sample exactly and compare.
+
+        The exact leg goes through the engine at the state's own spot, vol
+        and dividend object (its exact-mode key seeds an MC engine); the
+        approximate leg is the ladder, without feeding the reservoir.
+        """
+        if self.spot_step is None:
+            return GateReport(mode="exact", sampled=0, max_pv_gap_bp=0.0,
+                              max_delta_gap_hands=0.0, passed=True)
+        worst_pv = worst_delta = 0.0
+        count = 0
+        for row in samples:
+            if len(row) != 1:
+                raise ValidationError("verify takes one-row DayStates (see state_row)")
+            date = pd.Timestamp(row.date).normalize()
+            exact = self._price_env(
+                date, knocked_in=bool(row.knocked_in[0]), key=self._exact_keys(row)[0],
+                spot=float(row.spot[0]), vol=float(row.vol[0]), rate=float(row.rate[0]),
+                div_yield=row.div_yield[0], basis_yield=ImpliedBasisYield(float(row.basis_yield[0])),
+                label=f"gate sample day {row.day_index} path {int(row.path_index[0])}",
+            )
+            pv, delta, _ = self._price_ladder(row, sample=False)
+            worst_pv = max(worst_pv, abs(float(pv[0]) - exact[0]) / float(scale.unit_notional) * 1e4)
+            worst_delta = max(worst_delta, abs(float(delta[0]) - exact[1]) * float(scale.hands_per_unit_delta))
+            count += 1
+        return GateReport(
+            mode="ladder", sampled=count, max_pv_gap_bp=worst_pv, max_delta_gap_hands=worst_delta,
+            passed=worst_pv <= float(gate.pv_tolerance_bp) and worst_delta <= float(gate.delta_tolerance_hands),
+        )
 
     def fingerprint(self) -> str:
         return self._engine_fp

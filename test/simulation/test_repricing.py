@@ -7,7 +7,7 @@ import pytest
 from quantark.backtest.replay.engine_factory import create_pricing_engine
 from quantark.backtest.replay.market import ImpliedBasisYield, SignedDividendYield
 from quantark.backtest.simulation.config import CacheConfig, GateConfig
-from quantark.backtest.simulation.pricing.base import DayStates, float_key
+from quantark.backtest.simulation.pricing.base import DayStates, GateScale, float_key, state_row
 from quantark.backtest.simulation.pricing.cache import StateCache
 from quantark.backtest.simulation.pricing.repricing import RepricingPricer, product_fingerprint
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
@@ -100,8 +100,9 @@ def test_an_empty_day_prices_nothing():
 
 def test_the_exact_gate_reports_a_zero_gap():
     pricer = _pricer()
-    report = pricer.verify(_states(3, [SPOT]), GateConfig(sample_states=5, pv_tolerance_bp=1.0,
-                                                          delta_tolerance_hands=0.1))
+    report = pricer.verify([state_row(_states(3, [SPOT]), 0)],
+                           GateConfig(sample_states=5, pv_tolerance_bp=1.0, delta_tolerance_hands=0.1),
+                           GateScale(unit_notional=SPOT, hands_per_unit_delta=5.0))
     assert report.mode == "exact" and report.passed
     assert report.max_pv_gap_bp == 0.0 and report.max_delta_gap_hands == 0.0
 

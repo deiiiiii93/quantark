@@ -33,7 +33,7 @@ from .hedge import (
 )
 from .lifecycle import LifecycleRecord, VectorLifecycle, receivable_pv
 from .paths.market_path import MarketPath
-from .pricing.base import DayStates, row_keys
+from .pricing.base import DayStates, GateFailure, GateReport, GateScale, row_keys, state_row
 from .pricing.cache import StateCache
 from .pricing.repricing import RepricingPricer
 
@@ -49,16 +49,6 @@ TRADE_COLUMNS = [
     "path", "day", "date", "trade_type", "contract", "quantity", "price",
     "multiplier", "notional", "transaction_cost", "reason",
 ]
-
-
-def empty_states(day_index: int, date) -> DayStates:
-    """A ``DayStates`` with no paths, for reports that need the shape only."""
-    nothing = np.array([])
-    return DayStates(
-        day_index=day_index, date=date, path_index=np.array([], dtype=int), spot=nothing,
-        vol=nothing, rate=nothing, q_T=nothing, div_yield=(), basis_yield=nothing,
-        env_key=np.array([], dtype=np.int64), knocked_in=np.array([], dtype=bool),
-    )
 
 
 class StateCube:
@@ -153,9 +143,12 @@ class EnsembleBacktestEngine:
                 bp.product, engine_config=cfg.engine_config, start_date=dates[0],
                 underlying=cfg.underlying, cache=cache,
                 delta_bump_size=cfg.delta_bump_size, gamma_bump_size=cfg.gamma_bump_size,
+                spot_step=cfg.pricing.spot_step, vol_step=cfg.pricing.vol_step, q_step=cfg.pricing.q_step,
+                gate=cfg.pricing.gate,
             )
             for bp in cfg.products
         ]
+        gate_reports: List[GateReport] = []
         schedule_env = self._schedule_env(dates[0])
         schedules = [
             self._tracker(bp, dates[0]).resolve_calendar_schedule(dates, schedule_env)
@@ -192,6 +185,21 @@ class EnsembleBacktestEngine:
             )
             dividend_builds += builds
             q_T = self._pricing_q(pricers[0], day, div_yield, implied_q)
+
+            if d == 0:
+                # Day 0's states are gated BEFORE the run prices anything:
+                # a provider that cannot hold its budget at the start state
+                # fails the cell up front, not after a day of work.
+                everyone = np.arange(n_paths)
+                for bp, pricer in zip(cfg.products, pricers):
+                    states = self._states_for(day, d, everyone, np.zeros(n_paths, dtype=bool),
+                                              spot, vol, rate, q_T, div_yield, basis, env_key)
+                    gate_reports.append(pricer.verify(
+                        [state_row(states, n) for n in range(len(states))],
+                        cfg.pricing.gate, self._gate_scale(bp),
+                    ))
+                if not all(r.passed for r in gate_reports):
+                    raise GateFailure(GateReport.combine(gate_reports))
 
             if initial_book_value is None:
                 initial_book_value = self._initial_book_value(
@@ -238,13 +246,30 @@ class EnsembleBacktestEngine:
                 cube.freeze_from(d)
                 break
 
+        gate_reports += [
+            pricer.verify(pricer.sample_visited(), cfg.pricing.gate, self._gate_scale(bp))
+            for bp, pricer in zip(cfg.products, pricers)
+        ]
+        gate = GateReport.combine(gate_reports)
+        if not gate.passed:
+            raise GateFailure(gate)
+        cache.flush()
+
         last_day = np.where(settled_day >= 0, settled_day, last_executed)
         manifest = self._manifest(paths, pricers, cache, dividend_builds, lifecycle, started,
-                                  days_run=last_executed + 1)
+                                  days_run=last_executed + 1, gate=gate)
         return EnsembleResults(cube=cube, trades=trades, events=events, manifest=manifest,
                                last_day=last_day, initial_book_value=initial_book_value)
 
     # -- setup ---------------------------------------------------------
+
+    def _gate_scale(self, bp) -> GateScale:
+        """bp of the product's unit notional; hands of the hedge per unit delta."""
+        product = bp.product
+        return GateScale(
+            unit_notional=float(product.initial_price) * float(getattr(product, "contract_multiplier", 1.0)),
+            hands_per_unit_delta=abs(float(bp.quantity)) / float(self.config.hedge.multiplier),
+        )
 
     def _tracker(self, bp, start_date) -> AutocallableLifecycleTracker:
         return AutocallableLifecycleTracker(
@@ -480,18 +505,16 @@ class EnsembleBacktestEngine:
         for name in BOOL_COLUMNS:
             getattr(cube, name)[:, d] = flags[name]
 
-    def _manifest(self, paths, pricers, cache, dividend_builds, lifecycle, started, days_run):
+    def _manifest(self, paths, pricers, cache, dividend_builds, lifecycle, started, days_run, gate):
         return {
             "path_fingerprint": paths.fingerprint(),
             "days_run": int(days_run),
             "path_meta": dict(paths.meta),
             "engine_fingerprint": pricers[0].fingerprint(),
             "product_fingerprints": [p.product_fingerprint for p in pricers],
-            "provider": "repricing",
-            "mode": "exact",
-            "gate": pricers[0].verify(
-                empty_states(0, paths.dates[0]), self.config.pricing.gate
-            ).as_dict(),
+            "provider": self.config.pricing.provider,
+            "mode": self.config.pricing.mode,
+            "gate": gate.as_dict(),
             "engine_calls": sum(p.stats()["engine_calls"] for p in pricers),
             "cache": cache.stats().as_dict(),
             "dividend_builds": dividend_builds,

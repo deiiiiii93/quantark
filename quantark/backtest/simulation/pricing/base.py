@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple, Optional, Protocol, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Protocol, Sequence, Tuple
 
 import numpy as np
+
+from quantark.util.exceptions import ValidationError
 
 
 def _normalised(values: np.ndarray) -> np.ndarray:
@@ -98,6 +100,17 @@ class DayStates(NamedTuple):
         return len(self) == 0
 
 
+def state_row(states: DayStates, n: int) -> DayStates:
+    """A one-row ``DayStates`` for state ``n`` (the gate's reservoir stores these)."""
+    sl = slice(n, n + 1)
+    return DayStates(
+        day_index=states.day_index, date=states.date, path_index=states.path_index[sl].copy(),
+        spot=states.spot[sl].copy(), vol=states.vol[sl].copy(), rate=states.rate[sl].copy(),
+        q_T=states.q_T[sl].copy(), div_yield=(states.div_yield[n],), basis_yield=states.basis_yield[sl].copy(),
+        env_key=states.env_key[sl].copy(), knocked_in=states.knocked_in[sl].copy(),
+    )
+
+
 @dataclass(frozen=True)
 class StateKey:
     """What a priced state is identified by (spec 7.4).
@@ -151,6 +164,42 @@ class GateReport:
             "passed": bool(self.passed),
         }
 
+    @staticmethod
+    def combine(reports: Sequence["GateReport"]) -> "GateReport":
+        """The worst case over several reports (the day-0 gate and the run's reservoir)."""
+        reports = list(reports)
+        if not reports:
+            raise ValidationError("combine needs at least one report")
+        return GateReport(
+            mode=reports[0].mode, sampled=sum(r.sampled for r in reports),
+            max_pv_gap_bp=max(r.max_pv_gap_bp for r in reports),
+            max_delta_gap_hands=max(r.max_delta_gap_hands for r in reports),
+            passed=all(r.passed for r in reports),
+        )
+
+
+@dataclass(frozen=True)
+class GateScale:
+    """How a per-unit gap is expressed: bp of unit notional, hands of the hedge."""
+
+    unit_notional: float
+    hands_per_unit_delta: float
+
+    def __post_init__(self) -> None:
+        if float(self.unit_notional) <= 0.0 or float(self.hands_per_unit_delta) < 0.0:
+            raise ValidationError("GateScale needs a positive notional and a non-negative hands ratio")
+
+
+class GateFailure(ValidationError):
+    """An approximate provider missed its accuracy budget; the cell produced nothing."""
+
+    def __init__(self, report: GateReport) -> None:
+        self.report = report
+        super().__init__(
+            f"pricing gate failed ({report.mode}): max PV gap {report.max_pv_gap_bp:.4g} bp, "
+            f"max delta gap {report.max_delta_gap_hands:.4g} hands over {report.sampled} sampled states"
+        )
+
 
 class PathPricer(Protocol):
     """Prices one day's alive states, per unit product."""
@@ -159,8 +208,12 @@ class PathPricer(Protocol):
         """``(pv, delta, gamma)``, each shape ``(len(states),)``, per unit product."""
         ...
 
-    def verify(self, states: DayStates, gate: Any) -> GateReport:
-        """Measure this provider's gap against direct repricing."""
+    def verify(self, samples: Sequence[DayStates], gate: Any, scale: GateScale) -> GateReport:
+        """Reprice one-row samples exactly and report the worst gap against this provider."""
+        ...
+
+    def sample_visited(self) -> List[DayStates]:
+        """The deterministic reservoir of states this provider priced approximately."""
         ...
 
     def fingerprint(self) -> str:
