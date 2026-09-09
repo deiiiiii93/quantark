@@ -70,8 +70,41 @@ bucket-hedged: 0 / 0 / 0 / 0. This is the **hedged carry exposure**, and it
 is recorded daily for every cell (section 4.5) so the basis mitigation is
 measured directly rather than inferred from P&L.
 
-The bucket hedge zeroes every basis column and leaves `Δ_F` of spot. `Δ_F`
-is a property of the tail convention, not of the product:
+**Does the bucket hedge neutralise spot delta AND basis, or move the
+problem from one to the other?** Both are read directly by bumping the
+whole hedged book (product plus futures marked at the chain), not by
+substituting into the identity. Worked date, long-holder sign, spot delta
+in hands at a frozen curve, basis in bp per 1% of each node's yield:
+
+| tail | book | spot delta | IM2503 | IM2504 | IM2506 | IM2509 |
+|---|---|---:|---:|---:|---:|---:|
+| flat-fwd | product alone | +28.03 | 0.0 | 0.0 | +29.4 | −92.6 |
+| flat-fwd | bucket-exact | **+0.01** | 0.0 | 0.0 | 0.0 | 0.0 |
+| flat-q | product alone | +28.73 | 0.0 | +0.1 | −0.5 | −63.7 |
+| flat-q | bucket-exact | **−18.13** | 0.0 | 0.0 | 0.0 | 0.0 |
+| flat-q | bucket + tail in far | **0.00** | 0.0 | 0.0 | 0.0 | **−24.9** |
+
+Under the flat-forward-carry tail the answer is yes to both: spot delta
+and every basis node are zero at once, with n contracts. Under the flat-q
+tail the answer is no, and no combination of listed contracts can make it
+yes: the book has n+1 first-order risk factors (spot plus n node yields,
+because the tail's dependence on spot at pinned marks is a factor of its
+own) and only n instruments. Bucket-exact zeroes the n basis nodes and
+moves the whole `Δ_F` onto spot: the problem is transformed, not hedged,
+and the realised probe shows that book hedging worse than the front month.
+The fold spends the far contract on spot instead, zeroing spot and nodes
+1..n−1 and re-introducing exactly `Δ_F S T_n` of basis on the far node,
+−24.9 bp per 1% here against −63.7 unhedged. The fold is chosen because
+the residual it leaves is the smaller one on the data: 18 hands of open
+spot is 76 bp/day at one standard deviation of the spot move (1.67%),
+while 24.9 bp per 1% of far-node yield is 33 bp/day at one standard
+deviation of that yield's daily change (1.33%), over the 815-day history.
+
+So the precise statement for the flat-q family is: the bucket hedge with
+the fold is spot-neutral and basis-neutral on every listed node but the
+last, and carries a known, recorded far-node basis exposure equal to the
+tail's spot sensitivity times `S T_n`. `Δ_F` itself is a property of the
+tail convention, not of the product:
 
 - flat-forward-carry tail: `F(T) = F_n (F_n/F_{n-1})^{(T-T_n)/(T_n-T_{n-1})}`,
   spot-free, so `Δ_F ≈ 0` and bucket-exact is a complete first-order hedge.
@@ -291,7 +324,7 @@ function sets.
 book_dv, linear_spot, linear_basis, gamma_term, remainder, delta_q_hands,
 delta_f_hands, identity_residual_hands, gross_contracts, net_spot_hands,
 product_rhoq_bp, hedge_rhoq_bp, net_rhoq_bp, net_rhoq_gross_bp,
-flat_fit_rmse_bp`. One row per day whenever `record_carry_exposure` is on;
+fold_rhoq_bp, flat_fit_rmse_bp`. One row per day whenever `record_carry_exposure` is on;
 empty otherwise.
 
 P&L attribution uses the previous day's sensitivities and holdings (what
@@ -313,9 +346,12 @@ measured on the day's own sensitivities and the book AFTER rebalancing:
 `product_rhoq_bp` is `Σ ρ_i` (term) or `ρ_flat` (flat); `hedge_rhoq_bp` is
 the book's exposure to the same shift; `net_rhoq_bp` is their sum;
 `net_rhoq_gross_bp` is `Σ_i |ρ_i^book|` over nodes (term only, NaN for
-flat), which is the number a bucket hedge must drive to zero up to
-rounding while a single-contract hedge cannot; `flat_fit_rmse_bp` is the
-flat family's chain-fit error (NaN for term). `hedge_legs` carries the
+flat); `fold_rhoq_bp` is the far-node basis exposure the fold deliberately
+re-introduces, `Δ_F S T_n` in bp per 1%, zero under a spot-free tail
+(term only, NaN for flat), so that a bucket cell's audit is
+`net_rhoq_gross_bp - |fold_rhoq_bp|` within rounding of zero, not
+`net_rhoq_gross_bp` itself; `flat_fit_rmse_bp` is the flat family's
+chain-fit error (NaN for term). `hedge_legs` carries the
 per-node pieces, `product_rhoq_bp`, `hedge_rhoq_bp` and `net_rhoq_bp`, so
 the four-node table above is reproducible for any day of any cell.
 
@@ -385,10 +421,14 @@ Library, all TDD:
   0.01 hands under both extrapolations; the flat-forward-carry buckets
   reproduce the closed-form tail derivatives `1 + (T-T_n)/ΔT` and
   `-(T-T_n)/ΔT` at a tail tenor to three decimals.
-- Strategy: with `tail_residual="none"` the book's `net_spot_hands` equals
-  `Δ_F`; with `"far"` it is zero to rounding; every node's recorded
-  `net_rhoq_bp` is zero before rounding and bounded by one contract's
-  `m F_i T_i` after it; a node that leaves the curve gets a zero target.
+- Strategy, by direct bump of the whole book on the test chain under
+  BOTH extrapolations: with `tail_residual="none"` the book's frozen-curve
+  spot delta equals `Δ_F` and every node's basis exposure is zero; with
+  `"far"` the spot delta is zero, nodes 1..n−1 are zero, and node n equals
+  `Δ_F S T_n` (which is itself zero under flat forward carry), all before
+  rounding and bounded by one contract's `m F_i T_i` after it. The
+  recorded `net_rhoq_bp` per node and `fold_rhoq_bp` match those bumps. A
+  node that leaves the curve gets a zero target.
 - Carry exposure under a flat source: `product_rhoq_bp` equals the greeks
   calculator's rhoq on the fixture; `flat_fit_rmse_bp` equals stage 01's
   `fwd_err_rms_flat` on the same chain; a single-contract book's
@@ -414,9 +454,11 @@ Study:
 - **Whole-contract rounding across four legs** can leave up to two hands
   of net spot open. `net_spot_hands` is recorded so this is visible.
 - **The carry-exposure check is the strategy's own audit.** A bucket
-  cell whose `net_rhoq_gross_bp` is not within rounding of zero on every
-  day has a bug, whatever its P&L says; that check runs before any P&L is
-  read.
+  cell whose `net_rhoq_gross_bp - |fold_rhoq_bp|` is not within rounding
+  of zero on every day has a bug, whatever its P&L says; that check runs
+  before any P&L is read. Under flat forward carry `fold_rhoq_bp` is zero
+  and the audit is simply gross exposure at zero. Under flat q the audit
+  also confirms the far-node residual is the fold and nothing else.
 - **The tail convention.** Under flat-q the bucket cell is expected to
   land near `term_flat_q__far` (the fold makes them nearly the same
   book). Under flat-forward-carry it is expected to remove most of
