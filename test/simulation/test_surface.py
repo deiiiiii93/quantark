@@ -20,10 +20,11 @@ GATE = GateConfig(sample_states=6, pv_tolerance_bp=50.0, delta_tolerance_hands=3
 SCALE = GateScale(unit_notional=SPOT, hands_per_unit_delta=5.0)
 
 
-def _surface(vol_step=0.01, q_step=0.0025, budget=200_000_000):
+def _surface(vol_step=0.01, q_step=0.0025, budget=200_000_000, compact=True):
     return LifeSurfacePricer(
         short_snowball(), engine_config=pde_engine_config(), start_date=DATES[0], dates=DATES,
         underlying="CSI1000", vol_step=vol_step, q_step=q_step, surface_cache_bytes=budget, gate=GATE,
+        compact=compact,
     )
 
 
@@ -113,3 +114,30 @@ def test_the_fingerprint_names_the_provider_and_its_steps():
     assert _surface().fingerprint() != _exact().fingerprint()
     assert _surface(vol_step=0.02).fingerprint() != _surface().fingerprint()
     assert _surface().mode == "life_surface"
+
+
+def test_select_keeps_columns_bit_for_bit_and_remaps_the_nodes():
+    pricer = _surface(vol_step=0.0, q_step=0.0, compact=False)
+    pricer.price_day(_states(1, [SPOT]))
+    (key, full), = pricer._surfaces._store.items()
+    node = full.node(pricer.elapsed(2))
+    sub = full.select([0, node, full.t.size - 1])
+    assert sub.t.size == 3 and sub.nbytes < full.nbytes / 5      # 3 of ~25 columns on the six-day fixture
+    assert sub.node(pricer.elapsed(2)) == 1 and sub.step_of[pricer.elapsed(2)] == 1
+    x = np.log(SPOT * np.exp(np.array([-0.01, 0.0, 0.004])))
+    for ki in (False, True):
+        flags = np.full(3, ki)
+        for a, b in zip(full.readout(x, node, flags), sub.readout(x, 1, flags)):
+            assert np.array_equal(a, b)
+    assert np.array_equal(sub.v1[:, -1], full.v1[:, -1])
+    with pytest.raises(ValidationError):
+        full.select([full.t.size])
+
+
+def test_a_compact_pricer_prices_exactly_like_the_full_one_with_less_memory():
+    full, compact = _surface(vol_step=0.0, q_step=0.0, compact=False), _surface(vol_step=0.0, q_step=0.0)
+    for d in range(0, 5):
+        states = _states(d, SPOT * np.exp(np.linspace(-0.02, 0.02, 5)), knocked_in=[False, True, False, True, False])
+        for a, b in zip(full.price_day(states), compact.price_day(states)):
+            assert np.array_equal(a, b)
+    assert compact.stats()["surface_cache"]["bytes_used"] < full.stats()["surface_cache"]["bytes_used"] / 2

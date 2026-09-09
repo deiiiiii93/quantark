@@ -112,6 +112,30 @@ class LifeSurface:
         gamma = np.where(ki, np.interp(x_spot, self.x, self.g1[:, k]), np.interp(x_spot, self.x, g_alive))
         return pv, delta, gamma
 
+    def select(self, columns: Sequence[int]) -> "LifeSurface":
+        """This surface restricted to ``columns`` (sorted, unique), ``step_of`` remapped.
+
+        Column data is copied, so a readout of a kept column is bit-identical
+        to the readout of the original.  Keep column 0 and the terminal
+        column: ``readout`` reads ``t0_readout`` at column 0 and ``node``
+        maps the maturity to the last column.
+        """
+        keep = np.array(sorted({int(k) for k in columns}), dtype=np.int64)
+        if keep.size == 0 or keep[0] < 0 or keep[-1] >= self.t.size:
+            raise ValidationError(f"columns must index the surface's {self.t.size} time nodes")
+        position = {int(k): n for n, k in enumerate(keep)}
+        keeps_zero = 0 in position
+        return LifeSurface(
+            t=np.array(self.t[keep]), x=self.x,
+            v0=np.ascontiguousarray(self.v0[:, keep]), v1=np.ascontiguousarray(self.v1[:, keep]),
+            d0=np.ascontiguousarray(self.d0[:, keep]), g0=np.ascontiguousarray(self.g0[:, keep]),
+            d1=np.ascontiguousarray(self.d1[:, keep]), g1=np.ascontiguousarray(self.g1[:, keep]),
+            step_of={t: position[k] for t, k in self.step_of.items() if k in position},
+            t0_readout=self.t0_readout if keeps_zero else None,
+            t0_delta=self.t0_delta if keeps_zero else None,
+            t0_gamma=self.t0_gamma if keeps_zero else None,
+        )
+
 
 class SurfaceCache:
     """LRU of ``LifeSurface`` objects under a byte budget."""
@@ -161,9 +185,10 @@ class LifeSurfacePricer:
         self, product: Any, *, engine_config: Any, start_date: pd.Timestamp, dates: pd.DatetimeIndex,
         underlying: str, vol_step: float, q_step: float, surface_cache_bytes: int, gate: GateConfig,
         delta_bump_size: Optional[float] = None, gamma_bump_size: Optional[float] = None,
-        cache: Optional[StateCache] = None,
+        cache: Optional[StateCache] = None, compact: bool = True,
     ) -> None:
         self.product = product
+        self.compact = bool(compact)
         self.engine_config = engine_config
         self.start_date = pd.Timestamp(start_date).normalize()
         self.dates = pd.DatetimeIndex(dates)
@@ -249,8 +274,21 @@ class LifeSurfacePricer:
         surface = LifeSurface(t=sol.t, x=sol.x, v0=sol.v0, v1=sol.v1, d0=d0, g0=g0, d1=d1, g1=g1,
                               step_of=sol.step_of, t0_readout=sol.t0_readout,
                               t0_delta=t0_delta, t0_gamma=t0_gamma)
+        if self.compact:
+            surface = surface.select(self._read_columns(surface))
         self._surfaces.put(key, surface)
         return surface
+
+    def _read_columns(self, surface: LifeSurface) -> List[int]:
+        """Column 0, the terminal column, and the node of every calendar day up to maturity."""
+        columns = {0, int(surface.t.size - 1)}
+        tau = float(surface.t[-1])
+        for d in range(1, len(self.dates)):
+            elapsed = self.elapsed(d)
+            if elapsed > tau and not is_close(elapsed, tau):
+                break
+            columns.add(surface.node(elapsed))
+        return sorted(columns)
 
     # -- pricing --------------------------------------------------------
 
