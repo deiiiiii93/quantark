@@ -98,3 +98,25 @@ def test_approximate_providers_match_the_replay_within_their_gate(pricing, pv_bp
 def test_an_approximate_provider_is_not_bit_exact_by_default():
     report = run_oracle(ensemble_config(pricing=ladder_pricing(spot_step=0.002)), _paths(n_paths=2), 0)
     assert not report.passed and report.max_pv_gap > 0.0
+
+
+def test_sub_tolerance_trades_are_rounding_noise_under_a_contracts_tolerance():
+    """A one-hand rebalance that lands a day later on the approximate side is a rounding flip, not a missing trade."""
+    import pandas as pd
+    from quantark.backtest.simulation.conformance import _compare_trades
+
+    def frame(rows):
+        return pd.DataFrame(rows, columns=["date", "trade_type", "contract", "quantity", "price"])
+
+    big = ("2024-01-03", "roll_open", "IM2402", 40.0, 6000.0)
+    a = frame([("2024-01-02", "hedge_rebalance", "IM2401", 1.0, 6000.0), big])
+    b = frame([("2024-01-03", "hedge_rebalance", "IM2401", 1.0, 6010.0), big])
+    exact = []
+    assert _compare_trades(a, b, exact) == 1                                    # exact mode: a real mismatch
+    loose = []
+    assert _compare_trades(a, b, loose, contracts_tolerance=2.0) == 0 and loose == []
+    shifted_big = frame([("2024-01-04", "roll_open", "IM2402", 40.0, 6000.0)])
+    bad = []
+    assert _compare_trades(frame([big]), shifted_big, bad, contracts_tolerance=2.0) >= 1   # a big trade must match
+    split = frame([("2024-01-03", "roll_open", "IM2402", 25.0, 6000.0), ("2024-01-03", "roll_open", "IM2402", 15.0, 6000.0)])
+    assert _compare_trades(frame([big]), split, [], contracts_tolerance=2.0) == 0          # netted per day and contract

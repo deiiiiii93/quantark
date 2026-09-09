@@ -168,8 +168,14 @@ def _compare_trades(simulated: pd.DataFrame, expected: pd.DataFrame,
                     mismatches: List[str], *, contracts_tolerance: float = 0.0) -> int:
     """Trade for trade: same day, type, contract, size and price.
 
-    With a ``contracts_tolerance`` the size may differ by up to that many
-    hands (a rounding difference is a size difference, not a missing trade).
+    With a ``contracts_tolerance`` the comparison is per day, type and
+    contract instead of in sequence: the quantities traded under one key
+    are netted on each side and must agree within the tolerance, a key
+    traded on one side only counting as a trade against zero.  An
+    approximate delta a fraction of a hand away flips the rounding, so a
+    one-hand rebalance lands on a different day -- a rounding difference,
+    not a missing trade.  The price needs no check there: on one day one
+    contract has one price on both sides, the path's own.
     """
     fields = ("trade_type", "contract", "quantity", "price")
 
@@ -183,15 +189,27 @@ def _compare_trades(simulated: pd.DataFrame, expected: pd.DataFrame,
 
     left, right = rows(simulated), rows(expected)
     bad = 0
-    for n, (a, b) in enumerate(zip(left, right)):
-        if contracts_tolerance == 0.0:
-            same = a == b
-        else:
-            same = a[0] == b[0] and a[1] == b[1] and a[2] == b[2] and abs(a[3] - b[3]) <= contracts_tolerance
-        if not same:
+    if contracts_tolerance > 0.0:
+        def netted(items: list) -> Dict[tuple, float]:
+            out: Dict[tuple, float] = {}
+            for day, kind, contract, quantity, _price in items:
+                key = (day, kind, contract)
+                out[key] = out.get(key, 0.0) + float(quantity)
+            return out
+
+        a, b = netted(left), netted(right)
+        for key in sorted(set(a) | set(b)):
+            gap = abs(a.get(key, 0.0) - b.get(key, 0.0))
+            if gap > contracts_tolerance:
+                bad += 1
+                if len(mismatches) < 5:
+                    mismatches.append(f"trade {key}: {a.get(key, 0.0)} vs {b.get(key, 0.0)} hands")
+        return bad
+    for n, (x, y) in enumerate(zip(left, right)):
+        if x != y:
             bad += 1
             if len(mismatches) < 5:
-                mismatches.append(f"trade {n}: {a} vs {b}")
+                mismatches.append(f"trade {n}: {x} vs {y}")
     if len(left) != len(right):
         bad += abs(len(left) - len(right))
         mismatches.append(f"trade count {len(left)} vs {len(right)}")
