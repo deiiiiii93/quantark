@@ -73,3 +73,37 @@ def test_a_batched_run_has_the_same_summary(results):
 
 def test_summary_is_memoised(results):
     assert results.summary is results.summary
+
+
+def test_distribution_reports_moments_quantiles_and_the_loss_tail(results):
+    d = results.distribution("terminal_pnl_bp", es_level=0.25)
+    values = results.summary["terminal_pnl_bp"].to_numpy(dtype=float)
+    values = values[np.isfinite(values)]
+    assert d["n"] == values.size and d["n_paths"] == results.n_paths
+    assert d["mean"] == float(values.mean()) and d["std"] == float(values.std(ddof=1))
+    assert d["quantiles"]["q50"] == pytest.approx(float(np.quantile(values, 0.5)), rel=1e-12)
+    assert set(d["quantiles"]) == {"q01", "q05", "q25", "q50", "q75", "q95", "q99"}
+    cut = np.quantile(values, 0.25)
+    assert d["expected_shortfall"] == pytest.approx(float(values[values <= cut].mean()), rel=1e-12)
+    assert d["share_positive"] == float((values > 0).mean())
+    upper = results.distribution("cost_bp", es_level=0.25, tail="upper")
+    costs = results.summary["cost_bp"].to_numpy(dtype=float)
+    assert upper["expected_shortfall"] == pytest.approx(float(costs[costs >= np.quantile(costs, 0.75)].mean()), rel=1e-12)
+
+
+def test_distribution_frequencies_cover_every_path(results):
+    d = results.distribution("terminal_pnl", es_level=0.05)
+    reasons = results.summary["termination_reason"]
+    assert d["ko_frequency"] == float((reasons == "knock_out").mean())
+    assert d["maturity_frequency"] == float((reasons == "maturity").mean())
+    assert d["ki_frequency"] == float(results.summary["knocked_in"].mean())
+    assert d["ko_frequency"] + d["maturity_frequency"] + d["data_end_frequency"] == pytest.approx(1.0)
+
+
+def test_distribution_fails_closed_on_bad_arguments(results):
+    with pytest.raises(ValidationError):
+        results.distribution("sharpe", es_level=0.05)
+    with pytest.raises(ValidationError):
+        results.distribution("terminal_pnl_bp", es_level=0.0)
+    with pytest.raises(ValidationError):
+        results.distribution("terminal_pnl_bp", es_level=0.05, tail="middle")

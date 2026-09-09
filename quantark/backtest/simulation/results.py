@@ -37,6 +37,8 @@ EVENT_COLUMNS = ("product", "path", "day", "event", "index", "spot", "barrier", 
 SUMMARY_COLUMNS: Tuple[str, ...] = (
     "path", "termination_reason", "knocked_in", "ko_observation_index", "terminal_pnl",
 ) + MEASURE_COLUMNS
+QUANTILES = (0.01, 0.05, 0.25, 0.50, 0.75, 0.95, 0.99)
+DISTRIBUTION_MEASURES = ("terminal_pnl",) + MEASURE_COLUMNS
 
 
 class StateCube:
@@ -143,3 +145,51 @@ class EnsembleResults:
             row.update(path_measures(self.path_states(i), self.path_trades(i), notional=notional))
             rows.append(row)
         return pd.DataFrame(rows, columns=list(SUMMARY_COLUMNS))
+
+    # -- reductions ----------------------------------------------------
+
+    def distribution(self, measure: str, *, es_level: float, tail: str = "lower") -> Dict[str, Any]:
+        """Moments, quantiles, expected shortfall and event frequencies of one measure over the paths.
+
+        Expected shortfall is the mean of the ``es_level`` tail: the values
+        at or below that quantile (``lower``, the loss tail of a P&L measure)
+        or at or above the ``1 - es_level`` quantile (``upper``, for a
+        cost-like measure).  NaN values are dropped and ``n`` counts what
+        remains; the frequencies are over every path.
+        """
+        if measure not in DISTRIBUTION_MEASURES:
+            raise ValidationError(f"unknown measure {measure!r}; one of {DISTRIBUTION_MEASURES}")
+        if not 0.0 < float(es_level) < 1.0:
+            raise ValidationError("es_level must lie strictly between 0 and 1")
+        if tail not in ("lower", "upper"):
+            raise ValidationError("tail must be 'lower' or 'upper'")
+        summary = self.summary
+        values = summary[measure].to_numpy(dtype=float)
+        finite = values[np.isfinite(values)]
+        reasons = summary["termination_reason"]
+        out: Dict[str, Any] = {
+            "measure": measure, "n": int(finite.size), "n_paths": int(self.n_paths),
+            "es_level": float(es_level), "tail": tail,
+            "ko_frequency": float((reasons == "knock_out").mean()),
+            "ki_frequency": float(summary["knocked_in"].astype(bool).mean()),
+            "maturity_frequency": float((reasons == "maturity").mean()),
+            "data_end_frequency": float((reasons == "data_end").mean()),
+        }
+        if finite.size == 0:
+            out.update(mean=None, std=None, quantiles={}, expected_shortfall=None, share_positive=None)
+            return out
+        if tail == "lower":
+            cut = float(np.quantile(finite, float(es_level)))
+            tail_values = finite[finite <= cut]
+        else:
+            cut = float(np.quantile(finite, 1.0 - float(es_level)))
+            tail_values = finite[finite >= cut]
+        out.update(
+            mean=float(finite.mean()),
+            std=float(finite.std(ddof=1)) if finite.size > 1 else None,
+            quantiles={f"q{int(round(p * 100)):02d}": float(v)
+                       for p, v in zip(QUANTILES, np.quantile(finite, QUANTILES))},
+            expected_shortfall=float(tail_values.mean()),
+            share_positive=float((finite > 0.0).mean()),
+        )
+        return out
