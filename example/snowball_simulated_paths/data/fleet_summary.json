@@ -503,7 +503,7 @@
       "lockout_months": 3,
       "maturity_months": 12,
       "oracle_paths": 1,
-      "out_dir": "/Users/fuxinyao/quant-ark/output/snowball_simulated_paths",
+      "out_dir": "output/snowball_simulated_paths",
       "provider": "exact",
       "quad_grid": 401,
       "quick": true,
@@ -1706,7 +1706,7 @@
       }
     ]
   },
-  "out_dir": "/Users/fuxinyao/quant-ark/output/snowball_simulated_paths",
+  "out_dir": "output/snowball_simulated_paths",
   "paired": [
     {
       "base": "flat_from_hedge__front",

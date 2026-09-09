@@ -240,6 +240,8 @@ def test_tables_and_report_are_written(tiny_fleet, tmp_path):
     S03.write_tables(agg, tmp_path)
     for name in ("fleet_cells.json", "fleet_paired.csv", "stress_table.csv", "engine_check.csv", "fleet_summary.json"):
         assert (tmp_path / name).exists(), name
+    # the tables ship in a public repo: no absolute path of this machine in them
+    assert str(out) not in (tmp_path / "fleet_summary.json").read_text()
     html = S03.build_report(agg)
     assert "<html" in html and "term_flat_q__front" in html and C.BASELINE_CELL in html
     assert "expected shortfall" in html.lower() and "historical" in html.lower()

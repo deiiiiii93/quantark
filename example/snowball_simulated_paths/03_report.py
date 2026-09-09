@@ -102,14 +102,28 @@ def _historical(historical_dir, cells: Dict[str, EnsembleResults]) -> Dict[str, 
     return {"available": True, "reason": None, "rows": rows}
 
 
+def _portable(value: Any) -> Any:
+    """Paths relative to the project root where possible: the tables ship in a public repository."""
+    if isinstance(value, dict):
+        return {k: _portable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_portable(v) for v in value]
+    if isinstance(value, str) and value.startswith("/"):
+        try:
+            return str(Path(value).relative_to(C.PROJECT_ROOT))
+        except ValueError:
+            return Path(value).name
+    return value
+
+
 def aggregate(out_dir, *, es_level: float, historical_dir) -> Dict[str, Any]:
     """Everything the report shows, as plain dicts and lists."""
     out_dir = Path(out_dir)
     cells = load_cells(out_dir)
     bootstrap = {name: r for name, r in cells.items() if _is_bootstrap_cell(name)}
     agg: Dict[str, Any] = {
-        "out_dir": str(out_dir), "es_level": float(es_level),
-        "fleet": C.read_json(out_dir / "fleet_manifest.json") if (out_dir / "fleet_manifest.json").exists() else {},
+        "out_dir": _portable(str(out_dir)), "es_level": float(es_level),
+        "fleet": _portable(C.read_json(out_dir / "fleet_manifest.json")) if (out_dir / "fleet_manifest.json").exists() else {},
         "coupon": C.read_json(out_dir / "coupon.json") if (out_dir / "coupon.json").exists() else {},
         "cells": {name: {"n_paths": r.n_paths, "distributions": _distributions(r, es_level), "manifest_mode": r.manifest.get("mode"),
                          "gate": r.manifest.get("gate"), "solves": r.manifest.get("solves"), "engine_calls": r.manifest.get("engine_calls"),
