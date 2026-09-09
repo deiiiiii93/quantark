@@ -190,15 +190,40 @@ class ProductReplay:
     def product_for_date(self, date: pd.Timestamp, pricing_env: PricingEnvironment):
         return self._tracker.product_for_pricing(date, pricing_env)
 
-    def build_env(self, date: pd.Timestamp, market: dict[str, float], selected):
+    def build_env(
+        self,
+        date: pd.Timestamp,
+        market: dict[str, float],
+        selected,
+        dividend_row=None,
+    ):
+        """The day's pricing environment.
+
+        ``selected`` is the HEDGE contract: the returned ``basis_yield`` and
+        ``futures_ttm`` describe it, because they are the state row's futures
+        columns.  ``dividend_row`` is the contract the flat carry channel is
+        inverted from; ``None`` means the hedge contract, which is the
+        historical behaviour.  When the two differ the day costs a second
+        inversion, and the returned ``implied_q`` is the dividend row's.
+        """
         expiry = pd.Timestamp(selected["expiry_date"]).normalize()
         futures_ttm = (expiry - date).days / 365.0
-        basis_yield, implied_q = derive_implied_dividend_yield(
+        basis_yield, hedge_implied_q = derive_implied_dividend_yield(
             rate=market["rate"],
             spot=market["spot"],
             futures_price=float(selected["futures_price"]),
             time_to_maturity=futures_ttm,
         )
+        if dividend_row is None:
+            implied_q = hedge_implied_q
+        else:
+            div_expiry = pd.Timestamp(dividend_row["expiry_date"]).normalize()
+            _, implied_q = derive_implied_dividend_yield(
+                rate=market["rate"],
+                spot=market["spot"],
+                futures_price=float(dividend_row["futures_price"]),
+                time_to_maturity=(div_expiry - date).days / 365.0,
+            )
         pricing_q = self.pricing_dividend_yield(implied_q)
         vol_surface, div_yield = self._vol_and_dividend(date, market, pricing_q)
         rate_curve = FlatRateCurve(rate=market["rate"])

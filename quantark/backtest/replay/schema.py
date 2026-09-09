@@ -33,6 +33,9 @@ STATE_COLUMNS: tuple[str, ...] = (
     # stable): product_mtm stays contingent-only, the pending receivable is
     # discounted to its payment, and paid_cash is cash actually posted.
     "contingent_product_mtm", "pending_receivable_pv", "paid_cash",
+    # The contract the flat carry channel was inverted from.  Equal to
+    # active_contract unless the run sets dividend_roll_policy.
+    "dividend_contract",
 )
 
 SURFACE_PROVENANCE_COLUMNS: tuple[str, ...] = (
@@ -133,6 +136,7 @@ class StateRow(TypedDict):
     knocked_in: bool
     knocked_out: bool
     matured: bool
+    dividend_contract: str
 
 
 class GreekRow(TypedDict):

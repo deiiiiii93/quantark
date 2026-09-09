@@ -45,6 +45,7 @@ from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import EngineType, PDEMethod
+from quantark.util.exceptions import ValidationError
 
 
 def _snowball_product():
@@ -409,3 +410,77 @@ def test_delayed_ko_is_pending_before_otc_backtest_books_cash():
     assert final_state["pending_receivable_pv"] == 0.0
     assert final_state["paid_cash"] > 0.0
     assert final_state["cashflows"] == final_state["paid_cash"]
+
+
+# ---------------------------------------------------------------------------
+# Dividend contract decoupled from the hedge contract
+# ---------------------------------------------------------------------------
+
+
+def _decoupled_config(**overrides):
+    """Snowball replay whose hedge holds IF2401 and whose carry may not.
+
+    ``roll_days_before_expiry=0`` keeps the hedge in the front month for the
+    whole 5-day window; ``40`` forces the far contract on every day.
+    """
+    kwargs = dict(
+        product=_snowball_product(),
+        market_data=_market_data(),
+        engine_config=AutocallableEngineConfig(
+            pricing_engine_type=EngineType.MONTE_CARLO,
+            mc_params=MCParams(num_paths=64, time_steps=4, seed=11),
+        ),
+        strategy=AutocallableDeltaHedgeStrategy(delta_threshold=0.0, round_contracts=False),
+        roll_policy=FuturesRollPolicy(roll_days_before_expiry=0),
+        calculate_surfaces=False,
+        calculate_event_probabilities=False,
+        terminate_on_lifecycle_end=False,
+        product_quantity=-1.0,
+        underlying="CSI500",
+    )
+    kwargs.update(overrides)
+    return AutocallableBacktestConfig(**kwargs)
+
+
+def test_dividend_contract_defaults_to_the_hedged_contract():
+    states = AutocallableBacktestEngine(_decoupled_config()).run().states_df
+
+    assert (states["dividend_contract"] == states["active_contract"]).all()
+    assert set(states["active_contract"]) == {"IF2401"}
+
+
+def test_dividend_roll_policy_prices_off_its_own_contract_while_the_hedge_trades_another():
+    config = _decoupled_config(
+        dividend_roll_policy=FuturesRollPolicy(roll_days_before_expiry=40)
+    )
+
+    states = AutocallableBacktestEngine(config).run().states_df
+
+    assert set(states["active_contract"]) == {"IF2401"}
+    assert set(states["dividend_contract"]) == {"IF2402"}
+    far_expiry = pd.Timestamp("2024-02-16")
+    for date, row in states.iterrows():
+        spot = float(row["spot"])
+        ttm = (far_expiry - pd.Timestamp(date)).days / 365.0
+        _, expected_q = derive_implied_dividend_yield(
+            rate=float(row["rate"]), spot=spot, futures_price=spot * 1.01,
+            time_to_maturity=ttm,
+        )
+        assert row["pricing_q"] == pytest.approx(expected_q)
+        # The hedge leg's own columns keep describing the traded contract.
+        assert row["futures_price"] == pytest.approx(spot * 1.004)
+        assert row["futures_ttm"] == pytest.approx(
+            (pd.Timestamp("2024-01-07") - pd.Timestamp(date)).days / 365.0
+        )
+
+
+def test_dividend_roll_policy_is_rejected_with_a_term_dividend_source():
+    with pytest.raises(ValidationError, match="dividend_roll_policy"):
+        _decoupled_config(
+            dividend_roll_policy=FuturesRollPolicy(roll_days_before_expiry=40),
+            engine_config=AutocallableEngineConfig(
+                pricing_engine_type=EngineType.MONTE_CARLO,
+                mc_params=MCParams(num_paths=64, time_steps=4, seed=11),
+                dividend_source="futures_curve",
+            ),
+        )

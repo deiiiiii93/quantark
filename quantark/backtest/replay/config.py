@@ -239,6 +239,7 @@ def _validate_term_dividend_source(
     *,
     fixed_dividend_yield: Optional[float],
     calculate_surfaces: bool,
+    dividend_roll_policy: Optional[FuturesRollPolicy] = None,
 ) -> None:
     """Reject run options that would silently flatten a term dividend source.
 
@@ -259,6 +260,12 @@ def _validate_term_dividend_source(
         raise ValidationError(
             f"calculate_surfaces is not supported with dividend_source={source!r}: "
             "the spot x q surface grid prices on flat q nodes"
+        )
+    if dividend_roll_policy is not None:
+        raise ValidationError(
+            f"dividend_roll_policy cannot be combined with dividend_source="
+            f"{source!r}: a term source reads the WHOLE chain, so naming one "
+            "contract for the carry would be silently ignored"
         )
 
 
@@ -311,6 +318,14 @@ class AutocallableBacktestConfig:
     metadata: dict[str, Any] = field(default_factory=dict)
     # Appended AFTER metadata so existing positional construction keeps its slots.
     pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
+    # Which contract the FLAT carry channel is inverted from.  None (default)
+    # = the contract the hedge holds, which is the historical behaviour: the
+    # engine hands one selected row to both the hedge trade and build_env.
+    # Set it to price the carry off a contract the hedge does not trade, e.g.
+    # read from the longest listed contract while the delta sits in the front
+    # month.  A term dividend_source reads the WHOLE chain and would ignore
+    # it, so that combination is rejected rather than silently dropped.
+    dividend_roll_policy: Optional[FuturesRollPolicy] = None
 
     def __post_init__(self) -> None:
         if self.product is None:
@@ -327,6 +342,7 @@ class AutocallableBacktestConfig:
             self.engine_config,
             fixed_dividend_yield=self.fixed_dividend_yield,
             calculate_surfaces=self.calculate_surfaces,
+            dividend_roll_policy=self.dividend_roll_policy,
         )
         for field_name in ("delta_bump_size", "gamma_bump_size"):
             bump = getattr(self, field_name)
@@ -386,6 +402,14 @@ class ReplayBacktestConfig:
     metadata: dict[str, Any] = field(default_factory=dict)
     # Appended AFTER metadata so existing positional construction keeps its slots.
     pnl_explain: Optional[Any] = None   # PnLExplainConfig; None = no explain, no behaviour change
+    # Which contract the FLAT carry channel is inverted from.  None (default)
+    # = the contract the hedge holds, which is the historical behaviour: the
+    # engine hands one selected row to both the hedge trade and build_env.
+    # Set it to price the carry off a contract the hedge does not trade, e.g.
+    # read from the longest listed contract while the delta sits in the front
+    # month.  A term dividend_source reads the WHOLE chain and would ignore
+    # it, so that combination is rejected rather than silently dropped.
+    dividend_roll_policy: Optional[FuturesRollPolicy] = None
 
     def __post_init__(self):
         if not self.products:
@@ -398,6 +422,7 @@ class ReplayBacktestConfig:
             self.engine_config,
             fixed_dividend_yield=self.fixed_dividend_yield,
             calculate_surfaces=self.calculate_surfaces,
+            dividend_roll_policy=self.dividend_roll_policy,
         )
         if self.engine_config.vol_model != "bsm":
             # create_vol_model_engine builds Snowball engines only; pricing a

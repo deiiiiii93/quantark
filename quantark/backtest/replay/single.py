@@ -66,6 +66,7 @@ class AutocallableBacktestEngine:
             calculate_event_probabilities=config.calculate_event_probabilities,
             terminate_on_lifecycle_end=config.terminate_on_lifecycle_end,
             pnl_explain=config.pnl_explain,
+            dividend_roll_policy=config.dividend_roll_policy,
             metadata=config.metadata,
         )
         # Honor the single config's explicit futures roll policy.

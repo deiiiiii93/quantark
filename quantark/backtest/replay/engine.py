@@ -82,6 +82,9 @@ class ReplayBacktestEngine:
                 config.engine_config.vol_model_calibration
             )
 
+        # None = the flat carry channel follows the hedge contract.
+        self._dividend_roll_policy = getattr(config, "dividend_roll_policy", None)
+
         self._replays: list[ProductReplay] = []
         self._quantities: list[float] = []
         # Pricing engines are resolved by the ENGINE and passed explicitly to
@@ -141,6 +144,8 @@ class ReplayBacktestEngine:
             replay.start_date = self._start_date
 
         current_contract: Optional[str] = None
+        # The carry leg rolls on its OWN policy when the run decouples it.
+        current_dividend_contract: Optional[str] = None
         self._days_replayed = 0
         self._days_in_contract = int(len(dates))
         self._terminated_all_settled = False
@@ -160,14 +165,22 @@ class ReplayBacktestEngine:
                         date, selected, futures_slice, current_contract
                     )
                     current_contract = str(selected["contract"])
+                if self._dividend_roll_policy is not None:
+                    dividend_row = self._dividend_roll_policy.select_contract(
+                        futures_slice, date, current_dividend_contract
+                    )
+                    current_dividend_contract = str(dividend_row["contract"])
+                else:
+                    dividend_row = None
             else:
                 selected = self._spot_selected(date, market)
+                dividend_row = None
 
             multiplier = float(selected["multiplier"])
 
             # env is product-independent: build it once from any replay.
             env, basis_yield, implied_q, futures_ttm = self._replays[0].build_env(
-                date, market, selected
+                date, market, selected, dividend_row
             )
             if self.hedge.kind == "spot":
                 # For spot hedges, build_env synthesises a 100-year future
@@ -294,6 +307,7 @@ class ReplayBacktestEngine:
             self._record_day(
                 date=date,
                 selected=selected,
+                dividend_row=dividend_row,
                 market=market,
                 basis_yield=basis_yield,
                 implied_q=implied_q,
@@ -574,6 +588,7 @@ class ReplayBacktestEngine:
         date: pd.Timestamp,
         selected,
         market: dict[str, float],
+        dividend_row=None,
         basis_yield: float,
         implied_q: float,
         pricing_q: float,
@@ -660,6 +675,11 @@ class ReplayBacktestEngine:
                 "contingent_product_mtm": book_product_mtm,
                 "pending_receivable_pv": receivable_pv,
                 "paid_cash": book_cashflows,
+                # Appended last, matching STATE_COLUMNS: the contract the flat
+                # carry was inverted from (== active_contract by default).
+                "dividend_contract": str(
+                    (dividend_row if dividend_row is not None else selected)["contract"]
+                ),
             }
         )
         self._greeks.append(

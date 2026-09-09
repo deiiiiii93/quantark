@@ -140,7 +140,9 @@ def test_pnl_explain_field_is_appended_after_metadata_in_both_replay_configs():
     from quantark.backtest.replay.config import AutocallableBacktestConfig, ReplayBacktestConfig
     for cfg in (AutocallableBacktestConfig, ReplayBacktestConfig):
         names = [f.name for f in fields(cfg)]
-        assert names[-2:] == ["metadata", "pnl_explain"], cfg.__name__
+        # Later fields are APPENDED, never inserted: metadata and pnl_explain
+        # keep the slots they had, whatever is added after them.
+        assert names[-3:] == ["metadata", "pnl_explain", "dividend_roll_policy"], cfg.__name__
 
 
 def test_replay_first_day_intraday_leg_is_not_carried():
