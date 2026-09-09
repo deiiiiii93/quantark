@@ -65,8 +65,19 @@ CARRY_MODE = "changes"
 SEED = 1
 COST_BP = 1.0
 SPOT_STEP = 0.0025
-VOL_STEP = 0.01
-Q_STEP = 0.0025
+#: A surface (or ladder node) is solved at the vol bucket's centre, so the
+#: bucket half-width times the vega is a PV gap the gate sees.  Measured on
+#: the 1Y product at the 2026-09-09 start state: vega about 80 bp of notional
+#: per vol point at the start spot and about 150 bp/pt near the knock-in
+#: barrier; at a 0.01 step the gate saw 74 bp (0.48 pt off the centre) and
+#: the 25 bp budget cannot hold.  0.002 keeps the vol term under 15 bp.
+#: The yield term is about 70 bp per 1% of q, so 0.001 keeps it under 4 bp.
+#: Measured at (0.0025, 0.000625) on 8 real paths: worst 12.7 bp / 0.40
+#: hands over 64 sampled states, 942 solves against 682 at (0.01, 0.0025) --
+#: on real paths vol and carry both move daily, so nearly every state is
+#: its own bucket until the path count is in the thousands.
+VOL_STEP = 0.002
+Q_STEP = 0.001
 SURFACE_CACHE_BYTES = 2_000_000_000
 STATE_CACHE_BYTES = 500_000_000
 GATE_SURFACE = dict(sample_states=64, pv_tolerance_bp=25.0, delta_tolerance_hands=2.0)
