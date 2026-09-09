@@ -114,7 +114,7 @@ def curve_anatomy(
     spot_by_date = dict(zip(frames.dates, frames.spot["spot"].astype(float)))
     front_walk = _active_contract_walk(frames, C.HEDGE_POLICIES["front"]())
     far_walk = _active_contract_walk(frames, C.HEDGE_POLICIES["far"]())
-    flat = C.Q_MODELS["flat_active"]
+    flat = C.Q_MODELS["flat_from_hedge"]
     prev_front = prev_far = None
     rows: List[Dict[str, Any]] = []
     for d in frames.dates:

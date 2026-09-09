@@ -129,20 +129,41 @@ class QModel:
     needs_surface: bool = False
     description: str = ""
     min_tenor_days: int = FUTURES_CURVE_MIN_TENOR_DAYS
+    # Flat channel only: which contract the yield is inverted from, as a key
+    # of HEDGE_POLICIES.  None = the contract the hedge holds (the engine's
+    # own behaviour).  Naming one decouples carry from the hedge leg.
+    dividend_policy: Optional[str] = None
 
     def summary(self) -> Dict[str, Any]:
         return asdict(self)
 
 
 Q_MODELS: Dict[str, QModel] = {
-    "flat_active": QModel(
-        "flat_active",
-        "Flat q (active contract)",
+    "flat_from_hedge": QModel(
+        "flat_from_hedge",
+        "Flat q (hedged contract)",
         None,
         description=(
             "The replay engine's historical default: one flat yield implied "
             "from the hedge contract's basis, simple compounding, floored at "
-            "zero. Changes every time the hedge rolls."
+            "zero. Changes every time the hedge rolls.  The ONLY model whose "
+            "q depends on the hedge policy: the engine inverts whichever "
+            "contract the roll policy holds, so the same name under 'front' "
+            "and 'far' is a different carry, not just a different hedge leg."
+        ),
+    ),
+    "flat_from_far": QModel(
+        "flat_from_far",
+        "Flat q (longest listed contract)",
+        None,
+        dividend_policy="far",
+        description=(
+            "The same flat channel as flat_from_hedge, but always inverted "
+            "from the LONGEST listed contract, whatever the hedge holds.  "
+            "Paired against flat_from_hedge__front under a front-month hedge "
+            "it isolates the carry contract, the one comparison the "
+            "hedge-following model cannot make on its own.  Hedged with the "
+            "far contract it is flat_from_hedge__far by construction."
         ),
     ),
     "term_flat_q": QModel(
@@ -196,7 +217,7 @@ Q_MODELS: Dict[str, QModel] = {
     ),
 }
 Q_MODEL_ORDER: Tuple[str, ...] = tuple(Q_MODELS)
-BASELINE_MODEL = "flat_active"
+BASELINE_MODEL = "flat_from_hedge"
 REFERENCE_MODEL = "term_flat_q"  # the fair coupon is solved under this model
 
 
@@ -278,16 +299,21 @@ def dividend_for(
 ):
     """The dividend object ``model`` would hand the pricer on ``valuation``.
 
-    Mirrors ``ProductReplay.build_env`` exactly (pinned by test).  The flat
-    model needs the ACTIVE hedge contract row (its yield is simple-compounded
-    and floored at zero, as the engine has always done); the term models need
-    the whole chain slice; the surface model needs the day's artifact.
+    Mirrors ``ProductReplay.build_env`` exactly (pinned by test).  A flat
+    model needs ONE contract row, simple-compounded and floored at zero as the
+    engine has always done: ``active_row`` (the hedged contract) unless the
+    model names its own ``dividend_policy``, in which case that policy picks
+    the row out of ``chain_slice`` and ``active_row`` is not used.  The term
+    models need the whole chain slice; the surface model needs the artifact.
     """
     valuation = pd.Timestamp(valuation).normalize()
     rate_curve = FlatRateCurve(rate=float(rate))
     if model.dividend_source in (None, "active_contract"):
+        policy = dividend_roll_policy_for(model)
+        if policy is not None:
+            active_row = policy.select_contract(chain_slice, valuation)
         if active_row is None:
-            raise ValidationError("flat_active needs the active contract row")
+            raise ValidationError(f"{model.name} needs the active contract row")
         expiry = pd.Timestamp(active_row["expiry_date"]).normalize()
         ttm = (expiry - valuation).days / ACT
         _, implied_q = derive_implied_dividend_yield(
@@ -401,6 +427,27 @@ HEDGE_POLICY_LABELS = {
     "front": "front-month IM (5-day roll)",
     "far": "longest listed IM (5-day roll)",
 }
+
+
+def dividend_roll_policy_for(model: QModel) -> Optional[FuturesRollPolicy]:
+    """The roll policy the model's FLAT carry is inverted from.
+
+    ``None`` means the carry follows the hedge contract, which is what the
+    replay engine does when ``dividend_roll_policy`` is unset.
+    """
+    if model.dividend_policy is None:
+        return None
+    if model.dividend_policy not in HEDGE_POLICIES:
+        raise ValidationError(
+            f"{model.name} names dividend_policy={model.dividend_policy!r}, "
+            f"not one of {tuple(HEDGE_POLICIES)}"
+        )
+    if model.dividend_source is not None:
+        raise ValidationError(
+            f"{model.name} sets dividend_policy with dividend_source="
+            f"{model.dividend_source!r}: a term source reads the whole chain"
+        )
+    return HEDGE_POLICIES[model.dividend_policy]()
 
 
 # ---------------------------------------------------------------------------

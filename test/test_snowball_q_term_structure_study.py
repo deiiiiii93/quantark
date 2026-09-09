@@ -197,12 +197,18 @@ def _engine_env(dataset, model, d):
     )
     ts = pd.Timestamp(d)
     market = dataset.get_market_row(ts)
-    selected = FuturesRollPolicy().select_contract(dataset.get_futures_slice(ts), ts)
-    env, *_ = replay.build_env(ts, market, selected)
+    chain = dataset.get_futures_slice(ts)
+    selected = FuturesRollPolicy().select_contract(chain, ts)
+    policy = common.dividend_roll_policy_for(model)
+    dividend_row = policy.select_contract(chain, ts) if policy is not None else None
+    env, *_ = replay.build_env(ts, market, selected, dividend_row)
     return env, selected
 
 
-@pytest.mark.parametrize("model_name", ["flat_active", "term_flat_q", "term_flat_fwd", "term_opt_tail"])
+@pytest.mark.parametrize(
+    "model_name",
+    ["flat_from_hedge", "flat_from_far", "term_flat_q", "term_flat_fwd", "term_opt_tail"],
+)
 def test_static_dividend_matches_the_engine(model_name):
     dates = pd.date_range("2024-01-02", periods=2, freq="D")
     dataset = _dataset(dates)
@@ -250,7 +256,7 @@ def test_term_opt_tail_keeps_the_front_contract_and_takes_the_option_tail():
     assert div.get_yield(1.5) != pytest.approx(ref.get_yield(1.5), abs=1e-6)
 
 
-def test_flat_active_is_floored_and_the_curve_is_signed():
+def test_flat_from_hedge_is_floored_and_the_curve_is_signed():
     d = pd.Timestamp("2024-01-02")
     contango = (
         ("IM2401", pd.Timestamp("2024-01-19"), -0.04),
@@ -259,7 +265,7 @@ def test_flat_active_is_floored_and_the_curve_is_signed():
     chain = _chain_frame([d], chain=contango)
     active = FuturesRollPolicy().select_contract(chain, d)
     flat = common.dividend_for(
-        common.Q_MODELS["flat_active"], valuation=d, spot=SPOT, rate=RATE,
+        common.Q_MODELS["flat_from_hedge"], valuation=d, spot=SPOT, rate=RATE,
         chain_slice=chain, active_row=active,
     )
     term = common.dividend_for(
@@ -281,7 +287,7 @@ def test_forward_pricing_error_by_contract():
         common.Q_MODELS["term_flat_q"], valuation=d, spot=SPOT, rate=RATE, chain_slice=chain
     )
     flat = common.dividend_for(
-        common.Q_MODELS["flat_active"], valuation=d, spot=SPOT, rate=RATE,
+        common.Q_MODELS["flat_from_hedge"], valuation=d, spot=SPOT, rate=RATE,
         chain_slice=chain, active_row=active,
     )
     err_term = common.forward_pricing_error_bp(term, valuation=d, spot=SPOT, rate=RATE, chain_slice=chain)
@@ -511,28 +517,28 @@ def _row(inception, model, hedge, **measures):
 
 def test_default_pairs_compare_every_cell_to_the_baseline_and_far_to_front():
     s3 = _load_stage03()
-    cells = ["flat_active__front", "term_flat_q__front", "flat_active__far", "term_flat_q__far"]
+    cells = ["flat_from_hedge__front", "term_flat_q__front", "flat_from_hedge__far", "term_flat_q__far"]
     pairs = s3.default_pairs(cells)
-    assert ("term_flat_q__front", "flat_active__front") in pairs
-    assert ("flat_active__far", "flat_active__front") in pairs
+    assert ("term_flat_q__front", "flat_from_hedge__front") in pairs
+    assert ("flat_from_hedge__far", "flat_from_hedge__front") in pairs
     assert ("term_flat_q__far", "term_flat_q__front") in pairs
-    assert ("flat_active__front", "flat_active__front") not in pairs
+    assert ("flat_from_hedge__front", "flat_from_hedge__front") not in pairs
     assert len(pairs) == len(set(pairs))
 
 
 def test_paired_rows_subtract_on_matched_inceptions_only():
     s3 = _load_stage03()
     rows = [
-        _row("2023-05-04", "flat_active", "front", terminal_pnl_bp=10.0, daily_pnl_std_bp=5.0),
+        _row("2023-05-04", "flat_from_hedge", "front", terminal_pnl_bp=10.0, daily_pnl_std_bp=5.0),
         _row("2023-05-04", "term_flat_q", "front", terminal_pnl_bp=4.0, daily_pnl_std_bp=2.0),
         _row("2023-06-01", "term_flat_q", "front", terminal_pnl_bp=1.0),  # no baseline run
     ]
-    paired = s3.paired_rows(rows, [("term_flat_q__front", "flat_active__front")])
+    paired = s3.paired_rows(rows, [("term_flat_q__front", "flat_from_hedge__front")])
     assert len(paired) == 1
     assert paired[0]["inception"] == "2023-05-04"
     assert paired[0]["d_terminal_pnl_bp"] == pytest.approx(-6.0)
     assert paired[0]["d_daily_pnl_std_bp"] == pytest.approx(-3.0)
-    summary = s3.paired_summary(paired, [("term_flat_q__front", "flat_active__front")])
+    summary = s3.paired_summary(paired, [("term_flat_q__front", "flat_from_hedge__front")])
     assert summary["term_flat_q__front"]["n"] == 1
     assert summary["term_flat_q__front"]["terminal_pnl_bp"]["mean"] == pytest.approx(-6.0)
 
@@ -540,7 +546,7 @@ def test_paired_rows_subtract_on_matched_inceptions_only():
 def test_lifecycle_consistency_flags_a_cell_that_terminated_differently():
     s3 = _load_stage03()
     rows = [
-        _row("2023-05-04", "flat_active", "front"),
+        _row("2023-05-04", "flat_from_hedge", "front"),
         _row("2023-05-04", "term_flat_q", "front"),
     ]
     assert s3.lifecycle_consistency(rows)["consistent"]
@@ -588,7 +594,7 @@ def test_ki_probe_summary_reports_day_to_day_ki_change_per_model():
     probe = pd.DataFrame(
         {
             "date": list(days) * 2,
-            "model": ["flat_active"] * 3 + ["term_flat_q"] * 3,
+            "model": ["flat_from_hedge"] * 3 + ["term_flat_q"] * 3,
             "q_T": [0.30, 0.90, 0.00, 0.13, 0.19, 0.10],
             "p_ki": [0.55, 1.00, 0.05, 0.20, 0.34, 0.15],
             "p_ko": [0.18, 0.00, 0.68, 0.40, 0.23, 0.49],
@@ -598,7 +604,7 @@ def test_ki_probe_summary_reports_day_to_day_ki_change_per_model():
     out = s1.ki_probe_summary(probe)
     assert out["n_days"] == 3
     assert out["first_date"] == "2024-02-01" and out["last_date"] == "2024-02-05"
-    flat, term = out["models"]["flat_active"], out["models"]["term_flat_q"]
+    flat, term = out["models"]["flat_from_hedge"], out["models"]["term_flat_q"]
     assert flat["p_ki_daily_abs_change_mean"] == pytest.approx((0.45 + 0.95) / 2)
     assert term["p_ki_daily_abs_change_mean"] == pytest.approx((0.14 + 0.19) / 2)
     assert flat["p_ki"]["max"] == pytest.approx(1.0) and flat["p_ki"]["min"] == pytest.approx(0.05)
@@ -611,7 +617,7 @@ def test_static_summary_reports_ki_ko_probabilities_and_their_gap():
     dates = [date(2024, 1, 2), date(2024, 2, 1)]
     rows = []
     for d, pki_flat, pki_ref, q_flat, q_ref in zip(dates, [0.60, 0.40], [0.30, 0.35], [0.26, 0.05], [0.11, 0.10]):
-        for model, pki, q in (("flat_active", pki_flat, q_flat), ("term_flat_q", pki_ref, q_ref)):
+        for model, pki, q in (("flat_from_hedge", pki_flat, q_flat), ("term_flat_q", pki_ref, q_ref)):
             rows.append(
                 {
                     "date": d, "model": model, "pv_bp": 0.0, "delta_hands": 20.0, "rhoq_1pct_bp": -50.0,
@@ -620,8 +626,8 @@ def test_static_summary_reports_ki_ko_probabilities_and_their_gap():
                 }
             )
     risk = pd.DataFrame(rows)
-    out = s1.static_summary(risk, pd.DataFrame(), ["flat_active", "term_flat_q"])
-    flat = out["models"]["flat_active"]
+    out = s1.static_summary(risk, pd.DataFrame(), ["flat_from_hedge", "term_flat_q"])
+    flat = out["models"]["flat_from_hedge"]
     assert flat["p_ki"]["mean"] == pytest.approx(0.5)
     assert flat["p_ko"]["mean"] == pytest.approx(0.4)
     assert flat["p_ki_gap_vs_reference"]["mean"] == pytest.approx(((0.60 - 0.30) + (0.40 - 0.35)) / 2)
@@ -634,19 +640,79 @@ def test_static_summary_reports_ki_ko_probabilities_and_their_gap():
 def test_report_ki_section_renders_only_when_probabilities_exist(tmp_path):
     s3 = _load_stage03()
     d = {"n": 2, "mean": 0.4, "median": 0.4, "std": 0.1, "min": 0.3, "max": 0.5, "share_positive": 1.0, "t_stat": 5.0}
-    without = {"grid_dates": 2, "models": {"flat_active": {"pv_bp": d}, "term_flat_q": {"pv_bp": d}}}
+    without = {"grid_dates": 2, "models": {"flat_from_hedge": {"pv_bp": d}, "term_flat_q": {"pv_bp": d}}}
     assert s3._ki_section(without, tmp_path) == ""
     with_ki = {
         "grid_dates": 2,
         "models": {
             "term_flat_q": {"p_ki": d, "p_ko": d},
-            "flat_active": {"p_ki": d, "p_ko": d, "p_ki_gap_vs_reference": d, "p_ki_gap_vs_q_gap_corr": 0.98},
+            "flat_from_hedge": {"p_ki": d, "p_ko": d, "p_ki_gap_vs_reference": d, "p_ki_gap_vs_q_gap_corr": 0.98},
         },
         "ki_probe": {
             "inception": "2023-05-04", "coupon": 0.045, "n_days": 3, "first_date": "2024-02-01", "last_date": "2024-02-05",
-            "models": {"flat_active": {"q_T": d, "p_ki": d, "p_ko": d, "pv_bp": d, "p_ki_range": 0.95,
+            "models": {"flat_from_hedge": {"q_T": d, "p_ki": d, "p_ko": d, "pv_bp": d, "p_ki_range": 0.95,
                                         "p_ki_daily_abs_change_mean": 0.7, "q_T_daily_abs_change_mean": 0.45}},
         },
     }
     html_out = s3._ki_section(with_ki, tmp_path)  # no csv in tmp_path -> no chart, table still renders
     assert "2b." in html_out and "0.98" in html_out and "q-only probe" in html_out and "0.950" in html_out
+
+
+def test_flat_from_far_inverts_the_longest_listed_contract_not_the_hedged_one():
+    """The cross cell: carry from the far contract, delta in the front month."""
+    d = pd.Timestamp("2024-01-02")
+    chain = _chain_frame([d])
+    front = FuturesRollPolicy().select_contract(chain, d)
+    far = common.FarContractRollPolicy().select_contract(chain, d)
+    assert front["contract"] != far["contract"]
+
+    far_model = common.Q_MODELS["flat_from_far"]
+    assert far_model.dividend_source is None          # still the flat channel
+    assert far_model.dividend_policy == "far"
+
+    cross = common.dividend_for(
+        far_model, valuation=d, spot=SPOT, rate=RATE, chain_slice=chain, active_row=front
+    )
+    hedged_to_far = common.dividend_for(
+        common.Q_MODELS["flat_from_hedge"], valuation=d, spot=SPOT, rate=RATE,
+        chain_slice=chain, active_row=far,
+    )
+    hedged_to_front = common.dividend_for(
+        common.Q_MODELS["flat_from_hedge"], valuation=d, spot=SPOT, rate=RATE,
+        chain_slice=chain, active_row=front,
+    )
+    # Reading the far contract is what defines the model: the hedge row it is
+    # handed does not enter its carry at all.
+    assert cross.get_yield(1.0) == pytest.approx(hedged_to_far.get_yield(1.0), abs=1e-15)
+    assert cross.get_yield(1.0) != pytest.approx(hedged_to_front.get_yield(1.0), abs=1e-6)
+
+
+def test_flat_from_far_hedged_far_is_the_same_carry_as_flat_from_hedge():
+    """flat_from_far__far and flat_from_hedge__far must be the same run."""
+    d = pd.Timestamp("2024-01-02")
+    chain = _chain_frame([d])
+    far = common.FarContractRollPolicy().select_contract(chain, d)
+    a = common.dividend_for(
+        common.Q_MODELS["flat_from_far"], valuation=d, spot=SPOT, rate=RATE,
+        chain_slice=chain, active_row=far,
+    )
+    b = common.dividend_for(
+        common.Q_MODELS["flat_from_hedge"], valuation=d, spot=SPOT, rate=RATE,
+        chain_slice=chain, active_row=far,
+    )
+    for t in (0.05, 0.5, 1.0, 2.0):
+        assert a.get_yield(t) == b.get_yield(t)
+
+
+def test_the_cross_cell_is_in_the_study_grid_paired_against_the_baseline():
+    path = STUDY_DIR / "02_backtest_fleet.py"
+    spec = importlib.util.spec_from_file_location("q_term_structure_stage02", path)
+    stage02 = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = stage02
+    spec.loader.exec_module(stage02)
+    assert ("flat_from_far", "front") in stage02.DEFAULT_CELLS
+    # Its hedge leg is the baseline's, so the paired difference is carry only.
+    pairs = _load_stage03().default_pairs(
+        ["flat_from_hedge__front", "flat_from_far__front"]
+    )
+    assert ("flat_from_far__front", "flat_from_hedge__front") in pairs

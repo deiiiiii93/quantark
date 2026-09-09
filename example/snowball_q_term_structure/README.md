@@ -23,7 +23,8 @@ run when a file is missing.
 
 | model | what the pricer receives |
 |-------|--------------------------|
-| `flat_active` | the engine default: flat `q = max(0, r − basis)` from the **active hedge contract**, simple compounding |
+| `flat_from_hedge` | the engine default: flat `q = max(0, r − basis)` from **whichever contract the hedge currently holds**, simple compounding |
+| `flat_from_far` | the same flat channel, always inverted from the **longest listed contract**, whatever the hedge holds |
 | `term_flat_q` | every listed contract with ≥ 7 days to expiry inverted to `q(T_i) = r − ln(F_i/S)/T_i`, linear in `q` between nodes, endpoint **zero yield held** beyond the last tenor |
 | `term_flat_fwd` | same nodes, the last segment's **forward carry held** beyond the last tenor (`ForwardCarryCurve`) |
 | `surface_fwd` | the MO option-implied parity forwards of the admitted IV surface (cross-market control) |
@@ -36,7 +37,7 @@ interior from calendar spreads, and take the tail from the option market
 (Binsbergen, Brandt and Koijen 2012; Golez 2014).
 
 The four term models ride the engine's opt-in `dividend_source` channel on
-`AutocallableEngineConfig` (see *Engine hook* below); `flat_active` is the
+`AutocallableEngineConfig` (see *Engine hook* below); `flat_from_hedge` is the
 untouched default. The study's `dividend_for` builds the identical object
 outside the engine for the static stage and is pinned against
 `ProductReplay.build_env` by test.
@@ -44,6 +45,27 @@ outside the engine for the static stage and is pinned against
 Hedge contract policies: **front** (front month, rolled five days before
 expiry — the engine default) and **far** (longest listed contract, same roll
 rule; `FarContractRollPolicy`).
+
+**Cell names.** A cell is `<q model>__<hedge policy>`. For the four term
+models the two fields are independent: they read the whole chain, so
+`__front` and `__far` differ only in which contract carries the delta. They
+are **not** independent for `flat_from_hedge`. The replay engine passes one
+selected contract row to both the hedge trade and `build_env`
+(`quantark/backtest/replay/engine.py`), so that model's `q` is inverted from
+the hedged contract: `flat_from_hedge__far` prices off the longest listed
+contract, `flat_from_hedge__front` off the front month. The name says so, and
+the two flat rows of the stage-01 table below are the measured consequence
+(mean 12.1% vs 13.6%, std 5.6% vs 9.2%). One corollary for reading section 3:
+`flat_from_hedge__far − flat_from_hedge__front` moves the carry model and the
+hedge leg together, so only the `term_flat_q` pair isolates the hedge
+contract.
+
+`flat_from_far` cuts the other way. It is the same flat channel pinned to the
+longest listed contract whatever the hedge does, so `flat_from_far__front`
+shares its hedge leg with the baseline and differs from it only in which
+contract the carry was read from. Hedged with the far contract it would be
+`flat_from_hedge__far` by construction, which is why that pair stays out of
+the grid and is asserted as an identity in the tests instead.
 
 ## The product and the fleet
 
@@ -221,7 +243,7 @@ delta / 200.
 
 | model | PV gap vs reference | delta | delta gap | rhoq per +1% q | q at maturity |
 |-------|--------------------:|------:|----------:|---------------:|--------------:|
-| `flat_active` (front hedge) | **−368 bp** (median −179, min −1795, max +601) | 29.2 hands | **+5.3 hands** | −63 bp | 15.5% |
+| `flat_from_hedge` (front hedge) | **−368 bp** (median −179, min −1795, max +601) | 29.2 hands | **+5.3 hands** | −63 bp | 15.5% |
 | `term_flat_q` (reference) | 0 | 23.9 hands | 0 | −55 bp | 10.9% |
 | `term_flat_fwd` | +17 bp (median +10) | 23.5 hands | −0.4 hands | −55 bp | 10.6% |
 | `surface_fwd` | +119 bp (median +105) | 21.5 hands | −2.4 hands | −52 bp | 8.8% |
@@ -254,7 +276,7 @@ every listed forward and extrapolates only past the last tenor. On the same
 
 | model | P(KI) mean | P(KO) mean | P(KI) gap vs ref, mean | gap range | corr(gap, q(T) gap) |
 |-------|-----------:|-----------:|-----------------------:|----------:|--------------------:|
-| `flat_active` | **0.408** | 0.483 | **+0.072** | −0.160 .. +0.267 | 0.98 |
+| `flat_from_hedge` | **0.408** | 0.483 | **+0.072** | −0.160 .. +0.267 | 0.98 |
 | `term_flat_q` (reference) | 0.336 | 0.542 | 0 | | |
 | `term_flat_fwd` | 0.333 | 0.545 | −0.003 | −0.032 .. +0.021 | 0.99 |
 | `surface_fwd` | 0.311 | 0.563 | −0.025 | −0.081 .. +0.009 | 0.97 |
@@ -275,7 +297,7 @@ Every move of P(KI) is caused by the carry input alone
 
 | model | q(T) range | P(KI) range | mean \|ΔP(KI)\| per day |
 |-------|-----------:|------------:|-----------------------:|
-| `flat_active` | 0.0% .. 92.0% | **0.051 .. 1.000** | **0.234** |
+| `flat_from_hedge` | 0.0% .. 92.0% | **0.051 .. 1.000** | **0.234** |
 | `term_flat_q` | 7.5% .. 19.4% | 0.121 .. 0.341 | 0.045 |
 | `term_flat_fwd` | 8.0% .. 15.7% | 0.125 .. 0.278 | 0.032 |
 | `surface_fwd` | 6.3% .. 9.8% | 0.109 .. 0.161 | 0.012 |
@@ -293,32 +315,34 @@ tenor.
 ### 3. Hedging backtest (stages 02–03)
 
 29 monthly inceptions, 2023-05-04 to 2025-09-01 (every one uncensored),
-174 runs, no failures; 22 inceptions knocked out and 7 knocked in and
+8 cells, 232 runs, no failures; 22 inceptions knocked out and 7 knocked in and
 matured, identically in every cell (lifecycle check passed). Means over
 inceptions, bp of notional; turnover in multiples of notional.
 
 | cell | terminal P&L | daily P&L std | R² | max DD | turnover | cost | \|ΔMTM\| roll days | \|ΔMTM\| other days | hands/day |
 |------|-------------:|--------------:|---:|-------:|---------:|-----:|------------------:|-------------------:|----------:|
-| `flat_active__front` (engine default) | 489 | **384** | **0.26** | **2508** | 24.2 | 24.2 | 317 | 256 | 5.6 |
+| `flat_from_hedge__front` (engine default) | 489 | **384** | **0.26** | **2508** | 24.2 | 24.2 | 317 | 256 | 5.6 |
 | `term_flat_q__front` | 546 | **57** | **0.81** | 439 | 16.2 | 16.2 | 65 | 107 | 2.9 |
 | `term_flat_fwd__front` | 564 | 54 | 0.80 | 386 | 16.1 | 16.1 | 65 | 104 | 2.8 |
 | `surface_fwd__front` | 565 | 64 | 0.70 | 370 | 15.7 | 15.7 | 62 | 96 | 2.8 |
 | `term_opt_tail__front` | 567 | 56 | 0.76 | 371 | 15.8 | 15.8 | 62 | 101 | 2.8 |
-| `flat_active__far` | 426 | 86 | 0.74 | 697 | 8.7 | 8.7 | **334** | 115 | 2.9 |
+| `flat_from_hedge__far` | 426 | 86 | 0.74 | 697 | 8.7 | 8.7 | **334** | 115 | 2.9 |
 | `term_flat_q__far` | 442 | 53 | 0.83 | 418 | 8.4 | 8.4 | 68 | 105 | 2.9 |
+| `flat_from_far__front` | 535 | 90 | 0.72 | 705 | 16.7 | 16.7 | 88 | 117 | 2.9 |
 
 Paired differences on matched inceptions (n = 29; *t* is the paired
 t-statistic, overstated because inception windows overlap):
 
 | variant − base | Δ terminal P&L | Δ daily std | Δ R² | Δ max DD | Δ turnover | Δ \|ΔMTM\| roll days | Δ hands/day |
 |----------------|---------------:|------------:|-----:|---------:|-----------:|--------------------:|------------:|
-| `term_flat_q__front` − `flat_active__front` | +57 (median +115, 55% > 0, t 0.9) | **−327** (0% > 0, t −11.9) | **+0.56** (100% > 0) | −2069 | −7.9× | **−251** (0% > 0) | −2.7 |
-| `term_flat_fwd__front` − `flat_active__front` | +75 (t 1.0) | −330 | +0.54 | −2122 | −8.0× | −252 | −2.7 |
-| `surface_fwd__front` − `flat_active__front` | +76 (t 1.0) | −321 | +0.44 | −2138 | −8.5× | −255 | −2.8 |
-| `term_opt_tail__front` − `flat_active__front` | +78 (t 1.0) | −328 | +0.50 | −2137 | −8.3× | −255 | −2.8 |
+| `term_flat_q__front` − `flat_from_hedge__front` | +57 (median +115, 55% > 0, t 0.9) | **−327** (0% > 0, t −11.9) | **+0.56** (100% > 0) | −2069 | −7.9× | **−251** (0% > 0) | −2.7 |
+| `term_flat_fwd__front` − `flat_from_hedge__front` | +75 (t 1.0) | −330 | +0.54 | −2122 | −8.0× | −252 | −2.7 |
+| `surface_fwd__front` − `flat_from_hedge__front` | +76 (t 1.0) | −321 | +0.44 | −2138 | −8.5× | −255 | −2.8 |
+| `term_opt_tail__front` − `flat_from_hedge__front` | +78 (t 1.0) | −328 | +0.50 | −2137 | −8.3× | −255 | −2.8 |
 | `term_opt_tail__front` − `term_flat_q__front` | +21 (62% > 0, t 1.4) | −1 (t −0.7) | −0.05 (34% > 0, t −3.5) | −68 (17% > 0, t −5.3) | −0.4× (t −9.3) | −4 (t −1.7) | −0.1 (t −3.9) |
-| `flat_active__far` − `flat_active__front` | −63 (t −0.8) | −299 | +0.49 | −1811 | −15.5× | −38 (50% > 0, t −0.6) | −2.6 |
+| `flat_from_hedge__far` − `flat_from_hedge__front` | −63 (t −0.8) | −299 | +0.49 | −1811 | −15.5× | −38 (50% > 0, t −0.6) | −2.6 |
 | `term_flat_q__far` − `term_flat_q__front` | **−103** (24% > 0, t −4.7) | −4 (t −4.2) | +0.02 | −21 | −7.9× | −9 (t −0.5) | 0.0 |
+| `flat_from_far__front` − `flat_from_hedge__front` | +46 (55% > 0, t 0.7) | **−294** (0% > 0, t −10.1) | **+0.47** (100% > 0) | −1803 | −7.6× | −229 (0% > 0, t −12.9) | −2.6 |
 
 What the fleet says:
 
@@ -343,6 +367,18 @@ What the fleet says:
   yield is stable (std 4% vs 10.5% for the front), but its roll-day re-mark
   (334 bp) is the worst in the study: one flat number cannot be right for
   every tenor, and the error shows up whenever the number changes.
+- **That recovery is the carry contract, not the hedge contract.**
+  `flat_from_far__front` reads the same far yield while keeping the
+  baseline's front-month hedge, and it captures −294 bp of daily std against
+  the −299 bp that moving both together captures. The hedge leg is worth
+  about 4 bp of the 299, roughly one part in seventy. A desk that dislikes
+  holding the far contract can have almost the whole improvement by leaving
+  the hedge in the front month and only changing which contract it reads its
+  carry from. The far yield also fixes the roll-day re-mark that
+  `flat_from_hedge__far` suffers, 88 bp against 334, because the carry no
+  longer jumps when the hedge rolls. What it does not fix is the tenor
+  mismatch: at 90 bp of daily std it is still 33 bp worse than `term_flat_q`,
+  which is the cost of one flat number standing in for a curve.
 - **The tail convention does not matter for hedging.** `term_flat_fwd` and
   `term_flat_q` are within 3 bp of daily std and 0.05 hands per day of each
   other; the MO option forwards (`surface_fwd`) hedge nearly as well (64 bp,

@@ -170,7 +170,9 @@ def paired_summary(paired: Sequence[Dict[str, Any]], pairs: Sequence[Tuple[str, 
 def default_pairs(cells: Sequence[str]) -> List[Tuple[str, str]]:
     base = C.cell_name(C.BASELINE_MODEL, "front")
     pairs = [(c, base) for c in cells if c != base and base in cells]
-    # same model, far vs front: isolates the hedge contract
+    # same model, far vs front: isolates the hedge contract for the term
+    # models.  NOT for flat_from_hedge, whose q is inverted from the hedged
+    # contract, so its far-vs-front pair moves the carry model too.
     for model in C.Q_MODEL_ORDER:
         far, front = C.cell_name(model, "far"), C.cell_name(model, "front")
         if far in cells and front in cells and (far, front) not in pairs:
@@ -242,8 +244,8 @@ def _plt():
 
 
 CELL_COLORS = {
-    "flat_active__front": "#7f7f7f", "term_flat_q__front": "#1f77b4", "term_flat_fwd__front": "#17becf",
-    "surface_fwd__front": "#9467bd", "flat_active__far": "#bcbd22", "term_flat_q__far": "#2ca02c",
+    "flat_from_hedge__front": "#7f7f7f", "term_flat_q__front": "#1f77b4", "term_flat_fwd__front": "#17becf",
+    "surface_fwd__front": "#9467bd", "flat_from_hedge__far": "#bcbd22", "term_flat_q__far": "#2ca02c",
     "term_flat_fwd__far": "#8c564b", "surface_fwd__far": "#e377c2",
     "term_opt_tail__front": "#d62728", "term_opt_tail__far": "#e377c2",
 }
@@ -298,7 +300,7 @@ def chart_ki_probe(data_dir: Path) -> Optional[str]:
         return None
     plt = _plt()
     df = pd.read_csv(path, parse_dates=["date"])
-    colours = {"flat_active": "#7f7f7f", "term_flat_q": "#1f77b4", "term_flat_fwd": "#ff7f0e", "surface_fwd": "#9467bd",
+    colours = {"flat_from_hedge": "#7f7f7f", "term_flat_q": "#1f77b4", "term_flat_fwd": "#ff7f0e", "surface_fwd": "#9467bd",
                "term_opt_tail": "#d62728"}
     # trading-day positions on the x axis: a holiday gap must not stretch the lines
     days = sorted(df["date"].unique())
@@ -584,7 +586,11 @@ def _appendix(agg: Dict[str, Any]) -> str:
 
     sec3_cell = _dl([
         ("cell", "<code>&lt;carry model&gt;__&lt;hedge contract policy&gt;</code>. Every cell of one inception sells the "
-                 "same contract on the same spot path with the same vol channel and the same fair coupon."),
+                 "same contract on the same spot path with the same vol channel and the same fair coupon. "
+                 "The two fields are independent for the term models, which read the whole chain. They are NOT "
+                 "independent for <code>flat_from_hedge</code>: the engine inverts whichever contract the roll "
+                 "policy holds, so <code>flat_from_hedge__far</code> prices off the longest listed contract and "
+                 "<code>flat_from_hedge__front</code> off the front month."),
         ("P&amp;L mean bp, P&amp;L std bp",
          "Mean and cross-inception standard deviation of the <strong>terminal hedged P&amp;L</strong>: product + hedge "
          "&minus; costs at termination, seller's book, bp of notional. Every run is booked at the traded price of "

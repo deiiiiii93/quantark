@@ -6,18 +6,31 @@ futures through ``quantark.backtest.replay``, once per cell:
 
     cell = (q model, hedge contract policy)
 
-    q model            what the pricer receives as dividend/carry each day
-    ----------------   --------------------------------------------------------
-    flat_active        the engine default: flat yield implied from the ACTIVE
-                       hedge contract (simple compounding, floored at zero)
-    term_flat_q        the whole IM chain as q(T), endpoint zero yield held
-    term_flat_fwd      the whole IM chain as q(T), forward carry held
-    surface_fwd        MO option-implied forwards (cross-market control)
+    q model             what the pricer receives as dividend/carry each day
+    -----------------   -------------------------------------------------------
+    flat_from_hedge     the engine default: flat yield implied from the
+                        contract the hedge currently holds (simple
+                        compounding, floored at zero)
+    flat_from_far       the same flat channel, always inverted from the
+                        LONGEST listed contract whatever the hedge holds
+    term_flat_q         the whole IM chain as q(T), endpoint zero yield held
+    term_flat_fwd       the whole IM chain as q(T), forward carry held
+    surface_fwd         MO option-implied forwards (cross-market control)
+    term_opt_tail       the chain in log-forward space, option-forward tail
 
-    hedge policy       which contract carries the delta hedge
-    ----------------   --------------------------------------------------------
-    front              front month, rolled 5 days before expiry
-    far                longest listed contract, rolled 5 days before expiry
+    hedge policy        which contract carries the delta hedge
+    -----------------   -------------------------------------------------------
+    front               front month, rolled 5 days before expiry
+    far                 longest listed contract, rolled 5 days before expiry
+
+The two fields are independent for the four term models: they read the whole
+chain, so ``__front`` and ``__far`` differ only in the hedge leg.  They are
+NOT independent for ``flat_from_hedge``: the engine inverts whichever
+contract the roll policy holds (``engine.py`` passes one ``selected`` row to
+both the hedge trade and ``build_env``), so ``flat_from_hedge__far`` prices
+off the longest listed contract and ``flat_from_hedge__front`` off the front
+month.  The name says so; the paired difference of that model therefore mixes
+a carry change with a hedge change, and only the term pairs isolate the hedge.
 
 Every cell of one inception shares the contract, the spot path, the vol
 channel (ATM 1Y IV off the admitted MO surface), the rate and the cost
@@ -79,18 +92,21 @@ from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote  # noqa: E40
 from quantark.priceenv import PricingEnvironment  # noqa: E402
 
 DEFAULT_CELLS: Tuple[Tuple[str, str], ...] = (
-    ("flat_active", "front"),
+    ("flat_from_hedge", "front"),
     ("term_flat_q", "front"),
     ("term_flat_fwd", "front"),
     ("surface_fwd", "front"),
     ("term_opt_tail", "front"),
-    ("flat_active", "far"),
+    ("flat_from_hedge", "far"),
     ("term_flat_q", "far"),
+    # Carry off the longest listed contract, delta in the front month: the
+    # baseline's hedge leg, so their paired difference is the carry contract.
+    ("flat_from_far", "front"),
 )
 QUICK_CELLS: Tuple[Tuple[str, str], ...] = (
-    ("flat_active", "front"),
+    ("flat_from_hedge", "front"),
     ("term_flat_q", "front"),
-    ("flat_active", "far"),
+    ("flat_from_hedge", "far"),
 )
 QUICK_INCEPTIONS = 4
 DEFAULT_COST_BP = 1.0  # all-in proportional cost per side, bp of traded notional
@@ -194,6 +210,7 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
             round_contracts=bool(task["round_contracts"]),
         ),
         roll_policy=C.HEDGE_POLICIES[task["hedge"]](),
+        dividend_roll_policy=C.dividend_roll_policy_for(C.Q_MODELS[task["model"]]),
         transaction_cost_model=cost_model,
         product_quantity=C.PRODUCT_QUANTITY,
         underlying=C.UNDERLYING_NAME,
