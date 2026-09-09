@@ -191,9 +191,10 @@ def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool
     out_dir = Path(out_dir)
     fingerprint = config_fingerprint(config, paths)
     config_path = out_dir / "config.json"
-    if resume and config_path.exists() and C.read_json(config_path).get("fingerprint") == fingerprint:
-        previous = C.read_json(out_dir / "run.json")
-        return {**previous, "skipped": True}
+    run_path = out_dir / "run.json"
+    if (resume and config_path.exists() and run_path.exists()
+            and C.read_json(config_path).get("fingerprint") == fingerprint):
+        return {**C.read_json(run_path), "skipped": True}
     started = time.perf_counter()
     cell = config.metadata.get("model") + "__" + config.metadata.get("hedge")
     try:
@@ -204,7 +205,7 @@ def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool
             "seconds": time.perf_counter() - started, "gate": failure.report.as_dict(), "oracle": [],
             "oracle_tolerances": oracle_tolerances(config), "skipped": False, "failed": True,
         }
-        C.write_json(out_dir / "run.json", run)
+        C.write_json(run_path, run)
         return run
     results.to_dir(out_dir)
     C.write_json(config_path, {
@@ -219,7 +220,11 @@ def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool
     tolerances = oracle_tolerances(config)
     reports = []
     for i in oracle_paths:
-        report = run_oracle(single, paths.take([int(i)]), 0, **tolerances)
+        try:
+            report = run_oracle(single, paths.take([int(i)]), 0, **tolerances)
+        except GateFailure as failure:          # the one-path re-run has its own gate and reservoir
+            reports.append({"path": int(i), "passed": False, "gate": failure.report.as_dict()})
+            continue
         reports.append({"path": int(i), **report.as_dict()})
     run = {
         "cell": cell, "provider": config.metadata.get("provider"),
@@ -227,7 +232,7 @@ def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool
         "engine_calls": results.manifest["engine_calls"], "solves": results.manifest.get("solves", 0),
         "oracle": reports, "oracle_tolerances": tolerances, "skipped": False, "failed": False,
     }
-    C.write_json(out_dir / "run.json", run)
+    C.write_json(run_path, run)
     return run
 
 

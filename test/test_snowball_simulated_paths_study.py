@@ -296,3 +296,30 @@ def test_a_run_that_misses_its_gate_is_recorded_not_raised(tiny_fleet, tmp_path)
     assert run["failed"] and not run["skipped"] and not run["gate"]["passed"] and run["oracle"] == []
     assert not (tmp_path / "strict" / "manifest.json").exists() and (tmp_path / "strict" / "run.json").exists()
     assert S02.parse_args(["--provider", "exact"]).provider == "exact"
+
+
+def test_an_oracle_path_whose_rerun_misses_the_gate_is_a_failed_oracle_entry(tiny_fleet, tmp_path, monkeypatch):
+    """The oracle re-runs the ensemble on one path with its own gate; a failure there is recorded, not raised."""
+    from quantark.backtest.simulation.pricing.base import GateFailure, GateReport
+
+    out, _, coupon = tiny_fleet
+    bootstrap, _, _ = S01.load_paths(out)
+    terms = fixture_terms(bootstrap.dates)
+    product = C.Q.build_product(terms, float(bootstrap.spot[0, 0]), coupon.coupon)
+    report = GateReport(mode="ladder", sampled=5, max_pv_gap_bp=19.1, max_delta_gap_hands=0.6, passed=False)
+
+    def failing_oracle(*args, **kwargs):
+        raise GateFailure(report)
+
+    monkeypatch.setattr(S02, "run_oracle", failing_oracle)
+    cfg = S02.cell_config(product, C.MODELS[0], "front", provider="ladder", gate_override=FIXTURE_LADDER_GATE, **CELL)
+    run = S02.run_cell(bootstrap.take([1]), cfg, tmp_path / "oracle_gate", resume=False, oracle_paths=[0])
+    assert not run["failed"] and run["gate"]["passed"]
+    assert run["oracle"] == [{"path": 0, "passed": False, "gate": report.as_dict()}]
+    assert (tmp_path / "oracle_gate" / "run.json").exists()
+    # resume needs run.json as well as a matching config.json: a run that died in its oracle is re-run, not skipped
+    (tmp_path / "oracle_gate" / "run.json").unlink()
+    monkeypatch.setattr(S02, "run_oracle", lambda *a, **k: (_ for _ in ()).throw(AssertionError("oracle should not run")))
+    monkeypatch.setattr(S02, "run_ensemble", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("re-run")))
+    with pytest.raises(RuntimeError, match="re-run"):
+        S02.run_cell(bootstrap.take([1]), cfg, tmp_path / "oracle_gate", resume=True, oracle_paths=[])
