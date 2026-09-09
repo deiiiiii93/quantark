@@ -57,9 +57,21 @@ and the residual of each hedge follows by substitution:
 | bucket-exact | `h_i = -B_i/m` | `Δ_F dS`, whatever the chain does |
 | bucket with the tail folded into the far contract | as above, `h_n -= Δ_F S/(m F_n)` | `Δ_F (dS - (S/F_n) dF_n)`: the far basis move, scaled by `Δ_F` |
 
-In `(S, q)` coordinates the bucket hedge zeroes every basis column and leaves
-`Δ_F` of spot. `Δ_F` is a property of the tail convention, not of the
-product:
+In `(S, q)` coordinates the hedged book's basis exposure per node is
+
+    ρ_i^book = ρ_i - h_i m F_i T_i          (bp per unit of q_i; ρ_i = -B_i F_i T_i)
+
+which the bucket hedge zeroes node by node by construction, because
+`h_i = -B_i/m` gives `h_i m F_i T_i = -B_i F_i T_i = ρ_i`. A single-contract
+hedge leaves every node's `ρ_i` untouched except its own tenor, where it
+adds `-h_j m F_j T_j`. On the worked date, front-hedged: +3.4 / 0 / +29.4 /
+−92.6 bp per 1% on the four nodes; far-hedged: 0 / 0 / +29.4 / −56.3;
+bucket-hedged: 0 / 0 / 0 / 0. This is the **hedged carry exposure**, and it
+is recorded daily for every cell (section 4.5) so the basis mitigation is
+measured directly rather than inferred from P&L.
+
+The bucket hedge zeroes every basis column and leaves `Δ_F` of spot. `Δ_F`
+is a property of the tail convention, not of the product:
 
 - flat-forward-carry tail: `F(T) = F_n (F_n/F_{n-1})^{(T-T_n)/(T_n-T_{n-1})}`,
   spot-free, so `Δ_F ≈ 0` and bucket-exact is a complete first-order hedge.
@@ -106,7 +118,10 @@ In scope:
   multi-product book like delta.
 - Two new recorded frames: `hedge_legs` (one row per day per leg) and
   `hedge_attribution` (one row per day, the first-order decomposition of the
-  hedged P&L).
+  hedged P&L and the hedged carry exposure).
+- The hedged carry exposure recorded for EVERY cell, flat and term, behind
+  an opt-in flag, so the single-contract cells carry the same measure the
+  bucket cells are judged by.
 - Two study cells, `term_flat_q__buckets` and `term_flat_fwd__buckets`, and
   the stage 03 measures and README text to read them.
 
@@ -212,9 +227,30 @@ currency per index point. The engine sums `B_i · quantity` across replays
 exactly as it sums delta, on the same day-loop pass, using each replay's
 own pricing engine (vol-model days included).
 
-Cost: two prices per listed node per day on top of today's base, delta and
-gamma prices. Four nodes take the QUAD study run from about three prices a
-day to eleven, roughly 330 s per run against 90 s.
+**Carry exposure recording.** A replay-config flag
+`record_carry_exposure: bool = False` (both configs, appended last) turns on
+the daily measurement; a bucket strategy forces it on because it needs the
+buckets anyway. What is computed depends on the carry family:
+
+- term source (`futures_curve`, `surface_forwards`): the buckets above,
+  every day, whether or not the strategy uses them. Per node,
+  `ρ_i = -B_i F_i T_i`; the product's parallel carry sensitivity is
+  `Σ ρ_i`. The book's per-node exposure is `-h_i m F_i T_i` with the
+  market `F_i`.
+- flat source (`None` / `active_contract`): one central bump of the flat
+  yield (two prices) gives the product's `ρ_flat`; the book's exposure to
+  the same flat yield is `-Σ_i h_i m F_i T_i` over its legs with market
+  `F_i` and each leg's own tenor. The flat yield is a one-parameter fit to
+  the chain, and its fit error is basis risk the model cannot see: the RMS
+  over listed contracts of `ln(S e^{(r-q)T_i} / F_i)` is recorded as
+  `flat_fit_rmse_bp` (stage 01's `fwd_err_rms_flat`, now daily and
+  per cell).
+
+Cost: two prices per listed node per day under a term source on top of
+today's base, delta and gamma prices, so four nodes take a QUAD study run
+from about three prices a day to eleven, roughly 330 s per run against
+90 s. Under a flat source it is two prices a day, roughly 150 s per run.
+With the flag off nothing changes and the goldens are untouched.
 
 ### 4.4 Engine day loop (`engine.py`)
 
@@ -245,21 +281,43 @@ Unchanged for single-contract hedges except that `hedge_position` is now
 
 `HEDGE_LEG_COLUMNS`: `date, contract, maturity, price, multiplier,
 bucket, bucket_hands, target_contracts, held_contracts, trade_contracts,
-leg_mtm, is_tail_node`. Written for every futures run (one leg for a
+leg_mtm, is_tail_node, product_rhoq_bp, hedge_rhoq_bp, net_rhoq_bp`. Written for every futures run (one leg for a
 single-contract hedge; `bucket` and `bucket_hands` are NaN when no buckets
 were computed). `is_tail_node` is true for the last curve node when any
 alive product's maturity lies beyond it, the same flag the library bucket
 function sets.
 
-`HEDGE_ATTRIBUTION_COLUMNS`: `date, product_dv, hedge_pnl, book_dv,
-linear_spot, linear_basis, gamma_term, remainder, delta_q_hands,
-delta_f_hands, identity_residual_hands, gross_contracts, net_spot_hands`.
-One row per day, using the previous day's sensitivities and holdings
-(what the book carried overnight): `linear_spot = Δ_F ΔS`,
-`linear_basis = Σ (B_i + m h_i) ΔF_i`, `gamma_term = ½ Γ ΔS²`, `remainder =
+`HEDGE_ATTRIBUTION_COLUMNS`: `date, carry_family, product_dv, hedge_pnl,
+book_dv, linear_spot, linear_basis, gamma_term, remainder, delta_q_hands,
+delta_f_hands, identity_residual_hands, gross_contracts, net_spot_hands,
+product_rhoq_bp, hedge_rhoq_bp, net_rhoq_bp, net_rhoq_gross_bp,
+flat_fit_rmse_bp`. One row per day whenever `record_carry_exposure` is on;
+empty otherwise.
+
+P&L attribution uses the previous day's sensitivities and holdings (what
+the book carried overnight), `gamma_term = ½ Γ ΔS²`, and `remainder =
 book_dv - linear_spot - linear_basis - gamma_term` (theta, vega, higher
-order). Written only when buckets exist; empty otherwise. The first day and
-days where the chain's contract set changed have NaN linear terms.
+order). The linear terms are defined per carry family, named in
+`carry_family`:
+
+- `term`: `linear_spot = Δ_F ΔS`, `linear_basis = Σ (B_i + m h_i) ΔF_i`.
+- `flat`: `linear_spot = Δ_q ΔS + hedge_pnl` (the delta-hedged residual)
+  and `linear_basis = ρ_flat Δq_flat` (the re-mark from the flat yield
+  moving, which is what jumps on roll days).
+
+The first day, and days where the chain's contract set changed, have NaN
+linear terms.
+
+Carry exposure, all in bp of notional per one percentage point of yield,
+measured on the day's own sensitivities and the book AFTER rebalancing:
+`product_rhoq_bp` is `Σ ρ_i` (term) or `ρ_flat` (flat); `hedge_rhoq_bp` is
+the book's exposure to the same shift; `net_rhoq_bp` is their sum;
+`net_rhoq_gross_bp` is `Σ_i |ρ_i^book|` over nodes (term only, NaN for
+flat), which is the number a bucket hedge must drive to zero up to
+rounding while a single-contract hedge cannot; `flat_fit_rmse_bp` is the
+flat family's chain-fit error (NaN for term). `hedge_legs` carries the
+per-node pieces, `product_rhoq_bp`, `hedge_rhoq_bp` and `net_rhoq_bp`, so
+the four-node table above is reproducible for any day of any cell.
 
 `STATE_COLUMNS`, `TRADE_COLUMNS`, `REBALANCE_COLUMNS`, `GREEK_COLUMNS`:
 unchanged.
@@ -296,13 +354,22 @@ The simulation engine's config rejects the strategy type outright.
   two new frames. The resume fingerprint is unchanged for existing cells.
 - `03_aggregate_and_report.py`: new measures from `hedge_attribution` —
   per-run std of `linear_basis`, `linear_spot`, `gamma_term`, `remainder`,
-  and mean `gross_contracts` — so the daily std is decomposed, not just
-  compared. New pairs: each bucket cell against its own model's `__front`
-  and `__far` cells, and `term_flat_fwd__buckets - term_flat_q__buckets`
-  (the tail convention measured on P&L). Report section and README results
-  text.
-- Runtime: 58 new runs at roughly 330 s each, about 1.4 hours at four
-  workers; the 232 existing runs resume.
+  mean `gross_contracts`, and the carry-exposure summary: mean
+  `|net_rhoq_bp|`, mean `net_rhoq_gross_bp` (term cells), mean
+  `flat_fit_rmse_bp` (flat cells), each against the unhedged
+  `|product_rhoq_bp|` so mitigation reads as a fraction. New pairs: each
+  bucket cell against its own model's `__front` and `__far` cells, and
+  `term_flat_fwd__buckets - term_flat_q__buckets` (the tail convention
+  measured on P&L). Report section and README results text.
+- Every cell runs with `record_carry_exposure=True`, so the flag enters
+  the resume fingerprint and the whole fleet re-prices: 10 cells × 29
+  inceptions = 290 runs, roughly 6.5 hours at four workers (term cells
+  ~330 s, flat cells ~150 s). The current 232 runs stay on disk under the
+  old fingerprint until the new ones replace them. If that cost is not
+  wanted up front, the flag can be restricted to the two bucket cells and
+  their four direct comparators (`term_flat_q__front`, `term_flat_q__far`,
+  `term_flat_fwd__front`, `flat_from_hedge__front`), 174 runs, at the
+  price of the other four cells lacking the measure.
 
 ## 6. Testing
 
@@ -319,9 +386,13 @@ Library, all TDD:
   reproduce the closed-form tail derivatives `1 + (T-T_n)/ΔT` and
   `-(T-T_n)/ΔT` at a tail tenor to three decimals.
 - Strategy: with `tail_residual="none"` the book's `net_spot_hands` equals
-  `Δ_F`; with `"far"` it is zero to rounding; every leg's basis exposure
-  `ρ_i + m h_i F_i T_i` is zero before rounding; a node that leaves the
-  curve gets a zero target.
+  `Δ_F`; with `"far"` it is zero to rounding; every node's recorded
+  `net_rhoq_bp` is zero before rounding and bounded by one contract's
+  `m F_i T_i` after it; a node that leaves the curve gets a zero target.
+- Carry exposure under a flat source: `product_rhoq_bp` equals the greeks
+  calculator's rhoq on the fixture; `flat_fit_rmse_bp` equals stage 01's
+  `fwd_err_rms_flat` on the same chain; a single-contract book's
+  `hedge_rhoq_bp` is `-h m F_j T_j` to the last ulp.
 - Attribution: on a two-day fixture with a hand-built chain move, the
   recorded `linear_spot + linear_basis` equals the algebraic residual from
   section 2 for the hedge held.
@@ -342,6 +413,10 @@ Study:
   `linear_basis` and loses on cost is a real finding, not a failure.
 - **Whole-contract rounding across four legs** can leave up to two hands
   of net spot open. `net_spot_hands` is recorded so this is visible.
+- **The carry-exposure check is the strategy's own audit.** A bucket
+  cell whose `net_rhoq_gross_bp` is not within rounding of zero on every
+  day has a bug, whatever its P&L says; that check runs before any P&L is
+  read.
 - **The tail convention.** Under flat-q the bucket cell is expected to
   land near `term_flat_q__far` (the fold makes them nearly the same
   book). Under flat-forward-carry it is expected to remove most of
