@@ -317,9 +317,40 @@ def test_an_oracle_path_whose_rerun_misses_the_gate_is_a_failed_oracle_entry(tin
     assert not run["failed"] and run["gate"]["passed"]
     assert run["oracle"] == [{"path": 0, "passed": False, "gate": report.as_dict()}]
     assert (tmp_path / "oracle_gate" / "run.json").exists()
-    # resume needs run.json as well as a matching config.json: a run that died in its oracle is re-run, not skipped
+    # A run that died in its oracle has results and a matching config but no run.json: resume
+    # reuses the persisted results and runs only the oracle, never the ensemble again.
     (tmp_path / "oracle_gate" / "run.json").unlink()
-    monkeypatch.setattr(S02, "run_oracle", lambda *a, **k: (_ for _ in ()).throw(AssertionError("oracle should not run")))
-    monkeypatch.setattr(S02, "run_ensemble", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("re-run")))
-    with pytest.raises(RuntimeError, match="re-run"):
-        S02.run_cell(bootstrap.take([1]), cfg, tmp_path / "oracle_gate", resume=True, oracle_paths=[])
+    monkeypatch.setattr(S02, "run_ensemble", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ensemble re-run")))
+    calls = []
+    monkeypatch.setattr(S02, "run_oracle", lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(GateFailure(report)))
+    again = S02.run_cell(bootstrap.take([1]), cfg, tmp_path / "oracle_gate", resume=True, oracle_paths=[0])
+    assert len(calls) == 1 and not again["skipped"] and again["resumed_results"] and not again["failed"]
+    assert (tmp_path / "oracle_gate" / "run.json").exists()
+
+
+def test_a_failed_run_is_skipped_on_resume(tiny_fleet, tmp_path):
+    out, _, coupon = tiny_fleet
+    bootstrap, _, _ = S01.load_paths(out)
+    product = C.Q.build_product(fixture_terms(bootstrap.dates), float(bootstrap.spot[0, 0]), coupon.coupon)
+    strict = dict(sample_states=64, pv_tolerance_bp=0.0, delta_tolerance_hands=0.0)
+    cfg = S02.cell_config(product, C.MODELS[0], "front", provider="life_surface", gate_override=strict, **CELL)
+    first = S02.run_cell(bootstrap.take([1]), cfg, tmp_path / "strict", resume=False, oracle_paths=[])
+    assert first["failed"] and (tmp_path / "strict" / "config.json").exists()
+    again = S02.run_cell(bootstrap.take([1]), cfg, tmp_path / "strict", resume=True, oracle_paths=[])
+    assert again["failed"] and again["skipped"]
+
+
+def test_the_cli_runs_every_cell_of_the_quick_grid(tiny_fleet, tmp_path):
+    """Stage 02's main over two cells on exact QUAD: every run gets a run.json (the oracle list survives the first cell)."""
+    import shutil
+    out, _, _ = tiny_fleet
+    shutil.copytree(out / "paths", tmp_path / "paths")
+    rc = S02.main(["--out-dir", str(tmp_path), "--provider", "exact", "--cells", f"{C.MODELS[0]}:front", "term_flat_q:front",
+                   "--check-paths", "0", "--oracle-paths", "1", "--quad-grid", "101",
+                   "--maturity-months", "1", "--lockout-months", "1"])
+    assert rc == 0
+    for name in (C.BASELINE_CELL, C.BASELINE_CELL + "__stress", "term_flat_q__front", "term_flat_q__front__stress"):
+        run = C.read_json(tmp_path / "cells" / name / "run.json")
+        assert not run["failed"] and run["gate"]["max_pv_gap_bp"] == 0.0, name
+    fleet = C.read_json(tmp_path / "fleet_manifest.json")
+    assert len(fleet["runs"]) == 4 and fleet["runs"]["term_flat_q__front"]["oracle"][0]["passed"]

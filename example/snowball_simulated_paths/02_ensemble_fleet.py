@@ -52,6 +52,7 @@ from quantark.backtest.simulation import (  # noqa: E402
 )
 from quantark.backtest.simulation.hedge import day_active_contract  # noqa: E402
 from quantark.backtest.simulation.pricing.base import GateFailure  # noqa: E402
+from quantark.backtest.simulation.results import EnsembleResults  # noqa: E402
 from quantark.backtest.strategy.futures_delta_strategy import AutocallableDeltaHedgeStrategy  # noqa: E402
 from quantark.backtest.transaction_costs import ProportionalCostModel, ZeroCostModel  # noqa: E402
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote  # noqa: E402
@@ -180,42 +181,55 @@ def oracle_tolerances(config: EnsembleConfig) -> Dict[str, float]:
     }
 
 
-def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool,
-             oracle_paths: Sequence[int]) -> Dict[str, Any]:
-    """Run one cell over ``paths``, persist it, spot-check single paths against the replay engine.
-
-    A run that misses its gate produces no results (the provider's claim
-    failed); it is recorded in ``run.json`` with ``failed`` set and the
-    fleet carries on with the next run.
-    """
-    out_dir = Path(out_dir)
-    fingerprint = config_fingerprint(config, paths)
-    config_path = out_dir / "config.json"
-    run_path = out_dir / "run.json"
-    if (resume and config_path.exists() and run_path.exists()
-            and C.read_json(config_path).get("fingerprint") == fingerprint):
-        return {**C.read_json(run_path), "skipped": True}
-    started = time.perf_counter()
-    cell = config.metadata.get("model") + "__" + config.metadata.get("hedge")
-    try:
-        results = run_ensemble(config, paths)
-    except GateFailure as failure:
-        run = {
-            "cell": cell, "provider": config.metadata.get("provider"), "n_paths": paths.n_paths,
-            "seconds": time.perf_counter() - started, "gate": failure.report.as_dict(), "oracle": [],
-            "oracle_tolerances": oracle_tolerances(config), "skipped": False, "failed": True,
-        }
-        C.write_json(run_path, run)
-        return run
-    results.to_dir(out_dir)
-    C.write_json(config_path, {
+def _config_record(config: EnsembleConfig, paths: MarketPath, fingerprint: str) -> Dict[str, Any]:
+    return {
         "fingerprint": fingerprint, "metadata": config.metadata, "mode": config.pricing.mode,
         "gate": {"sample_states": config.pricing.gate.sample_states, "pv_tolerance_bp": config.pricing.gate.pv_tolerance_bp,
                  "delta_tolerance_hands": config.pricing.gate.delta_tolerance_hands},
         "steps": {"spot_step": config.pricing.spot_step, "vol_step": config.pricing.vol_step, "q_step": config.pricing.q_step},
         "workers": config.workers, "batch_paths": config.batch_paths, "n_paths": paths.n_paths,
         "path_fingerprint": paths.fingerprint(),
-    })
+    }
+
+
+def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool,
+             oracle_paths: Sequence[int]) -> Dict[str, Any]:
+    """Run one cell over ``paths``, persist it, spot-check single paths against the replay engine.
+
+    A run that misses its gate produces no results (the provider's claim
+    failed); it is recorded in ``run.json`` with ``failed`` set and the
+    fleet carries on with the next run.  With ``resume``, a run whose
+    ``config.json`` fingerprint matches is skipped when its ``run.json``
+    exists (a failed one included), and reuses its persisted results and
+    runs only the oracle when the results exist but ``run.json`` does not
+    (a run interrupted in its oracle).
+    """
+    out_dir = Path(out_dir)
+    fingerprint = config_fingerprint(config, paths)
+    config_path, run_path = out_dir / "config.json", out_dir / "run.json"
+    matches = resume and config_path.exists() and C.read_json(config_path).get("fingerprint") == fingerprint
+    if matches and run_path.exists():
+        return {**C.read_json(run_path), "skipped": True}
+    started = time.perf_counter()
+    cell = config.metadata.get("model") + "__" + config.metadata.get("hedge")
+    resumed = bool(matches and (out_dir / "manifest.json").exists())
+    if resumed:
+        results = EnsembleResults.from_dir(out_dir)
+    else:
+        try:
+            results = run_ensemble(config, paths)
+        except GateFailure as failure:
+            run = {
+                "cell": cell, "provider": config.metadata.get("provider"), "n_paths": paths.n_paths,
+                "seconds": time.perf_counter() - started, "gate": failure.report.as_dict(), "oracle": [],
+                "oracle_tolerances": oracle_tolerances(config), "skipped": False, "failed": True,
+                "resumed_results": False,
+            }
+            C.write_json(config_path, _config_record(config, paths, fingerprint))
+            C.write_json(run_path, run)
+            return run
+        results.to_dir(out_dir)
+        C.write_json(config_path, _config_record(config, paths, fingerprint))
     single = replace(config, workers=1, batch_paths=None)
     tolerances = oracle_tolerances(config)
     reports = []
@@ -231,6 +245,7 @@ def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool
         "n_paths": paths.n_paths, "seconds": time.perf_counter() - started, "gate": results.manifest["gate"],
         "engine_calls": results.manifest["engine_calls"], "solves": results.manifest.get("solves", 0),
         "oracle": reports, "oracle_tolerances": tolerances, "skipped": False, "failed": False,
+        "resumed_results": resumed,
     }
     C.write_json(run_path, run)
     return run
@@ -304,9 +319,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             runs[name] = run
             state = "skipped" if run["skipped"] else f"{run['seconds']:.0f}s"
             gate = run["gate"]
-            oracle = ("–" if not run["oracle"] else "ok" if all(r["passed"] for r in run["oracle"]) else "FAIL")
+            oracle_state = ("–" if not run["oracle"] else "ok" if all(r["passed"] for r in run["oracle"]) else "FAIL")
             print(f"  {name:32s} {state:>8s}  gate {gate['max_pv_gap_bp']:.2f} bp / {gate['max_delta_gap_hands']:.2f} hands "
-                  f"({'ok' if gate['passed'] else 'FAIL, no results'})  oracle {oracle}", flush=True)
+                  f"({'ok' if gate['passed'] else 'FAIL, no results'})  oracle {oracle_state}", flush=True)
     C.write_json(args.out_dir / "fleet_manifest.json", {
         "coupon": coupon.summary(), "terms": terms.summary(), "paths": paths_manifest, "runs": runs,
         "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
