@@ -162,7 +162,7 @@ def test_every_cell_run_is_persisted_gated_and_oracle_checked(tiny_fleet):
     from quantark.backtest.simulation.results import EnsembleResults
 
     for name, run in runs.items():
-        assert not run["skipped"] and run["gate"]["passed"], name
+        assert not run["skipped"] and not run["failed"] and run["gate"]["passed"], name
         results = EnsembleResults.from_dir(out / "cells" / name)
         assert results.manifest["mode"] == ("ladder" if name.endswith("ladder_quad") else "life_surface")
         assert (out / "cells" / name / "config.json").exists()
@@ -282,3 +282,17 @@ def test_engine_config_rejects_a_model_whose_carry_contract_is_not_the_hedge(mon
     monkeypatch.setitem(C.Q.Q_MODELS, "flat_from_far_fake", far)
     with pytest.raises(ValidationError, match="carry contract"):
         C.engine_config("flat_from_far_fake", "quad", quad_grid=101)
+
+
+def test_a_run_that_misses_its_gate_is_recorded_not_raised(tiny_fleet, tmp_path):
+    """The fleet records a failed gate in run.json and persists no results, then carries on with the next run."""
+    out, _, coupon = tiny_fleet
+    bootstrap, _, _ = S01.load_paths(out)
+    terms = fixture_terms(bootstrap.dates)
+    product = C.Q.build_product(terms, float(bootstrap.spot[0, 0]), coupon.coupon)
+    strict = dict(sample_states=64, pv_tolerance_bp=0.0, delta_tolerance_hands=0.0)
+    cfg = S02.cell_config(product, C.MODELS[0], "front", provider="life_surface", gate_override=strict, **CELL)
+    run = S02.run_cell(bootstrap.take([1]), cfg, tmp_path / "strict", resume=False, oracle_paths=[0])
+    assert run["failed"] and not run["skipped"] and not run["gate"]["passed"] and run["oracle"] == []
+    assert not (tmp_path / "strict" / "manifest.json").exists() and (tmp_path / "strict" / "run.json").exists()
+    assert S02.parse_args(["--provider", "exact"]).provider == "exact"

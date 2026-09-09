@@ -51,6 +51,7 @@ from quantark.backtest.simulation import (  # noqa: E402
     dividend_yield_for_day, run_ensemble, run_oracle,
 )
 from quantark.backtest.simulation.hedge import day_active_contract  # noqa: E402
+from quantark.backtest.simulation.pricing.base import GateFailure  # noqa: E402
 from quantark.backtest.strategy.futures_delta_strategy import AutocallableDeltaHedgeStrategy  # noqa: E402
 from quantark.backtest.transaction_costs import ProportionalCostModel, ZeroCostModel  # noqa: E402
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote  # noqa: E402
@@ -181,7 +182,12 @@ def oracle_tolerances(config: EnsembleConfig) -> Dict[str, float]:
 
 def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool,
              oracle_paths: Sequence[int]) -> Dict[str, Any]:
-    """Run one cell over ``paths``, persist it, spot-check single paths against the replay engine."""
+    """Run one cell over ``paths``, persist it, spot-check single paths against the replay engine.
+
+    A run that misses its gate produces no results (the provider's claim
+    failed); it is recorded in ``run.json`` with ``failed`` set and the
+    fleet carries on with the next run.
+    """
     out_dir = Path(out_dir)
     fingerprint = config_fingerprint(config, paths)
     config_path = out_dir / "config.json"
@@ -189,7 +195,17 @@ def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool
         previous = C.read_json(out_dir / "run.json")
         return {**previous, "skipped": True}
     started = time.perf_counter()
-    results = run_ensemble(config, paths)
+    cell = config.metadata.get("model") + "__" + config.metadata.get("hedge")
+    try:
+        results = run_ensemble(config, paths)
+    except GateFailure as failure:
+        run = {
+            "cell": cell, "provider": config.metadata.get("provider"), "n_paths": paths.n_paths,
+            "seconds": time.perf_counter() - started, "gate": failure.report.as_dict(), "oracle": [],
+            "oracle_tolerances": oracle_tolerances(config), "skipped": False, "failed": True,
+        }
+        C.write_json(out_dir / "run.json", run)
+        return run
     results.to_dir(out_dir)
     C.write_json(config_path, {
         "fingerprint": fingerprint, "metadata": config.metadata, "mode": config.pricing.mode,
@@ -206,10 +222,10 @@ def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool
         report = run_oracle(single, paths.take([int(i)]), 0, **tolerances)
         reports.append({"path": int(i), **report.as_dict()})
     run = {
-        "cell": config.metadata.get("model") + "__" + config.metadata.get("hedge"), "provider": config.metadata.get("provider"),
+        "cell": cell, "provider": config.metadata.get("provider"),
         "n_paths": paths.n_paths, "seconds": time.perf_counter() - started, "gate": results.manifest["gate"],
         "engine_calls": results.manifest["engine_calls"], "solves": results.manifest.get("solves", 0),
-        "oracle": reports, "oracle_tolerances": tolerances, "skipped": False,
+        "oracle": reports, "oracle_tolerances": tolerances, "skipped": False, "failed": False,
     }
     C.write_json(out_dir / "run.json", run)
     return run
@@ -231,7 +247,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", type=Path, default=C.DEFAULT_OUT_DIR)
     parser.add_argument("--cells", nargs="+", default=None, help="model:hedge, default = the full grid")
-    parser.add_argument("--provider", choices=("life_surface", "ladder"), default="life_surface")
+    parser.add_argument("--provider", choices=PROVIDERS, default="life_surface",
+                        help="the bootstrap and stress runs' provider; exact = QUAD repricing, no gate question")
     parser.add_argument("--check-paths", type=int, default=C.CHECK_PATHS, help="QUAD ladder subset (0 = none)")
     parser.add_argument("--exact-paths", type=int, default=0, help="exact QUAD repricing subset (0 = none)")
     parser.add_argument("--oracle-paths", type=int, default=C.ORACLE_PATHS)
@@ -282,9 +299,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             runs[name] = run
             state = "skipped" if run["skipped"] else f"{run['seconds']:.0f}s"
             gate = run["gate"]
+            oracle = ("–" if not run["oracle"] else "ok" if all(r["passed"] for r in run["oracle"]) else "FAIL")
             print(f"  {name:32s} {state:>8s}  gate {gate['max_pv_gap_bp']:.2f} bp / {gate['max_delta_gap_hands']:.2f} hands "
-                  f"({'ok' if gate['passed'] else 'FAIL'})  oracle {'ok' if all(r['passed'] for r in run['oracle']) else 'FAIL'}",
-                  flush=True)
+                  f"({'ok' if gate['passed'] else 'FAIL, no results'})  oracle {oracle}", flush=True)
     C.write_json(args.out_dir / "fleet_manifest.json", {
         "coupon": coupon.summary(), "terms": terms.summary(), "paths": paths_manifest, "runs": runs,
         "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},

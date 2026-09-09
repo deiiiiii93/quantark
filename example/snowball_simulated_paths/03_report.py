@@ -135,11 +135,10 @@ def aggregate(out_dir, *, es_level: float, historical_dir) -> Dict[str, Any]:
                 surface = bootstrap[name[: -len(suffix)]].take(range(r.n_paths))
                 agg["engine_check"].append({"cell": name[: -len(suffix)], "check": suffix[2:], "n": r.n_paths,
                                             "measures": _paired(surface, r)})
-    for name in cells:
-        run_path = out_dir / "cells" / name / "run.json"
-        if run_path.exists():
-            run = C.read_json(run_path)
-            agg["gates"][name] = {**run["gate"], "oracle": run.get("oracle", []), "seconds": run.get("seconds")}
+    for run_path in sorted((out_dir / "cells").glob("*/run.json")):     # failed runs have a run.json and no results
+        run = C.read_json(run_path)
+        agg["gates"][run_path.parent.name] = {**run["gate"], "oracle": run.get("oracle", []),
+                                              "seconds": run.get("seconds"), "failed": bool(run.get("failed"))}
     agg["historical"] = _historical(historical_dir, bootstrap)
     return agg
 
@@ -284,7 +283,7 @@ def _gate_section(agg: Dict[str, Any]) -> str:
     for name, g in agg["gates"].items():
         oracle = g.get("oracle") or []
         rows.append([html.escape(name), html.escape(str(g.get("mode"))), _fmt(g.get("sampled")), _fmt(g.get("max_pv_gap_bp"), 2),
-                     _fmt(g.get("max_delta_gap_hands"), 2), "pass" if g.get("passed") else "FAIL", _fmt(len(oracle)),
+                     _fmt(g.get("max_delta_gap_hands"), 2), "pass" if g.get("passed") else "FAIL (no results)", _fmt(len(oracle)),
                      ("pass" if all(r.get("passed") for r in oracle) else "FAIL") if oracle else "–", _fmt(g.get("seconds"), 0)])
     return ("<h2>Gates and oracle spot checks</h2>"
             "<p>The gate reprices a reservoir of visited states exactly and reports the worst gap; the oracle "
