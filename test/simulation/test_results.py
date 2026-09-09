@@ -158,3 +158,51 @@ def test_take_keeps_the_chosen_paths_and_renumbers_the_logs(results):
     assert sub.summary.drop(columns="path").iloc[1].equals(results.summary.drop(columns="path").iloc[2])
     with pytest.raises(ValidationError):
         results.take([results.n_paths])
+
+
+from quantark.backtest.simulation.results import EVENT_COLUMNS, jsonable  # noqa: E402,F401
+
+
+def _clean_events(events):
+    out = []
+    for e in events:
+        d = dict(e.__dict__)
+        d["barrier"] = None if np.isnan(d["barrier"]) else d["barrier"]
+        out.append(d)
+    return out
+
+
+def test_results_round_trip_through_a_directory(results, tmp_path):
+    out = results.to_dir(tmp_path / "run")
+    assert {p.name for p in out.iterdir()} == {"cube.npz", "trades.csv", "events.csv", "summary.csv", "manifest.json"}
+    loaded = EnsembleResults.from_dir(out)
+    for name in ("total_pnl", "product_mtm", "delta", "spot", "pending_receivable_pv"):
+        assert np.array_equal(getattr(loaded.cube, name), getattr(results.cube, name), equal_nan=True), name
+    assert np.array_equal(loaded.cube.alive, results.cube.alive)
+    assert loaded.cube.active_contract == results.cube.active_contract and loaded.cube.dates.equals(results.cube.dates)
+    assert np.array_equal(loaded.last_day, results.last_day)
+    assert np.array_equal(loaded.initial_book_value, results.initial_book_value)
+    for i in range(results.n_paths):
+        pd.testing.assert_frame_equal(loaded.path_states(i), results.path_states(i))
+        pd.testing.assert_frame_equal(loaded.path_trades(i), results.path_trades(i))
+    assert _clean_events(loaded.events) == _clean_events(results.events)
+    assert loaded.manifest == jsonable(results.manifest)
+    pd.testing.assert_frame_equal(loaded.summary, results.summary)
+    assert loaded.paired(results).describe("terminal_pnl_bp")["mean"] == 0.0
+
+
+def test_from_dir_fails_closed_on_a_missing_file_or_another_format(results, tmp_path):
+    out = results.to_dir(tmp_path / "run")
+    (out / "events.csv").unlink()
+    with pytest.raises(ValidationError):
+        EnsembleResults.from_dir(out)
+    out = results.to_dir(tmp_path / "other")
+    (out / "manifest.json").write_text('{"results_format": 99, "manifest": {}}')
+    with pytest.raises(ValidationError):
+        EnsembleResults.from_dir(out)
+
+
+def test_jsonable_handles_numpy_nan_and_dates():
+    value = {"a": np.float64(1.5), "b": float("nan"), "c": np.int64(3), "d": pd.Timestamp("2024-01-02"),
+             "e": [np.bool_(True), {"f": np.array([1, 2])}]}
+    assert jsonable(value) == {"a": 1.5, "b": None, "c": 3, "d": "2024-01-02T00:00:00", "e": [True, {"f": [1, 2]}]}

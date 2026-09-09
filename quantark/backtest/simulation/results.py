@@ -6,6 +6,7 @@ persist a run.  Nothing here prices anything.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import math
 from dataclasses import dataclass, field
@@ -39,6 +40,33 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
 ) + MEASURE_COLUMNS
 QUANTILES = (0.01, 0.05, 0.25, 0.50, 0.75, 0.95, 0.99)
 DISTRIBUTION_MEASURES = ("terminal_pnl",) + MEASURE_COLUMNS
+RESULTS_FORMAT = 1
+_RESULT_FILES = ("cube.npz", "trades.csv", "events.csv", "summary.csv", "manifest.json")
+
+
+def jsonable(value: Any) -> Any:
+    """A JSON-serialisable copy: numpy scalars to Python, NaN to None, timestamps to ISO strings."""
+    if isinstance(value, dict):
+        return {str(k): jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonable(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return [jsonable(v) for v in value.tolist()]
+    if isinstance(value, (pd.Timestamp, _dt.datetime, _dt.date)):
+        return value.isoformat()
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        v = float(value)
+        return v if math.isfinite(v) else None
+    return value
+
+
+def _dates_as_ns(dates: pd.DatetimeIndex) -> np.ndarray:
+    """Pinned to nanoseconds; ``asi8`` counts in the index's own inferred unit (see MarketPath)."""
+    return np.asarray(dates.values, dtype="datetime64[ns]").astype(np.int64)
 
 
 class StateCube:
@@ -276,3 +304,68 @@ class EnsembleResults:
         return EnsembleResults(cube=cube, trades=trades, events=events, manifest=manifest,
                                last_day=np.array(self.last_day[idx]),
                                initial_book_value=np.array(self.initial_book_value[idx]))
+
+    # -- persistence ---------------------------------------------------
+
+    def to_dir(self, path) -> Path:
+        """Persist the cube (npz), the logs and the summary (csv) and the manifest (json)."""
+        out = Path(path)
+        out.mkdir(parents=True, exist_ok=True)
+        cube = self.cube
+        arrays = {name: np.asarray(getattr(cube, name)) for name in FLOAT_COLUMNS + BOOL_COLUMNS}
+        np.savez_compressed(
+            out / "cube.npz", dates_ns=_dates_as_ns(cube.dates), dates_dtype=np.array(str(cube.dates.dtype)),
+            last_day=np.asarray(self.last_day),
+            initial_book_value=np.asarray(self.initial_book_value),
+            active_contract=np.array(cube.active_contract, dtype=str), **arrays,
+        )
+        pd.DataFrame(self.trades, columns=TRADE_COLUMNS).to_csv(out / "trades.csv", index=False)
+        pd.DataFrame([e.__dict__ for e in self.events], columns=list(EVENT_COLUMNS)).to_csv(
+            out / "events.csv", index=False)
+        self.summary.to_csv(out / "summary.csv", index=False)
+        (out / "manifest.json").write_text(
+            json.dumps({"results_format": RESULTS_FORMAT, "manifest": jsonable(self.manifest)},
+                       indent=2, sort_keys=True)
+        )
+        return out
+
+    @classmethod
+    def from_dir(cls, path) -> "EnsembleResults":
+        """Read a run written by ``to_dir``; the summary is recomputed from the cube."""
+        src = Path(path)
+        for name in _RESULT_FILES:
+            if not (src / name).exists():
+                raise ValidationError(f"results directory {src} is missing {name}")
+        header = json.loads((src / "manifest.json").read_text())
+        if header.get("results_format") != RESULTS_FORMAT:
+            raise ValidationError(
+                f"results at {src} are format {header.get('results_format')!r}; this library reads {RESULTS_FORMAT}"
+            )
+        with np.load(src / "cube.npz", allow_pickle=False) as z:
+            # Nanoseconds on disk; the index's own resolution (seconds for a
+            # trading_calendar) restored so a reloaded frame equals the original's.
+            stamps = np.asarray(z["dates_ns"], dtype=np.int64).astype("datetime64[ns]")
+            dates = pd.DatetimeIndex(stamps.astype(str(z["dates_dtype"])))
+            last_day = np.array(z["last_day"], dtype=np.int64)
+            cube = StateCube(dates, int(last_day.size))
+            cube.active_contract = [str(c) for c in z["active_contract"]]
+            for name in FLOAT_COLUMNS + BOOL_COLUMNS:
+                setattr(cube, name, np.array(z[name]))
+            initial = np.array(z["initial_book_value"], dtype=float)
+        trades_frame = pd.read_csv(src / "trades.csv")
+        trades = []
+        for row in trades_frame.to_dict("records"):
+            row["path"], row["day"] = int(row["path"]), int(row["day"])
+            row["date"] = cube.dates[row["day"]]        # the calendar day itself, in the index's resolution
+            for key in ("quantity", "price", "multiplier", "notional", "transaction_cost"):
+                row[key] = float(row[key])
+            trades.append(row)
+        events_frame = pd.read_csv(src / "events.csv")
+        events = [
+            LifecycleRecord(product=int(r["product"]), path=int(r["path"]), day=int(r["day"]), event=str(r["event"]),
+                            index=int(r["index"]), spot=float(r["spot"]), barrier=float(r["barrier"]),
+                            cashflow=float(r["cashflow"]))
+            for r in events_frame.to_dict("records")
+        ]
+        return cls(cube=cube, trades=trades, events=events, manifest=header["manifest"],
+                   last_day=last_day, initial_book_value=initial)
