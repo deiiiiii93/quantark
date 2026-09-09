@@ -212,3 +212,60 @@ def test_the_cell_config_states_every_choice(tiny_fleet):
     tol = S02.oracle_tolerances(cfg)
     assert tol["contracts_tolerance"] == C.GATE_LADDER["delta_tolerance_hands"]
     assert S02.oracle_tolerances(exact) == {"pv_tolerance": 0.0, "delta_tolerance": 0.0, "contracts_tolerance": 0.0}
+
+
+S03 = _load("03_report.py")
+
+
+def test_aggregate_reduces_every_cell_and_pairs_them(tiny_fleet):
+    out, runs, _ = tiny_fleet
+    agg = S03.aggregate(out, es_level=0.25, historical_dir=None)
+    assert set(agg["cells"]) == {C.BASELINE_CELL, "term_flat_q__front"}
+    cell = agg["cells"]["term_flat_q__front"]
+    assert set(S03.HEADLINE_MEASURES) <= set(cell["distributions"])
+    d = cell["distributions"]["terminal_pnl_bp"]
+    assert d["n_paths"] == 4 and "q50" in d["quantiles"] and d["es_level"] == 0.25
+    assert [p["variant"] for p in agg["paired"]] == ["term_flat_q__front"] and agg["paired"][0]["base"] == C.BASELINE_CELL
+    assert agg["paired"][0]["measures"]["terminal_pnl_bp"]["n"] == 4
+    assert {row["cell"] for row in agg["stress"]} == {C.BASELINE_CELL, "term_flat_q__front"}
+    assert len(agg["stress"]) == 10 and all(row["scenario"] for row in agg["stress"])
+    check = {row["cell"]: row for row in agg["engine_check"]}
+    assert check["term_flat_q__front"]["n"] == 2 and "terminal_pnl_bp" in check["term_flat_q__front"]["measures"]
+    assert agg["gates"][C.BASELINE_CELL]["passed"] and agg["historical"]["available"] is False
+
+
+def test_tables_and_report_are_written(tiny_fleet, tmp_path):
+    out, _, _ = tiny_fleet
+    agg = S03.aggregate(out, es_level=0.25, historical_dir=None)
+    S03.write_tables(agg, tmp_path)
+    for name in ("fleet_cells.json", "fleet_paired.csv", "stress_table.csv", "engine_check.csv", "fleet_summary.json"):
+        assert (tmp_path / name).exists(), name
+    html = S03.build_report(agg)
+    assert "<html" in html and "term_flat_q__front" in html and C.BASELINE_CELL in html
+    assert "expected shortfall" in html.lower() and "historical" in html.lower()
+    (tmp_path / "report.html").write_text(html)
+
+
+def test_the_historical_location_uses_the_library_measures(tiny_fleet, tmp_path):
+    """A fake q-study run directory: one inception, one cell, frames in the study's layout."""
+    out, _, _ = tiny_fleet
+    from quantark.backtest.simulation.results import EnsembleResults
+
+    results = EnsembleResults.from_dir(out / "cells" / "term_flat_q__front")
+    run_dir = tmp_path / "runs" / "2024-01" / "term_flat_q__front"
+    run_dir.mkdir(parents=True)
+    states = results.path_states(0).set_index("date")
+    states.to_csv(run_dir / "states.csv")
+    trades = results.path_trades(0)
+    (trades.set_index("date") if len(trades) else trades).to_csv(run_dir / "trades.csv")
+    for name in ("greeks", "rebalances", "actions"):
+        pd.DataFrame(index=pd.DatetimeIndex([], name="date")).to_csv(run_dir / f"{name}.csv")
+    C.write_json(run_dir / "run_summary.json", {"inception": "2024-01-02", "model": "term_flat_q", "hedge": "front",
+                                                "notional": results.notional})
+    agg = S03.aggregate(out, es_level=0.25, historical_dir=tmp_path)
+    hist = agg["historical"]
+    assert hist["available"] and len(hist["rows"]) == 1
+    row = hist["rows"][0]
+    assert row["cell"] == "term_flat_q__front" and row["inception"] == "2024-01-02"
+    assert row["terminal_pnl_bp"] == pytest.approx(results.summary["terminal_pnl_bp"].iloc[0])
+    assert 0.0 <= row["terminal_pnl_percentile"] <= 100.0
