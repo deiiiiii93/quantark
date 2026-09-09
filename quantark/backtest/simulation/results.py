@@ -81,6 +81,32 @@ class StateCube:
             )
 
 
+@dataclass(frozen=True)
+class PairedComparison:
+    """``variant - base`` per matched path, for ``terminal_pnl`` and every measure."""
+
+    differences: pd.DataFrame
+    n_paths: int
+    path_fingerprint: Optional[str]
+
+    def describe(self, measure: str) -> Dict[str, Any]:
+        """Mean, median, std, share positive and paired t-statistic of one measure's differences."""
+        if measure not in self.differences.columns or measure in ("path", "same_termination"):
+            raise ValidationError(f"unknown paired measure {measure!r}")
+        values = self.differences[measure].to_numpy(dtype=float)
+        finite = values[np.isfinite(values)]
+        if finite.size == 0:
+            return {"measure": measure, "n": 0, "mean": None, "median": None, "std": None,
+                    "share_positive": None, "t_stat": None}
+        std = float(finite.std(ddof=1)) if finite.size > 1 else None
+        mean = float(finite.mean())
+        t_stat = mean / (std / math.sqrt(finite.size)) if std not in (None, 0.0) else None
+        return {
+            "measure": measure, "n": int(finite.size), "mean": mean, "median": float(np.median(finite)),
+            "std": std, "share_positive": float((finite > 0.0).mean()), "t_stat": t_stat,
+        }
+
+
 @dataclass
 class EnsembleResults:
     """The run's cube, event logs and manifest, and the answers built from them."""
@@ -193,3 +219,60 @@ class EnsembleResults:
             share_positive=float((finite > 0.0).mean()),
         )
         return out
+
+    # -- matched paths -------------------------------------------------
+
+    def _matches(self, other: "EnsembleResults") -> bool:
+        """Same paths, proved by the data: the market columns are bit-identical up to each path's last day.
+
+        Beyond a path's last day the cube repeats its final values, and a
+        batch that settled early froze earlier than the whole run did, so
+        only the days a path actually ran are compared; the last days
+        themselves must agree (the lifecycle depends on the path alone).
+        """
+        if self.n_paths != other.n_paths or not self.cube.dates.equals(other.cube.dates):
+            return False
+        if not np.array_equal(self.last_day, other.last_day):
+            return False
+        for name in ("spot", "volatility", "rate"):
+            mine, theirs = getattr(self.cube, name), getattr(other.cube, name)
+            for i in range(self.n_paths):
+                end = int(self.last_day[i]) + 1
+                if not np.array_equal(mine[i, :end], theirs[i, :end]):
+                    return False
+        return True
+
+    def paired(self, base: "EnsembleResults") -> PairedComparison:
+        """``self - base`` per path; the two runs must be on the same paths."""
+        if not self._matches(base):
+            raise ValidationError(
+                "paired comparison needs the same paths on both sides: same count, calendar and market columns"
+            )
+        columns = ["terminal_pnl", *MEASURE_COLUMNS]
+        diff = self.summary[columns].to_numpy(dtype=float) - base.summary[columns].to_numpy(dtype=float)
+        frame = pd.DataFrame(diff, columns=columns)
+        frame.insert(0, "path", self.summary["path"].to_numpy())
+        frame["same_termination"] = (
+            self.summary["termination_reason"].to_numpy() == base.summary["termination_reason"].to_numpy()
+        )
+        mine, theirs = self.manifest.get("path_fingerprint"), base.manifest.get("path_fingerprint")
+        return PairedComparison(differences=frame, n_paths=int(self.n_paths),
+                                path_fingerprint=mine if mine == theirs else None)
+
+    def take(self, indices: Sequence[int]) -> "EnsembleResults":
+        """The sub-run of the given paths, in the given order; logs renumbered, manifest annotated."""
+        idx = [int(i) for i in indices]
+        if not idx or any(not 0 <= i < self.n_paths for i in idx):
+            raise ValidationError(f"path indices {idx} out of range for {self.n_paths} paths")
+        position = {old: new for new, old in enumerate(idx)}
+        cube = StateCube(self.cube.dates, len(idx))
+        cube.active_contract = list(self.cube.active_contract)
+        for name in FLOAT_COLUMNS + BOOL_COLUMNS:
+            setattr(cube, name, np.array(getattr(self.cube, name)[idx]))
+        trades = [{**t, "path": position[int(t["path"])]} for t in self.trades if int(t["path"]) in position]
+        events = [LifecycleRecord(**{**e.__dict__, "path": position[e.path]})
+                  for e in self.events if e.path in position]
+        manifest = {**self.manifest, "path_indices": idx}
+        return EnsembleResults(cube=cube, trades=trades, events=events, manifest=manifest,
+                               last_day=np.array(self.last_day[idx]),
+                               initial_book_value=np.array(self.initial_book_value[idx]))

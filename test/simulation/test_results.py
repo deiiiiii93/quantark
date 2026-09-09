@@ -107,3 +107,54 @@ def test_distribution_fails_closed_on_bad_arguments(results):
         results.distribution("terminal_pnl_bp", es_level=0.0)
     with pytest.raises(ValidationError):
         results.distribution("terminal_pnl_bp", es_level=0.05, tail="middle")
+
+
+from quantark.backtest.strategy.futures_delta_strategy import AutocallableDeltaHedgeStrategy  # noqa: E402
+from quantark.backtest.simulation.results import PairedComparison  # noqa: E402
+
+
+def test_paired_with_itself_is_identically_zero(results):
+    comparison = results.paired(results)
+    assert isinstance(comparison, PairedComparison)
+    assert comparison.n_paths == results.n_paths
+    for name in MEASURE_COLUMNS + ("terminal_pnl",):
+        diffs = comparison.differences[name].to_numpy(dtype=float)
+        assert np.all((diffs == 0.0) | np.isnan(diffs)), name
+    assert comparison.differences["same_termination"].all()
+    d = comparison.describe("terminal_pnl_bp")
+    assert d["n"] == results.n_paths and d["mean"] == 0.0 and d["share_positive"] == 0.0 and d["t_stat"] is None
+
+
+def test_paired_measures_a_different_hedge_on_the_same_paths(results):
+    half = EnsembleBacktestEngine(ensemble_config(
+        strategy=AutocallableDeltaHedgeStrategy(delta_threshold=0.0, hedge_ratio=0.5, target_delta=0.0),
+    )).run(_paths())
+    comparison = half.paired(results)
+    diffs = comparison.differences["terminal_pnl_bp"].to_numpy(dtype=float)
+    assert np.any(diffs != 0.0)
+    expected = half.summary["terminal_pnl_bp"].to_numpy() - results.summary["terminal_pnl_bp"].to_numpy()
+    assert np.array_equal(diffs, expected)
+    d = comparison.describe("terminal_pnl_bp")
+    assert d["n"] == results.n_paths and d["t_stat"] is not None and 0.0 <= d["share_positive"] <= 1.0
+    assert comparison.path_fingerprint == results.manifest["path_fingerprint"]
+
+
+def test_paired_refuses_unmatched_paths(results):
+    other = EnsembleBacktestEngine(ensemble_config()).run(_paths(seed=4))
+    with pytest.raises(ValidationError):
+        results.paired(other)
+    with pytest.raises(ValidationError):
+        results.paired(results.take([0, 1]))
+
+
+def test_take_keeps_the_chosen_paths_and_renumbers_the_logs(results):
+    sub = results.take([5, 2])
+    assert sub.n_paths == 2 and sub.manifest["path_indices"] == [5, 2]
+    assert np.array_equal(sub.cube.total_pnl[0], results.cube.total_pnl[5])
+    assert np.array_equal(sub.last_day, results.last_day[[5, 2]])
+    pd.testing.assert_frame_equal(sub.path_states(1), results.path_states(2))
+    pd.testing.assert_frame_equal(sub.path_trades(0), results.path_trades(5).assign(path=0))
+    assert {e.path for e in sub.events} <= {0, 1}
+    assert sub.summary.drop(columns="path").iloc[1].equals(results.summary.drop(columns="path").iloc[2])
+    with pytest.raises(ValidationError):
+        results.take([results.n_paths])
