@@ -61,7 +61,13 @@ QUICK_PATHS = 40
 MEAN_BLOCK_DAYS = 20
 ANNUAL_DRIFT = 0.0
 VOL_FLOOR = 0.08
-CARRY_MODE = "changes"
+#: Carry is resampled as LEVELS, not daily changes: the curve holds the total
+#: log basis per tenor and a year of resampled changes is a random walk that
+#: doubles the history's cross-path dispersion (1.5Y pillar std 0.119 on day
+#: 274 against 0.056 in history) and drove the 1M pillar to -9.8% (history
+#: floor -5%), which a contract 25 days from expiry turns into an annualised
+#: yield above 100% -- the term dividend curve refuses it, rightly.
+CARRY_MODE = "levels"
 SEED = 1
 COST_BP = 1.0
 SPOT_STEP = 0.0025
