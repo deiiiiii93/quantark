@@ -8,7 +8,6 @@ real path.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -34,94 +33,17 @@ from .hedge import (
 from .lifecycle import LifecycleRecord, VectorLifecycle, receivable_pv
 from .paths.market_path import MarketPath
 from .pricing.base import DayStates, GateFailure, GateReport, GateScale, row_keys, state_row
-from .pricing.cache import StateCache
+from .pricing.cache import LIBRARY_VERSION, StateCache
 from .pricing.repricing import RepricingPricer
 from .pricing.surface import LifeSurfacePricer
-
-FLOAT_COLUMNS = (
-    "portfolio_value", "product_mtm", "hedge_mtm", "cash", "cashflows", "transaction_costs",
-    "product_pnl", "hedge_pnl", "total_pnl", "spot", "volatility", "rate", "pricing_q",
-    "implied_q", "basis_yield", "futures_price", "futures_contracts", "pre_hedge_contracts",
-    "delta", "gamma", "pending_receivable_pv",
+from .results import (  # noqa: F401  (re-exported: plan 1-3 callers import them from here)
+    BOOL_COLUMNS,
+    EVENT_COLUMNS,
+    FLOAT_COLUMNS,
+    TRADE_COLUMNS,
+    EnsembleResults,
+    StateCube,
 )
-BOOL_COLUMNS = ("alive", "knocked_in", "knocked_out", "matured", "settled")
-
-TRADE_COLUMNS = [
-    "path", "day", "date", "trade_type", "contract", "quantity", "price",
-    "multiplier", "notional", "transaction_cost", "reason",
-]
-
-
-class StateCube:
-    """The replay's state columns that have a per-path meaning (spec 4.3)."""
-
-    def __init__(self, dates: pd.DatetimeIndex, n_paths: int) -> None:
-        self.dates = pd.DatetimeIndex(dates)
-        self.n_paths = int(n_paths)
-        self.active_contract: List[str] = []
-        shape = (self.n_paths, len(self.dates))
-        for name in FLOAT_COLUMNS:
-            setattr(self, name, np.zeros(shape))
-        for name in BOOL_COLUMNS:
-            setattr(self, name, np.zeros(shape, dtype=bool))
-
-    def frame(self, i: int, last_day: int) -> pd.DataFrame:
-        """One path's state rows up to and including ``last_day``."""
-        end = int(last_day) + 1
-        data: Dict[str, Any] = {
-            "date": self.dates[:end],
-            "active_contract": self.active_contract[:end],
-        }
-        for name in FLOAT_COLUMNS + BOOL_COLUMNS:
-            data[name] = getattr(self, name)[i, :end]
-        return pd.DataFrame(data)
-
-    def freeze_from(self, day: int) -> None:
-        """Repeat day ``day``'s values over the rest of the calendar.
-
-        The loop stops once every path has settled; a settled path's columns
-        repeat its terminal values, which is the per-path reading of the
-        replay's ``terminate_on_lifecycle_end``.
-        """
-        for name in FLOAT_COLUMNS + BOOL_COLUMNS:
-            column = getattr(self, name)
-            column[:, day + 1:] = column[:, day: day + 1]
-        if self.active_contract:
-            self.active_contract += [self.active_contract[-1]] * (
-                len(self.dates) - len(self.active_contract)
-            )
-
-
-@dataclass
-class EnsembleResults:
-    """The run's cube, event logs and manifest (distributions land in plan 4)."""
-
-    cube: StateCube
-    trades: List[Dict[str, Any]]
-    events: List[LifecycleRecord]
-    manifest: Dict[str, Any]
-    last_day: np.ndarray
-    initial_book_value: np.ndarray
-
-    @property
-    def n_paths(self) -> int:
-        return int(self.cube.n_paths)
-
-    def path_states(self, i: int) -> pd.DataFrame:
-        """One path's daily state rows, in the replay's schema, to its last day."""
-        return self.cube.frame(i, int(self.last_day[i]))
-
-    def path_trades(self, i: int) -> pd.DataFrame:
-        rows = [t for t in self.trades if t["path"] == i]
-        return pd.DataFrame(rows, columns=TRADE_COLUMNS)
-
-    def path_events(self, i: int) -> pd.DataFrame:
-        rows = [e.__dict__ for e in self.events if e.path == i]
-        return pd.DataFrame(
-            rows,
-            columns=["product", "path", "day", "event", "index", "spot", "barrier", "cashflow"],
-        )
-
 
 class EnsembleBacktestEngine:
     """Runs a book of snowballs over a batch of simulated paths."""
@@ -538,4 +460,14 @@ class EnsembleBacktestEngine:
             "underlying": self.config.underlying,
             "seconds": time.perf_counter() - started,
             "metadata": dict(self.config.metadata),
+            "library_version": LIBRARY_VERSION,
+            "book_notional": self._book_notional(),
         }
+
+    def _book_notional(self) -> float:
+        """``sum |quantity| * initial_price * contract_multiplier`` over the book (the summary's bp base)."""
+        return float(sum(
+            abs(float(bp.quantity)) * float(bp.product.initial_price)
+            * float(getattr(bp.product, "contract_multiplier", 1.0))
+            for bp in self.config.products
+        ))
