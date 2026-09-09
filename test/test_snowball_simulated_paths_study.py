@@ -31,7 +31,7 @@ def _load(name: str):
     return module
 
 
-C = _load("_common.py")
+C = _load("_sim_common.py")
 S01 = _load("01_build_paths.py")
 
 
@@ -89,4 +89,126 @@ def test_the_study_reuses_the_q_study_and_names_its_cells():
     cfg = C.engine_config("term_opt_tail", "pde", quad_grid=101)
     assert cfg.dividend_source == "futures_curve" and cfg.futures_curve_extrapolation == "surface_forward_carry"
     assert cfg.futures_curve_min_tenor_days == 1
-    assert C.engine_config("flat_active", "quad", quad_grid=101).dividend_source is None
+    assert C.engine_config(C.MODELS[0], "quad", quad_grid=101).dividend_source is None
+
+
+S02 = _load("02_ensemble_fleet.py")
+
+#: The one-month fixture: a 90% knock-in (the study's 75% is unreachable in a
+#: month, which makes the fair coupon exactly zero), and a narrow life-surface
+#: domain that still covers the 30% stress crash -- the PDE mesh costs 10 ms
+#: per new spot on it against about a second on the study's wide envelope.
+FIXTURE_KI_PCT = 0.90
+FIXTURE_SPOT_RANGE = (0.60, 1.60)
+CELL = dict(cost_bp=1.0, workers=1, batch_paths=None, quad_grid=101, spot_range=FIXTURE_SPOT_RANGE)
+#: The fixture's gate, not the study's.  Measured on this seed: day 17 of
+#: bootstrap path 3 sits 0.02% above the 90% knock-in barrier five days from
+#: maturity, where the alive value kinks and the surface reads linearly
+#: across the kink -- 85.7 bp and 140.1 hands against the exact engine (the
+#: next worst state, 0.2% above the barrier, 13.1 bp / 57.2 hands).  The
+#: study's gate (25 bp / 2 hands) would fail this cell, which
+#: ``test_the_gate_records_the_near_barrier_gap`` pins; the fixture widens the
+#: budget so the pipeline runs and the numbers are recorded, not hidden.
+FIXTURE_GATE = dict(sample_states=64, pv_tolerance_bp=120.0, delta_tolerance_hands=200.0)
+#: The QUAD ladder reads the same kink across 0.25% nodes: 12.41 bp and 0.97
+#: hands measured against the study's 10 bp / 2 hands.
+FIXTURE_LADDER_GATE = dict(sample_states=64, pv_tolerance_bp=20.0, delta_tolerance_hands=2.0)
+
+
+def fixture_terms(dates):
+    import dataclasses
+    return dataclasses.replace(S02.study_terms(dates, maturity_months=1, lockout_months=1), ki_pct=FIXTURE_KI_PCT)
+
+
+@pytest.fixture(scope="module")
+def tiny_fleet(tmp_path_factory):
+    """A one-month snowball on four bootstrap paths: one cell on the life surface, a ladder check, an oracle."""
+    out = tmp_path_factory.mktemp("fleet")
+    spot, vol, futures = synthetic_frames()
+    history = S01.build_history(spot, vol, futures, rate=RATE)
+    bootstrap, stress = S01.build_paths(history, n_paths=4, n_days=40, seed=2, mean_block_days=5,
+                                        annual_drift=0.0, vol_floor=0.08, carry_mode="changes")
+    S01.write_paths(out, bootstrap, stress, history=history)
+    terms = fixture_terms(bootstrap.dates)
+    coupon = S02.fair_coupon(bootstrap, terms, model="term_flat_q", quad_grid=101)
+    product = C.Q.build_product(terms, float(bootstrap.spot[0, 0]), coupon.coupon)
+    runs = {}
+    # The oracle spot-checks path 1, which never comes near the knock-in
+    # barrier.  Paths 0 and 3 sit within 0.2% of it for a day, where the
+    # widened gate allows the hedge to differ by up to 140 hands; a day of
+    # that moves the path's total P&L by 200-560 bp, far past the oracle's
+    # P&L budget, which is the PV budget (a sequence gap, not a state gap).
+    for model, hedge in ((C.MODELS[0], "front"), ("term_flat_q", "front")):
+        cell = C.cell_name(model, hedge)
+        cfg = S02.cell_config(product, model, hedge, provider="life_surface", gate_override=FIXTURE_GATE, **CELL)
+        runs[cell] = S02.run_cell(bootstrap, cfg, out / "cells" / cell, resume=False, oracle_paths=[1])
+        stress_cfg = S02.cell_config(product, model, hedge, provider="life_surface", gate_override=FIXTURE_GATE, **CELL)
+        runs[cell + "__stress"] = S02.run_cell(stress, stress_cfg, out / "cells" / f"{cell}__stress",
+                                               resume=False, oracle_paths=[])
+        ladder_cfg = S02.cell_config(product, model, hedge, provider="ladder", gate_override=FIXTURE_LADDER_GATE, **CELL)
+        runs[cell + "__ladder_quad"] = S02.run_cell(bootstrap.take([0, 1]), ladder_cfg,
+                                                    out / "cells" / f"{cell}__ladder_quad", resume=False, oracle_paths=[1])
+    C.write_json(out / "fleet_manifest.json", {"coupon": coupon.summary(), "terms": terms.summary(), "runs": runs})
+    return out, runs, coupon
+
+
+def test_the_fair_coupon_prices_the_product_to_zero_at_the_start_state(tiny_fleet):
+    _, _, coupon = tiny_fleet
+    assert coupon.converged and abs(coupon.pv) <= coupon.tolerance and 0.0 < coupon.coupon < 2.0
+
+
+def test_every_cell_run_is_persisted_gated_and_oracle_checked(tiny_fleet):
+    out, runs, _ = tiny_fleet
+    from quantark.backtest.simulation.results import EnsembleResults
+
+    for name, run in runs.items():
+        assert not run["skipped"] and run["gate"]["passed"], name
+        results = EnsembleResults.from_dir(out / "cells" / name)
+        assert results.manifest["mode"] == ("ladder" if name.endswith("ladder_quad") else "life_surface")
+        assert (out / "cells" / name / "config.json").exists()
+        for report in run["oracle"]:
+            assert report["passed"] and report["exact_columns_match"], (name, report)
+    assert len(runs[C.BASELINE_CELL]["oracle"]) == 1 and runs[C.BASELINE_CELL + "__stress"]["oracle"] == []
+
+
+def test_the_gate_records_the_near_barrier_gap(tiny_fleet):
+    """The fixture's widened gate records what the study's gate would have refused (see FIXTURE_GATE)."""
+    _, runs, _ = tiny_fleet
+    gate = runs[C.BASELINE_CELL]["gate"]
+    assert gate["passed"] and gate["sampled"] > 0
+    assert gate["max_pv_gap_bp"] > C.GATE_SURFACE["pv_tolerance_bp"]
+    assert gate["max_delta_gap_hands"] > C.GATE_SURFACE["delta_tolerance_hands"]
+    assert gate["max_pv_gap_bp"] <= FIXTURE_GATE["pv_tolerance_bp"]
+
+
+def test_resume_skips_a_run_whose_config_matches(tiny_fleet):
+    out, _, coupon = tiny_fleet
+    bootstrap, _, _ = S01.load_paths(out)
+    terms = fixture_terms(bootstrap.dates)
+    product = C.Q.build_product(terms, float(bootstrap.spot[0, 0]), coupon.coupon)
+    cfg = S02.cell_config(product, C.MODELS[0], "front", provider="life_surface", gate_override=FIXTURE_GATE, **CELL)
+    again = S02.run_cell(bootstrap, cfg, out / "cells" / C.BASELINE_CELL, resume=True, oracle_paths=[0])
+    assert again["skipped"]
+    other = S02.cell_config(product, C.MODELS[0], "front", provider="life_surface", gate_override=FIXTURE_GATE,
+                            **{**CELL, "cost_bp": 2.0})
+    assert S02.config_fingerprint(other, bootstrap) != S02.config_fingerprint(cfg, bootstrap)
+
+
+def test_the_cell_config_states_every_choice(tiny_fleet):
+    out, _, coupon = tiny_fleet
+    bootstrap, _, _ = S01.load_paths(out)
+    terms = fixture_terms(bootstrap.dates)
+    product = C.Q.build_product(terms, float(bootstrap.spot[0, 0]), coupon.coupon)
+    cfg = S02.cell_config(product, "term_opt_tail", "far", provider="ladder", cost_bp=1.0, workers=2,
+                          batch_paths=100, quad_grid=201)
+    assert cfg.pricing.mode == "ladder" and cfg.engine_config.futures_curve_extrapolation == "surface_forward_carry"
+    assert cfg.products[0].initial_price == 0.0 and cfg.products[0].quantity == C.Q.PRODUCT_QUANTITY
+    assert type(cfg.hedge.roll_policy).__name__ == "FarContractRollPolicy"
+    assert (cfg.workers, cfg.batch_paths) == (2, 100) and cfg.metadata["model"] == "term_opt_tail"
+    assert cfg.metadata["spot_range"] == list(C.SURFACE_SPOT_RANGE)
+    exact = S02.cell_config(product, "term_flat_q", "front", provider="exact", cost_bp=0.0, workers=1,
+                            batch_paths=None, quad_grid=101)
+    assert exact.pricing.mode == "exact" and exact.pricing.gate.sample_states == 0
+    tol = S02.oracle_tolerances(cfg)
+    assert tol["contracts_tolerance"] == C.GATE_LADDER["delta_tolerance_hands"]
+    assert S02.oracle_tolerances(exact) == {"pv_tolerance": 0.0, "delta_tolerance": 0.0, "contracts_tolerance": 0.0}

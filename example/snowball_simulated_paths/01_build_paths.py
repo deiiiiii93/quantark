@@ -20,7 +20,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _common as C  # noqa: E402
+import _sim_common as C  # noqa: E402
 
 from quantark.backtest.simulation import (  # noqa: E402
     DEFAULT_TENOR_GRID, MarketPath, PathHistory, StationaryBlockBootstrap, trading_calendar,

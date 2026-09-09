@@ -1,5 +1,9 @@
 """Shared pieces of the simulated-path snowball study.
 
+Named ``_sim_common`` rather than ``_common``: the q study's stages import
+their own ``_common`` by that bare name, and one pytest process running
+both studies' tests would otherwise hand one study the other's module.
+
 The product, the fair-coupon solver, the carry models and the hedge
 policies are the q term-structure study's (``example/snowball_q_term_structure/_common.py``),
 loaded here under a fixed module name so the two studies cannot drift.
@@ -10,11 +14,12 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.param import PDEParams, QuadParams
 from quantark.backtest.replay import AutocallableEngineConfig
 from quantark.backtest.simulation import MarketPath, SnowballStressLibrary, StartState, stress_set
@@ -44,9 +49,11 @@ def load_q_study():
 
 Q = load_q_study()
 
-MODELS = ("flat_active", "term_flat_q", "term_opt_tail")
+#: The baseline is the q study's (the engine's historical flat-q default),
+#: taken from it by name so the two studies cannot disagree on what it is called.
+MODELS = (Q.BASELINE_MODEL, "term_flat_q", "term_opt_tail")
 HEDGES = ("front", "far")
-BASELINE_CELL = "flat_active__front"
+BASELINE_CELL = f"{Q.BASELINE_MODEL}__front"
 
 N_PATHS = 2000
 N_DAYS = 275          # a 12-month product matures ~261 weekdays out; the engine refuses a shorter calendar
@@ -66,19 +73,40 @@ GATE_SURFACE = dict(sample_states=64, pv_tolerance_bp=25.0, delta_tolerance_hand
 GATE_LADDER = dict(sample_states=64, pv_tolerance_bp=10.0, delta_tolerance_hands=2.0)
 CHECK_PATHS = 200
 ORACLE_PATHS = 3
+#: The life surface's spot domain as fractions of the initial spot.  A
+#: surface is solved once at the start spot and read along the whole path,
+#: so its domain is a PATH envelope, not the pricer's default vol-scaled
+#: pricing envelope (which a 30% crash on a low-vol day would leave; the
+#: readout then fails closed).  The upside is capped by the KO barrier.
+#: Measured cost of the PDE mesh per NEW spot on a 1Y product (the exact
+#: leg of the gate and the oracle pay it once per state): default vol-scaled
+#: domain [0.35, 2.87] 1.07 s, [0.60, 1.60] 0.15 s, [0.40, 2.50] 1.08 s.
+SURFACE_SPOT_RANGE = (0.40, 1.60)
 
 
 def cell_name(model: str, hedge: str) -> str:
     return f"{model}__{hedge}"
 
 
-def engine_config(model: str, engine: str, *, quad_grid: int) -> AutocallableEngineConfig:
-    """The replay engine config of one carry model on the PDE (life surface) or QUAD (repricing) engine."""
+def engine_config(
+    model: str, engine: str, *, quad_grid: int, s0: Optional[float] = None,
+    spot_range: Optional[Tuple[float, float]] = None,
+) -> AutocallableEngineConfig:
+    """The replay engine config of one carry model on the PDE (life surface) or QUAD (repricing) engine.
+
+    With ``s0`` the PDE grid spans ``spot_range`` (default
+    ``SURFACE_SPOT_RANGE``) times it, so one surface covers every spot a
+    bootstrap or stress path can read.
+    """
     if model not in Q.Q_MODELS:
         raise ValidationError(f"unknown carry model {model!r}; one of {tuple(Q.Q_MODELS)}")
     q_model = Q.Q_MODELS[model]
     if engine == "pde":
-        kwargs: Dict[str, Any] = dict(pricing_engine_type=EngineType.PDE, pde_params=PDEParams())
+        grid = None
+        if s0 is not None:
+            lo, hi = spot_range if spot_range is not None else SURFACE_SPOT_RANGE
+            grid = GridConfig(bounds=(lo * float(s0), hi * float(s0)))
+        kwargs: Dict[str, Any] = dict(pricing_engine_type=EngineType.PDE, pde_params=PDEParams(grid=grid))
     elif engine == "quad":
         kwargs = dict(pricing_engine_type=EngineType.QUADRATURE, quad_params=QuadParams(grid_points=int(quad_grid)))
     else:
