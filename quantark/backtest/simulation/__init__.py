@@ -7,7 +7,10 @@ with a state cache, the vectorised lifecycle and futures ledger, the daily
 loop and the conformance oracle against the replay engine.  Plan 3: the
 approximate providers -- the spot ladder, the PDE life surface -- the
 on-disk cache tier, the sampling accuracy gate and path batching over a
-spawn pool.  See README.md in this package.
+spawn pool.  Plan 4: the results -- the per-path summary in the historical
+study's measures, distributions with expected shortfall, paired comparisons
+on matched paths, persistence -- and the worked study in
+``example/snowball_simulated_paths``.  See README.md in this package.
 """
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ from .dividends import dividend_yield_for_day
 from .engine import EnsembleBacktestEngine, EnsembleResults, StateCube
 from .hedge import VectorHedgeLedger
 from .lifecycle import VectorLifecycle
+from .measures import MEASURE_COLUMNS, max_drawdown, path_measures
 from .paths import (
     DEFAULT_TENOR_GRID, ConstantVol, GBMPaths, MarketPath, PathHistory, SnowballStressLibrary,
     StartState, StationaryBlockBootstrap, StickyRealisedVol, market_path_from_day_path, stress_set,
@@ -29,6 +33,7 @@ from .pricing.base import GateFailure, GateScale, bucket_centre, bucket_key
 from .pricing.cache import DiskTier, StateCache
 from .pricing.repricing import RepricingPricer
 from .pricing.surface import LifeSurfacePricer, SurfaceCache
+from .results import SUMMARY_COLUMNS, PairedComparison, jsonable
 from .runner import batch_ranges, concat_results, run_ensemble
 
 __all__ = [
@@ -42,4 +47,5 @@ __all__ = [
     "VectorHedgeLedger", "OracleReport", "run_oracle",
     "LifeSurfacePricer", "SurfaceCache", "GateScale", "GateFailure", "DiskTier",
     "bucket_key", "bucket_centre", "run_ensemble", "concat_results", "batch_ranges",
+    "PairedComparison", "SUMMARY_COLUMNS", "jsonable", "path_measures", "max_drawdown", "MEASURE_COLUMNS",
 ]

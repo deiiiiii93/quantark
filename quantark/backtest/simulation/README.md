@@ -21,7 +21,10 @@ giving up that reference: a spot-ladder mode for the repricing provider,
 a PDE life-surface provider that solves once per bucket and reads along
 the path, an on-disk cache tier, the sampling gate that measures every
 approximation against direct repricing, and path batching over a spawn
-pool.  The results distributions and the worked study follow in plan 4.
+pool.  Plan 4 turns a run into answers: a per-path summary in the
+historical study's own hedge measures, distributions with expected
+shortfall, paired comparisons on matched paths, persistence, and the worked
+study in `example/snowball_simulated_paths`.
 
 ## `MarketPath`
 
@@ -255,6 +258,19 @@ what says whether that was good enough.  On the test fixture the surface
 is within 2.5 bp of unit notional and 0.04 of unit delta of exact
 repricing.
 
+A surface keeps only the columns a run can read: column 0, the terminal
+column and the node of every calendar day up to maturity
+(`LifeSurface.select`, applied by the pricer's `compact=True` default).
+Column data is copied, not recomputed, so a readout of a kept column is
+bit-identical to the readout of the full surface; on the plan-3 layout that
+is about four times less memory per surface, so the byte budget holds about
+four times more buckets.  The PDE mesh, not the solve, is the cost of an
+exact repricing at a NEW spot: the certified concentrated mesh is built per
+distinct grid (the spot is a critical price), and on a wide domain it costs
+about a second (measured: default vol-scaled domain of a 1Y product 1.07 s,
+`bounds` at 0.6–1.6 of spot 0.15 s, at 0.4–2.5 of spot 1.08 s).  The gate's
+exact leg and the oracle's replay engine pay it once per state.
+
 ## The gate
 
 Every approximation is measured.  An approximate provider keeps a
@@ -281,6 +297,42 @@ share its engine, and the test pins that with `array_equal` on the
 accounting columns.  Batches keep their own memory caches; with a
 `disk_dir` they share states through the shards.  A worker failure aborts
 the run with the worker's error.
+
+## Results
+
+`EnsembleResults.summary` is one row per path: `termination_reason` (the
+path's last `knock_out` or `maturity` event, else `data_end`),
+`knocked_in`, `ko_observation_index`, `terminal_pnl` in currency, and the
+hedge measures of `measures.py` (`path_measures`) in bp of the book's unit
+notional — `manifest["book_notional"]`, `sum |quantity| * initial_price *
+contract_multiplier` — which are the q term-structure study's
+`hedge_measures` moved into the library so the historical replay and the
+simulated ensemble report one implementation (the study's function
+delegates).  The summary is memoised on the results object.
+
+`distribution(measure, es_level=..., tail="lower")` reduces a summary
+column to `n`, mean, std, the quantiles `q01 … q99`, expected shortfall
+(the mean of the values at or below the `es_level` quantile; `tail="upper"`
+takes the values at or above the `1 − es_level` quantile, for a cost-like
+measure), the share of positive values, and KO, KI, maturity and data-end
+frequencies over every path.  NaN values (a two-day path has no daily std)
+are dropped and `n` counts what remains.
+
+`variant.paired(base)` is `variant − base` per path for `terminal_pnl` and
+every measure, plus `same_termination`; matched paths are proved by the
+data — same count, same calendar, and bit-identical spot, vol and rate
+columns up to each path's last day — not by a label, and unmatched runs
+raise.  `PairedComparison.describe(measure)` gives mean, median, std, share
+positive and the paired t-statistic.  `take(indices)` is the sub-run of the
+chosen paths with renumbered logs and `manifest["path_indices"]`, which is
+how a 2,000-path surface run is paired with a 200-path QUAD check run.
+
+`to_dir(path)` writes `cube.npz` (every column, the dates as nanoseconds
+with their own resolution, `last_day`, `initial_book_value`), `trades.csv`,
+`events.csv`, `summary.csv` and `manifest.json` (`results_format` 1 plus the
+manifest through `jsonable`); `from_dir` reads them back — the summary is
+recomputed from the cube, so it is exactly the original's — and refuses a
+missing file or another format.  The manifest carries `library_version`.
 
 ## Why you can trust it
 
@@ -344,6 +396,10 @@ unchanged.  And `SnowballPDESolver.solve_life_surface` runs one ordinary
 solve with those nodes and hands back both slabs, restoring the solver so
 a later `price` is byte-identical to a fresh one.
 
-## What comes next
+## The worked study
 
-- **Plan 4** — ensemble results: summaries, distributions, paired comparisons and persistence, plus the worked snowball study in `example/`.
+`example/snowball_simulated_paths/README.md` runs the q term-structure
+study's snowball, carry models and hedge contracts over 2,000 bootstrapped
+paths and five designed stresses, checks the life surface against QUAD, and
+locates the historical study's realised runs inside the simulated
+distribution.

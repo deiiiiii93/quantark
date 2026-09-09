@@ -105,7 +105,8 @@ def test_public_api_is_exported():
                  "StateCache", "DayStates", "StateKey", "GateReport", "VectorLifecycle",
                  "VectorHedgeLedger", "OracleReport", "run_oracle",
                  "LifeSurfacePricer", "SurfaceCache", "GateScale", "GateFailure", "run_ensemble",
-                 "concat_results", "batch_ranges", "DiskTier", "bucket_key", "bucket_centre"):
+                 "concat_results", "batch_ranges", "DiskTier", "bucket_key", "bucket_centre",
+                 "PairedComparison", "path_measures", "max_drawdown", "MEASURE_COLUMNS", "SUMMARY_COLUMNS", "jsonable"):
         assert hasattr(sim, name), name
 
 
