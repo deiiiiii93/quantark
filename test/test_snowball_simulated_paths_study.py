@@ -269,3 +269,16 @@ def test_the_historical_location_uses_the_library_measures(tiny_fleet, tmp_path)
     assert row["cell"] == "term_flat_q__front" and row["inception"] == "2024-01-02"
     assert row["terminal_pnl_bp"] == pytest.approx(results.summary["terminal_pnl_bp"].iloc[0])
     assert 0.0 <= row["terminal_pnl_percentile"] <= 100.0
+
+
+def test_engine_config_rejects_a_model_whose_carry_contract_is_not_the_hedge(monkeypatch):
+    """The simulation inverts the ACTIVE contract; a q-study model with its own carry contract would silently disagree."""
+    from types import SimpleNamespace
+    from quantark.util.exceptions import ValidationError
+
+    base = C.Q.Q_MODELS["term_flat_q"]
+    far = SimpleNamespace(dividend_source=base.dividend_source, extrapolation=base.extrapolation,
+                          min_tenor_days=base.min_tenor_days, dividend_policy="far")
+    monkeypatch.setitem(C.Q.Q_MODELS, "flat_from_far_fake", far)
+    with pytest.raises(ValidationError, match="carry contract"):
+        C.engine_config("flat_from_far_fake", "quad", quad_grid=101)

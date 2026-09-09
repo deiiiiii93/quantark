@@ -101,6 +101,14 @@ def engine_config(
     if model not in Q.Q_MODELS:
         raise ValidationError(f"unknown carry model {model!r}; one of {tuple(Q.Q_MODELS)}")
     q_model = Q.Q_MODELS[model]
+    if getattr(q_model, "dividend_policy", None) is not None:
+        # The simulation inverts the ACTIVE hedge contract (dividend_yield_for_day
+        # takes one contract); a model whose carry comes from another contract
+        # would price something else under the same cell name.  Fail closed.
+        raise ValidationError(
+            f"model {model!r} takes its carry contract from policy {q_model.dividend_policy!r}; "
+            "the simulation has no carry contract separate from the hedge"
+        )
     if engine == "pde":
         grid = None
         if s0 is not None:
