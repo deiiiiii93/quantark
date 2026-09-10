@@ -236,6 +236,17 @@ quantities; every check that compares two repriced numbers agrees to about
 1e-13. So the disagreement is between the QUAD engine's delta and a central
 difference of the QUAD engine's own price.
 
+`audit_failure_attribution.py` now splits the four checks over all 27
+completed cells, both readouts: every failure is the identity ALONE, and the
+three holdings-dependent checks breach on zero dates out of roughly 6,500
+date-checks each. The identity is also the only check with no holdings in
+it, which is why it is byte-identical across all seven policies of a
+q-model — 0.042500 hands for every `term_flat_q` cell, 0.041171 for every
+`term_flat_fwd` cell, and 0.042613 / 0.041276 respectively under
+`transition`. So the audit's failure is a statement about the engine that
+the bucket hedge merely reports, and a single cell is fully representative
+of it. Every check that does test the hedge passes on every date.
+
 It is strongly state-dependent:
 
 | State | pass | fail |
