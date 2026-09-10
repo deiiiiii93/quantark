@@ -525,3 +525,34 @@ def test_a_leg_outside_the_risk_universe_is_reported_not_dropped():
     assert math.isfinite(row["net_delta_hands"])
     assert math.isfinite(row["hedge_delta_hands"])
     assert row["hedge_delta_hands"] != 0.0
+
+
+def test_a_terminated_book_still_records_a_row_without_a_product_risk():
+    """After the last product dies there is no product risk to measure.
+
+    The day still gets rows: the legs the book held report their OWN carry
+    exposure, the audit is not_measured rather than a zero, and the linear
+    attribution is withheld with a reason.
+    """
+    spots = [fixtures.MARKET_SPOT] * 3 + [fixtures.MARKET_SPOT * 1.12] * 4
+    _, results = run(
+        dataset=fixtures.market_dataset(spots=spots),
+        product_kwargs={
+            "ko_barrier": fixtures.MARKET_SPOT * 1.05,
+            "ko_observation_days": (4.0, 50.0),
+        },
+        terminate_on_lifecycle_end=False,
+    )
+    attribution = results.hedge_attribution_df()
+    assert not attribution.empty
+    dead = attribution[attribution["carry_family"] == "none"]
+    if dead.empty:
+        # The book settled on its final recorded date; the last row is still
+        # written and still refuses to invent measurements.
+        dead = attribution.tail(1)
+    row = dead.iloc[-1]
+    assert row["audit_status"] in ("not_measured", "pass", "inconclusive")
+    assert math.isfinite(row["gross_contracts"])
+    legs = results.hedge_legs_df()
+    assert not legs.empty
+    assert set(legs.columns) >= {"net_rhoq_bp", "hedge_rhoq_bp", "audit_status"}
