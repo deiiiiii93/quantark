@@ -291,16 +291,41 @@ class CarryExposureRecorder:
         ideal_parallel = (
             targets.ideal_net_parallel_rhoq if targets is not None else None
         )
-        return audit_held_book(
-            price_at,
-            context,
-            risk,
-            on_curve,
-            settings=self.settings,
-            holdings_kind="actual",
-            ideal_net_delta=ideal_delta,
-            ideal_net_parallel_rhoq=ideal_parallel,
-        )
+        try:
+            return audit_held_book(
+                price_at,
+                context,
+                risk,
+                on_curve,
+                settings=self.settings,
+                holdings_kind="actual",
+                ideal_net_delta=ideal_delta,
+                ideal_net_parallel_rhoq=ideal_parallel,
+            )
+        except ValidationError as error:
+            # The audit is a DIAGNOSTIC over a book whose P&L is already
+            # well defined, so a scenario it cannot construct records a
+            # status rather than ending a year-long replay.
+            #
+            # This is not hypothetical.  On 2024-02-05 the eleven-day IM2402
+            # implied +93.3% carry during the CSI 1000 basis blowout; the
+            # curve object bounds a yield at 100%, so the audit's pinned-spot
+            # direction -- a 1% spot move with every quote held fixed -- runs
+            # out of room, while the bucket and nodal-yield bumps the hedge is
+            # actually SIZED from stay comfortably inside it.
+            #
+            # Nothing is inferred from a mapped Greek here: every measurement
+            # stays NaN, and an inconclusive date keeps the run out of a
+            # validity pass.
+            return CarryAuditResult(
+                status="inconclusive",
+                reason=f"the audit scenario could not be constructed: {error}",
+                holdings_kind="actual",
+                spot_step=float(self.settings.audit_spot_bump_rel) * risk.spot,
+                yield_step=float(self.settings.audit_yield_bump),
+                reference_multiplier=float(self.settings.reference_multiplier),
+                reference_notional=float(self.settings.reference_notional),
+            )
 
     # ------------------------------------------------------------------
     # Rows

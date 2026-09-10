@@ -10,6 +10,7 @@ withheld, with a reason.
 from __future__ import annotations
 
 import math
+import sys
 from datetime import datetime
 
 import pandas as pd
@@ -601,3 +602,86 @@ def test_a_run_without_recording_reports_no_carry_cost():
     )
     engine.run()
     assert engine.carry_cost() == {}
+
+
+def test_an_unconstructable_audit_scenario_is_inconclusive_not_a_crash():
+    """A real market state, not a hypothetical.
+
+    On 2024-02-05 the eleven-day IM2402 implied +93.3% carry during the CSI
+    1000 basis blowout. The curve object bounds a yield at 100%, so the
+    audit's pinned-spot direction runs out of room while the bucket and
+    nodal-yield bumps the hedge is SIZED from stay inside it. The day must
+    record a status; a year-long replay whose P&L is well defined must not
+    end because a diagnostic could not be taken.
+    """
+    from quantark.util.exceptions import ValidationError
+
+    engine = ReplayBacktestEngine(
+        ReplayBacktestConfig(
+            products=[
+                ReplayProduct(
+                    product=fixtures.market_product(),
+                    quantity=-1.0,
+                    position_id=0,
+                    has_lifecycle=True,
+                )
+            ],
+            market_data=fixtures.market_dataset(),
+            engine_config=fixtures.market_engine_config(),
+            strategy=FuturesBucketHedgeStrategy(round_contracts=False),
+            calculate_surfaces=False,
+            calculate_event_probabilities=False,
+            carry_audit_mode="daily",
+        )
+    )
+    recorder = engine._carry_recorder
+    original = recorder._run_audit
+
+    import quantark.backtest.replay.carry_recorder as module
+
+    def exploding(price_at, context, risk, holdings, settings, **kwargs):
+        raise ValidationError("dividend yield magnitude must be <= 1.0.")
+
+    module.audit_held_book = exploding
+    try:
+        results = engine.run()
+    finally:
+        from quantark.backtest.replay.carry_risk import audit_held_book
+
+        module.audit_held_book = audit_held_book
+
+    frame = results.hedge_attribution_df()
+    assert not frame.empty
+    assert (frame["audit_status"] == "inconclusive").all()
+    assert frame["direct_net_delta_hands"].isna().all()
+    assert frame["identity_residual_hands"].isna().all()
+    # The replay itself completed and its P&L is intact.
+    assert results.states_df()["total_pnl"].notna().all()
+    # ... and the mapped exposure is still reported every day.
+    assert frame["net_delta_hands"].notna().all()
+
+
+def test_an_inconclusive_day_keeps_the_run_out_of_a_validity_pass():
+    import importlib.util
+    from pathlib import Path as _Path
+
+    study = _Path(__file__).resolve().parents[1] / "example" / "snowball_q_term_structure"
+    if str(study) not in sys.path:
+        sys.path.insert(0, str(study))
+    if "_common" in sys.modules:
+        common = sys.modules["_common"]
+    else:
+        spec = importlib.util.spec_from_file_location("_common", study / "_common.py")
+        common = importlib.util.module_from_spec(spec)
+        # Register BEFORE exec: dataclasses resolves annotations through
+        # sys.modules[cls.__module__], which is None for an unregistered name.
+        sys.modules["_common"] = common
+        spec.loader.exec_module(common)
+
+    attribution = pd.DataFrame(
+        {"audit_status": ["pass", "inconclusive", "pass"]},
+        index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]),
+    )
+    coverage = common.audit_coverage(None, attribution)
+    assert coverage["by_status"]["inconclusive"] == 1
+    assert coverage["all_measured_passed"] is False
