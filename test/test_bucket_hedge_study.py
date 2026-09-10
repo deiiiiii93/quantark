@@ -403,3 +403,331 @@ def test_stress_and_audit_dates_round_trip_into_settings():
         datetime(2025, 3, 3),
         datetime(2025, 3, 4),
     )
+
+
+# ---------------------------------------------------------------------------
+# Versioned persistence
+# ---------------------------------------------------------------------------
+
+
+class FakeSingleResults:
+    """The single-result API: frames are PROPERTIES."""
+
+    def __init__(self, frames):
+        self._frames = frames
+
+    @property
+    def states_df(self):
+        return self._frames["states"]
+
+    @property
+    def greeks_df(self):
+        return self._frames["greeks"]
+
+    @property
+    def trades_df(self):
+        return self._frames["trades"]
+
+    @property
+    def rebalance_df(self):
+        return self._frames["rebalances"]
+
+    @property
+    def actions_df(self):
+        return self._frames["actions"]
+
+    @property
+    def hedge_legs_df(self):
+        return self._frames["hedge_legs"]
+
+    @property
+    def hedge_attribution_df(self):
+        return self._frames["hedge_attribution"]
+
+    @property
+    def hedge_stresses_df(self):
+        return self._frames["hedge_stresses"]
+
+
+class FakeBookResults:
+    """The book-result API: frames are METHODS."""
+
+    def __init__(self, frames):
+        self._frames = frames
+
+    def states_df(self):
+        return self._frames["states"]
+
+    def greeks_df(self):
+        return self._frames["greeks"]
+
+    def trades_df(self):
+        return self._frames["trades"]
+
+    def rebalances_df(self):
+        return self._frames["rebalances"]
+
+    def actions_df(self):
+        return self._frames["actions"]
+
+    def hedge_legs_df(self):
+        return self._frames["hedge_legs"]
+
+    def hedge_attribution_df(self):
+        return self._frames["hedge_attribution"]
+
+    def hedge_stresses_df(self):
+        return self._frames["hedge_stresses"]
+
+
+def _frames(*, empty_stresses=True):
+    index = pd.to_datetime(["2024-01-02", "2024-01-03"])
+    base = pd.DataFrame({"total_pnl": [1.0, 2.0]}, index=index)
+    base.index.name = "date"
+    legs = pd.DataFrame(
+        {
+            "contract": ["IM2401", "IM2401"],
+            "net_rhoq_bp": [1.0, 1.1],
+            "audit_status": ["pass", "pass"],
+        },
+        index=index,
+    )
+    legs.index.name = "date"
+    attribution = pd.DataFrame(
+        {"audit_status": ["pass", "fail"], "attribution_status": ["first_date", "ok"]},
+        index=index,
+    )
+    attribution.index.name = "date"
+    stresses = pd.DataFrame(
+        columns=["scenario_id", "product_pnl"],
+        index=pd.DatetimeIndex([], name="date"),
+    )
+    if not empty_stresses:
+        stresses = pd.DataFrame(
+            {"scenario_id": ["tail+0.01"], "product_pnl": [-1.0]}, index=index[:1]
+        )
+        stresses.index.name = "date"
+    return {
+        "states": base,
+        "greeks": base,
+        "trades": base,
+        "rebalances": base,
+        "actions": base,
+        "hedge_legs": legs,
+        "hedge_attribution": attribution,
+        "hedge_stresses": stresses,
+    }
+
+
+@pytest.mark.parametrize("api", [FakeSingleResults, FakeBookResults])
+def test_the_frame_adapter_handles_both_result_apis(api):
+    results = api(_frames())
+    for name in C.LEGACY_RUN_FRAMES + C.CARRY_RUN_FRAMES:
+        assert isinstance(C.result_frame(results, name), pd.DataFrame)
+    # An EMPTY frame is falsy; the adapter must not read that as the wrong API.
+    assert C.result_frame(results, "hedge_stresses").empty
+
+
+def test_a_new_run_round_trips_all_eight_frames(tmp_path):
+    results = FakeSingleResults(_frames())
+    run_dir = tmp_path / "runs" / "2024-01" / "term_flat_q__buckets_spot_parallel"
+    C.write_run(
+        run_dir,
+        results,
+        {"fingerprint": "abc", "status": "completed"},
+        run_format=C.RUN_FORMAT_CARRY,
+        run_config={"objective": "spot_parallel"},
+        audit_summary={"audit_coverage": "measured"},
+    )
+    for name in C.LEGACY_RUN_FRAMES + C.CARRY_RUN_FRAMES:
+        assert (run_dir / f"{name}.csv").exists(), name
+    assert (run_dir / "run_config.json").exists()
+    assert (run_dir / "audit_summary.json").exists()
+
+    loaded = C.load_run(run_dir)
+    assert loaded["run_format"] == C.RUN_FORMAT_CARRY
+    for name in C.LEGACY_RUN_FRAMES + C.CARRY_RUN_FRAMES:
+        assert name in loaded, name
+    # The empty stress file keeps its fixed columns.
+    assert list(loaded["hedge_stresses"].columns) == ["scenario_id", "product_pnl"]
+    assert loaded["run_config"]["objective"] == "spot_parallel"
+    assert loaded["audit_summary"]["audit_coverage"] == "measured"
+
+
+def test_a_legacy_run_stays_readable_and_reports_no_audit_coverage(tmp_path):
+    results = FakeSingleResults(_frames())
+    run_dir = tmp_path / "runs" / "2024-01" / "flat_from_hedge__front"
+    C.write_run(run_dir, results, {"fingerprint": "abc", "status": "completed"})
+    assert not (run_dir / "hedge_legs.csv").exists()
+    loaded = C.load_run(run_dir)
+    assert loaded["run_format"] == C.RUN_FORMAT_LEGACY
+    assert loaded["audit_summary"]["audit_coverage"] == "not_available"
+    assert set(C.LEGACY_RUN_FRAMES) <= set(loaded)
+
+
+def test_a_new_format_run_missing_a_required_frame_is_an_error(tmp_path):
+    results = FakeSingleResults(_frames())
+    run_dir = tmp_path / "runs" / "2024-01" / "term_flat_q__buckets_nodes"
+    C.write_run(
+        run_dir,
+        results,
+        {"fingerprint": "abc", "status": "completed"},
+        run_format=C.RUN_FORMAT_CARRY,
+        run_config={},
+        audit_summary={},
+    )
+    (run_dir / "hedge_attribution.csv").unlink()
+    with pytest.raises(C.StudyDataError, match="hedge_attribution"):
+        C.load_run(run_dir)
+
+
+def test_audit_coverage_counts_statuses_rather_than_returning_a_boolean():
+    frames = _frames()
+    coverage = C.audit_coverage(frames["hedge_legs"], frames["hedge_attribution"])
+    assert coverage["audit_coverage"] == "measured"
+    assert coverage["dates"] == 2
+    assert coverage["by_status"]["pass"] == 1
+    assert coverage["by_status"]["fail"] == 1
+    # One failed audit means the run cannot serve as a passing gate result.
+    assert coverage["all_measured_passed"] is False
+
+    unmeasured = frames["hedge_attribution"].copy()
+    unmeasured["audit_status"] = "not_measured"
+    quiet = C.audit_coverage(frames["hedge_legs"], unmeasured)
+    assert quiet["audit_coverage"] == "not_measured"
+    assert quiet["all_measured_passed"] is False
+    # No frame at all is a THIRD thing: the run predates carry recording.
+    assert C.audit_coverage(None, None)["audit_coverage"] == "not_available"
+
+
+# ---------------------------------------------------------------------------
+# Resume
+# ---------------------------------------------------------------------------
+
+
+def _write_run(tmp_path, task, *, run_format, audit_coverage=None):
+    run_dir = C.run_dir_for(
+        tmp_path, task["inception_tag"], task["model"], task["hedge"]
+    )
+    summary = {
+        "fingerprint": FLEET.fingerprint(task),
+        "status": "completed",
+        "run_format": run_format,
+    }
+    if audit_coverage is not None:
+        summary["audit_coverage"] = audit_coverage
+    C.write_run(
+        run_dir,
+        FakeSingleResults(_frames()),
+        summary,
+        run_format=run_format,
+        run_config={},
+        audit_summary={"audit_coverage": audit_coverage or "not_available"},
+    )
+    return run_dir, summary
+
+
+def _audited_task():
+    task = dict(_task())
+    task["inception_tag"] = "2021-01"
+    task["risk"] = FLEET.resolve_risk_profile(
+        FLEET.parse_args(["--study-grid", "buckets"])
+    )
+    return task
+
+
+def test_a_legacy_artifact_cannot_resume_an_audited_task(tmp_path):
+    task = _audited_task()
+    run_dir, summary = _write_run(tmp_path, task, run_format=C.RUN_FORMAT_LEGACY)
+    assert FLEET.resumable(summary, task, run_dir) is False
+
+
+def test_a_complete_audited_artifact_resumes(tmp_path):
+    task = _audited_task()
+    run_dir, summary = _write_run(
+        tmp_path, task, run_format=C.RUN_FORMAT_CARRY, audit_coverage="measured"
+    )
+    assert FLEET.resumable(summary, task, run_dir) is True
+
+
+def test_an_audited_task_will_not_resume_an_unmeasured_run(tmp_path):
+    task = _audited_task()
+    run_dir, summary = _write_run(
+        tmp_path, task, run_format=C.RUN_FORMAT_CARRY, audit_coverage="not_measured"
+    )
+    assert FLEET.resumable(summary, task, run_dir) is False
+
+
+def test_a_missing_new_frame_blocks_the_resume(tmp_path):
+    task = _audited_task()
+    run_dir, summary = _write_run(
+        tmp_path, task, run_format=C.RUN_FORMAT_CARRY, audit_coverage="measured"
+    )
+    (run_dir / "hedge_stresses.csv").unlink()
+    assert FLEET.resumable(summary, task, run_dir) is False
+
+
+def test_a_failed_summary_never_resumes(tmp_path):
+    task = _audited_task()
+    run_dir, summary = _write_run(
+        tmp_path, task, run_format=C.RUN_FORMAT_CARRY, audit_coverage="measured"
+    )
+    summary["status"] = "failed"
+    assert FLEET.resumable(summary, task, run_dir) is False
+
+
+def test_a_legacy_task_still_resumes_a_legacy_artifact(tmp_path):
+    task = dict(_task(), inception_tag="2021-01")
+    run_dir, summary = _write_run(tmp_path, task, run_format=C.RUN_FORMAT_LEGACY)
+    assert FLEET.resumable(summary, task, run_dir) is True
+
+
+# ---------------------------------------------------------------------------
+# Failure records
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message, category",
+    [
+        ("bucket hedge infeasible on 2025-03-03: objective=...", "infeasible_hedge"),
+        ("no tradable mark for IM2401 on 2025-03-03", "missing_price"),
+        ("nodal rhoq IM2401 +0.5 bp vs tolerance 0.01", "numeric_audit"),
+        ("something else entirely", "other"),
+    ],
+)
+def test_failure_categories_stay_distinct(message, category):
+    assert FLEET.error_category(Exception(message)) == category
+
+
+def test_a_failure_is_written_beside_a_completed_run_not_over_it(tmp_path):
+    task = dict(_audited_task())
+    task["out_dir"] = str(tmp_path)
+    task["history_dir"] = str(tmp_path)
+    run_dir, summary = _write_run(
+        tmp_path, task, run_format=C.RUN_FORMAT_CARRY, audit_coverage="measured"
+    )
+    before = (run_dir / "run_summary.json").read_text()
+
+    original = FLEET.run_cell
+    def boom(_task):
+        raise RuntimeError("bucket hedge infeasible on 2025-03-03")
+
+    FLEET.run_cell = boom
+    try:
+        outcome = FLEET._run_cell_guarded(task)
+    finally:
+        FLEET.run_cell = original
+    assert outcome["status"] == "failed"
+    assert outcome["error_category"] == "infeasible_hedge"
+    assert outcome["objective"] == "spot_parallel"
+    assert outcome["input_fingerprint"] == FLEET.fingerprint(task)
+    assert (run_dir / "failure.json").exists()
+    # The completed summary is untouched.
+    assert (run_dir / "run_summary.json").read_text() == before
+
+
+def test_the_source_digest_follows_content_not_a_revision_name():
+    digest = FLEET.source_digest()
+    assert len(digest) == 16
+    assert digest == FLEET.source_digest()

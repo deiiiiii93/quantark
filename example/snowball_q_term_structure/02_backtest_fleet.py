@@ -311,8 +311,70 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
     }
     summary.update({k: v for k, v in results.get_summary().items() if k not in summary})
     run_dir = C.run_dir_for(Path(task["out_dir"]), task["inception_tag"], task["model"], task["hedge"])
-    C.write_run(run_dir, results, summary)
+    run_format = C.RUN_FORMAT_LEGACY
+    run_config = None
+    audits = None
+    if risk:
+        run_format = C.RUN_FORMAT_CARRY
+        audits = C.audit_coverage(
+            C.result_frame(results, "hedge_legs"),
+            C.result_frame(results, "hedge_attribution"),
+        )
+        run_config = {
+            "format_version": run_format,
+            "objective": C.BUCKET_OBJECTIVES.get(task["hedge"]),
+            "hedge_policy": task["hedge"],
+            "roll_selector": C.HEDGE_ROLL_SELECTOR[task["hedge"]],
+            "q_model": task["model"],
+            "dividend_source": C.Q_MODELS[task["model"]].dividend_source,
+            "extrapolation": C.Q_MODELS[task["model"]].extrapolation,
+            "min_tenor_days": C.Q_MODELS[task["model"]].min_tenor_days,
+            "quad_grid": task["quad_grid"],
+            "delta_threshold": task["delta_threshold"],
+            "round_contracts": task["round_contracts"],
+            "cost_bp": task["cost_bp"],
+            "rate": task["rate"],
+            "risk": dict(risk),
+            "fingerprint": summary["fingerprint"],
+            "source_digest": source_digest(),
+        }
+        summary["audit_coverage"] = audits["audit_coverage"]
+        summary["all_measured_audits_passed"] = audits["all_measured_passed"]
+        summary["exploratory_audit_override"] = bool(
+            risk.get("exploratory_audit_override")
+        )
+    C.write_run(
+        run_dir,
+        results,
+        summary,
+        run_format=run_format,
+        run_config=run_config,
+        audit_summary=audits,
+    )
     return summary
+
+
+def error_category(exc: Exception) -> str:
+    """Coarse classification, so a data gap is never retried like a bug.
+
+    A missing price, an infeasible hedge and a numeric audit failure are
+    distinct outcomes with distinct responses; collapsing them would let a
+    failed objective be retried identically until it looked like flakiness.
+    """
+    text = str(exc)
+    if "infeasible" in text or "two distinct futures tenors" in text:
+        return "infeasible_hedge"
+    if (
+        "mark" in text
+        or "no contract with at least" in text
+        or "found no contract" in text
+    ):
+        return "missing_price"
+    if "audit" in text or "tolerance" in text:
+        return "numeric_audit"
+    if isinstance(exc, C.StudyDataError):
+        return "study_data"
+    return "other"
 
 
 def _run_cell_guarded(task: Dict[str, Any]) -> Dict[str, Any]:
@@ -320,12 +382,24 @@ def _run_cell_guarded(task: Dict[str, Any]) -> Dict[str, Any]:
         summary = run_cell(task)
         return {"status": "ok", "task": task, "summary": summary}
     except Exception as exc:  # noqa: BLE001 - recorded in the manifest, fail-closed per cell
-        return {
+        failure = {
             "status": "failed",
             "task": task,
+            "date": datetime.now().isoformat(timespec="seconds"),
+            "objective": C.BUCKET_OBJECTIVES.get(task["hedge"]),
+            "input_fingerprint": fingerprint(task),
+            "error_category": error_category(exc),
             "error": f"{type(exc).__name__}: {exc}",
             "traceback": traceback.format_exc(),
         }
+        run_dir = C.run_dir_for(
+            Path(task["out_dir"]), task["inception_tag"], task["model"], task["hedge"]
+        )
+        # A failure NEVER replaces an earlier completed run: it is written
+        # beside it, and the completed summary keeps its own file.
+        run_dir.mkdir(parents=True, exist_ok=True)
+        C.write_json(run_dir / "failure.json", failure)
+        return failure
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +509,63 @@ def resolve_risk_profile(args) -> Dict[str, Any]:
     }
 
 
+def resumable(existing: Dict[str, Any], task: Dict[str, Any], run_dir: Path) -> bool:
+    """Whether a stored run can stand in for this task.
+
+    It needs the same fingerprint, a completed status, the right format and
+    every file that format requires.  A legacy summary can never satisfy a
+    task that asked for audits: it has neither the frames nor the coverage.
+    """
+    if existing.get("fingerprint") != fingerprint(task):
+        return False
+    if existing.get("status") == "failed":
+        return False
+    wanted = C.RUN_FORMAT_CARRY if task.get("risk") else C.RUN_FORMAT_LEGACY
+    if existing.get("run_format", C.RUN_FORMAT_LEGACY) != wanted:
+        return False
+    for name in C.required_frames(wanted):
+        if not (run_dir / f"{name}.csv").exists():
+            return False
+    if wanted == C.RUN_FORMAT_CARRY:
+        for name in ("run_config.json", "audit_summary.json"):
+            if not (run_dir / name).exists():
+                return False
+        requested = (task.get("risk") or {}).get("carry_audit_mode", "none")
+        if requested != "none" and existing.get("audit_coverage") != "measured":
+            return False
+    return True
+
+
+def source_digest() -> str:
+    """Content digest of the source that decides pricing, curve and sizing.
+
+    A revision identifier alone is insufficient: the working tree routinely
+    carries uncommitted changes, and two runs of "the same revision" can
+    price differently.
+    """
+    import hashlib as _hashlib
+    from pathlib import Path as _Path
+
+    import quantark.backtest.futures_risk as _risk
+    import quantark.backtest.replay.carry_context as _ctx
+    import quantark.backtest.replay.carry_recorder as _rec
+    import quantark.backtest.replay.carry_risk as _cr
+    import quantark.backtest.replay.carry_stress as _cs
+    import quantark.backtest.replay.engine as _engine
+    import quantark.backtest.strategy.futures_bucket_strategy as _bucket
+
+    roots = [_Path(C.__file__), _Path(__file__)]
+    roots += [
+        _Path(module.__file__)
+        for module in (_risk, _ctx, _cr, _cs, _rec, _engine, _bucket)
+    ]
+    digest = _hashlib.sha256()
+    for path in sorted(roots):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
 def load_json(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
@@ -515,7 +646,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 task["risk"] = dict(risk_profile)
             run_dir = C.run_dir_for(out_dir, s.tag, model, hedge)
             existing = load_json(run_dir / "run_summary.json") if args.resume else None
-            if existing and existing.get("fingerprint") == fingerprint(task):
+            if existing and resumable(existing, task, run_dir):
                 manifest_runs.append({"status": "resumed", "task": task, "summary": existing})
                 continue
             tasks.append(task)

@@ -1000,7 +1000,55 @@ def solve_fair_coupon(
 # Run I/O
 # ---------------------------------------------------------------------------
 
-RUN_FRAMES = ("states", "greeks", "trades", "rebalances", "actions")
+#: The five frames every run has ever written.  A historical run has only
+#: these, and must stay readable.
+LEGACY_RUN_FRAMES = ("states", "greeks", "trades", "rebalances", "actions")
+
+#: The three carry frames a revised (audited) run adds.
+CARRY_RUN_FRAMES = ("hedge_legs", "hedge_attribution", "hedge_stresses")
+
+RUN_FRAMES = LEGACY_RUN_FRAMES  # the historical name, unchanged
+
+#: Format versions.  ``legacy`` runs predate carry recording; ``carry_v2``
+#: runs carry all eight frames plus the resolved configuration.
+RUN_FORMAT_LEGACY = "legacy"
+RUN_FORMAT_CARRY = "carry_v2"
+
+#: The revised study writes here, so historical artifacts are never touched.
+BUCKET_RUN_VERSION = "bucket_hedge_v2"
+
+
+def required_frames(run_format: str) -> Tuple[str, ...]:
+    if run_format == RUN_FORMAT_CARRY:
+        return LEGACY_RUN_FRAMES + CARRY_RUN_FRAMES
+    return LEGACY_RUN_FRAMES
+
+
+def result_frame(results: Any, name: str):
+    """One frame from EITHER result API.
+
+    The single result exposes properties; the book result exposes methods.
+    The attribute is inspected for callability rather than the frame being
+    tested for truth: an empty DataFrame is falsy, and a truth test would
+    silently turn "no rows" into "wrong API".
+    """
+    accessors = {
+        "states": ("states_df",),
+        "greeks": ("greeks_df",),
+        "trades": ("trades_df",),
+        "rebalances": ("rebalance_df", "rebalances_df"),
+        "actions": ("actions_df",),
+        "hedge_legs": ("hedge_legs_df",),
+        "hedge_attribution": ("hedge_attribution_df",),
+        "hedge_stresses": ("hedge_stresses_df",),
+    }[name]
+    for accessor in accessors:
+        attribute = getattr(type(results), accessor, None)
+        if attribute is None:
+            continue
+        value = getattr(results, accessor)
+        return value() if callable(value) else value
+    raise StudyDataError(f"results expose no frame named {name!r}")
 
 
 def cell_name(model: str, hedge: str) -> str:
@@ -1011,29 +1059,91 @@ def run_dir_for(out_dir: Path, inception_tag: str, model: str, hedge: str) -> Pa
     return Path(out_dir) / "runs" / inception_tag / cell_name(model, hedge)
 
 
-def write_run(run_dir: Path, results: Any, summary: Dict[str, Any]) -> None:
+def write_run(
+    run_dir: Path,
+    results: Any,
+    summary: Dict[str, Any],
+    *,
+    run_format: str = RUN_FORMAT_LEGACY,
+    run_config: Optional[Dict[str, Any]] = None,
+    audit_summary: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Write the run's frames, then its configuration, then its summary.
+
+    The completed summary is published LAST and atomically, so a reader that
+    finds one can rely on every frame beside it already being there.
+    """
     run_dir.mkdir(parents=True, exist_ok=True)
-    frames = {
-        "states": results.states_df,
-        "greeks": results.greeks_df,
-        "trades": results.trades_df,
-        "rebalances": results.rebalance_df,
-        "actions": results.actions_df,
-    }
-    # every replay frame is date-indexed (trades and actions included)
-    for name, frame in frames.items():
-        frame.to_csv(run_dir / f"{name}.csv", index=True)
+    for name in required_frames(run_format):
+        # every replay frame is date-indexed (trades and actions included)
+        result_frame(results, name).to_csv(run_dir / f"{name}.csv", index=True)
+    if run_format == RUN_FORMAT_CARRY:
+        atomic_write_json(run_dir / "run_config.json", _jsonable(run_config or {}))
+        atomic_write_json(
+            run_dir / "audit_summary.json", _jsonable(audit_summary or {})
+        )
+    summary = dict(summary)
+    summary.setdefault("run_format", run_format)
     atomic_write_json(run_dir / "run_summary.json", _jsonable(summary))
+
+
+def audit_coverage(legs: Any, attribution: Any) -> Dict[str, Any]:
+    """Measured/pass/fail/inconclusive counts, not one boolean.
+
+    ``not_available`` is reserved for a run that predates carry recording:
+    it is NOT the same as a run whose audits were scheduled and failed.
+    """
+    if attribution is None or len(attribution) == 0:
+        return {"audit_coverage": "not_available"}
+    statuses = list(attribution["audit_status"])
+    counts = {
+        status: int(statuses.count(status))
+        for status in ("pass", "fail", "not_measured", "inconclusive")
+    }
+    measured = len(statuses) - counts["not_measured"]
+    by_scenario: Dict[str, int] = {}
+    if legs is not None and len(legs):
+        for family in sorted(set(legs.get("audit_status", []))):
+            by_scenario[str(family)] = int(
+                (legs["audit_status"] == family).sum()
+            )
+    return {
+        "audit_coverage": "measured" if measured else "not_measured",
+        "dates": len(statuses),
+        "measured": measured,
+        "by_status": counts,
+        "leg_rows_by_status": by_scenario,
+        # A completed run with a failed audit stays available for diagnosis
+        # and can never be reused as a passing gate result.
+        "all_measured_passed": bool(
+            measured and counts["fail"] == 0 and counts["inconclusive"] == 0
+        ),
+    }
 
 
 def load_run(run_dir: Path) -> Dict[str, Any]:
     run_dir = Path(run_dir)
     out: Dict[str, Any] = {}
-    for name in RUN_FRAMES:
+    summary_path = run_dir / "run_summary.json"
+    run_format = RUN_FORMAT_LEGACY
+    if summary_path.exists():
+        run_format = json.loads(summary_path.read_text()).get(
+            "run_format", RUN_FORMAT_LEGACY
+        )
+    out["run_format"] = run_format
+    for name in required_frames(run_format):
         path = run_dir / f"{name}.csv"
         if not path.exists():
             raise StudyDataError(f"run frame missing: {path}")
         out[name] = pd.read_csv(path, index_col=0, parse_dates=True)
+    if run_format == RUN_FORMAT_CARRY:
+        for name in ("run_config", "audit_summary"):
+            path = run_dir / f"{name}.json"
+            if not path.exists():
+                raise StudyDataError(f"run artifact missing: {path}")
+            out[name] = json.loads(path.read_text())
+    else:
+        out["audit_summary"] = {"audit_coverage": "not_available"}
     summary_path = run_dir / "run_summary.json"
     if not summary_path.exists():
         raise StudyDataError(f"run summary missing: {summary_path}")
