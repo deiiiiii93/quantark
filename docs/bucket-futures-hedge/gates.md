@@ -486,7 +486,7 @@ The ladder under both readouts:
 | audit spot bump | legacy | transition |
 |---:|---:|---:|
 | 0.01 (default, matched) | 0.042500 | 0.042613 |
-| 0.0025 | 0.051449 | pending |
+| 0.0025 | 0.051449 | 0.043244 |
 | 0.001 | 0.084353 | 0.046811 |
 
 The readout does exactly what it was built to do. It removes the
@@ -535,8 +535,24 @@ Two hypotheses died, and both were mine:
   `has_product_tail` is false throughout.
 - **the bucket bump.** `B_i` is taken at a fixed 1 index point regardless of
   the spot bump, which would reproduce the observed bump-invariance. The
-  knock-in split refutes it before the confirming run lands: a fixed bucket
-  bump cannot switch itself off when the product knocks in.
+  knock-in split refutes it: a fixed bucket bump cannot switch itself off
+  when the product knocks in. The confirming 10-point run never completed —
+  it raises `dividend yield magnitude must be <= 1.0`, because a 10-point
+  move on a short-tenor contract implies an absurd yield. So this is
+  refuted by the split, not by its own run.
+
+A third attempt failed differently and is worth recording as a method note.
+`quad-readout/identity_vs_pde.py` strips the identity to three price bumps
+through a single flat yield, to compare QUAD against PDE with no study, no
+curve and no replay. Its own bump control condemns it: the residual there
+scales ~100x between a 1% and a 0.1% bump, which is O(h^2) truncation in the
+central differences, while the study's residual is bump-invariant over the
+same three bumps. Different error structure means a different quantity, so
+its cross-engine numbers say nothing about the floor. Routing the chain rule
+through one analytic yield is what breaks it; the study measures the bucket
+deltas directly. The script is kept WITH the control that condemns it. The
+one claim that survives is that QUAD legacy and QUAD transition agree
+closely in every cell, which is the readout being irrelevant again.
 
 ## What these gates do NOT establish
 

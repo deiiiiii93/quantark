@@ -98,10 +98,20 @@ This explains every observation in the gate record:
   long-dated ones.
 - **it gets worse as the audit bump shrinks.** A narrower bump is more
   likely to sit inside one cell and return the chord slope, losing the
-  curvature entirely.
-- **it is confined to the pre-knock-in dates.** Once knocked in, the KI
-  barrier is gone and the surface near the money is far smoother, so the
-  same interpolation costs far less.
+  curvature entirely. This is a statement about the AUDIT's ladder, and it
+  holds only because shrinking that bump unmatches it from the engine's own;
+  see the end-to-end section below.
+- **it is confined to the pre-knock-in dates.**
+
+> The pre-knock-in confinement was attributed here to the interpolation:
+> once knocked in the barrier is gone, the surface near the money is
+> smoother, and the same readout costs less. That attribution is wrong. The
+> confinement is identical under `transition`, which has no interpolation
+> error at all — 0.000808 hands after knock-in under both readouts, agreeing
+> to six decimals. So the pre-knock-in residual is a property of the live
+> barrier, not of how the price is read off the surface, and it is the one
+> thing in this document the readout does not explain. See
+> `residual_by_ki_state.py` and `../gates.md`.
 
 ## It does not reach the hedge
 
@@ -495,7 +505,7 @@ The ladder under both readouts (`bump_ladder_table.py`):
 | audit spot bump | legacy | transition |
 |---:|---:|---:|
 | 0.01 (default, matched) | 0.042500 | 0.042613 |
-| 0.0025 | 0.051449 | pending |
+| 0.0025 | 0.051449 | 0.043244 |
 | 0.001 | 0.084353 | 0.046811 |
 
 So the mode does what it was built to do. It removes the bump-dependence of
@@ -513,10 +523,40 @@ settings the audit was never failing on the staircase, and my own earlier
 — already said so before I built the ladder.
 
 What is left is a floor near 0.0425 hands, invariant to the readout and to
-the spot bump. Bump-invariance rules out spot-bump truncation as well as the
-staircase. The open suspect is the bucket delta `B_i`, taken at a fixed 1
-index point regardless of the spot bump, which would produce exactly this
-signature; a 10x bucket-bump run is testing it.
+the spot bump, and it is **entirely the live knock-in barrier**
+(`residual_by_ki_state.py`):
+
+| | dates | mean abs | median | max |
+|---|---:|---:|---:|---:|
+| knock-in barrier live | 178 | 0.057257 | 0.044636 | 0.548283 |
+| after knock-in | 63 | 0.000808 | 0.000578 | 0.002909 |
+
+A 71x collapse on the same product, engine, curve and bumps; under
+`transition` the same split gives 0.057410 and 0.000808. Once the barrier is
+extinguished the identity holds an order of magnitude inside the budget on
+63 consecutive dates, so the chain rule, the audit machinery, the bucket
+deltas and the engine's delta Greek are all sound on this evidence. The
+monthly knock-OUT barriers are live in both legs, so it is the
+daily-monitored knock-IN barrier specifically — the same object as the
+near-barrier lobe above, which makes it one open defect rather than two.
+
+Two of my own hypotheses died on the way, and a third method failed:
+
+- **the uncovered tail** — the identity sums over LISTED contracts and this
+  product outlives the strip. Refuted by `tail_hypothesis.py`: correlation
+  +0.16, and dates where the curve SPANS the product carry a higher mean
+  residual than dates where it does not.
+- **the bucket bump** — `B_i` is taken at a fixed 1 index point whatever the
+  spot bump, which would reproduce the bump-invariance. Refuted by the
+  knock-in split: a fixed bucket bump cannot switch off at knock-in. Its
+  confirming 10-point run never completed, raising `dividend yield magnitude
+  must be <= 1.0` for the reason Gate A already records.
+- **`identity_vs_pde.py`**, which strips the identity to three price bumps
+  through one flat yield to compare QUAD against PDE. Its own bump control
+  condemns it: the residual there scales ~100x from a 1% to a 0.1% bump,
+  which is O(h^2) truncation, while the study's is bump-invariant over the
+  same three. Different error structure, different quantity. Kept with the
+  control that condemns it so the construction is not tried again.
 
 ### It moves the model-validation certificate identities, and that is correct
 
