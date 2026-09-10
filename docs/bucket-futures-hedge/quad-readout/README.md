@@ -626,6 +626,13 @@ say what this engine can actually resolve, and needs no engine change. But
 it accepts the ~0.8 bp of lost accuracy near the barrier rather than fixing
 it.
 
+> **That row would not have fixed the audit either**, which the decision
+> matrix did not know when it was written. The audit's two spot derivatives
+> use matched steps, so the sawtooth enters both and cancels; a tolerance
+> sized to it would not admit one extra date. The amplitude formula is the
+> right budget for a sub-cell delta probe, a different instrument. The
+> matrix's "audit only" column for this row should be read as "neither".
+
 Against that, the project's standing rule is to fix instability with
 resolution or refinement rather than with smoothing — and refinement does
 NOT fix this one. The linear readout's error near the barrier is

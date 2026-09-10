@@ -442,15 +442,20 @@ its base. See `quad-readout/README.md`. Unresolved.
 
 What remains open, with the measured evidence in `quad-readout/README.md`:
 
-- **the budget.** The sawtooth amplitude is not noise, it is
-  `h * |S*Gamma + Delta| / m_ref`, a quantity the engine knows. An audit
-  budget derived from it would say what this engine can actually resolve.
-  The 0.01-hand figure is an initial deterministic-fixture tolerance and was
-  never derived for a quadrature-priced snowball beside a discretely
-  monitored barrier. This is still worth doing whatever readout is in use.
-- **the remaining floor.** About 0.0425 reference hands survives at the
-  audit's own bump under both readouts, and is invariant to the spot bump.
-  It is neither the staircase nor spot-bump truncation. See below.
+- **the budget, but NOT the one proposed here.** Earlier drafts of this
+  section argued for deriving the audit tolerance from the sawtooth
+  amplitude `h * |S*Gamma + Delta| / m_ref`, and called it worth doing
+  whatever readout is in use. That is now the wrong budget for this check.
+  The audit's two spot derivatives use matched steps, so the sawtooth enters
+  both and cancels; a tolerance sized to an error the check cannot see would
+  not admit a single extra date. The amplitude formula remains the right
+  budget for a SUB-CELL delta probe, which is a different instrument. The
+  0.01-hand figure is still an initial deterministic-fixture tolerance never
+  derived for a quadrature-priced snowball beside a discretely monitored
+  barrier, so the budget question is open — it just has to be sized against
+  the knock-in barrier error below, which is what the check actually
+  resolves.
+- **the remaining floor**, which is that knock-in barrier error. See below.
 
 Disabling alignment is not among the options: measured, it makes the
 sawtooth 70x worse and moves prices 14.9 bp, because the barrier's own
