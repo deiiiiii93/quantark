@@ -53,7 +53,14 @@ def _node_greeks(x: np.ndarray, v: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
 @dataclass(frozen=True)
 class LifeSurface:
-    """Both slabs of one solve with their node greeks."""
+    """Both branch slabs of one solve with their node greeks.
+
+    ``v0`` / ``v1`` are the solver's BRANCH columns: each is the value after
+    that node's diffusion and before its event transforms, which is what a
+    path alive (or knocked in) on that day is worth.  Reading the projected
+    column instead would blend the two branches within a cell of a barrier
+    and differentiate across the observation's value jump.
+    """
 
     t: np.ndarray
     x: np.ndarray
@@ -64,9 +71,6 @@ class LifeSurface:
     d1: np.ndarray
     g1: np.ndarray
     step_of: Dict[float, int]
-    t0_readout: Optional[np.ndarray]
-    t0_delta: Optional[np.ndarray]
-    t0_gamma: Optional[np.ndarray]
 
     @property
     def nbytes(self) -> int:
@@ -103,10 +107,7 @@ class LifeSurface:
                 f"[{np.exp(self.x[0])!r}, {np.exp(self.x[-1])!r}]; widen the grid or use repricing"
             )
         ki = np.asarray(knocked_in, dtype=bool)
-        if k == 0 and self.t0_readout is not None:
-            v_alive, d_alive, g_alive = self.t0_readout, self.t0_delta, self.t0_gamma
-        else:
-            v_alive, d_alive, g_alive = self.v0[:, k], self.d0[:, k], self.g0[:, k]
+        v_alive, d_alive, g_alive = self.v0[:, k], self.d0[:, k], self.g0[:, k]
         pv = np.where(ki, np.interp(x_spot, self.x, self.v1[:, k]), np.interp(x_spot, self.x, v_alive))
         delta = np.where(ki, np.interp(x_spot, self.x, self.d1[:, k]), np.interp(x_spot, self.x, d_alive))
         gamma = np.where(ki, np.interp(x_spot, self.x, self.g1[:, k]), np.interp(x_spot, self.x, g_alive))
@@ -116,24 +117,19 @@ class LifeSurface:
         """This surface restricted to ``columns`` (sorted, unique), ``step_of`` remapped.
 
         Column data is copied, so a readout of a kept column is bit-identical
-        to the readout of the original.  Keep column 0 and the terminal
-        column: ``readout`` reads ``t0_readout`` at column 0 and ``node``
-        maps the maturity to the last column.
+        to the readout of the original.  Keep the terminal column: ``node``
+        maps the maturity to it.
         """
         keep = np.array(sorted({int(k) for k in columns}), dtype=np.int64)
         if keep.size == 0 or keep[0] < 0 or keep[-1] >= self.t.size:
             raise ValidationError(f"columns must index the surface's {self.t.size} time nodes")
         position = {int(k): n for n, k in enumerate(keep)}
-        keeps_zero = 0 in position
         return LifeSurface(
             t=np.array(self.t[keep]), x=self.x,
             v0=np.ascontiguousarray(self.v0[:, keep]), v1=np.ascontiguousarray(self.v1[:, keep]),
             d0=np.ascontiguousarray(self.d0[:, keep]), g0=np.ascontiguousarray(self.g0[:, keep]),
             d1=np.ascontiguousarray(self.d1[:, keep]), g1=np.ascontiguousarray(self.g1[:, keep]),
             step_of={t: position[k] for t, k in self.step_of.items() if k in position},
-            t0_readout=self.t0_readout if keeps_zero else None,
-            t0_delta=self.t0_delta if keeps_zero else None,
-            t0_gamma=self.t0_gamma if keeps_zero else None,
         )
 
 
@@ -266,14 +262,13 @@ class LifeSurfacePricer:
                 f"life-surface solve failed at vol={vol!r}, q={q!r}, rate={rate!r}: {exc}"
             ) from exc
         self._solves += 1
+        # Every column is a branch column now (LifeSurfaceSolution), column 0
+        # included, so the valuation-date readout needs no separate vector:
+        # ``sol.t0_readout`` is ``sol.v0[:, 0]`` to the bit whenever it exists.
         d0, g0 = _node_greeks(sol.x, sol.v0)
         d1, g1 = _node_greeks(sol.x, sol.v1)
-        t0_delta = t0_gamma = None
-        if sol.t0_readout is not None:
-            t0_delta, t0_gamma = (a[:, 0] for a in _node_greeks(sol.x, sol.t0_readout[:, None]))
         surface = LifeSurface(t=sol.t, x=sol.x, v0=sol.v0, v1=sol.v1, d0=d0, g0=g0, d1=d1, g1=g1,
-                              step_of=sol.step_of, t0_readout=sol.t0_readout,
-                              t0_delta=t0_delta, t0_gamma=t0_gamma)
+                              step_of=sol.step_of)
         if self.compact:
             surface = surface.select(self._read_columns(surface))
         self._surfaces.put(key, surface)

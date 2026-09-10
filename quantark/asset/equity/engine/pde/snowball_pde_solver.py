@@ -286,6 +286,12 @@ class SnowballPDESolver(BasePDESolver):
     #: Interior times that must be grid nodes for a life-surface readout
     #: (no event, no damping).  Empty for every ordinary solve.
     _extra_time_nodes: Tuple[float, ...] = ()
+    #: While True the march keeps every column's BRANCH values -- the two
+    #: surfaces after that node's diffusion and before its event transforms.
+    #: A life surface reads pointwise, and a discrete observation writes a
+    #: value JUMP onto the grid, so the projected column is not the value of
+    #: either branch within a cell of the barrier.  Off for ordinary solves.
+    _capture_branch_columns: bool = False
 
     def __init__(
         self, params: Optional[PDEParams] = None, enable_profiling: bool = False
@@ -1488,12 +1494,22 @@ class SnowballPDESolver(BasePDESolver):
         # Solve PDE
         result = self._solve(product, pricing_env)
 
-        # Extract price and Greeks from appropriate surface
-        price = self._interpolate_price(
-            result.solution_vec, result.x_vec, result.spot_log
+        # Extract price and Greeks from the appropriate surface, through the
+        # SAME readout price() uses (base_pde_solver.calculate_greeks): price
+        # from the pointwise-exact readout, delta/gamma from the smooth 0+
+        # branch column (a cash transition at the known spot is a constant
+        # shift with zero delta/gamma). A valuation-date observation writes a
+        # value JUMP onto the grid, so differentiating the post-event vector
+        # across it is O(J/h) wrong and worsens under refinement.
+        readout_vec = (
+            result.readout_vec if result.readout_vec is not None else result.solution_vec
         )
+        if result.readout_override is not None:
+            price = float(result.readout_override)
+        else:
+            price = self._interpolate_price(readout_vec, result.x_vec, result.spot_log)
         delta, gamma = self._calculate_delta_gamma(
-            result.solution_vec, result.x_vec, result.spot_log, spot
+            readout_vec, result.x_vec, result.spot_log, spot
         )
 
         return {"price": price, "delta": delta, "gamma": gamma}
@@ -1522,20 +1538,26 @@ class SnowballPDESolver(BasePDESolver):
         if any(t <= 0.0 or t >= tau for t in nodes):
             raise ValidationError(f"extra_times must lie strictly inside (0, {tau})")
         self._extra_time_nodes = nodes
+        self._capture_branch_columns = True
         try:
             result = self._solve(product, pricing_env)
             layout = self._active_layout
             if layout is None:
                 raise PricingError("the life surface needs the declarative grid layer")
+            if self._branch_cols is None:
+                raise PricingError("the life surface needs the march's branch columns")
+            branch_v0, branch_v1 = self._branch_cols
             return LifeSurfaceSolution(
                 t=np.array(layout.time.t, dtype=float), x=np.array(result.x_vec, dtype=float),
-                s=np.array(result.s_vec, dtype=float), v0=np.array(self._grid_v0, dtype=float),
-                v1=np.array(self._grid_v1, dtype=float), step_of=dict(layout.time.step_of),
+                s=np.array(result.s_vec, dtype=float), v0=np.array(branch_v0, dtype=float),
+                v1=np.array(branch_v1, dtype=float), step_of=dict(layout.time.step_of),
                 t0_readout=None if result.readout_vec is None else np.array(result.readout_vec, dtype=float),
                 knocked_in_at_valuation=bool(self._knocked_in_at_valuation),
             )
         finally:
             self._extra_time_nodes = ()
+            self._capture_branch_columns = False
+            self._branch_cols = None
 
     def _validate_product(self, product: SnowballOption) -> None:
         """
@@ -1647,6 +1669,7 @@ class SnowballPDESolver(BasePDESolver):
         self._t0_pre_event_cols = None
         self._t0_readout_cols = None
         self._t0_readout_values = None
+        self._branch_cols = None
 
     def _t0_has_events(self, product) -> bool:
         """Discrete events registered on the valuation date (t_idx == 0).
@@ -2615,6 +2638,16 @@ class SnowballPDESolver(BasePDESolver):
         # from the layout's frozensets on the migrated path, else legacy.
         theta_schedule = self._theta_schedule_from_layout(self._active_layout)
 
+        # Branch columns for a life-surface readout (see _capture_branch_columns).
+        # The terminal column carries the payoff, which no event follows.
+        branch_v0 = branch_v1 = None
+        if self._capture_branch_columns:
+            branch_v0 = np.empty_like(grid_v0)
+            branch_v1 = np.empty_like(grid_v1)
+            branch_v0[:, num_t - 1] = grid_v0[:, num_t - 1]
+            branch_v1[:, num_t - 1] = grid_v1[:, num_t - 1]
+            self._branch_cols = (branch_v0, branch_v1)
+
         rhs = None
         rhs_v0 = None
         rhs_v1 = None
@@ -2718,6 +2751,9 @@ class SnowballPDESolver(BasePDESolver):
             # across the nodal jump the event application writes.
             if profile:
                 t0 = perf_counter()
+            if branch_v0 is not None:
+                branch_v0[:, j] = grid_v0[:, j]
+                branch_v1[:, j] = grid_v1[:, j]
             if j == 0 and self._t0_has_events(product):
                 self._t0_pre_event_cols = (
                     grid_v0[:, 0].copy(),
