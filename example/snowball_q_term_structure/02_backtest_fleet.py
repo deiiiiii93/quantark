@@ -282,8 +282,12 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
         metadata={"study": "snowball_q_term_structure", "model": task["model"], "hedge": task["hedge"]},
     )
     started = time.perf_counter()
-    results = AutocallableBacktestEngine(config).run()
+    engine = AutocallableBacktestEngine(config)
+    results = engine.run()
     elapsed = time.perf_counter() - started
+    # Measured wall clock and price counts by stage, so a fleet runtime
+    # estimate comes from a measurement rather than an arithmetic guess.
+    carry_cost = engine._inner.carry_cost()
     states = results.states_df
     actions = results.actions_df
     summary: Dict[str, Any] = {
@@ -308,6 +312,7 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
         "knocked_out": bool(states["knocked_out"].iloc[-1]),
         "matured": bool(states["matured"].iloc[-1]),
         "n_actions": int(len(actions)),
+        "carry_cost": carry_cost,
     }
     summary.update({k: v for k, v in results.get_summary().items() if k not in summary})
     run_dir = C.run_dir_for(Path(task["out_dir"]), task["inception_tag"], task["model"], task["hedge"])

@@ -594,6 +594,12 @@ class ReplayBacktestEngine:
             ],
         )
 
+    def carry_cost(self) -> dict:
+        """Measured wall clock and price counts by stage, or an empty dict."""
+        if self._carry_recorder is None:
+            return {}
+        return dict(self._carry_recorder.cost)
+
     def _run_info(self) -> dict[str, Any]:
         """Termination provenance for the summary (study spec §6).
 
@@ -774,6 +780,7 @@ class ReplayBacktestEngine:
             raise ValidationError("no live product to measure carry risk for")
         settings = self._carry_recording.settings
         points = float(settings.futures_bump_points)
+        started = time.perf_counter()
         entries = []
         for quantity, replay, engine, product, unit_delta, price in alive_specs:
             entries.append(
@@ -789,6 +796,19 @@ class ReplayBacktestEngine:
                         base_price=price,
                     ),
                 )
+            )
+        if self._carry_recorder is not None:
+            self._carry_recorder.cost["bucket_seconds"] = (
+                self._carry_recorder.cost.get("bucket_seconds", 0.0)
+                + time.perf_counter()
+                - started
+            )
+            self._carry_recorder.cost["bucket_price_calls"] = (
+                self._carry_recorder.cost.get("bucket_price_calls", 0.0)
+                + sum(float(risk.price_calls) for _, risk in entries)
+            )
+            self._carry_recorder.cost["bucket_dates"] = (
+                self._carry_recorder.cost.get("bucket_dates", 0.0) + 1.0
             )
         return aggregate_book_risk(entries)
 

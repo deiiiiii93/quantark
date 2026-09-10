@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
@@ -98,6 +99,20 @@ class CarryExposureRecorder:
     legs: list = field(default_factory=list)
     attribution: list = field(default_factory=list)
     stresses: list = field(default_factory=list)
+    #: Wall clock and price counts by stage, so a fleet runtime estimate is
+    #: measured rather than guessed from an arithmetic price count.
+    cost: Dict[str, float] = field(
+        default_factory=lambda: {
+            "audit_seconds": 0.0,
+            "stress_seconds": 0.0,
+            "record_seconds": 0.0,
+            "audit_price_calls": 0.0,
+            "stress_price_calls": 0.0,
+            "audit_dates": 0.0,
+            "stress_dates": 0.0,
+            "recorded_dates": 0.0,
+        }
+    )
     _previous: Optional[CarryDaySnapshot] = None
     _node_sets: set = field(default_factory=set)
 
@@ -158,7 +173,13 @@ class CarryExposureRecorder:
         notional = float(settings.reference_notional)
         m_ref = float(settings.reference_multiplier)
 
+        started = time.perf_counter()
+        audit_started = time.perf_counter()
         audit = self._run_audit(date, risk, context, held, targets, price_at)
+        self.cost["audit_seconds"] += time.perf_counter() - audit_started
+        self.cost["audit_price_calls"] += float(audit.price_calls)
+        if audit.measured:
+            self.cost["audit_dates"] += 1.0
         self._append_leg_rows(
             date=date,
             risk=risk,
@@ -196,10 +217,19 @@ class CarryExposureRecorder:
             and context is not None
             and self.stresses_today(date)
         ):
+            stress_started = time.perf_counter()
+            before = len(self.stresses)
             self._append_stress_rows(
                 date, context, targets, held, price_at, objective
             )
+            self.cost["stress_seconds"] += time.perf_counter() - stress_started
+            # One base price and one stressed price per scenario and holdings
+            # set; the base is re-priced per scenario, so this is exact.
+            self.cost["stress_price_calls"] += 2.0 * (len(self.stresses) - before)
+            self.cost["stress_dates"] += 1.0
 
+        self.cost["record_seconds"] += time.perf_counter() - started
+        self.cost["recorded_dates"] += 1.0
         if risk is not None:
             self._node_sets.add(tuple(risk.contracts))
             self._previous = CarryDaySnapshot(

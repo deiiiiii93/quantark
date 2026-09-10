@@ -556,3 +556,48 @@ def test_a_terminated_book_still_records_a_row_without_a_product_risk():
     legs = results.hedge_legs_df()
     assert not legs.empty
     assert set(legs.columns) >= {"net_rhoq_bp", "hedge_rhoq_bp", "audit_status"}
+
+
+def test_the_run_measures_its_own_carry_cost_by_stage():
+    """A fleet runtime estimate should be measured, not arithmetic.
+
+    The counts also confirm the design's cost model: at one audit level a
+    three-node curve adds 14 audit prices a day (two pinned spot, two frozen
+    spot, two per node, two parallel and two product-only parallel) on top of
+    the bucket sampling.
+    """
+    engine, _ = run()
+    cost = engine.carry_cost()
+    assert cost["recorded_dates"] == 7
+    assert cost["bucket_dates"] == 7
+    assert cost["audit_dates"] == 7
+    # Buckets: one base plus two prices per node, per day.
+    assert cost["bucket_price_calls"] == 36
+    # Audits: 14 a day on three nodes, 12 once the front contract retires.
+    assert cost["audit_price_calls"] == 4 * 14 + 3 * 12
+    # Stresses: two holdings kinds x two tail scenarios x two prices.
+    assert cost["stress_price_calls"] == 7 * 2 * 2 * 2
+    for key in ("bucket_seconds", "audit_seconds", "stress_seconds", "record_seconds"):
+        assert cost[key] > 0.0, key
+
+
+def test_a_run_without_recording_reports_no_carry_cost():
+    engine = ReplayBacktestEngine(
+        ReplayBacktestConfig(
+            products=[
+                ReplayProduct(
+                    product=fixtures.market_product(),
+                    quantity=-1.0,
+                    position_id=0,
+                    has_lifecycle=True,
+                )
+            ],
+            market_data=fixtures.market_dataset(),
+            engine_config=fixtures.market_engine_config(),
+            strategy=AutocallableDeltaHedgeStrategy(round_contracts=False),
+            calculate_surfaces=False,
+            calculate_event_probabilities=False,
+        )
+    )
+    engine.run()
+    assert engine.carry_cost() == {}
