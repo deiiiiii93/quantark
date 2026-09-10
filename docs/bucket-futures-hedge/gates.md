@@ -346,8 +346,9 @@ of spot) and the risers are about 0.25 reference hands.
 
 A finite difference narrower than a cell returns the chord slope, which is
 the true delta at the cell MIDPOINT; its error is `gamma * (S_mid - S)`, a
-sawtooth of amplitude `(cell/2) * gamma` that vanishes at midpoints and is
-worst at the nodes. Swept across two cells at a 0.05% bump it runs from
+sawtooth that vanishes at midpoints and is worst at the nodes, with a
+peak-to-peak size of `h * |S*Gamma + Delta| / m_ref` set in the LOG
+coordinate the interpolation actually uses. Swept across two cells at a 0.05% bump it runs from
 -0.087 to +0.158 hands, mean absolute 0.054 — the scale the audit reports.
 
 This accounts for all three observations at once: no improvement from more
@@ -389,7 +390,7 @@ them can be read as a validity pass by accident.
 The cause is no longer open. The QUAD price is the LINEAR interpolant of a
 node array on a lattice pinned to the barrier rather than to spot, so delta
 is a staircase with 19.7-point treads and 0.25-hand risers, and every
-sub-cell finite difference inherits a `(cell/2) * gamma` sawtooth. See
+sub-cell finite difference inherits an `h * |S*Gamma + Delta|` sawtooth. See
 `quad-readout/` for the proof and the candidate readouts.
 
 What is NOT in question:
@@ -407,7 +408,7 @@ What needs a decision, with the measured options in
 `quad-readout/README.md`:
 
 - **the budget.** The sawtooth amplitude is not noise, it is
-  `(cell/2) * gamma`, a quantity the engine knows. An audit budget derived
+  `h * |S*Gamma + Delta| / m_ref`, a quantity the engine knows. An audit budget derived
   from it would say what this engine can actually resolve. The 0.01-hand
   figure is an initial deterministic-fixture tolerance and was never derived
   for a quadrature-priced snowball beside a discretely monitored barrier.

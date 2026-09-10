@@ -50,12 +50,36 @@ At the worst date the cell is **19.7 index points wide (0.371% of spot)**
 and the risers are about **0.25 reference hands**.
 
 A finite difference narrower than a cell returns that cell's chord slope,
-which is the true delta at the cell MIDPOINT. Its error is
-`gamma * (S_mid - S)` — a sawtooth of amplitude `(cell/2) * gamma`, zero at
-midpoints, worst at the nodes. `repro.py --n 201 --half-width-rel 0.004`
-shows the staircase directly; the risers are visible as a 0.285-hand drop
-across 0.1 index points at spot 5319.87, with a perfectly smooth run either
-side.
+which is the true delta at the cell MIDPOINT. `repro.py --n 201
+--half-width-rel 0.004` shows the staircase directly; the risers are visible
+as a 0.285-hand drop across 0.1 index points at spot 5319.87, with a
+perfectly smooth run either side.
+
+**The amplitude is set in the LOG coordinate, not in spot.** The
+interpolation is linear in `x = log S`, so the chord equals `dV/dx` at the
+cell midpoint and the delta error is `(x_mid - x) * (S*Gamma + Delta)`,
+giving a peak-to-peak sawtooth of
+
+```
+h * |S*Gamma + Delta| / m_ref
+```
+
+A `(cell/2) * Gamma` reading, which treats the interpolant as linear in
+spot, is wrong and over-predicts by an inconsistent factor.
+`amplitude.py 0.00005` checks both against the observed sawtooth:
+
+| centre | measured ptp | `(cell/2)*Gamma` | `h*(S*Gamma+Delta)` | ratio |
+|---:|---:|---:|---:|---:|
+| 5310.5 | 0.2681 | 0.5609 | 0.2227 | 1.204 |
+| 5450.5 | 1.1058 | 1.4238 | 1.1118 | 0.995 |
+| 5650.5 | 1.7816 | 2.1324 | 1.8866 | 0.944 |
+| 5950.5 | 1.8015 | 2.0401 | 1.9072 | 0.945 |
+
+The log-coordinate formula lands within 6% at three of four states; the
+outlier is the one nearest the barrier, where gamma varies fastest across
+the cell. Measured with a finite bump the observed sawtooth is clipped by
+roughly `1 - bump/cell`, which is why the same sweep at a 0.05% bump reads
+about 0.70 of the prediction.
 
 This explains every observation in the gate record:
 
@@ -119,12 +143,36 @@ sawtooth is 18.0 ptp and prices move 14.9 bp: the barrier's own projection
 error dominates, which is what alignment exists to prevent. Alignment is
 correct; the readout simply stayed linear after alignment was introduced.
 
-### Does the cubic overshoot at the barrier? No — it helps most there
+### There is no kink at t=0 — the transition already smoothed it
 
-The obvious objection to a high-order readout is the kink: alignment puts a
-node exactly ON the KI barrier, and a 4-point stencil straddling that node
-spans the kink, which is where a Lagrange interpolant is supposed to
-misbehave. `near_barrier.py` measures it there:
+The obvious objection to a high-order readout is that a 4-point stencil
+straddling the barrier node would span a kink. **It does not: by the time
+the surface reaches t=0 there is no kink left.** The kink is created at an
+observation date and then diffused away by the backward transition over the
+next positive-variance interval.
+
+`kink.py` inspects the retained t=0 surface directly. Through the barrier
+node the first derivative rises smoothly (71.0M, 80.0M, 86.8M) and the
+second peaks smoothly and declines; nothing is discontinuous. What is true
+is that the THIRD derivative is a thousand times larger near the barrier:
+
+| | mean `|d3V/dx3|` |
+|---|---:|
+| within 30 nodes of the barrier | 2.65e+10 |
+| well above it | 2.17e+07 |
+
+So the near-barrier regime is extreme but smooth curvature, not a kink.
+That is exactly the regime where a linear interpolant's error explodes and a
+high-order one stays bounded, and it is why the cubic does not overshoot —
+it is interpolating a smooth function.
+
+The caveat is narrow: a valuation date that IS an observation date, with the
+event not yet applied, or a boundary splice, could still present a genuine
+kink. Neither occurs here.
+
+### The cubic helps most where the problem is worst
+
+`near_barrier.py` measures it there:
 
 | distance above the KI barrier | linear ptp | cubic ptp | linear mean | cubic mean |
 |---|---:|---:|---:|---:|
@@ -156,6 +204,44 @@ agree on the mean to within 0.03, which is the signature of a shared offset
 against the reference rather than a difference between them. Shape
 preservation buys nothing here: there is no overshoot to prevent, and
 PCHIP's limiter costs smoothness.
+
+### The principled remedy: evaluate the final transition at spot
+
+The engine does not have to interpolate at all. The last backward step is an
+explicit smooth function of the readout coordinate:
+
+```
+V(x) = prefactor * scale * sum_j u_j * omega(x - x_j)  +  tail(x)
+```
+
+with `u_j` the already-weighted nodal values, `omega` the Gaussian kernel and
+`tail` the closed-form `erfc` term. Evaluating that at `x = 0` is one
+off-grid row of the operator the engine already applies — not a new
+quadrature rule, and not interpolation.
+
+**The product-agnostic core in the same module already works this way.**
+`QuadratureCore._calculate_final_value` (`quad_core.py:591`) sums
+`omega(0 - grid_j)` against the weighted values and adds closed-form boundary
+slivers; it never interpolates. Only the bespoke snowball path FFT-diffuses
+to the grid and then calls `np.interp`. So this is a restoration of
+consistency, not a new method.
+
+`transition_readout.py` implements it as a runtime patch and measures it
+beside the interpolants:
+
+| region | linear ptp | cubic ptp | transition-at-spot ptp |
+|---|---:|---:|---:|
+| 12–14 cells above the barrier | 0.1992 | 0.0166 | **0.0166** |
+| 0.1–2.1 cells above | 5.2714 | 0.3428 | **0.3213** |
+
+The cubic and the exact operator evaluation agree to four decimal places in
+the control region and to within 6% at the barrier. That is worth stating
+plainly: **the cubic is not an ad-hoc smoothing, it reproduces what the
+principled method gives**, which is the strongest evidence available that
+both are converging on the right answer rather than on a nicer-looking one.
+
+Price moves are the same order either way: 0.205 bp in the control region,
+2.801 bp within two cells of the barrier.
 
 ### Is the cubic more accurate, or only smoother? Both, depending on where
 
@@ -235,16 +321,29 @@ change goes to a decision before engine code moves.
 
 | Option | Delta consistency | Accuracy | Price change | Blast radius |
 |---|---|---|---|---|
-| leave as is | staircase stays; sub-cell spot Greeks unreliable on this engine | ~0.8 bp lost near the barrier, non-convergent | none | none |
-| cubic readout as the default | sawtooth down 10–70x, and 15x right at the barrier | converges monotonically; settled by n=1501 near the barrier | 0.03–2.3 bp | every QUAD price; all QUAD goldens rebase |
-| cubic readout behind an opt-in param | same, where enabled | same, where enabled | none by default | new parameter; two paths to maintain |
-| put spot and the barrier both on nodes | measured worse than the cubic on mean error (0.15–0.29 vs 0.03) | not measured | large | grid-selection rule; cost varies with spot |
-| leave the engine, derive the audit budget from the cell width | unchanged | unchanged | none | audit only |
+| (a) leave as is; derive the audit budget from `h*|S*Gamma+Delta|` | staircase stays; sub-cell spot Greeks unreliable on this engine | ~0.8 bp lost near the barrier, non-convergent | none | audit only |
+| (b) cubic readout as the default | sawtooth down 10–70x, and 15x right at the barrier | converges monotonically; settled by n=1501 near the barrier | 0.03–2.3 bp | every QUAD price; all QUAD goldens rebase |
+| (c) cubic readout behind an opt-in param | same, where enabled | same, where enabled | none by default | new parameter; two paths to maintain |
+| (d) put spot and the barrier both on nodes | measured worse than the cubic on mean error (0.15–0.29 vs 0.03) | not measured | large | grid-selection rule; cost varies with spot |
+| **(e) evaluate the final transition at spot** | **matches the cubic: 0.0166 control, 0.3213 at the barrier** | inherits the scheme's own order; no interpolation at all | 0.205 bp control, 2.801 bp at the barrier | the snowball readout path; QUAD goldens rebase |
+
+**Recommendation: (e), shipped as an explicit versioned readout mode with
+the legacy default preserved — which is (c)'s release shape carrying (e)'s
+method.** It is the only option that removes the error rather than bounding
+it, it restores consistency with `QuadratureCore` instead of inventing a
+rule, and it makes price and delta come from the same operator. Measured, it
+delivers what the cubic delivers, so nothing is lost by preferring the
+better justification.
+
+(a) remains the right immediate move for the bucket-hedge audit, and it is
+independent of the above: the budget should be derived rather than declared
+whatever happens to the readout. It is not a fix, and it should not be
+described as one.
 
 Two things bear on the choice beyond the table.
 
 The last row is cheap and honest: the sawtooth amplitude is not noise, it is
-`(cell/2) * gamma`, which the engine knows. A budget derived from it would
+`h * |S*Gamma + Delta| / m_ref`, which the engine knows. A budget derived from it would
 say what this engine can actually resolve, and needs no engine change. But
 it accepts the ~0.8 bp of lost accuracy near the barrier rather than fixing
 it.
@@ -255,3 +354,57 @@ NOT fix this one. The linear readout's error near the barrier is
 non-monotone in the grid size, so no amount of refinement converges it.
 That is the argument for treating the readout as a defect rather than a
 tolerance question.
+
+## Review
+
+Reviewed by `openai/gpt-6-astra` at `xhigh` reasoning via ZenMux, on the
+evidence above. Its recommendation was option (e) — evaluate the final
+transition operator at the requested spot, and take delta by differentiating
+that same operator — shipped first as an explicit versioned readout mode
+with the legacy default and its goldens preserved. It argued against
+changing the shared `interpolate` utility to cubic as the primary fix, on
+the grounds that the migration budget should be spent once, on the right
+method.
+
+Four of its points changed this document:
+
+1. **The amplitude formula.** It caught that `(cell/2) * Gamma` treats the
+   interpolant as linear in spot when it is linear in `log S`, and gave the
+   correct leading order. Verified above: the corrected formula lands within
+   6% at three of four states, the old one over-predicts by an inconsistent
+   1.13x to 2.5x. It also noted that the next term is
+   `[(m-x)^2/2 + h^2/24] * (Delta + 3*S*Gamma + S^2*V_SSS)`, and that my
+   proposed explanation for the residual gap — endpoints not reaching the
+   phase extrema — has the wrong sign, since under-sampling would reduce the
+   measured range, not raise it. That gap is not certified.
+2. **Where the kink lives.** It pointed out that a kink before a
+   positive-variance backward transition is normally smoothed. Checked
+   directly, and it is: see above. This removes the main objection to a
+   high-order readout rather than answering it.
+3. **The grid-gradient Greek path is not an unconditional substitute.** A
+   centred stencil at a genuine kink averages the one-sided slopes rather
+   than selecting a delta, and interpolating those derivatives spreads the
+   averaging over neighbouring cells; the local error can stay O(1) while
+   its region shrinks with `h`. It would sanction that path away from
+   nonsmooth locations with convergence tests, not as a barrier-Greek
+   standard. This also sharpens the caveat on using it as the reference
+   here.
+4. **Option (d)'s existence obstruction, withdrawn.** It began an argument
+   that spot and barrier cannot generally share a uniform grid, then
+   withdrew it once the envelope is adjustable: the construction measured
+   above relaxes exactly the binding constraint. (d) is rejected on
+   selection-rule stability, not on existence.
+
+Its remaining challenges are recorded and not yet answered: separate readout
+error from mesh-motion error, do not read ptp against the grid-gradient
+delta as absolute accuracy, and core consistency is architectural evidence
+rather than an accuracy proof — the bespoke path still needs its transition
+conventions, boundary slivers and event ordering checked against the core's.
+
+Where this document and the review differ: the cubic and the exact operator
+evaluation were measured to agree to four decimal places in the control
+region and within 6% at the barrier. That was not available when the review
+was given, and it weakens its objection to (b) — the cubic is not an
+arbitrary smoothing rule, it lands on what (e) computes. (e) remains the
+better justification; (b) is now a measured approximation to it rather than
+a different answer.
