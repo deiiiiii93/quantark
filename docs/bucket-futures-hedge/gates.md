@@ -258,7 +258,7 @@ do not agree.
 #### Convergence analysis
 
 The first hypothesis was quadrature resolution around the discretely
-monitored barrier. **It was wrong.** Tripling the grid changes nothing:
+monitored barrier. Tripling the grid changed nothing:
 
 | `--quad-grid` | fail | pass | mean abs identity | max abs identity |
 |---:|---:|---:|---:|---:|
@@ -266,8 +266,23 @@ monitored barrier. **It was wrong.** Tripling the grid changes nothing:
 | 801 | 175 | 66 | 0.042463 | 0.559124 |
 | 1201 | 175 | 66 | 0.042456 | 0.556560 |
 
-Three levels, flat to four decimal places, with the failing-date count
-identical at every one.
+**That ladder measured nothing, and reading it as a refutation was a
+mistake.** `SnowballQuadEngine._resolve_grid_points` returns
+`max(requested, required)`, where `required` comes from
+`min_diffusion_stddev_cells` (default 2.5) and the daily KI spacing. On the
+long-dated states — which are exactly the failing ones — the adaptive floor
+dominates and all three requests resolve to the SAME grid:
+
+| ttm | grid actually used at `--quad-grid` 401 / 801 / 1201 |
+|---:|---|
+| 1.00 | 1581 / 1581 / 1581 |
+| 0.75 | 2593 / 2593 / 2593 |
+| 0.60 | 1117 / 1117 / **1201** |
+| 0.25 | 635 / **801** / **1201** |
+
+The flat rows are flat because nothing moved. `quad-readout/probe_grid.py`
+reproduces the table. The grid hypothesis was never tested; it turns out to
+be beside the point anyway, for the reason recorded below.
 
 The remaining candidate is the audit's own SPOT BUMP. The identity
 `D = D_F + sum_i (F_i/S) B_i` is a first-order statement, and the three
@@ -302,65 +317,108 @@ central difference of the QUAD engine's own price differ by 0.05 to 0.08
 reference hands. `delta_f_direct` moves with the bump too — 5.0842, 5.0867,
 5.1209 — while `delta_f_derived` is pinned at 5.0968 by the engine's Greek.
 
-#### What is actually established
+#### Root cause: the price is a linear interpolant on a lattice that does not move with spot
 
-The frozen-carry spot derivative of the QUAD-priced snowball is
-**bump-dependent at the 0.05-hand level** near the knock-in barrier, and
-that dependence does not improve with more quadrature nodes. Both the
-identity residual and the net-delta audit error inherit it.
+Full evidence and the candidate comparison are in `quad-readout/`.
 
-In relative terms it is small: 0.05 reference hands against a product delta
-around 91 hands is under a tenth of a percent. But the audit budget is
-ABSOLUTE — 0.01 hands — and the plan is explicit that those are "initial
-deterministic-fixture tolerances". They were never derived for a
-quadrature-priced snowball beside a discretely monitored barrier.
+`SnowballQuadEngine._price_once` returns
+`math_utils.interpolate(value_surface, x=0.0)`
+(`snowball_quad_engine.py:463`), and `QuadratureMath.interpolate`
+(`quad_math.py:243`) is `np.interp` — linear.
 
-Two things follow, and they are different:
+That would cost nothing if the grid moved with spot. It does not. Barrier
+alignment snaps a node onto the closest barrier, which translates the
+log-moneyness lattice with spot in exactly the way that leaves the
+ABSOLUTE-PRICE lattice standing still: node `k` sits at `B * exp(k*h)`
+whatever the spot is. Three predictions follow, all measured at the worst
+date:
 
-1. the budget for this engine and product has not been derived, so applying
-   the fixture tolerance unchanged is not obviously the right test;
-2. the engine's spot-derivative roughness is real and worth understanding on
-   its own, independently of this hedge.
+| Prediction | Measured |
+|---|---|
+| the absolute price nodes do not move with spot | max drift 9.1e-13 index points over a 1.8-point spot move |
+| the kinks in `V(S)` sit on the nodes | largest kink at 5319.8700, nearest node 5319.8741 — 0.0002 cells |
+| the price IS the linear interpolant of the node values | max relative difference 2.0e-14 over 97 probes |
 
-Neither is resolved by widening the tolerance, and neither is resolved
-here.
+The third is not a resemblance. At machine precision `V(S)` is piecewise
+linear in `log S`, so **delta is a staircase**: flat across a cell, stepping
+at every node. At the worst date the cell is 19.7 index points wide (0.371%
+of spot) and the risers are about 0.25 reference hands.
 
-**Gate D is therefore NOT met with a 1% audit spot bump.** The bump ladder
-is recorded below. The tolerance was not touched.
+A finite difference narrower than a cell returns the chord slope, which is
+the true delta at the cell MIDPOINT; its error is `gamma * (S_mid - S)`, a
+sawtooth of amplitude `(cell/2) * gamma` that vanishes at midpoints and is
+worst at the nodes. Swept across two cells at a 0.05% bump it runs from
+-0.087 to +0.158 hands, mean absolute 0.054 — the scale the audit reports.
+
+This accounts for all three observations at once: no improvement from more
+quadrature nodes (the grid was never the variable), worse as the bump
+shrinks (a narrower bump is likelier to sit inside one cell and lose the
+curvature entirely), and confined to the pre-knock-in dates (after knock-in
+the KI barrier is gone and the surface near the money is far smoother).
+
+#### It does not reach the hedge
+
+The replay sizes the hedge from `calculate_greeks`, a 1% bump-and-reprice.
+That is 5.4 cells wide, and it averages the staircase away:
+
+| | contracts |
+|---|---:|
+| position | 90.79 |
+| sawtooth in the 1% delta, peak to peak | 0.0275 |
+| worst deviation from the grid delta | 0.1446 |
+| rounding granularity of a hedge trade | 1.0000 |
+
+The worst deviation is seven times smaller than the smallest tradeable
+increment, and hedge quantities round to whole contracts. The audit saw the
+staircase only because decoupling its spot bump took it below one cell —
+finer than the engine's own price grid.
+
+**Gate D is still NOT met**, and the tolerance was not touched. But the
+failure is now attributed rather than open: it is a property of the engine's
+readout, measured, and shown not to affect the hedge.
 
 ---
 
 ## Open item
 
-No tested setting certifies this product on this engine. The convergence
-analysis the plan requires was run in both variables and did not converge:
-the quadrature grid is flat over three levels, and the audit spot bump makes
-things worse in the direction that should help. Every subset cell's
-`audit_summary.json` records `all_measured_passed: false`, so none of them
-can be read as a validity pass by accident.
+No tested setting certifies this product on this engine, and none will while
+the audit measures the spot derivative below one grid cell. Every subset
+cell's `audit_summary.json` records `all_measured_passed: false`, so none of
+them can be read as a validity pass by accident.
+
+The cause is no longer open. The QUAD price is the LINEAR interpolant of a
+node array on a lattice pinned to the barrier rather than to spot, so delta
+is a staircase with 19.7-point treads and 0.25-hand risers, and every
+sub-cell finite difference inherits a `(cell/2) * gamma` sawtooth. See
+`quad-readout/` for the proof and the candidate readouts.
 
 What is NOT in question:
 
 - the hedge sizing. The bucket vector and the frozen-carry delta feeding it
   are consistent to 1e-13, the three policies produce the design's exact
-  holdings, and the replay's P&L is untouched — the audit is a diagnostic
-  taken alongside it, not an input to it;
+  holdings, and the replay's P&L is untouched. The 1% pricing bump spans 5.4
+  cells and averages the staircase to 0.028 contracts peak to peak against a
+  1-contract rounding granularity;
 - the audit machinery. It caught a deliberately perturbed bucket in Gate A,
   it refuses to be satisfied by re-sizing inside a scenario, and here it has
   surfaced a genuine engine property rather than a defect of its own.
 
-What IS in question, and needs a decision:
+What needs a decision, with the measured options in
+`quad-readout/README.md`:
 
-- whether the 0.01-hand fixture budget is the right test for a
-  quadrature-priced snowball beside a discretely monitored barrier, given
-  that the residual is under a tenth of a percent of the product delta it
-  sits beside;
-- why the QUAD engine's frozen-carry spot derivative is bump-dependent at
-  the 0.05-hand level near that barrier, and whether that matters anywhere
-  else in the library.
+- **the budget.** The sawtooth amplitude is not noise, it is
+  `(cell/2) * gamma`, a quantity the engine knows. An audit budget derived
+  from it would say what this engine can actually resolve. The 0.01-hand
+  figure is an initial deterministic-fixture tolerance and was never derived
+  for a quadrature-priced snowball beside a discretely monitored barrier.
+- **the readout.** A four-point centred Lagrange on the same node values
+  cuts the sawtooth 10–70x for no measurable cost, at a price change of
+  0.03–2.3 bp. That rebases every QUAD golden in the library, so it is a
+  decision, not a fix, and no engine code was touched here.
 
-The second is a pricing-engine investigation, not a hedge one, and it is
-outside this plan's scope.
+Disabling alignment is not among the options: measured, it makes the
+sawtooth 70x worse and moves prices 14.9 bp, because the barrier's own
+projection error is what alignment exists to prevent.
 
 ## What these gates do NOT establish
 
@@ -376,3 +434,8 @@ outside this plan's scope.
 - **Unquoted carry risk stays unhedged.** The tail and shape stresses are
   reported, not mitigated: no listed futures position responds to them at
   all. That remains true however neutral the nodal column looks.
+- **The readout finding is not a fix.** `quad-readout/` measures the cause
+  and the candidates; nothing in the engine was changed, and no golden was
+  regenerated. Whether the staircase matters elsewhere in the library — the
+  KI-probability readouts at `snowball_quad_engine.py:1227` go through the
+  same `interpolate` — was not investigated.
