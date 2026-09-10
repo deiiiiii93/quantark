@@ -423,13 +423,22 @@ detrended sub-cell delta spread falls from 4.6297 to 0.0168 reference hands
 within two cells of the barrier.
 
 **That is not the whole near-barrier story.** A separate, larger delta error
-survives it: a smooth signed lobe centred on the barrier, of order 10 to 25
-study hands, present identically under both readouts and therefore in the
-surface rather than the readout. It was found by a peer session against an
-independently validated reference and reproduced here against the PDE
-engine. The detrended metric above cannot see it, because detrending removes
-an error shared by every cell by construction. See `quad-readout/README.md`.
-Unresolved.
+survives it: a smooth signed lobe centred on the barrier, present
+identically under both readouts and therefore in the surface rather than the
+readout. The detrended metric above cannot see it, because detrending
+removes an error shared by every cell by construction.
+
+It is QUAD-specific, on a peer session's bump-free comparison against an
+independently validated reference: PDE at 1601 points sits 0.38 and 0.58
+study hands from that reference near the barrier, while QUAD sits 16.73
+hands out at the study's own 401 points and still 13.03 at 3201.
+
+My own QUAD-minus-PDE reproduction of it is **retracted as a magnitude**. It
+ran on this worktree's PDE, which predates `25d4f7d6` and therefore carried
+three near-barrier readout defects of its own, so it measured two errors at
+once. The lobe is real and QUAD-specific on the peer's evidence; my numbers
+for it are not to be quoted, and re-measuring needs this branch merged up to
+its base. See `quad-readout/README.md`. Unresolved.
 
 What remains open, with the measured evidence in `quad-readout/README.md`:
 

@@ -1,5 +1,21 @@
 """Independent check of the peer's near-barrier delta bias claim.
 
+RETRACTED AS A MAGNITUDE. This worktree's PDE predates `25d4f7d6`, which
+repaired three near-barrier readout defects in it: a stencil snapped to the
+nearest node, a snowball greeks path reading a different vector from the one
+`price()` reads, and a life surface returning event-projected columns
+instead of branch columns. So every number this script printed is QUAD minus
+a PDE carrying its own near-barrier delta error, and the -25.1 worst case it
+reported sits against the peer's bump-free 16.73, which is consistent with
+that contamination.
+
+The claim it was checking survives on better evidence: the peer's reference
+takes delta by differentiating the Gaussian transition density analytically,
+and puts PDE at 0.38-0.58 hands from it while QUAD is 16.73 at 401 points
+and 13.03 at 3201. Re-run this only after merging the branch up to its base.
+
+--------------------------------------------------------------------------
+
 A peer session reports that both QUAD readouts carry a signed delta lobe of
 order 14 reference hands within a few percent of the KI barrier, which grid
 refinement does not remove, and that my detrended sub-cell metric cannot see

@@ -264,23 +264,36 @@ Price moves are the same order either way: 0.205 bp in the control region,
 ### What this readout does NOT fix: a near-barrier delta lobe
 
 Reported by a peer session working from an independently validated
-Gaussian-transition reference, and reproduced here against the PDE engine,
-which needs none of their code. Delta gap, QUAD minus PDE, in study hands,
-on a 1Y snowball with KI at 75:
+Gaussian-transition reference. Their bump-free measurement is the load
+bearing one, because delta there comes from differentiating the transition
+density analytically:
 
-| spot vs KI | gap |
-|---:|---:|
-| −1.50% | +12.4 |
-| −0.50% | −8.3 |
-| +0.84% | **−25.1** |
-| +2.00% | −8.5 |
-| +5.00% | −1.6 |
+| engine | gap from the reference, study hands |
+|---|---:|
+| PDE, 1601 points / 16 steps per day | 0.38 and 0.58 |
+| QUAD, 401 points (the study default) | 16.73, worst |
+| QUAD, 3201 points | 13.03, still |
 
-A smooth signed lobe centred on the barrier, positive below, crossing zero
-just under it, worst a little above, decayed by 5%. **Both readouts show it
-identically**, so it is in the surface, not the readout. The peer measures
-it against their reference at 14 to 17 hands and finds it barely moves from
-401 to 3201 nodes.
+PDE converges to the reference near the barrier and QUAD does not, on
+evidence that cannot be a bump artefact. So the lobe is QUAD-specific.
+
+> **My own QUAD-minus-PDE reproduction is retracted as a magnitude.** It
+> reported +12.4 / −8.3 / −25.1 / −8.5 / −1.6 study hands at −1.50% /
+> −0.50% / +0.84% / +2.00% / +5.00% versus the barrier, and I presented it
+> as independent confirmation. It ran on this worktree's PDE, which predates
+> `25d4f7d6` — a fix for three separate near-barrier readout defects in the
+> PDE: a stencil snapped to the nearest node, a snowball greeks path reading
+> a different vector from the one `price()` reads, and a life surface
+> returning event-projected columns instead of branch columns. So the
+> numbers are QUAD minus a PDE carrying its own near-barrier delta error,
+> and the −25.1 worst case against the peer's 16.73 is consistent with that
+> contamination. The lobe is real and QUAD-specific on the peer's evidence;
+> the shape and magnitudes above are not to be quoted. Re-measuring needs
+> this branch merged up to its base, which is pending.
+
+**Both readouts show the lobe identically**, so it is in the surface, not
+the readout. That comparison is QUAD against QUAD and is unaffected by the
+PDE defect.
 
 **My detrended metric cannot see this, by construction.** It fits and
 removes a trend across one cell, so an error shared by every cell is removed
@@ -290,18 +303,22 @@ barrier the third derivative is a thousand times larger, so price
 convergence says little about delta there. Both are real measurements of
 what they measure and neither is evidence about near-barrier delta accuracy.
 
-Two mechanisms ruled out here, against the PDE:
+Two mechanisms ruled out, both against the pre-fix PDE and so worth only
+what their internal comparison is worth:
 
 - **event smoothing is not the cause.** `event_smoothing_cells=0` is
   bit-identical to the default 1, because that parameter is inert under the
   default `event_projection=CELL_AVERAGE`; only the NODAL path reads it.
+  This one is a QUAD-against-QUAD bit comparison and survives the retraction
+  intact.
 - **NODAL projection is worse**, not better: −32.8 against CELL_AVERAGE's
-  −25.1 at +0.84%.
+  −25.1. Both legs share the same contaminated baseline, so the ordering
+  stands while the two numbers do not.
 
-Refining 401 to 1601 roughly halves the gap against the PDE, but that is
-likely QUAD converging toward the PDE's own error rather than toward truth,
-which is why the peer's validated reference is the better target and their
-flat 401-to-3201 ladder the more trustworthy statement.
+The apparent halving of the gap when refining 401 to 1601 is not evidence of
+convergence toward truth. The peer's ladder against a validated reference
+shows 16.73 hands at 401 barely moving to 13.03 at 3201, which is the
+statement to trust.
 
 This is unresolved and is the dominant near-barrier delta error. The readout
 claims that stand are narrow: it removes the staircase, and at a node it
