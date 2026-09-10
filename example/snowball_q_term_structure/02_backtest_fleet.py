@@ -181,17 +181,64 @@ def solve_inception(task: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+#: Risk-profile keys that change what the run PRICES or MEASURES, and so
+#: belong in the fingerprint.  A display-only option must not appear here.
+RISK_FINGERPRINT_KEYS = (
+    "record_carry_exposure",
+    "carry_audit_mode",
+    "carry_audit_dates",
+    "hedge_ratio",
+    "futures_bump_points",
+    "audit_spot_bump_rel",
+    "audit_yield_bump",
+    "delta_tolerance_hands",
+    "rhoq_tolerance_bp",
+    "stress_dates",
+    "reference_notional",
+    "exploratory_audit_override",
+)
+
+
 def fingerprint(task: Dict[str, Any]) -> str:
     keys = ("model", "hedge", "quad_grid", "cost_bp", "rate", "vol_tenor", "coupon",
             "delta_threshold", "round_contracts", "inception", "trade_end")
     payload = {k: task[k] for k in keys}
     payload["initial_price_mode"] = "traded_zero"
+    risk = task.get("risk") or {}
+    # A legacy run carries no risk block at all, so its fingerprint is
+    # unchanged and old resumes keep working.
+    if risk:
+        payload["risk"] = {k: risk.get(k) for k in RISK_FINGERPRINT_KEYS}
+        payload["objective"] = C.BUCKET_OBJECTIVES.get(task["hedge"])
+        payload["correction_pair"] = risk.get("correction_pair")
     raw = json.dumps(payload, sort_keys=True).encode()
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+def _carry_settings(risk: Dict[str, Any]):
+    """The task's resolved CarryRiskSettings, or None when nothing is on."""
+    if not risk.get("record_carry_exposure") and risk.get(
+        "carry_audit_mode", "none"
+    ) == "none":
+        return None
+    from quantark.backtest.futures_risk import CarryRiskSettings
+
+    return CarryRiskSettings(
+        reference_notional=float(risk.get("reference_notional", C.NOTIONAL)),
+        futures_bump_points=float(risk.get("futures_bump_points", 1.0)),
+        audit_spot_bump_rel=risk.get("audit_spot_bump_rel"),
+        audit_yield_bump=float(risk.get("audit_yield_bump", 1e-4)),
+        delta_tolerance_hands=float(risk.get("delta_tolerance_hands", 0.01)),
+        rhoq_tolerance_bp=float(risk.get("rhoq_tolerance_bp", 0.01)),
+        stress_dates=tuple(
+            datetime.fromisoformat(d) for d in risk.get("stress_dates", ())
+        ),
+    )
+
+
 def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
     ctx = _context(task["history_dir"], task["rate"], task["vol_tenor"])
+    risk: Dict[str, Any] = dict(task.get("risk") or {})
     inception = date.fromisoformat(task["inception"])
     terms = C.build_terms(inception, ctx["calendar"])
     model = C.Q_MODELS[task["model"]]
@@ -205,12 +252,24 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
         product=product,
         market_data=ctx["dataset"],
         engine_config=C.engine_config_for(model, quad_grid_points=int(task["quad_grid"])),
-        strategy=AutocallableDeltaHedgeStrategy(
+        strategy=C.hedge_strategy_for(
+            task["hedge"],
             delta_threshold=float(task["delta_threshold"]),
             round_contracts=bool(task["round_contracts"]),
+            hedge_ratio=float(risk.get("hedge_ratio", 1.0)),
         ),
-        roll_policy=C.HEDGE_POLICIES[task["hedge"]](),
-        dividend_roll_policy=C.dividend_roll_policy_for(C.Q_MODELS[task["model"]]),
+        roll_policy=C.hedge_roll_policy_for(task["hedge"]),
+        dividend_roll_policy=(
+            None
+            if C.uses_buckets(task["hedge"])
+            else C.dividend_roll_policy_for(C.Q_MODELS[task["model"]])
+        ),
+        record_carry_exposure=bool(risk.get("record_carry_exposure", False)),
+        carry_audit_mode=str(risk.get("carry_audit_mode", "none")),
+        carry_audit_dates=tuple(
+            datetime.fromisoformat(d) for d in risk.get("carry_audit_dates", ())
+        ),
+        carry_risk_settings=_carry_settings(risk),
         transaction_cost_model=cost_model,
         product_quantity=C.PRODUCT_QUANTITY,
         underlying=C.UNDERLYING_NAME,
@@ -280,7 +339,7 @@ def parse_cells(values: Sequence[str]) -> List[Tuple[str, str]]:
         if ":" not in v:
             raise SystemExit(f"--cells entries look like model:hedge, got {v!r}")
         model, hedge = v.split(":", 1)
-        if model not in C.Q_MODELS or hedge not in C.HEDGE_POLICIES:
+        if model not in C.Q_MODELS or hedge not in C.HEDGE_ROLL_SELECTOR:
             raise SystemExit(f"unknown cell {v!r}")
         out.append((model, hedge))
     return out
@@ -290,8 +349,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--history-dir", type=Path, default=C.DEFAULT_HISTORY_DIR)
     parser.add_argument("--out-dir", type=Path, default=C.DEFAULT_OUT_DIR)
-    parser.add_argument("--cells", nargs="+", default=None, help="model:hedge, default = the study grid")
-    parser.add_argument("--quick", action="store_true", help=f"{QUICK_INCEPTIONS} inceptions x {len(QUICK_CELLS)} cells")
+    parser.add_argument("--cells", nargs="+", default=None, help="model:hedge, overrides --study-grid")
+    parser.add_argument(
+        "--study-grid",
+        choices=("legacy", "buckets", "all"),
+        default="legacy",
+        help=(
+            "legacy = the original cells (default, so old commands are "
+            "unchanged); buckets = the revised 14-cell primary grid; "
+            "all = both"
+        ),
+    )
+    parser.add_argument("--quick", action="store_true", help=f"{QUICK_INCEPTIONS} inceptions (legacy grid: {len(QUICK_CELLS)} cells)")
     parser.add_argument("--max-inceptions", type=int, default=None)
     parser.add_argument("--first-month", default=f"{C.FIRST_INCEPTION_MONTH[0]}-{C.FIRST_INCEPTION_MONTH[1]:02d}")
     parser.add_argument("--include-censored", action="store_true")
@@ -303,7 +372,67 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--no-round-contracts", action="store_true")
     parser.add_argument("--rate", type=float, default=C.FLAT_RATE)
     parser.add_argument("--vol-tenor", type=float, default=C.ATM_VOL_TENOR_YEARS)
+    risk = parser.add_argument_group("carry risk recording")
+    risk.add_argument("--record-carry-exposure", action="store_true")
+    risk.add_argument(
+        "--carry-audit-mode", choices=("none", "sampled", "daily"), default=None,
+        help="default: daily under --study-grid buckets, none otherwise",
+    )
+    risk.add_argument("--carry-audit-dates", nargs="+", default=())
+    risk.add_argument("--hedge-ratio", type=float, default=1.0)
+    risk.add_argument("--futures-bump-points", type=float, default=1.0)
+    risk.add_argument("--audit-spot-bump-rel", type=float, default=None)
+    risk.add_argument("--audit-yield-bump", type=float, default=1e-4)
+    risk.add_argument("--delta-tolerance-hands", type=float, default=0.01)
+    risk.add_argument("--rhoq-tolerance-bp", type=float, default=0.01)
+    risk.add_argument("--stress-dates", nargs="+", default=())
     return parser.parse_args(argv)
+
+
+def resolve_cells(args) -> List[Tuple[str, str]]:
+    """Explicit --cells wins; otherwise the named grid."""
+    if args.cells:
+        return parse_cells(args.cells)
+    if args.study_grid == "buckets":
+        return list(C.PRIMARY_BUCKET_CELLS)
+    legacy = list(QUICK_CELLS if args.quick else DEFAULT_CELLS)
+    if args.study_grid == "all":
+        seen = list(legacy)
+        for cell in C.PRIMARY_BUCKET_CELLS:
+            if cell not in seen:
+                seen.append(cell)
+        return seen
+    return legacy
+
+
+def resolve_risk_profile(args) -> Dict[str, Any]:
+    """The run's resolved recording settings, and whether they are a certificate.
+
+    The buckets profile records exposure and audits daily unless the caller
+    asks otherwise.  Such an override is fingerprinted and marked, because a
+    run that skipped audits cannot later be read as a full daily-audit
+    certificate.
+    """
+    buckets = args.study_grid == "buckets" or any(
+        C.uses_buckets(hedge) for _, hedge in resolve_cells(args)
+    )
+    requested = args.carry_audit_mode
+    mode = requested if requested is not None else ("daily" if buckets else "none")
+    exploratory = bool(buckets and requested is not None and requested != "daily")
+    return {
+        "record_carry_exposure": bool(args.record_carry_exposure or buckets),
+        "carry_audit_mode": mode,
+        "carry_audit_dates": [str(d) for d in args.carry_audit_dates],
+        "hedge_ratio": float(args.hedge_ratio),
+        "futures_bump_points": float(args.futures_bump_points),
+        "audit_spot_bump_rel": args.audit_spot_bump_rel,
+        "audit_yield_bump": float(args.audit_yield_bump),
+        "delta_tolerance_hands": float(args.delta_tolerance_hands),
+        "rhoq_tolerance_bp": float(args.rhoq_tolerance_bp),
+        "stress_dates": [str(d) for d in args.stress_dates],
+        "reference_notional": C.NOTIONAL,
+        "exploratory_audit_override": exploratory,
+    }
 
 
 def load_json(path: Path) -> Optional[Dict[str, Any]]:
@@ -314,7 +443,8 @@ def load_json(path: Path) -> Optional[Dict[str, Any]]:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
-    cells = parse_cells(args.cells) if args.cells else list(QUICK_CELLS if args.quick else DEFAULT_CELLS)
+    cells = resolve_cells(args)
+    risk_profile = resolve_risk_profile(args)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     y, m = (int(x) for x in args.first_month.split("-"))
@@ -379,6 +509,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "round_contracts": not args.no_round_contracts,
                 "history_dir": str(args.history_dir), "out_dir": str(out_dir),
             }
+            if risk_profile["record_carry_exposure"] or risk_profile[
+                "carry_audit_mode"
+            ] != "none":
+                task["risk"] = dict(risk_profile)
             run_dir = C.run_dir_for(out_dir, s.tag, model, hedge)
             existing = load_json(run_dir / "run_summary.json") if args.resume else None
             if existing and existing.get("fingerprint") == fingerprint(task):
@@ -425,6 +559,7 @@ def _write_manifest(out_dir, args, cells, schedules, runs, started) -> None:
                 "history_dir": str(args.history_dir), "quad_grid": args.quad_grid,
                 "cost_bp": args.cost_bp, "rate": args.rate, "vol_tenor": args.vol_tenor,
                 "delta_threshold": args.delta_threshold, "round_contracts": not args.no_round_contracts,
+                "study_grid": args.study_grid, "risk": resolve_risk_profile(args),
                 "reference_model": C.REFERENCE_MODEL, "baseline_model": C.BASELINE_MODEL,
                 "notional": C.NOTIONAL, "maturity_months": C.MATURITY_MONTHS,
                 "lockout_months": C.LOCKOUT_MONTHS, "ko_pct": C.KO_PCT, "ki_pct": C.KI_PCT,

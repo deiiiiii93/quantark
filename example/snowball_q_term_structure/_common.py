@@ -49,6 +49,7 @@ from quantark.backtest.replay import (
     AutocallableEngineConfig,
     AutocallableMarketDataSet,
 )
+from quantark.backtest.strategy import AutocallableDeltaHedgeStrategy
 from quantark.backtest.replay.dividend_source import term_dividend_yield
 from quantark.backtest.replay.market import (
     SignedDividendYield,
@@ -427,6 +428,156 @@ HEDGE_POLICY_LABELS = {
     "front": "front-month IM (5-day roll)",
     "far": "longest listed IM (5-day roll)",
 }
+
+# ---------------------------------------------------------------------------
+# Hedge STRATEGIES, separate from the roll policy above
+#
+# HEDGE_POLICIES answers "which contract does the reference leg follow"; the
+# factory below answers "how is the hedge sized".  The two were the same
+# question while every cell held one contract; a bucket cell holds several,
+# and still needs a reference contract for the legacy scalar columns.
+# ---------------------------------------------------------------------------
+
+#: Study policy name -> the design's objective.  No label calls any of these
+#: "bucket-neutral": each neutralises a DIFFERENT thing, and the primary one
+#: is not neutral to every node.
+BUCKET_OBJECTIVES: Dict[str, str] = {
+    "buckets_nodes": "nodes",
+    "buckets_far": "spot_far",
+    "buckets_spot_parallel": "spot_parallel",
+}
+
+#: The single-contract policies that apply the S/F scaling correction.
+SCALED_POLICIES: Tuple[str, ...] = ("front_scaled", "far_scaled")
+
+#: Which contract each policy's REFERENCE leg follows.  Bucket policies use
+#: the front selector for their scalar reference columns only; the hedge
+#: itself spans the whole curve.
+HEDGE_ROLL_SELECTOR: Dict[str, str] = {
+    "front": "front",
+    "far": "far",
+    "front_scaled": "front",
+    "far_scaled": "far",
+    "buckets_nodes": "front",
+    "buckets_far": "front",
+    "buckets_spot_parallel": "front",
+}
+
+HEDGE_STRATEGY_LABELS: Dict[str, str] = {
+    "front": "front-month, -D/m",
+    "far": "longest listed, -D/m",
+    "front_scaled": "front-month, -D S/(m F)",
+    "far_scaled": "longest listed, -D S/(m F)",
+    "buckets_nodes": "buckets: every modelled node neutral",
+    "buckets_far": "buckets + far fold: spot neutral",
+    "buckets_spot_parallel": "buckets + two-tenor fold: spot and parallel neutral",
+}
+
+
+def hedge_strategy_for(
+    name: str,
+    *,
+    delta_threshold: float,
+    round_contracts: bool,
+    hedge_ratio: float = 1.0,
+):
+    """The sizing strategy for one study hedge policy."""
+    from quantark.backtest.strategy import (
+        FuturesBucketHedgeStrategy,
+        ProportionalFuturesDeltaHedgeStrategy,
+    )
+
+    options = dict(
+        delta_threshold=delta_threshold,
+        round_contracts=round_contracts,
+        hedge_ratio=hedge_ratio,
+    )
+    if name in BUCKET_OBJECTIVES:
+        return FuturesBucketHedgeStrategy(
+            objective=BUCKET_OBJECTIVES[name], **options
+        )
+    if name in SCALED_POLICIES:
+        return ProportionalFuturesDeltaHedgeStrategy(**options)
+    if name in HEDGE_POLICIES:
+        return AutocallableDeltaHedgeStrategy(**options)
+    raise StudyDataError(f"unknown hedge policy: {name}")
+
+
+def hedge_roll_policy_for(name: str) -> FuturesRollPolicy:
+    """The reference-contract roll policy for one study hedge policy."""
+    selector = HEDGE_ROLL_SELECTOR.get(name)
+    if selector is None:
+        raise StudyDataError(f"unknown hedge policy: {name}")
+    return HEDGE_POLICIES[selector]()
+
+
+def uses_buckets(name: str) -> bool:
+    return name in BUCKET_OBJECTIVES
+
+
+#: The revised study's primary comparison: both supported term models crossed
+#: with seven hedge policies.  Fourteen cells, all on ACTUAL futures quotes,
+#: because every bucket coordinate must be a contract the hedge can trade.
+BUCKET_TERM_MODELS: Tuple[str, ...] = ("term_flat_q", "term_flat_fwd")
+BUCKET_HEDGES: Tuple[str, ...] = (
+    "front",
+    "far",
+    "front_scaled",
+    "far_scaled",
+    "buckets_nodes",
+    "buckets_far",
+    "buckets_spot_parallel",
+)
+PRIMARY_BUCKET_CELLS: Tuple[Tuple[str, str], ...] = tuple(
+    (model, hedge) for model in BUCKET_TERM_MODELS for hedge in BUCKET_HEDGES
+)
+
+
+def carry_context_for(
+    model: QModel,
+    *,
+    valuation: pd.Timestamp,
+    spot: float,
+    rate: float,
+    chain_slice: pd.DataFrame,
+):
+    """The day's ``CarryCurveContext`` for a supported term model.
+
+    Static analysis and the replay share this one builder, so a stage-01
+    bucket and a replay bucket cannot drift apart.  Flat and external-tail
+    controls have no futures-node coordinates and are rejected here rather
+    than served a curve they do not use.
+    """
+    from quantark.backtest.replay.carry_context import (
+        SUPPORTED_EXTRAPOLATIONS,
+        CarryCurveContext,
+    )
+
+    if model.dividend_source != "futures_curve":
+        raise StudyDataError(
+            f"{model.name} has no futures-node coordinates: bucket risk needs "
+            "dividend_source='futures_curve'"
+        )
+    if model.extrapolation not in SUPPORTED_EXTRAPOLATIONS:
+        raise StudyDataError(
+            f"{model.name} uses {model.extrapolation!r}, which is not a "
+            f"tradable futures tail; supported: {SUPPORTED_EXTRAPOLATIONS}"
+        )
+    valuation = pd.Timestamp(valuation).normalize()
+    quotes = curve_quotes(chain_slice, valuation, int(model.min_tenor_days))
+    if not quotes:
+        raise StudyDataError(
+            f"no contract with at least {model.min_tenor_days} days to expiry "
+            f"on {valuation.date()}"
+        )
+    return CarryCurveContext(
+        quotes=tuple(quotes),
+        spot=float(spot),
+        rate_curve=FlatRateCurve(rate=float(rate)),
+        extrapolation=model.extrapolation,
+        underlying=UNDERLYING_NAME,
+        valuation_date=valuation,
+    )
 
 
 def dividend_roll_policy_for(model: QModel) -> Optional[FuturesRollPolicy]:
