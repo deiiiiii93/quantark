@@ -327,10 +327,20 @@ def forward_claim_risk(
     )
 
 
+def log_forward_elasticities(
+    quotes: Sequence[AnalyticQuote], time: float, *, convention: str
+) -> Tuple[float, ...]:
+    """``dlog F(t) / dlog F_i`` at fixed spot, one entry per node.
+
+    These are LOG elasticities.  A price derivative divides by ``F_i``; the
+    tail's ``1 + alpha`` and ``-alpha`` are not themselves ``dF(t)/dF_i``.
+    """
+    return _log_forward_elasticities(_sorted_nodes(quotes), time, convention=convention)
+
+
 def _log_forward_elasticities(
     nodes: Tuple[AnalyticQuote, ...], time: float, *, convention: str
 ) -> Tuple[float, ...]:
-    """``dlog F(t) / dlog F_i`` at fixed spot, one entry per node."""
     t = float(time)
     first, last = nodes[0].tenor_years, nodes[-1].tenor_years
     out = [0.0] * len(nodes)

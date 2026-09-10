@@ -493,6 +493,68 @@ class ProductReplay:
         """
         return dict(engine.calculate_greeks(product, env))
 
+    # ------------------------------------------------------------------
+    # Carry risk adapter
+    # ------------------------------------------------------------------
+
+    def carry_price_callback(
+        self, product: Any, env: PricingEnvironment, *, engine: BaseEngine
+    ):
+        """``price_at(spot, dividend)`` over one fixed product/engine state.
+
+        Every carry scenario prices through this one closure, so the vol
+        surface, rate curve, basis yield, valuation date, product barriers and
+        lifecycle snapshot are shared by object identity across the whole bump
+        set.  It deliberately does not touch the engine factory, the daily
+        calibration or the lifecycle tracker: a bump that re-derived any of
+        those would measure the rebuild, not the risk.
+        """
+
+        def price_at(spot: float, dividend: Any) -> float:
+            return float(
+                engine.price(
+                    product,
+                    _env_with(
+                        env,
+                        spot=float(spot),
+                        div_yield=dividend,
+                        underlying=self.underlying,
+                    ),
+                )
+            )
+
+        return price_at
+
+    def measure_carry_risk(
+        self,
+        product: Any,
+        env: PricingEnvironment,
+        *,
+        context,
+        engine: BaseEngine,
+        delta_q: float,
+        points: float,
+        base_price: Optional[float] = None,
+    ):
+        """This product's UNIT-position carry buckets on ``context``.
+
+        ``context`` is passed in explicitly: a shared environment is built
+        through the first replay alone, so reading ``last_carry_context`` off
+        another replay would leave every later product without buckets.  The
+        engine aggregates the returned unit Greeks by position quantity.
+        """
+        # Local import: keeps ``carry_risk`` free to grow a dependency on this
+        # module's env helpers without closing a cycle.
+        from .carry_risk import measure_product_carry_risk
+
+        return measure_product_carry_risk(
+            self.carry_price_callback(product, env, engine=engine),
+            context,
+            delta_q=delta_q,
+            points=points,
+            base_price=base_price,
+        )
+
     def record_surfaces(
         self,
         date: pd.Timestamp,
