@@ -259,6 +259,36 @@ def squared_far_future_risk(
     )
 
 
+def linear_book_pricer(
+    *,
+    tenors: Sequence[float],
+    futures_coefficients: Sequence[float],
+    spot_coefficient: float = LINEAR_SPOT_COEFFICIENT,
+    rate: float = 0.0,
+):
+    """``price_at(spot, dividend)`` for ``V = a S + sum_i c_i F_i``.
+
+    Each ``F_i`` is read off the dividend curve at its own node tenor, where
+    both supported builders reproduce the quote exactly, so the callback is
+    convention independent.  ``V`` is linear in every ``F_i``, which makes a
+    central difference exact: any residual an audit sees against this book is
+    the audit noticing something, not the bump.
+    """
+    tenors = tuple(float(t) for t in tenors)
+    coefficients = tuple(float(c) for c in futures_coefficients)
+    if len(tenors) != len(coefficients):
+        raise ValueError("one coefficient per tenor is required")
+
+    def price_at(spot, dividend):
+        total = float(spot_coefficient) * float(spot)
+        for coefficient, tenor in zip(coefficients, tenors):
+            q = float(dividend.get_yield(tenor))
+            total += coefficient * float(spot) * math.exp((float(rate) - q) * tenor)
+        return total
+
+    return price_at
+
+
 def squared_far_future_price(quotes: Sequence[AnalyticQuote]) -> float:
     """``V = F_n^2`` evaluated on a (possibly stressed) quote list."""
     return float(_sorted_nodes(quotes)[-1].price ** 2)

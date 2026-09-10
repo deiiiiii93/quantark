@@ -13,7 +13,11 @@ from dataclasses import replace
 
 import pytest
 
-from bucket_hedge_fixtures import AnalyticQuote, linear_book_risk
+from bucket_hedge_fixtures import (
+    AnalyticQuote,
+    linear_book_pricer,
+    linear_book_risk,
+)
 from quantark.asset.equity.market import IndexFuturesQuote
 from quantark.backtest.futures_risk import (
     CarryRiskSettings,
@@ -80,16 +84,13 @@ def context(extrapolation: str = "flat_q"):
 
 
 def linear_pricer(coefficients=COEFFICIENTS, spot_coefficient=SPOT_COEFFICIENT):
-    """``V = a S + sum_i c_i F_i``, reading each ``F_i`` off the curve."""
-
-    def price(spot, dividend):
-        total = spot_coefficient * float(spot)
-        for coefficient, tenor in zip(coefficients, TENORS):
-            q = float(dividend.get_yield(tenor))
-            total += coefficient * float(spot) * math.exp((RATE - q) * tenor)
-        return total
-
-    return price
+    """``V = a S + sum_i c_i F_i``, from the shared analytic fixtures."""
+    return linear_book_pricer(
+        tenors=TENORS,
+        futures_coefficients=coefficients,
+        spot_coefficient=spot_coefficient,
+        rate=RATE,
+    )
 
 
 def measured_risk(ctx=None, coefficients=COEFFICIENTS):

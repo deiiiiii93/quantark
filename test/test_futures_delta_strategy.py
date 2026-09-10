@@ -84,3 +84,118 @@ def test_validation_preserved():
         AutocallableDeltaHedgeStrategy(delta_threshold=-1.0)
     with pytest.raises(ValidationError):
         AutocallableDeltaHedgeStrategy(hedge_ratio=1.5)
+
+
+# ---------------------------------------------------------------------------
+# The separate proportional S/F control
+# ---------------------------------------------------------------------------
+
+
+class TestProportionalControl:
+    """``h_j = -D S / (m_j F_j)``: spot neutral, with a known carry residual.
+
+    The legacy sizing above is deliberately untouched; this is a distinct
+    policy that isolates the ``S/F`` scaling correction from the effect of
+    holding a calendar spread.
+    """
+
+    def test_it_is_spot_neutral_where_the_legacy_sizing_is_not(self):
+        from quantark.backtest.strategy import (
+            ProportionalFuturesDeltaHedgeStrategy,
+        )
+
+        spot, futures_price, multiplier = 100.0, 96.0, 200.0
+        delta, quantity = 4_000.0, -1.0
+        legacy = AutocallableDeltaHedgeStrategy(round_contracts=False)
+        scaled = ProportionalFuturesDeltaHedgeStrategy(round_contracts=False)
+
+        legacy_hands = legacy.target_contracts(
+            product_delta=delta,
+            product_quantity=quantity,
+            futures_multiplier=multiplier,
+        )
+        scaled_hands = scaled.target_contracts(
+            product_delta=delta,
+            product_quantity=quantity,
+            futures_multiplier=multiplier,
+            spot=spot,
+            futures_price=futures_price,
+        )
+        book_delta = delta * quantity
+        assert legacy_hands == pytest.approx(-book_delta / multiplier)
+        assert scaled_hands == pytest.approx(
+            -book_delta * spot / (multiplier * futures_price)
+        )
+        # Residual spot delta: D(1 - F/S) for the legacy sizing, zero here.
+        legacy_residual = book_delta + legacy_hands * multiplier * futures_price / spot
+        scaled_residual = book_delta + scaled_hands * multiplier * futures_price / spot
+        assert legacy_residual == pytest.approx(
+            book_delta * (1.0 - futures_price / spot)
+        )
+        assert legacy_residual != pytest.approx(0.0, abs=1.0)
+        assert scaled_residual == pytest.approx(0.0, abs=1e-9)
+
+    def test_the_legacy_sizing_and_signature_are_untouched(self):
+        import inspect
+
+        signature = inspect.signature(
+            AutocallableDeltaHedgeStrategy().target_contracts
+        )
+        assert set(signature.parameters) == {
+            "product_delta",
+            "product_quantity",
+            "futures_multiplier",
+        }
+        assert AutocallableDeltaHedgeStrategy().target_contracts(
+            product_delta=40.0, product_quantity=-1.0, futures_multiplier=300.0
+        ) == 0.0
+
+    def test_the_inherited_scalar_adapter_requires_both_prices(self):
+        from quantark.backtest.strategy import (
+            ProportionalFuturesDeltaHedgeStrategy,
+        )
+
+        strategy = ProportionalFuturesDeltaHedgeStrategy()
+        greeks = {"delta": 1_000.0}
+        with pytest.raises(ValidationError):
+            strategy.calculate_hedge_size(None, greeks, {"futures_multiplier": 200.0})
+        with pytest.raises(ValidationError):
+            strategy.calculate_hedge_size(
+                None, greeks, {"futures_multiplier": 200.0, "spot": 100.0}
+            )
+        with pytest.raises(ValidationError):
+            strategy.target_contracts(
+                product_delta=1.0,
+                product_quantity=1.0,
+                futures_multiplier=200.0,
+                spot=100.0,
+                futures_price=0.0,
+            )
+        assert strategy.calculate_hedge_size(
+            None,
+            greeks,
+            {"futures_multiplier": 200.0, "spot": 100.0, "futures_price": 96.0},
+        ) == pytest.approx(round(-1_000.0 * 100.0 / (200.0 * 96.0)))
+
+    def test_it_keeps_the_bands_ratio_and_rounding_of_the_original(self):
+        from quantark.backtest.strategy import (
+            ProportionalFuturesDeltaHedgeStrategy,
+        )
+
+        strategy = ProportionalFuturesDeltaHedgeStrategy(
+            delta_threshold=0.5, hedge_ratio=0.5, round_contracts=True
+        )
+        assert not strategy.should_rebalance(1.0, 1.4)
+        assert strategy.should_rebalance(1.0, 1.6)
+        assert strategy.target_contracts(
+            product_delta=4_000.0,
+            product_quantity=-1.0,
+            futures_multiplier=200.0,
+            spot=100.0,
+            futures_price=96.0,
+        ) == pytest.approx(round(0.5 * 4_000.0 * 100.0 / (200.0 * 96.0)))
+        assert strategy.name == "ProportionalFuturesDeltaHedge"
+        assert strategy.get_parameters()["hedge_ratio"] == 0.5
+        # The inherited ratio bound is part of the legacy conventions it reuses.
+        with pytest.raises(ValidationError):
+            ProportionalFuturesDeltaHedgeStrategy(hedge_ratio=1.2)
