@@ -247,14 +247,13 @@ and the worst dates are those approaching the KI barrier from above
 (2024-01-19: spot 5306.99 against a 5050.48 barrier, residual 0.548 hands;
 passing dates average 0.0004 hands, three orders of magnitude smaller).
 
-It is NOT a hedge defect: the hedge's own sizing inputs, the buckets and
-the frozen-carry delta, are internally consistent to 1e-13 throughout, and
 `direct_net_delta` agrees with `mapped_net_delta` to 1e-13 on every date.
-That last agreement is important, because it rules out the engine's Greek
-being wrong: the engine's delta IS the repriced frozen-carry delta.
-
-So the disagreement is inside the chain-rule identity itself, between three
-quantities that are each repriced consistently.
+That agreement looks like independent confirmation of the engine's Greek. It
+is NOT, and reading it that way was a mistake made once in this document's
+history: at the default settings the audit's spot bump is RESOLVED FROM the
+effective pricing bump, so both sides of that comparison use the same bump
+and it is one estimator computed twice. Decoupling them, below, shows they
+do not agree.
 
 #### Convergence analysis
 
@@ -280,13 +279,51 @@ indifference to the grid.
 
 Quantitatively: each direction's central difference carries an error of
 `(h^2/6) * d3V/dS3` in its own direction, so the identity residual should be
-about `(h_S^2 / 6) * [d3V/dS3 frozen - d3V/dS3 pinned]`. The futures bumps
-are one index point against a 53-point spot bump, so they contribute
-nothing. That predicts the residual scaling with `h_S^2`: a 4x smaller bump
-should shrink it about 16x, a 10x smaller bump about 100x.
+about `(h_S^2 / 6) * [d3V/dS3 frozen - d3V/dS3 pinned]`. That predicts the
+residual scaling with `h_S^2`: a 4x smaller bump should shrink it about 16x,
+a 10x smaller bump about 100x.
 
-The plan's Task 15 declares 0.005 / 0.0025 / 0.00125 as the STARTING spot
-bumps for exactly this reason: 1% is a pricing bump, not an audit bump.
+**This hypothesis was refuted too.** Shrinking the bump makes it WORSE:
+
+| audit spot bump | fail | pass | mean abs identity | max abs identity | net delta audit error, mean |
+|---:|---:|---:|---:|---:|---:|
+| 0.01 (default) | 175 | 66 | 0.042500 | 0.548283 | 4.2e-14 |
+| 0.0025 | 155 | 86 | 0.051449 | 0.477425 | 5.0e-02 |
+| 0.001 | 213 | 29 | 0.084353 | 1.337295 | 8.4e-02 |
+
+Predicted 16x and 100x reductions; observed 0.83x and 0.61x, i.e. increases.
+A residual that GROWS as the step shrinks is noise divided by a small step,
+not truncation.
+
+The last column is the decisive measurement. At the default the audit's spot
+bump is resolved from the pricing bump, so both are 1% and the "agreement"
+is trivial. The moment they are decoupled, the QUAD engine's own delta and a
+central difference of the QUAD engine's own price differ by 0.05 to 0.08
+reference hands. `delta_f_direct` moves with the bump too — 5.0842, 5.0867,
+5.1209 — while `delta_f_derived` is pinned at 5.0968 by the engine's Greek.
+
+#### What is actually established
+
+The frozen-carry spot derivative of the QUAD-priced snowball is
+**bump-dependent at the 0.05-hand level** near the knock-in barrier, and
+that dependence does not improve with more quadrature nodes. Both the
+identity residual and the net-delta audit error inherit it.
+
+In relative terms it is small: 0.05 reference hands against a product delta
+around 91 hands is under a tenth of a percent. But the audit budget is
+ABSOLUTE — 0.01 hands — and the plan is explicit that those are "initial
+deterministic-fixture tolerances". They were never derived for a
+quadrature-priced snowball beside a discretely monitored barrier.
+
+Two things follow, and they are different:
+
+1. the budget for this engine and product has not been derived, so applying
+   the fixture tolerance unchanged is not obviously the right test;
+2. the engine's spot-derivative roughness is real and worth understanding on
+   its own, independently of this hedge.
+
+Neither is resolved by widening the tolerance, and neither is resolved
+here.
 
 **Gate D is therefore NOT met with a 1% audit spot bump.** The bump ladder
 is recorded below. The tolerance was not touched.
@@ -295,23 +332,35 @@ is recorded below. The tolerance was not touched.
 
 ## Open item
 
-The identity residual is unresolved at a 1% audit spot bump. Until a bump is
-identified at which it settles inside the 0.01-hand budget, no run at that
-setting can claim `numerical_validity`. Every subset cell's
-`audit_summary.json` already records `all_measured_passed: false`, so none
-of them can be read as a validity pass by accident.
+No tested setting certifies this product on this engine. The convergence
+analysis the plan requires was run in both variables and did not converge:
+the quadrature grid is flat over three levels, and the audit spot bump makes
+things worse in the direction that should help. Every subset cell's
+`audit_summary.json` records `all_measured_passed: false`, so none of them
+can be read as a validity pass by accident.
 
-Note carefully what this does and does not affect:
+What is NOT in question:
 
-- the hedge is sized from the bucket vector and the frozen-carry delta,
-  which are consistent to 1e-13; the sizing is not in question;
-- the replay's P&L is untouched, because the audit is a diagnostic taken
-  alongside it;
-- `direct_net_delta` matches `mapped_net_delta` to 1e-13 every day, so the
-  engine's Greek is not in question either;
-- what is unresolved is whether the three directions of the chain-rule
-  identity can be measured at one bump size accurately enough to certify a
-  run near a barrier.
+- the hedge sizing. The bucket vector and the frozen-carry delta feeding it
+  are consistent to 1e-13, the three policies produce the design's exact
+  holdings, and the replay's P&L is untouched — the audit is a diagnostic
+  taken alongside it, not an input to it;
+- the audit machinery. It caught a deliberately perturbed bucket in Gate A,
+  it refuses to be satisfied by re-sizing inside a scenario, and here it has
+  surfaced a genuine engine property rather than a defect of its own.
+
+What IS in question, and needs a decision:
+
+- whether the 0.01-hand fixture budget is the right test for a
+  quadrature-priced snowball beside a discretely monitored barrier, given
+  that the residual is under a tenth of a percent of the product delta it
+  sits beside;
+- why the QUAD engine's frozen-carry spot derivative is bump-dependent at
+  the 0.05-hand level near that barrier, and whether that matters anywhere
+  else in the library.
+
+The second is a pricing-engine investigation, not a hedge one, and it is
+outside this plan's scope.
 
 ## What these gates do NOT establish
 
