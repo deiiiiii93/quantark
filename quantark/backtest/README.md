@@ -458,12 +458,179 @@ FI-specific metrics include:
 - `dv01_hedge_effectiveness()`: Hedge effectiveness ratio (0-1)
 - `average_duration()`: Portfolio weighted-average duration
 
+## Multi-leg futures carry hedging
+
+A single futures contract can neutralise spot delta. It cannot neutralise
+the *shape* of the carry curve, because a snowball's value depends on the
+whole implied dividend term structure and one contract touches one point of
+it. `FuturesBucketHedgeStrategy` sizes a position in every listed contract.
+
+### Three distinct objectives
+
+All three start from the exact bucket positions `h_i = -B_i / m_i`, where
+`B_i` is the book's currency sensitivity to contract `i`.
+
+| Objective | Spot delta | Parallel rhoq | Gross nodal rhoq |
+|---|---|---|---|
+| `nodes` | `D_F` | 0 | 0 |
+| `spot_far` | 0 | `D_F S T_n` | `abs(D_F S T_n)` |
+| `spot_parallel` | 0 | 0 | `2 abs(K)` |
+
+`D_F` is the spot delta with every listed quote *pinned*. It is not a
+tail artefact and it is generally not zero: on the first interval both
+supported builders interpolate the forward log-linearly from spot to the
+first quote, so a product monitoring tomorrow against a barrier keeps
+`1 - t/T_1` of its spot delta outside what the futures span. A claim
+observing tomorrow with the first contract 30 days out keeps 29/30 of it.
+
+`spot_parallel` is the primary policy. It adds a two-tenor correction that
+zeroes spot delta and parallel rhoq together, and concentrates the remaining
+shape risk as `+K` and `-K` on the chosen pair, where
+`K = D_F S T_a T_b / (T_b - T_a)`. It requires two distinct eligible tenors
+even on a date whose `D_F` happens to be negligible; fewer nodes, or an
+explicit pair that is not available, is a recorded infeasibility rather than
+a silent fall back to another objective.
+
+### A minimal configuration
+
+```python
+from quantark.backtest.replay import (
+    AutocallableEngineConfig, CarryRiskSettings, FuturesBucketHedgeStrategy,
+    ReplayBacktestConfig, ReplayBacktestEngine, ReplayProduct,
+)
+
+config = ReplayBacktestConfig(
+    products=[ReplayProduct(product=snowball, quantity=-1.0,
+                            position_id=0, has_lifecycle=True)],
+    market_data=dataset,
+    engine_config=AutocallableEngineConfig(
+        dividend_source="futures_curve",        # ACTUAL quotes, required
+        futures_curve_extrapolation="flat_q",   # or "flat_forward_carry"
+    ),
+    strategy=FuturesBucketHedgeStrategy(objective="spot_parallel"),
+    carry_audit_mode="daily",
+    carry_risk_settings=CarryRiskSettings(reference_notional=50_000_000.0),
+)
+results = ReplayBacktestEngine(config).run()
+results.hedge_legs_df()          # one row per date and coordinate
+results.hedge_attribution_df()   # one daily exposure and P&L row
+results.hedge_stresses_df()      # finite unquoted-carry scenarios
+```
+
+`dividend_source="futures_curve"` is mandatory, with `flat_q` or
+`flat_forward_carry`. A flat carry channel has no nodes to hedge, and
+`surface_forwards` is an option-implied forward — a different instrument
+from the future the hedge trades, so sizing against it would leave an
+unreported cross-market basis. Both are rejected at configuration time.
+
+### Units
+
+Every Greek in `quantark.backtest.futures_risk` is a **currency**
+sensitivity, never a hand count. "Per 1%" always means one absolute
+percentage point of zero yield:
+
+```text
+spot_delta_hands  = delta / m_ref
+rhoq_bp_per_1pct  = 100 * rhoq / N_ref
+spot_1pct_bp      = 100 * delta * S / N_ref
+```
+
+The reporting notional is gross contractual, `sum |Q_p| * initial_price_p *
+contract_multiplier_p`, so a long-and-short book does not report a zero
+denominator and the measure does not shrink when a product knocks out.
+
+### Parallel versus nodal
+
+Zero parallel rhoq is a signed sum being zero. It is compatible with large
+opposing nodal exposures, and folding risk onto a far node can *create*
+parallel rhoq where there was none. Report gross nodal exposure against a
+gross denominator, and never read the parallel column as "the carry risk is
+gone".
+
+### What the futures cannot span
+
+Two stress families deliberately leave spot and every listed quote
+unchanged, so any futures hedge P&L in them is exactly zero:
+
+- **independent tail** — an extra instantaneous carry yield beyond the last
+  listed tenor. A 1Y claim loses about 49.88 bp of its PV to a one
+  percentage-point shift with the last node at six months.
+- **interpolation shape** — a log-forward bump inside one interval that
+  vanishes at both anchors, including `[0, T_1]`.
+
+A product that moves under either is carrying risk that nodal rhoq says
+nothing about. These are declared research scenarios, not one-standard-
+deviation market moves.
+
+### Execution residuals
+
+Actual holdings are `h_i = eta * h_i* + e_i`, so
+
+```text
+D_actual   = (1 - eta) D + eta D* + sum_i m_i F_i e_i / S
+R_actual,i = (1 - eta) R_i + eta R_i* - m_i F_i T_i e_i
+```
+
+The recorder splits `e_i` into a rounding error and a skipped-trade error,
+so their sum is the total execution error against the scaled target. A
+deliberate partial hedge is not an implementation bug, and neither is a
+skipped trade inside the band.
+
+### Independent audits
+
+Sizing uses `D_F_derived = D - sum_i (F_i/S) B_i` and
+`R_i_mapped = -F_i T_i B_i`. These are identities: they cancel against
+themselves and cannot detect a wrong bucket. On a scheduled audit date the
+book is **repriced** with its futures quantities held fixed, and the direct
+measurement is compared with the algebraic prediction for those *actual*
+holdings.
+
+Numerical validity and objective neutrality are separate results. A correct
+`nodes` book passes the audit while reporting `D_F` of net spot delta,
+because that residual is the policy's intent. An unrun audit is
+`not_measured` with NaN measurements, never a zero.
+
+An audit failure calls for convergence analysis, not a wider tolerance. In
+this repository the audit is sharp enough to see the pricing grid: on the
+standard PDE grid an engine's own delta and a central difference of its own
+price can differ by about 0.009 reference hands, a gap that does not shrink
+with the audit bump but roughly halves on the finer grid.
+
+### Failure categories
+
+| Category | Meaning | Response |
+|---|---|---|
+| `missing_price` | no tradable mark for a held or targeted leg | fix the data |
+| `infeasible_hedge` | fewer than two tenors, or a missing explicit pair | investigate, do not retry |
+| `numeric_audit` | a direct measurement disagreed | convergence analysis |
+
+A day's rebalance is planned, marked, validated and costed in full before
+the ledger moves, so none of these leaves a partial position behind.
+
+### Not in this version
+
+Mixed spot/futures hedges, minimum-variance optimisation, covariance
+fitting, order routing, stochastic-rate or futures-convexity modelling, and
+option-implied forward coordinates. The simulated-path engine rejects the
+strategy: it sizes one contract per day and carries no futures chain.
+
 ## Testing
 
 Run unit tests:
 
 ```bash
 pytest test/test_backtest.py -v
+```
+
+The multi-leg carry hedge has its own suites:
+
+```bash
+pytest -n0 -q test/test_futures_risk.py test/test_carry_curve_context.py \
+  test/test_futures_carry_risk.py test/test_futures_carry_audit.py \
+  test/test_futures_carry_stress.py test/test_futures_bucket_strategy.py \
+  test/test_futures_hedge_book.py test/test_futures_bucket_config.py \
+  test/test_futures_bucket_results.py test/test_futures_carry_recorder.py \
+  test/test_replay_futures_buckets.py
 ```
 
 ## Dependencies

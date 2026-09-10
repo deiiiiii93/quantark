@@ -180,6 +180,138 @@ Per-run frames go under `output/snowball_q_term_structure/` (locally
 excluded from git). Tests: `test/test_snowball_q_term_structure_study.py`
 and `test/test_replay_dividend_source.py`.
 
+## The bucket futures hedge (revised study)
+
+Everything above hedges with ONE futures contract. The revised study adds a
+second question: does holding a position in *every* listed contract, sized
+from the book's sensitivity to each one, hedge the carry curve better than a
+single leg — and does it pay for itself?
+
+Design: [`docs/superpowers/specs/2026-09-09-bucket-futures-hedge-design-revised.md`]
+
+### The 14-cell primary grid
+
+Both supported term models crossed with seven hedge policies:
+
+| Hedge | What it does |
+|---|---|
+| `front` | existing single-contract control, `-D/m`, unchanged |
+| `far` | the same sizing on the longest listed contract |
+| `front_scaled` | front month at `-D S/(m F)`, i.e. spot neutral |
+| `far_scaled` | longest listed at `-D S/(m F)` |
+| `buckets_nodes` | every modelled node neutral; residual spot delta `D_F` |
+| `buckets_far` | spot neutral; the far node keeps `D_F S T_n` |
+| `buckets_spot_parallel` | spot AND parallel rhoq neutral; `(+K, -K)` shape risk |
+
+The two scaled controls exist to separate two effects that a naive
+comparison conflates: correcting the `S/F` scaling, and holding a calendar
+spread. Only the four models with actual futures coordinates
+(`term_flat_q`, `term_flat_fwd`) can carry a bucket policy; the flat and
+option-forward models have no nodes to hedge and are refused at config time.
+
+### Running it
+
+```bash
+# 0) numerical validation, offline, no vendor history needed (≈ 2 s)
+.venv/bin/python example/snowball_q_term_structure/05_bucket_hedge_validation.py \
+    --synthetic --out-dir output/bucket_hedge_v2/validation
+
+# 1) one historical date, serialised so it can be replayed exactly
+.venv/bin/python example/snowball_q_term_structure/05_bucket_hedge_validation.py \
+    --historical-dates 2025-03-03 \
+    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/validation
+
+# 2) a one-inception subset of the primary grid, with daily audits
+.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \
+    --study-grid buckets --max-inceptions 1 --workers 2 \
+    --carry-audit-mode daily --record-carry-exposure \
+    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/subset --resume
+
+# 3) the full primary grid (14 cells per eligible inception)
+nohup caffeinate -i -m -s .venv/bin/python \
+    example/snowball_q_term_structure/02_backtest_fleet.py \
+    --study-grid buckets --workers 4 --record-carry-exposure \
+    --carry-audit-mode daily \
+    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full \
+    --resume > bucket_fleet.log 2>&1 &
+
+# 4) aggregate
+.venv/bin/python example/snowball_q_term_structure/03_aggregate_and_report.py \
+    --run-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full \
+    --data-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full_report
+```
+
+`--study-grid` defaults to `legacy`, so every command in the section above
+runs exactly the cells it always did. An explicit `--cells` overrides the
+grid and labels the output a subset.
+
+### Artifacts
+
+A revised run writes eight frames per cell instead of five:
+`states`, `greeks`, `trades`, `rebalances`, `actions`, plus `hedge_legs`,
+`hedge_attribution` and `hedge_stresses`; and two JSON files,
+`run_config.json` (fully resolved strategy, numerical, source, notional,
+schedule and stress settings, plus a content digest of the pricing modules)
+and `audit_summary.json` (measured / pass / fail / inconclusive counts).
+
+They land under a **new** versioned directory, `data/bucket_hedge_v2/`. The
+original study's artifacts are never overwritten and remain readable: a
+legacy run loads with `audit_coverage="not_available"`, which is a distinct
+state from "audits ran and failed".
+
+The validation stage writes `validation_manifest.json`,
+`input_snapshots.json`, `price_ladder.csv`, `greek_ladder.csv`,
+`policy_holdings.csv`, `direct_audits.csv`, `stress_results.csv` and
+`validation_summary.md`.
+
+### Resume and failure
+
+Resume needs a matching fingerprint, `status="completed"`, the right format
+version, every required file, and measured audit coverage when the task
+asked for audits. A legacy artifact therefore cannot stand in for an
+audited cell, and a run that completed with a failed audit stays available
+for diagnosis but can never be reused as a passing result.
+
+A worker failure writes `failure.json` *beside* the completed run, never
+over it, with the date, objective, input fingerprint, an error category and
+the traceback. The categories are distinct on purpose:
+
+| Category | Retry? |
+|---|---|
+| `missing_price` | only after fixing the data |
+| `infeasible_hedge` | no — investigate the objective |
+| `numeric_audit` | no — convergence analysis |
+
+### Reading the output
+
+Four questions are answered separately, and none is inferred from another:
+
+1. **Numerical validity** — did the independent repricing agree, and over
+   how much of the run? A sampled run cannot report daily coverage.
+2. **Objective achieved** — were the policy's own targets met, ideally and
+   then actually after rounding and skipped trades?
+3. **Joint mitigation** — did RMS spot-shock *and* RMS parallel-rhoq
+   exposure both fall?
+4. **Broader carry mitigation** — does gross nodal exposure support it too,
+   and do the unquoted tail and shape scenarios?
+5. **Economic comparison** — paired realised P&L variability, tail loss and
+   costs against the controls, with an interval.
+
+Zero parallel rhoq alone never earns the fourth. A policy can achieve its
+two-factor objective and still lose on shape risk or turnover; that is a
+valid study conclusion, not a failure of the implementation.
+
+### Limitations
+
+- The primary policy needs two distinct eligible tenors, always.
+- Every risk coordinate must be a contract the hedge can actually trade;
+  option-implied forwards are a different instrument.
+- Tail and interpolation-shape risk is *unhedgeable* with listed futures
+  and is reported separately, unchanged, however neutral the nodes are.
+- Uncertainty uses paired calendar-block resampling over overlapping
+  inceptions. Do not read the old per-run t-statistic as independent
+  evidence.
+
 ## Engine hook
 
 `AutocallableEngineConfig.dividend_source` (default `None` = the historical
