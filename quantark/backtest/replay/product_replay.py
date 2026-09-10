@@ -204,6 +204,7 @@ class ProductReplay:
         market: dict[str, float],
         selected,
         dividend_row=None,
+        allow_flat_carry_fallback: bool = False,
     ):
         """The day's pricing environment.
 
@@ -239,7 +240,15 @@ class ProductReplay:
         vol_surface, div_yield = self._vol_and_dividend(date, market, pricing_q)
         rate_curve = FlatRateCurve(rate=market["rate"])
         if self._dividend_source() in ("futures_curve", "surface_forwards"):
-            div_yield = self._term_dividend(date, market, rate_curve)
+            try:
+                div_yield = self._term_dividend(date, market, rate_curve)
+            except ValidationError:
+                # Only a caller that knows the whole book is already dead may
+                # ask for this: settling known cash and discounting a pending
+                # receivable need spot, rates and the date, not live carry.
+                if not allow_flat_carry_fallback:
+                    raise
+                self.last_carry_context = None
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=market["spot"], asset_name=self.underlying),
             vol_surface=vol_surface,
