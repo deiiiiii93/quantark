@@ -26,28 +26,73 @@ so the per-product samples stay unit-position sensitivities and no quantity
 is applied twice.  Two samples may only be added when their contexts carry
 the same coordinates -- contract order, prices, multipliers, tenors, spot,
 valuation date and convention.  A matching node COUNT is not evidence.
+
+The second half of the module is the INDEPENDENT AUDIT.  Everything in
+:mod:`quantark.backtest.futures_risk` is algebra over sampled Greeks:
+``delta_f_derived`` cancels against the identity that produced it, and
+``held_book_risk`` predicts a residual from the same buckets it was handed.
+Neither can detect a wrong bucket.  ``audit_held_book`` measures the same
+quantities by pricing the book again in each scenario, so a perturbed bucket
+makes the comparison fail while the derived identity still returns zero.
+
+Two rules make the audit an audit (design section 6.3):
+
+1. futures quantities are FIXED through every scenario and their
+   deterministic scenario P&L is added to the repriced product,
+   ``W(s, f) = V(s, f) + sum_i h_i m_i (f_i - F_i_base)``;
+2. the holdings are the ACTUAL post-trade ones.  Substituting the ideal
+   target into the sizing equations, or subtracting the derived identity,
+   reproduces the prediction by construction and audits nothing.
+
+Numerical validity and objective neutrality are separate results.  A correct
+``nodes`` audit passes while reporting a large net spot delta, because that
+residual is the policy's intent; an audit that was never taken reports
+``not_measured``, never a zero.
 """
 
 from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
-from quantark.backtest.futures_risk import FuturesBookRisk, FuturesBucket
+from quantark.backtest.futures_risk import (
+    CarryRiskSettings,
+    FuturesBookRisk,
+    FuturesBucket,
+    held_book_risk,
+    rhoq_bp_per_1pct,
+    spot_delta_hands,
+)
 from quantark.backtest.replay.carry_context import CarryCurveContext
 from quantark.util.exceptions import ValidationError
 
 PriceAt = Callable[[float, Any], float]
 
+#: Audit outcomes.  ``inconclusive`` means the measurement's own uncertainty
+#: is too wide to decide, which is NOT a pass even when it contains zero.
+AUDIT_STATUSES = ("pass", "fail", "not_measured", "inconclusive")
+
 __all__ = [
+    "AUDIT_STATUSES",
     "BucketSample",
+    "CarryAuditResult",
     "ProductCarryRisk",
     "aggregate_book_risk",
+    "audit_held_book",
     "buckets_of",
+    "direct_frozen_curve_book_delta",
+    "direct_nodal_rhoq",
+    "direct_parallel_rhoq",
+    "direct_pinned_delta",
     "measure_product_carry_risk",
+    "not_measured_audit",
+    "refinement_ladder",
     "sample_buckets",
+    "scenario_book_value",
+    "stabilised",
+    "status_from_interval",
 ]
 
 
@@ -245,3 +290,392 @@ def aggregate_book_risk(
         for quote, total in zip(reference.quotes, bucket_totals)
     )
     return FuturesBookRisk(spot=reference.spot, delta_q=delta, buckets=buckets)
+
+
+# ---------------------------------------------------------------------------
+# Independent audit: directions measured by ACTUAL repricing
+# ---------------------------------------------------------------------------
+
+
+def _checked(value: float, what: str) -> float:
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValidationError(f"non-finite price for {what}: {value!r}")
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Directions measured by actual repricing
+# ---------------------------------------------------------------------------
+
+
+def scenario_book_value(
+    price_at: PriceAt,
+    context: CarryCurveContext,
+    scenario: CarryCurveContext,
+    holdings: Mapping[str, float],
+) -> float:
+    """``W(s, f)``: the repriced product plus the FIXED hedge's scenario P&L."""
+    product = _checked(price_at(scenario.spot, scenario.dividend()), "scenario book")
+    base = {q.contract: q for q in context.quotes}
+    hedge = sum(
+        holdings.get(q.contract, 0.0)
+        * q.multiplier
+        * (q.price - base[q.contract].price)
+        for q in scenario.quotes
+    )
+    return product + hedge
+
+
+def direct_pinned_delta(
+    price_at: PriceAt, context: CarryCurveContext, spot_step: float
+) -> float:
+    """``D_F`` by repricing: spot moves, every listed quote is pinned."""
+    plus = context.with_spot(context.spot + spot_step)
+    minus = context.with_spot(context.spot - spot_step)
+    return (
+        _checked(price_at(plus.spot, plus.dividend()), "pinned spot up")
+        - _checked(price_at(minus.spot, minus.dividend()), "pinned spot down")
+    ) / (2 * spot_step)
+
+
+def direct_frozen_curve_book_delta(
+    price_at: PriceAt,
+    context: CarryCurveContext,
+    holdings: Mapping[str, float],
+    spot_step: float,
+) -> float:
+    """``D_book`` by repricing at a FROZEN carry curve.
+
+    The product is repriced on the base curve -- not on a curve rebuilt from
+    pinned futures -- and each futures mark scales by ``s/S``, which is the
+    frozen-carry direction the hedge is sized in.
+    """
+    div = context.dividend()
+    product = (
+        _checked(price_at(context.spot + spot_step, div), "frozen spot up")
+        - _checked(price_at(context.spot - spot_step, div), "frozen spot down")
+    ) / (2 * spot_step)
+    hedge = sum(
+        holdings.get(q.contract, 0.0) * q.multiplier * q.price / context.spot
+        for q in context.quotes
+    )
+    return product + hedge
+
+
+def direct_nodal_rhoq(
+    price_at: PriceAt,
+    context: CarryCurveContext,
+    holdings: Mapping[str, float],
+    yield_step: float,
+    *,
+    product_only: bool = False,
+) -> Dict[str, float]:
+    """``R_book,i`` (or ``R_i``) by repricing each node's yield bump."""
+    out: Dict[str, float] = {}
+    fixed = {} if product_only else holdings
+    for quote in context.quotes:
+        up = context.bump_node_yield(quote.contract, yield_step)
+        down = context.bump_node_yield(quote.contract, -yield_step)
+        out[quote.contract] = (
+            scenario_book_value(price_at, context, up, fixed)
+            - scenario_book_value(price_at, context, down, fixed)
+        ) / (2 * yield_step)
+    return out
+
+
+def direct_parallel_rhoq(
+    price_at: PriceAt,
+    context: CarryCurveContext,
+    holdings: Mapping[str, float],
+    yield_step: float,
+    *,
+    product_only: bool = False,
+) -> float:
+    """``R_book,parallel`` by repricing one parallel curve shift."""
+    fixed = {} if product_only else holdings
+    up = context.parallel_yield_shift(yield_step)
+    down = context.parallel_yield_shift(-yield_step)
+    return (
+        scenario_book_value(price_at, context, up, fixed)
+        - scenario_book_value(price_at, context, down, fixed)
+    ) / (2 * yield_step)
+
+
+# ---------------------------------------------------------------------------
+# The audit result
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CarryAuditResult:
+    """Direct measurements next to the algebraic predictions for the SAME
+    actual holdings, plus the separate question of what the policy intended.
+
+    ``status`` answers "are the Greeks right"; ``objective_achieved`` answers
+    "is the book neutral".  A ``nodes`` book is meant to keep ``D_F`` of spot
+    delta, so it can and should pass the first while failing the second.
+    """
+
+    status: str
+    reason: str
+    holdings_kind: str
+    spot_step: float
+    yield_step: float
+    reference_multiplier: float
+    reference_notional: float
+    delta_f_derived: float = float("nan")
+    delta_f_direct: float = float("nan")
+    identity_residual_hands: float = float("nan")
+    mapped_net_delta: float = float("nan")
+    direct_net_delta: float = float("nan")
+    net_delta_audit_error_hands: float = float("nan")
+    mapped_net_parallel_rhoq: float = float("nan")
+    direct_net_parallel_rhoq: float = float("nan")
+    parallel_rhoq_audit_error_bp: float = float("nan")
+    mapped_nodal_rhoq: Dict[str, float] = field(default_factory=dict)
+    direct_nodal_rhoq: Dict[str, float] = field(default_factory=dict)
+    nodal_rhoq_audit_error_bp: Dict[str, float] = field(default_factory=dict)
+    product_parallel_mapped: float = float("nan")
+    product_parallel_direct: float = float("nan")
+    price_calls: int = 0
+    objective_achieved: Optional[bool] = None
+    objective_reason: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status not in AUDIT_STATUSES:
+            raise ValidationError(
+                f"audit status must be one of {AUDIT_STATUSES}, got {self.status!r}"
+            )
+
+    @property
+    def measured(self) -> bool:
+        return self.status != "not_measured"
+
+    @property
+    def passed(self) -> bool:
+        return self.status == "pass"
+
+    @property
+    def worst_error_hands(self) -> float:
+        return abs(self.net_delta_audit_error_hands)
+
+    @property
+    def worst_rhoq_error_bp(self) -> float:
+        errors = [abs(self.parallel_rhoq_audit_error_bp)] + [
+            abs(v) for v in self.nodal_rhoq_audit_error_bp.values()
+        ]
+        finite = [e for e in errors if math.isfinite(e)]
+        return max(finite) if finite else float("nan")
+
+
+def not_measured_audit(
+    *,
+    holdings_kind: str,
+    reason: str,
+    settings: CarryRiskSettings,
+) -> CarryAuditResult:
+    """A scheduled-but-unrun audit.  Every measurement stays NaN."""
+    settings.require_resolved()
+    return CarryAuditResult(
+        status="not_measured",
+        reason=reason,
+        holdings_kind=holdings_kind,
+        spot_step=float("nan"),
+        yield_step=float("nan"),
+        reference_multiplier=settings.reference_multiplier,
+        reference_notional=float(settings.reference_notional),
+    )
+
+
+def audit_held_book(
+    price_at: PriceAt,
+    context: CarryCurveContext,
+    risk: FuturesBookRisk,
+    holdings: Mapping[str, float],
+    *,
+    settings: CarryRiskSettings,
+    holdings_kind: str = "actual",
+    ideal_net_delta: Optional[float] = None,
+    ideal_net_parallel_rhoq: Optional[float] = None,
+) -> CarryAuditResult:
+    """Reprice the held book and compare with the algebraic prediction.
+
+    The comparison is ``direct`` versus ``mapped`` for THESE holdings.  It
+    does not require a zero residual: ``nodes``, ``spot_far``, partial ratios
+    and rounded books all have intended non-zero residuals, and the optional
+    ``ideal_*`` arguments record whether the policy's own target was met as a
+    separate flag.
+    """
+    settings.require_resolved()
+    if holdings_kind not in ("actual", "ideal"):
+        raise ValidationError(f"unknown holdings kind: {holdings_kind!r}")
+    spot_step = float(settings.audit_spot_bump_rel) * context.spot
+    yield_step = float(settings.audit_yield_bump)
+    notional = float(settings.reference_notional)
+    m_ref = float(settings.reference_multiplier)
+
+    mapped_delta, mapped_rho = held_book_risk(risk, holdings)
+    mapped_parallel = sum(mapped_rho.values())
+
+    delta_f_direct = direct_pinned_delta(price_at, context, spot_step)
+    direct_delta = direct_frozen_curve_book_delta(
+        price_at, context, holdings, spot_step
+    )
+    direct_rho = direct_nodal_rhoq(price_at, context, holdings, yield_step)
+    direct_parallel = direct_parallel_rhoq(price_at, context, holdings, yield_step)
+    product_parallel_direct = direct_parallel_rhoq(
+        price_at, context, holdings, yield_step, product_only=True
+    )
+    price_calls = 4 + 2 * len(context.quotes) + 4
+
+    identity_residual = (
+        risk.delta_q - delta_f_direct - sum(
+            b.price / risk.spot * b.bucket_currency for b in risk.buckets
+        )
+    ) / m_ref
+    delta_error = spot_delta_hands(direct_delta - mapped_delta, m_ref)
+    parallel_error = rhoq_bp_per_1pct(direct_parallel - mapped_parallel, notional)
+    nodal_errors = {
+        contract: rhoq_bp_per_1pct(direct_rho[contract] - mapped_rho[contract], notional)
+        for contract in mapped_rho
+    }
+
+    failures = []
+    if abs(delta_error) > settings.delta_tolerance_hands:
+        failures.append(
+            f"net delta {delta_error:+.4f} hands vs tolerance "
+            f"{settings.delta_tolerance_hands}"
+        )
+    if abs(identity_residual) > settings.delta_tolerance_hands:
+        failures.append(
+            f"identity residual {identity_residual:+.4f} hands vs tolerance "
+            f"{settings.delta_tolerance_hands}"
+        )
+    if abs(parallel_error) > settings.rhoq_tolerance_bp:
+        failures.append(
+            f"parallel rhoq {parallel_error:+.4f} bp vs tolerance "
+            f"{settings.rhoq_tolerance_bp}"
+        )
+    for contract, error in nodal_errors.items():
+        if abs(error) > settings.rhoq_tolerance_bp:
+            failures.append(f"nodal rhoq {contract} {error:+.4f} bp")
+
+    status = "fail" if failures else "pass"
+    reason = "; ".join(failures) if failures else "direct measurements agree"
+
+    objective_achieved: Optional[bool] = None
+    objective_reason = ""
+    if ideal_net_delta is not None and ideal_net_parallel_rhoq is not None:
+        delta_gap = spot_delta_hands(direct_delta - float(ideal_net_delta), m_ref)
+        parallel_gap = rhoq_bp_per_1pct(
+            direct_parallel - float(ideal_net_parallel_rhoq), notional
+        )
+        objective_achieved = (
+            abs(delta_gap) <= settings.delta_tolerance_hands
+            and abs(parallel_gap) <= settings.rhoq_tolerance_bp
+        )
+        objective_reason = (
+            f"delta gap {delta_gap:+.4f} hands, parallel gap {parallel_gap:+.4f} bp"
+        )
+
+    return CarryAuditResult(
+        status=status,
+        reason=reason,
+        holdings_kind=holdings_kind,
+        spot_step=spot_step,
+        yield_step=yield_step,
+        reference_multiplier=m_ref,
+        reference_notional=notional,
+        delta_f_derived=risk.delta_f_derived,
+        delta_f_direct=delta_f_direct,
+        identity_residual_hands=identity_residual,
+        mapped_net_delta=mapped_delta,
+        direct_net_delta=direct_delta,
+        net_delta_audit_error_hands=delta_error,
+        mapped_net_parallel_rhoq=mapped_parallel,
+        direct_net_parallel_rhoq=direct_parallel,
+        parallel_rhoq_audit_error_bp=parallel_error,
+        mapped_nodal_rhoq=dict(mapped_rho),
+        direct_nodal_rhoq=dict(direct_rho),
+        nodal_rhoq_audit_error_bp=nodal_errors,
+        product_parallel_mapped=risk.parallel_rhoq,
+        product_parallel_direct=product_parallel_direct,
+        price_calls=price_calls,
+        objective_achieved=objective_achieved,
+        objective_reason=objective_reason,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Refinement
+# ---------------------------------------------------------------------------
+
+
+def refinement_ladder(
+    measure: Callable[[float], float],
+    *,
+    initial_step: float,
+    levels: int = 3,
+    max_levels: int = 8,
+    tolerance: float = 0.0,
+) -> Tuple[Tuple[float, float], ...]:
+    """Halve the step at least ``levels`` times, extending while it moves.
+
+    The ladder never widens a tolerance to declare success: it keeps every
+    sample so an unresolved measurement can be reported as ``inconclusive``
+    with its whole history attached.
+    """
+    if levels < 3:
+        raise ValidationError("a refinement ladder needs at least three levels")
+    if max_levels < levels:
+        raise ValidationError("max_levels must be at least levels")
+    step = float(initial_step)
+    if not math.isfinite(step) or step <= 0.0:
+        raise ValidationError("initial_step must be finite and positive")
+    samples = []
+    for index in range(max_levels):
+        samples.append((step, float(measure(step))))
+        if index + 1 >= levels:
+            previous, current = samples[-2][1], samples[-1][1]
+            if abs(current - previous) <= tolerance:
+                break
+        step /= 2.0
+    return tuple(samples)
+
+
+def stabilised(
+    samples: Sequence[Tuple[float, float]], tolerance: float
+) -> bool:
+    """True when the last two ladder samples agree within ``tolerance``."""
+    if len(samples) < 2:
+        return False
+    return abs(samples[-1][1] - samples[-2][1]) <= tolerance
+
+
+def status_from_interval(
+    estimate: float, half_width: float, tolerance: float
+) -> Tuple[str, str]:
+    """Decide an audit status from a measurement and its own uncertainty.
+
+    An estimate whose confidence interval is WIDER than the exposure budget
+    cannot decide the question, even when the interval contains zero, so it
+    is ``inconclusive`` rather than ``pass``.  This is the rule the Monte
+    Carlo validation driver applies to seed-batch intervals; a deterministic
+    engine passes ``half_width=0``.
+    """
+    estimate = float(estimate)
+    half_width = float(half_width)
+    tolerance = float(tolerance)
+    if not math.isfinite(estimate) or not math.isfinite(half_width):
+        return "not_measured", "estimate or interval is not finite"
+    if half_width < 0.0 or tolerance < 0.0:
+        raise ValidationError("half_width and tolerance must be non-negative")
+    if half_width > tolerance:
+        return (
+            "inconclusive",
+            f"interval half-width {half_width:.6g} exceeds the budget {tolerance:.6g}",
+        )
+    if abs(estimate) - half_width > tolerance:
+        return "fail", f"|{estimate:.6g}| exceeds the budget {tolerance:.6g}"
+    return "pass", "estimate lies inside the budget with a resolved interval"
