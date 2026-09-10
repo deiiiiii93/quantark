@@ -112,6 +112,15 @@ class EnsembleBacktestEngine:
                         [state_row(states, n) for n in range(len(states))],
                         cfg.pricing.gate, self._gate_scale(bp),
                     ))
+                    # ... and against states the run may never visit. Whether
+                    # a path ever comes to rest beside the knock-in is luck;
+                    # a risk tool has to hold its budget there regardless.
+                    if hasattr(pricer, "barrier_stress_cases"):
+                        designed = pricer.barrier_stress_cases(
+                            vol=float(vol[0]), rate=float(rate[0]), q=float(q_T[0]))
+                        if designed:
+                            gate_reports.append(pricer.verify_stress(
+                                designed, cfg.pricing.gate, self._gate_scale(bp)))
                 if not all(r.passed for r in gate_reports):
                     raise GateFailure(GateReport.combine(gate_reports))
 
