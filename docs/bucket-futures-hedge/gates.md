@@ -264,7 +264,11 @@ monitored barrier. **It was wrong.** Tripling the grid changes nothing:
 | `--quad-grid` | fail | pass | mean abs identity | max abs identity |
 |---:|---:|---:|---:|---:|
 | 401 | 175 | 66 | 0.042500 | 0.548283 |
+| 801 | 175 | 66 | 0.042463 | 0.559124 |
 | 1201 | 175 | 66 | 0.042456 | 0.556560 |
+
+Three levels, flat to four decimal places, with the failing-date count
+identical at every one.
 
 The remaining candidate is the audit's own SPOT BUMP. The identity
 `D = D_F + sum_i (F_i/S) B_i` is a first-order statement, and the three
@@ -273,6 +277,13 @@ spot bump from the effective pricing bump, which defaults to 1% — about 53
 index points — and it is taken beside a knock-in barrier where gamma is
 large. That would explain both the clustering before knock-in and the
 indifference to the grid.
+
+Quantitatively: each direction's central difference carries an error of
+`(h^2/6) * d3V/dS3` in its own direction, so the identity residual should be
+about `(h_S^2 / 6) * [d3V/dS3 frozen - d3V/dS3 pinned]`. The futures bumps
+are one index point against a 53-point spot bump, so they contribute
+nothing. That predicts the residual scaling with `h_S^2`: a 4x smaller bump
+should shrink it about 16x, a 10x smaller bump about 100x.
 
 The plan's Task 15 declares 0.005 / 0.0025 / 0.00125 as the STARTING spot
 bumps for exactly this reason: 1% is a pricing bump, not an audit bump.
