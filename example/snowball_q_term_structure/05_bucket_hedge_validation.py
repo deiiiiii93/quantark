@@ -95,9 +95,18 @@ def book_scale(inputs) -> float:
     return float(inputs["notional"]) / float(inputs["spot"])
 
 
+#: A signed, alternating pattern, so the reference book has real exposure at
+#: every node and a non-trivial gross-versus-parallel distinction.  It cycles
+#: because a live CFFEX chain lists four contracts, not three.
+COEFFICIENT_PATTERN = (1.0, -0.5, 0.25, -0.125)
+
+
 def scaled_coefficients(inputs, quotes) -> Tuple[float, ...]:
     scale = book_scale(inputs)
-    return tuple(scale * c for c in (1.0, -0.5, 0.25)[: len(quotes)])
+    return tuple(
+        scale * COEFFICIENT_PATTERN[index % len(COEFFICIENT_PATTERN)]
+        for index in range(len(quotes))
+    )
 
 STATUS_PASS = "pass"
 STATUS_FAIL = "fail"
