@@ -10,9 +10,23 @@ import json
 import pathlib
 
 import quantark.modelvalidation.builders.equity_snowball as B
+import quantark.modelvalidation.builders.equity_ko_reset as B_KO
+import quantark.modelvalidation.builders.equity_phoenix as B_PH
 from quantark.modelvalidation.candidate import candidate_identity
 from quantark.modelvalidation.evidence import identity_hash
 from quantark.modelvalidation.yaml_loader import load_study
+
+# The ko_reset and phoenix builders do `from ...equity_snowball import
+# _QUAD_NON_NUMERIC`, which binds the NAME into their own namespace at import
+# time. Rebinding it in equity_snowball alone leaves them untouched -- which
+# is exactly the mistake this probe made on its first outing, and it read as
+# pre-existing staleness in two candidates that were in fact fine.
+_BUILDERS = (B, B_KO, B_PH)
+
+
+def set_exclusions(names):
+    for module in _BUILDERS:
+        module._QUAD_NON_NUMERIC = names
 
 STUDY_YAML = {
     "snowball-flat-bsm": "example/modelvalidation/snowball_flat_bsm.yaml",
@@ -28,7 +42,7 @@ def main():
     )
     base = B._QUAD_NON_NUMERIC
     for excl in (base, base + ("readout",)):
-        B._QUAD_NON_NUMERIC = excl
+        set_exclusions(excl)
         ok = tot = 0
         for cert in certs:
             payload = json.loads(cert.read_text())
@@ -53,7 +67,7 @@ def by_candidate():
     certs = sorted(
         (ROOT / "docs" / "modelvalidation" / "certificates").glob("*/*/certificate.json")
     )
-    B._QUAD_NON_NUMERIC = B._QUAD_NON_NUMERIC + ("readout",)
+    set_exclusions(B._QUAD_NON_NUMERIC + ("readout",))
     tally: dict[str, list[int]] = {}
     for cert in certs:
         payload = json.loads(cert.read_text())

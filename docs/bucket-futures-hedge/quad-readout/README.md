@@ -448,8 +448,8 @@ space, so the resolution is an amendment to the banked evidence, not a
 regeneration, and that is a decision about banked certificates rather than
 part of this change.
 
-**That test was already failing on this branch.** Counting cells with
-`readout` excluded, which is exactly the state before this change:
+**Nothing was stale before.** Counting cells with `readout` excluded, which
+is exactly the state before this change, all 678 match:
 
 | candidate | cells matching their banked hash |
 |---|---|
@@ -457,14 +457,20 @@ part of this change.
 | `equity.phoenix.pde` | 123 / 123 |
 | `equity.ko_reset_snowball.pde` | 99 / 99 |
 | `equity.snowball.quad` | 117 / 117 |
-| `equity.phoenix.quad` | **0 / 123** |
-| `equity.ko_reset_snowball.quad` | **0 / 99** |
+| `equity.phoenix.quad` | 123 / 123 |
+| `equity.ko_reset_snowball.quad` | 99 / 99 |
 
-222 of 678 cells were already stale, in the two quadrature candidates this
-change did not touch numerically — some earlier `QuadParams` default moved
-and only the snowball certificate was re-banked. This change adds the
-remaining 117. Both wants resolving together; neither should be papered over
-by loosening the identity.
+Adding the field moves exactly the 339 QUAD cells and leaves the 339 PDE
+cells alone. The whole of it is this change's to answer.
+
+> An earlier version of this section reported 222 cells as already stale.
+> That was wrong, and the error was in the probe: `equity_ko_reset` and
+> `equity_phoenix` do `from ...equity_snowball import _QUAD_NON_NUMERIC`,
+> which binds the NAME at import time, so rebinding it in `equity_snowball`
+> alone never reached them. They kept `readout` in their identity and
+> mismatched, and I read that as pre-existing staleness. Caught by a peer
+> session that audited the same question against the main checkout and got
+> 726/726. `cert_probe.py` now patches all three builders.
 
 Two things bear on the choice beyond the table.
 
