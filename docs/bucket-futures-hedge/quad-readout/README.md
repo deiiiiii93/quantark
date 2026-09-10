@@ -429,6 +429,33 @@ returning a legacy-readout price under another name.
 The mode governs the event decomposition as well as the price, since the two
 are reported beside each other and read off the same surfaces.
 
+### Selecting it: which paths actually reach the engine
+
+A parameter is only real where something threads it. Three paths, and one of
+them was silently broken:
+
+- **The fleet** (`02_backtest_fleet.py --quad-readout`) reaches both the
+  replay's engine config and the fair-coupon solve, so a run prices one rule
+  throughout. Verified live: the solved coupon moves 4.5276% to 4.5272% and
+  the audit residuals move with it.
+- **Study stages 01 and 04** construct `QuadParams(grid_points=...)` from
+  defaults and take no readout argument, so they are always on the shipped
+  default. Consistent, but they cannot exercise the mode.
+- **The model-validation studies could NOT reach it, while appearing to.**
+  A peer session found that the three quad candidates spread their YAML keys
+  into `params()`, so `readout: transition` moved the identity hash, but
+  `_greeks` built `QuadParams(grid_points=grid_points)` from defaults and
+  priced the legacy path regardless. A study naming the mode would have
+  banked a certificate claiming to cover it while measuring something else.
+  Fixed on `feat/simulated-path-backtest`: a shared `_engine_params` builds
+  the params both `params()` records and `_greeks` prices with, and a
+  non-default readout takes its own candidate name so two candidates cannot
+  overwrite each other's recorded decision.
+
+The general shape of that bug is worth remembering: a config key that
+reaches the RECORD but not the RUN is worse than one that reaches neither,
+because it buys false confidence.
+
 ### It moves the model-validation certificate identities, and that is correct
 
 `equity.snowball.quad` records "every numerically relevant knob, including
