@@ -247,29 +247,60 @@ and the worst dates are those approaching the KI barrier from above
 (2024-01-19: spot 5306.99 against a 5050.48 barrier, residual 0.548 hands;
 passing dates average 0.0004 hands, three orders of magnitude smaller).
 
-That is the signature of quadrature resolution around a discretely monitored
-knock-in barrier, not of a hedge defect: the hedge's own sizing inputs, the
-buckets and nodal yields, are internally consistent to 1e-13 throughout.
+It is NOT a hedge defect: the hedge's own sizing inputs, the buckets and
+the frozen-carry delta, are internally consistent to 1e-13 throughout, and
+`direct_net_delta` agrees with `mapped_net_delta` to 1e-13 on every date.
+That last agreement is important, because it rules out the engine's Greek
+being wrong: the engine's delta IS the repriced frozen-carry delta.
 
-**Gate D is therefore NOT met at `--quad-grid 401`.** A convergence analysis
-at finer grids is recorded below. The tolerance was not touched.
+So the disagreement is inside the chain-rule identity itself, between three
+quantities that are each repriced consistently.
+
+#### Convergence analysis
+
+The first hypothesis was quadrature resolution around the discretely
+monitored barrier. **It was wrong.** Tripling the grid changes nothing:
+
+| `--quad-grid` | fail | pass | mean abs identity | max abs identity |
+|---:|---:|---:|---:|---:|
+| 401 | 175 | 66 | 0.042500 | 0.548283 |
+| 1201 | 175 | 66 | 0.042456 | 0.556560 |
+
+The remaining candidate is the audit's own SPOT BUMP. The identity
+`D = D_F + sum_i (F_i/S) B_i` is a first-order statement, and the three
+directions in it carry different second-order terms. The audit inherits its
+spot bump from the effective pricing bump, which defaults to 1% — about 53
+index points — and it is taken beside a knock-in barrier where gamma is
+large. That would explain both the clustering before knock-in and the
+indifference to the grid.
+
+The plan's Task 15 declares 0.005 / 0.0025 / 0.00125 as the STARTING spot
+bumps for exactly this reason: 1% is a pricing bump, not an audit bump.
+
+**Gate D is therefore NOT met with a 1% audit spot bump.** The bump ladder
+is recorded below. The tolerance was not touched.
 
 ---
 
 ## Open item
 
-The identity residual above is unresolved at the study's default quadrature
-grid. Until a grid is identified at which it settles inside the 0.01-hand
-budget, no run at that grid can claim `numerical_validity`, and the
-`audit_summary.json` of every subset cell already records
-`all_measured_passed: false`, which keeps them out of a validity pass
-automatically.
+The identity residual is unresolved at a 1% audit spot bump. Until a bump is
+identified at which it settles inside the 0.01-hand budget, no run at that
+setting can claim `numerical_validity`. Every subset cell's
+`audit_summary.json` already records `all_measured_passed: false`, so none
+of them can be read as a validity pass by accident.
 
-Note what this does and does not affect. The hedge is sized from the bucket
-vector and the frozen-carry delta; those are consistent to 1e-13 and the
-replay's P&L is unaffected. What is unresolved is whether the ENGINE's delta
-and its own repriced delta agree closely enough for the identity check to
-certify the run.
+Note carefully what this does and does not affect:
+
+- the hedge is sized from the bucket vector and the frozen-carry delta,
+  which are consistent to 1e-13; the sizing is not in question;
+- the replay's P&L is untouched, because the audit is a diagnostic taken
+  alongside it;
+- `direct_net_delta` matches `mapped_net_delta` to 1e-13 every day, so the
+  engine's Greek is not in question either;
+- what is unresolved is whether the three directions of the chain-rule
+  identity can be measured at one bump size accurately enough to certify a
+  run near a barrier.
 
 ## What these gates do NOT establish
 
