@@ -58,6 +58,10 @@ class ReplayBacktestEngine:
         self._surfaces: list[dict[str, Any]] = []
         self._daily_event_summary: list[dict[str, Any]] = []
         self._event_probabilities: list[dict[str, Any]] = []
+        # Carry risk rows: empty unless the run resolved recording on.
+        self._hedge_legs: list[dict[str, Any]] = []
+        self._hedge_attribution: list[dict[str, Any]] = []
+        self._hedge_stresses: list[dict[str, Any]] = []
 
         self._initial_book_value: Optional[float] = None
         self._transaction_costs: float = 0.0
@@ -352,6 +356,9 @@ class ReplayBacktestEngine:
             daily_event_summary=self._daily_event_summary,
             event_probabilities=self._event_probabilities,
             surfaces=self._surfaces,
+            hedge_legs=self._hedge_legs,
+            hedge_attribution=self._hedge_attribution,
+            hedge_stresses=self._hedge_stresses,
             products_meta=[
                 {
                     "position_id": bp.position_id,
