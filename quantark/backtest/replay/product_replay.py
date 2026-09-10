@@ -34,6 +34,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close
 
+from .carry_context import SUPPORTED_EXTRAPOLATIONS, CarryCurveContext
 from .dividend_source import term_dividend_yield
 from .engine_factory import create_mc_event_stats_engine
 from .market import (
@@ -165,6 +166,13 @@ class ProductReplay:
         # folds this into the per-day state row when present.
         self.last_surface_provenance: Optional[dict[str, Any]] = None
 
+        # The carry scenario source of the most recent build_env call, for the
+        # two supported actual-futures conventions only (None otherwise).  The
+        # engine passes ONE day context explicitly to every product's risk
+        # call; it must not read this attribute off another replay, because a
+        # shared environment is built through the first replay alone.
+        self.last_carry_context: Optional[CarryCurveContext] = None
+
         # date_resolver captures self; do not replace self.market_data
         # post-construction or the resolver will keep using the old one.
         self._tracker = AutocallableLifecycleTracker(
@@ -206,6 +214,9 @@ class ProductReplay:
         historical behaviour.  When the two differ the day costs a second
         inversion, and the returned ``implied_q`` is the dividend row's.
         """
+        # Yesterday's carry source must not survive into a day that has no
+        # eligible chain or a different dividend source.
+        self.last_carry_context = None
         expiry = pd.Timestamp(selected["expiry_date"]).normalize()
         futures_ttm = (expiry - date).days / 365.0
         basis_yield, hedge_implied_q = derive_implied_dividend_yield(
@@ -288,6 +299,19 @@ class ProductReplay:
             extrapolation = getattr(
                 self.engine_config, "futures_curve_extrapolation", "flat_q"
             )
+            if extrapolation in SUPPORTED_EXTRAPOLATIONS:
+                # Every risk scenario for the day is a transformation of this
+                # context, so the sampler and the pricer share one builder.
+                context = CarryCurveContext(
+                    quotes=tuple(quotes),
+                    spot=float(market["spot"]),
+                    rate_curve=rate_curve,
+                    extrapolation=extrapolation,
+                    underlying=self.underlying or "index",
+                    valuation_date=date,
+                )
+                self.last_carry_context = context
+                return context.dividend()
             artifact = (
                 self._surface_artifact(date, "surface_forward_carry")
                 if extrapolation == "surface_forward_carry"
