@@ -499,11 +499,44 @@ growth was real, and following it did find a real engine defect which is now
 fixed. But the growth was an artefact of the probe unmatching the two bumps.
 The audit, at its own settings, was never failing on the staircase.
 
-What is left is a floor of about 0.0425 hands, invariant to the readout and
-to the spot bump. Bump-invariance rules out spot-bump truncation as well as
-the staircase. The open suspect is the bucket delta `B_i`, which is measured
-at a fixed 1 index point regardless of the spot bump, and so would produce
-exactly this signature.
+### What is left is the live knock-in barrier, and nothing else
+
+Splitting the residual on the lifecycle flag the run already records
+(`quad-readout/residual_by_ki_state.py`) localizes it completely:
+
+| | dates | mean abs | median | max |
+|---|---:|---:|---:|---:|
+| knock-in barrier live | 178 | 0.057257 | 0.044636 | 0.548283 |
+| after knock-in | 63 | 0.000808 | 0.000578 | 0.002909 |
+
+A 71x collapse, on the same product, engine, curve, tolerances and bumps.
+Under `transition` the same split gives 0.057410 and 0.000808; the
+post-knock-in figures agree to six decimals.
+
+Once the barrier is extinguished the identity holds to 8e-4 hands, an order
+of magnitude inside the 0.01 budget, on 63 consecutive dates. So on this
+evidence the chain rule, the audit machinery, the bucket deltas and the
+engine's delta Greek are all sound. The monthly knock-OUT barriers are live
+throughout both legs, so this is not barriers in general: it is specifically
+the daily-monitored knock-in barrier.
+
+That is the same object as the near-barrier delta lobe — a knock-in-barrier
+property, identical under both readouts, resistant to refinement — so there
+is one open defect here rather than two.
+
+Two hypotheses died, and both were mine:
+
+- **the uncovered tail.** The identity sums over LISTED contracts, and this
+  1Y product outlives a strip running about eight months, so the
+  extrapolated tail looked structurally unattributed. Refuted
+  (`quad-readout/tail_hypothesis.py`): the correlation between uncovered
+  span and residual is +0.16, dates where the curve spans the product carry
+  a HIGHER mean residual than dates where it does not, and
+  `has_product_tail` is false throughout.
+- **the bucket bump.** `B_i` is taken at a fixed 1 index point regardless of
+  the spot bump, which would reproduce the observed bump-invariance. The
+  knock-in split refutes it before the confirming run lands: a fixed bucket
+  bump cannot switch itself off when the product knocks in.
 
 ## What these gates do NOT establish
 
