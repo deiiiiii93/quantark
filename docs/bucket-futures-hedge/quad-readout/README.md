@@ -251,6 +251,52 @@ both are converging on the right answer rather than on a nicer-looking one.
 Price moves are the same order either way: 0.205 bp in the control region,
 2.801 bp within two cells of the barrier.
 
+### What this readout does NOT fix: a near-barrier delta lobe
+
+Reported by a peer session working from an independently validated
+Gaussian-transition reference, and reproduced here against the PDE engine,
+which needs none of their code. Delta gap, QUAD minus PDE, in study hands,
+on a 1Y snowball with KI at 75:
+
+| spot vs KI | gap |
+|---:|---:|
+| −1.50% | +12.4 |
+| −0.50% | −8.3 |
+| +0.84% | **−25.1** |
+| +2.00% | −8.5 |
+| +5.00% | −1.6 |
+
+A smooth signed lobe centred on the barrier, positive below, crossing zero
+just under it, worst a little above, decayed by 5%. **Both readouts show it
+identically**, so it is in the surface, not the readout. The peer measures
+it against their reference at 14 to 17 hands and finds it barely moves from
+401 to 3201 nodes.
+
+**My detrended metric cannot see this, by construction.** It fits and
+removes a trend across one cell, so an error shared by every cell is removed
+along with the trend. It measures the staircase and is silent on any smooth
+bias. The convergence section below likewise measures PRICE, and near a
+barrier the third derivative is a thousand times larger, so price
+convergence says little about delta there. Both are real measurements of
+what they measure and neither is evidence about near-barrier delta accuracy.
+
+Two mechanisms ruled out here, against the PDE:
+
+- **event smoothing is not the cause.** `event_smoothing_cells=0` is
+  bit-identical to the default 1, because that parameter is inert under the
+  default `event_projection=CELL_AVERAGE`; only the NODAL path reads it.
+- **NODAL projection is worse**, not better: −32.8 against CELL_AVERAGE's
+  −25.1 at +0.84%.
+
+Refining 401 to 1601 roughly halves the gap against the PDE, but that is
+likely QUAD converging toward the PDE's own error rather than toward truth,
+which is why the peer's validated reference is the better target and their
+flat 401-to-3201 ladder the more trustworthy statement.
+
+This is unresolved and is the dominant near-barrier delta error. The readout
+claims that stand are narrow: it removes the staircase, and at a node it
+reproduces the engine's own diffusion to 1e-14.
+
 ### Is the cubic more accurate, or only smoother? Both, depending on where
 
 Smoothness alone would make this a matter of taste. `convergence.py` prices
@@ -282,9 +328,13 @@ of the ladder while the cubic's settle to within 2.
 
 That non-monotonicity is visible in the linear sequence alone and does not
 depend on the reference being the cubic's. **Near the barrier the linear
-readout costs real accuracy — about 0.8 bp at the working grid — and no
-amount of refinement removes it cleanly.** That is the regime a snowball
-lives in and the regime the audit failed in.
+readout costs real PRICE accuracy — about 0.8 bp at the working grid — and
+no amount of refinement removes it cleanly.**
+
+Read that as a statement about the price and nothing more. It is not
+evidence that the transition readout makes near-barrier DELTA right; the
+section above shows a delta lobe an order of magnitude larger that both
+readouts share.
 
 ### Putting spot on a node instead — measured, and it does not pay
 

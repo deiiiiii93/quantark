@@ -731,3 +731,42 @@ def test_the_source_digest_follows_content_not_a_revision_name():
     digest = FLEET.source_digest()
     assert len(digest) == 16
     assert digest == FLEET.source_digest()
+
+
+# --- The QUAD readout mode reaches the replay -------------------------------
+#
+# The engine grew a versioned readout (docs/bucket-futures-hedge/quad-readout/).
+# A study that cannot select it cannot re-run its audit under the fixed
+# readout, and a study that selects it without fingerprinting it would resume
+# one readout's cells into another readout's run.
+
+
+def test_the_engine_config_carries_the_default_readout():
+    model = C.Q_MODELS["term_flat_q"]
+    assert C.engine_config_for(model).quad_params.readout == "legacy_linear"
+
+
+def test_the_engine_config_can_select_the_transition_readout():
+    model = C.Q_MODELS["term_flat_q"]
+    config = C.engine_config_for(model, quad_readout="transition")
+    assert config.quad_params.readout == "transition"
+
+
+def test_the_readout_is_part_of_the_fingerprint():
+    """It changes prices, so a legacy cell must not resume into a fixed run."""
+    legacy = dict(_task(), quad_readout="legacy_linear")
+    transition = dict(_task(), quad_readout="transition")
+    assert FLEET.fingerprint(legacy) != FLEET.fingerprint(transition)
+
+
+def test_a_task_without_a_readout_keeps_its_old_fingerprint():
+    """Runs banked before the mode existed still resume."""
+    task = _task()
+    before = FLEET.fingerprint(task)
+    assert FLEET.fingerprint(dict(task, quad_readout="legacy_linear")) == before
+
+
+def test_the_fleet_exposes_the_readout_on_the_command_line():
+    args = FLEET.parse_args(["--quad-readout", "transition"])
+    assert args.quad_readout == "transition"
+    assert FLEET.parse_args([]).quad_readout == "legacy_linear"

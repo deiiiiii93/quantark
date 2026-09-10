@@ -404,12 +404,21 @@ What is NOT in question:
   it refuses to be satisfied by re-sizing inside a scenario, and here it has
   surfaced a genuine engine property rather than a defect of its own.
 
-**The readout has since been fixed**, as an opt-in mode: `QuadParams.readout`
-selects `"legacy_linear"` (the default, so nothing moved) or `"transition"`,
-which evaluates the final backward transition at the spot instead of
-interpolating its output. On the worst state above, the detrended sub-cell
-delta spread falls from 4.6297 to 0.0168 reference hands within two cells of
-the barrier. The audit has NOT been re-run under it; see below.
+**The staircase has since been fixed**, as an opt-in mode:
+`QuadParams.readout` selects `"legacy_linear"` (the default, so nothing
+moved) or `"transition"`, which evaluates the final backward transition at
+the spot instead of interpolating its output. On the worst state above, the
+detrended sub-cell delta spread falls from 4.6297 to 0.0168 reference hands
+within two cells of the barrier.
+
+**That is not the whole near-barrier story.** A separate, larger delta error
+survives it: a smooth signed lobe centred on the barrier, of order 10 to 25
+study hands, present identically under both readouts and therefore in the
+surface rather than the readout. It was found by a peer session against an
+independently validated reference and reproduced here against the PDE
+engine. The detrended metric above cannot see it, because detrending removes
+an error shared by every cell by construction. See `quad-readout/README.md`.
+Unresolved.
 
 What remains open, with the measured evidence in `quad-readout/README.md`:
 

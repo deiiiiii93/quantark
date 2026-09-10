@@ -82,6 +82,7 @@ import _common as C  # noqa: E402
 
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine  # noqa: E402
 from quantark.asset.equity.param import QuadParams  # noqa: E402
+from quantark.asset.equity.param.engine_params import QUAD_READOUT_MODES  # noqa: E402
 from quantark.backtest.replay import (  # noqa: E402
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
@@ -161,7 +162,10 @@ def solve_inception(task: Dict[str, Any]) -> Dict[str, Any]:
     terms = C.build_terms(inception, ctx["calendar"])
     env = inception_env(ctx, inception, task["rate"])
     s0 = float(env.spot_quote.spot)
-    engine = SnowballQuadEngine(params=QuadParams(grid_points=int(task["quad_grid"])))
+    engine = SnowballQuadEngine(params=QuadParams(
+        grid_points=int(task["quad_grid"]),
+        readout=str(task.get("quad_readout", C.DEFAULT_QUAD_READOUT)),
+    ))
     started = time.perf_counter()
     solution = C.solve_fair_coupon(lambda c: engine.price(C.build_product(terms, s0, c), env))
     return {
@@ -204,6 +208,12 @@ def fingerprint(task: Dict[str, Any]) -> str:
             "delta_threshold", "round_contracts", "inception", "trade_end")
     payload = {k: task[k] for k in keys}
     payload["initial_price_mode"] = "traded_zero"
+    # The readout changes prices, so a legacy cell must not resume into a run
+    # that fixed it. Absent or default it contributes nothing, which keeps
+    # every fingerprint banked before the mode existed valid.
+    readout = task.get("quad_readout", C.DEFAULT_QUAD_READOUT)
+    if readout != C.DEFAULT_QUAD_READOUT:
+        payload["quad_readout"] = readout
     risk = task.get("risk") or {}
     # A legacy run carries no risk block at all, so its fingerprint is
     # unchanged and old resumes keep working.
@@ -251,7 +261,11 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
     config = AutocallableBacktestConfig(
         product=product,
         market_data=ctx["dataset"],
-        engine_config=C.engine_config_for(model, quad_grid_points=int(task["quad_grid"])),
+        engine_config=C.engine_config_for(
+            model,
+            quad_grid_points=int(task["quad_grid"]),
+            quad_readout=str(task.get("quad_readout", C.DEFAULT_QUAD_READOUT)),
+        ),
         strategy=C.hedge_strategy_for(
             task["hedge"],
             delta_threshold=float(task["delta_threshold"]),
@@ -300,6 +314,7 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
         "s0": task["s0"],
         "notional": C.NOTIONAL,
         "quad_grid": task["quad_grid"],
+        "quad_readout": task.get("quad_readout", C.DEFAULT_QUAD_READOUT),
         "cost_bp": task["cost_bp"],
         "rate": task["rate"],
         "censored_schedule": task["censored"],
@@ -335,6 +350,7 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
             "extrapolation": C.Q_MODELS[task["model"]].extrapolation,
             "min_tenor_days": C.Q_MODELS[task["model"]].min_tenor_days,
             "quad_grid": task["quad_grid"],
+            "quad_readout": task.get("quad_readout", C.DEFAULT_QUAD_READOUT),
             "delta_threshold": task["delta_threshold"],
             "round_contracts": task["round_contracts"],
             "cost_bp": task["cost_bp"],
@@ -446,6 +462,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--quad-grid", type=int, default=C.DEFAULT_QUAD_GRID)
+    parser.add_argument(
+        "--quad-readout",
+        choices=QUAD_READOUT_MODES,
+        default=C.DEFAULT_QUAD_READOUT,
+        help=(
+            "how the engine recovers the price from its nodal surface; "
+            "'transition' removes the delta staircase but moves prices "
+            "(docs/bucket-futures-hedge/quad-readout/)"
+        ),
+    )
     parser.add_argument("--cost-bp", type=float, default=DEFAULT_COST_BP)
     parser.add_argument("--delta-threshold", type=float, default=0.0, help="contracts band before rebalancing")
     parser.add_argument("--no-round-contracts", action="store_true")
@@ -604,7 +630,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # --- fair coupons (cached; the contract is shared by every cell) ------
     inceptions_path = out_dir / "inceptions.json"
     cached = load_json(inceptions_path) if args.resume else None
-    coupon_key = f"grid={args.quad_grid}|rate={args.rate}|vol_tenor={args.vol_tenor}"
+    coupon_key = (
+        f"grid={args.quad_grid}|rate={args.rate}|vol_tenor={args.vol_tenor}"
+        f"|readout={args.quad_readout}"
+    )
     inception_records: Dict[str, Dict[str, Any]] = {}
     if cached and cached.get("coupon_key") == coupon_key:
         inception_records = dict(cached.get("inceptions", {}))
@@ -615,6 +644,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             {
                 "inception": s.inception.isoformat(), "history_dir": str(args.history_dir),
                 "rate": args.rate, "vol_tenor": args.vol_tenor, "quad_grid": args.quad_grid,
+                "quad_readout": args.quad_readout,
             }
             for s in todo
         ]
@@ -640,7 +670,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "trade_end": s.trade_end.isoformat(), "censored": s.censored,
                 "model": model, "hedge": hedge,
                 "coupon": rec["coupon"], "s0": rec["s0"],
-                "quad_grid": args.quad_grid, "cost_bp": args.cost_bp, "rate": args.rate,
+                "quad_grid": args.quad_grid, "quad_readout": args.quad_readout,
+                "cost_bp": args.cost_bp, "rate": args.rate,
                 "vol_tenor": args.vol_tenor, "delta_threshold": args.delta_threshold,
                 "round_contracts": not args.no_round_contracts,
                 "history_dir": str(args.history_dir), "out_dir": str(out_dir),
@@ -693,6 +724,7 @@ def _write_manifest(out_dir, args, cells, schedules, runs, started) -> None:
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "config": {
                 "history_dir": str(args.history_dir), "quad_grid": args.quad_grid,
+                "quad_readout": args.quad_readout,
                 "cost_bp": args.cost_bp, "rate": args.rate, "vol_tenor": args.vol_tenor,
                 "delta_threshold": args.delta_threshold, "round_contracts": not args.no_round_contracts,
                 "study_grid": args.study_grid, "risk": resolve_risk_profile(args),

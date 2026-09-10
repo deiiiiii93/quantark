@@ -94,6 +94,10 @@ PRODUCT_QUANTITY = -1.0  # SELLER: short one unit sized to the notional
 FIRST_INCEPTION_MONTH = (2023, 5)
 ATM_VOL_TENOR_YEARS = 1.0  # scalar vol channel: ATM IV at the product tenor
 DEFAULT_QUAD_GRID = 401
+# The shipped engine default. "transition" evaluates the final backward
+# transition at spot instead of interpolating between nodes; it removes the
+# delta staircase but moves prices, so it is opt-in here as in the engine.
+DEFAULT_QUAD_READOUT = "legacy_linear"
 ROLL_DAYS_BEFORE_EXPIRY = 5
 # Contracts inside their delivery week carry no measurable annualised carry
 # (a 1% basis two days out reads as a 180% yield); the curve skips them.
@@ -223,12 +227,22 @@ REFERENCE_MODEL = "term_flat_q"  # the fair coupon is solved under this model
 
 
 def engine_config_for(
-    model: QModel, *, quad_grid_points: int = DEFAULT_QUAD_GRID
+    model: QModel,
+    *,
+    quad_grid_points: int = DEFAULT_QUAD_GRID,
+    quad_readout: str = DEFAULT_QUAD_READOUT,
 ) -> AutocallableEngineConfig:
-    """QUAD-engine replay config for one q model (scalar vol channel)."""
+    """QUAD-engine replay config for one q model (scalar vol channel).
+
+    ``quad_readout`` selects how the engine recovers the price from its nodal
+    surface; see docs/bucket-futures-hedge/quad-readout/. It changes prices,
+    so it belongs in the run fingerprint.
+    """
     return AutocallableEngineConfig(
         pricing_engine_type=EngineType.QUADRATURE,
-        quad_params=QuadParams(grid_points=int(quad_grid_points)),
+        quad_params=QuadParams(
+            grid_points=int(quad_grid_points), readout=str(quad_readout)
+        ),
         dividend_source=model.dividend_source,
         futures_curve_extrapolation=model.extrapolation,
         futures_curve_min_tenor_days=int(model.min_tenor_days),
