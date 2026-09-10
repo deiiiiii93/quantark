@@ -1,8 +1,16 @@
 # The QUAD snowball's spot derivative is a staircase
 
 Root cause of the identity-residual failures recorded in `../gates.md`.
-Everything here is a standalone runtime-patched script; **no engine code was
-changed**. Run from this directory with the repo on the path:
+
+> **Shipped.** `QuadParams.readout` now selects the rule:
+> `"legacy_linear"` (the default, unchanged) or `"transition"`. The scripts
+> below were written before that and monkeypatch their candidates; they are
+> kept as the evidence the decision rested on. Measured through the shipped
+> parameter on the state below, the detrended sub-cell delta spread falls
+> from 0.1890 to 0.0000 reference hands twelve cells from the barrier, and
+> from 4.6297 to 0.0168 within two cells of it.
+
+Run from this directory with the repo on the path:
 
 ```
 PYTHONPATH=<repo>:. <repo>/.venv/bin/python proof.py
@@ -327,18 +335,86 @@ change goes to a decision before engine code moves.
 | (d) put spot and the barrier both on nodes | measured worse than the cubic on mean error (0.15–0.29 vs 0.03) | not measured | large | grid-selection rule; cost varies with spot |
 | **(e) evaluate the final transition at spot** | **matches the cubic: 0.0166 control, 0.3213 at the barrier** | inherits the scheme's own order; no interpolation at all | 0.205 bp control, 2.801 bp at the barrier | the snowball readout path; QUAD goldens rebase |
 
-**Recommendation: (e), shipped as an explicit versioned readout mode with
-the legacy default preserved — which is (c)'s release shape carrying (e)'s
-method.** It is the only option that removes the error rather than bounding
-it, it restores consistency with `QuadratureCore` instead of inventing a
-rule, and it makes price and delta come from the same operator. Measured, it
-delivers what the cubic delivers, so nothing is lost by preferring the
-better justification.
+**Chosen and shipped: (e), as an explicit versioned readout mode with the
+legacy default preserved — (c)'s release shape carrying (e)'s method.** It
+is the only option that removes the error rather than bounding it, it
+restores consistency with `QuadratureCore` instead of inventing a rule, and
+it makes price and delta come from the same operator.
 
 (a) remains the right immediate move for the bucket-hedge audit, and it is
 independent of the above: the budget should be derived rather than declared
 whatever happens to the readout. It is not a fix, and it should not be
 described as one.
+
+## What shipped
+
+`QuadParams.readout`, one of `QUAD_READOUT_MODES`. Default
+`"legacy_linear"`; no existing price or golden moves.
+
+Under `"transition"` the final backward transition is evaluated at the spot.
+Three properties are worth recording:
+
+**It reproduces the engine's own diffusion exactly.** At a grid node, where
+the legacy interpolation is exact, the two agree to between 6e-15 and 2e-14
+in all four combinations of spectral filter and FFT padding. That is the
+correctness check that matters: the readout is the same operator, not a
+better-behaved substitute for it.
+
+**The spectral filter had to move, not be dropped.** `convolution_fft`
+multiplies the transforms of the kernel, the weighted values and the filter,
+so the filter can be carried by either factor. Carrying it on the kernel
+leaves nothing analytic to evaluate off-lattice. `QuadratureMath
+.filtered_weights` moves it onto the values instead, which is exact and
+leaves the Gaussian kernel in closed form. Skipping the filter instead would
+have left a 2.4e-7 discrepancy and a final step inconsistent with every step
+before it.
+
+**Everything the mode does not cover refuses it.** Continuous knock-in
+monitoring takes the bridged transition, which has no pointwise form here,
+and raises. `PhoenixQuadEngine` and `KOResetSnowballQuadEngine` read their
+prices off their own surfaces and narrow `supported_readouts` to the legacy
+rule, so constructing them with `readout="transition"` raises rather than
+returning a legacy-readout price under another name.
+
+The mode governs the event decomposition as well as the price, since the two
+are reported beside each other and read off the same surfaces.
+
+### It moves the model-validation certificate identities, and that is correct
+
+`equity.snowball.quad` records "every numerically relevant knob, including
+the ones taken from defaults: a default that changes in a later release is a
+numerics change, and the identity hash has to notice"
+(`builders/equity_snowball.py`). `readout` is such a knob, so adding the
+field moves the hash and `test_banked_cells_keep_their_identity` fails for
+the snowball certificates.
+
+It must NOT be added to `_QUAD_NON_NUMERIC`. That list is for knobs which do
+not move the certified numbers — `event_stats_mode` qualifies because its
+npv is identical — and `readout` plainly does move them.
+
+No priced number changed. The default reproduces the old behaviour and the
+golden suites confirm it. What moved is the serialisation of the config
+space, so the resolution is an amendment to the banked evidence, not a
+regeneration, and that is a decision about banked certificates rather than
+part of this change.
+
+**That test was already failing on this branch.** Counting cells with
+`readout` excluded, which is exactly the state before this change:
+
+| candidate | cells matching their banked hash |
+|---|---|
+| `equity.snowball.pde` | 117 / 117 |
+| `equity.phoenix.pde` | 123 / 123 |
+| `equity.ko_reset_snowball.pde` | 99 / 99 |
+| `equity.snowball.quad` | 117 / 117 |
+| `equity.phoenix.quad` | **0 / 123** |
+| `equity.ko_reset_snowball.quad` | **0 / 99** |
+
+222 of 678 cells were already stale, in the two quadrature candidates this
+change did not touch numerically — some earlier `QuadParams` default moved
+and only the snowball certificate was re-banked. This change adds the
+remaining 117. Both wants resolving together; neither should be papered over
+by loosening the identity.
 
 Two things bear on the choice beyond the table.
 

@@ -214,6 +214,30 @@ class QuadratureMath:
         scale = self.h if self.integration_rule == "trapezoid" else self.h / 3.0
         return f_array[:, self.grid_x - 1 : 2 * self.grid_x - 1] * scale
 
+    def filtered_weights(self, u_array: np.ndarray) -> np.ndarray:
+        """Move the spectral filter from the kernel onto the weighted values.
+
+        ``convolution_fft`` multiplies the transforms of the kernel, the
+        weighted values and the filter, so the filter may be carried by
+        either factor. Carrying it here leaves an analytic kernel, which is
+        what lets a readout evaluate the transition away from the nodes.
+        Returns the input unchanged when no filter is configured.
+        """
+        u_array = np.asarray(u_array, dtype=float)
+        base_len = u_array.shape[-1]
+        fft_len = (
+            base_len
+            if self.fft_padding_factor <= 1
+            else int(self.fft_padding_factor * base_len)
+        )
+        fft_filter = self._get_fft_filter(fft_len)
+        if fft_filter is None:
+            return u_array
+        axis = u_array.ndim - 1
+        spectrum = np.fft.fft(u_array, n=fft_len, axis=axis)
+        shaped = fft_filter if axis == 0 else fft_filter.reshape(1, -1)
+        return np.fft.ifft(spectrum * shaped, axis=axis).real
+
     def _get_omega_fft(self, omega_array: np.ndarray, fft_len: int) -> np.ndarray:
         omega_array = np.ascontiguousarray(omega_array, dtype=float)
         key = (int(fft_len), omega_array.tobytes())

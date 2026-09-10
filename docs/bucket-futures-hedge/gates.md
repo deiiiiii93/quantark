@@ -404,18 +404,25 @@ What is NOT in question:
   it refuses to be satisfied by re-sizing inside a scenario, and here it has
   surfaced a genuine engine property rather than a defect of its own.
 
-What needs a decision, with the measured options in
-`quad-readout/README.md`:
+**The readout has since been fixed**, as an opt-in mode: `QuadParams.readout`
+selects `"legacy_linear"` (the default, so nothing moved) or `"transition"`,
+which evaluates the final backward transition at the spot instead of
+interpolating its output. On the worst state above, the detrended sub-cell
+delta spread falls from 4.6297 to 0.0168 reference hands within two cells of
+the barrier. The audit has NOT been re-run under it; see below.
+
+What remains open, with the measured evidence in `quad-readout/README.md`:
 
 - **the budget.** The sawtooth amplitude is not noise, it is
-  `h * |S*Gamma + Delta| / m_ref`, a quantity the engine knows. An audit budget derived
-  from it would say what this engine can actually resolve. The 0.01-hand
-  figure is an initial deterministic-fixture tolerance and was never derived
-  for a quadrature-priced snowball beside a discretely monitored barrier.
-- **the readout.** A four-point centred Lagrange on the same node values
-  cuts the sawtooth 10–70x for no measurable cost, at a price change of
-  0.03–2.3 bp. That rebases every QUAD golden in the library, so it is a
-  decision, not a fix, and no engine code was touched here.
+  `h * |S*Gamma + Delta| / m_ref`, a quantity the engine knows. An audit
+  budget derived from it would say what this engine can actually resolve.
+  The 0.01-hand figure is an initial deterministic-fixture tolerance and was
+  never derived for a quadrature-priced snowball beside a discretely
+  monitored barrier. This is still worth doing whatever readout is in use.
+- **re-running the subset under `readout="transition"`.** A run entirely
+  under the new mode would validate the NEW mode. It would say nothing about
+  whether the shipped default certifies, and must not be presented as the
+  old path passing. The replay does not yet expose the setting.
 
 Disabling alignment is not among the options: measured, it makes the
 sawtooth 70x worse and moves prices 14.9 bp, because the barrier's own

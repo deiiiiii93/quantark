@@ -33,6 +33,11 @@ class PhoenixQuadEngine(SnowballQuadEngine):
     Quadrature pricing engine for Phoenix options with coupon jumps.
     """
 
+    # This engine reads its price off its OWN surfaces, so the
+    # transition readout is not implemented here yet; refuse it rather
+    # than report a legacy-readout price under another name.
+    supported_readouts = ("legacy_linear",)
+
     def __init__(self, params: Optional[QuadParams] = None):
         super().__init__(params=params)
 
