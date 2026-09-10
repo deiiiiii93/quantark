@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.special import erfc
@@ -30,6 +30,7 @@ from quantark.asset.equity.engine.quad.quad_adapters import (
 from quantark.asset.equity.engine.quad.term_inputs import build_quad_term_params
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.param.engine_params import QUAD_READOUT_MODES
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
@@ -90,12 +91,23 @@ class SnowballQuadEngine(BaseEngine):
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_spot_greeks_grid = True
 
+    #: Readout modes this engine actually implements. A subclass with its own
+    #: readout path narrows this rather than silently reporting a
+    #: legacy-readout price as though it were something else.
+    supported_readouts: Tuple[str, ...] = QUAD_READOUT_MODES
+
     def __init__(self, params: Optional[QuadParams] = None) -> None:
         if params is None:
             params = QuadParams()
         if not isinstance(params, QuadParams):
             raise ValidationError(
                 f"params must be QuadParams instance, got {type(params).__name__}"
+            )
+        if params.readout not in self.supported_readouts:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not implement "
+                f"readout={params.readout!r}; it supports "
+                f"{self.supported_readouts}."
             )
         super().__init__(params)
         # Opt-in capture of the per-observation backward-induction value surfaces
@@ -316,6 +328,18 @@ class SnowballQuadEngine(BaseEngine):
         full_p_lr, full_p_ur, full_p0 = 0, len(grid) - 1, (len(grid) - 1) % 2
         omega_grid = math_utils.z_grid
 
+        transition_readout = self.params.readout == "transition"
+        if transition_readout and ki_continuous:
+            # The bridged transition is not a plain convolution, so it has no
+            # pointwise form here yet. Refuse rather than quietly reading the
+            # continuous-KI price off a different rule than the one asked for.
+            raise NotImplementedError(
+                "readout='transition' does not support continuous knock-in "
+                "monitoring: the Brownian-bridge transition has no pointwise "
+                "evaluation in this engine. Use readout='legacy_linear'."
+            )
+        final_transition: Optional[tuple] = None
+
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
 
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
@@ -404,6 +428,12 @@ class SnowballQuadEngine(BaseEngine):
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
 
+            if step_index == 1 and transition_readout:
+                # The last transition carries the surfaces to the valuation
+                # date; retain its INPUT so the readout can evaluate it at the
+                # spot instead of interpolating its output between nodes.
+                final_transition = (v_in, v_out, prefactor, alpha, beta, tau_step)
+
             # The bridge correction below samples BOTH surfaces at this step's
             # slice, so retain the knocked-in surface before it is rolled back.
             v_in_at_obs = v_in
@@ -460,6 +490,21 @@ class SnowballQuadEngine(BaseEngine):
 
         value_surface = v_in if knocked_in_at_valuation else v_out
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
+        if final_transition is not None:
+            pre_in, pre_out, prefactor, alpha, beta, tau_step = final_transition
+            return float(
+                self._readout_at_spot(
+                    pre_in if knocked_in_at_valuation else pre_out,
+                    math_utils,
+                    prefactor,
+                    full_p_lr,
+                    full_p_ur,
+                    full_p0,
+                    alpha,
+                    beta,
+                    tau_step,
+                )
+            )
         return math_utils.interpolate(value_surface, x=0.0)
 
     def _price_with_convergence(
@@ -884,6 +929,17 @@ class SnowballQuadEngine(BaseEngine):
             v_in_ever = np.ones(grid.size, dtype=float)
             v_out_ever = np.zeros(grid.size, dtype=float)
 
+        # The readout mode governs the event decomposition too, so its parts
+        # keep reconciling with the price under either rule.
+        transition_readout = self.params.readout == "transition"
+        if transition_readout and ki_continuous:
+            raise NotImplementedError(
+                "readout='transition' does not support continuous knock-in "
+                "monitoring: the Brownian-bridge transition has no pointwise "
+                "evaluation in this engine. Use readout='legacy_linear'."
+            )
+        final_transition: Optional[dict] = None
+
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
 
@@ -1016,6 +1072,17 @@ class SnowballQuadEngine(BaseEngine):
             omega_array = np.exp(
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
+
+            if step_index == 1 and transition_readout:
+                # Inputs to the transition that reaches the valuation date, so
+                # the readout can evaluate it at the spot.
+                final_transition = {
+                    "kernel": (prefactor, alpha, beta, tau_step),
+                    "in": v_in,
+                    "out": v_out,
+                    "out_ki": v_out_ki if fuse_ki else None,
+                    "out_ever": v_out_ever if fuse_ki else None,
+                }
 
             # The bridge correction below samples BOTH surfaces at this step's
             # slice, so retain the knocked-in surface before it is rolled back.
@@ -1159,10 +1226,21 @@ class SnowballQuadEngine(BaseEngine):
                     )
 
         initial_surface = v_in if knocked_in_at_valuation else v_out
-        ed_unit = np.array(
-            [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_ko)],
-            dtype=float,
-        )
+        if final_transition is not None:
+            prefactor, alpha, beta, tau_step = final_transition["kernel"]
+            pre = final_transition["in" if knocked_in_at_valuation else "out"]
+            ed_unit = np.asarray(
+                self._readout_at_spot(
+                    pre, math_utils, prefactor, full_p_lr, full_p_ur, full_p0,
+                    alpha, beta, tau_step,
+                ),
+                dtype=float,
+            )[:n_ko]
+        else:
+            ed_unit = np.array(
+                [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_ko)],
+                dtype=float,
+            )
         ko_times = np.array([rec.observation_time for rec in ko_records], dtype=float)
         ko_prob = np.zeros(n_ko, dtype=float)
         ed_ko_cf = np.zeros(n_ko, dtype=float)
@@ -1224,8 +1302,20 @@ class SnowballQuadEngine(BaseEngine):
             # rides the main stacked loop above (one time loop instead of
             # two), bit-identical to the historical second walk.
             df_T = float(df_local(maturity))
-            pv_ki_no_ko = float(math_utils.interpolate(v_out_ki, x=0.0))
-            pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
+            if final_transition is not None:
+                prefactor, alpha, beta, tau_step = final_transition["kernel"]
+                pv_ki_no_ko, pv_ki_ever = (
+                    float(
+                        self._readout_at_spot(
+                            final_transition[key], math_utils, prefactor,
+                            full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
+                        )
+                    )
+                    for key in ("out_ki", "out_ever")
+                )
+            else:
+                pv_ki_no_ko = float(math_utils.interpolate(v_out_ki, x=0.0))
+                pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
             if df_T > 0:
                 ki_probability = float(pv_ki_no_ko / df_T)
                 ki_survive_knocked_in_probability = ki_probability
@@ -2133,6 +2223,70 @@ class SnowballQuadEngine(BaseEngine):
             "extra_fields": extra_fields,
             "mass_diagnostic": float(terminal_mass + np.sum(absorbed)),
         }
+
+    def _readout_at_spot(
+        self,
+        values: np.ndarray,
+        math_utils: QuadratureMath,
+        prefactor: float,
+        p_lr: int,
+        p_ur: int,
+        p0: int,
+        alpha: float,
+        beta: float,
+        tau_step: float,
+    ) -> np.ndarray:
+        """Evaluate the final backward transition AT the spot, x = 0.
+
+        ``values`` is the surface BEFORE that transition. The transition is
+        an explicit smooth function of the readout coordinate, so the price
+        needs no interpolation between nodes: this is one off-grid row of the
+        operator the sweep already applies, exactly as
+        ``QuadratureCore._calculate_final_value`` evaluates it for the
+        product-agnostic path. Returns a scalar for a single surface and one
+        value per row for the stacked indicator surfaces.
+        """
+        grid = math_utils.grid
+        h = float(math_utils.h)
+        scale = h if math_utils.integration_rule == "trapezoid" else h / 3.0
+        if values.ndim == 1:
+            weighted = math_utils.simpson_weights(values, p_lr, p_ur, p0)
+        else:
+            weighted = math_utils.simpson_weights_many(values, p_lr, p_ur, p0)
+
+        # The convolution multiplies omega, u and the spectral filter in
+        # frequency, so the filter can be carried by EITHER factor. Moving it
+        # onto the weighted values leaves an analytic kernel that can be
+        # evaluated off-lattice, which is the whole point of this readout.
+        weighted = math_utils.filtered_weights(weighted)
+
+        # omega(x - x_j) at x = 0, over the extended lattice the convolution
+        # implies: entry j pairs with the node at grid[0] + j*h.
+        offsets = grid[0] + np.arange(weighted.shape[-1], dtype=float) * h
+        omega = np.exp(-(offsets * offsets) / (4.0 * tau_step) + alpha * offsets)
+        if values.ndim == 1:
+            main = prefactor * scale * float(np.dot(weighted, omega))
+        else:
+            main = prefactor * scale * (weighted @ omega)
+        return main + self._tail_at_spot(values, math_utils, alpha, beta, tau_step)
+
+    def _tail_at_spot(
+        self,
+        values: np.ndarray,
+        math_utils: QuadratureMath,
+        alpha: float,
+        beta: float,
+        tau_step: float,
+    ) -> np.ndarray:
+        """``_tail_correction`` evaluated at x = 0 rather than on the grid."""
+        grid = math_utils.grid
+        sqrt_tau = math.sqrt(tau_step)
+        u_left = (-grid[0] + 2.0 * tau_step * alpha) / (2.0 * sqrt_tau)
+        u_right = (-grid[-1] + 2.0 * tau_step * alpha) / (2.0 * sqrt_tau)
+        tail_scale = 0.5 * math.exp(tau_step * (alpha * alpha - beta))
+        left = values[0] if values.ndim == 1 else values[:, 0]
+        right = values[-1] if values.ndim == 1 else values[:, -1]
+        return left * tail_scale * erfc(u_left) + right * tail_scale * erfc(-u_right)
 
     def _tail_correction(
         self,

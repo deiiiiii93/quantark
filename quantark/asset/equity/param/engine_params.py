@@ -677,6 +677,18 @@ class PDEParams(EngineParams):
         )
 
 
+#: How the scalar price is recovered from the nodal value surface.
+#:
+#: ``legacy_linear`` interpolates linearly between the two nodes straddling
+#: the spot.  Because barrier alignment pins the grid to the barrier rather
+#: than to spot, that makes the price piecewise linear in ``log S`` and its
+#: spot derivative a staircase.  ``transition`` evaluates the final backward
+#: transition operator at the spot instead, which is what
+#: ``QuadratureCore._calculate_final_value`` already does for the
+#: product-agnostic path.  See docs/bucket-futures-hedge/quad-readout/.
+QUAD_READOUT_MODES = ("legacy_linear", "transition")
+
+
 @dataclass
 class QuadParams(EngineParams):
     """
@@ -743,6 +755,13 @@ class QuadParams(EngineParams):
             (per-observation indicator rows, default) or "forward_density"
             (forward transition-density march; distribution values differ at
             finite grid, npv identical; see spec 2026-08-24).
+        readout: How the scalar price is recovered from the nodal surface,
+            one of QUAD_READOUT_MODES. "legacy_linear" (default) interpolates
+            linearly between the straddling nodes; "transition" evaluates the
+            final backward transition operator at the spot. The mode governs
+            EVERY readout of the recursion, price and event decomposition
+            alike, so their reconciliation holds under either. Changing it
+            changes prices by a few basis points and rebases QUAD goldens.
     """
 
     grid_points: int = 1001  # Odd count keeps nested refinements node-compatible
@@ -773,6 +792,7 @@ class QuadParams(EngineParams):
     )
     bgk_min_ki_observations: int = 100
     event_stats_mode: str = "stacked"
+    readout: str = "legacy_linear"
 
     def __post_init__(self):
         """Validate quadrature parameters."""
@@ -864,6 +884,10 @@ class QuadParams(EngineParams):
             raise ValidationError(
                 "barrier_reach_stddevs must be positive when supplied, got "
                 f"{self.barrier_reach_stddevs}"
+            )
+        if self.readout not in QUAD_READOUT_MODES:
+            raise ValidationError(
+                f"readout must be one of {QUAD_READOUT_MODES}, got {self.readout!r}"
             )
         if self.fft_padding_factor < 1:
             raise ValidationError(
