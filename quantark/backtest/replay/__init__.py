@@ -48,7 +48,17 @@ from .strategy_state import (
     AutocallableLifecycleState,
     FuturesHedgePosition,
 )
-from quantark.backtest.futures_ledger import FuturesRollPolicy
+from quantark.backtest.futures_ledger import FuturesHedgeBook, FuturesRollPolicy
+from quantark.backtest.futures_risk import CarryRiskSettings
+from quantark.backtest.strategy.futures_bucket_strategy import (
+    FuturesBucketHedgeStrategy,
+    FuturesHedgeTargets,
+)
+from quantark.backtest.strategy.futures_delta_strategy import (
+    ProportionalFuturesDeltaHedgeStrategy,
+)
+from .carry_context import CarryCurveContext
+from .config import CarryRecordingPlan
 
 
 __all__ = [
@@ -66,10 +76,17 @@ __all__ = [
     "BookAutocallableBacktestEngine",
     "BookBacktestResults",
     "BookProduct",
+    "CarryCurveContext",
+    "CarryRecordingPlan",
+    "CarryRiskSettings",
+    "FuturesBucketHedgeStrategy",
+    "FuturesHedgeBook",
+    "FuturesHedgeTargets",
     "FuturesHedgePosition",
     "FuturesRollPolicy",
     "HedgeSpec",
     "ImpliedBasisYield",
+    "ProportionalFuturesDeltaHedgeStrategy",
     "ReplayBacktestConfig",
     "ReplayBacktestEngine",
     "ReplayBacktestResults",

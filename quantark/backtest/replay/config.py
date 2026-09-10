@@ -269,6 +269,179 @@ def _validate_term_dividend_source(
         )
 
 
+CARRY_AUDIT_MODES = ("none", "sampled", "daily")
+
+
+@dataclass(frozen=True)
+class CarryRecordingPlan:
+    """What a run actually decided to record, after resolution.
+
+    Recording is on when it was asked for, OR a bucket strategy is in use, OR
+    an audit mode was requested.  A non-``none`` audit with the flag left off
+    turns recording ON here rather than disappearing, so an artifact never
+    claims an audit it could not have produced.
+    """
+
+    record: bool
+    audit_mode: str
+    audit_dates: tuple
+    settings: Optional[Any]
+    reference_notional: Optional[float]
+
+    def audits_on(self, date) -> bool:
+        if self.audit_mode == "none":
+            return False
+        if self.audit_mode == "daily":
+            return True
+        return date in self.audit_dates
+
+    def as_metadata(self) -> dict:
+        return {
+            "record_carry_exposure": self.record,
+            "carry_audit_mode": self.audit_mode,
+            "carry_audit_dates": [str(d) for d in self.audit_dates],
+            "reference_notional": self.reference_notional,
+        }
+
+
+def _normalise_audit_dates(dates) -> tuple:
+    stamps = tuple(dates or ())
+    for stamp in stamps:
+        if not hasattr(stamp, "year"):
+            raise ValidationError(
+                f"carry_audit_dates must hold date-like values, got {stamp!r}"
+            )
+    return tuple(sorted(set(stamps)))
+
+
+def _gross_contractual_notional(entries) -> Optional[float]:
+    """``sum |Q_p| * initial_price_p * contract_multiplier_p`` for the book.
+
+    ``None`` when a product does not document both an initial price and a
+    contract multiplier: an undocumented notional must be supplied explicitly
+    rather than guessed from a signed PV, the current spot or the remaining
+    alive notional.
+    """
+    from quantark.backtest.futures_risk import gross_contractual_notional
+
+    rows = []
+    for quantity, product in entries:
+        initial_price = getattr(product, "initial_price", None)
+        multiplier = getattr(product, "contract_multiplier", None)
+        if initial_price is None or multiplier is None:
+            return None
+        rows.append((float(quantity), float(initial_price), float(multiplier)))
+    if not rows:
+        return None
+    return gross_contractual_notional(rows)
+
+
+def _validate_carry_hedge(
+    strategy,
+    *,
+    hedge_kind: str,
+    engine_config: AutocallableEngineConfig,
+    dividend_roll_policy,
+    pnl_explain,
+    record_carry_exposure: bool,
+    carry_audit_mode: str,
+    carry_audit_dates,
+    carry_risk_settings,
+    products,
+) -> CarryRecordingPlan:
+    """Accept a bucket hedge only where its risk coordinates actually exist.
+
+    Every coordinate a bucket policy sizes against must be an ACTUAL tradable
+    futures contract with a quote, an expiry and a multiplier.  A flat carry
+    channel has no nodes at all, and an option-implied forward is a different
+    instrument from the future the hedge trades, so neither can inherit these
+    formulas without a separate quote Jacobian and basis reporting.
+    """
+    from quantark.backtest.futures_risk import CarryRiskSettings
+    from quantark.backtest.strategy.futures_bucket_strategy import (
+        FuturesBucketHedgeStrategy,
+    )
+
+    if carry_audit_mode not in CARRY_AUDIT_MODES:
+        raise ValidationError(
+            f"carry_audit_mode must be one of {CARRY_AUDIT_MODES}, "
+            f"got {carry_audit_mode!r}"
+        )
+    audit_dates = _normalise_audit_dates(carry_audit_dates)
+    if carry_risk_settings is not None and not isinstance(
+        carry_risk_settings, CarryRiskSettings
+    ):
+        raise ValidationError(
+            "carry_risk_settings must be a CarryRiskSettings instance"
+        )
+
+    is_bucket = isinstance(strategy, FuturesBucketHedgeStrategy)
+    if is_bucket:
+        if hedge_kind != "futures":
+            raise ValidationError("bucket hedge requires futures instruments")
+        if engine_config.dividend_source != "futures_curve":
+            raise ValidationError(
+                "bucket hedge requires actual futures_curve quotes"
+            )
+        if engine_config.futures_curve_extrapolation not in {
+            "flat_q",
+            "flat_forward_carry",
+        }:
+            raise ValidationError(
+                "bucket hedge does not support external tail coordinates"
+            )
+        if dividend_roll_policy is not None or pnl_explain is not None:
+            raise ValidationError(
+                "bucket hedge is incompatible with dividend rolls and "
+                "single-leg explain"
+            )
+
+    record = bool(record_carry_exposure) or is_bucket or carry_audit_mode != "none"
+    if not record:
+        # Nothing new is enabled: do not impose a notional requirement on a
+        # legacy caller that never asked for a risk report.
+        return CarryRecordingPlan(
+            record=False,
+            audit_mode="none",
+            audit_dates=(),
+            settings=None,
+            reference_notional=None,
+        )
+
+    seen = [pid for pid in (getattr(p, "position_id", None) for p in products)]
+    if len(set(seen)) != len(seen):
+        raise ValidationError(
+            f"an audited risk book needs unique position ids, got {seen}"
+        )
+    for entry in products:
+        quantity = float(getattr(entry, "quantity", 0.0))
+        if not math.isfinite(quantity):
+            raise ValidationError(
+                "an audited risk book needs finite signed quantities"
+            )
+
+    settings = carry_risk_settings or CarryRiskSettings()
+    notional = settings.reference_notional
+    if notional is None:
+        notional = _gross_contractual_notional(
+            [(getattr(p, "quantity", 0.0), getattr(p, "product", None)) for p in products]
+        )
+    if notional is None:
+        raise ValidationError(
+            "carry recording needs a reference notional: this book holds a "
+            "product without a documented initial price and contract "
+            "multiplier, so set carry_risk_settings.reference_notional"
+        )
+    settings = settings.resolved(reference_notional=notional)
+    return CarryRecordingPlan(
+        record=True,
+        audit_mode=carry_audit_mode,
+        audit_dates=audit_dates,
+        settings=settings,
+        reference_notional=float(notional),
+    )
+
+
 @dataclass
 class SurfaceGridConfig:
     """Compact surface grid configuration."""
@@ -326,6 +499,13 @@ class AutocallableBacktestConfig:
     # month.  A term dividend_source reads the WHOLE chain and would ignore
     # it, so that combination is rejected rather than silently dropped.
     dividend_roll_policy: Optional[FuturesRollPolicy] = None
+    # Carry risk recording, appended after dividend_roll_policy so existing
+    # positional construction keeps its slots.  All default to off: a legacy
+    # run prices nothing extra and resolves no notional.
+    record_carry_exposure: bool = False
+    carry_audit_mode: str = "none"
+    carry_audit_dates: tuple = ()
+    carry_risk_settings: Optional[Any] = None  # CarryRiskSettings
 
     def __post_init__(self) -> None:
         if self.product is None:
@@ -344,6 +524,27 @@ class AutocallableBacktestConfig:
             calculate_surfaces=self.calculate_surfaces,
             dividend_roll_policy=self.dividend_roll_policy,
         )
+        self.carry_recording = _validate_carry_hedge(
+            self.strategy,
+            hedge_kind="futures",
+            engine_config=self.engine_config,
+            dividend_roll_policy=self.dividend_roll_policy,
+            pnl_explain=self.pnl_explain,
+            record_carry_exposure=self.record_carry_exposure,
+            carry_audit_mode=self.carry_audit_mode,
+            carry_audit_dates=self.carry_audit_dates,
+            carry_risk_settings=self.carry_risk_settings,
+            products=[
+                ReplayProduct(
+                    product=self.product,
+                    quantity=self.product_quantity,
+                    position_id=0,
+                    has_lifecycle=True,
+                    initial_price=self.initial_product_price,
+                )
+            ],
+        )
+        self.carry_audit_dates = self.carry_recording.audit_dates
         for field_name in ("delta_bump_size", "gamma_bump_size"):
             bump = getattr(self, field_name)
             if bump is None:
@@ -410,6 +611,13 @@ class ReplayBacktestConfig:
     # month.  A term dividend_source reads the WHOLE chain and would ignore
     # it, so that combination is rejected rather than silently dropped.
     dividend_roll_policy: Optional[FuturesRollPolicy] = None
+    # Carry risk recording, appended after dividend_roll_policy so existing
+    # positional construction keeps its slots.  All default to off: a legacy
+    # run prices nothing extra and resolves no notional.
+    record_carry_exposure: bool = False
+    carry_audit_mode: str = "none"
+    carry_audit_dates: tuple = ()
+    carry_risk_settings: Optional[Any] = None  # CarryRiskSettings
 
     def __post_init__(self):
         if not self.products:
@@ -424,6 +632,19 @@ class ReplayBacktestConfig:
             calculate_surfaces=self.calculate_surfaces,
             dividend_roll_policy=self.dividend_roll_policy,
         )
+        self.carry_recording = _validate_carry_hedge(
+            self.strategy,
+            hedge_kind=self.hedge.kind,
+            engine_config=self.engine_config,
+            dividend_roll_policy=self.dividend_roll_policy,
+            pnl_explain=self.pnl_explain,
+            record_carry_exposure=self.record_carry_exposure,
+            carry_audit_mode=self.carry_audit_mode,
+            carry_audit_dates=self.carry_audit_dates,
+            carry_risk_settings=self.carry_risk_settings,
+            products=self.products,
+        )
+        self.carry_audit_dates = self.carry_recording.audit_dates
         if self.engine_config.vol_model != "bsm":
             # create_vol_model_engine builds Snowball engines only; pricing a
             # Phoenix/European with one would be silently wrong (fail-closed).

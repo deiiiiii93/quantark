@@ -141,8 +141,21 @@ def test_pnl_explain_field_is_appended_after_metadata_in_both_replay_configs():
     for cfg in (AutocallableBacktestConfig, ReplayBacktestConfig):
         names = [f.name for f in fields(cfg)]
         # Later fields are APPENDED, never inserted: metadata and pnl_explain
-        # keep the slots they had, whatever is added after them.
-        assert names[-3:] == ["metadata", "pnl_explain", "dividend_roll_policy"], cfg.__name__
+        # keep the slots they had, whatever is added after them.  Assert the
+        # SLOTS, not the tail of the list, so a genuinely appended field does
+        # not read as a broken one.
+        appended = ["metadata", "pnl_explain", "dividend_roll_policy"]
+        first = names.index("metadata")
+        assert names[first : first + 3] == appended, cfg.__name__
+        for offset, name in enumerate(appended):
+            assert names.index(name) == first + offset, (cfg.__name__, name)
+        # Anything after them is later work, and must stay after them.
+        assert set(names[first + 3 :]) <= {
+            "record_carry_exposure",
+            "carry_audit_mode",
+            "carry_audit_dates",
+            "carry_risk_settings",
+        }, cfg.__name__
 
 
 def test_replay_first_day_intraday_leg_is_not_carried():

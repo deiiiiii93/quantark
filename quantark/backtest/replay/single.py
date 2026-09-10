@@ -68,6 +68,10 @@ class AutocallableBacktestEngine:
             pnl_explain=config.pnl_explain,
             dividend_roll_policy=config.dividend_roll_policy,
             metadata=config.metadata,
+            record_carry_exposure=config.record_carry_exposure,
+            carry_audit_mode=config.carry_audit_mode,
+            carry_audit_dates=config.carry_audit_dates,
+            carry_risk_settings=config.carry_risk_settings,
         )
         # Honor the single config's explicit futures roll policy.
         self._book_config.hedge.roll_policy = config.roll_policy
