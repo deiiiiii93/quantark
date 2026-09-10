@@ -521,11 +521,18 @@ MARKET_RATE = 0.02
 MARKET_MULTIPLIER = 200.0
 
 #: Three listed contracts with distinct implied carry (q = 3%, 6%, 9%), so the
-#: term structure is unmistakably non-flat.  The front contract expires
-#: mid-run: with a 3-day minimum tenor it RETIRES on 2024-01-06, leaving
-#: exactly two later contracts, which is the minimum the primary policy needs.
+#: term structure is unmistakably non-flat.  The front contract expires just
+#: after the window: at the production seven-day minimum tenor it RETIRES on
+#: 2024-01-06, leaving exactly two later contracts, which is the minimum the
+#: primary policy needs.
+#:
+#: The minimum tenor is the production default on purpose.  A delivery-week
+#: contract cannot carry either bump: one index point three days from expiry
+#: is a 121% implied yield, and the 1% audit spot bump is worse.  The curve
+#: refuses both rather than clipping, which is why the real study drops those
+#: contracts instead of shrinking the bump.
 MARKET_CHAIN = (
-    ("IM2401", "2024-01-08", 0.03),
+    ("IM2401", "2024-01-12", 0.03),
     ("IM2402", "2024-02-23", 0.06),
     ("IM2403", "2024-03-15", 0.09),
 )
@@ -538,7 +545,7 @@ MARKET_DATES = (
     "2024-01-08",
     "2024-01-09",
 )
-MARKET_MIN_TENOR_DAYS = 3
+MARKET_MIN_TENOR_DAYS = 7
 
 
 def market_dataset(*, dates=MARKET_DATES, chain=MARKET_CHAIN, spots=None):
@@ -613,13 +620,23 @@ def market_product(
 
 
 def market_engine_config(extrapolation: str = "flat_q", **kwargs):
-    """The engine config a bucket hedge needs: actual quotes, supported tail."""
+    """The engine config a bucket hedge needs: actual quotes, supported tail.
+
+    The PDE runs at ``accuracy="high"`` because the audit is sharp enough to
+    see the grid.  On the standard grid the engine's own delta and a central
+    difference of its own price disagree by about 0.0094 reference hands --
+    a real discretisation gap, not audit truncation: it does NOT shrink as
+    the audit bump halves, but it roughly halves on the finer grid.  The
+    honest response is resolution, not a wider tolerance.
+    """
+    from quantark.asset.equity.param import PDEParams
     from quantark.backtest.replay import AutocallableEngineConfig
 
     options = dict(
         dividend_source="futures_curve",
         futures_curve_extrapolation=extrapolation,
         futures_curve_min_tenor_days=MARKET_MIN_TENOR_DAYS,
+        pde_params=PDEParams(accuracy="high"),
     )
     options.update(kwargs)
     return AutocallableEngineConfig(**options)

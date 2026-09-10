@@ -271,6 +271,10 @@ def _validate_term_dividend_source(
 
 CARRY_AUDIT_MODES = ("none", "sampled", "daily")
 
+#: BumpConfig.spot_bump's own default: the relative spot bump the pricing
+#: engines use when a run names none.
+DEFAULT_SPOT_BUMP_REL = 0.01
+
 
 @dataclass(frozen=True)
 class CarryRecordingPlan:
@@ -348,6 +352,7 @@ def _validate_carry_hedge(
     carry_audit_dates,
     carry_risk_settings,
     products,
+    delta_bump_size=None,
 ) -> CarryRecordingPlan:
     """Accept a bucket hedge only where its risk coordinates actually exist.
 
@@ -432,7 +437,19 @@ def _validate_carry_hedge(
             "product without a documented initial price and contract "
             "multiplier, so set carry_risk_settings.reference_notional"
         )
-    settings = settings.resolved(reference_notional=notional)
+    # The audit's spot bump follows the run's EFFECTIVE pricing bump, so the
+    # direct D_F is measured the same way the day's delta is, and the
+    # resolved value is recorded rather than the request to infer one.
+    spot_bump = settings.audit_spot_bump_rel
+    if spot_bump is None:
+        spot_bump = (
+            float(delta_bump_size)
+            if delta_bump_size is not None
+            else DEFAULT_SPOT_BUMP_REL
+        )
+    settings = settings.resolved(
+        reference_notional=notional, audit_spot_bump_rel=spot_bump
+    )
     return CarryRecordingPlan(
         record=True,
         audit_mode=carry_audit_mode,
@@ -534,6 +551,7 @@ class AutocallableBacktestConfig:
             carry_audit_mode=self.carry_audit_mode,
             carry_audit_dates=self.carry_audit_dates,
             carry_risk_settings=self.carry_risk_settings,
+            delta_bump_size=self.delta_bump_size,
             products=[
                 ReplayProduct(
                     product=self.product,
@@ -642,6 +660,7 @@ class ReplayBacktestConfig:
             carry_audit_mode=self.carry_audit_mode,
             carry_audit_dates=self.carry_audit_dates,
             carry_risk_settings=self.carry_risk_settings,
+            delta_bump_size=self.delta_bump_size,
             products=self.products,
         )
         self.carry_audit_dates = self.carry_recording.audit_dates

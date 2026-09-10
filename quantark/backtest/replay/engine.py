@@ -33,8 +33,35 @@ from .engine_factory import (
     create_vol_model_engine,
 )
 from quantark.volmodels.calibration import VolModelCalibrator
-from .product_replay import ProductReplay
+from .product_replay import ProductReplay, _env_with
 from .results import BookBacktestResults
+
+
+def _book_price_callback(alive_specs, env):
+    """``price_at(spot, dividend)`` for the whole SIGNED product book.
+
+    Each product is priced by its own resolved engine and weighted by its own
+    quantity, exactly once, so the audit's scenario value is the same book
+    the risk was aggregated from.
+    """
+
+    def price_at(spot: float, dividend) -> float:
+        total = 0.0
+        for quantity, replay, engine, product, _delta, _price in alive_specs:
+            total += quantity * float(
+                engine.price(
+                    product,
+                    _env_with(
+                        env,
+                        spot=float(spot),
+                        div_yield=dividend,
+                        underlying=replay.underlying,
+                    ),
+                )
+            )
+        return total
+
+    return price_at
 
 
 @dataclass(frozen=True)
@@ -91,6 +118,24 @@ class ReplayBacktestEngine:
         self._is_bucket = isinstance(config.strategy, FuturesBucketHedgeStrategy)
         self._carry_recording = getattr(config, "carry_recording", None)
         self._hedge_infeasibility: Optional[dict[str, Any]] = None
+        self._carry_recorder = None
+        if self._carry_recording is not None and self._carry_recording.record:
+            from .carry_recorder import CarryExposureRecorder
+            from .carry_stress import shape_scenario, tail_scenario
+
+            settings = self._carry_recording.settings
+            scenarios = tuple(
+                tail_scenario(shift) for shift in settings.tail_shifts
+            )
+            self._carry_recorder = CarryExposureRecorder(
+                settings=settings,
+                record=True,
+                audit_mode=self._carry_recording.audit_mode,
+                audit_dates=self._carry_recording.audit_dates,
+                scenarios=scenarios,
+                stress_dates=settings.stress_dates,
+            )
+            self._shape_shifts = tuple(settings.shape_shifts)
 
         self._states: list[dict[str, Any]] = []
         self._greeks: list[dict[str, Any]] = []
@@ -443,12 +488,18 @@ class ReplayBacktestEngine:
             pre_hedge_contracts = self._selected_contracts(selected)
             day_risk = None
             hedge_targets = None
+            context = self._replays[0].last_carry_context
+            if any_alive and context is not None and (
+                self._is_bucket or self._carry_recorder is not None
+            ):
+                # With recording on, a single-contract control is measured by
+                # exactly the same daily risk call as a bucket run, so their
+                # exposure columns are comparable rather than differently
+                # derived.
+                day_risk = self._measure_book_carry_risk(
+                    date, env, context, alive_specs
+                )
             if self._is_bucket:
-                context = self._replays[0].last_carry_context
-                if any_alive:
-                    day_risk = self._measure_book_carry_risk(
-                        date, env, context, alive_specs
-                    )
                 hedge_targets = self._rebalance_buckets(
                     date=date,
                     selected=selected,
@@ -486,6 +537,19 @@ class ReplayBacktestEngine:
                 any_alive=any_alive,
                 receivable_pv=book_receivable_pv,
             )
+            if self._carry_recorder is not None:
+                self._record_carry_day(
+                    date=date,
+                    env=env,
+                    risk=day_risk,
+                    context=context,
+                    targets=hedge_targets,
+                    carried=carried_holdings,
+                    chain_rows=chain_rows,
+                    alive_specs=alive_specs,
+                    net_position_gamma=net_position_gamma,
+                    state_row=self._states[-1],
+                )
             # PnL explain: close the day against the recorded state
             if self._explain_recorder is not None:
                 self._explain_recorder.end_day(
@@ -859,6 +923,64 @@ class ReplayBacktestEngine:
         # stays measurable against the target the policy actually planned.
         self._rebalances.extend(decisions)
         return targets
+
+    def _record_carry_day(
+        self,
+        *,
+        date,
+        env,
+        risk,
+        context,
+        targets,
+        carried,
+        chain_rows,
+        alive_specs,
+        net_position_gamma,
+        state_row,
+    ) -> None:
+        """Hand the recorder explicit day data, then drain its rows.
+
+        The pricing closure is built for TODAY only and released with the
+        day: it is never serialised into a CSV and never retained across the
+        fleet.  With no live product there is no closure at all, and the
+        recorder writes a holdings-only row.
+        """
+        price_at = None
+        if alive_specs and context is not None:
+            price_at = _book_price_callback(alive_specs, env)
+        self._carry_recorder.record_day(
+            date=date,
+            risk=risk,
+            context=context,
+            targets=targets,
+            carried=carried,
+            held=self.hedge_book.holdings(),
+            chain_prices={
+                c: float(row["futures_price"]) for c, row in chain_rows.items()
+            },
+            chain_multipliers={
+                c: float(row["multiplier"]) for c, row in chain_rows.items()
+            },
+            chain_expiries={
+                c: row["expiry_date"] for c, row in chain_rows.items()
+            },
+            # Daily product P&L is the DIFFERENCE of this cumulative field,
+            # which already carries paid cash and the pending receivable; it
+            # is not merely the change in product_mtm.
+            product_pnl=float(state_row.get("product_pnl", float("nan"))),
+            transaction_costs=float(self._transaction_costs),
+            gamma=float(net_position_gamma),
+            objective=getattr(self.strategy, "objective", ""),
+            carry_family=(
+                getattr(self.config.engine_config, "futures_curve_extrapolation", "")
+                if context is not None
+                else "none"
+            ),
+            price_at=price_at,
+        )
+        self._hedge_legs = self._carry_recorder.legs
+        self._hedge_attribution = self._carry_recorder.attribution
+        self._hedge_stresses = self._carry_recorder.stresses
 
     def _commit_bucket_trades(self, planned_trades) -> None:
         trial = self.hedge_book.copy()
