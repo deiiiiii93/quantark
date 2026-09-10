@@ -188,9 +188,88 @@ Artifacts: `validation_manifest.json`, `input_snapshots.json`,
   --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/subset --resume
 ```
 
-_Result recorded below when the run completes._
+**Result: 14 cells ran, 14 ok, 0 failed, 6059 s wall clock on 2 workers.**
+
+Inception 2023-05-04, 243 trading days, every cell terminating `ki_maturity`.
+
+| Cell type | Seconds per cell |
+|---|---:|
+| single-contract control, recording on | 743–775 |
+| bucket policy, daily audits | 853–1093 |
+
+Extrapolation to the full primary grid: 14 cells x 29 eligible inceptions is
+406 cells at roughly 800 s, about 90 CPU-hours, near 23 hours of wall clock
+on four workers. Per-cell storage is about 2 MB of frames, so the full grid
+is under a gigabyte.
+
+Measured cost by stage, from `carry_cost()` on a seven-day synthetic run
+with three nodes:
+
+| Stage | Price calls |
+|---|---:|
+| bucket sampling | 1 base + 2 per node, per day |
+| direct audit | 14 per day on three nodes (12 on two) |
+| finite stresses | 2 per scenario per holdings kind |
+
+This confirms the design's section 10.3 estimate: four nodes add about 20
+pricing calls per day at one audit level, counting the eight bucket prices.
+
+#### Audit completeness: the audits did NOT pass
+
+Every cell recorded 242 measured audit dates out of 243, and **175 of them
+report `fail`**. This is the same figure in all fourteen cells, including
+the plain single-contract controls, which is what identifies it as
+systematic rather than a property of any hedge policy.
+
+Only ONE of the four checks breaches:
+
+| Check | Dates over the 0.01 budget |
+|---|---:|
+| net delta audit error | 0 |
+| parallel rhoq audit error | 0 |
+| nodal rhoq audit error | 0 (of 655 leg rows) |
+| **identity residual** | **175** |
+
+The identity residual is `(D - D_F_direct - sum_i (F_i/S) B_i) / m_ref`. It
+is the one quantity that mixes the ENGINE'S OWN Greek `D` with repriced
+quantities; every check that compares two repriced numbers agrees to about
+1e-13. So the disagreement is between the QUAD engine's delta and a central
+difference of the QUAD engine's own price.
+
+It is strongly state-dependent:
+
+| State | pass | fail |
+|---|---:|---:|
+| before knock-in | 3 | 175 |
+| after knock-in | 63 | 0 |
+
+and the worst dates are those approaching the KI barrier from above
+(2024-01-19: spot 5306.99 against a 5050.48 barrier, residual 0.548 hands;
+passing dates average 0.0004 hands, three orders of magnitude smaller).
+
+That is the signature of quadrature resolution around a discretely monitored
+knock-in barrier, not of a hedge defect: the hedge's own sizing inputs, the
+buckets and nodal yields, are internally consistent to 1e-13 throughout.
+
+**Gate D is therefore NOT met at `--quad-grid 401`.** A convergence analysis
+at finer grids is recorded below. The tolerance was not touched.
 
 ---
+
+## Open item
+
+The identity residual above is unresolved at the study's default quadrature
+grid. Until a grid is identified at which it settles inside the 0.01-hand
+budget, no run at that grid can claim `numerical_validity`, and the
+`audit_summary.json` of every subset cell already records
+`all_measured_passed: false`, which keeps them out of a validity pass
+automatically.
+
+Note what this does and does not affect. The hedge is sized from the bucket
+vector and the frozen-carry delta; those are consistent to 1e-13 and the
+replay's P&L is unaffected. What is unresolved is whether the ENGINE's delta
+and its own repriced delta agree closely enough for the identity check to
+certify the run.
 
 ## What these gates do NOT establish
 
