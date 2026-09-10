@@ -456,6 +456,68 @@ The general shape of that bug is worth remembering: a config key that
 reaches the RECORD but not the RUN is worse than one that reaches neither,
 because it buys false confidence.
 
+### End to end on the study: it fixes the defect, and the carry audit was never measuring that defect
+
+The 14-cell subset was re-run entirely under `--quad-readout transition`
+(`bucket_hedge_v2/subset_transition`). No cell's verdict changes. On
+`term_flat_q__front` the two runs agree to the leg row — 66 pass, 175 fail,
+1 not measured, 1 inconclusive — and the mean identity residual moves only
+from 0.042500 to 0.042613 reference hands.
+
+That is not the readout failing. The audit is blind to the staircase at its
+own settings, by construction.
+
+Its residual is `(delta_q - delta_f_direct - sum_i (F_i/S) B_i) / m_ref`.
+Both delta terms are central differences of the same price surface at the
+same spot, and at the default their steps are the same size, because
+`audit_spot_bump_rel` resolves from the pricing bump. Any error that depends
+only on the readout point and the step therefore enters both terms and
+subtracts out. Measured over the same 243 dates, as a mean absolute change
+in reference hands (`identity_ingredients.py`):
+
+| what changes | `delta_f_derived` | `delta_f_direct` | identity residual |
+|---|---:|---:|---:|
+| readout, at the matched default bump | 0.006814 | 0.006503 | 0.000787 |
+| bump 0.01 to 0.001, readout fixed | 0.000000 | 0.014838 | 0.014838 |
+
+The first row is the cancellation. The readout moves both sides by nearly
+the same amount, so the residual barely moves and no verdict flips.
+
+The second row is why the bump ladder in `gates.md` ever showed anything.
+`delta_f_derived` is EXACTLY invariant to the audit bump, to every digit,
+because `delta_q` is the engine's own delta Greek at the engine's own
+`BumpConfig` bump (`base_engine.py:245`) and never the audit's. Only
+`delta_f_direct` follows `audit_spot_bump_rel`. Shrinking the audit bump
+unmatches the two steps and exposes the staircase on one side alone.
+
+The ladder under both readouts (`bump_ladder_table.py`):
+
+| audit spot bump | legacy | transition |
+|---:|---:|---:|
+| 0.01 (default, matched) | 0.042500 | 0.042613 |
+| 0.0025 | 0.051449 | pending |
+| 0.001 | 0.084353 | 0.046811 |
+
+So the mode does what it was built to do. It removes the bump-dependence of
+the frozen-carry spot derivative: at the mismatched bump the residual falls
+44% and the passing dates rise from 29 to 65. It changes nothing where the
+bumps match.
+
+**The ladder has to be read the other way round from how I read it.** I
+built it to diagnose why the audit fails and treated its growth as evidence
+about that failure. The growth was real, and following it did find a real
+engine defect, now fixed and shipped. But the growth was an artefact of the
+probe unmatching two bumps that the audit deliberately matches. At its own
+settings the audit was never failing on the staircase, and my own earlier
+`hedge_impact.py` measurement — 0.028 contracts peak to peak at the 1% bump
+— already said so before I built the ladder.
+
+What is left is a floor near 0.0425 hands, invariant to the readout and to
+the spot bump. Bump-invariance rules out spot-bump truncation as well as the
+staircase. The open suspect is the bucket delta `B_i`, taken at a fixed 1
+index point regardless of the spot bump, which would produce exactly this
+signature; a 10x bucket-bump run is testing it.
+
 ### It moves the model-validation certificate identities, and that is correct
 
 `equity.snowball.quad` records "every numerically relevant knob, including

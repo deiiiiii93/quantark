@@ -428,14 +428,71 @@ What remains open, with the measured evidence in `quad-readout/README.md`:
   The 0.01-hand figure is an initial deterministic-fixture tolerance and was
   never derived for a quadrature-priced snowball beside a discretely
   monitored barrier. This is still worth doing whatever readout is in use.
-- **re-running the subset under `readout="transition"`.** A run entirely
-  under the new mode would validate the NEW mode. It would say nothing about
-  whether the shipped default certifies, and must not be presented as the
-  old path passing. The replay does not yet expose the setting.
+- **the remaining floor.** About 0.0425 reference hands survives at the
+  audit's own bump under both readouts, and is invariant to the spot bump.
+  It is neither the staircase nor spot-bump truncation. See below.
 
 Disabling alignment is not among the options: measured, it makes the
 sawtooth 70x worse and moves prices 14.9 bp, because the barrier's own
 projection error is what alignment exists to prevent.
+
+### The audit cannot see the staircase at its own bump, and the ladder above misled me
+
+The subset has now been re-run entirely under `readout="transition"`
+(`bucket_hedge_v2/subset_transition`). Every cell's verdict is unchanged. On
+`term_flat_q__front` the two runs agree to the leg row: 66 pass, 175 fail,
+1 not measured, 1 inconclusive under both readouts, and the mean identity
+residual moves only from 0.042500 to 0.042613 reference hands.
+
+That is not the readout failing. It is the audit being blind to the
+staircase at its own settings, by construction.
+
+The residual is
+`(delta_q - delta_f_direct - sum_i (F_i/S) B_i) / m_ref`. Both `delta_q` and
+`delta_f_direct` are central differences of the same price surface at the
+same spot. At the default the two steps are the same size, because
+`audit_spot_bump_rel` resolves from the pricing bump. So both sides inherit
+the same sawtooth and it cancels in the subtraction. Measured over the same
+243 dates, as a mean absolute change in reference hands:
+
+| what changes | `delta_f_derived` | `delta_f_direct` | identity residual |
+|---|---:|---:|---:|
+| readout, at the matched default bump | 0.006814 | 0.006503 | 0.000787 |
+| bump 0.01 to 0.001, readout fixed | 0.000000 | 0.014838 | 0.014838 |
+
+The first row is the cancellation: the readout moves both sides by nearly
+the same amount, so the residual barely moves and no verdict flips.
+
+The second row says why the ladder ever showed anything. `delta_f_derived`
+is EXACTLY invariant to the audit bump, to every digit, because `delta_q` is
+the engine's own delta Greek at the engine's own `BumpConfig` bump
+(`base_engine.py:245`) and never the audit's. Only `delta_f_direct` follows
+`audit_spot_bump_rel`. Shrinking the audit bump therefore unmatches the two
+steps and exposes the staircase on one side alone.
+
+The ladder under both readouts:
+
+| audit spot bump | legacy | transition |
+|---:|---:|---:|
+| 0.01 (default, matched) | 0.042500 | 0.042613 |
+| 0.0025 | 0.051449 | pending |
+| 0.001 | 0.084353 | 0.046811 |
+
+The readout does exactly what it was built to do. It removes the
+bump-dependence: the mismatched-bump residual falls by 44% and the passing
+dates rise from 29 to 65. It changes nothing at the matched bump.
+
+**So the ladder must be read the other way round.** I built it to diagnose
+why the audit fails and read its growth as evidence about that failure. The
+growth was real, and following it did find a real engine defect which is now
+fixed. But the growth was an artefact of the probe unmatching the two bumps.
+The audit, at its own settings, was never failing on the staircase.
+
+What is left is a floor of about 0.0425 hands, invariant to the readout and
+to the spot bump. Bump-invariance rules out spot-bump truncation as well as
+the staircase. The open suspect is the bucket delta `B_i`, which is measured
+at a fixed 1 index point regardless of the spot bump, and so would produce
+exactly this signature.
 
 ## What these gates do NOT establish
 
