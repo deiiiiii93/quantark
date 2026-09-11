@@ -102,13 +102,15 @@ FIXTURE_KI_PCT = 0.90
 FIXTURE_SPOT_RANGE = (0.60, 1.60)
 CELL = dict(cost_bp=1.0, workers=1, batch_paths=None, quad_grid=101, spot_range=FIXTURE_SPOT_RANGE)
 #: The fixture's gate, not the study's.  Measured on this seed: day 17 of
-#: bootstrap path 3 sits 0.02% above the 90% knock-in barrier five days from
-#: maturity, where the alive value kinks and the surface reads linearly
-#: across the kink -- 85.7 bp and 140.1 hands against the exact engine (the
-#: next worst state, 0.2% above the barrier, 13.1 bp / 57.2 hands).  The
-#: study's gate (25 bp / 2 hands) would fail this cell, which
-#: ``test_the_gate_records_the_near_barrier_gap`` pins; the fixture widens the
-#: budget so the pipeline runs and the numbers are recorded, not hidden.
+#: Bootstrap path 3 sits 0.02% above the 90% knock-in barrier five days from
+#: maturity.  The surface used to read the event-projected column there and
+#: differentiate across the observation's value jump, costing 85.7 bp and
+#: 140.1 hands against the exact engine; reading the continuation branch
+#: instead brings the worst sampled state to 2.24 bp and 0.81 hands, inside
+#: the study's own 25 bp / 2 hands budget, which
+#: ``test_the_near_barrier_states_sit_inside_the_study_gate`` pins.  The
+#: fixture's budget stays wide so that a regression is RECORDED by that
+#: assertion rather than aborting the fixture before it can be measured.
 FIXTURE_GATE = dict(sample_states=64, pv_tolerance_bp=120.0, delta_tolerance_hands=200.0)
 #: The QUAD ladder reads the same kink across 0.25% nodes: 12.41 bp and 0.97
 #: hands measured against the study's 10 bp / 2 hands.
@@ -134,10 +136,10 @@ def tiny_fleet(tmp_path_factory):
     product = C.Q.build_product(terms, float(bootstrap.spot[0, 0]), coupon.coupon)
     runs = {}
     # The oracle spot-checks path 1, which never comes near the knock-in
-    # barrier.  Paths 0 and 3 sit within 0.2% of it for a day, where the
-    # widened gate allows the hedge to differ by up to 140 hands; a day of
-    # that moves the path's total P&L by 200-560 bp, far past the oracle's
-    # P&L budget, which is the PV budget (a sequence gap, not a state gap).
+    # barrier.  Paths 0 and 3 pass within 0.2% of it; under the projected
+    # readout that cost up to 140 hands for a day and moved the path's total
+    # P&L past the oracle's budget, and the branch readout no longer does,
+    # but path 1 remains the check that does not depend on the question.
     for model, hedge in ((C.MODELS[0], "front"), ("term_flat_q", "front")):
         cell = C.cell_name(model, hedge)
         cfg = S02.cell_config(product, model, hedge, provider="life_surface", gate_override=FIXTURE_GATE, **CELL)
@@ -171,14 +173,18 @@ def test_every_cell_run_is_persisted_gated_and_oracle_checked(tiny_fleet):
     assert len(runs[C.BASELINE_CELL]["oracle"]) == 1 and runs[C.BASELINE_CELL + "__stress"]["oracle"] == []
 
 
-def test_the_gate_records_the_near_barrier_gap(tiny_fleet):
-    """The fixture's widened gate records what the study's gate would have refused (see FIXTURE_GATE)."""
+def test_the_near_barrier_states_sit_inside_the_study_gate(tiny_fleet):
+    """The branch readout brings the worst near-barrier state inside the study's budget.
+
+    The fixture's own budget is wider than the study's (see FIXTURE_GATE), so
+    this asserts against the study's, which is the number that decides whether
+    a real cell may run on the surface at all.
+    """
     _, runs, _ = tiny_fleet
     gate = runs[C.BASELINE_CELL]["gate"]
     assert gate["passed"] and gate["sampled"] > 0
-    assert gate["max_pv_gap_bp"] > C.GATE_SURFACE["pv_tolerance_bp"]
-    assert gate["max_delta_gap_hands"] > C.GATE_SURFACE["delta_tolerance_hands"]
-    assert gate["max_pv_gap_bp"] <= FIXTURE_GATE["pv_tolerance_bp"]
+    assert gate["max_pv_gap_bp"] <= C.GATE_SURFACE["pv_tolerance_bp"], gate
+    assert gate["max_delta_gap_hands"] <= C.GATE_SURFACE["delta_tolerance_hands"], gate
 
 
 def test_resume_skips_a_run_whose_config_matches(tiny_fleet):

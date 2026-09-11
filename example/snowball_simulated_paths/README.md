@@ -111,12 +111,15 @@ count is in the thousands: 8 paths needed 942 surface solves.
   must match exactly, trades within the tolerance are netted per day.
 - The engine check: the first 200 bootstrap paths of every cell on the QUAD
   spot ladder (0.25% nodes), paired against the same paths on the surface.
-- Known limit of both approximate providers, measured on the test fixture:
-  within one grid cell above the knock-in barrier in the last days of the
-  product the alive value kinks and a linear readout across the kink is off
-  — 86 bp and 140 hands 0.02% above a 90% barrier five days from maturity
-  on the surface, 12 bp on the ladder.  The reservoir gate catches such a
-  state only when it samples one; a barrier-aware readout is a follow-up.
+- A near-barrier readout defect, since fixed.  A discrete knock-in
+  observation writes a value JUMP onto the grid, and the surface used to read
+  and differentiate the event-projected column, which within a cell of the
+  barrier is the value of neither branch.  Measured on the test fixture at
+  0.02% above a 90% barrier five days from maturity: 86 bp and 140 hands
+  against the exact engine, and worsening under refinement rather than
+  improving.  The solver now returns the continuation branches, and the same
+  fixture state costs 2.24 bp and 0.81 hands, inside the study's own budget.
+  The ladder's 12 bp at that state is interpolation and is unchanged.
 - Known cost: the PDE grid binder keys its layout cache on the whole market
   snapshot, so every vol or q bucket rebuilds an identical concentrated mesh
   under the study's explicit bounds, about a second each; a mesh memo on the

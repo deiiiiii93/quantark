@@ -155,14 +155,21 @@ class GateReport:
     max_pv_gap_bp: float
     max_delta_gap_hands: float
     passed: bool
+    #: One entry per designed state, when the report came from a stress
+    #: set. Empty for the sampled reservoir, which reports a worst case
+    #: and nothing else.
+    attribution: Tuple[Dict[str, Any], ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
-        return {
+        out = {
             "mode": self.mode, "sampled": int(self.sampled),
             "max_pv_gap_bp": float(self.max_pv_gap_bp),
             "max_delta_gap_hands": float(self.max_delta_gap_hands),
             "passed": bool(self.passed),
         }
+        if self.attribution:
+            out["attribution"] = [dict(row) for row in self.attribution]
+        return out
 
     @staticmethod
     def combine(reports: Sequence["GateReport"]) -> "GateReport":
@@ -175,7 +182,26 @@ class GateReport:
             max_pv_gap_bp=max(r.max_pv_gap_bp for r in reports),
             max_delta_gap_hands=max(r.max_delta_gap_hands for r in reports),
             passed=all(r.passed for r in reports),
+            attribution=tuple(row for r in reports for row in r.attribution),
         )
+
+
+@dataclass(frozen=True)
+class StressCase:
+    """One designed state of the barrier stress set.
+
+    ``distance`` is the signed fraction of the knock-in barrier its spot
+    sits at, so a reader can see which side of the barrier a gap came
+    from without decoding the label.
+    """
+
+    label: str
+    distance: float
+    states: "DayStates"
+
+    def __post_init__(self) -> None:
+        if len(self.states) != 1:
+            raise ValidationError("a StressCase holds one state (see state_row)")
 
 
 @dataclass(frozen=True)

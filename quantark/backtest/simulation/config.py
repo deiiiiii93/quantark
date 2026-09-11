@@ -8,7 +8,7 @@ config that is constructed is a config that runs.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -33,12 +33,27 @@ class GateConfig:
     sample_states: int
     pv_tolerance_bp: float
     delta_tolerance_hands: float
+    #: Signed fractions of the knock-in barrier the designed stress set
+    #: places spots at.  Whether a run's reservoir ever lands beside the
+    #: barrier is luck; these states are visited whether it does or not.
+    #: An empty tuple turns the stress set off.
+    barrier_offsets: Tuple[float, ...] = (-0.01, -0.002, 0.002, 0.01)
+    #: How many knock-in observation dates the stress set probes.
+    barrier_dates: int = 2
 
     def __post_init__(self) -> None:
         if int(self.sample_states) < 0:
             raise ValidationError("GateConfig.sample_states must be non-negative")
         if float(self.pv_tolerance_bp) < 0.0 or float(self.delta_tolerance_hands) < 0.0:
             raise ValidationError("GateConfig tolerances must be non-negative")
+        offsets = tuple(float(x) for x in self.barrier_offsets)
+        if any(x == 0.0 or not np.isfinite(x) or x <= -1.0 for x in offsets):
+            raise ValidationError(
+                "GateConfig.barrier_offsets must be finite, non-zero and above -100%"
+            )
+        object.__setattr__(self, "barrier_offsets", offsets)
+        if int(self.barrier_dates) < 0:
+            raise ValidationError("GateConfig.barrier_dates must be non-negative")
 
 
 @dataclass(frozen=True)

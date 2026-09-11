@@ -28,6 +28,7 @@ from quantark.asset.equity.engine.pde.grid.config import resolve_config
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.param.engine_params import QUAD_READOUT_MODES
 from quantark.asset.equity.product.option.phoenix_helpers import (
     create_standard_phoenix,
 )
@@ -365,7 +366,40 @@ class PhoenixQuadCandidate(_PhoenixArm):
     """Quadrature engine; Greeks by central difference on the same bump width."""
 
     def name(self) -> str:
-        return "equity.phoenix.quad"
+        """The default readout keeps the name it has always had.
+
+        A decision is recorded per candidate name, so a study certifying
+        both readouts needs two names; suffixing only the non-default one
+        leaves every banked certificate matching.
+        """
+        readout = str(self._params.get("readout", "legacy_linear"))
+        return "equity.phoenix.quad" if readout == "legacy_linear" else f"equity.phoenix.quad.{readout}"
+
+    def _engine_params(self, grid_points: int) -> QuadParams:
+        """The quadrature settings this candidate prices with.
+
+        The readout mode has to come through here as well as through
+        ``params()``: ``params()`` spreads the declared settings into the
+        recorded configuration, so naming a mode in the study YAML moves
+        the identity hash whether or not the engine ever sees it. A
+        candidate that recorded a mode it did not price with would issue a
+        certificate for a configuration nobody measured.
+        """
+        readout = str(self._params.get("readout", "legacy_linear"))
+        if readout not in QUAD_READOUT_MODES:
+            raise ValidationError(
+                f"readout must be one of {list(QUAD_READOUT_MODES)}, got {readout!r}"
+            )
+        # Refuse at study-load time what the engine would refuse mid-run.
+        # An unsupported mode otherwise surfaces as an ERROR cell after the
+        # references have already been paid for.
+        supported = tuple(PhoenixQuadEngine.supported_readouts)
+        if readout not in supported:
+            raise ValidationError(
+                f"PhoenixQuadEngine does not support readout={readout!r}; "
+                f"it supports {list(supported)}"
+            )
+        return QuadParams(grid_points=int(grid_points), readout=readout)
 
     def params(self) -> Mapping[str, Any]:
         """Declared settings plus the full resolved quadrature configuration."""
@@ -374,7 +408,7 @@ class PhoenixQuadCandidate(_PhoenixArm):
             **self._params,
             "engine": "PhoenixQuadEngine",
             "grid": engine_config(
-                QuadParams(grid_points=grid_points), exclude=_QUAD_NON_NUMERIC
+                self._engine_params(grid_points), exclude=_QUAD_NON_NUMERIC
             ),
         }
 
@@ -384,7 +418,7 @@ class PhoenixQuadCandidate(_PhoenixArm):
         bump = float(self._params.get("bump", 0.01))
 
         def price_at(spot: float) -> float:
-            engine = PhoenixQuadEngine(params=QuadParams(grid_points=grid_points))
+            engine = PhoenixQuadEngine(params=self._engine_params(grid_points))
             return engine.price(product, make_environment(environment, spot))
 
         return _central_difference_greeks(price_at, float(environment["spot"]), bump)

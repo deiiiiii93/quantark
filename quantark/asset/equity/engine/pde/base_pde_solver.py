@@ -138,12 +138,20 @@ class PDESolutionResult(NamedTuple):
 class LifeSurfaceSolution(NamedTuple):
     """Both value surfaces of one solve on every time node (life-surface readout).
 
-    ``v0`` / ``v1`` are the alive and knocked-in surfaces, shape
+    ``v0`` / ``v1`` are the alive and knocked-in BRANCH surfaces, shape
     ``(n_x, n_t)``; column ``k`` is the value at ``t[k]`` after that node's
-    event transforms.  ``step_of`` maps every event and extra time to its
-    column.  ``t0_readout`` is the smooth valuation-date column for the
-    alive surface when the valuation date itself carries events (the same
-    column ``calculate_greeks`` reads), else ``None``.
+    diffusion and BEFORE its event transforms.  That is what a pointwise
+    readout needs: a discrete observation writes a value JUMP onto the grid
+    (the surviving branch above the barrier, the knocked-in branch at or
+    below it), so within a cell of the barrier the projected column is the
+    value of neither branch, and differentiating it is O(J/h) wrong.  The
+    march still propagates the projected values; only the readout differs.
+    The terminal column is the payoff, which no event follows.
+
+    ``step_of`` maps every event and extra time to its column.
+    ``t0_readout`` is the smooth valuation-date column for the alive surface
+    when the valuation date itself carries events (the same column
+    ``calculate_greeks`` reads), which is now ``v0[:, 0]``; else ``None``.
     """
 
     t: np.ndarray
@@ -1461,7 +1469,7 @@ class BasePDESolver(BaseEngine):
         Returns:
             Tuple of (delta, gamma)
         """
-        # Snap to the grid node nearest x_target (interior only)
+        # Centre the stencil on the node nearest x_target (interior only)
         idx = int(np.searchsorted(x_vec, x_target))
         idx = max(1, min(idx, len(x_vec) - 2))
         if idx > 1 and abs(x_vec[idx - 1] - x_target) < abs(x_vec[idx] - x_target):
@@ -1484,12 +1492,18 @@ class BasePDESolver(BaseEngine):
             v_m / (h_m * h_sum) - v_0 / (h_m * h_p) + v_p / (h_p * h_sum)
         )
 
-        # Convert to price-space derivatives AT THE NODE where the stencil
-        # was evaluated (identical to `spot` when the spot is a grid node,
-        # which is the default; consistent when x_target falls between nodes).
-        s_node = float(np.exp(x_vec[idx]))
-        delta = dv_dx / s_node
-        gamma = (d2v_dx2 - dv_dx) / (s_node**2)
+        # The stencil's quadratic has a LINEAR first derivative, so carrying
+        # dV/dx from the stencil node to x_target is exact for that quadratic
+        # (d2V/dx2 is constant on it). Reporting the node's derivative instead
+        # makes delta piecewise constant in spot and moves it whenever the
+        # mesh moves -- changing a domain bound is enough.
+        offset = float(x_target) - float(x_vec[idx])
+        if offset != 0.0:
+            dv_dx = dv_dx + offset * d2v_dx2
+
+        # Convert to price-space derivatives at the query spot itself.
+        delta = dv_dx / spot
+        gamma = (d2v_dx2 - dv_dx) / (spot * spot)
 
         return delta, gamma
 
