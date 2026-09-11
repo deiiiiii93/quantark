@@ -993,6 +993,27 @@ still compute the same number". Those two questions come apart whenever a
 code change moves values without moving configuration, which is what every
 engine repair does.
 
+### Landed as `30230233`, one commit, 35 files
+
+The one-commit constraint above was honoured deliberately. Verified
+independently of the claim: `30230233` is 35 files, the 16 new
+`2026-09-11` certificate files are tracked, 11 superseded markers are
+tracked, and the worktree is clean.
+
+**A count of 35 and not 19, which is a trap worth recording.** `git status`
+showed 19 modified files. The other 16 are NEW files under
+`docs/modelvalidation/certificates/*/2026-09-11/`, and `git status` does not
+show them at all, because `/docs/` is in `.git/info/exclude`. Those 16 are
+the certificates, the anchors and the reports — the actual evidence, and by
+far the most expensive part to reproduce, at over an hour of certification
+each.
+
+So on this repository **`git status` is not a completeness check.** Anything
+under an exclusion is invisible to it, and a "nothing is lost" verification
+built on its output silently omits exactly the files that took longest to
+produce. Use `git ls-files <glob>` for what is tracked and an explicit
+directory listing for what is not.
+
 ### What was changed, and where it still needs to go
 
 - the three flat-BSM studies re-certified against the seeded MC benchmark
