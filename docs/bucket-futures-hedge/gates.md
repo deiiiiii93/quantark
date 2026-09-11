@@ -639,6 +639,76 @@ workers; the original took 6059 s on two.
 **Gate D is met**, on this one inception, for the audit criteria it states.
 The tolerance was never touched and no golden was regenerated.
 
+### The 0.01-hand tolerance, derived at last — and a budget that had to be rejected
+
+The figure was inherited from a deterministic fixture and never sized for a
+quadrature-priced snowball beside a discretely monitored barrier. It is now
+derived. No repricing was needed: the production run records both spot
+derivatives at all three levels, so each component's error follows from its
+own ladder. For an `h^2` estimator `D(2h) - D(h) = 3 C h^2`, so the error at
+the finest bump is `abs(D(2h) - D(h)) / 3`.
+
+**The obvious budget is wrong, and the measurement says so.** Summing the
+component magnitudes, `(E_D + E_DF + sum_i abs(F_i/S) E_Bi)`, as the earlier
+draft proposed, gives this over the 242 flat-q dates:
+
+| hands | mean | p95 | max |
+|---|---:|---:|---:|
+| `E_D`, frozen-curve delta | 1.02e-02 | 5.88e-02 | 1.16e-01 |
+| `E_DF`, pinned-futures delta | 1.02e-02 | 5.85e-02 | 1.16e-01 |
+| summed budget | 2.04e-02 | 1.17e-01 | 2.32e-01 |
+| observed abs(R) | 1.02e-04 | 3.92e-04 | 2.20e-03 |
+
+The two components are each about a hundred times the residual they produce.
+They CANCEL, systematically, because both are derivatives of the same surface
+at the same spot and share its readout and grid error. A sum-of-magnitudes
+budget ignores exactly the cancellation the check is built on. Adopting it
+would set the tolerance at 0.232 hands, 23x looser than today, and a bucket
+wrong by 0.2 hands would pass a check that currently catches 0.02.
+
+That is the same trap as the sawtooth budget recorded above, in mirror
+image. There, a tolerance sized to an error the check cannot SEE would not
+have admitted one extra date. Here, a tolerance sized to an error the check
+CANCELS would admit errors it is supposed to catch. Component budgets are
+for a probe that measures one derivative. This check measures a difference.
+
+**The right derivation is two-sided.** The tolerance has to clear the
+residual a CORRECT book produces, and stay under the smallest error worth
+catching.
+
+| Bound | hands | where it comes from |
+|---|---:|---|
+| noise floor | 0.00434 | max abs(R)+E over 484 correct-book date-curves |
+| one IM contract | 1.0 | `reference_multiplier` is 200, the index multiplier, so one hand IS one contract, and hedges round to whole contracts |
+
+Any tolerance in that window works, and the window spans a factor of 230, so
+this is not a delicately poised number. **0.01 sits near the conservative
+end**: 2.3x above the noise floor and 100x below a one-contract error. It
+maximises detection and accepts a modest false-positive margin. Keep it.
+
+Economically, at the worst date's spot of 5306.99 and a 50m notional:
+
+| tolerance, hands | CNY per 1% index move | bp of notional |
+|---:|---:|---:|
+| 0.01 | 106.14 | 0.0212 |
+| 0.001 | 10.61 | 0.0021 |
+| one contract, 1.0 | 10614 | 2.1229 |
+
+**The one caveat is sample size.** That 2.3x margin is measured on a single
+inception. If the worst abs(R)+E grows past about 0.005 on other inceptions
+at Gate E, the margin is gone and the tolerance needs revisiting. The
+components to watch are in `identity_ladder`, which every run now records.
+
+Method note: on 34 flat-forward dates abs(R) slightly exceeds this summed
+budget. Those are quiet dates where the spot truncation has vanished and the
+residual sits on the quote-bump floor, which I held fixed at the 4.86e-05
+measured on the worst date. The floor is date-dependent. It does not change
+the conclusion, and it is another reason not to build a tolerance out of
+per-date component estimates.
+
+Reproduce with `quad-readout/tolerance_budget.py`, which reads the recorded
+ladders and prices nothing.
+
 ---
 
 ## Open item — SUPERSEDED 2026-09-10
@@ -711,7 +781,15 @@ What remains open, with the measured evidence in `quad-readout/README.md`:
   barrier, so the budget question is open — it just has to be sized against
   the knock-in barrier error below, which is what the check actually
   resolves.
+
+  **CLOSED 2026-09-11.** The instinct here was right and its final clause
+  was wrong. A component budget is the wrong instrument, for the same
+  cancellation reason given above, and the knock-in barrier error is not
+  what the check resolves — that reading is retracted with the rest. The
+  tolerance is now derived two-sided, between a measured noise floor and one
+  contract. See "The 0.01-hand tolerance, derived at last".
 - **the remaining floor**, which is that knock-in barrier error. See below.
+  **RETRACTED**: the floor was 1%-secant truncation, not the barrier.
 
 Disabling alignment is not among the options: measured, it makes the
 sawtooth 70x worse and moves prices 14.9 bp, because the barrier's own
