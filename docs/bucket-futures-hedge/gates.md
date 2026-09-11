@@ -814,6 +814,51 @@ once. The lobe is real and QUAD-specific on the peer's evidence; my numbers
 for it are not to be quoted, and re-measuring needs this branch merged up to
 its base. See `quad-readout/README.md`. Unresolved.
 
+**UNBLOCKED 2026-09-11.** The branch is merged up to its base, so `25d4f7d6`
+is now an ancestor and the corrected PDE is available here. The reconcile
+was smaller than it looked: the base carries this branch's readout work as
+`0e4afd67`, the code half of `806187fc`, so all six shared engine files
+merged with no change. The only real divergence was
+`backtest/simulation/config.py`, where this branch's multi-leg bucket-hedge
+guard and the base's `barrier_offsets` were independent additions from the
+merge base, and both survive.
+
+The merge touched no QUAD, carry, futures or replay source file, and the
+frozen identity regression still reproduces 0.548283, so none of the Gate D
+evidence above moved. Re-measuring the lobe is now work, not a blocker.
+
+**The merge also inherits 24 failing tests, and they are the base's, not
+this branch's.** The full suite after merging is 24 failed, 8073 passed,
+120 skipped. All 24 sit in three files, and every one of them fails on the
+base commit `d926e1f5` with nothing from this branch present:
+
+| Where | Count | Why |
+|---|---:|---|
+| `test_variant_case_builders.py::test_banked_cells_keep_their_identity` | 10 | `QuadParams.readout` arriving on the base moves every QUAD candidate identity hash |
+| `test_banked_certificates.py::test_banked_certification_still_describes_its_engines` | 11 | the same moved hashes |
+| `test_replay_goldens.py::test_frame_matches_golden` | 3 | the PDE barrier-readout repair moves PDE deltas |
+
+Checked out at `d926e1f5` alone, those three files give 24 failed and 99
+passed, the same count as the merged suite, and `test_replay_goldens.py`
+alone gives the same three failures by name. Before the merge this branch
+passed `test_replay_goldens.py`, because it did not yet carry `25d4f7d6`.
+
+The replay golden is not float churn. On `scalar_bsm/greeks` the delta moves
+from 18.296472 to 19.509487, 6.6% relative, which is the barrier readout
+repair doing exactly what its message says it does.
+
+`d926e1f5` predicted half of this itself: "What did move the QUAD identities
+is the readout field arriving on QuadParams, which is a numerics-relevant
+knob and is meant to." Neither the certificates nor the goldens were
+re-banked to match.
+
+**Nothing here was re-banked either, and that is deliberate.** Re-banking a
+replay golden hides a real pricing change, and re-banking a QUAD certificate
+means RE-PRICING its cells, not re-hashing them, because a certificate
+covers only the configuration it names. This is the base branch's debt and
+it should be settled there, on purpose, not absorbed silently by a merge
+whose own subject is something else.
+
 What remains open, with the measured evidence in `quad-readout/README.md`:
 
 - **the budget, but NOT the one proposed here.** Earlier drafts of this
