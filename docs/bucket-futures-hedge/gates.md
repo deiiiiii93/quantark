@@ -159,7 +159,12 @@ are the pre-existing `quantark.backtest.otc` import aliases.
 ### Post-merge gate status
 
 After merging the base on 2026-09-11, all four recorded suites were re-run.
-The ONLY change anywhere is the three inherited replay goldens:
+The ONLY change anywhere is the three inherited replay goldens.
+
+*These numbers are from BEFORE the 24 were settled. The three goldens have
+since been re-captured against a re-certified PDE, so B, C and D should now
+be green at 122, 128 and 658. I have not re-run them to confirm: the other
+session holds the tree while its last re-certification finishes.*
 
 | Suite | before the merge | after |
 |---|---|---|
@@ -863,14 +868,17 @@ frozen identity regression still reproduces 0.548283, so none of the Gate D
 evidence above moved. Re-measuring the lobe is now work, not a blocker.
 
 **The merge also inherits 24 failing tests, and they are the base's, not
-this branch's.** The full suite after merging is 24 failed, 8073 passed,
-120 skipped. All 24 sit in three files, and every one of them fails on the
-base commit `d926e1f5` with nothing from this branch present:
+this branch's.** *They were SETTLED on this branch later the same day; see
+"Settled: the 24 are fixed on this branch" below, which also corrects the
+third row of the table that follows.* The full suite after merging is 24
+failed, 8073 passed, 120 skipped. All 24 sit in three files, and every one
+of them fails on the base commit `d926e1f5` with nothing from this branch
+present:
 
 | Where | Count | Why |
 |---|---:|---|
 | `test_variant_case_builders.py::test_banked_cells_keep_their_identity` | 10 | `QuadParams.readout` arriving on the base moves every QUAD candidate identity hash |
-| `test_banked_certificates.py::test_banked_certification_still_describes_its_engines` | 11 | the same moved hashes |
+| `test_banked_certificates.py::test_banked_certification_still_describes_its_engines` | 11 | **NOT the same hashes — see the correction below.** These re-run engines and compare NUMBERS. They are the PDE greeks repair |
 | `test_replay_goldens.py::test_frame_matches_golden` | 3 | the PDE barrier-readout repair moves PDE deltas |
 
 Checked out at `d926e1f5` alone, those three files give 24 failed and 99
@@ -893,6 +901,103 @@ means RE-PRICING its cells, not re-hashing them, because a certificate
 covers only the configuration it names. This is the base branch's debt and
 it should be settled there, on purpose, not absorbed silently by a merge
 whose own subject is something else.
+
+*SUPERSEDED the same day. The 24 are settled, on this branch, with
+measurement rather than assertion. The caution in that paragraph was the
+right one and it is exactly what got discharged: nobody re-hashed anything
+that needed re-pricing. Read on.*
+
+### Settled: the 24 are fixed on this branch, and my attribution of 11 was wrong
+
+A second session working this worktree measured the question on 2026-09-11
+instead of reasoning about it, and settled all 24 here. The caution above was
+right — a certificate re-bank is a re-price, not a re-hash — and it is
+precisely what the measurement discharged.
+
+**Nothing that follows involves a price moving.** This is a GREEKS repair
+throughout. `pv` is bitwise identical everywhere it was checked: in the
+anchors per-quantity split, in the PDE `pv` aggregate bias row old against
+new, and in the replay goldens, where every price column held and only
+delta, gamma and their cash variants moved. A reader who takes "the PDE
+repair moved numbers" to mean prices moved has it wrong.
+
+**The 11 certificate failures were never the moved hashes.**
+`test_banked_certification_still_describes_its_engines` calls
+`assert_anchors`, which `anchors.py:225` documents as "Re-run the anchored
+engines and compare against the banked values". It imports no hash function
+at all. So those 11 always were the PDE greeks repair. The two
+modelvalidation families split the OPPOSITE way from each other, which is
+the whole trap:
+
+| Family | identity hash | banked `pv` | banked delta and gamma |
+|---|---|---|---|
+| every QUAD cell, 339 of them | MOVED | unchanged | unchanged |
+| every PDE cell, same count | unchanged | unchanged | MOVED |
+
+**`QuadParams.readout` is numerically inert, measured over all 678 banked
+cells.** 339 moved, every one explained by removing the single `readout` key
+from the identity dict, which restores the banked hash exactly, and
+re-pricing them returns bitwise-identical pv, delta and gamma. On the PDE
+side pv is bitwise identical and only delta and gamma move, which is exactly
+the signature of a greeks-readout repair rather than a pricing change.
+
+**The new golden value is the right one**, on evidence from a different
+engine family than the one under test. Full re-certification against the
+same seeded Monte Carlo benchmark moves the PDE mean signed delta bias from
+-0.002751 to -0.000859, a 3.2x reduction, with pv bias byte-identical and
+all six candidates ADMITTED over 306 cells with zero ERROR and zero
+UNRESOLVED. So 19.509487 is closer to Monte Carlo than 18.296472, and the
+golden was simply stale.
+
+**A fourth confirmation was sitting in this repository the whole time, and I
+missed it with a case-sensitive grep.** The `book` replay golden is a QUAD
+control: `test/replay_golden/fixtures.py:269` pins
+`EngineType.QUADRATURE` for it while the other two pin PDE. It stayed
+bitwise identical while both PDE frames moved on delta and gamma. The
+failing three are `scalar_bsm` twice and `localvol` once, with `book`
+absent, which fits. I had grepped that file for `Quad|quad`, found nothing,
+and told the other session there was no QUAD reference there. `QUADRATURE`
+is upper case. A negative from a grep is only as good as its pattern.
+
+### The tooling would have made this worse, in both directions at once
+
+`amend` was the wrong instrument here and `RELEASE_PROCEDURE` section 1 was
+routing people to it. Its carry-forward rule at `amendment.py:172` keys on
+IDENTITY ALONE. Against the split above that fails twice over: it would have
+re-priced the 339 QUAD cells whose values never moved, and carried forward
+every stale PDE cell whose values did. The routing table is corrected to
+send a config-level numerics change to `amend` and a code-level change to
+full certification.
+
+This is worth keeping as a general lesson and not just a fixed table. An
+identity hash answers "was this configured the same way", not "does this
+still compute the same number". Those two questions come apart whenever a
+code change moves values without moving configuration, which is what every
+engine repair does.
+
+### What was changed, and where it still needs to go
+
+- the three flat-BSM studies re-certified against the seeded MC benchmark
+  and banked at `<study>/2026-09-11`, plus `snowball-localvol-1d`;
+- a supersession mechanism: `superseded_by` and `superseded_reason` in a
+  retired `anchors.json`, `resolve_supersession()` in `anchors.py`, and both
+  guards skipping with a reason. It refuses the skip unless the successor is
+  banked AND covers every `(candidate, case, quantity)` the retired file
+  did, and a new test requires every study to keep one live directory;
+- the 10 old flat-BSM directories marked superseded. Nothing overwritten,
+  nothing deleted, `certificate.json` untouched so its `projected_sha256`
+  still verifies;
+- the 3 replay goldens re-captured, delta, gamma and their cash variants
+  only;
+- the retirement convention written into `RELEASE_PROCEDURE` section 4 and
+  the routing table corrected in section 1.
+
+**This is a merge-direction note, not a caveat on the evidence.** The
+evidence is real and it is in this tree. But the BASE branch carries the
+same debt and does not yet carry the fix. If it settles these artifacts
+independently it will conflict on the same files, and worse, it could bank
+them a different way. So this work needs to land on the base rather than
+living only here.
 
 What remains open, with the measured evidence in `quad-readout/README.md`:
 
