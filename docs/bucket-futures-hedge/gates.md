@@ -139,6 +139,11 @@ Two findings:
 
 **Result: 636 passed, 4 skipped, 131 s.** No golden was updated.
 
+Re-run on 2026-09-10 with the matched identity, adding
+`test/test_futures_carry_identity_quad.py` to the list above:
+**658 passed, 4 skipped, 178 s.** Still no golden updated. The two warnings
+are the pre-existing `quantark.backtest.otc` import aliases.
+
 ### Synthetic validation
 
 ```sh
@@ -147,6 +152,8 @@ Two findings:
 ```
 
 **Result: 7/7 required cases passed, exit 0, about 2 s, no vendor history.**
+Re-run under the matched identity on 2026-09-10: **7/7, 0 failed, 0
+inconclusive, exit 0.**
 
 ### Historical validation
 
@@ -156,7 +163,9 @@ Two findings:
   --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/validation
 ```
 
-**Result: 7/7 required cases passed on the real chain.**
+**Result: 7/7 required cases passed on the real chain.** Re-run under the
+matched identity on 2026-09-10: **7/7, 0 failed, 0 inconclusive**, on the
+same 2025-03-03 chain.
 
 Spot 6273.67 with four listed IM contracts at 0.049 / 0.126 / 0.299 / 0.548
 years, in steep backwardation. Under both conventions:
@@ -215,6 +224,11 @@ This confirms the design's section 10.3 estimate: four nodes add about 20
 pricing calls per day at one audit level, counting the eight bucket prices.
 
 #### Audit completeness: the audits did NOT pass
+
+*As of 2026-09-10 these 175 failures are resolved and re-attributed to
+1%-secant truncation. This subsection and the three after it are the record
+of how they were investigated, including two wrong conclusions. Skip to "The
+truncation hypothesis was right" for the outcome.*
 
 Every cell recorded 242 measured audit dates out of 243, and **175 of them
 report `fail`**. This is the same figure in all fourteen cells, including
@@ -309,7 +323,12 @@ about `(h_S^2 / 6) * [d3V/dS3 frozen - d3V/dS3 pinned]`. That predicts the
 residual scaling with `h_S^2`: a 4x smaller bump should shrink it about 16x,
 a 10x smaller bump about 100x.
 
-**This hypothesis was refuted too.** Shrinking the bump makes it WORSE:
+**This hypothesis was refuted too** — and the refutation is now itself
+retracted. See "The truncation hypothesis was right" below: the ladder
+shrank only ONE of the two steps, so it never tested the prediction it is
+about to reject. Read the table as a record of the mistake.
+
+Shrinking the bump makes it WORSE:
 
 | audit spot bump | fail | pass | mean abs identity | max abs identity | net delta audit error, mean |
 |---:|---:|---:|---:|---:|---:|
@@ -318,8 +337,12 @@ a 10x smaller bump about 100x.
 | 0.001 | 213 | 29 | 0.084353 | 1.337295 | 8.4e-02 |
 
 Predicted 16x and 100x reductions; observed 0.83x and 0.61x, i.e. increases.
-A residual that GROWS as the step shrinks is noise divided by a small step,
-not truncation.
+I concluded that a residual which GROWS as the step shrinks is noise divided
+by a small step, not truncation. That inference is invalid: the quadratic
+prediction applies to the residual of a CONSISTENTLY refined identity, and
+this ladder moved `h_F` while `h_D` stayed at 1%. Unmatching the two steps
+exposes a one-sided readout error that the matched difference cancels, which
+is what grows here.
 
 The last column is the decisive measurement. At the default the audit's spot
 bump is resolved from the pricing bump, so both are 1% and the "agreement"
@@ -385,13 +408,246 @@ increment, and hedge quantities round to whole contracts. The audit saw the
 staircase only because decoupling its spot bump took it below one cell —
 finer than the engine's own price grid.
 
-**Gate D is still NOT met**, and the tolerance was not touched. But the
-failure is now attributed rather than open: it is a property of the engine's
-readout, measured, and shown not to affect the hedge.
+**Gate D was NOT met at this point**, and the tolerance was not touched. The
+failure was attributed rather than open: on the reading current here, a
+property of the engine's readout, measured, and shown not to affect the
+hedge. That attribution was wrong, and the section below replaces it.
 
 ---
 
-## Open item
+## The truncation hypothesis was right, and the audit now refines both steps
+
+Everything above this line is the record as it stood before 2026-09-10. The
+identity failure is resolved; the retracted sections are kept because the
+readings in them were mine and every one was reached from real measurements.
+
+The residual is
+`R = [e_D(h_D) - e_DF(h_F) - sum_i (F_i/S) e_i(b_i)] / m_ref`, where each `e`
+is that estimator's error against the local derivative of the SAME pricing
+function. A quadratic collapse is predicted only when the steps that appear
+in it are refined TOGETHER. They never were:
+
+- `delta_q` is the engine's own delta Greek at the engine's own `BumpConfig`
+  bump (`equity/engine/base_engine.py:243`), effectively 1%, and is exactly invariant to
+  every audit setting;
+- only `delta_f_direct` followed `audit_spot_bump_rel`.
+
+At the 1% default the two coincided, so the check looked matched and the
+sawtooth cancelled. Every ladder that tried to refine it moved one side
+alone. That is why refinement made the residual worse, and why the growth
+was misread twice: first as price noise, then as a knock-in surface defect.
+
+Repricing BOTH spot directions at a matched, refined step closes it. On the
+worst date, 2024-01-19, with buckets held at their original +/-1 point:
+
+| Matched spot bump | Legacy R, hands | Transition R, hands | Transition ratio |
+|---:|---:|---:|---:|
+| 0.01 | +0.548283264 | +0.560638806 | — |
+| 0.005 | +0.119140657 | +0.138641085 | 4.04 |
+| 0.0025 | +0.018561785 | +0.034530597 | 4.02 |
+| 0.001 | -0.005966028 | +0.005479909 | 6.30 |
+| 0.0001 | -0.000107683 | +0.000006701 | — |
+| 0.00005 | -0.000063298 | -0.000034756 | — |
+
+The ratio column is each row against the one above it, and it is `h^2` to
+two digits under `transition`. The two halvings predict 4 and give 4.04 and
+4.02. The 0.0025 to 0.001 step is a factor of 2.5, so it predicts 6.25 and
+gives 6.30. That is the convergence the earlier ladder was built to test and
+never did. Under `legacy_linear` it converges too but not monotonically,
+because the staircase adds a non-smooth component of its own.
+
+Below about `0.0001` both readouts stall against a floor. It is the FIXED
++/-1 point quote bump in the bucket sum, not the spot steps: Richardson the
+two spot derivatives alone and the residual settles at -4.850e-05 hands
+under legacy and -4.858e-05 under transition, agreeing to three digits
+precisely because it is a quote-bump error and the readout has nothing to do
+with it. Extrapolate the bucket sum as well, from +/-1 and +/-0.5 point
+quote bumps, and the chain identity closes:
+
+| Fully extrapolated chain residual | hands |
+|---|---:|
+| legacy_linear | +1.6e-10 |
+| transition | +2.0e-10 |
+
+So the chain rule, the bucket vector and the engine's own delta are mutually
+consistent, and the 0.548 hands was the truncation of a 1% secant taken
+where the third derivative is large. The production ladder,
+`(0.001, 0.0005, 0.00025)`, sits above that quote-bump floor by design.
+
+### What the pre/post-knock-in split did and did not show
+
+The 71x collapse at knock-in is real and reproduces. It localises the
+residual, and I read that as identifying the live KI barrier as the cause.
+It does not: a live daily-monitored knock-in barrier is also exactly where
+`d3V/dS3` is largest, so a 1% secant truncates most there. The split is
+consistent with BOTH hypotheses and discriminates between neither. The
+matched ladder does discriminate, because truncation is the only one of the
+two that obeys `h^2`.
+
+The corollary matters for the near-barrier work: **the identity residual was
+never evidence for the delta lobe.** They are not one defect after all. The
+lobe stands or falls on its own bump-free comparison against a validated
+reference, which this branch still cannot run.
+
+### The implementation
+
+`audit_held_book` now recomputes both spot derivatives at each of
+`identity_spot_bumps_rel = (0.001, 0.0005, 0.00025)`, four price calls per
+level, twelve per audited date. The supplied bucket vector is RETAINED, so a
+wrong bucket still fails rather than being replaced by a freshly sampled
+correct one. Let `R` be the finest matched residual and `E` the absolute
+change from the previous level. The identity passes only when
+`abs(R) + E <= 0.01`, fails when `abs(R) - E > 0.01`, and is otherwise
+inconclusive. `E` is an observed refinement allowance, not an error bound.
+
+The bumps are configurable through `CarryRiskSettings` and
+`--identity-spot-bumps-rel`, and they enter the study fingerprint.
+
+Nothing about pricing, hedge sizing, the 1% pricing bump or the tolerance
+changed. Three diagnostics are added and reported, none of them gated:
+`finite_bump_identity_residual_hands` reproduces the original quantity,
+`pricing_delta_local_gap_hands` is the reported hedge delta minus the finest
+local delta, and `identity_ladder` carries every level.
+
+### Historical validation against the archived books
+
+`verify_identity_fix.py` runs the production `audit_held_book` over every
+archived live state of both front controls, using the actual held quantities
+and the saved pricing Greeks. Product, coupon and market state are rebuilt
+first, and every base PV matches the archive before any saved Greek is
+reused. No hedge is replayed or changed.
+
+| Curve | Live dates | Overall passes | Max abs R | Max abs(R)+E | Max base PV error |
+|---|---:|---:|---:|---:|---:|
+| Flat zero q | 242 | 242 | 0.002196 | 0.004340 | 1.6e-6 CNY |
+| Flat forward carry | 242 | 242 | 0.001994 | 0.003947 | 1.5e-6 CNY |
+
+Net-delta reproduction stayed below 4.9e-11 hands and every nodal and
+parallel rho-q error below 0.000097 bp. On 2024-02-05 the flat-q local audit
+now passes while its 1% pinned scenario still records `inconclusive:
+dividend yield magnitude must be <= 1.0`, which accounts for the one
+archived date that had no finite residual.
+
+The check keeps its teeth on that same real state rather than only on the
+linear fixture. Perturbing the front bucket by 0.02 hands, twice the budget,
+fails the identity; a reported hedge delta wrong by 0.05 hands fails the
+separate net-delta reproduction check.
+
+Evidence: `quad-readout/identity-fix.md`, `identity-review.md`,
+`identity_fix_flat_q.csv`, `identity_fix_flat_forward.csv`, and the frozen
+regression `test/test_futures_carry_identity_quad.py`, which needs no market
+cache and reproduces the original 0.548283-hand residual under both readouts.
+
+### The subset, re-run
+
+```sh
+.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \
+  --study-grid buckets --max-inceptions 1 --workers 6 \
+  --carry-audit-mode daily --record-carry-exposure \
+  --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/subset_matched \
+  --resume
+```
+
+A NEW output directory on purpose. `identity_spot_bumps_rel` is in
+`RISK_FINGERPRINT_KEYS`, so no banked cell resumes and `--resume` into the
+original `subset` would have re-run all fourteen in place — destroying the
+archive that `verify_identity_fix.py` reads. The pre-fix run stays where it
+is.
+
+**Result: 14 cells ran, 14 ok, 0 failed.** Every cell now reports
+`all_measured_passed: true`, against `false` in every pre-fix cell.
+
+| | pass | fail | not measured | inconclusive |
+|---|---:|---:|---:|---:|
+| pre-fix, `term_flat_q` cells | 66 | 175 | 1 | 1 |
+| pre-fix, `term_flat_fwd` cells | 66 | 176 | 1 | 0 |
+| post-fix, every cell | 242 | 0 | 1 | 0 |
+
+The one remaining `not_measured` date is the terminal date, as before.
+
+Leg rows follow, and their totals differ between policies because a bucket
+book carries more eligible node rows than a single-contract control. What is
+uniform is the verdict: **no leg row fails or is inconclusive in any cell**,
+against 655 to 664 failures per cell before, and four inconclusive rows in
+seven of the fourteen.
+
+The identity numbers reproduce the offline replay to six decimals, which is
+worth stating because those are separate code paths — the recorder inside
+the replay loop, and `verify_identity_fix.py` rebuilding archived states:
+
+| Over 242 dates | max abs R | mean abs R | max abs(R)+E |
+|---|---:|---:|---:|
+| every `term_flat_q` cell | 0.002196 | 0.000102 | 0.004340 |
+| every `term_flat_fwd` cell | 0.001994 | 0.000090 | 0.003947 |
+
+Both agree with `identity_fix_flat_q.csv` and `identity_fix_flat_forward.csv`
+to every digit printed here.
+
+It is byte-identical across all seven policies of a q-model, as it was
+before. That has to hold: the identity is the only check with no holdings in
+it.
+
+#### The re-run changed nothing that is priced or traded
+
+Diffed cell by cell against the pre-fix archive. `states.csv`, `trades.csv`,
+`actions.csv`, `rebalances.csv`, `greeks.csv` and `hedge_stresses.csv` are
+BYTE identical in every cell, and `final_total_pnl` is bit-identical. Only
+three kinds of value moved:
+
+- the audit verdicts;
+- `identity_residual_hands`, which is now the matched-ladder residual rather
+  than the 1% secant. That is the fix;
+- five fields on ONE date, 2024-02-05, under the flat-q curve only, which
+  were NaN because the old 1% pinned scenario aborted on the dividend yield
+  range and are now genuinely measured. Their nodal rho-q audit errors land
+  between 1e-10 and 1e-7 bp against a 0.01 bp tolerance.
+
+That last one is coverage going UP. Four leg rows and one attribution row
+per flat-q cell stop being unmeasurable. The flat-forward cells never had
+the abort and recover nothing.
+
+#### Cost, measured in price calls rather than seconds
+
+**Per-cell wall clock is NOT comparable between these two runs.** The
+original subset ran on two workers and this one on six, so contention
+differs and the per-cell seconds cannot be divided. Two flat-forward cells
+even came out FASTER post-fix, which is contention, not a speedup. Ratios
+taken from those columns would be meaningless.
+
+Price calls are deterministic and are the right measure. From `carry_cost()`
+on `term_flat_q__front`, 242 audited dates:
+
+| Stage | pre-fix calls | post-fix calls |
+|---|---:|---:|
+| bucket sampling | 1824 | 1824 |
+| direct audit | 3744 | 6662 |
+| finite stresses | 968 | 968 |
+| **total** | **6536** | **9454** |
+
+The bucket and stress stages are IDENTICAL, which is its own confirmation
+that the change is confined to the audit. The audit stage costs 1.78x, the
+whole run 1.45x, and the difference works out at 12.06 calls per audited
+date — the twelve of the ladder, plus the node-count variation the audit
+already had.
+
+Extrapolating the full primary grid at the run-level 1.45x, 406 cells cost
+roughly 130 CPU-hours rather than 90.
+
+For the record and not as a ratio: this run took 3242 s of wall clock on six
+workers; the original took 6059 s on two.
+
+**Gate D is met**, on this one inception, for the audit criteria it states.
+The tolerance was never touched and no golden was regenerated.
+
+---
+
+## Open item — SUPERSEDED 2026-09-10
+
+**Superseded by the matched-identity section above, and kept for the two
+readings it retracts.** Its premise, that the audit measures the spot
+derivative below one grid cell and therefore cannot certify anything, does
+not survive: at a matched step BOTH derivatives sit inside the same cell and
+the staircase cancels between them.
 
 No tested setting certifies this product on this engine, and none will while
 the audit measures the spot derivative below one grid cell. Every subset
@@ -463,6 +719,14 @@ projection error is what alignment exists to prevent.
 
 ### The audit cannot see the staircase at its own bump, and the ladder above misled me
 
+*This section holds up and is the one that got closest. It establishes that
+`delta_q` is invariant to the audit bump and that the staircase cancels
+between matched steps. What it missed is that a MATCHED pair still carries
+truncation, because the two directions have different third derivatives. It
+therefore stopped one step short of the answer, and went looking for a
+surface defect instead. The `subset_transition` figures quoted below are
+pre-fix and stale for the same reason as the primary subset.*
+
 The subset has now been re-run entirely under `readout="transition"`
 (`bucket_hedge_v2/subset_transition`). Every cell's verdict is unchanged. On
 `term_flat_q__front` the two runs agree to the leg row: 66 pass, 175 fail,
@@ -491,7 +755,7 @@ the same amount, so the residual barely moves and no verdict flips.
 The second row says why the ladder ever showed anything. `delta_f_derived`
 is EXACTLY invariant to the audit bump, to every digit, because `delta_q` is
 the engine's own delta Greek at the engine's own `BumpConfig` bump
-(`base_engine.py:245`) and never the audit's. Only `delta_f_direct` follows
+(`equity/engine/base_engine.py:243`) and never the audit's. Only `delta_f_direct` follows
 `audit_spot_bump_rel`. Shrinking the audit bump therefore unmatches the two
 steps and exposes the staircase on one side alone.
 
@@ -513,7 +777,13 @@ growth was real, and following it did find a real engine defect which is now
 fixed. But the growth was an artefact of the probe unmatching the two bumps.
 The audit, at its own settings, was never failing on the staircase.
 
-### What is left is the live knock-in barrier, and nothing else
+### What is left is the live knock-in barrier, and nothing else — RETRACTED
+
+The split below is correct and reproduces. The conclusion drawn from it is
+not: a live daily-monitored knock-in barrier is also where `d3V/dS3` is
+largest, so 1%-secant truncation predicts exactly the same localisation.
+The measurement never separated the two. See "What the pre/post-knock-in
+split did and did not show" above.
 
 Splitting the residual on the lifecycle flag the run already records
 (`quad-readout/residual_by_ki_state.py`) localizes it completely:
@@ -537,6 +807,12 @@ the daily-monitored knock-in barrier.
 That is the same object as the near-barrier delta lobe — a knock-in-barrier
 property, identical under both readouts, resistant to refinement — so there
 is one open defect here rather than two.
+
+**Both sentences above are withdrawn.** "Resistant to refinement" was only
+ever true of the mismatched ladder; the matched one collapses quadratically.
+And with the residual explained as truncation, nothing ties it to the lobe.
+There is one open defect here, the lobe, and the identity is not evidence
+for it.
 
 Two hypotheses died, and both were mine:
 
@@ -587,3 +863,25 @@ closely in every cell, which is the readout being irrelevant again.
   regenerated. Whether the staircase matters elsewhere in the library — the
   KI-probability readouts at `snowball_quad_engine.py:1227` go through the
   same `interpolate` — was not investigated.
+- **The identity does not certify the delta.** Its `D` term is now a
+  repriced matched-step derivative, so the engine's own Greek left the gated
+  equation. What still constrains that Greek is the net-delta reproduction
+  check, which confirms it IS a 1% secant of this pricer and nothing more.
+  Closure is internal consistency of one numerical surface, not accuracy.
+- **The 1% secant's own gap is measured but NOT gated.**
+  `pricing_delta_local_gap_hands` is the reported hedge delta minus the
+  finest local delta, over the 242 archived flat-q dates:
+
+  | | hands |
+  |---|---:|
+  | mean | 0.176 |
+  | max | 0.887 |
+  | dates above the 0.01 budget | 229 |
+
+  Gating it would fail 95% of dates. It is left ungated because a 1% secant
+  is the desk's hedge convention rather than an approximation to the local
+  slope, and because 0.18 contracts sits inside the 1-contract trading
+  increment against a 91-contract position — the same argument used for the
+  staircase, now with the quantity itself on the record. If that convention
+  is ever revisited, this column is where the cost of it is already written
+  down.
