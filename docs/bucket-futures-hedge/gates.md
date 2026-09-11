@@ -1011,8 +1011,37 @@ each.
 So on this repository **`git status` is not a completeness check.** Anything
 under an exclusion is invisible to it, and a "nothing is lost" verification
 built on its output silently omits exactly the files that took longest to
-produce. Use `git ls-files <glob>` for what is tracked and an explicit
-directory listing for what is not.
+produce. Use `git ls-files` for what is tracked and an explicit directory
+listing for what is not.
+
+The hiding and the value are CORRELATED, not independent: the same `/docs/`
+exclude that makes these files invisible to `git status` is what makes them
+need `git add -f` in the first place. So this failure mode does not lose a
+random file, it selects for the most expensive one available.
+
+**And quote the pathspec, which is its own trap.** Measured on this tree,
+all four combinations of quoting and trailing `/*`:
+
+| Command | Result |
+|---|---:|
+| `git ls-files docs/…/*/2026-09-11` | 16 |
+| `git ls-files 'docs/…/*/2026-09-11'` | **0** |
+| `git ls-files 'docs/…/*/2026-09-11/*'` | 16 |
+| `git ls-files docs/…/*/2026-09-11/*` | 16 |
+
+Unquoted, the SHELL expands the wildcard and hands git a list of literal
+directories, which it lists. Quoted, GIT matches the pattern, and a git
+pathspec names files rather than directories, so a directory pattern matches
+nothing. Both behaviours are correct; they are two different tools doing the
+matching, and the quoting silently decides which.
+
+Quote it, so one predictable semantics applies, and then remember a pathspec
+names files. An unquoted glob also changes behaviour depending on whether
+anything matched at all, which is the worst property a verification command
+can have. The general form: **a zero from a pattern means "this pattern
+matched nothing", never "nothing is there"**, and the two cannot be
+distinguished without a second check of a different shape. Same family as
+the case-sensitive grep above.
 
 ### What was changed, and where it still needs to go
 
