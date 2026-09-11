@@ -1085,11 +1085,53 @@ That is what establishes `25d4f7d6` as a Greeks-readout repair rather than a
 pricing change, and it is what retires the earlier note in this file that
 the new golden value had not been independently verified.
 
-So **all 24 are settled**, with one confirmation still outstanding: the
-three originally-failing files have not yet been re-run end to end, which is
-the direct answer to "are the 24 fixed" as opposed to the four gate suites
-and the anchor guard agreeing that they are. That run and a full-suite sweep
-are in flight and are not recorded here yet.
+### Measured directly, twice, and the books balance
+
+The two outstanding runs landed, so "all 24 settled" no longer rests on four
+suites agreeing:
+
+| Run | Result |
+|---|---|
+| the three originally-failing files, end to end, `-n0` | 116 passed, 28 skipped, **0 failed**, 1321 s |
+| full sweep, `-n auto` under `caffeinate` | 8090 passed, 142 skipped, **0 failed**, 1116 s |
+
+Against the pre-fix baseline of 24 failed, 8073 passed, 120 skipped:
+
+| | before | after | delta |
+|---|---:|---:|---:|
+| total | 8217 | 8232 | +15 |
+| passed | 8073 | 8090 | +17 |
+| skipped | 120 | 142 | +22 |
+| failed | 24 | 0 | -24 |
+
+The +15 is 7 tests added, being 6 supersession unit tests and the
+study-liveness guard, plus 8 new parametrised cases, one per guard for each
+of the 4 newly banked directories. Nothing is left over.
+
+**But 21 of the 24 are now SKIPS, not passes, and the record should say so.**
+Both guards call `pytest.skip` on a retired directory rather than asserting
+anything. So the 24 resolve as:
+
+| Former failure | How it resolves now |
+|---|---|
+| 3 replay goldens | re-captured, and genuinely PASS |
+| 21 anchor and identity guards | their directories are retired, so they SKIP with a recorded reason |
+
+A skip is not a pass, and the distinction is the whole point of this file.
+What makes it sound here rather than a way of quieting a red suite is that
+the coverage MOVED rather than vanished: the successors are in `BANKED` and
+checked in their own right by the 8 new cases, and `resolve_supersession`
+refuses the skip unless the successor covers every
+`(candidate, case, quantity)` the retired file anchored. The skip is
+therefore a statement that something else now carries the check, and it is
+enforced, not asserted.
+
+One further test moved from pass to skip, which is what makes the arithmetic
+close: `snowball-localvol-1d` passed the identity guard before, because it
+is a PDE study whose identity never moved, while failing the anchor guard,
+because its values did. Retirement now skips both. So passed is +3 goldens,
++15 new, -1 localvol identity, giving +17, and skipped is +21 failures plus
+that 1, giving +22. Every number is accounted for and none is left over.
 
 What remains open, with the measured evidence in `quad-readout/README.md`:
 
