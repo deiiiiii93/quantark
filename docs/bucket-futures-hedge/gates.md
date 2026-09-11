@@ -161,10 +161,12 @@ are the pre-existing `quantark.backtest.otc` import aliases.
 After merging the base on 2026-09-11, all four recorded suites were re-run.
 The ONLY change anywhere is the three inherited replay goldens.
 
-*These numbers are from BEFORE the 24 were settled. The three goldens have
-since been re-captured against a re-certified PDE, so B, C and D should now
-be green at 122, 128 and 658. I have not re-run them to confirm: the other
-session holds the tree while its last re-certification finishes.*
+*These numbers are from BEFORE the 24 were settled, and are left here as the
+pre-fix state. The three goldens have since been re-captured against a
+re-certified PDE. B, C and D have NOT been re-run end to end since, so this
+file deliberately carries no post-fix figure for them rather than one
+inferred by arithmetic from the rows above. Measured numbers replace this
+note when the other session, which holds the tree, hands them over.*
 
 | Suite | before the merge | after |
 |---|---|---|
@@ -998,6 +1000,29 @@ same debt and does not yet carry the fix. If it settles these artifacts
 independently it will conflict on the same files, and worse, it could bank
 them a different way. So this work needs to land on the base rather than
 living only here.
+
+**Retired anchors and their successors must travel together.** In a commit,
+a cherry-pick or a rebase, always both. `resolve_supersession` RAISES rather
+than skipping when a named successor is missing, so any test that reaches a
+retired `anchors.json` without it fails loudly. That is deliberate, and it
+is the safety net for the `/docs/` exclusion in `.git/info/exclude`: if the
+`2026-09-11` directories are ever committed without `git add -f`, ten tests
+fail with "not banked" instead of silently passing. The cost of that safety
+is the coupling, so move them as a unit.
+
+**Verified so far, measured, with one outstanding:**
+
+| Run | Result |
+|---|---|
+| modelvalidation suite minus the slow anchor re-runs | 366 passed, 13 skipped, 15 deselected |
+| the anchor guard itself | 1 failed, 12 passed, 10 skipped |
+
+The single failure is `snowball-localvol-1d/2026-08-28`, whose
+re-certification was still running, and it carries the same signature as
+everything else here: delta and gamma listed, `pv` absent. The three new
+`2026-09-11` directories re-run bitwise exact, `adi2d` is untouched and
+green, and the 10 retired ones skip. So **23 of the 24 are settled and
+verified**, with only the localvol anchor outstanding.
 
 What remains open, with the measured evidence in `quad-readout/README.md`:
 
