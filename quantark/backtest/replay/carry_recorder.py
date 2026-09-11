@@ -577,6 +577,21 @@ class CarryExposureRecorder:
                     else NAN
                 ),
                 "identity_residual_hands": audit.identity_residual_hands,
+                "finite_bump_identity_residual_hands": audit.finite_bump_identity_residual_hands,
+                "finite_bump_identity_status": audit.finite_bump_identity_status,
+                "finite_bump_identity_reason": audit.finite_bump_identity_reason,
+                "pricing_delta_local_gap_hands": audit.pricing_delta_local_gap_hands,
+                "identity_spot_refinement_error_hands": audit.identity_spot_refinement_error_hands,
+                "identity_status": audit.identity_status,
+                "identity_ladder": json.dumps([
+                    {
+                        "spot_bump_rel": sample.spot_bump_rel,
+                        "delta_q_hands": sample.delta_q_direct / m_ref,
+                        "delta_f_hands": sample.delta_f_direct / m_ref,
+                        "residual_hands": sample.residual_hands,
+                    }
+                    for sample in audit.identity_samples
+                ]),
                 "direct_net_delta_hands": (
                     spot_delta_hands(audit.direct_net_delta, m_ref)
                     if audit.measured and math.isfinite(audit.direct_net_delta)

@@ -325,6 +325,7 @@ def test_settings_defaults_match_the_plan_table():
     assert settings.futures_bump_points == 1.0
     assert settings.audit_spot_bump_rel is None
     assert settings.audit_yield_bump == 1e-4
+    assert settings.identity_spot_bumps_rel == (0.001, 0.0005, 0.00025)
     assert settings.delta_tolerance_hands == 0.01
     assert settings.rhoq_tolerance_bp == 0.01
     assert settings.stress_dates == ()
@@ -361,6 +362,12 @@ def test_unresolved_settings_cannot_be_used_for_reporting():
         {"audit_yield_bump": 0.0},
         {"audit_yield_bump": -1e-4},
         {"audit_spot_bump_rel": 0.0},
+        {"identity_spot_bumps_rel": (0.001, 0.0005)},
+        {"identity_spot_bumps_rel": (0.001, 0.0005, 0.0)},
+        {"identity_spot_bumps_rel": (0.001, 0.0005, float("nan"))},
+        {"identity_spot_bumps_rel": (0.001, 0.001, 0.0005)},
+        {"identity_spot_bumps_rel": (0.00025, 0.0005, 0.001)},
+        {"identity_spot_bumps_rel": (1.0, 0.01, 0.001)},
         {"delta_tolerance_hands": -0.01},
         {"rhoq_tolerance_bp": -0.01},
         {"reference_notional": 0.0},

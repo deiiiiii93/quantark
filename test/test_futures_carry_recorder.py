@@ -141,6 +141,11 @@ def test_a_bucket_run_reports_direct_measurements_next_to_the_mapped_ones():
     _, results = run()
     row = results.hedge_attribution_df().iloc[0]
     assert row["audit_status"] == "pass"
+    assert row["identity_status"] == "pass"
+    import json
+    ladder = json.loads(row["identity_ladder"])
+    assert len(ladder) == 3
+    assert ladder[-1]["residual_hands"] == pytest.approx(row["identity_residual_hands"])
     assert row["objective"] == "spot_parallel"
     for column in (
         "direct_net_delta_hands",
@@ -575,7 +580,7 @@ def test_the_run_measures_its_own_carry_cost_by_stage():
     # Buckets: one base plus two prices per node, per day.
     assert cost["bucket_price_calls"] == 36
     # Audits: 14 a day on three nodes, 12 once the front contract retires.
-    assert cost["audit_price_calls"] == 4 * 14 + 3 * 12
+    assert cost["audit_price_calls"] == 4 * (14 + 12) + 3 * (12 + 12)
     # Stresses: two holdings kinds x two tail scenarios x two prices.
     assert cost["stress_price_calls"] == 7 * 2 * 2 * 2
     for key in ("bucket_seconds", "audit_seconds", "stress_seconds", "record_seconds"):

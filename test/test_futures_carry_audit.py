@@ -481,7 +481,75 @@ def test_the_audit_records_its_effective_bumps_and_price_count():
     assert result.reference_multiplier == 1.0
     # Two pinned spot prices, two frozen spot prices, two per node, two
     # parallel and two product-only parallel.
-    assert result.price_calls == 4 + 2 * len(ctx.quotes) + 4
+    assert result.price_calls == 4 + 2 * len(ctx.quotes) + 4 + 4 * 3
+    assert len(result.identity_samples) == 3
+    assert result.identity_samples[-1].spot_bump_rel == 0.00025
+
+
+def test_nonlinear_identity_refines_both_deltas_without_changing_hedge_delta():
+    """W(S,F)=0.1*S*F1**2 has a mixed cubic term along fixed-q spot bumps.
+
+    Its 1% delta has a known 0.1-hand secant error. Buckets and pinned
+    spot delta are exact central differences, so an exact chain check must
+    not mix that 1% delta with the local bucket derivative.
+    """
+    ctx = context()
+    settings = replace(SETTINGS, audit_spot_bump_rel=0.01)
+
+    def price_at(s, div):
+        f = s * math.exp((RATE - div.get_yield(TENORS[0])) * TENORS[0])
+        return 0.1 * s * f * f
+
+    pricing_delta = direct_frozen_curve_book_delta(price_at, ctx, {}, 1.0)
+    risk = FuturesBookRisk(SPOT, pricing_delta, buckets_of(ctx, sample_buckets(price_at, ctx, 1.0)))
+    result = audit_held_book(price_at, ctx, risk, {}, settings=settings)
+    assert result.status == "pass"
+    assert result.identity_status == "pass"
+    assert result.finite_bump_identity_residual_hands == pytest.approx(0.1, abs=1e-8)
+    assert result.pricing_delta_local_gap_hands == pytest.approx(0.0999375, abs=1e-8)
+    assert [s.residual_hands for s in result.identity_samples] == pytest.approx(
+        [0.001, 0.00025, 0.0000625], abs=1e-8
+    )
+    assert risk.delta_q == pytest.approx(3000.1, abs=1e-8)
+    assert abs(result.net_delta_audit_error_hands) < 1e-9
+
+    # A wrong reported hedge Greek still fails its own reproduction check,
+    # even though the separately measured local chain identity closes.
+    bad = audit_held_book(price_at, ctx, replace(risk, delta_q=pricing_delta + 0.2),
+                          {}, settings=settings)
+    assert bad.status == "fail"
+    assert bad.identity_status == "pass"
+    assert bad.net_delta_audit_error_hands == pytest.approx(-0.2, abs=1e-8)
+
+
+def test_unstable_matched_identity_is_inconclusive_even_when_last_residual_is_zero(monkeypatch):
+    from quantark.backtest.replay import carry_risk
+
+    samples = tuple(carry_risk.IdentitySample(h, 1.5, 1., r) for h, r in
+                    zip(SETTINGS.identity_spot_bumps_rel, (0.05, 0.03, 0.0)))
+    monkeypatch.setattr(carry_risk, "sample_chain_identity", lambda *args: samples)
+    result = audit_held_book(linear_pricer(), context(), measured_risk(), {}, settings=SETTINGS)
+    assert result.identity_residual_hands == 0.0
+    assert result.identity_status == "inconclusive"
+    assert result.status == "inconclusive"
+
+
+def test_unavailable_large_pinned_bump_does_not_hide_valid_local_measurements():
+    base = linear_pricer()
+    ctx = context()
+    settings = replace(SETTINGS, audit_spot_bump_rel=.01)
+
+    def price_at(s, div):
+        if abs(s - SPOT) > .5 and abs(div.get_yield(TENORS[0]) - RATE) > .01:
+            raise ValidationError("large pinned spot scenario outside supported yield range")
+        return base(s, div)
+
+    result = audit_held_book(price_at, ctx, measured_risk(), {}, settings=settings)
+    assert result.status == "pass"
+    assert result.identity_status == "pass"
+    assert result.finite_bump_identity_status == "inconclusive"
+    assert math.isnan(result.finite_bump_identity_residual_hands)
+    assert "supported yield range" in result.finite_bump_identity_reason
 
 
 def test_a_wide_confidence_interval_is_inconclusive_not_a_pass():

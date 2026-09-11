@@ -346,6 +346,7 @@ def test_a_legacy_task_fingerprint_is_unchanged_by_the_new_block():
         ["--hedge-ratio", "0.5"],
         ["--futures-bump-points", "0.5"],
         ["--audit-spot-bump-rel", "0.002"],
+        ["--identity-spot-bumps-rel", "0.002", "0.001", "0.0005"],
         ["--audit-yield-bump", "5e-5"],
         ["--delta-tolerance-hands", "0.02"],
         ["--rhoq-tolerance-bp", "0.02"],

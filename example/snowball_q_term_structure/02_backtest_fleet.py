@@ -194,6 +194,7 @@ RISK_FINGERPRINT_KEYS = (
     "hedge_ratio",
     "futures_bump_points",
     "audit_spot_bump_rel",
+    "identity_spot_bumps_rel",
     "audit_yield_bump",
     "delta_tolerance_hands",
     "rhoq_tolerance_bp",
@@ -237,6 +238,9 @@ def _carry_settings(risk: Dict[str, Any]):
         reference_notional=float(risk.get("reference_notional", C.NOTIONAL)),
         futures_bump_points=float(risk.get("futures_bump_points", 1.0)),
         audit_spot_bump_rel=risk.get("audit_spot_bump_rel"),
+        identity_spot_bumps_rel=tuple(risk.get(
+            "identity_spot_bumps_rel", CarryRiskSettings().identity_spot_bumps_rel
+        )),
         audit_yield_bump=float(risk.get("audit_yield_bump", 1e-4)),
         delta_tolerance_hands=float(risk.get("delta_tolerance_hands", 0.01)),
         rhoq_tolerance_bp=float(risk.get("rhoq_tolerance_bp", 0.01)),
@@ -487,6 +491,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     risk.add_argument("--hedge-ratio", type=float, default=1.0)
     risk.add_argument("--futures-bump-points", type=float, default=1.0)
     risk.add_argument("--audit-spot-bump-rel", type=float, default=None)
+    from quantark.backtest.futures_risk import CarryRiskSettings
+    risk.add_argument(
+        "--identity-spot-bumps-rel", type=float, nargs="+",
+        default=CarryRiskSettings().identity_spot_bumps_rel,
+        help="descending matched spot-bump ladder for the chain identity (at least 3)",
+    )
     risk.add_argument("--audit-yield-bump", type=float, default=1e-4)
     risk.add_argument("--delta-tolerance-hands", type=float, default=0.01)
     risk.add_argument("--rhoq-tolerance-bp", type=float, default=0.01)
@@ -531,6 +541,7 @@ def resolve_risk_profile(args) -> Dict[str, Any]:
         "hedge_ratio": float(args.hedge_ratio),
         "futures_bump_points": float(args.futures_bump_points),
         "audit_spot_bump_rel": args.audit_spot_bump_rel,
+        "identity_spot_bumps_rel": list(args.identity_spot_bumps_rel),
         "audit_yield_bump": float(args.audit_yield_bump),
         "delta_tolerance_hands": float(args.delta_tolerance_hands),
         "rhoq_tolerance_bp": float(args.rhoq_tolerance_bp),

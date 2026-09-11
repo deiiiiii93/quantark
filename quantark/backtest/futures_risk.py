@@ -349,8 +349,20 @@ class CarryRiskSettings:
     stress_dates: Tuple[datetime, ...] = ()
     tail_shifts: Tuple[float, ...] = (-0.01, 0.01)
     shape_shifts: Tuple[float, ...] = (-0.01, 0.01)
+    # Independent of the pricing/hedge bump: BOTH spot derivatives in the
+    # chain identity are repriced at every level of this descending ladder.
+    identity_spot_bumps_rel: Tuple[float, ...] = (0.001, 0.0005, 0.00025)
 
     def __post_init__(self) -> None:
+        identity_bumps = tuple(
+            _positive(bump, "identity_spot_bumps_rel")
+            for bump in self.identity_spot_bumps_rel
+        )
+        if len(identity_bumps) < 3 or any(b >= 1.0 for b in identity_bumps):
+            raise ValidationError("identity_spot_bumps_rel needs at least three bumps below 1")
+        if any(a <= b for a, b in zip(identity_bumps, identity_bumps[1:])):
+            raise ValidationError("identity_spot_bumps_rel must be strictly decreasing")
+        object.__setattr__(self, "identity_spot_bumps_rel", identity_bumps)
         if self.reference_notional is not None:
             object.__setattr__(
                 self,

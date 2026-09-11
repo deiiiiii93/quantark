@@ -78,6 +78,7 @@ __all__ = [
     "AUDIT_STATUSES",
     "BucketSample",
     "CarryAuditResult",
+    "IdentitySample",
     "ProductCarryRisk",
     "aggregate_book_risk",
     "audit_held_book",
@@ -90,6 +91,7 @@ __all__ = [
     "not_measured_audit",
     "refinement_ladder",
     "sample_buckets",
+    "sample_chain_identity",
     "scenario_book_value",
     "stabilised",
     "status_from_interval",
@@ -408,13 +410,51 @@ def direct_parallel_rhoq(
 
 
 @dataclass(frozen=True)
+class IdentitySample:
+    """A matched spot-difference identity, in signed currency Greek units."""
+
+    spot_bump_rel: float
+    delta_q_direct: float
+    delta_f_direct: float
+    residual_hands: float
+
+
+def sample_chain_identity(
+    price_at: PriceAt,
+    context: CarryCurveContext,
+    risk: FuturesBookRisk,
+    settings: CarryRiskSettings,
+) -> Tuple[IdentitySample, ...]:
+    """Reprice BOTH spot directions at each step, keeping supplied buckets.
+
+    The hedge's pricing delta is intentionally not substituted into this
+    local derivative identity. The supplied buckets ARE retained: a wrong
+    bucket must remain visible rather than being replaced by an audit's
+    newly sampled, correct value. Exactly four price calls per level.
+    """
+    settings.require_resolved()
+    bucket_sum = sum(b.price / risk.spot * b.bucket_currency for b in risk.buckets)
+    samples = []
+    for bump in settings.identity_spot_bumps_rel:
+        step = bump * context.spot
+        delta_q = direct_frozen_curve_book_delta(price_at, context, {}, step)
+        delta_f = direct_pinned_delta(price_at, context, step)
+        samples.append(IdentitySample(
+            bump, delta_q, delta_f,
+            (delta_q - delta_f - bucket_sum) / settings.reference_multiplier,
+        ))
+    return tuple(samples)
+
+
+@dataclass(frozen=True)
 class CarryAuditResult:
     """Direct measurements next to the algebraic predictions for the SAME
     actual holdings, plus the separate question of what the policy intended.
 
-    ``status`` answers "are the Greeks right"; ``objective_achieved`` answers
-    "is the book neutral".  A ``nodes`` book is meant to keep ``D_F`` of spot
-    delta, so it can and should pass the first while failing the second.
+    ``status`` checks pricing-Greek reproduction and local chain consistency;
+    it does not certify Greeks against an external reference.
+    ``objective_achieved`` checks the policy's target. A ``nodes`` book is
+    meant to keep ``D_F`` of spot delta, so consistency does not imply neutrality.
     """
 
     status: str
@@ -441,6 +481,16 @@ class CarryAuditResult:
     price_calls: int = 0
     objective_achieved: Optional[bool] = None
     objective_reason: str = ""
+    # delta_f_direct retains its original audit/pricing bump. Only
+    # identity_samples uses the separate matched ladder. The old difference
+    # delta_f_derived - delta_f_direct remains observable in this diagnostic.
+    finite_bump_identity_residual_hands: float = float("nan")
+    finite_bump_identity_status: str = "not_measured"
+    finite_bump_identity_reason: str = ""
+    pricing_delta_local_gap_hands: float = float("nan")
+    identity_spot_refinement_error_hands: float = float("nan")
+    identity_status: str = "not_measured"
+    identity_samples: Tuple[IdentitySample, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in AUDIT_STATUSES:
@@ -510,6 +560,15 @@ def audit_held_book(
     settings.require_resolved()
     if holdings_kind not in ("actual", "ideal"):
         raise ValidationError(f"unknown holdings kind: {holdings_kind!r}")
+    original_price_at = price_at
+    price_calls = 0
+
+    def counted_price_at(spot, dividend):
+        nonlocal price_calls
+        price_calls += 1
+        return original_price_at(spot, dividend)
+
+    price_at = counted_price_at
     spot_step = float(settings.audit_spot_bump_rel) * context.spot
     yield_step = float(settings.audit_yield_bump)
     notional = float(settings.reference_notional)
@@ -518,7 +577,18 @@ def audit_held_book(
     mapped_delta, mapped_rho = held_book_risk(risk, holdings)
     mapped_parallel = sum(mapped_rho.values())
 
-    delta_f_direct = direct_pinned_delta(price_at, context, spot_step)
+    # The original (usually 1%) pinned spot move is now a diagnostic of the
+    # hedge convention, not the local identity's measurement. It may leave
+    # the curve's supported yield range even when the local ladder is valid.
+    # Retain an explicit unavailable status without withholding the core audit.
+    finite_bump_identity_status = "measured"
+    finite_bump_identity_reason = ""
+    try:
+        delta_f_direct = direct_pinned_delta(price_at, context, spot_step)
+    except ValidationError as error:
+        delta_f_direct = float("nan")
+        finite_bump_identity_status = "inconclusive"
+        finite_bump_identity_reason = str(error)
     direct_delta = direct_frozen_curve_book_delta(
         price_at, context, holdings, spot_step
     )
@@ -527,13 +597,25 @@ def audit_held_book(
     product_parallel_direct = direct_parallel_rhoq(
         price_at, context, holdings, yield_step, product_only=True
     )
-    price_calls = 4 + 2 * len(context.quotes) + 4
 
-    identity_residual = (
+    finite_bump_identity_residual = (
         risk.delta_q - delta_f_direct - sum(
             b.price / risk.spot * b.bucket_currency for b in risk.buckets
         )
     ) / m_ref
+    identity_samples = sample_chain_identity(price_at, context, risk, settings)
+    identity_residual = identity_samples[-1].residual_hands
+    identity_refinement = abs(identity_residual - identity_samples[-2].residual_hands)
+    # This is an observed spot-refinement allowance, not a confidence
+    # interval or a certificate of spatial/quote-step accuracy. Requiring
+    # the WHOLE allowance inside the budget avoids passing a marginal or
+    # unstable estimate merely because its centre lies inside the budget.
+    if abs(identity_residual) + identity_refinement <= settings.delta_tolerance_hands:
+        identity_status = "pass"
+    elif abs(identity_residual) - identity_refinement > settings.delta_tolerance_hands:
+        identity_status = "fail"
+    else:
+        identity_status = "inconclusive"
     delta_error = spot_delta_hands(direct_delta - mapped_delta, m_ref)
     parallel_error = rhoq_bp_per_1pct(direct_parallel - mapped_parallel, notional)
     nodal_errors = {
@@ -547,9 +629,10 @@ def audit_held_book(
             f"net delta {delta_error:+.4f} hands vs tolerance "
             f"{settings.delta_tolerance_hands}"
         )
-    if abs(identity_residual) > settings.delta_tolerance_hands:
+    if identity_status == "fail":
         failures.append(
-            f"identity residual {identity_residual:+.4f} hands vs tolerance "
+            f"matched identity residual {identity_residual:+.4f} hands "
+            f"(refinement {identity_refinement:.4f}) vs tolerance "
             f"{settings.delta_tolerance_hands}"
         )
     if abs(parallel_error) > settings.rhoq_tolerance_bp:
@@ -563,6 +646,11 @@ def audit_held_book(
 
     status = "fail" if failures else "pass"
     reason = "; ".join(failures) if failures else "direct measurements agree"
+    if not failures and identity_status == "inconclusive":
+        status = "inconclusive"
+        reason = (f"matched identity {identity_residual:+.6g} hands with spot refinement "
+                  f"{identity_refinement:.6g} does not resolve tolerance "
+                  f"{settings.delta_tolerance_hands}")
 
     objective_achieved: Optional[bool] = None
     objective_reason = ""
@@ -590,6 +678,13 @@ def audit_held_book(
         delta_f_derived=risk.delta_f_derived,
         delta_f_direct=delta_f_direct,
         identity_residual_hands=identity_residual,
+        finite_bump_identity_residual_hands=finite_bump_identity_residual,
+        finite_bump_identity_status=finite_bump_identity_status,
+        finite_bump_identity_reason=finite_bump_identity_reason,
+        pricing_delta_local_gap_hands=(risk.delta_q - identity_samples[-1].delta_q_direct) / m_ref,
+        identity_spot_refinement_error_hands=identity_refinement,
+        identity_status=identity_status,
+        identity_samples=identity_samples,
         mapped_net_delta=mapped_delta,
         direct_net_delta=direct_delta,
         net_delta_audit_error_hands=delta_error,
