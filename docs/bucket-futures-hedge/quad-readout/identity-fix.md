@@ -93,8 +93,13 @@ Use `term_flat_fwd__front` and a different output path for the other curve.
 The frozen regression at `test/test_futures_carry_identity_quad.py` requires
 no market-data cache and reproduces the original 0.548283-hand residual.
 
-The next numerical task is external accuracy of the hedge deltas. The PDE
-in this branch predates its own near-barrier delta repair. A fresh comparison
-should use that corrected reference or an independently validated Gaussian
-transition derivative, in actual CSI1000/IM units, with genuine grid and
-bump refinement. Local identity closure alone cannot certify that accuracy.
+The next numerical task is external accuracy of the hedge deltas. A fresh
+comparison should use a corrected PDE reference or an independently
+validated Gaussian transition derivative, in actual CSI1000/IM units, with
+genuine grid and bump refinement. Local identity closure alone cannot
+certify that accuracy.
+
+**Update 2026-09-11.** The sentence here used to say the PDE in this branch
+predates its own near-barrier delta repair, which was the blocker. The
+branch is now merged up to its base, so `25d4f7d6` is an ancestor and the
+corrected reference is available. The comparison is work, not a blocker.

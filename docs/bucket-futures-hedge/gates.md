@@ -67,6 +67,12 @@ close.
 
 **Result: 122 passed, 4 skipped.**
 
+**Post-merge 2026-09-11: 3 failed, 119 passed, 4 skipped.** The three are the
+inherited replay goldens; see "Post-merge gate status" under Gate D. The
+bullet below saying the historical goldens pass unchanged was true when
+written and is FALSE after the merge, because the base's PDE barrier-readout
+repair moves the very deltas those goldens freeze.
+
 - a nine-step sequence of non-integer trades recorded against
   `FuturesHedgePosition` BEFORE the accounting transition was extracted is
   reproduced with exact float equality plus two `float.hex()` bit patterns;
@@ -93,6 +99,12 @@ Both result APIs, genuine direct audits, finite stress residuals.
 ```
 
 **Result: 123 passed, 4 skipped.**
+
+**Post-merge 2026-09-11: 3 failed, 125 passed, 4 skipped.** The same three
+inherited goldens. Separately, the 0.0094 reference hands recorded in the
+second finding below was measured on the PRE-repair PDE and has not been
+re-measured since `25d4f7d6`; treat the number as dated, though the point it
+makes, resolution rather than tolerance, is unaffected.
 
 - every eligible node gets a leg row even at zero holdings, so a
   single-contract control cannot hide the rhoq at the tenors it does not
@@ -143,6 +155,29 @@ Re-run on 2026-09-10 with the matched identity, adding
 `test/test_futures_carry_identity_quad.py` to the list above:
 **658 passed, 4 skipped, 178 s.** Still no golden updated. The two warnings
 are the pre-existing `quantark.backtest.otc` import aliases.
+
+### Post-merge gate status
+
+After merging the base on 2026-09-11, all four recorded suites were re-run.
+The ONLY change anywhere is the three inherited replay goldens:
+
+| Suite | before the merge | after |
+|---|---|---|
+| Gate A | 253 passed, then 262 with the new tests | **262 passed** |
+| Gate B | 122 passed, 4 skipped | 3 failed, **119 passed**, 4 skipped |
+| Gate C | 123 passed, 4 skipped | 3 failed, **125 passed**, 4 skipped |
+| Gate D | 658 passed, 4 skipped | 3 failed, **655 passed**, 4 skipped |
+
+655 plus 3 is 658. Every test that passed before still passes; exactly the
+three goldens moved, and they are the same three in all four suites because
+all four include `test_replay_goldens.py`. Gate A does not, and is green.
+
+Both validations still pass post-merge: **7/7 synthetic** and **7/7 on the
+real 2025-03-03 chain**, 0 failed and 0 inconclusive in each.
+
+The subset runs predate the merge and are NOT invalidated by it: the merge
+changed no QUAD, carry, futures or replay source file, and the frozen
+identity regression still reproduces 0.548283.
 
 ### Synthetic validation
 

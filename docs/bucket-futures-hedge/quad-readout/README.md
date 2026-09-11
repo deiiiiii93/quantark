@@ -290,6 +290,13 @@ evidence that cannot be a bump artefact. So the lobe is QUAD-specific.
 > contamination. The lobe is real and QUAD-specific on the peer's evidence;
 > the shape and magnitudes above are not to be quoted. Re-measuring needs
 > this branch merged up to its base, which is pending.
+>
+> **No longer pending, 2026-09-11.** The branch is merged up; `25d4f7d6` is
+> an ancestor and the corrected PDE is available here. The retraction
+> stands — these magnitudes are still not to be quoted — but re-measuring is
+> now work rather than a blocker. Note the merge also inherits 24 failing
+> tests from the base, three of which are replay goldens moved by this very
+> repair, and nothing was re-banked. See `../gates.md`.
 
 **Both readouts show the lobe identically**, so it is in the surface, not
 the readout. That comparison is QUAD against QUAD and is unaffected by the
