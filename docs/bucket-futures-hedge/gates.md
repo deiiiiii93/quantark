@@ -1017,14 +1017,19 @@ independently it will conflict on the same files, and worse, it could bank
 them a different way. So this work needs to land on the base rather than
 living only here.
 
-**Retired anchors and their successors must travel together.** In a commit,
-a cherry-pick or a rebase, always both. `resolve_supersession` RAISES rather
-than skipping when a named successor is missing, so any test that reaches a
-retired `anchors.json` without it fails loudly. That is deliberate, and it
+**Retired anchors and their successors must travel together, in ONE commit.**
+Not two, and not a commit plus a follow-up. `resolve_supersession` RAISES
+rather than skipping when a named successor is missing, so any test reaching
+a retired `anchors.json` without it fails loudly. That is deliberate, and it
 is the safety net for the `/docs/` exclusion in `.git/info/exclude`: if the
-`2026-09-11` directories are ever committed without `git add -f`, ten tests
-fail with "not banked" instead of silently passing. The cost of that safety
-is the coupling, so move them as a unit.
+`2026-09-11` directories are ever committed without `git add -f`, eleven
+anchors fail with "not banked" instead of silently passing.
+
+Splitting them across two commits is not untidy, it is a BROKEN INTERMEDIATE
+STATE that fails the suite. That costs you `git bisect`, which will land on
+the intermediate and blame it, and it costs you a clean cherry-pick onto the
+base, which is exactly where this work still has to go. Ten retired files
+and four `2026-09-11` directories, one commit.
 
 **Verified so far, measured, with one outstanding:**
 
@@ -1060,10 +1065,25 @@ For the localvol study:
 
 Delta improves 1.46x toward the benchmark, gamma is essentially unchanged,
 and `pv` does not move a bit. The flat-BSM studies gave the same shape, with
-the PDE delta bias there going -0.002751 to -0.000859. Four separate
-benchmarks agreeing that `pv` is untouched while delta converges is a much
-stronger statement than any one of them, and it is the evidence that
-`25d4f7d6` is a Greeks-readout repair rather than a pricing change.
+the PDE delta bias there going -0.002751 to -0.000859, a 3.2x improvement.
+
+**Why four studies is not just one result counted four times.** On a single
+study, `pv` coming back byte-identical is consistent with a Greeks repair,
+but equally consistent with a benchmark that cannot resolve `pv` well enough
+to show a change. Four benchmarks all failing to resolve it the same way is
+a far less comfortable coincidence.
+
+**And the two improvement factors differ, 3.2x against 1.46x, which is the
+part that carries the argument.** Identical factors across studies would
+have pointed AT a shared artefact, something in the harness rather than in
+the engine. Different factors are what four genuine measurements of
+different products against different references look like. Keep both numbers
+visible for that reason; collapsing them to "delta improved" throws away the
+evidence.
+
+That is what establishes `25d4f7d6` as a Greeks-readout repair rather than a
+pricing change, and it is what retires the earlier note in this file that
+the new golden value had not been independently verified.
 
 So **all 24 are settled**, with one confirmation still outstanding: the
 three originally-failing files have not yet been re-run end to end, which is
