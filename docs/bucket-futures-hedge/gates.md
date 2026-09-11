@@ -161,12 +161,28 @@ are the pre-existing `quantark.backtest.otc` import aliases.
 After merging the base on 2026-09-11, all four recorded suites were re-run.
 The ONLY change anywhere is the three inherited replay goldens.
 
-*These numbers are from BEFORE the 24 were settled, and are left here as the
-pre-fix state. The three goldens have since been re-captured against a
-re-certified PDE. B, C and D have NOT been re-run end to end since, so this
-file deliberately carries no post-fix figure for them rather than one
-inferred by arithmetic from the rows above. Measured numbers replace this
-note when the other session, which holds the tree, hands them over.*
+*The table above is the state BEFORE the 24 were settled. After the goldens
+were re-captured against a re-certified PDE, all four suites were re-run on
+this tree with `-n0`, and every one is clean:*
+
+| Suite | after the 24 were settled | wall |
+|---|---|---:|
+| Gate A | **262 passed** | 0.9 s |
+| Gate B | **122 passed**, 4 skipped | 49 s |
+| Gate C | **128 passed**, 4 skipped | 215 s |
+| Gate D | **658 passed**, 4 skipped | 330 s |
+
+Zero failures in all four. Gate A's 262 is 253 plus the matched-identity
+tests and predates the settlement work; the other three are back to exactly
+their pre-merge counts.
+
+*Method note, because the coincidence is instructive.* These numbers are the
+same 122, 128 and 658 that an earlier draft of this section predicted by
+adding the three golden failures back onto the post-merge rows. That draft
+was retracted before publication precisely because it was arithmetic wearing
+the clothes of a measurement. It happening to be right does not make it
+evidence, and publishing it would have taught a reader to trust the next
+such guess, which will not be.
 
 | Suite | before the merge | after |
 |---|---|---|
@@ -1017,12 +1033,43 @@ is the coupling, so move them as a unit.
 | modelvalidation suite minus the slow anchor re-runs | 366 passed, 13 skipped, 15 deselected |
 | the anchor guard itself | 1 failed, 12 passed, 10 skipped |
 
-The single failure is `snowball-localvol-1d/2026-08-28`, whose
-re-certification was still running, and it carries the same signature as
+The single failure was `snowball-localvol-1d/2026-08-28`, whose
+re-certification was still running, and it carried the same signature as
 everything else here: delta and gamma listed, `pv` absent. The three new
 `2026-09-11` directories re-run bitwise exact, `adi2d` is untouched and
-green, and the 10 retired ones skip. So **23 of the 24 are settled and
-verified**, with only the localvol anchor outstanding.
+green, and the 10 retired ones skip.
+
+**That last one has since landed ADMITTED**, 48 cells all PASS over 16
+cases, zero ERROR, zero UNRESOLVED, 4122 s. The retired certification ran
+4050 s over the same 16 cases and 48 cells, so the scope is identical and
+the supersession coverage check passes on it. Banked at
+`snowball-localvol-1d/2026-09-11`, with `2026-08-28` retired under a reason
+recording its three aggregate bias numbers.
+
+### Four independent benchmarks say Greeks, not prices
+
+Every one of the four studies re-certifies ADMITTED, and in every one the
+`pv` aggregate bias is byte-identical while delta moves toward Monte Carlo.
+For the localvol study:
+
+| Aggregate signed bias | before | after |
+|---|---:|---:|
+| `pv` | +0.010389388 | +0.010389388 |
+| delta | -0.008340592 | -0.005701076 |
+| gamma | +0.004874109 | +0.004805871 |
+
+Delta improves 1.46x toward the benchmark, gamma is essentially unchanged,
+and `pv` does not move a bit. The flat-BSM studies gave the same shape, with
+the PDE delta bias there going -0.002751 to -0.000859. Four separate
+benchmarks agreeing that `pv` is untouched while delta converges is a much
+stronger statement than any one of them, and it is the evidence that
+`25d4f7d6` is a Greeks-readout repair rather than a pricing change.
+
+So **all 24 are settled**, with one confirmation still outstanding: the
+three originally-failing files have not yet been re-run end to end, which is
+the direct answer to "are the 24 fixed" as opposed to the four gate suites
+and the anchor guard agreeing that they are. That run and a full-suite sweep
+are in flight and are not recorded here yet.
 
 What remains open, with the measured evidence in `quad-readout/README.md`:
 
