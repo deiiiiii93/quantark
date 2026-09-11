@@ -639,6 +639,48 @@ workers; the original took 6059 s on two.
 **Gate D is met**, on this one inception, for the audit criteria it states.
 The tolerance was never touched and no golden was regenerated.
 
+### The transition subset, re-run — and the readout turns out to matter after all
+
+`subset_transition` was run pre-fix, so its figures described a check that no
+longer exists. Re-run into `subset_transition_matched`, same config plus
+`--quad-readout transition`, six workers, 3309 s:
+
+**14 cells ran, 14 ok, 0 failed.** All fourteen report 242 pass, 0 fail, 1
+not measured, 0 inconclusive, and `all_measured_passed: true`, against 0 of
+14 before. Diffed against the pre-fix transition run, the six priced and
+traded frames are byte-identical and `final_total_pnl` is bit-identical in
+every cell, so this run is audit-only too.
+
+Now the part that is new. The old record concluded that the readout
+"changes nothing at the matched bump", from the 1% default where the mean
+residual moved only from 0.042500 to 0.042613. That is true AT 1%, and false
+at the production ladder:
+
+| `__front`, 242 dates | mean abs R | max abs R | max abs(R)+E |
+|---|---:|---:|---:|
+| `term_flat_q`, legacy | 0.000102 | 0.002196 | 0.004340 |
+| `term_flat_q`, transition | 0.000017 | 0.000311 | 0.001333 |
+| `term_flat_fwd`, legacy | 0.000090 | 0.001994 | 0.003947 |
+| `term_flat_fwd`, transition | 0.000022 | 0.000307 | 0.001274 |
+
+**The transition readout shrinks the residual about sevenfold and the noise
+floor about threefold.** The mechanism is the one already established here:
+at 0.00025 relative the bump is 1.3 index points inside a 19.7-point cell,
+so under `legacy_linear` both derivatives are chord slopes and what survives
+the subtraction is the UNCANCELLED part of the staircase, roughly
+`(Gamma_frozen - Gamma_pinned) * (S_mid - S)`. The transition readout
+removes the staircase, leaving only smooth truncation, which is why its
+ladder converges at a clean `h^2` while legacy's oscillates.
+
+So the readout earns something here it was not built for. It was adopted to
+fix a sub-cell delta probe; it also tightens this audit's floor, and the
+evidence for that did not exist while the audit was pinned to a 1% secant.
+
+One caveat on the comparison: the two runs solve slightly different coupons,
+4.5276% against 4.5272%, because the readout changes prices. That is far too
+small to account for a sevenfold gap, but the cells are not the same product
+to the last digit.
+
 ### The 0.01-hand tolerance, derived at last — and a budget that had to be rejected
 
 The figure was inherited from a deterministic fixture and never sized for a
@@ -678,13 +720,19 @@ catching.
 
 | Bound | hands | where it comes from |
 |---|---:|---|
-| noise floor | 0.00434 | max abs(R)+E over 484 correct-book date-curves |
+| noise floor, `legacy_linear` | 0.00434 | max abs(R)+E over 484 correct-book date-curves |
+| noise floor, `transition` | 0.00133 | the same 484, under the other readout |
 | one IM contract | 1.0 | `reference_multiplier` is 200, the index multiplier, so one hand IS one contract, and hedges round to whole contracts |
 
 Any tolerance in that window works, and the window spans a factor of 230, so
 this is not a delicately poised number. **0.01 sits near the conservative
-end**: 2.3x above the noise floor and 100x below a one-contract error. It
-maximises detection and accepts a modest false-positive margin. Keep it.
+end**: 2.3x above the noise floor under the default readout, 7.5x under
+`transition`, and 100x below a one-contract error either way. It maximises
+detection and accepts a modest false-positive margin. Keep it.
+
+The floor is readout-dependent, so the binding number is the legacy one,
+since `legacy_linear` is still the default and nothing about this tolerance
+should assume the opt-in mode is on.
 
 Economically, at the worst date's spot of 5306.99 and a 50m notional:
 
@@ -797,13 +845,16 @@ projection error is what alignment exists to prevent.
 
 ### The audit cannot see the staircase at its own bump, and the ladder above misled me
 
-*This section holds up and is the one that got closest. It establishes that
-`delta_q` is invariant to the audit bump and that the staircase cancels
-between matched steps. What it missed is that a MATCHED pair still carries
-truncation, because the two directions have different third derivatives. It
-therefore stopped one step short of the answer, and went looking for a
-surface defect instead. The `subset_transition` figures quoted below are
-pre-fix and stale for the same reason as the primary subset.*
+*This section is the one that got closest, and it holds up with two
+amendments. It establishes correctly that `delta_q` is invariant to the
+audit bump. It missed that a MATCHED pair still carries truncation, because
+the two directions have different third derivatives, so it stopped one step
+short and went looking for a surface defect instead. And its "the staircase
+cancels" is only approximate: the uncancelled remainder is invisible at a 1%
+bump but is the DOMINANT term at the refined ladder, where it makes the
+legacy readout's floor 3.3x the transition readout's. See "The transition
+subset, re-run". The `subset_transition` figures quoted below are pre-fix
+and stale for the same reason as the primary subset.*
 
 The subset has now been re-run entirely under `readout="transition"`
 (`bucket_hedge_v2/subset_transition`). Every cell's verdict is unchanged. On
