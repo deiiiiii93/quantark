@@ -15,7 +15,8 @@ that uses it.
 | Situation | What to run | Why |
 |---|---|---|
 | New engine, or a new numerical method inside an existing engine | **Full certification** (`run`) | Nothing banked describes this engine's numbers. |
-| A deliberate numerics change: different scheme, changed default grid, a fixed discretization bug | **Amendment** (`amend`) | The parts you did not touch stay valid; re-running them wastes hours and breaks the evidence chain. |
+| A deliberate numerics change expressed in **configuration**: a different scheme, a changed default grid, a new engine-params field | **Amendment** (`amend`) | The parts you did not touch stay valid; re-running them wastes hours and breaks the evidence chain. The changed configuration moves the identity hash, which is what tells `amend` what to re-run. |
+| A deliberate numerics change expressed in **code**: a fixed discretization bug, a repaired readout, a corrected stencil | **Full certification** (`run`) | `amend` decides what to re-run from the identity hash, and a code fix moves no hash. It would carry forward exactly the cells the fix invalidated. See section 5. |
 | A refactor proven bitwise-identical (byte-compare on a detached worktree) | **Anchors only** | The numbers did not move, so the banked evidence still describes the engine. The anchor test proves that claim. |
 | Performance work that changes results at all | Full certification or amendment | "Faster and slightly different" is a numerics change, not a refactor. |
 
@@ -129,6 +130,39 @@ python -m quantark.modelvalidation anchors \
 Reference the banked certificate from the release notes or PR description by
 its digest, so a reader can tell which evidence backs which release.
 
+### Retiring a superseded certificate
+
+A numerics change retires every certificate banked before it: those engines no
+longer compute what that evidence describes, so re-running their anchors can
+only fail. The directory still may not be overwritten or deleted — a child
+records its parent's digest, and a chain whose parent is gone cannot be
+verified. Retire it in place instead, by adding two keys to its `anchors.json`:
+
+```json
+  "superseded_by": "snowball-flat-bsm/2026-09-11",
+  "superseded_reason": "Retired by 25d4f7d6, which repaired three PDE near-barrier readout defects. ..."
+```
+
+The marker goes in `anchors.json` because that file carries no self-digest.
+`certificate.json` is covered by its own `projected_sha256` and must not be
+touched; the identity guard reads the marker from the anchor file beside it.
+
+Both banked-evidence guards then skip that directory with a reason, and
+`resolve_supersession` refuses the skip unless the successor is really banked
+and anchors every `(candidate, case, quantity)` the retired file did. Scope may
+grow across a supersession; it may never shrink. A separate test requires every
+study to keep at least one live directory, so a study cannot be retired out of
+existence by marking all of them — genuinely dropping a study's coverage means
+removing its directories, which is visible in a diff.
+
+`superseded_reason` is not decoration. As with an amendment's `--reason`, it is
+the only part of the record that says why the numbers moved.
+
+**New files under `docs/` are excluded from this repository's index**
+(`.git/info/exclude`), so a freshly banked directory needs `git add -f`.
+Forgetting it fails loudly rather than silently: the retired directories name a
+successor that is not there, and `resolve_supersession` raises.
+
 ## 5. Anchors in CI
 
 Anchors are the cheap residue of an expensive certification: the deterministic
@@ -155,7 +189,17 @@ constraint governs `test/golden_compare.py`.
 
 When an anchor test fails, the banked certificate no longer describes the
 engine. Re-certify or amend — do not update the anchor file to match the new
-numbers, which would silently relabel a numerics change as a no-op.
+numbers, which would silently relabel a numerics change as a no-op. Once the
+successor is banked, retire the old directory as in section 4 rather than
+leaving a failing guard in the suite.
+
+**A code change can move the numbers without moving a single identity hash.**
+The identity covers configuration; a repaired discretization is neither a
+config change nor anything `candidate_identity` can see. That is why both
+guards exist, and it is also why `amend` is the wrong tool for such a fix: its
+carry-forward rule keys on identity alone, so it would carry forward exactly
+the cells the repair invalidated, while re-pricing the ones it did not touch.
+Run the full certification for a code-level numerics change.
 
 ## 6. Amendments
 

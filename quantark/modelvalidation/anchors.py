@@ -134,6 +134,94 @@ def _matches(
     return abs(actual - expected) <= rel_tol * abs(expected) + abs_tol
 
 
+#: Key a retired anchor file sets to name the certification that replaces it.
+#:
+#: A numerics change retires every certificate banked before it: the engine no
+#: longer computes what that evidence describes. The procedure forbids
+#: overwriting a banked directory -- a child records its parent's digest, and a
+#: chain whose parent was replaced cannot be verified -- so a retired directory
+#: keeps its bytes and gains this pointer instead.
+#:
+#: It goes in ``anchors.json`` because that file carries no self-digest;
+#: ``certificate.json`` is covered by its own ``projected_sha256`` and must not
+#: be touched. Both banked-evidence guards read it from there, the identity
+#: guard via the anchor file sitting beside the certificate it retires.
+SUPERSEDED_BY = "superseded_by"
+
+
+def resolve_supersession(anchor_path: str | Path) -> Path | None:
+    """Resolve a retired anchor file to the live successor that replaces it.
+
+    Args:
+        anchor_path: A banked ``anchors.json``.
+
+    Returns:
+        The successor's ``anchors.json``, or ``None`` when this file is live
+        and must be checked in its own right.
+
+    Raises:
+        ValidationError: the successor is missing, is not itself banked, or
+            does not cover everything this file anchored. Skipping a check
+            because something else covers it is only honest if that something
+            actually exists and actually covers it.
+    """
+    path = Path(anchor_path)
+    payload = read_json(path)
+    successor_id = payload.get(SUPERSEDED_BY)
+    if successor_id is None:
+        return None
+
+    root = path.parents[2]
+    successor = root / str(successor_id) / "anchors.json"
+    if not successor.is_file():
+        raise ValidationError(
+            f"{path.parent.parent.name}/{path.parent.name} declares it is superseded by "
+            f"{successor_id!r}, which is not banked at {successor}. A retired anchor "
+            "names its replacement; without one, nothing checks these engines."
+        )
+    if successor.resolve() == path.resolve():
+        raise ValidationError(
+            f"{successor_id!r} declares itself its own successor"
+        )
+
+    _assert_successor_covers(path, payload, successor)
+    return successor
+
+
+def _assert_successor_covers(
+    path: Path, payload: Mapping[str, Any], successor: Path
+) -> None:
+    """Refuse a supersession that quietly drops coverage.
+
+    Retiring an anchor file stops it being checked. That is honest only when
+    the successor checks at least as much: the values may move -- that is what
+    a numerics change does -- but the set of (candidate, case, quantity) they
+    are checked over may never shrink.
+
+    Raises:
+        ValidationError: the successor anchors less than ``path`` did.
+    """
+    def scope(anchors) -> set:
+        return {
+            (entry["candidate"], entry["case"], quantity)
+            for entry in anchors
+            for quantity in entry["values"]
+        }
+
+    retired = scope(payload["anchors"])
+    covered = scope(read_json(successor)["anchors"])
+    dropped = sorted(retired - covered)
+    if dropped:
+        shown = ", ".join("/".join(item) for item in dropped[:5])
+        more = f" (and {len(dropped) - 5} more)" if len(dropped) > 5 else ""
+        raise ValidationError(
+            f"{path.parent.parent.name}/{path.parent.name} would be retired in favour of "
+            f"{successor.parent.parent.name}/{successor.parent.name}, which does not anchor "
+            f"{len(dropped)} of its cells: {shown}{more}. Scope may grow across a "
+            "supersession; it may never shrink, or the missing coverage reads as passing."
+        )
+
+
 def assert_anchors(anchor_path: str | Path) -> None:
     """Re-run the anchored engines and compare against the banked values.
 
