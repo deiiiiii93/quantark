@@ -1342,6 +1342,166 @@ deltas directly. The script is kept WITH the control that condemns it. The
 one claim that survives is that QUAD legacy and QUAD transition agree
 closely in every cell, which is the readout being irrelevant again.
 
+## Gate E — the full paired study
+
+```sh
+.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \
+  --study-grid buckets --workers 6 \
+  --carry-audit-mode daily --record-carry-exposure \
+  --hedge-resolution-rel 0.0025 \
+  --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e --resume
+```
+
+**406 cells ran, 406 ok, 0 failed, 57828 s.** 29 inceptions from 2023-05-04
+to 2025-09-01, 14 cells each, 249 MB. 308 cells knocked out and 98 knocked
+in and ran to maturity.
+
+### The economic answer: the bucket hedge does not pay for itself
+
+Paired by inception, since every cell of an inception shares the contract,
+the spot path, the vol channel, the rate and the cost model. Terminal P&L
+difference, bucket policy minus its single-contract control, in bp of
+notional:
+
+| Model | Bucket policy | vs `front` | vs `far` |
+|---|---|---:|---:|
+| `term_flat_fwd` | `buckets_nodes` | -214.0 *** | -113.3 ** |
+| `term_flat_fwd` | `buckets_far` | -194.5 *** | -93.8 *** |
+| `term_flat_fwd` | `buckets_spot_parallel` | -196.7 *** | -95.9 *** |
+| `term_flat_q` | `buckets_nodes` | -186.8 | -83.3 |
+| `term_flat_q` | `buckets_far` | -137.4 *** | -33.9 |
+| `term_flat_q` | `buckets_spot_parallel` | -239.0 *** | -135.6 *** |
+
+All twelve are negative and nine reach significance. The bucket hedge is
+worse, consistently.
+
+**And transaction costs do not explain it.** The realised cost difference is
++5 to +14 bp against a P&L gap of 34 to 239 bp, so costs account for a few
+percent of it. Turnover roughly triples, 5.0 to 9.1 hands a day against 2.8
+for a single contract, and the extra trading buys nothing: the daily
+tracking error difference is between -1.9 and +1.5 bp on every cell except
+one, and that one is WORSE by 21 to 25 bp.
+
+| Policy | mean cost, bp | mean terminal P&L, bp |
+|---|---:|---:|
+| `front` | 16.19 | 554.8 |
+| `far` | 8.34 | 452.8 |
+| `buckets_far` | 18.10 | 388.9 |
+| `buckets_nodes` | 18.71 | 354.5 |
+| `buckets_spot_parallel` | 22.21 | 337.0 |
+
+**The honest caveat, which cuts against reading this as pure inefficiency.**
+These policies do not hold the same risk by construction. A `nodes` book is
+MEANT to retain `D_F` of spot delta, as Gate A established and as the
+validation measured at 39.85 hands on a real chain. So part of the P&L
+difference is a deliberate difference in residual exposure rather than a
+worse hedge of the same exposure. What the table shows is that the extra
+exposure and the extra turnover were not rewarded over this history; it does
+not show that the bucket decomposition is wrong about the risk it names.
+
+Terminal P&L standard deviation is 541 to 631 bp across every policy, so a
+34-to-239 bp mean difference is a consistent drag well inside one path's
+noise. The pairing is what makes it visible.
+
+### The audit over the full grid
+
+| | |
+|---|---|
+| identity verdicts | 52892 pass, **14 fail**, 406 not measured |
+| net delta audit error | max 3.820e-12 hands |
+| worst abs(R)+E | 0.013347 |
+
+The net delta reproduction at 4e-12 says the audit machinery itself is exact
+across 406 cells. The 14 failures are a single market state, and they are
+the subject of the next section.
+
+## The alignment crossover: a delta discontinuity, found by the audit
+
+**The 0.01-hand tolerance is now exceeded, and it must NOT be widened.** The
+worst `abs(R)+E` is 0.013347 against the 0.00434 that one inception showed,
+so the 2.3x margin is now 0.75x. This file predicted exactly that test and
+it failed it. But the cause is not a budget that is too tight.
+
+All 14 breaches are ONE market state: 2023-10-26 in the 2023-07-03
+inception, appearing once per cell because the identity is holdings-free.
+Its neighbours sit at 1e-5. The mechanism is exact:
+
+| | value | log distance from spot 5811.69 |
+|---|---:|---:|
+| knock-in barrier | 4959.67 | -0.1585312 |
+| knock-out barrier | 6811.29 | +0.1587097 |
+
+The grid snaps a node onto the NEAREST barrier in log space. Those two are
+equidistant at the geometric mean, 5812.21, which sat **0.52 index points**
+from that day's spot while the audit bump is 1.45 points. So the bump
+straddled the crossover: instrumenting `_select_alignment_log` shows the
+down scenario aligning to the knock-in barrier at -0.1583 and the up
+scenario to the knock-out at +0.1585. **The two prices are computed on
+differently aligned lattices**, so the finite difference measures a grid
+change on top of a market change, and delta is discontinuous there.
+
+The prediction that follows is testable and holds exactly. Binning all
+32,746 pre-knock-in date-rows by distance from the crossover:
+
+| Distance from crossover | rows | max abs(R) | breaches |
+|---|---:|---:|---:|
+| under 2 bumps | 126 | 0.013268 | **14** |
+| 2 to 10 bumps | 322 | 0.000353 | 0 |
+| 10 to 50 bumps | 1498 | 0.002055 | 0 |
+| 50 to 200 bumps | 6370 | 0.002624 | 0 |
+| over 200 bumps | 24430 | 0.003899 | 0 |
+
+Every breach is within two bumps of the crossover and there is not one
+anywhere else. The post-knock-in control agrees: with the knock-in barrier
+extinguished there is no crossover, and the worst residual over 16,324 rows
+is 0.0011.
+
+Three hypotheses died with evidence on the way to this. Knock-out
+reachability filtering is 9 of 9 in every scenario on the failing date and
+its neighbours. The pinned scenario's implied-yield rebuild is smooth across
+the bump with no clamping and no exception. And the bucket quote bump is not
+it either: the residual holds at 0.0132 as that bump goes from 2.0 points
+down to 0.1, so it converges to a non-zero limit rather than shrinking.
+
+This file twice called for the alignment-selection path to be instrumented
+and nobody had done it. It is an engine defect, not an audit one, and the
+fix belongs in `_select_alignment_log`. Raising the tolerance to 0.02 would
+bury a delta discontinuity under a budget.
+
+### The secant decision needs revisiting, and part of it is the same defect
+
+The 1% bump was kept because its error against the 0.25% hedge secant never
+reached half a contract. That was one inception. Over 29:
+
+| 1% against the 0.25% hedge secant | one inception | 29 inceptions |
+|---|---:|---:|
+| mean | 0.0497 | 0.0430 |
+| p95 | 0.1557 | 0.1308 |
+| max | 0.4892 | **2.7103** |
+
+The typical case is unchanged and small. The tail is not: the worst is 2.7
+contracts. Counted as distinct MARKET STATES rather than rows, since each
+appears once per cell, five states out of roughly 3,744 exceed one contract.
+Their locations split cleanly:
+
+| Date | gap | distance to KO barrier | cause |
+|---|---:|---:|---|
+| 2025-07-01 | 2.706 | -1.99% | knock-out barrier |
+| 2024-08-08 | 1.829 | -14.82% | **alignment crossover** |
+| 2025-07-02 | 1.333 | -2.36% | knock-out barrier |
+| 2025-04-07 | 1.053 | -14.75% | **alignment crossover** |
+| 2024-10-31 | 1.014 | -3.12% | knock-out barrier |
+
+The crossover sits 14.67% below the knock-out barrier by construction, so
+two of the five are the defect above rather than secant error at all. The
+other three are genuine curvature at the knock-out barrier, which is exactly
+where a wide secant should hurt because the payoff has a kink there.
+
+So the decision is conditional, not global. The 1% bump is fine on 99.87% of
+states and costs up to 2.7 contracts in two identifiable places, one of
+which is a bug. **Fix the alignment first**: it removes two of the five
+outright and changes what the remaining question is about.
+
 ## What these gates do NOT establish
 
 - **No economic conclusion.** Gate E (the full paired study over every
