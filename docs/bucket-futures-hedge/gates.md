@@ -1366,6 +1366,44 @@ closely in every cell, which is the readout being irrelevant again.
   equation. What still constrains that Greek is the net-delta reproduction
   check, which confirms it IS a 1% secant of this pricer and nothing more.
   Closure is internal consistency of one numerical surface, not accuracy.
+- **DECIDED 2026-09-12: the 1% pricing bump stays, as a declared
+  approximation to the desk's 0.25% hedge resolution.** The desk re-hedges
+  on a 0.25% move, so the P&L-relevant slope is the secant across that band,
+  not the tangent and not a 1% secant. Measured over all 242 live dates,
+  the error of the 1% bump against that 0.25% reference:
+
+  | readout | mean | p95 | max | dates over 0.5 contracts |
+  |---|---:|---:|---:|---:|
+  | `legacy_linear` | 0.0497 | 0.1557 | 0.4892 | 0 |
+  | `transition` | 0.0405 | 0.1074 | 0.4428 | 0 |
+
+  One hand is one IM contract and trades round to whole contracts, so an
+  error that never reaches half a contract on any date usually changes
+  nothing traded at all. Worst date is 2023-08-28, spot 5922, where delta
+  goes -37.7068 at 1% against -38.1496 at 0.25%. Pre-knock-in dates are
+  slightly worse, 0.0659 mean, which is the extra curvature.
+
+  Three reasons the bump is not moved. The accuracy gain is under half a
+  contract at its worst. The change is free in price calls but expensive
+  operationally, since it moves every recorded delta and therefore every
+  golden and certificate anchor, which is the migration that cost a day on
+  2026-09-11. And 0.25% is SUB-CELL at 13.3 index points against a
+  19.7-point cell, so adopting it honestly means also adopting `transition`
+  or a finer grid; it is two coupled changes, not one.
+
+  If it is ever revisited, those two must land together, and `transition`
+  is the cheap half: measured at 15997 s against 15562 s of CPU over the
+  same 14 cells, about 3%, versus roughly doubling the nodes.
+
+- **`pricing_delta_local_gap_hands` OVERSTATES the hedge-relevant error, and
+  should not be read as one.** Its reference is the finest ladder delta at
+  0.025%, which is deep sub-cell, so under the default readout it carries
+  the staircase and reads up to 0.887 hands. Against the reference that
+  actually matters, the 0.25% hedge secant, the error is 0.443. The field is
+  a numerical diagnostic of the pricing bump, not a measure of hedge error.
+  Re-pointing it at the hedge resolution would make it mean what its name
+  suggests.
+
 - **The 1% secant's own gap is measured but NOT gated.**
   `pricing_delta_local_gap_hands` is the reported hedge delta minus the
   finest local delta, over the 242 archived flat-q dates:
