@@ -487,7 +487,17 @@ class CarryAuditResult:
     finite_bump_identity_residual_hands: float = float("nan")
     finite_bump_identity_status: str = "not_measured"
     finite_bump_identity_reason: str = ""
+    #: Pricing delta minus the FINEST ladder delta. A numerical diagnostic of
+    #: the pricing bump against a local derivative, and NOT a hedge error:
+    #: its reference is deep sub-cell, so on a linear readout it carries the
+    #: interpolation staircase and overstates anything hedge-relevant. For a
+    #: hedge error use ``pricing_delta_hedge_gap_hands``, whose reference is
+    #: the desk's own rebalance resolution.
     pricing_delta_local_gap_hands: float = float("nan")
+    #: Pricing delta minus the delta at ``settings.hedge_resolution_rel``.
+    #: NaN unless that setting is declared.
+    pricing_delta_hedge_gap_hands: float = float("nan")
+    hedge_gap_status: str = "not_measured"
     identity_spot_refinement_error_hands: float = float("nan")
     identity_status: str = "not_measured"
     identity_samples: Tuple[IdentitySample, ...] = ()
@@ -603,6 +613,16 @@ def audit_held_book(
             b.price / risk.spot * b.bucket_currency for b in risk.buckets
         )
     ) / m_ref
+    # The hedge gap measures the pricing delta against the secant across the
+    # desk's OWN rebalance band, which is the slope that governs P&L between
+    # rebalances. Opt-in: undeclared, it costs nothing and stays NaN rather
+    # than substituting a local derivative that means something else.
+    hedge_gap, hedge_gap_status = float("nan"), "not_measured"
+    if settings.hedge_resolution_rel is not None:
+        hedge_step = float(settings.hedge_resolution_rel) * context.spot
+        hedge_delta = direct_frozen_curve_book_delta(price_at, context, {}, hedge_step)
+        hedge_gap = (risk.delta_q - hedge_delta) / m_ref
+        hedge_gap_status = "measured"
     identity_samples = sample_chain_identity(price_at, context, risk, settings)
     identity_residual = identity_samples[-1].residual_hands
     identity_refinement = abs(identity_residual - identity_samples[-2].residual_hands)
@@ -682,6 +702,8 @@ def audit_held_book(
         finite_bump_identity_status=finite_bump_identity_status,
         finite_bump_identity_reason=finite_bump_identity_reason,
         pricing_delta_local_gap_hands=(risk.delta_q - identity_samples[-1].delta_q_direct) / m_ref,
+        pricing_delta_hedge_gap_hands=hedge_gap,
+        hedge_gap_status=hedge_gap_status,
         identity_spot_refinement_error_hands=identity_refinement,
         identity_status=identity_status,
         identity_samples=identity_samples,

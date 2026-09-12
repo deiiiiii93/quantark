@@ -352,8 +352,29 @@ class CarryRiskSettings:
     # Independent of the pricing/hedge bump: BOTH spot derivatives in the
     # chain identity are repriced at every level of this descending ladder.
     identity_spot_bumps_rel: Tuple[float, ...] = (0.001, 0.0005, 0.00025)
+    #: The desk's rebalance resolution, e.g. 0.0025 for a 0.25% move.
+    #:
+    #: When a book is re-hedged after a move of this size, spot wanders
+    #: inside that band between rebalances, so the slope governing P&L over
+    #: the holding interval is the SECANT across it -- not the tangent, and
+    #: not the pricing bump's secant unless the two happen to agree. Setting
+    #: this measures the pricing delta against that reference and reports
+    #: ``pricing_delta_hedge_gap_hands``, at a cost of two price calls per
+    #: audited date.
+    #:
+    #: Opt-in, and None by default, because a rebalance policy is a desk
+    #: convention rather than a property of the risk math. Leaving it None
+    #: costs nothing and reports NaN with a status.
+    hedge_resolution_rel: Optional[float] = None
 
     def __post_init__(self) -> None:
+        if self.hedge_resolution_rel is not None:
+            resolution = _positive(
+                float(self.hedge_resolution_rel), "hedge_resolution_rel"
+            )
+            if resolution >= 1.0:
+                raise ValidationError("hedge_resolution_rel must be below 1")
+            object.__setattr__(self, "hedge_resolution_rel", resolution)
         identity_bumps = tuple(
             _positive(bump, "identity_spot_bumps_rel")
             for bump in self.identity_spot_bumps_rel

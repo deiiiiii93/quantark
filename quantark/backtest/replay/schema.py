@@ -140,6 +140,7 @@ HEDGE_ATTRIBUTION_COLUMNS: tuple[str, ...] = (
     "product_delta_hands", "hedge_delta_hands", "net_delta_hands",
     "delta_f_derived_hands", "delta_f_direct_hands", "identity_residual_hands",
     "finite_bump_identity_residual_hands", "pricing_delta_local_gap_hands",
+    "pricing_delta_hedge_gap_hands", "hedge_gap_status",
     "finite_bump_identity_status", "finite_bump_identity_reason",
     "identity_spot_refinement_error_hands", "identity_status", "identity_ladder",
     "direct_net_delta_hands", "net_delta_audit_error_hands",

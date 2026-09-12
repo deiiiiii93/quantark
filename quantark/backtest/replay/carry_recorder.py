@@ -581,6 +581,8 @@ class CarryExposureRecorder:
                 "finite_bump_identity_status": audit.finite_bump_identity_status,
                 "finite_bump_identity_reason": audit.finite_bump_identity_reason,
                 "pricing_delta_local_gap_hands": audit.pricing_delta_local_gap_hands,
+                "pricing_delta_hedge_gap_hands": audit.pricing_delta_hedge_gap_hands,
+                "hedge_gap_status": audit.hedge_gap_status,
                 "identity_spot_refinement_error_hands": audit.identity_spot_refinement_error_hands,
                 "identity_status": audit.identity_status,
                 "identity_ladder": json.dumps([

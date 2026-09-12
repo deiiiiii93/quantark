@@ -570,3 +570,47 @@ def test_a_wide_confidence_interval_is_inconclusive_not_a_pass():
 def test_a_deterministic_engine_needs_no_interval():
     assert status_from_interval(0.0, half_width=0.0, tolerance=0.0)[0] == "pass"
     assert status_from_interval(1.0, half_width=0.0, tolerance=0.0)[0] == "fail"
+
+
+def test_the_hedge_gap_is_opt_in_and_costs_nothing_undeclared():
+    """Undeclared, it must not price: a rebalance policy is a desk convention."""
+    result = audit_held_book(linear_pricer(), context(), measured_risk(), {}, settings=SETTINGS)
+    assert math.isnan(result.pricing_delta_hedge_gap_hands)
+    assert result.hedge_gap_status == "not_measured"
+    assert result.price_calls == 4 + 2 * len(context().quotes) + 4 + 4 * 3
+
+
+def test_the_hedge_gap_measures_the_pricing_delta_against_the_desks_own_secant():
+    """W = 0.1*S*F1**2 again: its 1% delta has a known secant error.
+
+    The hedge gap must be measured against the secant across the DESK's
+    band, not against a local derivative, so it differs from the local gap
+    by exactly the difference of the two references.
+    """
+    ctx = context()
+    settings = replace(SETTINGS, audit_spot_bump_rel=0.01, hedge_resolution_rel=0.0025)
+
+    def price_at(s, div):
+        f = s * math.exp((RATE - div.get_yield(TENORS[0])) * TENORS[0])
+        return 0.1 * s * f * f
+
+    pricing_delta = direct_frozen_curve_book_delta(price_at, ctx, {}, 1.0)
+    risk = FuturesBookRisk(SPOT, pricing_delta, buckets_of(ctx, sample_buckets(price_at, ctx, 1.0)))
+    result = audit_held_book(price_at, ctx, risk, {}, settings=settings)
+
+    hedge_delta = direct_frozen_curve_book_delta(price_at, ctx, {}, 0.0025 * ctx.spot)
+    assert result.hedge_gap_status == "measured"
+    assert result.pricing_delta_hedge_gap_hands == pytest.approx(
+        (pricing_delta - hedge_delta) / settings.reference_multiplier, abs=1e-12
+    )
+    # Two extra price calls, and the local gap is a DIFFERENT number.
+    assert result.price_calls == 4 + 2 * len(ctx.quotes) + 4 + 4 * 3 + 2
+    assert result.pricing_delta_hedge_gap_hands != pytest.approx(
+        result.pricing_delta_local_gap_hands, abs=1e-9
+    )
+
+
+def test_an_out_of_range_hedge_resolution_is_rejected():
+    for bad in (0.0, -0.0025, 1.0, 2.0, float("nan")):
+        with pytest.raises(ValidationError):
+            replace(SETTINGS, hedge_resolution_rel=bad)

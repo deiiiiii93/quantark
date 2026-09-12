@@ -222,6 +222,12 @@ def fingerprint(task: Dict[str, Any]) -> str:
         payload["risk"] = {k: risk.get(k) for k in RISK_FINGERPRINT_KEYS}
         payload["objective"] = C.BUCKET_OBJECTIVES.get(task["hedge"])
         payload["correction_pair"] = risk.get("correction_pair")
+        # Absent or None it contributes nothing, which keeps every cell
+        # banked before the hedge gap existed resumable. It only enters the
+        # fingerprint when it is actually declared, because only then does
+        # it add price calls and a measured column.
+        if risk.get("hedge_resolution_rel") is not None:
+            payload["hedge_resolution_rel"] = risk["hedge_resolution_rel"]
     raw = json.dumps(payload, sort_keys=True).encode()
     return hashlib.sha256(raw).hexdigest()[:16]
 
@@ -241,6 +247,7 @@ def _carry_settings(risk: Dict[str, Any]):
         identity_spot_bumps_rel=tuple(risk.get(
             "identity_spot_bumps_rel", CarryRiskSettings().identity_spot_bumps_rel
         )),
+        hedge_resolution_rel=risk.get("hedge_resolution_rel"),
         audit_yield_bump=float(risk.get("audit_yield_bump", 1e-4)),
         delta_tolerance_hands=float(risk.get("delta_tolerance_hands", 0.01)),
         rhoq_tolerance_bp=float(risk.get("rhoq_tolerance_bp", 0.01)),
@@ -497,6 +504,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=CarryRiskSettings().identity_spot_bumps_rel,
         help="descending matched spot-bump ladder for the chain identity (at least 3)",
     )
+    risk.add_argument(
+        "--hedge-resolution-rel", type=float, default=None,
+        help="desk rebalance resolution, e.g. 0.0025; opt-in, adds 2 price "
+             "calls a day and reports pricing_delta_hedge_gap_hands",
+    )
     risk.add_argument("--audit-yield-bump", type=float, default=1e-4)
     risk.add_argument("--delta-tolerance-hands", type=float, default=0.01)
     risk.add_argument("--rhoq-tolerance-bp", type=float, default=0.01)
@@ -542,6 +554,7 @@ def resolve_risk_profile(args) -> Dict[str, Any]:
         "futures_bump_points": float(args.futures_bump_points),
         "audit_spot_bump_rel": args.audit_spot_bump_rel,
         "identity_spot_bumps_rel": list(args.identity_spot_bumps_rel),
+        "hedge_resolution_rel": args.hedge_resolution_rel,
         "audit_yield_bump": float(args.audit_yield_bump),
         "delta_tolerance_hands": float(args.delta_tolerance_hands),
         "rhoq_tolerance_bp": float(args.rhoq_tolerance_bp),
