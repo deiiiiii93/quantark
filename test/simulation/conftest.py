@@ -1,7 +1,7 @@
 """Shared synthetic fixtures for the simulation tests."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
@@ -61,6 +61,17 @@ KO_BARRIER = 1.03 * SPOT
 KI_BARRIER = 0.75 * SPOT
 
 
+#: Every test in this package starts its runs here.
+#:
+#: A snowball whose KO coupon is annualized accrues from its inception, and
+#: naming it is how the fixture says which contract it means: without it the
+#: accrual runs from the product's own time origin, which is the same thing
+#: on the trade date and a different one on every day after.  Ageing carries
+#: either reading correctly (``test/test_aged_accrual.py``); the anchor is
+#: here so the fixture states the one it intends.
+INCEPTION = datetime(2024, 1, 2)
+
+
 def short_snowball(maturity_days: int = 6, *, ko_days=(2, 5), ki_days=(1, 3), continuous_ki: bool = False,
                    settlement_lag_days: int = 0):
     """A snowball short enough to run a whole life inside a test.
@@ -81,6 +92,8 @@ def short_snowball(maturity_days: int = 6, *, ko_days=(2, 5), ki_days=(1, 3), co
         ki_observation_dates=None if continuous_ki else [d / 365.0 for d in ki_days],
         include_principal=True,
     )
+    # The factory routes kwargs into the sub-configs and does not take this one.
+    product.initial_date = INCEPTION
     if settlement_lag_days:
         product.settlement_convention = SettlementConvention(
             lag=settlement_lag_days / 365.0, lag_unit=SettlementLagUnit.YEAR_FRACTION,

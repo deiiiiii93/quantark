@@ -526,7 +526,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             )
 
         if accrual_start_date is None:
-            return float(observation_time)
+            return float(self.accrual_config.accrued_offset + observation_time)
 
         if pricing_env is None:
             raise ValidationError(

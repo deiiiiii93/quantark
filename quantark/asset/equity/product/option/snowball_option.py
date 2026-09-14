@@ -588,13 +588,23 @@ class SnowballOption(BaseEquityOption):
         if dropped_all:
             return True
 
+        before = self._ko_observation_count()
         if self.barrier_config is not None:
             new_config, dropped_all = self.barrier_config.time_shift(
                 time_bump, bumped_date, pricing_env
             )
             self.barrier_config = new_config
 
+        # The schedule has just lost the observations that are now behind
+        # the valuation date; the accrual has to follow it.
+        self.accrual_config = self.accrual_config.shifted(
+            time_bump, before - self._ko_observation_count()
+        )
         return dropped_all
+
+    def _ko_observation_count(self) -> int:
+        config = getattr(self, "barrier_config", None)
+        return 0 if config is None else config.ko_observation_count
 
     def get_maturity(self, pricing_env: PricingEnv = None) -> float:
         """
@@ -1043,7 +1053,9 @@ class SnowballOption(BaseEquityOption):
                     )
                 else:
                     if accrual_start_date is None:
-                        accrual_factor = rec.observation_time
+                        accrual_factor = (
+                            self.accrual_config.accrued_offset + rec.observation_time
+                        )
                     else:
                         if pricing_env is None:
                             raise ValidationError(
@@ -1127,6 +1139,12 @@ class SnowballOption(BaseEquityOption):
             raise ValidationError(
                 "KI observation schedule is required to resolve KI observations."
             )
+        if not schedule.records:
+            # Every knock-in observation has passed -- the state an aged
+            # contract reaches once its last KI date is behind it.  The KO
+            # resolver already returns an empty list when no record is
+            # still active; this is the same answer for the same reason.
+            return []
 
         default_barrier = (
             None
