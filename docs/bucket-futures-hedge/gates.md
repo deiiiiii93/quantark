@@ -1581,3 +1581,199 @@ outright and changes what the remaining question is about.
   staircase, now with the quantity itself on the record. If that convention
   is ever revisited, this column is where the cost of it is already written
   down.
+
+## The alignment fix: whole-cell barrier spacing, opt-in
+
+The previous section left an engine defect, not an audit one. This is the
+fix, and the evidence that it is one.
+
+### Why there was a choice to make at all
+
+A uniform log lattice has exactly one degree of freedom, the translation
+that `grid_shift` applies, so it can put a node on exactly ONE barrier.
+`_select_alignment_log` spends it on the barrier nearest to spot, which is
+why the target changes hands at the geometric mean and why delta jumps
+there.
+
+The unpinned barrier then lands wherever the spacing leaves it. On the
+failing state the two barriers are **98.43 cells apart**, so the knock-out
+sits **7.87 index points** from the nearest node, 0.42 of a cell.
+
+Refining the lattice shows that this off-node distance is the entire
+disagreement between the two choices. Pinning each barrier in turn:
+
+| N | h, pts | unpinned barrier off-node, pts | err pin KI | err pin KO | branch gap, bp |
+|---:|---:|---:|---:|---:|---:|
+| **1225** | 18.73 | **7.865** | +1943.5 | −2034.0 | **16.83** |
+| 2451 | 9.36 | 0.005 | +570.9 | +570.9 | 0.00 |
+| 4901 | 4.68 | 0.005 | +122.2 | +122.3 | 0.00 |
+| 9801 | 2.34 | 0.005 | +26.3 | +26.4 | 0.00 |
+
+Errors are against the 19601-point grid. At every resolution above 1225 the
+barrier separation happens to land within 0.005 points of a whole number of
+cells, both barriers are effectively on nodes, and **the two branches agree
+to 0.00 bp**. Neither pin is the correct one at 1225: they are wrong by
++8.2 and −8.6 bp in opposite directions, and the jump is the sum.
+
+### The fix
+
+`QuadParams.align_cell_stretch` widens the cell until the separations
+between barriers are whole numbers of cells. Every barrier then lands on a
+node at once, so the two candidate lattices become the same set of points
+and the choice between them stops having a consequence.
+
+Two constraints hold by construction, not by luck:
+
+- **The grid never grows.** `grid_x` is not touched and the cell only ever
+  widens. Holding the domain and shrinking the cell to fit would need
+  proportionally more nodes; widening instead lets the domain grow with the
+  cell, which makes the truncation bound safer rather than weaker. The cost
+  is at most `align_cell_stretch` of spatial resolution, at identical cost
+  in time.
+- **The default path is untouched.** The option is `None` unless asked for,
+  and when it is off the grid is built by the same `np.linspace` expression
+  as before, because `linspace` and `arange * h` do not produce the same
+  floats. 208 QUAD and replay-golden tests pass unchanged.
+
+The budget has to be set against the grid, not picked as a round number.
+Reaching a whole cell costs roughly one part in the number of cells between
+the barriers: 0.44% at 1225 points, but 9.3% at 201. When the budget is too
+small the option declines and leaves the grid alone rather than overspending.
+
+### Measured on the state that failed
+
+| | before | after |
+|---|---:|---:|
+| cell width, relative | 1.000000 | 1.004284 |
+| `grid_x` | 1225 | 1225 |
+| worst barrier off-node | 7.865 pts | 0.000 pts |
+| pin-KI vs pin-KO price gap | 3977.53 | 3.1e-07 |
+| `auto` vs a forced pin | differs | bit-identical |
+| worst delta step over two treads | 4036 | 217 |
+
+Scanned across the crossover, the 4036-deep spike is gone. What remains is
+the ordinary readout staircase — risers of about 217, or 1.1 hands — which
+is a separate defect already on this record and is unchanged in character.
+
+Turning the option on moves the price by **−215.49, or −0.91 bp**, toward
+the refined value. That is the golden rebase, and it is why this is opt-in.
+
+### Multiple knock-out and knock-in levels
+
+Two levels give one separation and one unknown, so it is solvable exactly.
+A third level adds a second constraint without adding an unknown, and one
+spacing cannot generally satisfy both. The search therefore minimises the
+WORST off-node distance rather than claiming to reach zero. On a synthetic
+third level the worst distance falls from 8.06 to 0.88 index points — a
+real improvement, and not a cure.
+
+The levels fed to the search are the CONTRACTUAL ones, not the
+reachability-filtered set that picks the alignment target. That is
+deliberate: reachability depends on spot, so deriving the cell width from it
+would make the grid move with a spot bump and reintroduce the very
+discontinuity being removed. Separations are differences of logs, so the
+spot they are quoted against cancels and the chosen cell width is
+spot-independent.
+
+### The carry-audit residual at the failing state
+
+The identity `D_frozen = D_pinned + sum_i (F_i/S) B_i` is exact, so its
+residual is pure numerical error. Recomputed on the failing date and its
+neighbours, in hands against the 0.01 budget:
+
+| date | spot | R, option off | R, option on |
+|---|---:|---:|---:|
+| 2023-10-24 | 5719.32 | 0.000009 | 0.000006 |
+| 2023-10-25 | 5778.90 | 0.000019 | 0.000016 |
+| **2023-10-26** | **5811.69** | **0.013268** | **0.000076** |
+| 2023-10-27 | 5916.68 | −0.000082 | 0.000045 |
+| 2023-10-30 | 6006.56 | 0.000047 | 0.000046 |
+
+The breach collapses by a factor of 175 and rejoins its neighbours. The
+other four dates do not move, which is the control: the option is not
+flattening the residual everywhere, it is removing one mechanism that only
+fired in one place.
+
+### It moves three certificate identities, and nothing else
+
+`params()` on the QUAD candidates records "every numerically relevant knob
+... including the ones taken from defaults: a default that changes in a
+later release is a numerics change, and the identity hash has to notice."
+`align_cell_stretch` is numerically relevant, so simply existing moves the
+hash, and `test_banked_cells_keep_their_identity` fails for
+`snowball-flat-bsm`, `phoenix-flat-bsm` and `ko-reset-flat-bsm`
+(2026-09-11). That is the guard working, not a defect.
+
+The banked VALUES are untouched. `test_banked_certification_still_describes_its_engines`
+re-runs the engines and compares, and it passes: 5 passed, 11 skipped over
+10 minutes of real pricing. Across the whole suite, 8102 passed and these
+three failed. So what moved is the recorded enumeration of the
+configuration, not a single price.
+
+The hash cannot tell a NEW inert knob from a CHANGED default, so this needed
+a decision rather than a patch. The precedent settled it: the retirement
+notice on the 2026-08-19 certificates says the same thing one field earlier
+-- "its identity hashes moved only because QuadParams gained a readout field
+whose default reproduces the old path" -- and the answer then was to bank a
+new certificate, not to make the hash stop noticing.
+
+**Decided: re-certify, and certify the new option as its own arm.** Making
+the identity ignore an unset option was rejected; it would let future knobs
+enter invisibly, which is the opposite of what the guard is for.
+
+Certifying the option cost almost nothing extra. References are computed per
+CASE, not per candidate, so a second deterministic arm is gated against the
+benchmark the first one already paid for. The three runs took 316, 283 and
+273 seconds, against 352, 319 and 274 banked for two arms.
+
+| study | cases | arms | verdict |
+|---|---:|---|---|
+| snowball-flat-bsm | 23 | pde, quad, quad.stretch_0.02 | all three ADMITTED |
+| phoenix-flat-bsm | 14 | pde, quad, quad.stretch_0.02 | all three ADMITTED |
+| ko-reset-flat-bsm | 14 | pde, quad, quad.stretch_0.02 | all three ADMITTED |
+
+Banked as `2026-09-14`, with the `2026-09-11` certificates retired by a
+`superseded_by` marker. Before writing that marker, all 306 parent cells
+were re-checked against the fresh run: **306 reproduced, 0 moved**. The
+notice claims the values did not move, so it was worth proving rather than
+asserting.
+
+The candidate name carries the budget -- `equity.snowball.quad.stretch_0.02`
+-- rather than a bare flag, because two budgets are two different lattices
+and a decision is recorded per name. The default arm keeps the name it has
+always had, which is the convention `readout` established.
+
+### What the aligned arm measures, and where it declines
+
+Errors against the same benchmark, in the study's own unit of hedge
+contracts against a 0.5-contract cell bound:
+
+| study | quantity | mean, default | mean, aligned | worst, default | worst, aligned |
+|---|---|---:|---:|---:|---:|
+| snowball | gamma | 0.00780 | 0.00771 | 0.02180 | 0.02025 |
+| phoenix | gamma | 0.00744 | 0.00752 | 0.01297 | 0.01298 |
+| ko-reset | pv | 0.01224 | 0.01201 | 0.02433 | 0.02433 |
+
+Unchanged to three decimals, which is the expected result: these cases are
+not sitting on an alignment crossover, and away from one the two lattices
+are both fine. The certification establishes that the option is safe, not
+that it helps here. What shows it helps is the crossover measurement above.
+
+**The option declined in most snowball cases, and that is worth knowing
+before setting a budget.** It engaged in 3 of 23 snowball cases, 12 of 14
+phoenix, and 6 of 14 ko-reset. The snowball's barriers at 85 and 103 sit
+29.8 cells apart on a 1001-point grid, so reaching a whole cell needs 2.9%
+and a 2% budget refuses. The rule is the one already stated -- the widening
+needed is about one part in the number of cells between the barriers -- and
+2% is NOT generous at 1001 points with barriers this close. It is ample at
+the production geometry, where 1225 points and wider barriers give 98 cells
+and a 0.44% requirement.
+
+### What this does NOT yet settle
+
+This is the failing state, not the fleet. The audit has **not** been re-run
+over all 406 cells with the option on, so the 14 breaches and the 0.01-hand
+tolerance stay open on the record until it has been. The other four of the
+five one-contract secant states are at the knock-out barrier and are
+genuine curvature, so they are untouched by this and the secant question
+still stands on its own.

@@ -503,9 +503,15 @@ class SnowballQuadCandidate(_SnowballArm):
         A decision is recorded per candidate name, so a study certifying
         both readouts needs two names; suffixing only the non-default one
         leaves every banked certificate matching.
+
+        Whole-cell barrier alignment follows the same rule. Its suffix
+        carries the stretch budget rather than a bare flag, because two
+        budgets are two different lattices and must not share a decision.
         """
         readout = str(self._params.get("readout", "legacy_linear"))
-        return "equity.snowball.quad" if readout == "legacy_linear" else f"equity.snowball.quad.{readout}"
+        base = "equity.snowball.quad" if readout == "legacy_linear" else f"equity.snowball.quad.{readout}"
+        stretch = self._params.get("align_cell_stretch")
+        return base if stretch is None else f"{base}.stretch_{float(stretch):g}"
 
     def _engine_params(self, grid_points: int) -> QuadParams:
         """The quadrature settings this candidate prices with.
@@ -531,7 +537,16 @@ class SnowballQuadCandidate(_SnowballArm):
                 f"SnowballQuadEngine does not support readout={readout!r}; "
                 f"it supports {list(supported)}"
             )
-        return QuadParams(grid_points=int(grid_points), readout=readout)
+        # Same contract as the readout above: a setting that reaches
+        # params() must also reach the engine, or the certificate would
+        # describe a lattice nobody priced on. QuadParams validates the
+        # budget, so a bad one is refused at study-load time.
+        stretch = self._params.get("align_cell_stretch")
+        return QuadParams(
+            grid_points=int(grid_points),
+            readout=readout,
+            align_cell_stretch=None if stretch is None else float(stretch),
+        )
 
     def params(self) -> Mapping[str, Any]:
         """Declared settings plus the full resolved quadrature configuration.

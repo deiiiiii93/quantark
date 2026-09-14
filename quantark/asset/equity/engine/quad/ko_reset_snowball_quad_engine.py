@@ -158,6 +158,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 times, list(pre_ko_records) + list(post_ko_records), maturity)
 
         align_log = self._select_alignment_log(spot, product)
+        barrier_logs = self._barrier_logs(
+            spot,
+            [record.barrier for record in pre_ko_records],
+            [record.barrier for record in post_ko_records],
+            [record.barrier for record in ki_records],
+            product.barrier_config.ki_barrier,
+        )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
@@ -170,6 +177,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             vol_max=vol,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
+            barrier_logs=barrier_logs,
+            cell_stretch=self._resolve_align_cell_stretch(),
             integration_rule=self.params.integration_rule,
             fft_padding_factor=fft_padding_factor,
             fft_filter_alpha=fft_filter_alpha,
@@ -468,6 +477,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             return None
 
         align_log = self._select_alignment_log(spot, product)
+        barrier_logs = self._barrier_logs(
+            spot,
+            [record.barrier for record in pre_ko_records],
+            [record.barrier for record in post_ko_records],
+            [record.barrier for record in ki_records],
+            product.barrier_config.ki_barrier,
+        )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
@@ -480,6 +496,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             vol_max=vol,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
+            barrier_logs=barrier_logs,
+            cell_stretch=self._resolve_align_cell_stretch(),
             integration_rule=self.params.integration_rule,
             fft_padding_factor=fft_padding_factor,
             fft_filter_alpha=fft_filter_alpha,

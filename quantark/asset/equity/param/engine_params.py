@@ -719,6 +719,21 @@ class QuadParams(EngineParams):
         stability_preset: Optional stability preset overriding FFT padding/filter defaults.
                           Supported: conservative, balanced, aggressive.
         align_priority: Barrier alignment priority (auto, ko, coupon, ki).
+        align_cell_stretch: Opt-in fix for the alignment discontinuity, and
+            None (unset) by default because it moves barrier prices. A
+            uniform lattice can pin only ONE barrier onto a node; align_priority
+            picks which, and because that choice is made by distance from
+            spot, it can switch mid-bump and make delta discontinuous. Setting
+            this widens the cell just enough that the separations between
+            barriers are whole numbers of cells, so every barrier lands on a
+            node at once and the choice stops mattering. The value is the
+            largest fractional widening allowed, e.g. 0.02 for 2%; no
+            widening within budget means the grid is left alone. grid_points
+            is never changed and the cell never shrinks, so the grid cannot
+            grow -- the cost is at most this fraction of spatial resolution,
+            and the truncation domain widens by the same fraction. Exact for
+            two distinct levels; three or more cannot share one lattice, so
+            the widening minimises the worst off-node distance instead.
         event_smoothing_cells: Half-width of smoothing window in grid cells (0 disables).
         event_smoothing_mode: Smoothing mode (fixed, auto, reverse_aware).
         event_smoothing_kernel: Smoothing kernel (cosine, tanh).
@@ -778,6 +793,7 @@ class QuadParams(EngineParams):
     fft_filter_power: int = 8
     stability_preset: Optional[str] = None
     align_priority: str = "auto"
+    align_cell_stretch: Optional[float] = None
     event_smoothing_cells: int = 1
     event_smoothing_mode: str = "fixed"
     event_smoothing_kernel: str = "cosine"
@@ -905,6 +921,14 @@ class QuadParams(EngineParams):
             raise ValidationError(
                 f"align_priority must be one of auto, ko, coupon, ki, got {self.align_priority}"
             )
+        if self.align_cell_stretch is not None:
+            stretch = float(self.align_cell_stretch)
+            if not 0.0 < stretch <= 1.0:
+                raise ValidationError(
+                    "align_cell_stretch must be in (0, 1], got "
+                    f"{self.align_cell_stretch}"
+                )
+            self.align_cell_stretch = stretch
         if self.event_smoothing_cells < 0:
             raise ValidationError(
                 f"event_smoothing_cells must be >= 0, got {self.event_smoothing_cells}"

@@ -77,6 +77,16 @@ candidates:
     params: {accuracy: standard}
   - builder: equity.snowball.quad
     params: {grid_points: 1001}
+  # The same engine with whole-cell barrier alignment. A uniform lattice can
+  # pin only ONE barrier onto a node, and the engine picks the one nearest to
+  # spot -- so the choice flips at the geometric mean of two barriers and
+  # delta is discontinuous there. Widening the cell until the barrier
+  # separations are whole numbers of cells puts every barrier on a node at
+  # once and the choice stops mattering. 0.02 is the budget it may widen by;
+  # the grid keeps its node count. Certified as its own arm because it is a
+  # different lattice, and a certificate covers only what it prices.
+  - builder: equity.snowball.quad
+    params: {grid_points: 1001, align_cell_stretch: 0.02}
 
 cases:
   # At inception, comfortably between the barriers.
