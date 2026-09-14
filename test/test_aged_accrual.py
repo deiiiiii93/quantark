@@ -179,27 +179,76 @@ def test_an_unanchored_ko_reset_snowball_keeps_its_accrual_factor():
     assert got == pytest.approx(survivors, rel=1e-12)
 
 
-@pytest.mark.xfail(strict=True, reason="KNOWN DEFECT: the contract tenor ages with the maturity")
-def test_an_annualized_rebate_keeps_its_contract_tenor_when_aged():
-    """The rebate and the knock-in participation scale by the CONTRACT tenor
-    -- inception to expiry -- which does not change as the contract ages.
+HALF = 182.0 / 365.0
 
-    ``BaseEquityOption.get_tenor`` falls back to ``maturity`` when there is
-    no explicit ``tenor`` and no ``exercise_date``, and ageing shrinks
-    maturity, so a 10% annualized rebate on a one-year note is worth 5% of
-    it halfway through.  Unlike the coupon accrual, ``initial_date`` does
-    not cure this: ``get_tenor_end_date`` needs an ``exercise_date``.
 
-    Left failing on purpose: the fix belongs to ``get_tenor``, which every
-    equity option shares, and is a wider change than the accrual.
+def _rebating_snowball():
+    """A snowball whose REBATE accrues, with no tenor and no exercise date.
+
+    That is what makes the contract tenor fall back to the remaining
+    maturity: ``get_tenor_end_date`` needs an ``exercise_date``, so unlike
+    the coupon accrual this one is not cured by ``initial_date`` either.
     """
     from dataclasses import replace
 
     product = _snowball()
     product.accrual_config = replace(product.accrual_config, is_annualized_rebate=True)
+    assert product.tenor is None and product.exercise_date is None
+    return product
+
+
+def test_the_contract_tenor_does_not_age_with_the_maturity():
+    """The tenor is inception to expiry, a constant of the deal; maturity is
+    what is LEFT of it.  They agree only on the trade date."""
+    product = _rebating_snowball()
     base = product.get_contract_tenor(_env())
-    aged = _aged(product, 182.0 / 365.0)
-    assert aged.get_contract_tenor(_env(182.0 / 365.0)) == pytest.approx(base, rel=1e-12)
+    assert base == pytest.approx(1.0, rel=1e-12)
+    for shift in (SHIFT, HALF, 273.0 / 365.0):
+        aged = _aged(product, shift)
+        assert aged.get_contract_tenor(_env(shift)) == pytest.approx(base, rel=1e-12)
+        # ... while the REMAINING maturity does age, which is the whole point.
+        assert float(aged.get_maturity(_env(shift))) == pytest.approx(base - shift, abs=1e-12)
+
+
+@pytest.mark.parametrize("anchored", [False, True])
+def test_an_annualized_rebate_is_worth_the_same_after_ageing(anchored):
+    """A 10% annualized rebate on a one-year note was worth 5% of it halfway
+    through, because it scaled by a tenor that had halved."""
+    product = _rebating_snowball()
+    if anchored:
+        product.initial_date = VALUATION
+    base = product.get_maturity_payoff_v0(SPOT, _env())
+    aged = _aged(product, HALF).get_maturity_payoff_v0(SPOT, _env(HALF))
+    assert aged == pytest.approx(base, rel=1e-12)
+
+
+def test_the_ko_reset_contract_tenor_does_not_age_either():
+    """The KO-reset snowball resolves its own contract tenor and falls back
+    to the remaining time to its last pre-KO observation, so the base
+    class's fallback never sees it.  Same defect, its own code path -- and
+    again ``initial_date`` does not cure it, because the schedule it reads
+    the end date from carries times rather than dates.
+    """
+    product = create_ko_reset_snowball(
+        initial_price=SPOT, strike=SPOT, maturity_pre=1.0, maturity_post=2.0,
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE, ki_continuous=True,
+    )
+    base = product.get_contract_tenor(_env())
+    aged = _aged(product, HALF)
+    assert aged.get_contract_tenor(_env(HALF)) == pytest.approx(base, rel=1e-12)
+
+
+def test_an_option_that_banks_no_elapsed_time_is_unchanged():
+    """The hook defaults to zero, so every other equity option keeps the
+    tenor it had: the fallback is exact at inception, which is the only
+    place the bare maturity was ever right."""
+    from quantark.asset.equity.product.option.european_vanilla_option import (
+        EuropeanVanillaOption,
+    )
+    from quantark.util.enum import OptionType
+
+    call = EuropeanVanillaOption(strike=SPOT, option_type=OptionType.CALL, maturity=1.0)
+    assert call.get_tenor(_env()) == pytest.approx(1.0, rel=1e-12)
 
 
 def test_the_offset_must_be_a_finite_non_negative_year_fraction():

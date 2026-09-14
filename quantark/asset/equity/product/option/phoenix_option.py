@@ -1213,6 +1213,10 @@ class PhoenixOption(BaseEquityOption):
             return bool(self.accrual_config.is_annualized)
         return flag
 
+    def _elapsed_since_origin(self) -> float:
+        """The accrual offset is the elapsed time, banked by ``time_shift``."""
+        return float(self.accrual_config.accrued_offset)
+
     def get_contract_tenor(self, pricing_env=None) -> float:
         """
         Get contract tenor in years.

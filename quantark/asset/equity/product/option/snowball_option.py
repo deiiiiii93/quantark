@@ -621,6 +621,10 @@ class SnowballOption(BaseEquityOption):
         """
         return super().get_maturity(pricing_env)
 
+    def _elapsed_since_origin(self) -> float:
+        """The accrual offset is the elapsed time, banked by ``time_shift``."""
+        return float(self.accrual_config.accrued_offset)
+
     def get_contract_tenor(self, pricing_env: PricingEnv = None) -> float:
         """
         Get contract tenor in years.
