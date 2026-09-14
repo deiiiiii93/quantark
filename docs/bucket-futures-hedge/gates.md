@@ -1844,11 +1844,48 @@ barrier the grid is pinned to.
 Excluding those two states, the worst `abs(R)+E` is 0.008094 against 0.008368
 before, so the margin improves from 1.19x to 1.24x.
 
-**The tolerance still should not be widened.** What these two states argue
-for is a fourth rung on `identity_spot_bumps_rel`, at 0.000125. It costs four
-more price calls per audited state, about a third more audit time, and it
-would have resolved both. That is a change to the measurement, not to the
-budget, and it is left for a decision rather than taken here.
+**The tolerance still should not be widened.** But a fourth ladder rung,
+which this file first proposed, is the wrong remedy and the cost quoted for
+it here was an estimate, not a measurement. Both are corrected below.
+
+### A fourth rung is a workaround; the readout is the cause
+
+Measured at the failing state, with the audit's own price-call counter:
+
+| readout | ladder | audit price calls | abs(R)+E | status |
+|---|---|---:|---:|---|
+| legacy_linear | three rungs (production) | 30 | 0.019867 | inconclusive |
+| legacy_linear | four rungs | 34 | 0.001336 | pass |
+| **transition** | **three rungs (production)** | **30** | **0.004482** | **pass** |
+| transition | four rungs | 34 | 0.001130 | pass |
+
+A fourth rung costs **13%** more price calls, not the third estimated above.
+It does resolve the state. But `readout="transition"` resolves it on the
+ladder that already exists, at no extra audit cost, and it does more than
+that: under transition the option-off and option-on gates are 0.004484 and
+0.004482. **The lattice shift stops mattering at all**, because the readout
+no longer interpolates between nodes, so where spot sits inside its cell is
+no longer part of the answer.
+
+The convergence rates say which readout is actually converging. Under
+transition the ladder falls 0.017887, 0.004484, 0.001130 -- ratios of 3.99
+and 3.97, which is h-squared to two figures. Under legacy_linear it falls
+0.057736, 0.019867, 0.001336 -- ratios of 2.91 and 14.87. A ladder that is
+not converging at its own order cannot be extended into a reliable
+allowance; it can only be extended until it happens to land somewhere small.
+
+That does not make the readout switch free. It changes every QUAD barrier
+price by a few basis points and rebases the goldens and the certificates,
+which is a far larger change than a fourth rung, and it is already on this
+record as its own open question with a measured cost of about 3% engine CPU.
+
+Doing nothing is also defensible: 2 states in 7,558, and `inconclusive` is
+an honest status that says the measurement cannot decide rather than
+claiming a pass. Note too that a straddled node is common and a failure is
+not -- at the production rung the bump exceeds the distance to the node
+boundary in roughly a tenth of states, yet only 0.03% report inconclusive,
+because the identity subtracts two finite differences and the kink usually
+cancels between them.
 
 ### What this does NOT settle
 

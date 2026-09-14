@@ -98,7 +98,8 @@ def probe(inception, model, day, stretch):
         pd.Timestamp(day), env(context.spot, context.dividend()))
 
     quad = {"grid_points": config["quad_grid"],
-            "readout": config.get("quad_readout", "legacy_linear")}
+            "readout": os.environ.get("READOUT")
+            or config.get("quad_readout", "legacy_linear")}
     if stretch is not None:
         quad["align_cell_stretch"] = float(stretch)
     engine = SnowballQuadEngine(QuadParams(**quad))
