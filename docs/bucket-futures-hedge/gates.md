@@ -1769,11 +1769,97 @@ needed is about one part in the number of cells between the barriers -- and
 the production geometry, where 1225 points and wider barriers give 98 cells
 and a 0.44% requirement.
 
-### What this does NOT yet settle
+## The fleet audit, re-run: no failures left
 
-This is the failing state, not the fleet. The audit has **not** been re-run
-over all 406 cells with the option on, so the 14 breaches and the 0.01-hand
-tolerance stay open on the record until it has been. The other four of the
-five one-contract secant states are at the knock-out barrier and are
-genuine curvature, so they are untouched by this and the secant question
-still stands on its own.
+### 7,558 states, not 406 cells
+
+The identity compares three spot derivatives of the PRICE and no hedge
+quantity enters it, so cells differing only in hedge policy must audit
+identically. Checked rather than assumed: **45,348 paired rows across
+policies, zero differing.** The distinct work is therefore one audit per
+(inception, model, date) -- 7,558 measured states behind 52,906 banked
+cell-rows, seven cells to a state.
+
+That also re-reads the banked counts. "14 breaches" is **two** states,
+2023-10-26 under each q-model, each recorded seven times. "406 not measured"
+is 58 terminal dates, likewise times seven.
+
+The re-run uses the production primitives rather than re-deriving them --
+`measure_product_carry_risk` for the buckets the identity must retain,
+`sample_chain_identity` for the matched ladder -- and applies the recorder's
+own rule. Validated first with the option OFF on one group: 242 states,
+every banked residual reproduced to **4.8e-10 hands**, which is seven orders
+below the signal and 2e7 below the budget. So the banked column is a sound
+control and only the ON arm needed running: 7,558 states, 63 minutes, zero
+errors.
+
+### The gate
+
+| | option off (banked) | option on |
+|---|---:|---:|
+| pass | 7556 | 7556 |
+| inconclusive | 0 | 2 |
+| **fail** | **2** | **0** |
+| worst abs(R) | 0.013268 | **0.003960** |
+| 95th percentile abs(R) | 2.693e-04 | 2.125e-04 |
+| mean abs(R) | 7.889e-05 | 7.419e-05 |
+| states with E above 10% of budget | 297 | 259 |
+
+**Both failures are gone**, and they are gone for the stated reason. At the
+crossover state the residual collapses from 0.013268 to 0.000076, a factor
+of 174, while the barrier off-node distance goes from 7.865 index points to
+zero. Its four neighbouring dates do not move, which is the control: the
+option is not flattening residuals everywhere, it removed one mechanism that
+fired in one place.
+
+Every aggregate improves -- worst, 95th percentile, mean, and the count of
+poorly-converged ladders. This is not a wash that happens to clear one date.
+
+### The two inconclusive states are the ladder stopping early
+
+2025-06-30 in the 2025-04-01 inception went from pass to inconclusive under
+both q-models. It is NOT an identity failure and NOT the alignment:
+
+| rung | 0.001 | 0.0005 | 0.00025 | 0.000125 | 0.0000625 |
+|---|---:|---:|---:|---:|---:|
+| option off | +0.043232 | +0.005764 | +0.000096 | +0.000033 | +0.000018 |
+| option on | +0.057736 | +0.019867 | +0.001336 | +0.000032 | **+0.000017** |
+
+The banked ladder stops at the third rung. There the ON residual is 0.001336
+-- seven times inside the budget -- but the change from the previous rung is
+0.018531, and the gate conservatively requires the WHOLE allowance to fit.
+Extend the ladder two rungs and both configurations converge to the same
+number, about 1.7e-05 hands, 300 times inside the budget, and the state
+passes either way.
+
+The cause is the readout staircase, already on this record as a separate
+defect, and the reason it bites here is visible: spot sits **0.9076** of the
+way through its cell with the option off and **0.9501** with it on. This was
+already the fleet's worst-converging ladder before the change -- its banked
+E of 0.005669 was the largest of all 7,558 -- and widening the cell pushed
+spot nearer the node boundary, which made a bad ladder worse. The alignment
+fix cannot help it, because the staircase is in the readout and not in which
+barrier the grid is pinned to.
+
+Excluding those two states, the worst `abs(R)+E` is 0.008094 against 0.008368
+before, so the margin improves from 1.19x to 1.24x.
+
+**The tolerance still should not be widened.** What these two states argue
+for is a fourth rung on `identity_spot_bumps_rel`, at 0.000125. It costs four
+more price calls per audited state, about a third more audit time, and it
+would have resolved both. That is a change to the measurement, not to the
+budget, and it is left for a decision rather than taken here.
+
+### What this does NOT settle
+
+The fleet P&L was **not** replayed. Prices move about 0.9 bp with the option
+on, so Gate E's paired comparison, turnover and tracking error would shift
+slightly if re-run; they were not the failing gate and are untouched.
+`net_delta_audit_error` is holdings-dependent and would need the full replay
+too. It was already passing at 3.8e-12 and is an algebraic consistency check
+that does not depend on the engine's accuracy, so the fix cannot plausibly
+disturb it -- but it was not re-measured and is not claimed to have been.
+
+The other four of the five one-contract secant states are at the knock-out
+barrier and are genuine curvature, so the secant question still stands on its
+own.
