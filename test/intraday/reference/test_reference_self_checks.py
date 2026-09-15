@@ -100,6 +100,23 @@ def test_reference_converges_and_reports_uncertainty(sse_calendar, sse_sessions,
     assert b.uncertainty_price <= a.uncertainty_price
 
 
+def test_reference_does_not_depend_on_call_order(sse_calendar, sse_sessions, desk):
+    # The global sweep is cached across horizons; its cached event times must never leak into another context.
+    from intraday.reference import gaussian_reference
+    kos = [e for e in _snow_ctx(sse_calendar, sse_sessions, desk, datetime(2026, 9, 15, tzinfo=SHANGHAI)).timeline.events
+           if e.kind is EventKind.KO]
+    fixings = tuple(Fixing(k.timestamp, 100.0) for k in kos[:5])
+    day = _snow_ctx(sse_calendar, sse_sessions, desk, kos[5].timestamp - timedelta(days=1), fixings=fixings)
+    near = _snow_ctx(sse_calendar, sse_sessions, desk, kos[5].timestamp - timedelta(minutes=15), spot=102.5, fixings=fixings)
+    gaussian_reference._SWEEP_CACHE.clear()
+    alone = reference_snowball(near, points=(1001, 2001, 4001))
+    gaussian_reference._SWEEP_CACHE.clear()
+    reference_snowball(day, points=(1001, 2001, 4001))
+    after_other = reference_snowball(near, points=(1001, 2001, 4001))
+    assert after_other.price == pytest.approx(alone.price, abs=1e-12)
+    assert after_other.delta == pytest.approx(alone.delta, rel=1e-10)
+
+
 def test_barrier_zero_carry_in_out_parity_and_exact_bridge_mc():
     S, K, u, sigma = 100.0, 100.0, 0.5, 0.25
     for is_call in (True, False):

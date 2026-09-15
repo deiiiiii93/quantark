@@ -73,18 +73,25 @@ uniform / desk / sessions_only; spots B(1 +- 1e-4), B(1 +- 1e-3), B exp(+-k sqrt
 
 At points (2001, 4001, 8001): worst 3*unc/budget price 0.785, delta 0.521, gamma 1.188 (6h; a cell where gamma crosses
 zero and the absolute floor binds). Doubling the grid cut that uncertainty by exactly 4x (7.14e-7 -> 1.79e-7), so it
-is resolution, not a limit: **Gate C uses `GATE_C_POINTS = (4001, 8001, 16001)`** (405 s for the 480 cells):
+is resolution, not a limit: **Gate C uses `GATE_C_POINTS = (4001, 8001, 16001)`**.
+
+**Correction (same day).** The first evidence run shared the reference's global-sweep cache across horizons and the
+cache returned the time to the second remaining event measured from the FIRST valuation instant that populated it, so
+every later horizon priced its final interval over the wrong span (found when the reference disagreed with QUAD V2 by
+2.2e-3 at 15 minutes; an independent quadrature over QUAD V2's own continuation sided with QUAD V2). Richardson
+uncertainties were unaffected (every level shared the stale time), prices were not. Fixed in the reference; a
+call-order regression test now guards it. The re-run (624 s, machine shared) confirms the conclusion:
 
 | horizon | max unc price | max unc delta | max unc gamma | worst 3*unc/budget (price, delta, gamma) |
 |---|---|---|---|---|
 | 1 day | 6.53e-06 | 3.10e-06 | 1.83e-06 | 0.196, 0.130, 0.051 |
-| 6h | 6.53e-06 | 5.35e-06 | 6.62e-06 | 0.196, 0.130, 0.297 |
-| 1h | 4.94e-06 | 1.21e-05 | 3.72e-05 | 0.148, 0.079, 0.015 |
-| 15m | 4.23e-06 | 2.35e-05 | 1.45e-04 | 0.127, 0.060, 0.046 |
-| 5m | 3.94e-06 | 4.00e-05 | 4.31e-04 | 0.118, 0.052, 0.005 |
-| 1m | 3.79e-06 | 8.56e-05 | 2.14e-03 | 0.114, 0.060, 0.004 |
-| 10s | 3.80e-06 | 1.92e-04 | 1.28e-02 | 0.114, 0.100, 0.037 |
-| 1s | 3.80e-06 | 6.07e-04 | 1.28e-01 | 0.114, 0.100, 0.039 |
+| 6h | 6.52e-06 | 5.34e-06 | 6.60e-06 | 0.196, 0.130, 0.323 |
+| 1h | 4.93e-06 | 1.21e-05 | 3.71e-05 | 0.148, 0.079, 0.015 |
+| 15m | 4.23e-06 | 2.34e-05 | 1.45e-04 | 0.127, 0.060, 0.045 |
+| 5m | 3.94e-06 | 3.99e-05 | 4.29e-04 | 0.118, 0.052, 0.005 |
+| 1m | 3.76e-06 | 8.53e-05 | 2.13e-03 | 0.113, 0.059, 0.004 |
+| 10s | 3.77e-06 | 1.92e-04 | 1.27e-02 | 0.113, 0.099, 0.039 |
+| 1s | 3.77e-06 | 6.04e-04 | 1.27e-01 | 0.113, 0.099, 0.039 |
 
 **No horizon is reference-limited** at Gate C resolution (the plan expected 10s/1s gamma to be; the local final grid
 removes that limit). `budgets.REFERENCE_LIMITED` stays empty for the snowball family.

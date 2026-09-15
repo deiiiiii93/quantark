@@ -231,8 +231,23 @@ def _barrier_logs(ctx, prod):
 _SWEEP_CACHE: Dict[tuple, Tuple[PLJ, PLJ]] = {}
 
 
-def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[PLJ, PLJ, float]:
-    """Backward sweep from maturity down to the SECOND remaining instant (events applied). Cached."""
+def _time_homogeneous(env) -> bool:
+    """Whether the market means the same absolute schedule from any valuation instant."""
+    from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, NoDividend
+    return (type(env.rate_curve) is FlatRateCurve and type(env.vol_surface) is FlatVolSurface
+            and (env.div_yield is None or type(env.div_yield) in (NoDividend, ContinuousDividendYield)))
+
+
+def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[PLJ, PLJ]:
+    """Backward sweep from maturity down to the SECOND remaining instant (events applied). Cached.
+
+    The cached functions of ln S are anchor-free (moments between absolute
+    instants). Event TIMES are not: they are measured from the valuation
+    instant, so the caller must use its own. A market that is not
+    time-homogeneous (a term curve re-read from another instant is another
+    schedule) keys the cache on the valuation instant as well.
+    """
+    from quantark.intraday.timestamp import to_utc
     strike = float(prod.strike)
     t_second, t_mat = instants[1][0], instants[-1][0]
     _, w_rest, _ = moments(ctx, t_second, t_mat, strike)
@@ -241,10 +256,11 @@ def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[P
     lo, hi = round(levels[0] - half, 6), round(levels[-1] + half, 6)
     from quantark.execution import greeks as summaries
     from quantark.intraday.context import value_tree
-    key = (points, width_std, lo, hi, tuple(e.event_id for _, g in instants[1:] for e in g),
+    env = ctx.request.pricing_env
+    anchor = None if _time_homogeneous(env) else to_utc(ctx.valuation_timestamp).isoformat()
+    key = (points, width_std, lo, hi, anchor, tuple(e.event_id for _, g in instants[1:] for e in g),
            ctx.request.variance_profile.identity(), ctx.request.session_calendar.identity(),
-           repr(value_tree((summaries._vol_summary(ctx.request.pricing_env), summaries._rate_summary(ctx.request.pricing_env),
-                            summaries._div_summary(ctx.request.pricing_env)))),
+           repr(value_tree((summaries._vol_summary(env), summaries._rate_summary(env), summaries._div_summary(env)))),
            repr(value_tree(ctx.request.product)))
     hit = _SWEEP_CACHE.get(key)
     if hit is not None:
@@ -259,8 +275,8 @@ def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[P
         c1 = PLJ.sample(v1.x, expect(v1, v1.x + m, v, disc)[0])
         v0, v1 = _apply_instant(ctx, prod, events, c0, c1, t)
         t_next = t
-    _SWEEP_CACHE[key] = (v0, v1, t_next)
-    return v0, v1, t_next
+    _SWEEP_CACHE[key] = (v0, v1)
+    return v0, v1
 
 
 def _solve_snowball(ctx, points: int, width_std: float) -> Tuple[float, float, float]:
@@ -283,7 +299,8 @@ def _solve_snowball(ctx, points: int, width_std: float) -> Tuple[float, float, f
     if len(instants) == 1:
         c0, c1 = _terminal(ctx, prod, local, t1)
     else:
-        g0, g1, t2 = _global_sweep(ctx, prod, instants, points, width_std)
+        g0, g1 = _global_sweep(ctx, prod, instants, points, width_std)
+        t2 = instants[1][0]                     # this context's own time to the second instant
         m12, v12, disc12 = moments(ctx, t1, t2, strike)
         c0 = PLJ.sample(local, expect(g0, local + m12, v12, disc12)[0])
         c1 = PLJ.sample(local, expect(g1, local + m12, v12, disc12)[0])
