@@ -1,6 +1,6 @@
 # QUAD V2 feasibility experiment
 
-This is a numerical experiment supporting the [proposed design](../../docs/plans/2026-09-11-quad-v2-design.md). It is not a new production engine.
+This is a numerical experiment supporting the [proposed design](../../docs/superpowers/plans/2026-09-11-quad-v2-design.md). It is not a new production engine.
 
 The confirmed V2 speed priority is price plus Greeks and scenario curves, with accuracy gates across all supported products. The design benchmarks cold preparation, reusable 101-spot curves and complete market-risk/scenario batches separately; scalar RFQ speed is secondary. This probe measures only price plus delta and backend equivalence, so it does not establish performance for the complete target workload or the proposed twofold throughput improvement.
 
