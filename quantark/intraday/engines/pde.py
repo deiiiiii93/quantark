@@ -2,20 +2,25 @@
 
 The PDE solvers take no lifecycle state: the twin carries the knocked-in flag
 (``_otc_lifecycle_knocked_in``) and the service adds pending receivables. Near a
-fixing the value function's diffusion layer shrinks below the grid; the route
-then re-solves ONE refined clone (points raised to cover the layer, capped at
-``INTRADAY_PDE_MAX_POINTS``) and reports the final status verbatim — never a
-silent change of the time fill, never a status better than the grid delivered.
+fixing the value function's diffusion layer shrinks below the grid, in space and
+in time (see ``quantark.intraday.resolution``); the route then re-solves ONE
+refined clone (points raised to cover the layer, capped at
+``INTRADAY_PDE_MAX_POINTS``; steps per day doubled until the time floors hold on
+that space grid, capped at ``INTRADAY_PDE_MAX_STEPS``, with ``max_steps`` lifted
+so the fill is never scaled) and reports the final status verbatim — never a
+status better than the grid delivered.
 """
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 
 from quantark.intraday.engines.base import EnginePriceOutcome
-from quantark.intraday.resolution import INTRADAY_PDE_MAX_POINTS, pde_resolution
+from quantark.intraday.resolution import (INTRADAY_PDE_MAX_POINTS, INTRADAY_PDE_MAX_STEPS, diffusion_layer, pde_resolution,
+                                          time_resolved)
 
 
 def _layout_numbers(solver, spot: float):
@@ -30,10 +35,61 @@ def _layout_numbers(solver, spot: float):
             "fill_scaled": bool(layout.time.fill_scaled)}
 
 
-def _grid_config(solver):
-    from quantark.asset.equity.engine.pde.grid.config import resolve_config
-    params = solver.params
-    return resolve_config(params.accuracy, getattr(params, "grid", None)) if hasattr(params, "accuracy") else params.grid
+def _barrier_placement(ctx, solver) -> str:
+    """Why a barrier-bearing twin's barrier is not where the contract puts it on the solved grid ("" when it is).
+
+    A continuous knock-out barrier is a hard domain edge of the layout (exact). Otherwise the solver overwrites
+    the nodes at and beyond the barrier, so the effective barrier is the first such node: first order in dx and
+    alignment-dependent unless a node sits on the barrier itself.
+    """
+    from quantark.util.enum.option_enums import ObservationType
+    from quantark.util.numerical import is_close
+
+    twin = ctx.numerical.product
+    barrier = getattr(twin, "barrier", None)
+    if barrier is None or getattr(twin, "observation_type", None) not in (ObservationType.CONTINUOUS, ObservationType.DISCRETE):
+        return ""
+    layout, b = solver._active_layout, float(barrier)
+    if b in (layout.request.hard_upper, layout.request.hard_lower):
+        return ""
+    s = np.exp(np.asarray(layout.spatial.x, dtype=float))
+    beyond = np.nonzero(s >= b)[0] if twin.is_up_barrier else np.nonzero(s <= b)[0]
+    if len(beyond) == 0:
+        return ""
+    node = float(s[beyond[0]] if twin.is_up_barrier else s[beyond[-1]])
+    if is_close(node, b, rel_tol=1e-12, abs_tol=0.0):
+        return ""
+    layer = diffusion_layer(ctx)
+    offset = abs(np.log(node / b))
+    return (f"the barrier {b:g} enters the grid by node overwrite at S={node:.10g}, "
+            f"{offset / layer if layer > 0.0 else float('inf'):.2e} layers beyond it (first order in dx)")
+
+
+def _dx_min(solver) -> float:
+    return float(np.min(np.diff(np.asarray(solver._active_layout.spatial.x, dtype=float))))
+
+
+def _time_status(ctx, solver, layout, numbers, dx_min):
+    return pde_resolution(ctx, dx_at_spot=numbers["dx_at_spot"], domain_log_width=numbers["domain_log_width"],
+                          time_nodes=layout.time.t, theta=solver._theta_schedule_from_layout(layout), dx_min=dx_min)
+
+
+def _time_fill_for(ctx, solver, grid, numbers, dx_min):
+    """(steps_per_day, requested steps) of the smallest power-of-two multiple of the current fill whose time
+    layout meets the time floors on the given space grid, or the last multiple within ``INTRADAY_PDE_MAX_STEPS``."""
+    from quantark.asset.equity.engine.pde.grid.time import build_time
+
+    layout = solver._active_layout
+    spd = float(grid.steps_per_day)
+    best = (spd, int(layout.time.requested_steps))
+    while True:
+        spd *= 2.0
+        candidate = build_time(layout.request, replace(grid, steps_per_day=spd, max_steps=INTRADAY_PDE_MAX_STEPS))
+        if candidate.requested_steps > INTRADAY_PDE_MAX_STEPS:
+            return best
+        best = (spd, int(candidate.requested_steps))
+        if time_resolved(_time_status(ctx, solver, SimpleNamespace(time=candidate), numbers, dx_min)):
+            return best
 
 
 class PDERoute:
@@ -57,22 +113,38 @@ class PDERoute:
         records = ()
         if numbers is None:          # an at-valuation event decided the price without a grid
             return EnginePriceOutcome(pv, self._method(engine), {"resolution": "not_solved"}, {}, engine_used=solver)
-        status = pde_resolution(ctx, dx_at_spot=numbers["dx_at_spot"], domain_log_width=numbers["domain_log_width"])
-        if status.status == "unqualified" and status.required_points > numbers["points"]:
-            target = min(status.required_points, INTRADAY_PDE_MAX_POINTS)
-            if target > numbers["points"]:
+        grid = solver.grid_binder.config            # the resolved config the solve used (scheme knobs included)
+        dx_min = _dx_min(solver)
+        status = _time_status(ctx, solver, solver._active_layout, numbers, dx_min)
+        if status.status == "unqualified":
+            points = int(grid.points)
+            if status.required_points > numbers["points"]:
+                points = max(points, min(status.required_points, INTRADAY_PDE_MAX_POINTS))
+            # the time floors are judged on the refined space grid: its smallest cell shrinks with the point count
+            dx_min *= numbers["points"] / max(points, numbers["points"])
+            spd, requested = float(grid.steps_per_day), numbers["requested_steps"]
+            space_resolvable = status.required_points <= INTRADAY_PDE_MAX_POINTS
+            # a layer the point cap cannot resolve stays unqualified: more steps would buy cost, not a claim
+            if space_resolvable and not time_resolved(_time_status(ctx, solver, solver._active_layout, numbers, dx_min)):
+                spd, requested = _time_fill_for(ctx, solver, grid, numbers, dx_min)
+            if points > numbers["points"] or spd > float(grid.steps_per_day):
                 refined = deepcopy(engine)
-                grid = _grid_config(refined)
-                refined.params.grid = replace(grid, points=target, max_points=max(int(grid.max_points or 0), target))
+                refined.params.grid = replace(grid, points=points, max_points=max(int(grid.max_points or 0), points),
+                                              steps_per_day=spd, max_steps=max(int(grid.max_steps), requested))
                 refined._grid_binder = None
                 refined._active_layout = None
                 pv = float(refined.price(twin, env))
                 numbers = _layout_numbers(refined, ctx.spot)
-                status = pde_resolution(ctx, dx_at_spot=numbers["dx_at_spot"], domain_log_width=numbers["domain_log_width"])
-                records = (f"grid refined to {numbers['points']} points for the diffusion layer",)
-                solver = refined
+                status = _time_status(ctx, refined, refined._active_layout, numbers, _dx_min(refined))
+                records = (f"grid refined to {numbers['points']} points and {spd:g} steps per day for the diffusion layer",)
+                solver, grid = refined, refined.grid_binder.config
+        placement = _barrier_placement(ctx, solver) if status.status == "resolved" else ""
+        if placement:
+            status = replace(status, status="unqualified", reason=placement)
         numerical = dict(numbers, resolution=status.status, resolution_reason=status.reason,
-                         cells_per_layer=status.cells_per_layer, layer_log_width=status.layer_log_width)
+                         cells_per_layer=status.cells_per_layer, layer_log_width=status.layer_log_width,
+                         steps_per_layer=status.steps_per_layer, grid_mode_damping=status.grid_mode_damping,
+                         steps_per_day=float(grid.steps_per_day))
         return EnginePriceOutcome(pv, self._method(engine), numerical, {}, records, engine_used=solver)
 
     @staticmethod

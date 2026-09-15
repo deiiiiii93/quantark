@@ -13,7 +13,7 @@ from quantark.execution import PricingSession
 from quantark.intraday import EventKind, Fixing, VarianceProfile, resolve_context, value_intraday
 from quantark.intraday.engines import route_for
 from quantark.intraday.request import IntradayValuationRequest
-from quantark.intraday.resolution import INTRADAY_PDE_MAX_POINTS
+from quantark.intraday.resolution import INTRADAY_PDE_MAX_POINTS, REQUIRED_STEPS_PER_LAYER
 from quantark.util.enum.option_enums import BarrierType, ObservationType, OptionType
 from intraday.conftest import SHANGHAI, dated_snowball, flat_env
 
@@ -41,11 +41,23 @@ def _pde():
     return SnowballPDESolver(PDEParams())
 
 
-def test_one_day_out_prices_the_twin_unrefined_and_resolved(sse_calendar, sse_sessions, desk):
-    ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1))
+def test_far_from_the_fixing_prices_the_twin_unrefined_and_resolved(sse_calendar, sse_sessions, desk):
+    ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[4].timestamp + timedelta(days=1))
     out = route_for(ctx, _pde()).price(ctx, _pde())
     assert out.numerical["resolution"] == "resolved" and out.records == ()
     assert out.contingent_pv == _pde().price(ctx.numerical.product, ctx.pricing_env)
+    quad = route_for(ctx, SnowballQuadEngineV2()).price(ctx, SnowballQuadEngineV2()).contingent_pv
+    assert out.contingent_pv == pytest.approx(quad, rel=CROSS_CHECK_REL), "cross-check with QUAD V2, not a qualification"
+
+
+def test_one_day_out_refines_the_time_fill_so_no_step_jumps_the_layer(sse_calendar, sse_sessions, desk):
+    # 4 steps per day on the desk profile put a whole session's variance into one Crank-Nicolson step
+    ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1))
+    engine = _pde()
+    out = route_for(ctx, engine).price(ctx, engine)
+    assert out.numerical["resolution"] == "resolved" and out.numerical["points"] == 400
+    assert out.numerical["steps_per_day"] > 4.0 and out.numerical["steps_per_layer"] >= REQUIRED_STEPS_PER_LAYER
+    assert out.numerical["fill_scaled"] is False and "steps per day" in out.records[0]
     quad = route_for(ctx, SnowballQuadEngineV2()).price(ctx, SnowballQuadEngineV2()).contingent_pv
     assert out.contingent_pv == pytest.approx(quad, rel=CROSS_CHECK_REL), "cross-check with QUAD V2, not a qualification"
 
@@ -80,6 +92,25 @@ def test_before_at_the_fixing_above_the_barrier_is_the_ko_cash(sse_calendar, sse
     ctx, kos = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp, spot=104.0)
     out = route_for(ctx, _pde()).price(ctx, _pde())
     assert out.contingent_pv == pytest.approx(kos[5].cash, abs=1e-9)
+
+
+def test_a_one_touch_barrier_snapped_to_the_next_node_is_unqualified(sse_sessions, desk):
+    from quantark.asset.equity.engine.pde import OneTouchPDESolver
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
+    from quantark.util.enum.option_enums import BarrierDirection
+    product = OneTouchOption(barrier=103.0, barrier_direction=BarrierDirection.UP, rebate=1.0,
+                             exercise_date=datetime(2026, 9, 16), observation_type=ObservationType.CONTINUOUS)
+    ctx = resolve_context(IntradayValuationRequest(product=product, pricing_env=flat_env(datetime(2026, 9, 15, 15, 0, tzinfo=SHANGHAI),
+                                                                                        spot=101.0, r=0.0, q=0.0),
+                                                   session_calendar=sse_sessions, variance_profile=desk))
+    out = route_for(ctx, OneTouchPDESolver(PDEParams())).price(ctx, OneTouchPDESolver(PDEParams()))
+    assert out.numerical["resolution"] == "unqualified" and "node overwrite" in out.numerical["resolution_reason"]
+    ko = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=103.0, barrier_type=BarrierType.UP_OUT,
+                       exercise_date=datetime(2026, 9, 16), observation_type=ObservationType.CONTINUOUS)
+    ko_ctx = resolve_context(IntradayValuationRequest(product=ko, pricing_env=ctx.request.pricing_env,
+                                                      session_calendar=sse_sessions, variance_profile=desk))
+    edge = route_for(ko_ctx, BarrierPDESolver(PDEParams())).price(ko_ctx, BarrierPDESolver(PDEParams()))
+    assert "node overwrite" not in edge.numerical["resolution_reason"], "a continuous knock-out barrier is a hard grid edge"
 
 
 def test_continuous_barrier_under_zero_carry_cross_checks_the_exact_closed_form(sse_sessions, desk):
