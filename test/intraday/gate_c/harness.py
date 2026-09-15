@@ -37,6 +37,16 @@ PHASE_SHIFTS = (1, 2, 3)
 LADDER_MAX_GRID_CELLS = 100_000_000
 
 
+def release_pde_memos() -> None:
+    """Drop the PDE solvers' per-market step-coefficient memo between ladder solves.
+
+    It is keyed on the (shared) rate curve of a cell and holds n_unique x points x 3 coefficient arrays per grid,
+    so every ladder level and phase shift of one cell would otherwise stay alive until the cell ends.
+    """
+    from quantark.asset.equity.engine.pde import base_pde_solver
+    base_pde_solver._ENV_STEP_COEFF_MEMO.clear()
+
+
 def pde_level_cells(level0: dict, level: int) -> float:
     """Grid cells of PDE ladder ``level`` built from the level-0 solve (points and steps both doubled per level)."""
     return float(level0.get("points") or 0) * 2 ** level * (float(level0.get("requested_steps") or 0) * 2 ** level + 1)
@@ -204,6 +214,9 @@ def run_cell(cell: C.Cell) -> CellResult:
             return CellResult(cell, None, ref, unc, budget, False, "unsupported", str(exc))
         prices.append(out.contingent_pv + fixed_value)
         numerics.append({k: v for k, v in out.numerical.items() if isinstance(v, (int, float, str, bool, type(None)))})
+        out = None
+        if cell.engine == "pde":
+            release_pde_memos()
         if cell.engine == "pde" and level == 0 and numerics[0].get("resolution") == "unqualified":
             # the route itself declines an accuracy claim: the diffusion layer is below the grid in space or time
             return CellResult(passed=False, status="unqualified", reason=numerics[0].get("resolution_reason", ""), **record()[1])
@@ -240,6 +253,7 @@ def run_cell(cell: C.Cell) -> CellResult:
             for shift in PHASE_SHIFTS:
                 engine = engine_for(cell, level, numerics[0], phase_shift=shift)
                 shifted.append(route_for(ctx, engine).price(ctx, engine).contingent_pv + fixed_value)
+                release_pde_memos()
             envelope.append(max(abs(p - ref) for p in shifted))
         base["refinement"]["phase_envelope"] = envelope
         if not (envelope[-1] <= tol or envelope[2] < envelope[1] < envelope[0]):
