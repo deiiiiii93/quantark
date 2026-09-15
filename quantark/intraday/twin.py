@@ -163,7 +163,7 @@ def _digital_twin(product, timeline: ContractTimeline, remaining, ts: datetime):
     return twin
 
 
-def _event_for_cashflow(cf: RealizedCashflow, timeline: ContractTimeline) -> Optional[ContractEvent]:
+def event_for_cashflow(cf: RealizedCashflow, timeline: ContractTimeline) -> Optional[ContractEvent]:
     """The contract event a tracker cashflow id names ("knock-out:4", "coupon:2", "maturity")."""
     if cf.cashflow_id == "maturity":
         return timeline.terminal()
@@ -179,7 +179,7 @@ def _time_based_state(state: AutocallableLifecycleState, timeline: ContractTimel
     for cf in state.ledger.cashflows:
         if cf.determination_date is None:
             raise ValidationError(f"cashflow {cf.cashflow_id!r} is time-based; intraday mode places dated ledgers only")
-        event = _event_for_cashflow(cf, timeline)
+        event = event_for_cashflow(cf, timeline)
         if event is not None:
             if event.payment_timestamp.astimezone(cal.tz).date() != cf.payment_date.date():
                 raise ValidationError(f"cashflow {cf.cashflow_id!r} pays on {cf.payment_date.date()} but its contract event "

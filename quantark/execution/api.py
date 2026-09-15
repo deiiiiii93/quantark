@@ -132,6 +132,30 @@ class PricingSession:
         )
         return outcome.value
 
+    def value_intraday(self, engine, product, pricing_env, *, session_calendar, variance_profile,
+                       lifecycle_state=None, fixings=(), event_phase="before", greeks=(),
+                       greek_convention=None, theta_step=None, theta_unit="hour",
+                       fixing_time_of_day=None, schedule_origin=None, request_id=None):
+        """Intraday valuation at ``pricing_env.valuation_date`` (a timezone-aware timestamp).
+
+        Resolves one immutable context (session calendar, variance profile,
+        confirmed and assumed fixings), prices its float-time twin through
+        ``engine`` and returns a structured ``IntradayValuationResult``;
+        see ``quantark/intraday/README.md``.
+        """
+        self._ensure_open()
+        from quantark.intraday.request import IntradayValuationRequest
+        from quantark.intraday.service import value_intraday
+
+        request = IntradayValuationRequest(
+            product=product, pricing_env=pricing_env, session_calendar=session_calendar,
+            variance_profile=variance_profile, lifecycle_state=lifecycle_state, fixings=tuple(fixings),
+            event_phase=event_phase, greeks=tuple(greeks), greek_convention=greek_convention,
+            theta_step=theta_step, theta_unit=theta_unit, fixing_time_of_day=fixing_time_of_day,
+            schedule_origin=schedule_origin, request_id=request_id,
+        )
+        return value_intraday(engine, request, session=self)
+
     def price_many(self, items, *, collect_errors: bool = False) -> list:
         """Serial, caller-ordered pricing of (engine, PricingRequest) pairs.
 
