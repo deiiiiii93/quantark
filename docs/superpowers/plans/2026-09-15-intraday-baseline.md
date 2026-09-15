@@ -41,6 +41,15 @@ starts (a `python -m` cwd insertion comes too late). Tests import shared fixture
 ## Acceptance budgets
 Fixed by Plan 2 Task 1 (independent reference) BEFORE any route is tuned. This file records them when set.
 
+## Open questions (need a desk decision; intraday fails closed meanwhile)
+- **Phoenix realized coupon amount.** `AutocallableLifecycleTracker.observe` books a coupon as
+  `get_coupon_payoff(idx)` = principal·coupon_rate·1.0 (pinned by
+  `test/test_equity_lifecycle_trackers.py::test_phoenix_coupon_event`), while every Phoenix engine
+  (QUAD V2 adapter, QUAD, PDE) pays principal·coupon_rate·period_year_fraction. A replayed coupon
+  therefore has two amounts; the tracker also resets memory without paying memorized coupons.
+  Intraday reconstruction raises `CapabilityError` when a Phoenix coupon event is due and not
+  covered by the checkpoint.
+
 ## Known day-resolution hazards that intraday mode must bypass (not fix)
 - calculate_year_fraction → timedelta.days; Calendar._normalize_date → midnight; lifecycle trackers → pd.Timestamp.normalize().
 - SnowballMCEngine._build_time_grid keeps t=0 nodes → GBMPathGenerator raises on dt=0 (Plan 2 fixes).

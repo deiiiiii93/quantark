@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
+from collections.abc import Mapping
 from datetime import datetime, time, timedelta, timezone
+from enum import Enum
 
 import pytest
 
@@ -95,11 +98,36 @@ def digital(expiry, strike=100.0, payout=1.0, option_type=OptionType.CALL):
     return CashOrNothingDigitalOption(strike=strike, option_type=option_type, payout=payout, exercise_date=expiry)
 
 
+def _structure(obj, seen):
+    """Structural value of ``obj``: leaves via canonical_tree, containers and plain objects walked field by field."""
+    is_composite = isinstance(obj, (list, tuple, set, frozenset, Mapping)) or (
+        not isinstance(obj, (type, Enum)) and (dataclasses.is_dataclass(obj) or hasattr(obj, "__dict__")))
+    if not is_composite:
+        try:
+            return canonical_tree(obj)
+        except Uncanonicalizable:
+            return ("repr", repr(obj))
+    if id(obj) in seen:
+        return ("cycle", type(obj).__qualname__)
+    seen = seen | {id(obj)}
+    if isinstance(obj, (list, tuple)):
+        return ("seq", tuple(_structure(x, seen) for x in obj))
+    if isinstance(obj, (set, frozenset)):
+        return ("set", tuple(sorted((_structure(x, seen) for x in obj), key=repr)))
+    if isinstance(obj, Mapping):
+        return ("map", tuple(sorted(((repr(k), _structure(v, seen)) for k, v in obj.items()), key=lambda kv: kv[0])))
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        fields = [f.name for f in dataclasses.fields(obj)]
+        extra = sorted(set(vars(obj)) - set(fields)) if hasattr(obj, "__dict__") else []
+        return ("dc", type(obj).__qualname__, tuple((n, _structure(getattr(obj, n), seen)) for n in fields + extra))
+    if hasattr(obj, "__dict__"):
+        return ("obj", type(obj).__qualname__, tuple((k, _structure(v, seen)) for k, v in sorted(vars(obj).items())))
+    return ("repr", repr(obj))
+
+
 def snapshot(obj):
-    try:
-        return canonical_tree(obj)
-    except Uncanonicalizable:
-        return repr(copy.deepcopy(obj))
+    """Deep structural snapshot (no memory addresses), including attributes set outside dataclass fields."""
+    return _structure(copy.deepcopy(obj), frozenset())
 
 
 def _assert_unchanged(before, obj):
