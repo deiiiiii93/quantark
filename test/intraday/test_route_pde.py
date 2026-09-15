@@ -99,6 +99,19 @@ def test_the_route_does_not_hand_back_full_value_surfaces(sse_calendar, sse_sess
     assert again == out.contingent_pv
 
 
+def test_the_route_leaves_no_coefficient_memo_on_the_request_market(sse_calendar, sse_sessions, desk):
+    # the legacy memo is keyed on the (request-owned) rate curve: a batch holding its requests would keep every
+    # route's coefficient sets alive (a 100-item PDE batch passed 7 GiB)
+    from quantark.asset.equity.engine.pde import base_pde_solver
+    ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(minutes=15), spot=102.5)
+    engine = _pde()
+    out = route_for(ctx, engine).price(ctx, engine)
+    assert id(ctx.pricing_env.rate_curve) not in base_pde_solver._ENV_STEP_COEFF_MEMO
+    route_for(ctx, engine).point_greeks(ctx, engine)
+    assert id(ctx.pricing_env.rate_curve) not in base_pde_solver._ENV_STEP_COEFF_MEMO
+    assert route_for(ctx, engine).price(ctx, engine).contingent_pv == out.contingent_pv
+
+
 def test_a_fixing_inside_a_zero_variance_window_reports_deterministic(sse_calendar, sse_sessions):
     only = VarianceProfile.sessions_only(sse_sessions, 244)
     ctx, _ = _snow_ctx(sse_calendar, sse_sessions, only, lambda kos: kos[5].timestamp.replace(hour=12, minute=0),

@@ -104,8 +104,25 @@ def _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps):
             return best
 
 
+def _release_market_memo(env) -> None:
+    """Drop the legacy per-market step-coefficient memo of this environment's rate curve.
+
+    The memo is keyed on the curve object, which the resolved context shares with the caller's request: without
+    this, every request a batch still holds keeps its routes' coefficient sets (n_unique x points x 3 arrays per
+    grid) alive. A later solve on the same market rebuilds them.
+    """
+    from quantark.asset.equity.engine.pde import base_pde_solver
+    base_pde_solver._ENV_STEP_COEFF_MEMO.pop(id(env.rate_curve), None)
+
+
 class PDERoute:
     def price(self, ctx, engine) -> EnginePriceOutcome:
+        try:
+            return self._price(ctx, engine)
+        finally:
+            _release_market_memo(ctx.pricing_env)
+
+    def _price(self, ctx, engine) -> EnginePriceOutcome:
         from quantark.asset.equity.engine.pde import EuropeanPDESolver
         from quantark.asset.equity.product.option import EuropeanVanillaOption
 
@@ -175,7 +192,10 @@ class PDERoute:
         if ctx.numerical.terminated:
             return TERMINATED_POINT_GREEKS
         outcome = self.price(ctx, engine)
-        greeks = outcome.engine_used.calculate_greeks(ctx.numerical.product, ctx.pricing_env)
+        try:
+            greeks = outcome.engine_used.calculate_greeks(ctx.numerical.product, ctx.pricing_env)
+        finally:
+            _release_market_memo(ctx.pricing_env)
         delta, gamma = float(greeks["delta"]), float(greeks["gamma"])
         if not (isfinite(delta) and isfinite(gamma)):
             return PointGreeks(None, None, "failed", f"non-finite grid stencil (delta={delta!r}, gamma={gamma!r})", "grid_stencil")
