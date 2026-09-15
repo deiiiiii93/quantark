@@ -13,7 +13,7 @@ from math import sqrt
 
 from quantark.execution.errors import CapabilityError
 from quantark.intraday.admissibility import analytical_barrier_admissibility
-from quantark.intraday.engines.base import EnginePriceOutcome
+from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
 from quantark.intraday.timestamp import calendar_year_fraction
 from quantark.util.enum.option_enums import ObservationType
 
@@ -62,3 +62,26 @@ class AnalyticalBarrierRoute:
         pv = float(engine.price(proxy, proxy_env))
         return EnginePriceOutcome(pv, "analytical_zero_carry_time_change",
                                   {"variance_time_maturity": u_T, "sigma_proxy": sigma, "total_variance": adm.total_variance}, {})
+
+    def point_greeks(self, ctx, engine) -> PointGreeks:
+        """Central difference of the exact closed form (h = 1e-6 S), smooth away from a live barrier; a stencil
+        reaching a live barrier is undefined (one side is decided, the other is not)."""
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        from quantark.intraday.greeks import with_pricing_env
+
+        if ctx.numerical.terminated:
+            return TERMINATED_POINT_GREEKS
+        spot = float(ctx.spot)
+        h = 1e-6 * spot
+        barrier = None if isinstance(ctx.numerical.product, EuropeanVanillaOption) else getattr(ctx.numerical.product, "barrier", None)
+        if barrier is not None and abs(spot - float(barrier)) <= h:
+            return PointGreeks(None, None, "undefined", f"the difference stencil reaches the live barrier {float(barrier):g}",
+                               "closed_form_fd")
+
+        def at(s):
+            env = deepcopy(ctx.pricing_env)
+            env.spot_quote.spot = s
+            return self.price(with_pricing_env(ctx, env, f"point_spot:{s!r}"), engine).contingent_pv
+
+        base, up, down = self.price(ctx, engine).contingent_pv, at(spot + h), at(spot - h)
+        return PointGreeks((up - down) / (2.0 * h), (up - 2.0 * base + down) / (h * h), "ok", "", "closed_form_fd")

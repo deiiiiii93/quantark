@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping, Protocol, Tuple
+from typing import Mapping, Optional, Protocol, Tuple
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,27 @@ class EnginePriceOutcome:
         object.__setattr__(self, "numerical", MappingProxyType(dict(self.numerical)))
         object.__setattr__(self, "components", MappingProxyType(dict(self.components)))
         object.__setattr__(self, "records", tuple(self.records))
+
+
+@dataclass(frozen=True)
+class PointGreeks:
+    """Spot derivatives of the conditional price function at the valuation spot."""
+
+    delta: Optional[float]
+    gamma: Optional[float]
+    status: str                   # "ok" | "undefined" | "unqualified" | "failed"
+    reason: str
+    evidence: str                 # "kernel_derivative" | "closed_form" | "closed_form_fd" | "grid_stencil" | "paired_rqmc" | "terminated"
+    uncertainty: Mapping[str, float] = field(default_factory=dict)
+
+    def __post_init__(self):
+        object.__setattr__(self, "uncertainty", MappingProxyType(dict(self.uncertainty)))
+        if self.status != "ok":
+            object.__setattr__(self, "delta", None)
+            object.__setattr__(self, "gamma", None)
+
+
+TERMINATED_POINT_GREEKS = PointGreeks(0.0, 0.0, "ok", "", "terminated")
 
 
 class IntradayEngineRoute(Protocol):

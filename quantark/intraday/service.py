@@ -50,8 +50,8 @@ def _cashflow_origin(cf, ctx):
 def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -> IntradayValuationResult:
     """Value one contract at an intraday timestamp; see the module docstring for the sequence."""
     ctx = resolve_context(request)
-    if request.greeks and request.greek_convention != "desk_bump":
-        raise CapabilityError(f"{request.greek_convention} greeks are not delivered yet (point greeks arrive in plan 3 task 3)")
+    if request.greeks and request.greek_convention not in ("desk_bump", "point"):
+        raise CapabilityError(f"{request.greek_convention} greeks have no intraday route")
     require_capability(request.product, engine, monitoring=_monitoring(ctx),
                        outputs=("price",) + tuple(g for g in request.greeks if g != "theta"))
     if "theta" in request.greeks:
@@ -80,7 +80,11 @@ def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -
                                                    cashflow_id=cf.cashflow_id, payment_tau=float(cf.payment_time)))
     lifecycle = {k: getattr(state, k) for k in _LIFECYCLE_FIELDS if hasattr(state, k)} if state is not None else {}
     greeks = ()
-    if request.greeks:
+    if request.greeks and request.greek_convention == "point":
+        from quantark.intraday.greeks import point_greek_values
+        greeks, point_records = point_greek_values(ctx, engine, request.greeks)
+        records.extend(point_records)
+    elif request.greeks:
         from quantark.intraday.greeks import assemble_desk_greeks, bump_config_for, desk_bump_cells
         cells = desk_bump_cells(ctx, engine, request.greeks)
         greeks = assemble_desk_greeks(cells, request.greeks, spot=ctx.spot, bump_config=bump_config_for(engine))

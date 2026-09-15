@@ -14,11 +14,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from math import isfinite
 from types import SimpleNamespace
 
 import numpy as np
 
-from quantark.intraday.engines.base import EnginePriceOutcome
+from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
 from quantark.intraday.resolution import (INTRADAY_PDE_MAX_POINTS, INTRADAY_PDE_MAX_STEPS, diffusion_layer, pde_resolution,
                                           time_resolved)
 
@@ -146,6 +147,27 @@ class PDERoute:
                          steps_per_layer=status.steps_per_layer, grid_mode_damping=status.grid_mode_damping,
                          steps_per_day=float(grid.steps_per_day))
         return EnginePriceOutcome(pv, self._method(engine), numerical, {}, records, engine_used=solver)
+
+    def point_greeks(self, ctx, engine) -> PointGreeks:
+        """The solver's own stencil on the grid the route priced on; ``ok`` only on a resolved grid."""
+        if ctx.numerical.terminated:
+            return TERMINATED_POINT_GREEKS
+        outcome = self.price(ctx, engine)
+        greeks = outcome.engine_used.calculate_greeks(ctx.numerical.product, ctx.pricing_env)
+        delta, gamma = float(greeks["delta"]), float(greeks["gamma"])
+        if not (isfinite(delta) and isfinite(gamma)):
+            return PointGreeks(None, None, "failed", f"non-finite grid stencil (delta={delta!r}, gamma={gamma!r})", "grid_stencil")
+        resolution = outcome.numerical.get("resolution")
+        if resolution == "not_solved":
+            # an event at the valuation instant decided the claim on the known spot: constant in a neighbourhood
+            # (the query spot on that event's level is caught before the route is asked)
+            if delta == 0.0 and gamma == 0.0:
+                return PointGreeks(0.0, 0.0, "ok", "", "decided_at_valuation")
+            return PointGreeks(None, None, "unqualified", "decided at the valuation instant without a grid", "grid_stencil")
+        if resolution != "resolved":
+            return PointGreeks(None, None, "unqualified", str(outcome.numerical.get("resolution_reason") or resolution),
+                               "grid_stencil")
+        return PointGreeks(delta, gamma, "ok", "", "grid_stencil")
 
     @staticmethod
     def _method(engine) -> str:

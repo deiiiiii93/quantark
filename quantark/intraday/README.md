@@ -116,13 +116,34 @@ intraday alternatives; an engine subclass does not inherit a row.
 `supported` means the semantics are implemented; `qualified` (accuracy evidence against an
 independent reference on the time-to-fixing ladder) arrives with Gate C.
 
+PDE routes report a resolution status with every price: `resolved` needs at least 4 grid
+cells across the diffusion layer `sqrt(W)` to the first event, at least 16 time steps across
+its variance, and a Crank–Nicolson grid-scale mode damped by e^-8 before the valuation; the
+route refines points and steps per day on a clone to reach them. A barrier that enters the
+grid by node overwrite (one-touch, discrete barriers) is `unqualified` unless a node sits on it.
+
+## Greeks
+
+Every Greek re-evaluates the SAME resolved price function: bumped cells share the numerical
+twin, the ledger and every confirmed or assumed fixing, so a bump never re-decides an
+observation.
+
+- `greek_convention="desk_bump"` — the daily conventions (`bump_envs`): relative central
+  spot bumps, one-sided raw vega per `vol_bump` of the trading-quoted surface, one-sided rho
+  and dividend rho rescaled to +1%.
+- `greek_convention="point"` — derivatives at the query spot from the route's own evidence:
+  QUAD V2 kernel derivative, closed forms (digital; central difference of the barrier closed
+  form), the PDE solver's stencil (`ok` only on a `resolved` grid), paired RQMC for MC
+  (RANDOMIZED_QUASI engines with an RQMC session spec; others raise `CapabilityError`).
+  Where the price function jumps at the query spot (an unfixed event at the valuation
+  instant on its level, a continuous barrier hit there) delta and gamma are `undefined`.
+  Point vega/rho/dividend rho are `unqualified` (no value) until a bump-limit ladder
+  demonstrates them.
+
 ## Not yet covered
 
-- PDE, MC and analytical barrier/one-touch routes, KO-reset snowballs, the independent
-  Gaussian reference and Gate C qualification.
-- Greeks (`point` and `desk_bump` conventions), intraday theta, frozen-market time roll,
-  batch valuation, spot curves and aggregation — requesting greeks raises
-  `CapabilityError` today.
+- Intraday theta, the roll-through-events scenario, batch valuation, spot curves and
+  aggregation; qualification horizons from Gate C in the capability matrix.
 - Phoenix coupon replay: the lifecycle tracker books a coupon as `principal·rate` while the
   engines pay `principal·rate·period fraction`; until that is settled a due Phoenix coupon
   not covered by the checkpoint fails closed.

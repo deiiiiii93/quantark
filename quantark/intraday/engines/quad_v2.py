@@ -1,7 +1,9 @@
 """QUAD V2 autocallable route: exact Gaussian interval moments on the intraday clock."""
 from __future__ import annotations
 
-from quantark.intraday.engines.base import EnginePriceOutcome
+from math import isfinite
+
+from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
 
 _DIAGNOSTIC_KEYS = ("nodes", "cells", "events", "states", "model", "backends", "continuous")
 
@@ -24,3 +26,15 @@ class QuadV2Route:
         method = "quad_v2_fft" if any("fft" in str(b) for b in backends) else "quad_v2_direct"
         return EnginePriceOutcome(contingent, method, numerical,
                                   {k: float(components[k]) for k in ("ko", "coupon", "terminal") if k in components})
+
+    def point_greeks(self, ctx, engine) -> PointGreeks:
+        num = ctx.numerical
+        if num.terminated:
+            return TERMINATED_POINT_GREEKS
+        res = engine.calculate_point_greeks(num.product, ctx.pricing_env, lifecycle_state=num.lifecycle_state,
+                                            event_phase=ctx.phase.value)
+        delta, gamma = float(res["delta"]), float(res["gamma"])
+        if not (isfinite(delta) and isfinite(gamma)):
+            return PointGreeks(None, None, "undefined", "payoff discontinuity of an unfixed event at the query spot",
+                               "kernel_derivative")
+        return PointGreeks(delta, gamma, "ok", "", "kernel_derivative")

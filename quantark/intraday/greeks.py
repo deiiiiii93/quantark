@@ -7,6 +7,13 @@ bumps reuse the daily helpers and conventions exactly (``bump_envs`` and
 ``GreeksCalculator``): relative central spot bumps, a one-sided raw vega per
 ``vol_bump`` of the trading-quoted surface, one-sided rho and dividend rho
 rescaled to +1%.
+
+Point Greeks are derivatives of that price function at the query spot, taken
+by each route's own evidence (kernel derivative, closed form, grid stencil,
+paired RQMC). Where the function jumps at the query spot they are undefined;
+where the route cannot vouch for its derivative they are unqualified. Point
+vega/rho/dividend rho are finite-difference proxies that stay unqualified
+(no value) until a Gate C bump-limit ladder demonstrates the (route, measure).
 """
 from __future__ import annotations
 
@@ -20,9 +27,15 @@ from quantark.asset.equity.riskmeasures.greeks import bump_envs
 from quantark.execution.cache.fingerprint import fingerprint
 from quantark.execution.errors import CapabilityError
 from quantark.intraday.result import GreekValue
+from quantark.intraday.timestamp import same_instant, to_utc
 from quantark.util.exceptions import NumericalError, PricingError
 
 DESK_GREEKS = ("delta", "gamma", "vega", "rho", "dividend_rho")
+POINT_UNITS = {"delta": "per unit spot", "gamma": "per unit spot^2", "vega": "per unit vol (trading-quoted)",
+               "rho": "per unit rate", "dividend_rho": "per unit dividend yield"}
+POINT_PROXY_REASON = "finite-difference proxy for a point derivative; bump-limit not demonstrated"
+#: (route class name, measure) pairs whose central-difference proxy a Gate C bump ladder has demonstrated.
+POINT_PROXY_DEMONSTRATED: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
@@ -87,6 +100,84 @@ def desk_bump_cells(ctx, engine, greeks: Sequence[str]) -> Mapping[str, BumpCell
         except (NumericalError, PricingError) as exc:
             cells[bump_id] = BumpCell(bump_id, cell_ctx, float("nan"), f"{type(exc).__name__}: {exc}")
     return cells
+
+
+def discontinuity_at_spot(ctx) -> str:
+    """Why the price function jumps or kinks at the query spot ("" when it does not).
+
+    An event determined AT the valuation instant (phase BEFORE) whose level is the spot, or a continuous barrier
+    the spot hits at this instant under the contract's inclusive rule: one side of any neighbourhood is decided,
+    the other is not.
+    """
+    now, spot = to_utc(ctx.valuation_timestamp), float(ctx.spot)
+    for event in ctx.timeline.remaining(ctx.valuation_timestamp, ctx.phase):
+        if to_utc(event.timestamp) == now and event.barrier is not None and float(event.barrier) == spot:
+            return f"payoff discontinuity of the unfixed event {event.event_id} at the query spot"
+    assumption = ctx.reconstruction.continuous_assumption
+    barrier = ctx.timeline.continuous_barrier
+    level = barrier.level if barrier is not None else ctx.timeline.continuous_ki_barrier
+    if (assumption is not None and assumption.assumed_hit_at is not None and level is not None
+            and same_instant(assumption.assumed_hit_at, ctx.valuation_timestamp) and float(level) == spot):
+        return f"the continuous barrier {level:g} is hit exactly at the query spot"
+    return ""
+
+
+def point_greek_values(ctx, engine, greeks: Sequence[str]) -> Tuple[Tuple[GreekValue, ...], Tuple[str, ...]]:
+    """(greek values, records) under the point convention, in the requested order."""
+    from quantark.intraday.engines import route_for
+    from quantark.intraday.engines.base import PointGreeks
+
+    unknown = sorted(set(greeks) - set(POINT_UNITS))
+    if unknown:
+        raise CapabilityError(f"point greeks {unknown} are not in the intraday inventory; available {list(POINT_UNITS)}")
+    route = route_for(ctx, engine)
+    values, records = {}, []
+    if "delta" in greeks or "gamma" in greeks:
+        jump = discontinuity_at_spot(ctx)
+        if jump:
+            pg = PointGreeks(None, None, "undefined", jump, "")
+        else:
+            finder = getattr(route, "point_greeks", None)
+            if finder is None:
+                raise CapabilityError(f"{type(route).__name__} has no point greeks")
+            pg = finder(ctx, engine)
+        records.append(f"point_evidence:{pg.evidence or 'none'}")
+        records.extend(f"point_uncertainty:{k}={v!r}" for k, v in pg.uncertainty.items())
+        for name in ("delta", "gamma"):
+            if name in greeks:
+                ok = pg.status == "ok"
+                values[name] = GreekValue(name, getattr(pg, name) if ok else None, POINT_UNITS[name], "point",
+                                          status=pg.status, reason=None if ok else pg.reason)
+    for name in ("vega", "rho", "dividend_rho"):
+        if name in greeks:
+            values[name] = _point_proxy(ctx, engine, route, name)
+    return tuple(values[g] for g in greeks), tuple(records)
+
+
+def _point_proxy(ctx, engine, route, name: str) -> GreekValue:
+    """Central difference of the frozen price function: h = 1e-4 sigma (vega), 1e-6 (rho, dividend rho)."""
+    env, product = ctx.pricing_env, ctx.numerical.product
+    if name == "vega":
+        strike = float(getattr(product, "strike", env.spot) or env.spot)
+        unit_vol = bump_envs.bump_unit_vol(env, strike, max(ctx.numerical.maturity_tau, 0.0))
+        h = 1e-4 * unit_vol
+    else:
+        h = 1e-6
+    if (type(route).__name__, name) not in POINT_PROXY_DEMONSTRATED:
+        return GreekValue(name, None, POINT_UNITS[name], "point", bump=h, status="unqualified", reason=POINT_PROXY_REASON)
+    if ctx.numerical.terminated:
+        return GreekValue(name, 0.0, POINT_UNITS[name], "point", bump=h)
+
+    def env_at(direction: float):
+        if name == "vega":
+            return bump_envs.build_vol_bumped_env(env, product, unit_vol, h, direction=direction)
+        if name == "rho":
+            return bump_envs.build_rate_bumped_env(env, h, direction=direction)
+        return bump_envs.build_div_bumped_env(env, product, 0.0, h, direction=direction)
+
+    up = cell_price(with_pricing_env(ctx, env_at(1.0), f"point_{name}_up"), engine)
+    down = cell_price(with_pricing_env(ctx, env_at(-1.0), f"point_{name}_down"), engine)
+    return GreekValue(name, (up - down) / (2.0 * h), POINT_UNITS[name], "point", bump=h)
 
 
 def assemble_desk_greeks(cells: Mapping[str, BumpCell], greeks: Sequence[str], *, spot: float, bump_config) -> Tuple[GreekValue, ...]:

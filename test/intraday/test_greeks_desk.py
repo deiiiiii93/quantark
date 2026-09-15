@@ -78,7 +78,7 @@ def test_bumps_do_not_rebuild_assumptions_from_bumped_spots(sse_calendar, sse_se
     assert res.lifecycle["alive"] and res.greek("delta").status == "ok" and abs(res.greek("delta").value) < 5.0
 
 
-def test_point_convention_and_unknown_greeks_fail_closed(sse_calendar, sse_sessions, desk):
+def test_unknown_greeks_fail_closed(sse_calendar, sse_sessions, desk):
     from quantark.execution.errors import CapabilityError
     ts = datetime(2026, 9, 15, 14, 0, tzinfo=SHANGHAI)
     with pytest.raises(CapabilityError):

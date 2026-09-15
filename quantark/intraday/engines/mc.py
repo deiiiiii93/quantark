@@ -10,8 +10,10 @@ the lifecycle state here.
 from __future__ import annotations
 
 from copy import deepcopy
+from math import isfinite
 
-from quantark.intraday.engines.base import EnginePriceOutcome
+from quantark.execution.errors import CapabilityError
+from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
 
 
 def _estimator(engine, result) -> str:
@@ -52,3 +54,36 @@ class MCRoute:
             "resolution": "sampling_uncertainty_reported",
         }
         return EnginePriceOutcome(pv, method, numerical, {}, engine_used=solver)
+
+    def point_greeks(self, ctx, engine) -> PointGreeks:
+        """Paired RQMC: the engine's session spec at spot*(1-h), spot, spot*(1+h) on identical scramble batches."""
+        from quantark.intraday.greeks import bump_config_for
+        from quantark.montecarlo import run_paired_rqmc_greeks
+        from quantark.util.enum.engine_enums import MonteCarloMethod
+
+        num = ctx.numerical
+        if num.terminated:
+            return TERMINATED_POINT_GREEKS
+        if getattr(engine, "method", None) != MonteCarloMethod.RANDOMIZED_QUASI:
+            raise CapabilityError(f"point greeks on MC need RQMC: {type(engine).__name__} runs "
+                                  f"{getattr(getattr(engine, 'method', None), 'name', 'an unknown method')}")
+        if not hasattr(engine, "build_rqmc_session_spec"):
+            raise CapabilityError(f"point greeks on MC need an RQMC session spec; {type(engine).__name__} has none")
+        h = float(bump_config_for(engine).spot_bump)
+        specs = []
+        for factor in (1.0 - h, 1.0, 1.0 + h):
+            env = deepcopy(ctx.pricing_env)
+            env.spot_quote.spot = float(ctx.spot) * factor
+            spec = deepcopy(engine).build_rqmc_session_spec(num.product, env)
+            if spec is None:
+                raise CapabilityError(f"{type(engine).__name__} takes no RQMC session for this claim (near-expiry shortcut)")
+            specs.append(spec)
+        res = run_paired_rqmc_greeks(*specs, spot=float(ctx.spot), relative_bump=h)
+        uncertainty = {"delta": float(res.delta_std_error), "gamma": float(res.gamma_std_error),
+                       "batches": float(res.batches_used), "relative_bump": h}
+        min_batches = int(getattr(engine.params, "rqmc_min_batches", 2))
+        if isfinite(res.delta_std_error) and isfinite(res.gamma_std_error) and res.batches_used >= min_batches:
+            return PointGreeks(float(res.delta), float(res.gamma), "ok", "", "paired_rqmc", uncertainty)
+        return PointGreeks(None, None, "unqualified",
+                           f"paired RQMC gave {res.batches_used} batches (< {min_batches}) or a non-finite standard error",
+                           "paired_rqmc", uncertainty)

@@ -94,5 +94,5 @@ def test_unsupported_engine_and_greeks_fail_closed(sse_calendar, sse_sessions, d
     ts = datetime(2026, 9, 15, 14, 59, 59, tzinfo=SHANGHAI)
     with pytest.raises(CapabilityError, match="intraday inventory"):
         value_intraday(SnowballQuadEngine(), _snow_req(sse_calendar, sse_sessions, desk, ts))
-    with pytest.raises(CapabilityError, match="plan 3"):
-        value_intraday(SnowballQuadEngineV2(), _snow_req(sse_calendar, sse_sessions, desk, ts, greeks=("delta",), greek_convention="point"))
+    with pytest.raises(CapabilityError, match="vanna"):
+        value_intraday(SnowballQuadEngineV2(), _snow_req(sse_calendar, sse_sessions, desk, ts, greeks=("vanna",), greek_convention="point"))
