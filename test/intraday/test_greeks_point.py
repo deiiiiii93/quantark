@@ -120,11 +120,25 @@ def test_an_assumed_ko_has_zero_point_delta_from_the_terminated_claim(sse_calend
 
 
 def test_point_vega_and_rho_are_unqualified_proxies_until_demonstrated(sse_calendar, sse_sessions, desk):
-    req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
+    # Gate C demonstrated no PDE point proxy
+    req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1),
                     greeks=("vega", "rho", "dividend_rho"), greek_convention="point")
-    res = value_intraday(QUAD, req)
+    res = value_intraday(SnowballPDESolver(PDEParams()), req)
     for g in res.greeks:
         assert g.status == "unqualified" and g.value is None and g.reason == POINT_PROXY_REASON and g.bump > 0.0
+
+
+def test_demonstrated_quad_proxies_are_central_differences_of_the_frozen_price_function(sse_calendar, sse_sessions, desk):
+    import quantark.intraday.greeks as G
+    from quantark.intraday.capability import point_output_qualified
+    req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
+                    greeks=("vega", "rho", "dividend_rho"), greek_convention="point")
+    ctx = resolve_context(req)
+    assert point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0)
+    res = value_intraday(QUAD, req)
+    for g in res.greeks:
+        expected = G.point_proxy_difference(ctx, g.name, G.point_proxy_bump(ctx, g.name), lambda c: G.cell_price(c, QUAD))
+        assert g.status == "ok" and g.value == pytest.approx(expected, rel=1e-12) and g.bump == G.point_proxy_bump(ctx, g.name)
 
 
 def test_a_demonstrated_proxy_is_a_central_difference_of_the_frozen_price_function(sse_calendar, sse_sessions, desk, monkeypatch):

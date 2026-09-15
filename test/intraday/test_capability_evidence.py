@@ -78,3 +78,22 @@ def test_the_qualified_horizon_is_the_shortest_the_evidence_supports(evidence):
 def test_rows_without_evidence_are_not_qualified(evidence):
     certified = set(GATE_C_ROWS.values())
     assert all(_row_key(r) in certified for r in INTRADAY_CAPABILITIES if r.status == "qualified")
+
+
+def test_greek_evidence_parses_and_every_demonstration_is_backed_by_passing_cells():
+    import importlib
+    from quantark.intraday.capability import greek_evidence
+    payload = greek_evidence()
+    assert payload and payload["schema"] == "intraday-gate-c-greeks/1" and payload["git_sha"]
+    for row in payload["demonstrated"]:
+        module = importlib.import_module(f"quantark.intraday.engines.{_route_module(row['route'])}")
+        assert hasattr(module, row["route"]), row["route"]
+        cells = [c for c in payload["cells"] if (c["product"], c["route"]) == (row["product"], row["route"])
+                 and c["cell"]["horizon"] >= row["horizon_s"]]
+        statuses = {m["status"] for c in cells for m in c["measures"] if m["measure"] == row["measure"]}
+        assert cells and statuses <= {"passed", "undefined"}, row
+
+
+def _route_module(route: str) -> str:
+    return {"QuadV2Route": "quad_v2", "AnalyticalDigitalRoute": "analytical_digital", "AnalyticalBarrierRoute": "analytical_barrier",
+            "PDERoute": "pde", "MCRoute": "mc"}[route]

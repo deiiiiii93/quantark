@@ -374,7 +374,7 @@ def aggregate_greeks(jsonl_path, json_path, *, git_sha=None, wall_time_s=None) -
         "cells": [rows[k] for k in sorted(rows)],
     }
     with open(json_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=1, sort_keys=True)
+        json.dump(payload, handle, sort_keys=True, separators=(",", ":"))  # packaged: compact
     counts: dict = {}
     for row in rows.values():
         for m in row["measures"]:

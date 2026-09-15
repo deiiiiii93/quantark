@@ -142,6 +142,34 @@ Defects Gate C found and fixed before this run (each with a regression test):
   `INTRADAY_PDE_MAX_GRID_CELLS` (5e7, ~1.2 GiB measured) and releases its surfaces; ladders stop at 1e8 cells and a
   capped ladder is `unqualified`.
 
+## Gate C greeks
+Packaged evidence: `quantark/intraday/evidence/gate_c_greeks.json` (git 9eb643df; 528 groups = snowball and digital
+x desk/sessions-only x 8 horizons x 11 offsets x barriers; 1408 route results). Four workers under the 20 GiB guard,
+which stopped the run once in the heavy short-horizon PDE groups; the resume finished on two workers (about 85
+minutes in total). Budgets for vega/rho/dividend rho were frozen before the run: m* = measure x 0.01 / N,
+absolute 1e-6, relative 1e-4.
+
+| product | route | point delta | point gamma | desk delta | desk gamma | point vega / rho / div rho |
+|---|---|---|---|---|---|---|
+| snowball | QUAD V2 | 352 passed | 352 passed | 352 passed | 348 passed, 4 inconclusive | 352 / 352 / 352 passed |
+| snowball | PDE | 352 unqualified | 351 unqualified, 1 passed | 161 passed, 191 unqualified | 64 passed, 284 unqualified, 4 inconclusive | not run (no demonstrated bump limit) |
+| snowball | MC (RQMC) | 352 unqualified | 352 unqualified | 352 passed | 348 passed, 4 inconclusive | not run |
+| digital | analytical | 176 passed | 176 passed | 176 passed | 176 passed | 176 / 176 / 176 passed |
+| digital | MC | 176 unsupported | 176 unsupported | — | — | — |
+
+No failed measure. **Demonstrated to 1 second:** QUAD V2 snowball point delta, gamma, vega, rho, dividend rho and
+desk delta; analytical digital every measure; MC snowball desk delta. The four inconclusive desk-gamma cells are
+1 day / 6 h at 10 bp below the KO barrier (a 1% move straddles it; reference uncertainty ~7e-6 against a small
+absolute budget), so QUAD desk gamma is not demonstrated. PDE point Greeks are unqualified (resolution floors and the
+capped ladder). MC point Greeks are unqualified by construction: a paired RQMC difference at the 1% desk bump equals
+the desk move (one hour before a fixing it missed the point delta by 0.08), so the route reports it only inside a
+demonstrated bump limit, and none was demonstrated.
+
+Found while building this gate: the reference's global-sweep cache keyed a bumped context on its REQUEST's market, so
+rate and dividend bumps reused the unbumped sweep (reference rho -0.348 and dividend rho +0.240, where QUAD V2, a
+fine PDE and a CRN MC agreed on -0.27 and -0.06); fixed in 14128502 (content key for bumped markets) with a regression
+test. Price evidence never used bumped contexts.
+
 ## Open questions (need a desk decision; intraday fails closed meanwhile)
 - **Phoenix realized coupon amount.** `AutocallableLifecycleTracker.observe` books a coupon as
   `get_coupon_payoff(idx)` = principal·coupon_rate·1.0 (pinned by
