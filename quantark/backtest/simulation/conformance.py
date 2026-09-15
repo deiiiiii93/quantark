@@ -102,7 +102,13 @@ def run_oracle(
     replay = ReplayBacktestEngine(
         ReplayBacktestConfig(
             products=list(config.products),
-            market_data=to_market_dataset(paths, path_index, multiplier=config.hedge.multiplier),
+            market_data=to_market_dataset(
+                paths, path_index, multiplier=config.hedge.multiplier,
+                # the simulation's surface_forward_carry tail is the path's carry curve
+                carry_tail=(getattr(config.engine_config, "dividend_source", None) == "futures_curve"
+                            and getattr(config.engine_config, "futures_curve_extrapolation", None)
+                            == "surface_forward_carry"),
+            ),
             hedge=config.hedge,
             engine_config=config.engine_config,
             strategy=_replay_strategy or config.strategy,

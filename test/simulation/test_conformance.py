@@ -45,6 +45,19 @@ def test_a_term_dividend_source_also_matches():
     assert report.passed, report.summary()
 
 
+def test_a_surface_forward_carry_tail_matches():
+    # The simulation takes the tail past the last listed contract from the
+    # path's own carry curve; the replay reads it from market_data's surface
+    # history, which the oracle's dataset must therefore carry.
+    cfg = ensemble_config(engine_config=pde_engine_config(
+        dividend_source="futures_curve", futures_curve_extrapolation="surface_forward_carry",
+        futures_curve_min_tenor_days=1,
+    ))
+    report = run_oracle(cfg, _paths(n_paths=2), 1)
+    assert report.passed, report.summary()
+    assert report.max_pv_gap == 0.0 and report.max_delta_gap == 0.0
+
+
 def test_a_traded_initial_price_matches():
     cfg = ensemble_config(products=[
         ReplayProduct(product=short_snowball(), quantity=-1000.0, position_id=1,
