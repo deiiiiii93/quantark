@@ -207,16 +207,21 @@ def append_result(result: CellResult, jsonl_path) -> None:
         handle.write(json.dumps(_jsonable(result), sort_keys=True, default=str) + "\n")
 
 
-def aggregate(jsonl_path, json_path) -> dict:
-    """Collect the appended cells into the evidence JSON and return per-status counts."""
+def aggregate(jsonl_path, json_path, *, git_sha=None, wall_time_s=None) -> dict:
+    """Collect the appended cells into the evidence JSON and return per-status counts.
+
+    ``git_sha`` names the commit the run executed (HEAD may have moved since).
+    """
     with open(jsonl_path, encoding="utf-8") as handle:
         rows = {row["cell"]["id"]: row for row in (json.loads(line) for line in handle if line.strip())}
-    try:
-        sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False).stdout.strip()
-    except OSError:
-        sha = None
+    sha = git_sha
+    if sha is None:
+        try:
+            sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False).stdout.strip()
+        except OSError:
+            sha = None
     payload = {
-        "schema": "intraday-gate-c/1", "machine": platform.platform(), "git_sha": sha,
+        "schema": "intraday-gate-c/1", "machine": platform.platform(), "git_sha": sha, "wall_time_s": wall_time_s,
         "budgets": {"price_abs_per_notional": budgets.PRICE_ABS_PER_NOTIONAL, "reference_multiplier": K_REF},
         "reference": {"method": "dense_gaussian_backward", "points": list(GATE_C_POINTS)},
         "cells": [rows[k] for k in sorted(rows)],
