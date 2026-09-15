@@ -147,8 +147,10 @@ observation.
   (RANDOMIZED_QUASI engines with an RQMC session spec; others raise `CapabilityError`).
   Where the price function jumps at the query spot (an unfixed event at the valuation
   instant on its level, a continuous barrier hit there) delta and gamma are `undefined`.
-  Point vega/rho/dividend rho are `unqualified` (no value) until a bump-limit ladder
-  demonstrates them.
+  Point vega/rho/dividend rho are `unqualified` (no value) until a Gate C bump-limit ladder
+  demonstrates them for the (product, route): demonstrated to one second before the fixing
+  for QUAD V2 snowballs and analytical digitals (`evidence/gate_c_greeks.json`). MC point
+  delta/gamma (a paired RQMC difference at the desk bump) stay `unqualified`.
 - `"theta"` under either convention — a declared forward step (`theta_step`, default one
   hour; `theta_unit` second/minute/hour/day) on the frozen market (`roll_context`),
   including cash paid during the step. A step that would cross the next event is clamped to

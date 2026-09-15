@@ -61,6 +61,17 @@ separates concerns across composable layers:
 - **SA-CVA**: Basel (MAR50) SBA CVA capital
 - **Portfolios**: equity, fixed income, FX, and credit position tracking — one position object feeds the entire risk stack
 
+#### Intraday pricing
+- **Timestamp valuation** (`quantark.intraday`): timezone-aware valuation instants on a trading-session calendar with a
+  sub-day variance profile, confirmed and assumed (provisional) fixings, and a structured result that separates the
+  contingent claim, pending receivables and paid cash
+- **Routes** for digitals, barriers/one-touches and autocallables through QUAD V2, PDE, MC and admissible closed forms,
+  each reporting its numerical status (PDE resolution, MC sampling error); point and desk-bump Greeks, a declared-step
+  intraday theta, roll-through-events scenarios, spot curves and batch aggregation
+- **Evidence**: an independent Gaussian-transition reference gates every route on a one-day-to-one-second
+  time-to-fixing ladder; see `quantark/intraday/README.md` and the generated
+  [intraday capability matrix](docs/execution/intraday-capability-matrix.md)
+
 #### Cross-cutting
 - **Greeks**: analytical (closed-form) and numerical (finite-difference) — Delta, Gamma, Vega, Theta, Rho, DV01
 - **Robust error handling**: professional exception hierarchy
@@ -274,6 +285,8 @@ quantark/
 ├── montecarlo/         # Shared QMC layer (Sobol, Brownian bridge, RQMC, variance reduction)
 ├── param/              # Market data: quote/, rrf/, div/, vol/ (incl. sabr/, vannavolga/)
 ├── priceenv/           # Pricing environments (equity & FX)
+├── intraday/           # Timestamp valuation: sessions, variance profiles, provisional fixings, routes, Greeks
+├── execution/          # PricingSession kernel: capability matrix, determinism policy, batch / scenarios
 ├── portfolio/          # Position tracking: equity/, fi/, fx/, credit/
 ├── var/                # Value-at-Risk (historical / parametric / monte_carlo) + backtest/
 ├── stresstest/         # Scenario-based stress testing (all asset classes)

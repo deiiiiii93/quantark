@@ -21,6 +21,9 @@ Spec of record:
 - [Capability matrix](capability-matrix.md) — generated per-engine
   batch/adaptive/prepared adoption states with rationales
   (`python -m quantark.execution.capability_matrix`; CI-enforced freshness).
+- [Intraday capability matrix](intraday-capability-matrix.md) — generated
+  intraday routes with Gate C qualified horizons and demonstrated point Greeks
+  (`python -m quantark.intraday.publish`; CI-enforced freshness).
 - [Policy guide](policy-guide.md) — precedence, environment variables,
   budgets, backend × capability matrix.
 - [Internals and legacy duplicates](internals-and-legacy.md) — what is
