@@ -274,8 +274,8 @@ def compute_step_crossing_probabilities(
     if barrier_level <= 0.0:
         raise ValueError("barrier_level must be positive")
     sigma_vec = np.asarray(sigma, dtype=float)
-    if np.any(sigma_vec <= 0.0):
-        raise ValueError("sigma must be positive")
+    if np.any(sigma_vec < 0.0):
+        raise ValueError("sigma must be non-negative")
     if sigma_vec.ndim not in (0, 1):
         raise ValueError("sigma must be a scalar or 1D per-step array")
     if paths.shape[1] != times.shape[0] + 1:
@@ -319,11 +319,14 @@ def compute_step_crossing_probabilities(
     # Opposite-side or touching endpoints imply a hit with probability 1
     prob[crossed_mask | touched_mask] = 1.0
 
-    # Same-side endpoints: Brownian-bridge crossing probability
-    same_side = ~(crossed_mask | touched_mask)
+    # Same-side endpoints: Brownian-bridge crossing probability. A zero-variance
+    # step (e.g. a trading-clock lunch) is the deterministic log-linear path
+    # between its endpoints and cannot reach the barrier: probability 0.
+    same_side = ~(crossed_mask | touched_mask) & np.broadcast_to(h2 > 0.0, S0.shape)
     if np.any(same_side):
         log_term = safe_log(S0 / barrier_level) * safe_log(S1 / barrier_level)
-        bridge_prob = np.exp(-2.0 * log_term / h2)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bridge_prob = np.exp(-2.0 * log_term / h2)
         bridge_prob = np.clip(bridge_prob, 0.0, 1.0)
         prob[same_side] = bridge_prob[same_side]
 

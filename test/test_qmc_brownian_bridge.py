@@ -51,3 +51,31 @@ def test_same_side_probability_formula() -> None:
             log_term = math.log(s0 / barrier) * math.log(s1 / barrier)
             expected = math.exp(-2.0 * log_term / (sigma * sigma * dt[col]))
             assert is_close(probs[row, col], expected, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def test_zero_variance_steps_are_deterministic() -> None:
+    """A zero-variance step (a trading-clock lunch or overnight) is the deterministic path between its endpoints."""
+    barrier = 100.0
+    times = np.array([0.25, 0.5, 0.75])
+    sigma = np.array([0.2, 0.0, 0.2])
+    paths = np.array(
+        [
+            [99.0, 99.5, np.nextafter(100.0, 0.0), 99.0],   # same side, second step ends a ulp below the barrier
+            [99.0, 99.5, 101.0, 99.0],                      # opposite sides across the zero-variance step
+            [99.0, 99.5, 100.0, 99.0],                      # touches at the end of the zero-variance step
+        ]
+    )
+
+    probs = compute_step_crossing_probabilities(paths, barrier, sigma, times)
+    positive = compute_step_crossing_probabilities(paths, barrier, np.array([0.2, 0.3, 0.2]), times)
+
+    assert probs[0, 1] == 0.0
+    assert probs[1, 1] == 1.0 and probs[2, 1] == 1.0
+    assert np.array_equal(probs[:, [0, 2]], positive[:, [0, 2]])
+
+
+def test_negative_sigma_is_rejected() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="non-negative"):
+        compute_step_crossing_probabilities(np.array([[99.0, 99.5]]), 100.0, -0.1, np.array([0.5]))
