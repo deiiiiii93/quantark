@@ -20,11 +20,16 @@ def route_for(ctx, engine) -> IntradayEngineRoute:
         raise CapabilityError(f"no intraday route registered for {path}") from None
 
 
+from quantark.intraday.engines.analytical_barrier import AnalyticalBarrierRoute  # noqa: E402
 from quantark.intraday.engines.analytical_digital import AnalyticalDigitalRoute  # noqa: E402
 from quantark.intraday.engines.quad_v2 import QuadV2Route  # noqa: E402
 
 register_route("quantark.asset.equity.engine.analytical.digital_option_engine.DigitalOptionAnalyticalEngine",
                AnalyticalDigitalRoute)
+register_route("quantark.asset.equity.engine.analytical.barrier_analytical_engine.BarrierAnalyticalEngine",
+               AnalyticalBarrierRoute)
+register_route("quantark.asset.equity.engine.analytical.one_touch_analytical_engine.OneTouchAnalyticalEngine",
+               AnalyticalBarrierRoute)
 for _name in ("SnowballQuadEngineV2", "PhoenixQuadEngineV2", "KOResetSnowballQuadEngineV2"):
     register_route(f"quantark.asset.equity.engine.quad.v2.engine.{_name}", QuadV2Route)
 

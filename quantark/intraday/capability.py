@@ -35,13 +35,27 @@ def engine_class_path(engine) -> str:
 
 
 def _rows() -> Tuple[IntradayCapability, ...]:
+    from quantark.asset.equity.product.option.barrier_option import BarrierOption
     from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
     from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
     from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
     price_only = frozenset({"price"})
     anywhere = frozenset({"any"})
-    return (
+    barrier_rows = []
+    for product, engine in ((BarrierOption, "barrier_analytical_engine.BarrierAnalyticalEngine"),
+                            (OneTouchOption, "one_touch_analytical_engine.OneTouchAnalyticalEngine")):
+        barrier_rows += [
+            IntradayCapability(product, _ANALYTICAL + engine, "continuous", anywhere, price_only, "supported",
+                               "exact only under a uniform calendar variance rate with flat carry, or zero carry "
+                               "(variance-time change); otherwise CapabilityError"),
+            IntradayCapability(product, _ANALYTICAL + engine, "terminal", anywhere, price_only, "supported",
+                               "expiry-only monitoring: terminal distribution, exact"),
+            IntradayCapability(product, _ANALYTICAL + engine, "discrete", anywhere, price_only, "unsupported",
+                               "BGK is an approximation; discrete barriers route to PDE/QUAD/MC"),
+        ]
+    return tuple(barrier_rows) + (
         IntradayCapability(CashOrNothingDigitalOption, _ANALYTICAL + "digital_option_engine.DigitalOptionAnalyticalEngine",
                            "terminal", anywhere, price_only, "supported",
                            "integrated carry/variance via TradingClockVolSurface; zero variance priced as the exact forward limit"),
@@ -84,9 +98,10 @@ def require_capability(product, engine, *, monitoring: str, outputs: Iterable[st
     name = engine_class_path(engine).rsplit(".", 1)[-1]
     if row is None or row.status == "unsupported":
         alts = _alternatives(product, monitoring)
+        why = f" ({row.note})" if row is not None and row.note else " (PDE/MC routes arrive in Plan 2)"
         raise CapabilityError(
-            f"{name} has no intraday route for {type(product).__name__} with {monitoring} monitoring "
-            f"(PDE/MC/analytical-barrier routes arrive in Plan 2). Intraday alternatives: {alts or 'none'}.")
+            f"{name} has no intraday route for {type(product).__name__} with {monitoring} monitoring{why}. "
+            f"Intraday alternatives: {alts or 'none'}.")
     missing = sorted(set(outputs) - set(row.outputs))
     if missing:
         raise CapabilityError(f"{name} intraday route for {type(product).__name__} does not deliver {missing}; "
