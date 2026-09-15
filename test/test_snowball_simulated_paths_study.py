@@ -17,6 +17,7 @@ import pytest
 
 from quantark.backtest.simulation.config import GateConfig
 from quantark.backtest.simulation.paths.market_path import DEFAULT_TENOR_GRID, MarketPath, trading_calendar
+from quantark.util.enum.engine_enums import EngineType
 
 REPO = Path(__file__).resolve().parents[1]
 STUDY_DIR = REPO / "example" / "snowball_simulated_paths"
@@ -373,7 +374,7 @@ def test_the_cli_runs_every_cell_of_the_quick_grid(tiny_fleet, tmp_path):
     out, _, _ = tiny_fleet
     shutil.copytree(out / "paths", tmp_path / "paths")
     rc = S02.main(["--out-dir", str(tmp_path), "--provider", "exact", "--cells", f"{C.MODELS[0]}:front", "term_flat_q:front",
-                   "--check-paths", "0", "--oracle-paths", "1", "--quad-grid", "101",
+                   "--check-paths", "0", "--exact-paths", "0", "--oracle-paths", "1", "--quad-grid", "101",
                    "--maturity-months", "1", "--lockout-months", "1"])
     assert rc == 0
     for name in (C.BASELINE_CELL, C.BASELINE_CELL + "__stress", "term_flat_q__front", "term_flat_q__front__stress"):
@@ -382,6 +383,50 @@ def test_the_cli_runs_every_cell_of_the_quick_grid(tiny_fleet, tmp_path):
     fleet = C.read_json(tmp_path / "fleet_manifest.json")
     assert len(fleet["runs"]) == 4 and fleet["runs"]["term_flat_q__front"]["oracle"][0]["passed"]
 
+
+def test_per_date_is_exact_repricing_on_the_pde_engine(tiny_fleet):
+    out, _, coupon = tiny_fleet
+    bootstrap, _, _ = S01.load_paths(out)
+    product = C.Q.build_product(fixture_terms(bootstrap.dates), float(bootstrap.spot[0, 0]), coupon.coupon)
+    cfg = S02.cell_config(product, "term_flat_q", "front", provider="per_date", **CELL)
+    assert cfg.pricing.provider == "repricing" and cfg.pricing.mode == "exact" and cfg.pricing.gate.sample_states == 0
+    assert cfg.engine_config.pricing_engine_type == EngineType.PDE
+    assert cfg.engine_config.pde_params.grid.points == C.SURFACE_POINTS
+    assert (cfg.metadata["provider"], cfg.metadata["engine"]) == ("per_date", "pde")
+    exact = S02.cell_config(product, "term_flat_q", "front", provider="exact", **CELL)
+    assert exact.engine_config.pricing_engine_type == EngineType.QUADRATURE
+    assert S02.config_fingerprint(cfg, bootstrap) != S02.config_fingerprint(exact, bootstrap)
+    assert S02.oracle_tolerances(cfg) == {"pv_tolerance": 0.0, "delta_tolerance": 0.0, "contracts_tolerance": 0.0}
+    args = S02.parse_args([])
+    assert (args.provider, args.check_paths, args.exact_paths, args.oracle_paths) == ("per_date", 0, 40, 3)
+    assert tuple(args.spot_range) == C.SURFACE_SPOT_RANGE
+
+
+def test_each_run_is_batched_for_its_own_path_count():
+    assert S02.batch_for(2000, 12, 170) == 167
+    assert S02.batch_for(40, 12, 170) == 4
+    assert S02.batch_for(5, 12, 170) == 1
+    assert S02.batch_for(40, 6, 7) == 7
+    assert S02.batch_for(40, 1, None) is None
+
+
+def test_the_cli_runs_a_per_date_cell_with_an_exact_quad_check(tiny_fleet, tmp_path):
+    import shutil
+    out, _, _ = tiny_fleet
+    shutil.copytree(out / "paths", tmp_path / "paths")
+    rc = S02.main(["--out-dir", str(tmp_path), "--cells", f"{C.MODELS[0]}:front", "--exact-paths", "2",
+                   "--oracle-paths", "2", "--spot-range", *map(str, FIXTURE_SPOT_RANGE), "--quad-grid", "101",
+                   "--maturity-months", "1", "--lockout-months", "1"])
+    assert rc == 0
+    runs = C.read_json(tmp_path / "fleet_manifest.json")["runs"]
+    assert set(runs) == {C.BASELINE_CELL, C.BASELINE_CELL + "__stress", C.BASELINE_CELL + "__exact_quad"}
+    main = runs[C.BASELINE_CELL]
+    assert main["provider"] == "per_date" and not main["failed"] and main["gate"]["max_pv_gap_bp"] == 0.0
+    assert [r["path"] for r in main["oracle"]] == [0, 1] and all(r["passed"] for r in main["oracle"])
+    check = runs[C.BASELINE_CELL + "__exact_quad"]
+    assert check["provider"] == "exact" and check["n_paths"] == 2 and [r["path"] for r in check["oracle"]] == [0]
+    assert runs[C.BASELINE_CELL + "__stress"]["oracle"] == []
+    assert np.isfinite(main["day0_book_mark_bp"]) and np.isfinite(check["day0_book_mark_bp"])
 
 def test_the_life_surface_mesh_is_refined_and_its_step_cap_clears_the_request():
     """One surface serves a whole market bucket, so the mesh is cheap enough

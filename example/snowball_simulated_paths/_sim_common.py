@@ -102,7 +102,13 @@ STATE_CACHE_BYTES = 500_000_000
 GATE_SURFACE = dict(sample_states=64, pv_tolerance_bp=25.0, delta_tolerance_hands=2.0,
                     delta_tolerance_rel=0.01)
 GATE_LADDER = dict(sample_states=64, pv_tolerance_bp=10.0, delta_tolerance_hands=2.0)
-CHECK_PATHS = 200
+#: The QUAD spot-ladder check is off by default: its 2026-09-09 failures were
+#: the flat-node carry gap, structural, and Design B replaced the provider it
+#: was checking.  Pass --check-paths to run it.
+CHECK_PATHS = 0
+#: Exact QUAD repricing on each cell's first paths, paired with the cell's
+#: own provider on the same paths: the engine check (reported, not gated).
+EXACT_CHECK_PATHS = 40
 ORACLE_PATHS = 3
 #: The life surface's spot domain as fractions of the initial spot.  A
 #: surface is solved once at the start spot and read along the whole path,
