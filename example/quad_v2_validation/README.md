@@ -244,4 +244,4 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
 
 `--phase matrix`, `risk`, `curves` and `benchmark` run individual parts. [all_results.json](all_results.json) records inputs, settings, errors, reference refinement, diagnostics, timings and source hashes; [family_results.json](family_results.json) records family PVs, scramble means and provenance. The frozen original comparison and feasibility artifacts are preserved.
 
-Implementation entry points are [engine.py](../../quantark/asset/equity/engine/quad/v2/engine.py), [QuadV2Params](../../quantark/asset/equity/param/quad_v2_params.py), the [design](../../docs/superpowers/plans/2026-09-11-quad-v2-design.md) and the [implementation plan](../../docs/plans/2026-09-11-quad-v2-implementation.md).
+Implementation entry points are [engine.py](../../quantark/asset/equity/engine/quad/v2/engine.py), [QuadV2Params](../../quantark/asset/equity/param/quad_v2_params.py), the [design](../../docs/superpowers/plans/2026-09-11-quad-v2-design.md) and the [implementation plan](../../docs/superpowers/plans/2026-09-11-quad-v2-implementation.md).
