@@ -62,6 +62,12 @@ class ObservationRecord:
     tenor_end: Optional[TenorEnd] = None
     day_count_fraction: Optional[float] = None
     settlement_time: Optional[float] = None
+    #: Explicit fixing instant (timezone-aware). Intraday mode uses it instead
+    #: of the exchange-close convention for ``observation_date``; day-level
+    #: resolution ignores it. ``observation_date`` stays the contractual identity.
+    observation_timestamp: Optional[datetime] = None
+    #: Explicit payment instant (timezone-aware); intraday mode only.
+    settlement_timestamp: Optional[datetime] = None
 
     def resolve_time(self, pricing_env: PricingEnv) -> float:
         """Resolve observation time to a year fraction.
@@ -165,6 +171,17 @@ class ObservationRecord:
         """Validate record fields."""
         if self.observation_time is None and self.observation_date is None:
             raise ValidationError("ObservationRecord must provide observation_time or observation_date.")
+        for name in ("observation_timestamp", "settlement_timestamp"):
+            ts = getattr(self, name)
+            if ts is None:
+                continue
+            if not isinstance(ts, datetime) or ts.tzinfo is None or ts.utcoffset() is None:
+                raise ValidationError(f"{name} must be a timezone-aware datetime, got {ts!r}")
+        if self.observation_timestamp is not None:
+            if self.observation_date is None:
+                raise ValidationError("observation_timestamp requires observation_date (the contractual date)")
+            if self.observation_timestamp.date() != self.observation_date.date():
+                raise ValidationError("observation_timestamp must fall on the same local date as observation_date")
         if require_single:
             if self.barrier is None:
                 raise ValidationError("Single-barrier observation requires barrier level.")
