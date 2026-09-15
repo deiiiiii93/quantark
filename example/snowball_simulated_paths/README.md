@@ -77,6 +77,63 @@ surface and the ladder, and the term object itself only in the optional
 exact-QUAD subset (`--exact-paths`).  The gate reports the gap between the
 two on every cell.
 
+**Measured on 2026-09-14, this is decisive, not a caveat.**  One bootstrap
+path, 65 sampled states, each priced three ways: on the surface, exactly
+with the term object, and exactly with the surface's own flat `q`.  That
+splits every gate gap into the carry SHAPE, which no mesh or bucket step
+can remove, and everything else.
+
+| carry model | worst gate gap | of which carry shape | the surface itself |
+|---|---|---|---|
+| `flat_from_hedge` | 14.72 bp | 0.00 | 14.72 |
+| `term_flat_q` | 108.73 bp | 107.34 | 1.39 |
+
+On the flat model the carry term is identically zero on all 65 states and
+the surface holds its 25 bp budget.  On the term model the surface is just
+as accurate — worst residual 15.28 bp over the path — and the gate failure
+at 38.24 bp is entirely the flat-versus-term dividend object.  So the life
+surface can run the flat-carry arm of this study and cannot run the term
+arms: flattening the carry there would compare a flattened term model
+against a flat model, which measures nothing.
+
+The root cause is the cache key, not the solver.  `solve_life_surface`
+accepts a `TermStructureDividendYield` and prices it correctly — the
+surface's day-0 column equals `PDEEngine.price` to the digit under both a
+flat and a term object, and at day 0 the term object behaves like a flat
+14.6603% against the scalar's 14.6554%, worth 0.34 bp.  What the surface
+cannot do is LOOK ONE UP: `LifeSurfacePricer._surface` keys its store on
+`(vol, q, rate)`, three floats, so a curve has to be collapsed to one
+number first.  The number is `q_T`, the zero yield at the product's
+remaining maturity, which reproduces the terminal forward exactly and
+carries nothing about the shape in between — and a snowball prices off the
+intermediate forwards, because that is what its monthly knock-out and
+daily knock-in observations see.
+
+On path 0 that shape is violent.  The one-month zero yield falls to 0.05%
+on day 120 and stands at 26.5% on day 121 while `q_T` reads 11.36% and
+17.02%, a curve spread of 11.4 and 9.7 percentage points; the gate gaps on
+those two days are −108.73 and +98.41 bp.  At about 70 bp of notional per
+1% of carry (measured: 352,000 on a 50M book) a shape mismatch of a
+fraction of a percent in effective yield is worth tens of basis points.
+
+So the fix is a key a term curve can occupy.  The obvious objection is
+that reuse is the whole point of the provider and a seven-tenor curve
+would give one surface per state — but measured, there is almost no reuse
+to lose.  At 40 paths the study's steps give 3,037 distinct (vol, q, rate)
+buckets over 11,000 path-days, and the run performed 6,568 solves for
+6,472 priced states: more than one full solve per state.  The 2 GB surface
+store holds 99 surfaces of 20 MB against those 3,037 buckets, so it evicts
+6,172 times and re-solves what it dropped.
+
+That has a consequence beyond the term-carry question.  At 40 paths the
+life surface is not cheaper than exact repricing: 2,654 s on four workers
+against the published exact-QUAD cell's 2,542 s on one, for the same
+paths.  Distinct buckets grow as `paths**0.745`, so reuse rises from 3.6
+states per surface at 40 paths to about 8 at 2,000, which is where the
+provider starts to earn its keep — by roughly threefold in CPU, not the
+fiftyfold the 35-hour exact-QUAD figure suggests.  Surface capacity, not
+mesh and not bucket width, is the lever on that number.
+
 The surface's spot domain is set explicitly to 0.40–1.60 of the initial
 spot (`SURFACE_SPOT_RANGE`).  A surface is solved once at the start spot
 and read along the whole path, so its domain has to be a path envelope,
@@ -120,11 +177,28 @@ count is in the thousands: 8 paths needed 942 surface solves.
   improving.  The solver now returns the continuation branches, and the same
   fixture state costs 2.24 bp and 0.81 hands, inside the study's own budget.
   The ladder's 12 bp at that state is interpolation and is unchanged.
+- The mesh, since pinned.  The surface ran on the engine's "standard"
+  accuracy profile: 400 points, 4 steps a day, a mesh concentrated around
+  the critical prices.  It now runs a fixed 1601 points at 16 steps a day,
+  which against the Gaussian-transition quadrature reference converges at
+  second order and lands the study's designed states within 0.14 hands away
+  from expiry.  Sixteen steps a day asks for 5060 intervals and the
+  engine's shipped cap of 5000 used to deliver 4799 without saying so,
+  which is why the old refinement ladder looked divergent; the cap is
+  stated at 8000 and the surface now refuses a scaled fill rather than
+  pricing on it.
+- What the mesh costs: nothing, here.  A two-path cell does 509 solves in
+  592 s on the profile and 521 in 599 s on this mesh, because the grid
+  binder rebuilds its layout for every market bucket and that rebuild, not
+  the sweep, is the solve.  Doubling again to 3201 by 32 does cost, about
+  4.4 times per solve, and buys a smaller number against a reference that
+  cannot support it, so it was not taken.  A surface here is four times the
+  size of a profile one, so the 2 GB surface cache holds 99 of them against
+  397; that budget is what to raise at fleet path counts.
 - Known cost: the PDE grid binder keys its layout cache on the whole market
-  snapshot, so every vol or q bucket rebuilds an identical concentrated mesh
-  under the study's explicit bounds, about a second each; a mesh memo on the
-  mesh's own inputs is the library follow-up that would make the surface
-  solves cheap.
+  snapshot, so every vol or q bucket rebuilds the same mesh under the
+  study's explicit bounds; a mesh memo on the mesh's own inputs is the
+  library follow-up that would remove the rebuild.
 
 ## Running it
 
@@ -140,8 +214,8 @@ Measured on the quick run: an exact 40-path cell is 40–50 minutes (6,472
 engine calls, one per state), a 5-path stress set 6–7 minutes, an 8-path
 ladder check 15–18 minutes, one oracle path 3–4 minutes.  The 2,000-path
 fleet on exact QUAD would be about 35 hours per cell on one worker; the
-life surface is the provider meant for it, once its two gate failures
-recorded below are addressed.
+life surface is the provider meant for it, and as of 2026-09-11 it passes
+its gate.
 
 Paths, cells (`cells/<cell>[__stress|__ladder_quad|__exact_quad]/` written
 by `EnsembleResults.to_dir`, with `config.json` and `run.json`),
@@ -189,6 +263,22 @@ product's gate at 68 bp (vol bucketing) and, at the finer steps, at 2.84
 hands (its stencil delta against the engine's bump delta near a barrier).
 Both approximate providers therefore produced no numbers here; the
 distributions below are exact repricing, one engine call per state.
+
+Re-measured on 2026-09-11, after the readout fix and on the pinned mesh,
+the surface's day-zero gate on this product is 5.61 bp and 7.15 hands,
+against 16.95 bp and 13.04 hands on the accuracy profile it replaced, and
+every designed state away from expiry is 0.14 hands or better.  **The
+surface now passes its gate.**  The 7.15 hands is one state, the last
+trading day a fraction of a percent above the knock-in barrier, where the
+surface and the fresh solve the gate scores it against both oscillate as
+the barrier moves within a cell: 7.15 hands at this mesh, 2.42 at 3201
+points and 32 steps, 3.06 at 6401 and 64.  The reference itself moves by
+about half a percent between meshes, so a budget tighter than that would
+measure the mesh rather than the provider.  The gate therefore judges that
+state on its own delta scale, 1% of 814 hands against 2 hands for a
+typical 40-hand state, and it passes at 7.15 against an 8.14 allowance.
+The two ladder failures are unchanged; the ladder is not the fleet's
+provider.
 
 **Hedge-cost distributions, 40 paths** (bp of notional; ES = mean of the
 5% loss tail for P&L, of the 5% upper tail for cost-like measures):

@@ -28,7 +28,8 @@ from quantark.util.exceptions import ValidationError
 
 from ..config import GateConfig
 from .base import (
-    DayStates, GateReport, GateScale, StateKey, bucket_centre, bucket_key, float_key, row_keys, state_row,
+    DayStates, GateReport, GateScale, StateKey, bucket_centre, bucket_key, delta_usage, float_key,
+    row_keys, state_row,
 )
 from .cache import StateCache
 
@@ -455,19 +456,25 @@ class RepricingPricer:
         if self.spot_step is None:
             return GateReport(mode="exact", sampled=0, max_pv_gap_bp=0.0,
                               max_delta_gap_hands=0.0, passed=True)
-        worst_pv = worst_delta = 0.0
+        worst_pv = worst_delta = worst_use = 0.0
         count = 0
+        delta_ok = True
         for row in samples:
             if len(row) != 1:
                 raise ValidationError("verify takes one-row DayStates (see state_row)")
             exact = self.price_exact(row)
             pv, delta, _ = self._price_ladder(row, sample=False)
+            exact_hands = exact[1] * float(scale.hands_per_unit_delta)
+            gap_hands = (float(delta[0]) - exact[1]) * float(scale.hands_per_unit_delta)
             worst_pv = max(worst_pv, abs(float(pv[0]) - exact[0]) / float(scale.unit_notional) * 1e4)
-            worst_delta = max(worst_delta, abs(float(delta[0]) - exact[1]) * float(scale.hands_per_unit_delta))
+            worst_delta = max(worst_delta, abs(gap_hands))
+            worst_use = max(worst_use, delta_usage(gate, gap_hands, exact_hands))
+            delta_ok = delta_ok and gate.passes_delta(gap_hands=gap_hands, exact_delta_hands=exact_hands)
             count += 1
         return GateReport(
             mode="ladder", sampled=count, max_pv_gap_bp=worst_pv, max_delta_gap_hands=worst_delta,
-            passed=worst_pv <= float(gate.pv_tolerance_bp) and worst_delta <= float(gate.delta_tolerance_hands),
+            max_delta_usage=worst_use,
+            passed=worst_pv <= float(gate.pv_tolerance_bp) and delta_ok,
         )
 
     def fingerprint(self) -> str:

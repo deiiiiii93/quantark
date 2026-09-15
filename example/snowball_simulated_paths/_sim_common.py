@@ -86,7 +86,21 @@ VOL_STEP = 0.002
 Q_STEP = 0.001
 SURFACE_CACHE_BYTES = 2_000_000_000
 STATE_CACHE_BYTES = 500_000_000
-GATE_SURFACE = dict(sample_states=64, pv_tolerance_bp=25.0, delta_tolerance_hands=2.0)
+#: 2 hands is calibrated on a typical state, whose delta runs about 40
+#: hands; beside the knock-in on the last trading day the delta is twenty
+#: times that, and an absolute rule there is twenty times tighter for no
+#: stated reason.  1% of the state's own delta is the second budget, and
+#: the larger of the two governs, so on a typical state (1% of 40 is 0.4
+#: hands) the absolute rule still decides and this changes nothing.
+#:
+#: 1% is not arbitrary.  At the one state that needs it the gap runs 0.88%
+#: at this mesh, 0.30% at 3201/32 and 0.37% at 6401/64 -- the EXACT solve
+#: the gate scores against moves by about half a percent between meshes, so
+#: a budget below that measures the mesh, not the provider.  Measured worst
+#: designed state 7.15 hands against an 8.14 allowance; every other state
+#: is 1.17 hands or less.
+GATE_SURFACE = dict(sample_states=64, pv_tolerance_bp=25.0, delta_tolerance_hands=2.0,
+                    delta_tolerance_rel=0.01)
 GATE_LADDER = dict(sample_states=64, pv_tolerance_bp=10.0, delta_tolerance_hands=2.0)
 CHECK_PATHS = 200
 ORACLE_PATHS = 3
@@ -99,6 +113,49 @@ ORACLE_PATHS = 3
 #: leg of the gate and the oracle pay it once per state): default vol-scaled
 #: domain [0.35, 2.87] 1.07 s, [0.60, 1.60] 0.15 s, [0.40, 2.50] 1.08 s.
 SURFACE_SPOT_RANGE = (0.40, 1.60)
+#: The life-surface mesh.  A surface is solved once per market bucket and
+#: read for every state in it, so accuracy here is bought per bucket, not
+#: per state.
+#:
+#: Measured on the study's own day-zero gate, profile default (400 points,
+#: 4 steps/day) against this mesh: worst PV gap 16.95 -> 5.61 bp, worst
+#: delta gap 13.04 -> 7.15 hands, and every designed state away from expiry
+#: 0.14 hands or better.  Against the Gaussian-transition quadrature
+#: reference the surface converges at second order, and what is left of the
+#: gate gap on those states is the vol/carry bucket term above, which no
+#: mesh can remove.
+#:
+#: It is not slower.  Measured in the run rather than in isolation, a
+#: two-path 275-day cell does 521 solves in 599 s at this mesh and 509 in
+#: 592 s on the profile, because the grid binder rebuilds its layout for
+#: every market bucket and that rebuild, not the sweep, is the solve.  An
+#: isolated repeat solve looks cheap on the profile (0.15 s against 0.69 s)
+#: only because the binder's layout cache is warm by the second call; the
+#: fleet never sees that.  Doubling again to 3201/32 DOES cost: the
+#: day-zero gate alone runs 33.7 s against 12.7 s here, and a two-path cell
+#: was observed once at about 44 min.  What the fleet sees either way is
+#: size: a surface here is four times a profile one, so
+#: SURFACE_CACHE_BYTES holds 99 of them against 397, and at the path counts
+#: where bucket reuse starts to pay that budget is what to raise.
+#:
+#: The one state this does not settle is the last trading day a fraction of
+#: a percent above the knock-in barrier, where the surface and the fresh
+#: solve the gate scores it against both oscillate as the barrier moves
+#: within a cell: 7.15 hands here, 2.42 at 3201/32, 3.06 at 6401/64.  Since
+#: that is not a sequence more mesh will settle, the extra mesh buys a
+#: smaller number against a reference that cannot support it, and it is not
+#: bought: GATE_SURFACE judges that state on its own delta scale instead.
+SURFACE_POINTS = 1601
+SURFACE_STEPS_PER_DAY = 16.0
+#: 16 steps/day over this 1Y daily-observed product asks for 5060 intervals
+#: and the engine's shipped cap of 5000 delivers 4799 -- space refined with
+#: time standing still, which is what made the old ladder look divergent.
+#: Sized with headroom; a calendar that outgrows it is REFUSED by the
+#: surface pricer, not quietly coarsened.
+SURFACE_MAX_STEPS = 8000
+#: Stated beside ``points`` so the two are edited together: points above
+#: this budget is an error from the grid layer, never a silent trim.
+SURFACE_MAX_POINTS = 2000
 
 
 def cell_name(model: str, hedge: str) -> str:
@@ -127,10 +184,16 @@ def engine_config(
             "the simulation has no carry contract separate from the hedge"
         )
     if engine == "pde":
-        grid = None
+        bounds: Tuple[Optional[float], Optional[float]] = (None, None)
         if s0 is not None:
             lo, hi = spot_range if spot_range is not None else SURFACE_SPOT_RANGE
-            grid = GridConfig(bounds=(lo * float(s0), hi * float(s0)))
+            bounds = (lo * float(s0), hi * float(s0))
+        # The mesh is set here and not only under ``s0`` so the surface and
+        # the fresh solves the gate scores it against share one grid; on two
+        # grids the gate measures the difference between them.
+        grid = GridConfig(bounds=bounds, points=SURFACE_POINTS,
+                          steps_per_day=SURFACE_STEPS_PER_DAY, max_steps=SURFACE_MAX_STEPS,
+                          max_points=SURFACE_MAX_POINTS)
         kwargs: Dict[str, Any] = dict(pricing_engine_type=EngineType.PDE, pde_params=PDEParams(grid=grid))
     elif engine == "quad":
         kwargs = dict(pricing_engine_type=EngineType.QUADRATURE, quad_params=QuadParams(grid_points=int(quad_grid)))

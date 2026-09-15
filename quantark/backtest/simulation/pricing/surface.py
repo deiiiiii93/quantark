@@ -24,7 +24,7 @@ from quantark.util.numerical import is_close
 
 from ..config import CacheConfig, GateConfig
 from .base import (DayStates, GateReport, GateScale, StressCase, bucket_centre, bucket_key,
-                   float_key, state_row)
+                   delta_usage, float_key, state_row)
 from .cache import StateCache
 from .repricing import RepricingPricer, engine_fingerprint
 
@@ -275,6 +275,16 @@ class LifeSurfacePricer:
             raise ValidationError(
                 f"life-surface solve failed at vol={vol!r}, q={q!r}, rate={rate!r}: {exc}"
             ) from exc
+        if sol.fill_scaled:
+            # The gate reads this surface against fresh solves that mostly
+            # sit under the cap, so a surface whose fill was cut would
+            # measure the cap and call it propagation.  Refuse, naming the
+            # knob and the count it needs.
+            raise ValidationError(
+                f"life-surface time grid was scaled from {sol.requested_steps} to {sol.actual_steps} "
+                f"steps by the engine's max_steps; set GridConfig(max_steps=...) to at least "
+                f"{sol.requested_steps} or lower steps_per_day"
+            )
         self._solves += 1
         # Every column is a branch column now (LifeSurfaceSolution), column 0
         # included, so the valuation-date readout needs no separate vector:
@@ -343,19 +353,27 @@ class LifeSurfacePricer:
 
     def verify(self, samples: Sequence[DayStates], gate: GateConfig, scale: GateScale) -> GateReport:
         """Each sample exactly through the engine at its own spot, vol and dividend object, then the readout."""
-        worst_pv = worst_delta = 0.0
+        worst_pv = worst_delta = worst_use = 0.0
         count = 0
+        delta_ok = True
         for row in samples:
             if len(row) != 1:
                 raise ValidationError("verify takes one-row DayStates (see state_row)")
             pv_e, delta_e, _ = self._exact.price_exact(row)
             pv_s, delta_s, _ = self._readout_only(row)
+            exact_hands = delta_e * float(scale.hands_per_unit_delta)
+            gap_hands = (float(delta_s[0]) - delta_e) * float(scale.hands_per_unit_delta)
             worst_pv = max(worst_pv, abs(float(pv_s[0]) - pv_e) / float(scale.unit_notional) * 1e4)
-            worst_delta = max(worst_delta, abs(float(delta_s[0]) - delta_e) * float(scale.hands_per_unit_delta))
+            worst_delta = max(worst_delta, abs(gap_hands))
+            worst_use = max(worst_use, delta_usage(gate, gap_hands, exact_hands))
+            # Per state, because the budget a state is judged against depends
+            # on its own delta; a worst-case gap alone cannot decide it.
+            delta_ok = delta_ok and gate.passes_delta(gap_hands=gap_hands, exact_delta_hands=exact_hands)
             count += 1
         return GateReport(
             mode="life_surface", sampled=count, max_pv_gap_bp=worst_pv, max_delta_gap_hands=worst_delta,
-            passed=worst_pv <= float(gate.pv_tolerance_bp) and worst_delta <= float(gate.delta_tolerance_hands),
+            max_delta_usage=worst_use,
+            passed=worst_pv <= float(gate.pv_tolerance_bp) and delta_ok,
         )
 
     # -- the designed barrier stress set --------------------------------
@@ -490,7 +508,8 @@ class LifeSurfacePricer:
         exact solves per state, which is why it is off by default: the
         gate only needs the total, and the split is a diagnostic.
         """
-        worst_pv = worst_delta = 0.0
+        worst_pv = worst_delta = worst_use = 0.0
+        delta_ok = True
         rows: List[Dict[str, Any]] = []
         for case in cases:
             row = case.states
@@ -498,15 +517,26 @@ class LifeSurfacePricer:
             pv_s, delta_s, _ = self._readout_only(row)
             pv_bp = (float(pv_s[0]) - pv_e) / float(scale.unit_notional) * 1e4
             delta_hands = (float(delta_s[0]) - delta_e) * float(scale.hands_per_unit_delta)
+            exact_hands = delta_e * float(scale.hands_per_unit_delta)
             worst_pv = max(worst_pv, abs(pv_bp))
             worst_delta = max(worst_delta, abs(delta_hands))
+            worst_use = max(worst_use, delta_usage(gate, delta_hands, exact_hands))
+            delta_ok = delta_ok and gate.passes_delta(gap_hands=delta_hands, exact_delta_hands=exact_hands)
             # Absolute hands alone misread a state whose delta is an order
             # of magnitude above a typical one, which is what happens beside
             # a barrier near expiry, so the relative gap travels with it.
+            # The market each leg priced at travels with the row: the exact
+            # leg at the state's own (corner) values, the surface at the
+            # bucket centre.  An outside reference built from a row must be
+            # priced at one of these, and the row says which is which.
             entry: Dict[str, Any] = {
                 "label": case.label, "distance": float(case.distance),
                 "day_index": int(row.day_index), "spot": float(row.spot[0]),
                 "knocked_in": bool(row.knocked_in[0]),
+                "vol": float(row.vol[0]), "q": float(row.q_T[0]), "rate": float(row.rate[0]),
+                "surface_vol": float(bucket_centre(row.vol, self.vol_step)[0]),
+                "surface_q": float(bucket_centre(row.q_T, self.q_step)[0]),
+                "surface_rate": float(bucket_centre(row.rate, self.q_step)[0]),
                 "pv_gap_bp": pv_bp, "delta_gap_hands": delta_hands,
                 "exact_delta_hands": delta_e * float(scale.hands_per_unit_delta),
                 "delta_gap_rel": (delta_hands / abs(delta_e * float(scale.hands_per_unit_delta))
@@ -517,9 +547,9 @@ class LifeSurfacePricer:
             rows.append(entry)
         return GateReport(
             mode="life_surface_barrier", sampled=len(rows), max_pv_gap_bp=worst_pv,
-            max_delta_gap_hands=worst_delta, attribution=tuple(rows),
-            passed=(worst_pv <= float(gate.pv_tolerance_bp)
-                    and worst_delta <= float(gate.delta_tolerance_hands)),
+            max_delta_gap_hands=worst_delta, max_delta_usage=worst_use,
+            attribution=tuple(rows),
+            passed=worst_pv <= float(gate.pv_tolerance_bp) and delta_ok,
         )
 
     def _attribute(self, row: DayStates, pv_bp: float, delta_hands: float,

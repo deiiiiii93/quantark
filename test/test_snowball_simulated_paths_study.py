@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from quantark.backtest.simulation.config import GateConfig
 from quantark.backtest.simulation.paths.market_path import DEFAULT_TENOR_GRID, MarketPath, trading_calendar
 
 REPO = Path(__file__).resolve().parents[1]
@@ -362,3 +363,44 @@ def test_the_cli_runs_every_cell_of_the_quick_grid(tiny_fleet, tmp_path):
         assert not run["failed"] and run["gate"]["max_pv_gap_bp"] == 0.0, name
     fleet = C.read_json(tmp_path / "fleet_manifest.json")
     assert len(fleet["runs"]) == 4 and fleet["runs"]["term_flat_q__front"]["oracle"][0]["passed"]
+
+
+def test_the_life_surface_mesh_is_refined_and_its_step_cap_clears_the_request():
+    """One surface serves a whole market bucket, so the mesh is cheap enough
+    to buy accuracy with.
+
+    On the study's own day-zero gate the profile default (400 points, 4
+    steps a day) gives 16.95 bp and 13.04 hands; this mesh gives 5.61 bp and
+    7.15 hands, and every designed state away from expiry 0.14 or better.
+    It costs nothing: a two-path cell does 521 solves in 599 s here and 509
+    in 592 s on the profile, because the per-bucket layout rebuild is the
+    solve.  The cap has to clear what the mesh asks for: 16 steps a day over
+    the 1Y daily-observed product requests 5060 intervals, and the engine's
+    shipped cap of 5000 would deliver 4799 -- a refinement of space only.
+    A calendar that outgrows the cap is refused by the surface pricer
+    rather than quietly coarsened.
+    """
+    grid = C.engine_config(C.MODELS[0], "pde", quad_grid=101, s0=100.0).pde_params.grid
+    assert (grid.points, grid.steps_per_day) == (C.SURFACE_POINTS, C.SURFACE_STEPS_PER_DAY)
+    assert (C.SURFACE_POINTS, C.SURFACE_STEPS_PER_DAY) == (1601, 16.0)
+    assert grid.max_steps == C.SURFACE_MAX_STEPS >= 5060
+    assert grid.max_points == C.SURFACE_MAX_POINTS >= C.SURFACE_POINTS
+    assert grid.bounds == (40.0, 160.0)
+    # The same mesh on both legs, or the gate measures one grid against another.
+    assert C.engine_config(C.MODELS[0], "pde", quad_grid=101).pde_params.grid.points == C.SURFACE_POINTS
+
+
+def test_the_surface_gate_judges_a_near_barrier_state_on_its_own_delta_scale():
+    """2 hands is calibrated on a 40-hand state; beside the knock-in on the
+    last trading day the delta is twenty times that, and the exact solve the
+    gate scores against is itself unconverged there.  The relative budget is
+    what makes the two states judged alike, and it governs only where it is
+    the larger of the two."""
+    gate = GateConfig(**C.GATE_SURFACE)
+    assert gate.delta_tolerance_rel == 0.01
+    assert gate.delta_allowance(41.0) == 2.0          # typical state: hands govern
+    assert gate.delta_allowance(813.8) == pytest.approx(8.138)  # measured worst state
+    assert gate.passes_delta(gap_hands=7.15, exact_delta_hands=813.8)
+    assert not gate.passes_delta(gap_hands=7.15, exact_delta_hands=41.0)
+    # The ladder keeps hands alone; its failures are PV, not delta.
+    assert GateConfig(**C.GATE_LADDER).delta_tolerance_rel == 0.0
