@@ -8,7 +8,8 @@ alternatives. Engine classes match exactly: a subclass does not inherit a row.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import timedelta
 from functools import lru_cache
 from typing import Iterable, Optional, Tuple
 
@@ -28,6 +29,13 @@ class IntradayCapability:
     status: str                            # "supported" | "qualified" | "unsupported"
     note: str = ""
     alternatives: Tuple[str, ...] = ()
+    #: shortest time to the next fixing at which every Gate C price cell of the row passed (``qualified`` requires it);
+    #: timestamp support below it does not imply an accuracy certificate there
+    qualified_horizon: Optional[timedelta] = None
+
+    def __post_init__(self):
+        if (self.status == "qualified") != (self.qualified_horizon is not None):
+            raise ValueError(f"{self.engine_class_path}: a qualified row needs a qualified horizon and only it has one")
 
 
 def engine_class_path(engine) -> str:
@@ -58,7 +66,8 @@ def _rows() -> Tuple[IntradayCapability, ...]:
                                "BGK is an approximation; discrete barriers route to PDE/QUAD/MC"),
         ]
     pde = "quantark.asset.equity.engine.pde."
-    pde_note = "diffusion-layer resolution reported per price (resolved / unqualified / deterministic)"
+    pde_note = ("resolution reported per price (resolved / unqualified / deterministic): cells and time steps across the "
+                "diffusion layer, grid-mode damping, barrier placement; refinement bounded by a grid-cell memory budget")
     pde_rows = []
     for product, path, modes in (
             (SnowballOption, "snowball_pde_solver.SnowballPDESolver", ("discrete", "continuous")),
@@ -97,7 +106,33 @@ def _rows() -> Tuple[IntradayCapability, ...]:
     )
 
 
-INTRADAY_CAPABILITIES: Tuple[IntradayCapability, ...] = _rows()
+#: Rows every Gate C price cell of which passed at the horizon and above (packaged evidence gate_c_results.json,
+#: profiles uniform / desk / sessions_only, eleven spot offsets per barrier; test/intraday/test_capability_evidence.py
+#: cross-checks). (product, engine, monitoring) -> (horizon, evidence scope appended to the note)
+_QUALIFIED = {
+    ("SnowballOption", "SnowballQuadEngineV2", "discrete"):
+        (timedelta(seconds=1), "Gate C qualified to 1 s before a fixing around the KO and KI barriers"),
+    ("CashOrNothingDigitalOption", "DigitalOptionAnalyticalEngine", "terminal"):
+        (timedelta(seconds=1), "Gate C qualified to 1 s before expiry around the strike"),
+    ("BarrierOption", "BarrierAnalyticalEngine", "continuous"):
+        (timedelta(seconds=1), "Gate C qualified to 1 s before expiry on zero-carry up-and-out calls"),
+    ("OneTouchOption", "OneTouchAnalyticalEngine", "continuous"):
+        (timedelta(seconds=1), "Gate C qualified to 1 s before expiry on zero-carry up one-touches"),
+}
+
+
+def _publish(rows):
+    out = []
+    for row in rows:
+        key = (row.product_type.__name__, row.engine_class_path.rsplit(".", 1)[-1], row.monitoring)
+        if key in _QUALIFIED:
+            horizon, scope = _QUALIFIED[key]
+            row = replace(row, status="qualified", qualified_horizon=horizon, note=f"{row.note}; {scope}")
+        out.append(row)
+    return tuple(out)
+
+
+INTRADAY_CAPABILITIES: Tuple[IntradayCapability, ...] = _publish(_rows())
 
 
 def find_capability(product, engine, *, monitoring: str) -> Optional[IntradayCapability]:
@@ -130,19 +165,30 @@ def require_capability(product, engine, *, monitoring: str, outputs: Iterable[st
     return row
 
 
+PRICE_EVIDENCE_FILE = "gate_c_results.json"
 GREEK_EVIDENCE_FILE = "gate_c_greeks.json"
+
+
+def _evidence(name: str) -> dict:
+    import json
+    from importlib import resources
+
+    resource = resources.files("quantark.intraday.evidence").joinpath(name)
+    if not resource.is_file():
+        return {}
+    return json.loads(resource.read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=None)
+def capability_evidence() -> dict:
+    """The packaged Gate C price evidence (``quantark/intraday/evidence/gate_c_results.json``); {} when absent."""
+    return _evidence(PRICE_EVIDENCE_FILE)
 
 
 @lru_cache(maxsize=None)
 def greek_evidence() -> dict:
     """The packaged Gate C greek evidence (``quantark/intraday/evidence/gate_c_greeks.json``); {} when absent."""
-    import json
-    from importlib import resources
-
-    resource = resources.files("quantark.intraday.evidence").joinpath(GREEK_EVIDENCE_FILE)
-    if not resource.is_file():
-        return {}
-    return json.loads(resource.read_text(encoding="utf-8"))
+    return _evidence(GREEK_EVIDENCE_FILE)
 
 
 def point_output_qualified(product_name: str, route_name: str, measure: str, seconds_to_event: float) -> bool:
@@ -158,9 +204,21 @@ def point_output_qualified(product_name: str, route_name: str, measure: str, sec
     return False
 
 
+def _horizon_label(horizon: Optional[timedelta]) -> str:
+    if horizon is None:
+        return "—"
+    seconds = int(horizon.total_seconds())
+    for unit, size in (("d", 86400), ("h", 3600), ("min", 60)):
+        if seconds % size == 0 and seconds >= size:
+            return f"{seconds // size} {unit}"
+    return f"{seconds} s"
+
+
 def render_capability_matrix() -> str:
-    lines = ["| Product | Engine | Monitoring | Profiles | Outputs | Status | Note |", "|---|---|---|---|---|---|---|"]
+    lines = ["| Product | Engine | Monitoring | Profiles | Outputs | Status | Qualified horizon | Note |",
+             "|---|---|---|---|---|---|---|---|"]
     for r in INTRADAY_CAPABILITIES:
         lines.append(f"| {r.product_type.__name__} | {r.engine_class_path.rsplit('.', 1)[-1]} | {r.monitoring} | "
-                     f"{', '.join(sorted(r.profiles))} | {', '.join(sorted(r.outputs))} | {r.status} | {r.note} |")
+                     f"{', '.join(sorted(r.profiles))} | {', '.join(sorted(r.outputs))} | {r.status} | "
+                     f"{_horizon_label(r.qualified_horizon)} | {r.note} |")
     return "\n".join(lines) + "\n"

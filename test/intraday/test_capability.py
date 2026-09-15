@@ -40,4 +40,4 @@ def test_subclasses_do_not_inherit_a_route(sse_calendar):
 
 def test_matrix_renders_every_row():
     md = render_capability_matrix()
-    assert "| Product | Engine | Monitoring | Profiles | Outputs | Status |" in md and "SnowballQuadEngineV2" in md
+    assert "| Product | Engine | Monitoring | Profiles | Outputs | Status | Qualified horizon | Note |" in md and "SnowballQuadEngineV2" in md

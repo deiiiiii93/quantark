@@ -96,6 +96,52 @@ call-order regression test now guards it. The re-run (624 s, machine shared) con
 **No horizon is reference-limited** at Gate C resolution (the plan expected 10s/1s gamma to be; the local final grid
 removes that limit). `budgets.REFERENCE_LIMITED` stays empty for the snowball family.
 
+## Gate C results
+Packaged evidence: `quantark/intraday/evidence/gate_c_results.json` (3432 cells; git 510c3da0 — the first 1207
+cells ran at 9110eb62, whose classification is identical: 510c3da0 only releases a PDE memo between solves). Four
+xdist workers under a process-group RSS guard (20 GiB); the guard stopped the run once when heavy PDE cells
+coincided, and the resume finished the last 48 cells on two workers. About 27 minutes of wall time.
+
+| product | engine | passed | unqualified | failed |
+|---|---|---|---|---|
+| snowball (discrete KI) | QUAD V2 | 528 | 0 | 0 |
+| snowball (discrete KI) | PDE | 3 | 525 | 0 |
+| snowball (discrete KI) | MC (RQMC) | 5 | 523 | 0 |
+| cash-or-nothing digital | analytical | 264 | 0 | 0 |
+| cash-or-nothing digital | MC (RQMC) | 8 | 256 | 0 |
+| up-and-out call, zero carry | analytical | 264 | 0 | 0 |
+| up-and-out call, zero carry | PDE | 186 | 78 | 0 |
+| up-and-out call, zero carry | MC (RQMC, bridge) | 148 | 116 | 0 |
+| up one-touch, zero carry | analytical | 264 | 0 | 0 |
+| up one-touch, zero carry | PDE | 144 | 120 | 0 |
+
+**Qualified rows (every cell at the horizon and above passed, all three profiles):** `SnowballQuadEngineV2`
+discrete, `DigitalOptionAnalyticalEngine` terminal, `BarrierAnalyticalEngine` and `OneTouchAnalyticalEngine`
+continuous (on zero-carry contracts) — all to **1 second** before the fixing. PDE and MC rows stay `supported`: at
+default settings their errors exceed the 1e-6-of-notional price budget while their refinement ladders (or phase
+envelopes) converge, or their sampling error exceeds the budget — honest `unqualified`, never a defect. Barrier PDE
+passes at 1 day / 6 h on individual profiles but not on all three at one horizon.
+
+Defects Gate C found and fixed before this run (each with a regression test):
+- **MC, zero-variance steps** (4230ff99): the Brownian-bridge crossing probability rejected σ = 0 on
+  sessions-only lunch/overnight steps; a zero-variance step cannot cross between same-side endpoints (probability 0).
+- **PDE resolution ignored time** (0ea58a89): a sessions-only barrier one day before expiry priced 0.895 against the
+  reference 0.515 while reporting `resolved` — four steps per day put a whole session's variance into one
+  Crank–Nicolson step. `resolved` now also needs >= 16 steps across the layer variance and e^-8 damping of the
+  grid-scale mode (theta-scheme factor with the solver's own Rannacher steps); the route refines steps per day on a clone.
+- **One-touch / discrete barriers on PDE** (0ea58a89): `OneTouchPDESolver` overwrites the nodes beyond the barrier, so
+  the effective barrier is the next node (first order, alignment-dependent: +1 point moved the error from 0.016 to
+  0.057). Legacy daily behaviour, not changed; the intraday route reports `unqualified` unless a node sits on the barrier.
+- **Harness ladder** (fb449eeb): PDE levels scaled the default request and stayed pinned at the route's layer floor
+  (time-only refinement); levels now double the grid actually solved. A single-phase ladder that is not monotone is
+  judged on the envelope over +1..+3 points per level (the snowball's discrete-KI error depends on the KI barrier's
+  position in its cell: envelope 1.1e-2, 2.0e-3, 4.7e-4, 1.3e-4 per doubling).
+- **Memory** (9110eb62, 510c3da0): the two-surface PDE solvers keep both value surfaces over the whole time grid and
+  a per-market coefficient memo; an uncapped level-2 ladder on a 10-second grid exceeded 12 GiB per worker (an
+  earlier 12-worker run exhausted the 48 GB machine). The route's refinement is bounded by
+  `INTRADAY_PDE_MAX_GRID_CELLS` (5e7, ~1.2 GiB measured) and releases its surfaces; ladders stop at 1e8 cells and a
+  capped ladder is `unqualified`.
+
 ## Open questions (need a desk decision; intraday fails closed meanwhile)
 - **Phoenix realized coupon amount.** `AutocallableLifecycleTracker.observe` books a coupon as
   `get_coupon_payoff(idx)` = principal·coupon_rate·1.0 (pinned by

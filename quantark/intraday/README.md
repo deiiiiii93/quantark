@@ -103,18 +103,28 @@ fingerprint is appended to `result.records`).
 ## Capability matrix
 
 Requests outside the matrix raise `CapabilityError` naming the limitation and the
-intraday alternatives; an engine subclass does not inherit a row.
+intraday alternatives; an engine subclass does not inherit a row. The full matrix —
+QUAD V2, PDE, MC and closed-form routes for snowballs, phoenixes, KO-reset snowballs,
+digitals, barriers and one-touches — is generated into
+[`docs/execution/intraday-capability-matrix.md`](../../docs/execution/intraday-capability-matrix.md)
+(`python -m quantark.intraday.publish`).
 
-| Product | Engine | Monitoring | Profiles | Outputs | Status | Note |
-|---|---|---|---|---|---|---|
-| CashOrNothingDigitalOption | DigitalOptionAnalyticalEngine | terminal | any | price | supported | integrated carry/variance via TradingClockVolSurface; zero variance priced as the exact forward limit |
-| SnowballOption | SnowballQuadEngineV2 | discrete | any | price | supported | exact Gaussian interval moments; a t=0 event under 'before' is decided at spot |
-| SnowballOption | SnowballQuadEngineV2 | continuous | any | price | supported | continuous KI via the QUAD V2 survival kernel; touch history disclosed as an assumption |
-| PhoenixOption | PhoenixQuadEngineV2 | discrete | any | price | supported | valuations before the first due coupon (coupon replay fails closed) |
-| PhoenixOption | PhoenixQuadEngineV2 | continuous | any | price | supported | valuations before the first due coupon (coupon replay fails closed) |
+`supported` means the semantics are implemented and every price reports its numerical
+status. `qualified` means every Gate C price cell of the row passed against the independent
+Gaussian-transition reference (profiles uniform, desk and sessions-only; eleven spot offsets
+on both sides of each barrier) at the qualified horizon and every longer horizon
+(`quantark/intraday/evidence/gate_c_results.json`):
 
-`supported` means the semantics are implemented; `qualified` (accuracy evidence against an
-independent reference on the time-to-fixing ladder) arrives with Gate C.
+| Product | Engine | Monitoring | Qualified horizon |
+|---|---|---|---|
+| SnowballOption | SnowballQuadEngineV2 | discrete | 1 s |
+| CashOrNothingDigitalOption | DigitalOptionAnalyticalEngine | terminal | 1 s |
+| BarrierOption (zero carry) | BarrierAnalyticalEngine | continuous | 1 s |
+| OneTouchOption (zero carry) | OneTouchAnalyticalEngine | continuous | 1 s |
+
+PDE and MC routes miss the 1e-6-of-notional price budget at default settings while their
+refinement converges — `supported`, with the per-price status saying so. Timestamp support
+below the qualified horizon does not imply a Greek-accuracy certificate there.
 
 PDE routes report a resolution status with every price: `resolved` needs at least 4 grid
 cells across the diffusion layer `sqrt(W)` to the first event, at least 16 time steps across
@@ -149,6 +159,32 @@ observation.
 `roll_through_events(engine, request, to_timestamp, outcomes=...)` is a scenario, not a
 derivative: every event crossed needs a `Fixing` outcome, and the contract is valued at
 `to_timestamp` on the frozen market after them.
+
+| Greek | `point` unit | `desk_bump` unit |
+|---|---|---|
+| delta | per unit spot (derivative) | per unit spot, central relative move `spot_bump` |
+| gamma | per unit spot² (derivative) | per unit spot², central relative move `gamma_spot_bump` |
+| vega | per unit trading-quoted vol (proxy, `unqualified` until demonstrated) | PnL per `+vol_bump` of the trading-quoted surface, one-sided |
+| rho / dividend rho | per unit rate / yield (proxy, `unqualified` until demonstrated) | PnL per +1%, one-sided and rescaled |
+| theta | PnL per `theta_unit` over the declared forward step (either convention, same number) | same |
+
+Every `GreekValue` carries `status` (`ok`, `undefined`, `unqualified`, `failed`) and, when
+not `ok`, a `reason` and no value. `example/intraday_greeks_demo.py` prints both conventions
+side by side one hour and one second before a fixing, the undefined point Greeks at the
+fixing, the zero delta and non-zero rho of an assumed knock-out paid later, and a
+roll-through-events row.
+
+## Batches, curves and books
+
+- `value_intraday_many(items, collect_errors=...)` (or `PricingSession.value_intraday_many`)
+  keeps caller order; a failed item is an `IntradayFailure`, never a silent `None`.
+- `spot_curve(engine, request, spots)` resolves ONE context: its confirmed and assumed
+  fixings come from the request's own spot and are shared by every point — a curve never
+  re-decides an observation at a curve spot. QUAD V2 prepares its operator once over the
+  spots and reads price, delta and gamma from it; other routes price each spot.
+- `aggregate_intraday([(id, quantity, result), ...])` scales price, paid cash and Greeks by
+  quantity; the book is provisional if any position is (and names them), and a Greek is
+  summed only when every position reports it `ok` under one convention and unit.
 
 ## Not yet covered
 
