@@ -10,7 +10,11 @@ See ``docs/modelvalidation/RELEASE_PROCEDURE.md`` for the release procedure.
 """
 
 from quantark.modelvalidation.amendment import amend, validate_parent
-from quantark.modelvalidation.anchors import assert_anchors, extract_anchors
+from quantark.modelvalidation.anchors import (
+    assert_anchors,
+    extract_anchors,
+    resolve_supersession,
+)
 from quantark.modelvalidation.pipeline import Certificate, certify, validate_payload
 from quantark.modelvalidation.registry import register_builder
 from quantark.modelvalidation.study import (
@@ -35,6 +39,7 @@ __all__ = [
     "SamplingPolicy",
     "amend",
     "assert_anchors",
+    "resolve_supersession",
     "certify",
     "extract_anchors",
     "load_study",

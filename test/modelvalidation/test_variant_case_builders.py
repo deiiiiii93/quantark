@@ -173,9 +173,21 @@ def test_banked_cells_keep_their_identity(certificate_path):
     """Every case a certificate banked must still hash identically today."""
     import json
 
+    from quantark.modelvalidation import resolve_supersession
     from quantark.modelvalidation.candidate import candidate_identity
     from quantark.modelvalidation.evidence import identity_hash
     from quantark.modelvalidation.yaml_loader import load_study
+
+    # A retired certificate declares its successor in the anchor file beside
+    # it -- certificate.json cannot carry the marker without breaking its own
+    # projected_sha256. Its identities are allowed to have moved: that is what
+    # retired it. The successor banks today's hashes and is checked here too.
+    successor = resolve_supersession(certificate_path.parent / "anchors.json")
+    if successor is not None:
+        pytest.skip(
+            f"superseded by {successor.parent.parent.name}/{successor.parent.name}, "
+            "whose identities this test checks instead"
+        )
 
     payload = json.loads(certificate_path.read_text())
     study_name = payload["study"]["name"]
