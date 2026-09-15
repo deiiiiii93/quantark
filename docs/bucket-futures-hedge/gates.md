@@ -1972,13 +1972,65 @@ is `bool(measured and ...)` by design (`_common.py:1141`), so a run that
 measured nothing can never be reused as a passing gate result. The banked arm
 reads 392 True / 14 False, the 14 being the two known states across seven cells.
 
-### What this does NOT settle
+### `net_delta_audit_error`, measured
 
-`net_delta_audit_error` is an AUDIT column, and this replay deliberately ran
-without the audit, so it remains unmeasured since the engine change. It was
-passing at 3.8e-12 and is an algebraic consistency check that does not depend
-on the engine's accuracy, so the fix cannot plausibly disturb it -- but that is
-reasoning, not a measurement, and it is not claimed as one.
+This was the last gate left standing on reasoning rather than measurement:
+the replay ran without the audit, so the column is NaN in every aligned row.
+It has now been measured. Evidence in
+`quad-readout/alignment_net_delta_audit.py`.
+
+It does not need an audit replay. The error is the direct reprice of the held
+book minus the recorder's algebraic prediction, and the recorder writes that
+prediction to EVERY row as `net_delta_hands` -- it comes from the risk the
+hedger used, not from the audit, so `carry_audit_mode=none` does not remove
+it. Only the direct reprice was missing: one central bump, two price calls per
+state, against 16 hours for a full audit replay.
+
+Taking the mapped side from the recorder is not a shortcut, it is the point.
+That side IS the thing under test; reconstructing it here would have tested the
+reconstruction instead. A first attempt that did rebuild it passed `delta_q=0`
+and silently dropped the product's own delta, reporting a 92-hand "error" that
+was exactly the missing `product_delta_hands` to twelve digits.
+
+The harness was validated against the banked arm, where the recorder did write
+the column: 25 states across five cells, agreeing to ~1e-12 in 24 of them and
+1.7e-10 in one. That outlier is a state, not a noise floor -- the aligned
+measurement's own maximum comes in below it.
+
+It is holdings-dependent, so unlike the chain identity it cannot be collapsed
+across hedge policies: the banked census is 52,906 audited states. The aligned
+arm was measured on a stratified sample of 3,074 -- every one of the 406 cells,
+taking each cell's first and last live date, its largest net exposure, its
+largest book, and evenly spaced dates between. Applying that same sampler to
+the banked census, where the true maximum is known, shows what the sample can
+see:
+
+| banked arm | max | p99 | median |
+|---|---:|---:|---:|
+| full census, 52,906 states | 3.820e-12 | 1.367e-12 | 0.000 |
+| 8-per-cell sample, 3,077 | 3.256e-12 | 1.364e-12 | 0.000 |
+
+The sample recovers 85% of the census maximum and its p99 to within 0.2%, so a
+sampled maximum reads as a fleet maximum to within about 15%.
+
+**The result:**
+
+| | max | p99 | p95 | median |
+|---|---:|---:|---:|---:|
+| banked (option off), full census | **3.820e-12** | 1.367e-12 | -- | 0.000 |
+| aligned (option on), 3,074 sampled | **3.624e-12** | 2.647e-12 | 1.673e-12 | 3.618e-13 |
+
+Same order, same magnitude, against a `delta_tolerance_hands` of 0.01 -- nine
+orders of margin. The worst aligned state is +3.624e-12 hands, 2024-03-01
+`term_flat_fwd__far` on its inception date.
+
+That is what should happen. The error differences two computations of the same
+book delta through the SAME price function, and a futures leg's contribution is
+exactly linear in spot, so the engine's accuracy cancels out of it entirely.
+What it tests is the bucket mapping arithmetic, which the alignment does not
+touch. The gate now says so from measurement.
+
+### What this does NOT settle
 
 The other four of the five one-contract secant states are at the knock-out
 barrier and are genuine curvature, so the secant question still stands on its
