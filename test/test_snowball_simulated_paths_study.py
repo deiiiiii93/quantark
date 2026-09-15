@@ -84,6 +84,24 @@ def test_paths_are_written_with_a_manifest_and_read_back(tmp_path):
     assert b.fingerprint() == bootstrap.fingerprint() and s.fingerprint() == stress.fingerprint() and m == manifest
 
 
+def test_history_end_cuts_the_frames_and_is_recorded(tmp_path):
+    spot, vol, futures = synthetic_frames()
+    end = pd.Timestamp(spot["date"].iloc[59])
+    cut_spot, cut_futures = S01.cut_history_frames(spot, futures, end.date())
+    assert len(cut_spot) == 60 and cut_spot["date"].max() == end and cut_futures["date"].max() == end
+    history = S01.build_history(cut_spot, vol, cut_futures, rate=RATE)
+    assert history.n_days == 60 and history.dates[-1] == end
+    bootstrap, stress = S01.build_paths(history, n_paths=2, n_days=10, seed=1, mean_block_days=5,
+                                        annual_drift=0.0, vol_floor=0.08, carry_mode="levels")
+    manifest = S01.write_paths(tmp_path / "cut", bootstrap, stress, history=history, history_end=end.date())
+    assert manifest["history_end"] == str(end.date())
+    assert "history_end" not in S01.write_paths(tmp_path / "plain", bootstrap, stress, history=history)
+    with pytest.raises(C.Q.StudyDataError, match="no history on or before"):
+        S01.cut_history_frames(spot, futures, date(2000, 1, 1))
+    assert S01.parse_args(["--history-end", "2026-09-09"]).history_end == date(2026, 9, 9)
+    assert S01.parse_args([]).history_end is None
+
+
 def test_the_study_reuses_the_q_study_and_names_its_cells():
     assert C.Q.Q_MODELS["term_opt_tail"].dividend_source == "futures_curve"
     assert C.cell_name("term_flat_q", "far") == "term_flat_q__far"
