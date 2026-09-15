@@ -38,6 +38,21 @@ starts (a `python -m` cwd insertion comes too late). Tests import shared fixture
 `from intraday.conftest import ...` (pytest prepends `test/`; there is no
 `test/__init__.py`, so `test.` would resolve to the stdlib package).
 
+## Plan 1 exit
+2026-09-15, full suite `-n auto` after Task 16 (machine shared with another session's long job):
+**7829 passed, 142 skipped, 0 failed** (1096 s) — 7732 legacy (same count as the post-Task-6 run) + 97 intraday
+(Gate A 6, Gate B 5). Demo: `example/intraday_snowball_fixing_demo.py` (four rows at 103.5 and 102.0).
+
+Plan deviations worth knowing (details in the commit messages):
+- instant arithmetic through UTC (same-tzinfo datetime arithmetic is wall-clock across DST);
+- checkpoint-covered events are marked observed before tracker replay; each replay step must observe exactly its instant;
+- every numerical twin re-resolves its own cash and must match the contract; Phoenix coupons ride `accrual_factors` only
+  when they agree with the KO accrual; a terminated contract has no twin;
+- continuous-KI autocallables disclose a `ContinuousHistoryAssumption` already in Plan 1;
+- a date-only payment is deemed at the calendar's payment time but never before its determination;
+- Gate A: the price is NOT monotone towards a KO fixing above the barrier (6.86 a day out, 6.05 a second out — the
+  unknocked contract is worth more than the KO cash); the gap to the discounted KO cash is.
+
 ## Acceptance budgets
 Fixed by Plan 2 Task 1 (independent reference) BEFORE any route is tuned. This file records them when set.
 
