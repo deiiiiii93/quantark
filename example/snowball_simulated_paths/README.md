@@ -64,7 +64,60 @@ front-month IM contract and with the longest listed one; 1 bp per side.
 A q-study model whose carry comes from a contract other than the hedge's
 is refused: the simulation inverts the active contract only.
 
-## What a cell measures under each provider
+## How a cell is priced
+
+Every cell is priced by one provider, `per_date`: exact repricing on the PDE
+engine.  Each state is one backward solve from maturity to that state's date,
+on the tracker's aged contract, with that date's own term dividend object.
+Nothing is collapsed to a scalar yield, so the carry models under test reach
+the engine intact.  One provider for all six cells is deliberate: a flat-arm
+provider different from the term-arm provider would make the provider choice
+move with the treatment the study measures.
+
+**Why not the whole-life surface.**  The surface solved one PDE over the
+product's life per `(vol, q, rate)` bucket and read a column per day.  A term
+curve has to be flattened to `q_T` to fit that key, and on 2026-09-14 that
+flattening was 107.34 of the 108.73 bp worst gate gap on `term_flat_q`.  A key
+that holds the curve does not rescue it: the surface's reuse comes from a flat
+market being the same market on every day, while a term curve is
+re-snapshotted each day relative to that day.  Counted on the 2,000 × 275
+batch, the flat key shares 22.7 states per solve and a (day, vol, rate, carry)
+key 1.05.  So the per-date solve costs about what exact repricing costs, and it
+is exact.
+
+**One solve per state.**  Exact repricing used to call `price()` and then
+`calculate_greeks()`, and each ran the full solve.  Phase 0
+(`phase0_single_solve.py`) compared removing the second solve with a solver
+memo or in the provider; the decision and its evidence are in the design note
+`docs/superpowers/specs/2026-09-15-per-date-pde-provider-design.md`.
+
+The mesh is pinned (1601 points, 16 steps a day, step cap 8000, bounds
+0.40–1.60 of the initial spot); the day-zero convergence evidence for it is
+in "Earlier provider" below.
+
+**Engine check.**  Each cell's first 40 bootstrap paths are also repriced on
+exact QUAD and paired with the cell on the same paths.  It is reported, not
+gated.  The fair coupon is solved on QUAD, so each cell's day-0 mark is the
+PDE-vs-QUAD gap at inception (about 0.5 bp of notional measured on day 1),
+shown in the report's day-0 table.
+
+## Checks
+
+- `per_date` is exact: its gate report is zero by construction.
+- The oracle spot check: 3 single paths per bootstrap run through the replay
+  engine at zero tolerance, and the first of them on each exact-QUAD check.
+- The engine check: exact QUAD on each cell's first 40 paths, paired with the
+  cell (reported, not gated).
+
+## Earlier provider: the whole-life surface (2026-09-09 to 2026-09-15)
+
+The study's first fleet provider, kept in the library for flat-carry books.
+It ran the flat arm within its 25 bp gate after the readout fix and the
+pinned mesh below, and could not run the term arms (see "How a cell is
+priced").  The measurements that shaped it stay here because the mesh they
+pinned is the one `per_date` uses.
+
+### What a cell measured under the surface
 
 The bootstrap and stress batches run on the PDE life surface: one solve per
 (vol, q, rate) bucket, read along the path.  A surface is solved at a flat
@@ -144,7 +197,7 @@ mesh is built per distinct spot, and the gate's exact leg and the oracle pay
 it once per state — measured on the 1Y product, 1.07 s on the default
 domain, 0.15 s on 0.6–1.6, 1.08 s on 0.4–2.5.
 
-## Bucket steps
+### Bucket steps
 
 A surface, or a ladder node, is solved at its vol and q bucket centres, so
 half a bucket times the sensitivity is a PV gap the gate sees.  Measured on
@@ -158,16 +211,13 @@ sampled states was 12.7 bp and 0.40 hands.  On real paths vol and carry
 both move daily, so nearly every state is its own bucket until the path
 count is in the thousands: 8 paths needed 942 surface solves.
 
-## Gates and checks
+### Surface checks
 
-- The surface gate: 64 reservoir-sampled states repriced exactly, 25 bp of
-  notional and 2 hands of the hedge.  The ladder gate: 64 states, 10 bp,
-  2 hands.  A cell that misses its budget produces nothing.
-- The oracle spot check: 3 single paths per run through the replay engine
-  with the gate's tolerances; the lifecycle columns and the hedge contract
-  must match exactly, trades within the tolerance are netted per day.
-- The engine check: the first 200 bootstrap paths of every cell on the QUAD
-  spot ladder (0.25% nodes), paired against the same paths on the surface.
+The surface gate repriced 64 reservoir-sampled states exactly against 25 bp
+of notional and 2 hands of the hedge; the ladder gate 64 states, 10 bp,
+2 hands.  A cell that missed its budget produced nothing, and the engine
+check paired each surface cell's first 200 paths with the QUAD spot ladder.
+
 - A near-barrier readout defect, since fixed.  A discrete knock-in
   observation writes a value JUMP onto the grid, and the surface used to read
   and differentiate the event-projected column, which within a cell of the
@@ -203,37 +253,40 @@ count is in the thousands: 8 paths needed 942 surface solves.
 ## Running it
 
 ```bash
-.venv/bin/python example/snowball_simulated_paths/01_build_paths.py            # 2,000 x 275 (--quick: 40 paths)
-.venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py --quick  # two cells, 8 check paths, 1 oracle path
+# stage 1: the banked 40-path batch of 2026-09-09, all six cells, in its own directory
+.venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py \
+    --out-dir output/snowball_simulated_paths/per_date_40 \
+    --paths-dir output/snowball_simulated_paths/paths --workers 6 --batch-paths 7 --resume
+.venv/bin/python example/snowball_simulated_paths/03_report.py \
+    --out-dir output/snowball_simulated_paths/per_date_40 \
+    --data-dir output/snowball_simulated_paths/per_date_40/data
+
+# stage 2: 2,000 paths from the same history cut
+.venv/bin/python example/snowball_simulated_paths/01_build_paths.py \
+    --history-end 2026-09-09 --out-dir output/snowball_simulated_paths/per_date_2000
 nohup caffeinate -i -m -s .venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py \
-    --workers 4 --batch-paths 250 --disk-cache --resume > output/snowball_simulated_paths/fleet.log 2>&1 &
-.venv/bin/python example/snowball_simulated_paths/03_report.py
+    --out-dir output/snowball_simulated_paths/per_date_2000 \
+    --workers 12 --batch-paths 170 --disk-cache --resume \
+    > output/snowball_simulated_paths/per_date_2000/fleet.log 2>&1 &
+.venv/bin/python example/snowball_simulated_paths/03_report.py \
+    --out-dir output/snowball_simulated_paths/per_date_2000
 ```
 
-Measured on the quick run: an exact 40-path cell is 40–50 minutes (6,472
-engine calls, one per state), a 5-path stress set 6–7 minutes, an 8-path
-ladder check 15–18 minutes, one oracle path 3–4 minutes.  The 2,000-path
-fleet on exact QUAD would be about 35 hours per cell on one worker; the
-life surface is the provider meant for it, and as of 2026-09-11 it passes
-its gate.
-
-Paths, cells (`cells/<cell>[__stress|__ladder_quad|__exact_quad]/` written
-by `EnsembleResults.to_dir`, with `config.json` and `run.json`),
-`coupon.json` and `fleet_manifest.json` go to
-`output/snowball_simulated_paths/`; the tables and the HTML report go to
-this directory's `data/`.  `--resume` skips a run whose `config.json`
-fingerprint matches, a recorded failure included, and a run interrupted in
-its oracle (results on disk, no `run.json`) reuses its results and runs
-only the oracle.  A run that misses its gate produces no results; it is
-recorded in its `run.json` with `failed` set, the fleet carries on, and the
-report lists it as a failed gate.  `--provider exact` runs the bootstrap
-and stress batches on exact QUAD repricing instead of the surface: no gate
-question, one engine call per state, the term dividend object handed to
-the engine on every call.
+Paths, cells (`cells/<cell>[__stress|__exact_quad|__ladder_quad]/`, each with
+`config.json` and `run.json`), `coupon.json` and `fleet_manifest.json` go to
+the `--out-dir`; `--paths-dir` reads a batch from elsewhere without copying.
+`--resume` skips a run whose `config.json` fingerprint matches, a recorded
+failure included, and a run interrupted in its oracle reuses its results.
+`--history-end` cuts the history at a day: at 2026-09-09 it reproduces the
+banked batch's history, bootstrap and stress fingerprints from the longer
+cache.  `--batch-paths` must be set for `--workers` to take effect; each run
+is batched for its own path count.  `--provider exact|life_surface|ladder`
+remain available.
 
 ## Results
 
-**The 2,000-path fleet has not been run yet; its numbers will replace this
+**Recorded before Design B, on exact QUAD, before the ageing fixes of
+2026-09-15 (`8cb0ec67`, `f8987344`).  Stage 1 and stage 2 replace this
 section.**  What follows is the quick run of 2026-09-09: 40 bootstrap
 paths and the five stresses from the 2026-09-09 start state (history
 2023-05-04 to 2026-09-09, 816 days; spot 7659.6, ATM vol 26.1%, front IM
@@ -357,8 +410,8 @@ gates.  Report: `data/simulated_paths_report.html`.
 
 - One start state, the history's last day, for every simulated path; a
   historical inception's percentile is indicative.
-- Under the surface and the ladder the term models enter through `q_T`
-  only; `--exact-paths` is where the engine receives the term object.
+- The fair coupon is solved on QUAD while cells price on the PDE, so each
+  cell's day-0 mark is the engine gap at inception (report, day-0 table).
 - Paired t-statistics treat the simulated paths as independent draws,
   unlike the historical study's overlapping inceptions.
 - The stress paths are designed, not sampled.
