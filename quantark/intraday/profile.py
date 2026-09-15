@@ -179,6 +179,13 @@ class IntradayTimeMap:
                 tau_c[-1] = self._tau_knots[i]
         self._u_carry, self._tau_carry = np.array(u_c), np.array(tau_c)
 
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        """Immutable after construction: copies share it (engines deep-copy their environments)."""
+        return self
+
     # ---- construction --------------------------------------------------
     @staticmethod
     def _day_segments(cal: TradingSessionCalendar, profile: VarianceProfile, d: date) -> List[tuple]:

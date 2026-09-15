@@ -67,6 +67,13 @@ class TradingSessionCalendar:
             if t <= self.sessions[0].open:
                 raise ValidationError(f"early close {t} on {d} is not after the first open")
 
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        """Immutable value object: copies share it (engines deep-copy their environments)."""
+        return self
+
     # --- trading days -------------------------------------------------
     def is_trading_day(self, d: date) -> bool:
         return bool(self.calendar.is_business_day(datetime(d.year, d.month, d.day)))
