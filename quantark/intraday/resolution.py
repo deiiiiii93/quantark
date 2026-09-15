@@ -33,6 +33,9 @@ REQUIRED_STEPS_PER_LAYER = REQUIRED_CELLS_PER_LAYER ** 2
 REQUIRED_GRID_MODE_DAMPING = 8.0
 INTRADAY_PDE_MAX_POINTS = 20_000
 INTRADAY_PDE_MAX_STEPS = 100_000
+#: Memory budget of one refined solve: points x time nodes. The two-surface autocallable solvers keep both value
+#: surfaces over the whole time grid (16 bytes per cell), so 5e7 cells is ~0.75 GiB before transients.
+INTRADAY_PDE_MAX_GRID_CELLS = 50_000_000
 
 
 @dataclass(frozen=True)

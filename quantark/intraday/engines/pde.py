@@ -20,8 +20,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
-from quantark.intraday.resolution import (INTRADAY_PDE_MAX_POINTS, INTRADAY_PDE_MAX_STEPS, diffusion_layer, pde_resolution,
-                                          time_resolved)
+from quantark.intraday.resolution import (INTRADAY_PDE_MAX_GRID_CELLS, INTRADAY_PDE_MAX_POINTS, INTRADAY_PDE_MAX_STEPS,
+                                          diffusion_layer, pde_resolution, time_resolved)
 
 
 def _layout_numbers(solver, spot: float):
@@ -75,9 +75,20 @@ def _time_status(ctx, solver, layout, numbers, dx_min):
                           time_nodes=layout.time.t, theta=solver._theta_schedule_from_layout(layout), dx_min=dx_min)
 
 
-def _time_fill_for(ctx, solver, grid, numbers, dx_min):
+def _release_solution_grids(solver) -> None:
+    """Drop the full value surfaces a two-surface solver keeps after a solve (its fresh state is None).
+
+    The route reads only prices and the layout; a later solve on the same object rebuilds them. Without this the
+    unrefined solve's surfaces coexist with the refined one, and the engine handed back carries them.
+    """
+    for name in ("_grid_v0", "_grid_v1"):
+        if isinstance(getattr(solver, name, None), np.ndarray):
+            setattr(solver, name, None)
+
+
+def _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps):
     """(steps_per_day, requested steps) of the smallest power-of-two multiple of the current fill whose time
-    layout meets the time floors on the given space grid, or the last multiple within ``INTRADAY_PDE_MAX_STEPS``."""
+    layout meets the time floors on the given space grid, or the last multiple within ``max_steps``."""
     from quantark.asset.equity.engine.pde.grid.time import build_time
 
     layout = solver._active_layout
@@ -85,8 +96,8 @@ def _time_fill_for(ctx, solver, grid, numbers, dx_min):
     best = (spd, int(layout.time.requested_steps))
     while True:
         spd *= 2.0
-        candidate = build_time(layout.request, replace(grid, steps_per_day=spd, max_steps=INTRADAY_PDE_MAX_STEPS))
-        if candidate.requested_steps > INTRADAY_PDE_MAX_STEPS:
+        candidate = build_time(layout.request, replace(grid, steps_per_day=spd, max_steps=max(max_steps, 1)))
+        if candidate.requested_steps > max_steps:
             return best
         best = (spd, int(candidate.requested_steps))
         if time_resolved(_time_status(ctx, solver, SimpleNamespace(time=candidate), numbers, dx_min)):
@@ -110,6 +121,7 @@ class PDERoute:
         solver = deepcopy(engine)
         solver._active_layout = None
         pv = float(solver.price(twin, env))
+        _release_solution_grids(solver)
         numbers = _layout_numbers(solver, ctx.spot)
         records = ()
         if numbers is None:          # an at-valuation event decided the price without a grid
@@ -117,17 +129,23 @@ class PDERoute:
         grid = solver.grid_binder.config            # the resolved config the solve used (scheme knobs included)
         dx_min = _dx_min(solver)
         status = _time_status(ctx, solver, solver._active_layout, numbers, dx_min)
+        budget_bound = False
         if status.status == "unqualified":
             points = int(grid.points)
             if status.required_points > numbers["points"]:
                 points = max(points, min(status.required_points, INTRADAY_PDE_MAX_POINTS))
+            steps_now = int(numbers["requested_steps"])
+            if points * (steps_now + 1) > INTRADAY_PDE_MAX_GRID_CELLS:
+                points, budget_bound = max(int(grid.points), INTRADAY_PDE_MAX_GRID_CELLS // (steps_now + 1)), True
             # the time floors are judged on the refined space grid: its smallest cell shrinks with the point count
             dx_min *= numbers["points"] / max(points, numbers["points"])
-            spd, requested = float(grid.steps_per_day), numbers["requested_steps"]
-            space_resolvable = status.required_points <= INTRADAY_PDE_MAX_POINTS
-            # a layer the point cap cannot resolve stays unqualified: more steps would buy cost, not a claim
+            spd, requested = float(grid.steps_per_day), steps_now
+            space_resolvable = status.required_points <= max(points, numbers["points"])
+            # a layer the point or memory cap cannot resolve stays unqualified: more steps would buy cost, not a claim
             if space_resolvable and not time_resolved(_time_status(ctx, solver, solver._active_layout, numbers, dx_min)):
-                spd, requested = _time_fill_for(ctx, solver, grid, numbers, dx_min)
+                max_steps = min(INTRADAY_PDE_MAX_STEPS, INTRADAY_PDE_MAX_GRID_CELLS // points - 1)
+                spd, requested = _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps)
+                budget_bound = budget_bound or max_steps < INTRADAY_PDE_MAX_STEPS
             if points > numbers["points"] or spd > float(grid.steps_per_day):
                 refined = deepcopy(engine)
                 refined.params.grid = replace(grid, points=points, max_points=max(int(grid.max_points or 0), points),
@@ -135,10 +153,14 @@ class PDERoute:
                 refined._grid_binder = None
                 refined._active_layout = None
                 pv = float(refined.price(twin, env))
+                _release_solution_grids(refined)
                 numbers = _layout_numbers(refined, ctx.spot)
                 status = _time_status(ctx, refined, refined._active_layout, numbers, _dx_min(refined))
                 records = (f"grid refined to {numbers['points']} points and {spd:g} steps per day for the diffusion layer",)
                 solver, grid = refined, refined.grid_binder.config
+            if status.status == "unqualified" and budget_bound:
+                status = replace(status, reason=f"{status.reason}; refinement capped by the grid memory budget "
+                                                f"({INTRADAY_PDE_MAX_GRID_CELLS:.0e} points x time nodes)")
         placement = _barrier_placement(ctx, solver) if status.status == "resolved" else ""
         if placement:
             status = replace(status, status="unqualified", reason=placement)

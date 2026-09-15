@@ -32,6 +32,14 @@ SIGMA_INNER = 0.20
 MC_BASE_PATHS = 2 ** 14
 #: extra points per PDE level for the phase envelope (each moves every barrier's in-cell position substantially)
 PHASE_SHIFTS = (1, 2, 3)
+#: Memory cap of one ladder solve (points x time nodes; two-surface solvers keep 16 bytes per cell, ~1.5 GiB here).
+#: Each PDE level multiplies the cells by ~4: an uncapped level 2 on a layer-refined grid needed > 12 GiB per worker.
+LADDER_MAX_GRID_CELLS = 100_000_000
+
+
+def pde_level_cells(level0: dict, level: int) -> float:
+    """Grid cells of PDE ladder ``level`` built from the level-0 solve (points and steps both doubled per level)."""
+    return float(level0.get("points") or 0) * 2 ** level * (float(level0.get("requested_steps") or 0) * 2 ** level + 1)
 
 
 @dataclass(frozen=True)
@@ -184,7 +192,11 @@ def run_cell(cell: C.Cell) -> CellResult:
         return errors, dict(cell=cell, route_price=prices[0], ref_price=ref, ref_uncertainty=unc, budget=budget,
                             numerical=numerics[0], refinement=refinement)
 
+    capped = None
     for level in _levels(cell):
+        if cell.engine == "pde" and level > 0 and pde_level_cells(numerics[0], level) > LADDER_MAX_GRID_CELLS:
+            capped = (level, pde_level_cells(numerics[0], level))
+            break
         engine = engine_for(cell, level, numerics[0] if numerics else None)
         try:
             out = route_for(ctx, engine).price(ctx, engine)
@@ -197,6 +209,11 @@ def run_cell(cell: C.Cell) -> CellResult:
             return CellResult(passed=False, status="unqualified", reason=numerics[0].get("resolution_reason", ""), **record()[1])
     tol = budget + K_REF * unc
     errors, base = record()
+    if capped is not None:
+        base["refinement"]["capped"] = {"level": capped[0], "grid_cells": capped[1], "cap": LADDER_MAX_GRID_CELLS}
+        return CellResult(passed=False, status="unqualified",
+                          reason=f"refinement ladder capped by the grid memory budget at level {capped[0]} "
+                                 f"(~{capped[1]:.2e} cells > {LADDER_MAX_GRID_CELLS:.0e}); errors so far {errors}", **base)
 
     if cell.engine == "analytical":
         ok = errors[0] <= tol

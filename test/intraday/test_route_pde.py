@@ -80,6 +80,25 @@ def test_one_second_out_is_unqualified_at_the_point_cap(sse_calendar, sse_sessio
     assert "points needed" in out.numerical["resolution_reason"]
 
 
+def test_refinement_respects_the_grid_memory_budget_and_says_so(sse_calendar, sse_sessions, desk, monkeypatch):
+    import quantark.intraday.engines.pde as pde_route
+    budget = 2_000_000
+    monkeypatch.setattr(pde_route, "INTRADAY_PDE_MAX_GRID_CELLS", budget)
+    ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(minutes=15), spot=102.5)
+    out = route_for(ctx, _pde()).price(ctx, _pde())
+    n = out.numerical
+    assert n["points"] * (n["requested_steps"] + 1) <= budget
+    assert n["resolution"] == "unqualified" and "grid memory budget" in n["resolution_reason"]
+
+
+def test_the_route_does_not_hand_back_full_value_surfaces(sse_calendar, sse_sessions, desk):
+    ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(minutes=15), spot=102.5)
+    out = route_for(ctx, _pde()).price(ctx, _pde())
+    assert out.engine_used._grid_v0 is None and out.engine_used._grid_v1 is None
+    again = out.engine_used.price(ctx.numerical.product, ctx.pricing_env)       # a later solve rebuilds them
+    assert again == out.contingent_pv
+
+
 def test_a_fixing_inside_a_zero_variance_window_reports_deterministic(sse_calendar, sse_sessions):
     only = VarianceProfile.sessions_only(sse_sessions, 244)
     ctx, _ = _snow_ctx(sse_calendar, sse_sessions, only, lambda kos: kos[5].timestamp.replace(hour=12, minute=0),
