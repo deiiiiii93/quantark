@@ -2666,6 +2666,10 @@ class SnowballPDESolver(BasePDESolver):
             theta = float(theta_schedule[j])
             if step_coeffs is not None:
                 coeff_key = int(step_coeffs.set_index[j])
+                if coeff_key in step_coeffs.zero_diffusion_sets:
+                    # upwind advection is monotone only fully implicit, as in the
+                    # single-surface march (spec 2026-09-01 trading-clock-vol §4.5)
+                    theta = 1.0
                 l, c, u = step_coeffs.lcu_sets[coeff_key]
             else:
                 coeff_key = 0
