@@ -54,7 +54,40 @@ Plan deviations worth knowing (details in the commit messages):
   unknocked contract is worth more than the KO cash); the gap to the discounted KO cash is.
 
 ## Acceptance budgets
-Fixed by Plan 2 Task 1 (independent reference) BEFORE any route is tuned. This file records them when set.
+Fixed by Plan 2 Task 1 (independent reference) BEFORE any route is tuned; frozen in
+`test/intraday/reference/budgets.py`:
+`PRICE_ABS_PER_NOTIONAL = 1e-6` (x initial_price x multiplier), `DELTA_ABS, DELTA_REL = 1e-5, 1e-4` on
+d* = Delta S/N, `GAMMA_ABS, GAMMA_REL = 1e-4, 1e-3` on g* = Gamma S^2/N,
+`REFERENCE_UNCERTAINTY_MULTIPLIER = 3.0`: a route passes iff |route - ref| <= budget + 3 ref_uncertainty.
+
+Reference (`test/intraday/reference/gaussian_reference.py`): each state is a piecewise-linear function of ln S with
+exact jumps on barrier knots; its Gaussian expectation and first two derivatives are closed form (erf/R(a)); the
+continuation at the first remaining event is re-evaluated exactly on a local grid scaled to the remaining standard
+deviation, so the final (down to one-second) propagation is an exact pointwise expectation. Error = O(h^2)
+interpolation of the smooth continuation, estimated by Richardson |p2 - p1|/3. Continuous KI and Phoenix coupons
+are outside the reference (raise).
+
+Evidence (`python -m intraday.reference.evidence`): fixture snowball, sixth fixing, 5 confirmed fixings; profiles
+uniform / desk / sessions_only; spots B(1 +- 1e-4), B(1 +- 1e-3), B exp(+-k sqrt W) k in {0.5, 1, 2} for B in
+{103 (KO), 75 (KI)}; 480 cells.
+
+At points (2001, 4001, 8001): worst 3*unc/budget price 0.785, delta 0.521, gamma 1.188 (6h; a cell where gamma crosses
+zero and the absolute floor binds). Doubling the grid cut that uncertainty by exactly 4x (7.14e-7 -> 1.79e-7), so it
+is resolution, not a limit: **Gate C uses `GATE_C_POINTS = (4001, 8001, 16001)`** (405 s for the 480 cells):
+
+| horizon | max unc price | max unc delta | max unc gamma | worst 3*unc/budget (price, delta, gamma) |
+|---|---|---|---|---|
+| 1 day | 6.53e-06 | 3.10e-06 | 1.83e-06 | 0.196, 0.130, 0.051 |
+| 6h | 6.53e-06 | 5.35e-06 | 6.62e-06 | 0.196, 0.130, 0.297 |
+| 1h | 4.94e-06 | 1.21e-05 | 3.72e-05 | 0.148, 0.079, 0.015 |
+| 15m | 4.23e-06 | 2.35e-05 | 1.45e-04 | 0.127, 0.060, 0.046 |
+| 5m | 3.94e-06 | 4.00e-05 | 4.31e-04 | 0.118, 0.052, 0.005 |
+| 1m | 3.79e-06 | 8.56e-05 | 2.14e-03 | 0.114, 0.060, 0.004 |
+| 10s | 3.80e-06 | 1.92e-04 | 1.28e-02 | 0.114, 0.100, 0.037 |
+| 1s | 3.80e-06 | 6.07e-04 | 1.28e-01 | 0.114, 0.100, 0.039 |
+
+**No horizon is reference-limited** at Gate C resolution (the plan expected 10s/1s gamma to be; the local final grid
+removes that limit). `budgets.REFERENCE_LIMITED` stays empty for the snowball family.
 
 ## Open questions (need a desk decision; intraday fails closed meanwhile)
 - **Phoenix realized coupon amount.** `AutocallableLifecycleTracker.observe` books a coupon as
