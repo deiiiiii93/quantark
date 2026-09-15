@@ -19,10 +19,11 @@ import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime
 from math import log, sqrt
-from typing import Optional
+from typing import Optional, Sequence
 
 from quantark.execution.errors import DeterminismViolation
 from quantark.intraday.events import ContractEvent, EventPhase
+from quantark.intraday.fixings import Fixing
 from quantark.intraday.timestamp import SECONDS_PER_YEAR, calendar_year_fraction, require_aware, to_utc
 from quantark.param.div.dividend_yield import DividendYield
 from quantark.param.rrf.rate_curve import RateCurve
@@ -138,17 +139,49 @@ def roll_context(ctx, new_ts: datetime, *, frozen_market: bool = True, phase: Op
     if at_target and phase is EventPhase.AFTER:
         raise ValidationError(f"landing AFTER {at_target[0].event_id} needs its outcome (use roll_through_events)")
     request = ctx.request
-    env = request.pricing_env
-    if frozen_market:
-        d_tau = calendar_year_fraction(ts, new_ts)
-        d_u = float(ctx.time_map.to_trading(d_tau))
-        env = dataclasses.replace(
-            env, valuation_date=new_ts, rate_curve=ShiftedRateCurve(env.rate_curve, d_tau),
-            div_yield=None if env.div_yield is None else ShiftedDividendYield(env.div_yield, d_tau),
-            vol_surface=ShiftedTradingVolSurface(env.vol_surface, d_u))
-    else:
-        env = dataclasses.replace(env, valuation_date=new_ts)
+    env = frozen_env(ctx, new_ts) if frozen_market else dataclasses.replace(request.pricing_env, valuation_date=new_ts)
     rolled = resolve_context(dataclasses.replace(request, pricing_env=env, event_phase=phase))
     if rolled.reconstruction.assumptions != ctx.reconstruction.assumptions:
         raise DeterminismViolation("a roll must not create or drop fixing assumptions")
     return rolled
+
+
+def frozen_env(ctx, new_ts: datetime):
+    """The request's environment re-quoted from ``new_ts`` with every absolute DF ratio, carry and variance kept."""
+    env = ctx.request.pricing_env
+    d_tau = calendar_year_fraction(ctx.valuation_timestamp, new_ts)
+    d_u = float(ctx.time_map.to_trading(d_tau))
+    return dataclasses.replace(
+        env, valuation_date=new_ts, rate_curve=ShiftedRateCurve(env.rate_curve, d_tau),
+        div_yield=None if env.div_yield is None else ShiftedDividendYield(env.div_yield, d_tau),
+        vol_surface=ShiftedTradingVolSurface(env.vol_surface, d_u))
+
+
+def roll_through_events(engine, request, to_timestamp: datetime, *, outcomes: Sequence[Fixing] = (), session=None):
+    """A SCENARIO, not a derivative: value the contract at ``to_timestamp`` on the frozen market after the given
+    outcomes of every event in between.
+
+    Every remaining event at or before ``to_timestamp`` (including one at the current instant under BEFORE) needs a
+    ``Fixing`` at its instant; the scenario lands AFTER an event at ``to_timestamp`` itself.
+    """
+    from quantark.intraday.context import resolve_context
+    from quantark.intraday.service import value_intraday
+
+    require_aware(to_timestamp, "to_timestamp")
+    ctx = resolve_context(request)
+    target = to_utc(to_timestamp)
+    if target <= to_utc(ctx.valuation_timestamp):
+        raise ValidationError("roll_through_events moves the valuation instant forward")
+    outcomes = tuple(outcomes)
+    given = {to_utc(f.timestamp) for f in outcomes}
+    crossed = sorted({to_utc(e.timestamp): e.timestamp for e in ctx.numerical.remaining_events
+                      if to_utc(e.timestamp) <= target}.items())
+    missing = [stamp for key, stamp in crossed if key not in given]
+    if missing:
+        raise ValidationError("roll_through_events needs an outcome for every crossed event instant; missing "
+                              + ", ".join(m.isoformat() for m in missing))
+    phase = EventPhase.AFTER if any(key == target for key, _ in crossed) else EventPhase.BEFORE
+    scenario = dataclasses.replace(request, pricing_env=frozen_env(ctx, to_timestamp), fixings=request.fixings + outcomes,
+                                   event_phase=phase)
+    result = value_intraday(engine, scenario, session=session)
+    return dataclasses.replace(result, records=result.records + ("scenario:roll_through_events",))

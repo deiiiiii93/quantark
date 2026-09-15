@@ -3,7 +3,7 @@
 The design's sequence: (1) resolve the context; (2) look up the capability row
 for the product/engine/monitoring; (3) price the twin through the route;
 (4) add pending receivables from the time-based ledger; (5) itemise cashflows
-with provenance; (6) greeks — delivered by Plan 3, fail closed until then.
+with provenance; (6) greeks and a local theta re-evaluating the SAME resolved price function.
 With a ``PricingSession``, an engine-invoking route is re-dispatched through
 the execution kernel and must agree to 1e-12 (two paths to one number).
 """
@@ -52,10 +52,7 @@ def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -
     ctx = resolve_context(request)
     if request.greeks and request.greek_convention not in ("desk_bump", "point"):
         raise CapabilityError(f"{request.greek_convention} greeks have no intraday route")
-    require_capability(request.product, engine, monitoring=_monitoring(ctx),
-                       outputs=("price",) + tuple(g for g in request.greeks if g != "theta"))
-    if "theta" in request.greeks:
-        raise CapabilityError("intraday theta arrives in plan 3 task 4")
+    require_capability(request.product, engine, monitoring=_monitoring(ctx), outputs=("price",) + request.greeks)
     outcome = route_for(ctx, engine).price(ctx, engine)
     state = ctx.numerical.lifecycle_state
     pending_pv = float(pending_receivable_pv(state, ctx.pricing_env)) if state is not None else 0.0
@@ -79,16 +76,26 @@ def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -
                 cashflows.append(CashflowComponent("paid", float(cf.amount), provenance, event_id=event_id,
                                                    cashflow_id=cf.cashflow_id, payment_tau=float(cf.payment_time)))
     lifecycle = {k: getattr(state, k) for k in _LIFECYCLE_FIELDS if hasattr(state, k)} if state is not None else {}
-    greeks = ()
-    if request.greeks and request.greek_convention == "point":
+    numerical = dict(outcome.numerical)
+    by_name = {}
+    sensitivities = tuple(g for g in request.greeks if g != "theta")
+    if sensitivities and request.greek_convention == "point":
         from quantark.intraday.greeks import point_greek_values
-        greeks, point_records = point_greek_values(ctx, engine, request.greeks)
+        values, point_records = point_greek_values(ctx, engine, sensitivities)
+        by_name.update((g.name, g) for g in values)
         records.extend(point_records)
-    elif request.greeks:
+    elif sensitivities:
         from quantark.intraday.greeks import assemble_desk_greeks, bump_config_for, desk_bump_cells
-        cells = desk_bump_cells(ctx, engine, request.greeks)
-        greeks = assemble_desk_greeks(cells, request.greeks, spot=ctx.spot, bump_config=bump_config_for(engine))
+        cells = desk_bump_cells(ctx, engine, sensitivities)
+        values = assemble_desk_greeks(cells, sensitivities, spot=ctx.spot, bump_config=bump_config_for(engine))
+        by_name.update((g.name, g) for g in values)
         records.extend(f"cell:{bump_id}" for bump_id in cells if bump_id != "base")
+    if "theta" in request.greeks:
+        from quantark.intraday.greeks import intraday_theta, resolve_theta_step, theta_metadata
+        step = resolve_theta_step(ctx, request.theta_step, request.theta_unit)
+        by_name["theta"] = intraday_theta(ctx, engine, step, price_base=price, convention=request.greek_convention)
+        numerical.update(theta_metadata(step))
+    greeks = tuple(by_name[g] for g in request.greeks)
     return IntradayValuationResult(
         price=price, contingent_pv=outcome.contingent_pv, pending_receivable_pv=pending_pv,
         paid_cash=ctx.numerical.paid_cash, units="price_per_contract", valuation_timestamp=ctx.valuation_timestamp,
@@ -97,7 +104,7 @@ def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -
         cashflows=tuple(cashflows), greeks=greeks, profile_identity=request.variance_profile.identity(),
         session_identity=request.session_calendar.identity(), market_snapshot_id=ctx.market_snapshot_id,
         context_identity=ctx.identity, engine=engine_class_path(engine), method=outcome.method,
-        numerical=dict(outcome.numerical), records=tuple(records))
+        numerical=numerical, records=tuple(records))
 
 
 def _dispatch_and_compare(session, engine, request, ctx, outcome, price) -> str:

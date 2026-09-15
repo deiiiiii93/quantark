@@ -139,11 +139,21 @@ observation.
   instant on its level, a continuous barrier hit there) delta and gamma are `undefined`.
   Point vega/rho/dividend rho are `unqualified` (no value) until a bump-limit ladder
   demonstrates them.
+- `"theta"` under either convention — a declared forward step (`theta_step`, default one
+  hour; `theta_unit` second/minute/hour/day) on the frozen market (`roll_context`),
+  including cash paid during the step. A step that would cross the next event is clamped to
+  land on it (BEFORE) and reported (`result.numerical["theta_adjusted"]`, `theta_side`); at
+  an event instant under BEFORE there is no step inside the segment and theta is
+  `undefined`, never zero.
+
+`roll_through_events(engine, request, to_timestamp, outcomes=...)` is a scenario, not a
+derivative: every event crossed needs a `Fixing` outcome, and the contract is valued at
+`to_timestamp` on the frozen market after them.
 
 ## Not yet covered
 
-- Intraday theta, the roll-through-events scenario, batch valuation, spot curves and
-  aggregation; qualification horizons from Gate C in the capability matrix.
+- Batch valuation, spot curves and aggregation; qualification horizons from Gate C in the
+  capability matrix.
 - Phoenix coupon replay: the lifecycle tracker books a coupon as `principal·rate` while the
   engines pay `principal·rate·period fraction`; until that is settled a due Phoenix coupon
   not covered by the checkpoint fails closed.

@@ -42,7 +42,7 @@ def _rows() -> Tuple[IntradayCapability, ...]:
     from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
     # Every priced route delivers desk-bump greeks: re-evaluations of the same route on bumped environments.
-    price_only = frozenset({"price", "delta", "gamma", "vega", "rho", "dividend_rho"})
+    price_only = frozenset({"price", "delta", "gamma", "vega", "rho", "dividend_rho", "theta"})
     anywhere = frozenset({"any"})
     barrier_rows = []
     for product, engine in ((BarrierOption, "barrier_analytical_engine.BarrierAnalyticalEngine"),

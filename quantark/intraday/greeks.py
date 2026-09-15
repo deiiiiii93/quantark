@@ -20,7 +20,8 @@ from __future__ import annotations
 import dataclasses
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Mapping, Sequence, Tuple
+from datetime import timedelta
+from typing import Mapping, Optional, Sequence, Tuple
 
 from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
 from quantark.asset.equity.riskmeasures.greeks import bump_envs
@@ -178,6 +179,59 @@ def _point_proxy(ctx, engine, route, name: str) -> GreekValue:
     up = cell_price(with_pricing_env(ctx, env_at(1.0), f"point_{name}_up"), engine)
     down = cell_price(with_pricing_env(ctx, env_at(-1.0), f"point_{name}_down"), engine)
     return GreekValue(name, (up - down) / (2.0 * h), POINT_UNITS[name], "point", bump=h)
+
+
+@dataclass(frozen=True)
+class ThetaStep:
+    """The forward step a local theta takes: requested, actually taken (None when no step exists), and its unit."""
+
+    requested: timedelta
+    actual: Optional[timedelta]
+    adjusted: bool
+    side: str                    # "forward" | "forward_clamped_to_event" | "none"
+    unit: str
+    divisor: Optional[float]     # actual seconds / THETA_UNITS[unit]
+    reason: str = ""
+
+
+DEFAULT_THETA_STEP = timedelta(hours=1)
+
+
+def resolve_theta_step(ctx, requested: Optional[timedelta], unit: str = "hour") -> ThetaStep:
+    """A forward step inside the current segment: clamped to land (BEFORE) on the next remaining event it would cross."""
+    from quantark.intraday.request import THETA_UNITS
+
+    requested = DEFAULT_THETA_STEP if requested is None else requested
+    now = to_utc(ctx.valuation_timestamp)
+    upcoming = sorted(to_utc(e.timestamp) for e in ctx.numerical.remaining_events)
+    if upcoming and upcoming[0] == now:
+        return ThetaStep(requested, None, True, "none", unit, None,
+                         "valuation is at an event boundary; local theta needs a one-sided step inside the segment")
+    target = now + requested
+    following = [t for t in upcoming if t > now]
+    if following and following[0] < target:
+        actual = following[0] - now
+        return ThetaStep(requested, actual, True, "forward_clamped_to_event", unit, actual.total_seconds() / THETA_UNITS[unit])
+    return ThetaStep(requested, requested, False, "forward", unit, requested.total_seconds() / THETA_UNITS[unit])
+
+
+def intraday_theta(ctx, engine, step: ThetaStep, *, price_base: float, convention: str) -> GreekValue:
+    """(frozen-market value after the step, with the cash it paid) - value now, per unit of time."""
+    from quantark.intraday.roll import roll_context
+
+    unit = f"PnL per {step.unit}"
+    if step.actual is None:
+        return GreekValue("theta", None, unit, convention, status="undefined", reason=step.reason)
+    rolled = roll_context(ctx, (to_utc(ctx.valuation_timestamp) + step.actual).astimezone(ctx.valuation_timestamp.tzinfo))
+    received = float(rolled.numerical.paid_cash) - float(ctx.numerical.paid_cash)
+    value = (cell_price(rolled, engine) + received - price_base) / step.divisor
+    return GreekValue("theta", value, unit, convention, bump=step.actual.total_seconds())
+
+
+def theta_metadata(step: ThetaStep) -> dict:
+    return {"theta_step_requested_s": step.requested.total_seconds(),
+            "theta_step_actual_s": None if step.actual is None else step.actual.total_seconds(),
+            "theta_adjusted": step.adjusted, "theta_side": step.side, "theta_unit": step.unit}
 
 
 def assemble_desk_greeks(cells: Mapping[str, BumpCell], greeks: Sequence[str], *, spot: float, bump_config) -> Tuple[GreekValue, ...]:

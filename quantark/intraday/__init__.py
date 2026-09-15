@@ -7,6 +7,7 @@ from quantark.intraday.fixings import AssumedFixing, ContinuousHistoryAssumption
 from quantark.intraday.profile import IntradayTimeMap, SegmentKind, VarianceProfile
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.intraday.result import CashflowComponent, GreekValue, IntradayValuationResult
+from quantark.intraday.roll import roll_context, roll_through_events
 from quantark.intraday.service import value_intraday
 from quantark.intraday.session import TradingSession, TradingSessionCalendar
 from quantark.intraday.timestamp import (
@@ -40,6 +41,8 @@ __all__ = [
     "calendar_year_fraction",
     "require_aware",
     "resolve_context",
+    "roll_context",
+    "roll_through_events",
     "same_instant",
     "seconds_between",
     "to_utc",
