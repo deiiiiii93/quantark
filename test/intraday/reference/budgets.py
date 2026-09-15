@@ -32,6 +32,18 @@ def gamma_budget(reference_gamma: float, spot: float, notional: float) -> float:
     return max(GAMMA_ABS, GAMMA_REL * normalised) * notional / (spot * spot)
 
 
+#: Point vega / rho / dividend rho (per unit vol, rate, yield), frozen with Plan 3 Task 5 BEFORE any greek ladder ran:
+#: normalised m* = Measure * 0.01 / N (PnL of a one-point move per unit notional), the price budget's absolute level.
+MOVE_ABS, MOVE_REL = 1e-6, 1e-4
+POINT_MOVE = 0.01
+
+
+def move_budget(reference_value: float, notional: float) -> float:
+    """Budget on a per-unit-vol / per-unit-rate sensitivity from m* = value * POINT_MOVE / N."""
+    normalised = abs(reference_value) * POINT_MOVE / notional
+    return max(MOVE_ABS, MOVE_REL * normalised) * notional / POINT_MOVE
+
+
 #: Reference grid levels used by Gate C. (2001, 4001, 8001) left one 6h gamma cell (gamma crossing zero,
 #: absolute floor) at 3*unc/budget = 1.29; doubling cut that uncertainty 4x (clean O(h^2)) to 0.32.
 GATE_C_POINTS = (4001, 8001, 16001)

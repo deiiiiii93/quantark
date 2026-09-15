@@ -9,6 +9,7 @@ alternatives. Engine classes match exactly: a subclass does not inherit a row.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Iterable, Optional, Tuple
 
 from quantark.execution.errors import CapabilityError
@@ -127,6 +128,34 @@ def require_capability(product, engine, *, monitoring: str, outputs: Iterable[st
         raise CapabilityError(f"{name} intraday route for {type(product).__name__} does not deliver {missing}; "
                               f"available outputs: {sorted(row.outputs)}")
     return row
+
+
+GREEK_EVIDENCE_FILE = "gate_c_greeks.json"
+
+
+@lru_cache(maxsize=None)
+def greek_evidence() -> dict:
+    """The packaged Gate C greek evidence (``quantark/intraday/evidence/gate_c_greeks.json``); {} when absent."""
+    import json
+    from importlib import resources
+
+    resource = resources.files("quantark.intraday.evidence").joinpath(GREEK_EVIDENCE_FILE)
+    if not resource.is_file():
+        return {}
+    return json.loads(resource.read_text(encoding="utf-8"))
+
+
+def point_output_qualified(product_name: str, route_name: str, measure: str, seconds_to_event: float) -> bool:
+    """Whether Gate C demonstrated point ``measure`` for this product on ``route_name`` at this time to the first event.
+
+    A demonstration is a (product, route, measure, horizon) row: every greek cell at that horizon or longer passed
+    its ladder against the reference. No evidence file, or no row, demonstrates nothing (fail closed).
+    """
+    for row in greek_evidence().get("demonstrated", ()):
+        if (row["product"], row["route"], row["measure"]) == (product_name, route_name, f"point_{measure}") \
+                and seconds_to_event >= float(row["horizon_s"]):
+            return True
+    return False
 
 
 def render_capability_matrix() -> str:

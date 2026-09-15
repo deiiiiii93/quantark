@@ -103,7 +103,8 @@ def test_mc_point_greeks_need_rqmc_and_report_their_uncertainty(sse_calendar, ss
     rqmc = SnowballMCEngine(params=MCParams(num_paths=2 ** 12, seed=11), method=MonteCarloMethod.RANDOMIZED_QUASI)
     pg = route_for(ctx, rqmc).point_greeks(ctx, rqmc)
     assert pg.evidence == "paired_rqmc" and isfinite(pg.uncertainty["delta"]) and isfinite(pg.uncertainty["gamma"])
-    assert pg.status in ("ok", "unqualified")
+    # a 1% paired difference one hour before a fixing is a finite move, not a derivative: unqualified until demonstrated
+    assert pg.status == "unqualified" and pg.delta is None and "bump limit not demonstrated" in pg.reason
     pseudo = SnowballMCEngine(params=MCParams(num_paths=2 ** 12, seed=11), method=MonteCarloMethod.PSEUDO)
     with pytest.raises(CapabilityError, match="need RQMC"):
         value_intraday(pseudo, req)
@@ -127,8 +128,10 @@ def test_point_vega_and_rho_are_unqualified_proxies_until_demonstrated(sse_calen
 
 
 def test_a_demonstrated_proxy_is_a_central_difference_of_the_frozen_price_function(sse_calendar, sse_sessions, desk, monkeypatch):
+    import quantark.intraday.capability as cap
     import quantark.intraday.greeks as G
-    monkeypatch.setattr(G, "POINT_PROXY_DEMONSTRATED", frozenset({("QuadV2Route", "rho")}))
+    monkeypatch.setattr(cap, "point_output_qualified",
+                        lambda product, route, measure, seconds: (product, route, measure) == ("SnowballOption", "QuadV2Route", "rho"))
     req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
                     greeks=("rho",), greek_convention="point")
     ctx = resolve_context(req)

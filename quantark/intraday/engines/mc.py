@@ -56,8 +56,14 @@ class MCRoute:
         return EnginePriceOutcome(pv, method, numerical, {}, engine_used=solver)
 
     def point_greeks(self, ctx, engine) -> PointGreeks:
-        """Paired RQMC: the engine's session spec at spot*(1-h), spot, spot*(1+h) on identical scramble batches."""
-        from quantark.intraday.greeks import bump_config_for
+        """Paired RQMC: the engine's session spec at spot*(1-h), spot, spot*(1+h) on identical scramble batches.
+
+        That is a central difference at the finite relative bump h, not a derivative: near a fixing a 1% move
+        spans the diffusion layer. It is ``ok`` only inside a Gate C demonstrated bump limit; otherwise the
+        estimate and its standard errors are recorded as uncertainty and the status is unqualified.
+        """
+        from quantark.intraday.capability import point_output_qualified
+        from quantark.intraday.greeks import bump_config_for, seconds_to_first_event
         from quantark.montecarlo import run_paired_rqmc_greeks
         from quantark.util.enum.engine_enums import MonteCarloMethod
 
@@ -80,10 +86,16 @@ class MCRoute:
             specs.append(spec)
         res = run_paired_rqmc_greeks(*specs, spot=float(ctx.spot), relative_bump=h)
         uncertainty = {"delta": float(res.delta_std_error), "gamma": float(res.gamma_std_error),
+                       "delta_estimate": float(res.delta), "gamma_estimate": float(res.gamma),
                        "batches": float(res.batches_used), "relative_bump": h}
         min_batches = int(getattr(engine.params, "rqmc_min_batches", 2))
-        if isfinite(res.delta_std_error) and isfinite(res.gamma_std_error) and res.batches_used >= min_batches:
-            return PointGreeks(float(res.delta), float(res.gamma), "ok", "", "paired_rqmc", uncertainty)
-        return PointGreeks(None, None, "unqualified",
-                           f"paired RQMC gave {res.batches_used} batches (< {min_batches}) or a non-finite standard error",
-                           "paired_rqmc", uncertainty)
+        if not (isfinite(res.delta_std_error) and isfinite(res.gamma_std_error) and res.batches_used >= min_batches):
+            return PointGreeks(None, None, "unqualified",
+                               f"paired RQMC gave {res.batches_used} batches (< {min_batches}) or a non-finite standard error",
+                               "paired_rqmc", uncertainty)
+        seconds, product = seconds_to_first_event(ctx), type(ctx.request.product).__name__
+        if not all(point_output_qualified(product, "MCRoute", m, seconds) for m in ("delta", "gamma")):
+            return PointGreeks(None, None, "unqualified",
+                               f"paired RQMC central difference at relative bump {h:g}; bump limit not demonstrated",
+                               "paired_rqmc", uncertainty)
+        return PointGreeks(float(res.delta), float(res.gamma), "ok", "", "paired_rqmc", uncertainty)

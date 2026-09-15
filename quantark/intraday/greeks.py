@@ -35,8 +35,6 @@ DESK_GREEKS = ("delta", "gamma", "vega", "rho", "dividend_rho")
 POINT_UNITS = {"delta": "per unit spot", "gamma": "per unit spot^2", "vega": "per unit vol (trading-quoted)",
                "rho": "per unit rate", "dividend_rho": "per unit dividend yield"}
 POINT_PROXY_REASON = "finite-difference proxy for a point derivative; bump-limit not demonstrated"
-#: (route class name, measure) pairs whose central-difference proxy a Gate C bump ladder has demonstrated.
-POINT_PROXY_DEMONSTRATED: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
@@ -155,30 +153,53 @@ def point_greek_values(ctx, engine, greeks: Sequence[str]) -> Tuple[Tuple[GreekV
     return tuple(values[g] for g in greeks), tuple(records)
 
 
-def _point_proxy(ctx, engine, route, name: str) -> GreekValue:
-    """Central difference of the frozen price function: h = 1e-4 sigma (vega), 1e-6 (rho, dividend rho)."""
+def _unit_vol(ctx) -> float:
+    env = ctx.pricing_env
+    strike = float(getattr(ctx.numerical.product, "strike", env.spot) or env.spot)
+    return bump_envs.bump_unit_vol(env, strike, max(ctx.numerical.maturity_tau, 0.0))
+
+
+def point_proxy_bump(ctx, name: str) -> float:
+    """The production bump of a point proxy: 1e-4 of the trading-quoted vol (vega), 1e-6 (rho, dividend rho)."""
+    return 1e-4 * _unit_vol(ctx) if name == "vega" else 1e-6
+
+
+def point_proxy_env(ctx, name: str, h: float, direction: float):
+    """The environment moved by ``direction * h`` in the proxy's market variable (the daily bump builders)."""
     env, product = ctx.pricing_env, ctx.numerical.product
     if name == "vega":
-        strike = float(getattr(product, "strike", env.spot) or env.spot)
-        unit_vol = bump_envs.bump_unit_vol(env, strike, max(ctx.numerical.maturity_tau, 0.0))
-        h = 1e-4 * unit_vol
-    else:
-        h = 1e-6
-    if (type(route).__name__, name) not in POINT_PROXY_DEMONSTRATED:
+        return bump_envs.build_vol_bumped_env(env, product, _unit_vol(ctx), h, direction=direction)
+    if name == "rho":
+        return bump_envs.build_rate_bumped_env(env, h, direction=direction)
+    if name == "dividend_rho":
+        return bump_envs.build_div_bumped_env(env, product, 0.0, h, direction=direction)
+    raise CapabilityError(f"{name} has no point proxy")
+
+
+def point_proxy_difference(ctx, name: str, h: float, price) -> float:
+    """Central difference of ``price(context)`` over the proxy's market variable with bump ``h``."""
+    up = price(with_pricing_env(ctx, point_proxy_env(ctx, name, h, 1.0), f"point_{name}_up:{h!r}"))
+    down = price(with_pricing_env(ctx, point_proxy_env(ctx, name, h, -1.0), f"point_{name}_down:{h!r}"))
+    return (up - down) / (2.0 * h)
+
+
+def _point_proxy(ctx, engine, route, name: str) -> GreekValue:
+    """Central difference of the frozen price function, ``ok`` only inside a Gate C demonstrated bump limit."""
+    from quantark.intraday.capability import point_output_qualified
+    h = point_proxy_bump(ctx, name)
+    if not point_output_qualified(type(ctx.request.product).__name__, type(route).__name__, name, seconds_to_first_event(ctx)):
         return GreekValue(name, None, POINT_UNITS[name], "point", bump=h, status="unqualified", reason=POINT_PROXY_REASON)
     if ctx.numerical.terminated:
         return GreekValue(name, 0.0, POINT_UNITS[name], "point", bump=h)
+    return GreekValue(name, point_proxy_difference(ctx, name, h, lambda c: cell_price(c, engine)), POINT_UNITS[name],
+                      "point", bump=h)
 
-    def env_at(direction: float):
-        if name == "vega":
-            return bump_envs.build_vol_bumped_env(env, product, unit_vol, h, direction=direction)
-        if name == "rho":
-            return bump_envs.build_rate_bumped_env(env, h, direction=direction)
-        return bump_envs.build_div_bumped_env(env, product, 0.0, h, direction=direction)
 
-    up = cell_price(with_pricing_env(ctx, env_at(1.0), f"point_{name}_up"), engine)
-    down = cell_price(with_pricing_env(ctx, env_at(-1.0), f"point_{name}_down"), engine)
-    return GreekValue(name, (up - down) / (2.0 * h), POINT_UNITS[name], "point", bump=h)
+def seconds_to_first_event(ctx) -> float:
+    """Seconds from the valuation instant to the first remaining event (0.0 at an event under BEFORE)."""
+    now = to_utc(ctx.valuation_timestamp)
+    upcoming = [to_utc(e.timestamp) for e in ctx.numerical.remaining_events]
+    return min((t - now).total_seconds() for t in upcoming) if upcoming else float("inf")
 
 
 @dataclass(frozen=True)
