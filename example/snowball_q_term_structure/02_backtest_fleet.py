@@ -165,6 +165,7 @@ def solve_inception(task: Dict[str, Any]) -> Dict[str, Any]:
     engine = SnowballQuadEngine(params=QuadParams(
         grid_points=int(task["quad_grid"]),
         readout=str(task.get("quad_readout", C.DEFAULT_QUAD_READOUT)),
+        align_cell_stretch=task.get("align_cell_stretch"),
     ))
     started = time.perf_counter()
     solution = C.solve_fair_coupon(lambda c: engine.price(C.build_product(terms, s0, c), env))
@@ -215,6 +216,12 @@ def fingerprint(task: Dict[str, Any]) -> str:
     readout = task.get("quad_readout", C.DEFAULT_QUAD_READOUT)
     if readout != C.DEFAULT_QUAD_READOUT:
         payload["quad_readout"] = readout
+    # The cell alignment moves prices for the same reason, so it earns its
+    # place by the same rule: absent it contributes nothing, so every cell
+    # banked before the option existed stays resumable.
+    stretch = task.get("align_cell_stretch")
+    if stretch is not None:
+        payload["align_cell_stretch"] = float(stretch)
     risk = task.get("risk") or {}
     # A legacy run carries no risk block at all, so its fingerprint is
     # unchanged and old resumes keep working.
@@ -276,6 +283,7 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
             model,
             quad_grid_points=int(task["quad_grid"]),
             quad_readout=str(task.get("quad_readout", C.DEFAULT_QUAD_READOUT)),
+            align_cell_stretch=task.get("align_cell_stretch"),
         ),
         strategy=C.hedge_strategy_for(
             task["hedge"],
@@ -326,6 +334,7 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
         "notional": C.NOTIONAL,
         "quad_grid": task["quad_grid"],
         "quad_readout": task.get("quad_readout", C.DEFAULT_QUAD_READOUT),
+        "align_cell_stretch": task.get("align_cell_stretch"),
         "cost_bp": task["cost_bp"],
         "rate": task["rate"],
         "censored_schedule": task["censored"],
@@ -362,6 +371,7 @@ def run_cell(task: Dict[str, Any]) -> Dict[str, Any]:
             "min_tenor_days": C.Q_MODELS[task["model"]].min_tenor_days,
             "quad_grid": task["quad_grid"],
             "quad_readout": task.get("quad_readout", C.DEFAULT_QUAD_READOUT),
+            "align_cell_stretch": task.get("align_cell_stretch"),
             "delta_threshold": task["delta_threshold"],
             "round_contracts": task["round_contracts"],
             "cost_bp": task["cost_bp"],
@@ -481,6 +491,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             "how the engine recovers the price from its nodal surface; "
             "'transition' removes the delta staircase but moves prices "
             "(docs/bucket-futures-hedge/quad-readout/)"
+        ),
+    )
+    parser.add_argument(
+        "--align-cell-stretch",
+        type=float,
+        default=None,
+        help=(
+            "widen the QUAD cell by at most this fraction (e.g. 0.02) so "
+            "every barrier lands on a node; opt-in, and it changes the "
+            "solved coupon as well as the replay prices "
+            "(docs/bucket-futures-hedge/gates.md)"
         ),
     )
     parser.add_argument("--cost-bp", type=float, default=DEFAULT_COST_BP)
@@ -658,6 +679,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"grid={args.quad_grid}|rate={args.rate}|vol_tenor={args.vol_tenor}"
         f"|readout={args.quad_readout}"
     )
+    # The coupon is SOLVED with this engine, so the alignment changes the
+    # contract and not just the replay. Appended only when it is on, which
+    # leaves every inceptions.json cached before the option valid.
+    if args.align_cell_stretch is not None:
+        coupon_key += f"|align={args.align_cell_stretch:g}"
     inception_records: Dict[str, Dict[str, Any]] = {}
     if cached and cached.get("coupon_key") == coupon_key:
         inception_records = dict(cached.get("inceptions", {}))
@@ -669,6 +695,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "inception": s.inception.isoformat(), "history_dir": str(args.history_dir),
                 "rate": args.rate, "vol_tenor": args.vol_tenor, "quad_grid": args.quad_grid,
                 "quad_readout": args.quad_readout,
+                "align_cell_stretch": args.align_cell_stretch,
             }
             for s in todo
         ]
@@ -695,6 +722,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "model": model, "hedge": hedge,
                 "coupon": rec["coupon"], "s0": rec["s0"],
                 "quad_grid": args.quad_grid, "quad_readout": args.quad_readout,
+                "align_cell_stretch": args.align_cell_stretch,
                 "cost_bp": args.cost_bp, "rate": args.rate,
                 "vol_tenor": args.vol_tenor, "delta_threshold": args.delta_threshold,
                 "round_contracts": not args.no_round_contracts,
@@ -749,6 +777,7 @@ def _write_manifest(out_dir, args, cells, schedules, runs, started) -> None:
             "config": {
                 "history_dir": str(args.history_dir), "quad_grid": args.quad_grid,
                 "quad_readout": args.quad_readout,
+                "align_cell_stretch": args.align_cell_stretch,
                 "cost_bp": args.cost_bp, "rate": args.rate, "vol_tenor": args.vol_tenor,
                 "delta_threshold": args.delta_threshold, "round_contracts": not args.no_round_contracts,
                 "study_grid": args.study_grid, "risk": resolve_risk_profile(args),

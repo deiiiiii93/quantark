@@ -231,17 +231,26 @@ def engine_config_for(
     *,
     quad_grid_points: int = DEFAULT_QUAD_GRID,
     quad_readout: str = DEFAULT_QUAD_READOUT,
+    align_cell_stretch: Optional[float] = None,
 ) -> AutocallableEngineConfig:
     """QUAD-engine replay config for one q model (scalar vol channel).
 
     ``quad_readout`` selects how the engine recovers the price from its nodal
     surface; see docs/bucket-futures-hedge/quad-readout/. It changes prices,
     so it belongs in the run fingerprint.
+
+    ``align_cell_stretch`` widens the cell by at most that fraction so every
+    barrier lands on a node, which stops the alignment target moving with
+    spot; see docs/bucket-futures-hedge/gates.md. It changes prices too, so
+    it belongs in the fingerprint for the same reason.
     """
     return AutocallableEngineConfig(
         pricing_engine_type=EngineType.QUADRATURE,
         quad_params=QuadParams(
-            grid_points=int(quad_grid_points), readout=str(quad_readout)
+            grid_points=int(quad_grid_points), readout=str(quad_readout),
+            align_cell_stretch=(
+                None if align_cell_stretch is None else float(align_cell_stretch)
+            ),
         ),
         dividend_source=model.dividend_source,
         futures_curve_extrapolation=model.extrapolation,
