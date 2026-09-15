@@ -97,6 +97,26 @@ def test_other_routes_price_per_spot_without_greeks_and_flag_barrier_points(sse_
                                                                            event_phase="before")).price, abs=1e-10)
 
 
+def test_a_per_spot_curve_releases_each_spot_market_before_the_next(sse_calendar, sse_sessions, desk, monkeypatch):
+    # every spot context carries a copied market, and PDE coefficient memos live as long as that market does:
+    # a 101-point PDE curve that kept all contexts alive grew past 8 GiB
+    import gc
+    import weakref
+    import quantark.intraday.greeks as G
+    real, seen = G.cell_price, []
+
+    def recording(ctx, engine):
+        gc.collect()
+        assert all(ref() is None for ref in seen), "an earlier spot's market is still alive"
+        seen.append(weakref.ref(ctx.pricing_env))
+        return real(ctx, engine)
+
+    monkeypatch.setattr(G, "cell_price", recording)
+    req = _req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1))
+    curve = spot_curve(SnowballPDESolver(PDEParams()), req, [99.0, 100.0, 101.0])
+    assert len(seen) == 3 and all(p.status == "not_requested" for p in curve)
+
+
 def test_aggregation_preserves_provenance_and_sums_only_qualified_greeks(sse_calendar, sse_sessions, desk):
     when = lambda kos: kos[5].timestamp - timedelta(hours=1)                                      # noqa: E731
     confirmed = value_intraday(QUAD, _req(sse_calendar, sse_sessions, desk, when, greeks=("delta",), greek_convention="point"))

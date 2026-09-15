@@ -77,8 +77,7 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
     spots = [float(s) for s in spots]
     assumptions = ctx.reconstruction.assumptions
     route = route_for(ctx, engine)
-    contexts = [_spot_context(ctx, s) for s in spots]
-    jumps = [discontinuity_at_spot(c) for c in contexts]
+    jumps = [discontinuity_at_spot(ctx, s) for s in spots]
     num = ctx.numerical
     if isinstance(route, QuadV2Route) and not num.terminated:
         prepared = engine.prepare(num.product, ctx.pricing_env, spot_levels=spots, event_phase=ctx.phase.value,
@@ -94,8 +93,9 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
                 points.append(SpotCurvePoint(s, float(values["price"][i]), delta, gamma, "ok", "", assumptions))
         return tuple(points)
     points = []
-    for s, c, jump in zip(spots, contexts, jumps):
-        price = cell_price(c, engine)
+    for s, jump in zip(spots, jumps):
+        # one context at a time: each carries a copied market whose engine memos live as long as it does
+        price = cell_price(_spot_context(ctx, s), engine)
         if num.terminated and not jump:
             points.append(SpotCurvePoint(s, price, 0.0, 0.0, "ok", "", assumptions))
         elif jump:

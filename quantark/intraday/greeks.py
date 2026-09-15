@@ -101,14 +101,14 @@ def desk_bump_cells(ctx, engine, greeks: Sequence[str]) -> Mapping[str, BumpCell
     return cells
 
 
-def discontinuity_at_spot(ctx) -> str:
-    """Why the price function jumps or kinks at the query spot ("" when it does not).
+def discontinuity_at_spot(ctx, spot: Optional[float] = None) -> str:
+    """Why the price function jumps or kinks at the query spot ("" when it does not); ``spot`` defaults to the context's.
 
     An event determined AT the valuation instant (phase BEFORE) whose level is the spot, or a continuous barrier
     the spot hits at this instant under the contract's inclusive rule: one side of any neighbourhood is decided,
     the other is not.
     """
-    now, spot = to_utc(ctx.valuation_timestamp), float(ctx.spot)
+    now, spot = to_utc(ctx.valuation_timestamp), float(ctx.spot if spot is None else spot)
     for event in ctx.timeline.remaining(ctx.valuation_timestamp, ctx.phase):
         if to_utc(event.timestamp) == now and event.barrier is not None and float(event.barrier) == spot:
             return f"payoff discontinuity of the unfixed event {event.event_id} at the query spot"
