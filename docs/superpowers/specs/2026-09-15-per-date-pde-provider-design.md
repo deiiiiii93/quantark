@@ -138,6 +138,23 @@ If neither candidate is bitwise-safe, the study runs with two solves per
 state and the stage-2 budget doubles (section 6); no approximation is
 introduced to avoid it.
 
+**Decision (2026-09-15, Phase 0).** The user chose candidate b
+from `output/snowball_simulated_paths/phase0/decision_matrix.md`: solves per
+state [baseline 2.000, chosen 1.000], study path bitwise [true],
+conformance [pass], replay goldens [n.a.].  Seconds per state on path 0
+(261 states, back-to-back): baseline 0.574 and 0.677 on its repeat, (a)
+0.299, (b) 0.303.  Candidate (a) also passed every row, but only after its
+key was corrected: the first key, `repricing._canonical` with lifecycle
+attributes kept, renders a dataclass by its declared fields, and the
+lifecycle tracker `setattr`s `_otc_lifecycle_knocked_in` onto the dataclass
+product, so an alive and a knocked-in state keyed alike and the knock-in
+probe reused the alive solve.  (b) has no key to keep complete and gives the
+study the same saving.  Found on the way, not fixed here:
+`product_fingerprint` does not render `contract_multiplier` or
+`settlement_convention`, the product's other attributes outside its
+dataclass fields, so two products differing only in those share state-cache
+shards; the study prices one product.
+
 ### 3.3 The fair coupon
 
 Unchanged: solved once under `term_flat_q` with QUAD on a 401-point grid
