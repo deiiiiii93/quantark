@@ -21,8 +21,8 @@ from quantark.asset.equity.product.option.observation_schedule import Observatio
 from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
 from quantark.execution.errors import CapabilityError
 from quantark.intraday.events import ContractEvent, ContractTimeline, EventKind, EventPhase, phoenix_coupon_fractions
-from quantark.intraday.provisional import LifecycleReconstruction
-from quantark.intraday.timestamp import calendar_year_fraction
+from quantark.intraday.provisional import ASSUMED, DETERMINATION_TIMESTAMP, PAYMENT_TIMESTAMP, LifecycleReconstruction
+from quantark.intraday.timestamp import calendar_year_fraction, to_utc
 from quantark.param import FlatRateCurve, FlatVolSurface, NoDividend, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
@@ -163,32 +163,62 @@ def _digital_twin(product, timeline: ContractTimeline, remaining, ts: datetime):
     return twin
 
 
-def event_for_cashflow(cf: RealizedCashflow, timeline: ContractTimeline) -> Optional[ContractEvent]:
-    """The contract event a tracker cashflow id names ("knock-out:4", "coupon:2", "maturity")."""
-    if cf.cashflow_id == "maturity":
+def event_for_cashflow(cf: RealizedCashflow, timeline: ContractTimeline, tz=None) -> Optional[ContractEvent]:
+    """The contract event a tracker cashflow id names.
+
+    Autocallable tracker ids carry the schedule index ("knock-out:4", "coupon:2",
+    "maturity"); barrier tracker ids carry the determination date ("ko:<date>",
+    "expiry:<date>"). A flow the intraday layer assumed itself names no event.
+    """
+    if cf.cashflow_id == "maturity" or cf.cashflow_id.startswith("expiry:"):
         return timeline.terminal()
     match = re.fullmatch(r"(knock-out|coupon):(\d+)", cf.cashflow_id)
-    if match is None:
-        return None
-    kind, index = _TRACKER_IDS[match.group(1)], int(match.group(2))
-    return next((e for e in timeline.events if e.kind is kind and e.index == index), None)
+    if match is not None:
+        kind, index = _TRACKER_IDS[match.group(1)], int(match.group(2))
+        return next((e for e in timeline.events if e.kind is kind and e.index == index), None)
+    if cf.cashflow_id.startswith("ko:") and not cf.metadata.get(ASSUMED) and cf.determination_date is not None:
+        day = cf.determination_date.date()
+        same_day = [e for e in timeline.events if e.kind is EventKind.KO
+                    and (e.timestamp.astimezone(tz) if tz is not None else e.timestamp).date() == day]
+        return same_day[0] if len(same_day) == 1 else None
+    return None
 
 
-def _time_based_state(state: AutocallableLifecycleState, timeline: ContractTimeline, ts: datetime, cal):
+def place_cashflow(cf: RealizedCashflow, timeline: ContractTimeline, cal):
+    """(determination instant, payment instant, contract event or None) of a dated ledger flow; cash-checked."""
+    if cf.determination_date is None:
+        raise ValidationError(f"cashflow {cf.cashflow_id!r} is time-based; intraday mode places dated ledgers only")
+    if DETERMINATION_TIMESTAMP in cf.metadata:
+        return (datetime.fromisoformat(cf.metadata[DETERMINATION_TIMESTAMP]),
+                datetime.fromisoformat(cf.metadata[PAYMENT_TIMESTAMP]), None)
+    event = event_for_cashflow(cf, timeline, cal.tz)
+    expected = event.cash if event is not None else None
+    if event is None and cf.cashflow_id.startswith("ko:") and timeline.continuous_barrier is not None:
+        expected = timeline.continuous_barrier.hit_cash            # a continuous barrier touched at a close
+    if expected is not None and not is_close(float(cf.amount), float(expected), rel_tol=_CASH_REL_TOL, abs_tol=_CASH_ABS_TOL):
+        raise CapabilityError(f"ledger cash {cf.amount!r} for {cf.cashflow_id!r} differs from the contract's "
+                              f"{expected!r} (the daily lifecycle tracker and the engines disagree on this amount); "
+                              "not in the intraday inventory")
+    if event is not None and event.kind is not EventKind.TERMINAL:
+        if event.payment_timestamp.astimezone(cal.tz).date() != cf.payment_date.date():
+            raise ValidationError(f"cashflow {cf.cashflow_id!r} pays on {cf.payment_date.date()} but its contract event "
+                                  f"pays on {event.payment_timestamp.astimezone(cal.tz).date()}")
+        return event.timestamp, event.payment_timestamp, event
+    d = cf.determination_date.date()
+    if event is not None:
+        det_ts = event.timestamp
+    else:
+        det_ts = cal.close_at(d) if cal.is_trading_day(d) else cal.payment_at(d)
+    pay_ts = max(cal.payment_at(cf.payment_date.date()), det_ts, key=to_utc)
+    if event is not None and event.payment_timestamp.astimezone(cal.tz).date() == cf.payment_date.date():
+        pay_ts = event.payment_timestamp
+    return det_ts, pay_ts, event
+
+
+def _time_based_state(state, timeline: ContractTimeline, ts: datetime, cal):
     flows = []
     for cf in state.ledger.cashflows:
-        if cf.determination_date is None:
-            raise ValidationError(f"cashflow {cf.cashflow_id!r} is time-based; intraday mode places dated ledgers only")
-        event = event_for_cashflow(cf, timeline)
-        if event is not None:
-            if event.payment_timestamp.astimezone(cal.tz).date() != cf.payment_date.date():
-                raise ValidationError(f"cashflow {cf.cashflow_id!r} pays on {cf.payment_date.date()} but its contract event "
-                                      f"pays on {event.payment_timestamp.astimezone(cal.tz).date()}")
-            det_ts, pay_ts = event.timestamp, event.payment_timestamp
-        else:
-            d = cf.determination_date.date()
-            det_ts = cal.close_at(d) if cal.is_trading_day(d) else cal.payment_at(d)
-            pay_ts = cal.payment_at(cf.payment_date.date())
+        det_ts, pay_ts, _ = place_cashflow(cf, timeline, cal)
         flows.append(RealizedCashflow(cashflow_id=cf.cashflow_id, event_type=cf.event_type, amount=cf.amount,
                                       determination_time=calendar_year_fraction(ts, det_ts),
                                       payment_time=calendar_year_fraction(ts, pay_ts), metadata=dict(cf.metadata)))
@@ -196,6 +226,37 @@ def _time_based_state(state: AutocallableLifecycleState, timeline: ContractTimel
     new.ledger = LifecycleCashflowLedger(flows)
     new.valuation_point = ValuationPoint(time=0.0)
     return new
+
+
+def _barrier_twin(product, timeline: ContractTimeline, remaining, ts: datetime, state):
+    """Float-time barrier / touch product; a knocked-in barrier option is its European vanilla."""
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    from quantark.asset.equity.product.option.barrier_option import BarrierOption
+    terminal = timeline.terminal()
+    if terminal not in remaining:
+        raise ValidationError("the terminal fixing is history but the lifecycle is still alive")
+    maturity = calendar_year_fraction(ts, terminal.timestamp)
+    convention = _settlement(calendar_year_fraction(ts, terminal.payment_timestamp) - maturity)
+    if isinstance(product, BarrierOption) and state.knocked_in:
+        return EuropeanVanillaOption(strike=float(product.strike), option_type=product.option_type, maturity=maturity,
+                                     contract_multiplier=float(product.contract_multiplier), settlement_convention=convention)
+    twin = deepcopy(product)
+    marks = [e for e in remaining if e.kind in (EventKind.KO, EventKind.KI)]
+    if product.observation_schedule is not None:
+        records = [ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier,
+                                     payoff=e.cash, settlement_time=calendar_year_fraction(ts, e.payment_timestamp))
+                   for e in marks]
+        twin.observation_schedule = ObservationSchedule(records=records,
+                                                        aggregation_mode=product.observation_schedule.aggregation_mode,
+                                                        frequency=product.observation_schedule.frequency)
+    if hasattr(twin, "observation_dates"):
+        twin.observation_dates = None
+    twin.maturity = maturity
+    _clear_dates(twin)
+    twin.settlement_convention = convention
+    if marks and not twin.observation_schedule.records:
+        raise ValidationError("discrete barrier twin lost its remaining observations")
+    return twin
 
 
 def build_numerical_contract(product, timeline: ContractTimeline, reconstruction: LifecycleReconstruction, *,
@@ -207,13 +268,18 @@ def build_numerical_contract(product, timeline: ContractTimeline, reconstruction
     if any(t < 0.0 for t in taus.values()) or (phase is EventPhase.AFTER and any(t == 0.0 for t in taus.values())):
         raise ValidationError("remaining events must be strictly future (or at valuation under BEFORE)")
     if state is None:
-        if hasattr(product, "barrier_config"):
-            raise ValidationError("an autocallable needs a reconstructed lifecycle state")
+        if hasattr(product, "barrier_config") or hasattr(product, "observation_type"):
+            raise ValidationError("a product with a lifecycle needs a reconstructed lifecycle state")
         twin, tstate, terminated = _digital_twin(product, timeline, remaining, ts), None, False
     else:
         tstate = _time_based_state(state, timeline, ts, session_calendar)
         terminated = not tstate.alive
-        twin = None if terminated else _autocallable_twin(product, timeline, remaining, ts, state)
+        if terminated:
+            twin = None
+        elif hasattr(product, "barrier_config"):
+            twin = _autocallable_twin(product, timeline, remaining, ts, state)
+        else:
+            twin = _barrier_twin(product, timeline, remaining, ts, state)
     pending, paid = [], 0.0
     if tstate is not None:
         for cf in tstate.ledger.cashflows:

@@ -79,6 +79,23 @@ def _order_key(e: ContractEvent):
 
 
 @dataclass(frozen=True)
+class ContinuousBarrier:
+    """A single barrier monitored continuously (barrier options, one-touch / no-touch).
+
+    ``hit_cash`` is what a hit fixes: the rebate of a knock-out or one-touch,
+    0.0 for a no-touch, None for a knock-in (which switches to the vanilla).
+    ``rebate`` is the never-hit amount of a knock-in paid at expiry.
+    """
+
+    level: float
+    is_up: bool
+    is_knock_out: bool
+    pays_at_hit: bool
+    rebate: float
+    hit_cash: Optional[float]
+
+
+@dataclass(frozen=True)
 class ContractTimeline:
     """Every remaining-or-past event of one contract, ordered by (instant, kind priority)."""
 
@@ -87,6 +104,7 @@ class ContractTimeline:
     contractual_tenor: float                # years, the ORIGINAL product's contract tenor
     continuous_ki_barrier: Optional[float]  # set when the product monitors KI continuously
     schedule_origin: Optional[datetime]     # for float-time products
+    continuous_barrier: Optional[ContinuousBarrier] = None
 
     def __post_init__(self):
         object.__setattr__(self, "events", tuple(sorted(self.events, key=_order_key)))
@@ -148,8 +166,9 @@ def _schedule_env(product, template_env: PricingEnvironment) -> PricingEnvironme
 def _contract_dates(product) -> List[datetime]:
     dates = [getattr(product, name, None) for name in ("exercise_date", "maturity_date", "settlement_date")]
     bc = getattr(product, "barrier_config", None)
-    for name in ("ko_observation_schedule", "ki_observation_schedule"):
-        schedule = getattr(bc, name, None)
+    schedules = [getattr(bc, name, None) for name in ("ko_observation_schedule", "ki_observation_schedule")]
+    schedules.append(getattr(product, "observation_schedule", None))
+    for schedule in schedules:
         if schedule is not None:
             dates.extend(r.observation_date for r in schedule.records)
     return [d for d in dates if d is not None]
@@ -281,11 +300,57 @@ def _autocallable_events(product, cal, env, origin, fixing_time, with_coupons: b
     return events, continuous
 
 
+def barrier_terms(product) -> ContinuousBarrier:
+    """What a hit of this single-barrier product means (engine semantics: rebates carry no multiplier)."""
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
+    if isinstance(product, OneTouchOption):
+        return ContinuousBarrier(level=float(product.barrier), is_up=bool(product.is_up_barrier), is_knock_out=True,
+                                 pays_at_hit=bool(product.payment_at_hit), rebate=float(product.rebate),
+                                 hit_cash=float(product.get_payoff(float(product.barrier), touched=True)))
+    knock_out = bool(product.is_knock_out)
+    return ContinuousBarrier(level=float(product.barrier), is_up=bool(product.is_up_barrier), is_knock_out=knock_out,
+                             pays_at_hit=bool(product.pay_at_hit), rebate=float(product.rebate),
+                             hit_cash=float(product.rebate) if knock_out else None)
+
+
+def _barrier_events(product, cal, env, origin, fixing_time):
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
+    terms = barrier_terms(product)
+    terminal = _terminal_event(product, cal, env, origin, fixing_time)
+    events = [terminal]
+    obs = product.observation_type
+    if obs == ObservationType.CONTINUOUS:
+        return events, terms
+    if obs == ObservationType.EXPIRY:
+        return events, None
+    schedule = product.observation_schedule
+    if schedule is None or not schedule.records:
+        raise ValidationError("discrete barrier monitoring needs an ObservationSchedule")
+    no_touch = isinstance(product, OneTouchOption) and product.is_no_touch
+    resolved = schedule.resolve(pricing_env=env, default_barrier=terms.level,
+                                default_payoff=0.0 if no_touch else float(terms.hit_cash or 0.0),
+                                require_single=True, product=product)
+    kind = EventKind.KO if terms.is_knock_out else EventKind.KI
+    for i, (src, rec) in enumerate(zip(schedule.records, resolved)):
+        ts, date_only = _instant(cal, timestamp=src.observation_timestamp, dt=rec.observation_date, tau=rec.observation_time,
+                                 origin=origin, fixing_time=fixing_time, what=f"{kind.value}[{i}]")
+        if terms.pays_at_hit:
+            pay = _payment(cal, timestamp=src.settlement_timestamp, dt=rec.settlement_date, tau=rec.settlement_time,
+                           origin=origin, fallback=ts)
+        else:
+            pay = max(terminal.payment_timestamp, ts, key=to_utc)
+        cash = (0.0 if no_touch else float(rec.payoff)) if kind is EventKind.KO else None
+        events.append(ContractEvent.make(kind, i, ts, pay, rec.barrier, cash, date_only))
+    return events, None
+
+
 def resolve_timeline(product, session_calendar: TradingSessionCalendar, template_env: PricingEnvironment, *,
                      fixing_time_of_day: Optional[time] = None,
                      schedule_origin: Optional[datetime] = None) -> ContractTimeline:
     """Resolve every contractual event of ``product`` to aware instants (the product is not mutated)."""
+    from quantark.asset.equity.product.option.barrier_option import BarrierOption
     from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
     from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
     if schedule_origin is not None:
@@ -293,7 +358,11 @@ def resolve_timeline(product, session_calendar: TradingSessionCalendar, template
     if fixing_time_of_day is not None and not isinstance(fixing_time_of_day, time):
         raise ValidationError("fixing_time_of_day must be a datetime.time")
     env = _schedule_env(product, template_env)
-    if type(product) is PhoenixOption:
+    continuous_barrier = None
+    if type(product) in (BarrierOption, OneTouchOption):
+        events, continuous_barrier = _barrier_events(product, session_calendar, env, schedule_origin, fixing_time_of_day)
+        continuous = None
+    elif type(product) is PhoenixOption:
         events, continuous = _autocallable_events(product, session_calendar, env, schedule_origin, fixing_time_of_day, True)
     elif type(product) is SnowballOption:
         events, continuous = _autocallable_events(product, session_calendar, env, schedule_origin, fixing_time_of_day, False)
@@ -312,4 +381,4 @@ def resolve_timeline(product, session_calendar: TradingSessionCalendar, template
         tenor = float(product.get_contract_tenor(env))
     else:
         tenor = float(product.get_maturity(env))
-    return ContractTimeline(tuple(events), initial_ts, tenor, continuous, schedule_origin)
+    return ContractTimeline(tuple(events), initial_ts, tenor, continuous, schedule_origin, continuous_barrier)

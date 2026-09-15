@@ -16,19 +16,20 @@ from quantark.intraday.capability import engine_class_path, require_capability
 from quantark.intraday.context import resolve_context
 from quantark.intraday.engines import route_for
 from quantark.intraday.events import EventKind
+from quantark.intraday.provisional import ASSUMED
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.intraday.result import CashflowComponent, IntradayValuationResult
 from quantark.intraday.twin import event_for_cashflow
 from quantark.util.numerical import is_close
 
-_LIFECYCLE_FIELDS = ("alive", "knocked_in", "knocked_out", "matured", "coupon_memory_count")
+_LIFECYCLE_FIELDS = ("alive", "knocked_in", "knocked_out", "matured", "expired", "coupon_memory_count")
 #: Route methods that never call the engine; there is nothing for the kernel to re-dispatch.
 _ENGINE_FREE_METHODS = ("terminated", "deterministic_zero_variance")
 _PARITY_TOL = 1e-12
 
 
 def _monitoring(ctx) -> str:
-    if ctx.timeline.continuous_ki_barrier is not None:
+    if ctx.timeline.continuous_ki_barrier is not None or ctx.timeline.continuous_barrier is not None:
         return "continuous"
     if all(e.kind is EventKind.TERMINAL for e in ctx.timeline.events):
         return "terminal"
@@ -36,8 +37,10 @@ def _monitoring(ctx) -> str:
 
 
 def _cashflow_origin(cf, ctx):
-    """(event_id, provenance) of a ledger flow: provisional iff its event was determined by an assumption."""
-    event = event_for_cashflow(cf, ctx.timeline)
+    """(event_id, provenance) of a ledger flow: provisional iff an assumption determined it."""
+    if cf.metadata.get(ASSUMED):
+        return None, "provisional"        # a continuous-barrier hit assumed at the valuation instant
+    event = event_for_cashflow(cf, ctx.timeline, ctx.request.session_calendar.tz)
     if event is None:
         return None, "confirmed"          # carried in from the authoritative checkpoint
     assumed = {eid for a in ctx.reconstruction.assumptions for eid in a.event_ids}
@@ -71,7 +74,7 @@ def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -
             else:
                 cashflows.append(CashflowComponent("paid", float(cf.amount), provenance, event_id=event_id,
                                                    cashflow_id=cf.cashflow_id, payment_tau=float(cf.payment_time)))
-    lifecycle = {k: getattr(state, k) for k in _LIFECYCLE_FIELDS} if state is not None else {}
+    lifecycle = {k: getattr(state, k) for k in _LIFECYCLE_FIELDS if hasattr(state, k)} if state is not None else {}
     return IntradayValuationResult(
         price=price, contingent_pv=outcome.contingent_pv, pending_receivable_pv=pending_pv,
         paid_cash=ctx.numerical.paid_cash, units="price_per_contract", valuation_timestamp=ctx.valuation_timestamp,

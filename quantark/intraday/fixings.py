@@ -49,6 +49,6 @@ class ContinuousHistoryAssumption:
     inclusive rule and, if it breaches, the hit is assumed at that instant.
     """
 
-    uncovered_from: datetime
+    uncovered_from: Optional[datetime]   # None: unknown since inception (no checkpoint, no initial instant)
     uncovered_to: datetime
     assumed_hit_at: Optional[datetime]
