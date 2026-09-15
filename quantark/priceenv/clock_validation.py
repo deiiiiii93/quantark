@@ -15,6 +15,9 @@ def validate_trading_clock_configuration(env) -> None:
         obj = getattr(env, name, None)
         clock = getattr(obj, "clock", None)
         if clock is None:
+            # TradingClockVolSurface carries its clock on the time map, not on itself
+            clock = getattr(getattr(obj, "time_map", None), "clock", None)
+        if clock is None:
             continue
         if clock.days_per_year != env.bus_days_in_year:
             raise ValidationError(
