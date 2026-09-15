@@ -166,3 +166,34 @@ def test_extra_times_at_the_endpoints_are_rejected():
     with pytest.raises(ValidationError):
         GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None,
                     hard_upper=None, event_times=(), extra_times=(1.0,))
+
+
+def test_scaled_fill_is_flagged_and_warned(caplog):
+    """A request over max_steps is delivered with less fill than asked for;
+    the layout must say so, not just shrink quietly."""
+    import logging
+
+    events = tuple(np.linspace(1e-4, 99e-4, 99))
+    with caplog.at_level(logging.WARNING, logger="quantark.asset.equity.engine.pde.grid.time"):
+        tl = build_time(req(tau=1.0, events=events), CFG(max_steps=100))
+    assert tl.fill_scaled
+    assert tl.actual_steps < tl.requested_steps
+    assert not tl.cap_exceeded
+    message = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    assert str(tl.requested_steps) in message and str(tl.actual_steps) in message
+
+
+def test_fill_under_the_cap_is_not_flagged(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="quantark.asset.equity.engine.pde.grid.time"):
+        tl = build_time(req(), CFG())
+    assert not tl.fill_scaled
+    assert tl.actual_steps == tl.requested_steps
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_mandatory_overflow_is_also_a_scaled_fill():
+    events = tuple(np.linspace(0.001, 0.999, 400))
+    tl = build_time(req(events=events), CFG(max_steps=100))
+    assert tl.cap_exceeded and tl.fill_scaled

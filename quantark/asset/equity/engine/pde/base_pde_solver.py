@@ -152,6 +152,12 @@ class LifeSurfaceSolution(NamedTuple):
     ``t0_readout`` is the smooth valuation-date column for the alive surface
     when the valuation date itself carries events (the same column
     ``calculate_greeks`` reads), which is now ``v0[:, 0]``; else ``None``.
+
+    ``requested_steps`` / ``actual_steps`` / ``fill_scaled`` are the time
+    layout's own: a surface asks for one interval per observation and per
+    simulation day, so ``max_steps`` bites it long before it bites a single
+    pricing, and a caller comparing this surface with fresh solves has to
+    know when the fill it asked for was not the fill it got.
     """
 
     t: np.ndarray
@@ -162,6 +168,9 @@ class LifeSurfaceSolution(NamedTuple):
     step_of: Dict[float, int]
     t0_readout: Optional[np.ndarray]
     knocked_in_at_valuation: bool
+    requested_steps: int
+    actual_steps: int
+    fill_scaled: bool
 
 
 class PDESessionOutputs(NamedTuple):

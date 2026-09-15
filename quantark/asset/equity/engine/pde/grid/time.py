@@ -36,6 +36,12 @@ class TimeLayout:
     requested_steps: int
     actual_steps: int
     cap_exceeded: bool
+    #: True whenever fewer steps were delivered than ``steps_per_day`` asked
+    #: for: the extras were scaled into ``max_steps`` (``cap_exceeded`` stays
+    #: False) or the mandatory nodes alone overflowed it (``cap_exceeded``
+    #: True).  A refinement ladder that does not check this refines space
+    #: while time stays put.
+    fill_scaled: bool = False
 
     def step_at(self, obs_time: float) -> int:
         """Node index for an event-bearing time.
@@ -95,6 +101,13 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
             fill = 1 + np.floor(
                 extras.astype(float) * (budget / total_extras)
             ).astype(int)
+        logger.warning(
+            "time grid: %d requested steps scaled to %d by max_steps=%d; "
+            "raise GridConfig(max_steps=...) for the requested fill",
+            requested,
+            int(fill.sum()),
+            cap,
+        )
 
     # Nodes via linspace (exact endpoints); dt as the CONSTRUCTED constant
     # per interval, not np.diff(t): interior linspace spacings wobble by an
@@ -146,4 +159,5 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
         requested_steps=requested,
         actual_steps=n_steps,
         cap_exceeded=cap_exceeded,
+        fill_scaled=n_steps < requested,
     )
