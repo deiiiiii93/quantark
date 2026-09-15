@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
+from quantark.intraday.session import TradingSession, TradingSessionCalendar
 from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
 from quantark.asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
@@ -22,6 +23,13 @@ SHANGHAI = timezone(timedelta(hours=8))  # fixed offset: no tz database needed
 @pytest.fixture(scope="session")
 def sse_calendar():
     return create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+
+
+@pytest.fixture(scope="session")
+def sse_sessions(sse_calendar):
+    return TradingSessionCalendar(name="SSE", tz=SHANGHAI, calendar=sse_calendar,
+                                  sessions=(TradingSession(time(9, 30), time(11, 30)),
+                                            TradingSession(time(13, 0), time(15, 0))))
 
 
 def flat_env(valuation, spot=100.0, vol=0.20, r=0.03, q=0.01, spot_ts=None):
