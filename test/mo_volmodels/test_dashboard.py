@@ -959,6 +959,8 @@ def test_real_artifacts_produce_the_expected_dashboard_state():
     Every number here is a claim the design makes.  If scoping regresses,
     this fails rather than the page quietly lying.
 
+    Re-dated 2026-09-15 for the completed fleet; see the counts below.
+
     Re-dated from 2026-08-03: G2's delta facet is no longer VOID.  3fbbf21
     voided it because the gate's own MC delta reference carried a sigma of
     0.41-0.51 futures contracts against a 0.1-contract bound, so it could not
@@ -979,14 +981,26 @@ def test_real_artifacts_produce_the_expected_dashboard_state():
     assert g1["freshness"] != "void", "f97fba3 must not reach G1"
 
     assert doc["fleet"]["expected_cells"] == 162
-    # 27 STALE, not fresh: every flat_bsm cell is dated no later than
-    # 2026-08-03 01:55 while f97fba3 (13:39), 3fbbf21 (15:17) and ec20db9
-    # (15:45) all touch declared FLEET dependencies.  Coverage counts
-    # fresh + stale precisely so this reads 27 rather than 0.
-    assert doc["fleet"]["counts"]["stale"] == 27
+    # 154 STALE, not fresh: every cell predates commits that touch declared
+    # FLEET dependencies (f97fba3, 3fbbf21, ec20db9), and coverage counts
+    # fresh + stale precisely so this reads 154 rather than 0.
+    #
+    # Re-dated from 2026-08-25, where this read 27 stale and 8 void: the
+    # fleet has since run the remaining 135 cells, so the grid is complete
+    # at 154 + 8 = 162 and nothing is missing any more.  The 8 are no
+    # longer VOID but FAILED, and they are a refusal rather than a crash:
+    # heston and heston_slv on the four shortest-dated inceptions
+    # (2024-08-01, -09-02, -10-08, -11-01) cannot meet the spatial
+    # resolution target -- achieved spacing 0.0066-0.0074 against an
+    # eps_crit of 0.0030 -- so the preflight declines to produce
+    # under-resolved evidence.  Pinned rather than waved through: those
+    # eight need more grid points, and this is where that stays visible.
+    assert doc["fleet"]["counts"]["stale"] == 154
     assert doc["fleet"]["counts"]["fresh"] == 0
-    assert doc["fleet"]["counts"]["void"] == 8
-    assert doc["fleet"]["admitted"] == 27
+    assert doc["fleet"]["counts"]["void"] == 0
+    assert doc["fleet"]["counts"]["failed"] == 8
+    assert doc["fleet"]["counts"]["missing"] == 0
+    assert doc["fleet"]["admitted"] == 154
     # "fleet", not G2 or G5: all four gates now pass -- G5's sweep found
     # 14,084 operating points and no under-resolved grid -- so the first
     # unsatisfied node in G1 -> G4 -> G2 -> G5 -> fleet -> aggregate is the
