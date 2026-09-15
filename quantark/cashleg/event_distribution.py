@@ -55,6 +55,11 @@ class EventDistribution:
         Dict[EventType, Union[tuple[datetime, ...], datetime]]
     ] = None
     mc_ko_times: Optional[np.ndarray] = None
+    # Such events retain trigger probabilities, but their settlement requires a
+    # joint timing distribution or the engine's expected-cashflow ledger.
+    path_dependent_payment_events: frozenset[EventType] = field(
+        default_factory=frozenset
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event_times", np.asarray(self.event_times, dtype=float))
@@ -176,9 +181,10 @@ class EventDistribution:
                 and stats.coupon_probability.size == n_ko
                 and ledger_payment_times.size >= 2 * n_ko + 1
             ):
-                payment_times[EventType.COUPON] = ledger_payment_times[
-                    n_ko : 2 * n_ko
-                ]
+                if not stats.coupon_payment_is_path_dependent:
+                    payment_times[EventType.COUPON] = ledger_payment_times[
+                        n_ko : 2 * n_ko
+                    ]
                 next_index = 2 * n_ko
             terminal_payment_time = float(ledger_payment_times[-1])
             payment_times[EventType.MATURITY_NO_KO] = terminal_payment_time
@@ -196,7 +202,10 @@ class EventDistribution:
                 payment_dates[EventType.KO] = tuple(
                     ledger_payment_dates[:n_ko]
                 )
-                if next_index == 2 * n_ko:
+                if (
+                    next_index == 2 * n_ko
+                    and EventType.COUPON in payment_times
+                ):
                     payment_dates[EventType.COUPON] = tuple(
                         ledger_payment_dates[n_ko:next_index]
                     )
@@ -214,6 +223,12 @@ class EventDistribution:
             survival_probability=survival,
             payment_times=payment_times,
             payment_dates=payment_dates or None,
+            path_dependent_payment_events=(
+                frozenset({EventType.COUPON})
+                if isinstance(stats, PhoenixEventStats)
+                and stats.coupon_payment_is_path_dependent
+                else frozenset()
+            ),
         )
         return dist.normalized()
 
@@ -221,8 +236,13 @@ class EventDistribution:
         self,
         event_type: EventType,
     ) -> Union[np.ndarray, float]:
-        """Return payment timing, falling back to determination timing."""
+        """Return fixed payment timing, or reject path-dependent settlement."""
 
+        if event_type in self.path_dependent_payment_events:
+            raise NotImplementedError(
+                f"{event_type.value} payment timing is path-dependent; "
+                "use the engine's expected-cashflow ledger"
+            )
         if event_type in self.payment_times:
             return self.payment_times[event_type]
         probability = self.probabilities.get(event_type)
@@ -272,6 +292,7 @@ class EventDistribution:
             payment_times=self.payment_times,
             payment_dates=self.payment_dates,
             mc_ko_times=self.mc_ko_times,
+            path_dependent_payment_events=self.path_dependent_payment_events,
         )
 
     def _validate_invariants(self) -> None:

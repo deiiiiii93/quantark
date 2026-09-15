@@ -2,6 +2,7 @@
 Equity pricing parameters.
 """
 from .engine_params import EngineParams, MCParams, PDEParams, QuadParams, BumpConfig
+from .quad_v2_params import QuadV2Params
 from .engine_param_profiles import (
     ENGINE_PARAM_PRESETS,
     list_param_profiles,
@@ -15,6 +16,7 @@ __all__ = [
     'MCParams',
     'PDEParams',
     'QuadParams',
+    'QuadV2Params',
     'BumpConfig',
     'ENGINE_PARAM_PRESETS',
     'list_param_profiles',

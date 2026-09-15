@@ -1,0 +1,250 @@
+{
+  "metadata": {
+    "date": "2026-09-11T14:56:05.618371+08:00",
+    "python": "3.11.8 (main, Feb 26 2024, 15:36:12) [Clang 14.0.6 ]",
+    "numpy": "2.4.6",
+    "source_sha256": {
+      "example/quad_v2_validation/families.py": "095cc717ca55652874ecbad158073fae1ff782b0b5cbba2ff8301f9586d188c4",
+      "quantark/asset/equity/engine/quad/v2/__init__.py": "9c7f58227244cc5efc705cd75db5c9a51a751710589cd5c2fe7b898bff5ba3ee",
+      "quantark/asset/equity/engine/quad/v2/adapters.py": "e66cc8fcf5e73664594221ba879213952eea47d8f84523fccda4222c6a85a8d0",
+      "quantark/asset/equity/engine/quad/v2/basis.py": "8f62a0363916d7b122ad089987acaecae0743765abeaec52fe27e363c8516fb4",
+      "quantark/asset/equity/engine/quad/v2/context.py": "f2652e5b90eb6ea62a768406396d1f9e8bba14f3e1a2ff5333ddc3994d8d69c9",
+      "quantark/asset/equity/engine/quad/v2/continuous.py": "3f1964f34350dc169e785c35ca788f6ea7f922ea986b30ffef90b629b132ba88",
+      "quantark/asset/equity/engine/quad/v2/contract.py": "7a30451d024363db9313db02e3aa2049deaccfb1378b8099d5683b542ab8a302",
+      "quantark/asset/equity/engine/quad/v2/direct.py": "8c0273056d0d8372599c926387fe22a3a3700d2c1b0d8412b925fe0470b40628",
+      "quantark/asset/equity/engine/quad/v2/engine.py": "20234f087119b739a949a24d95f58beb3af87a4c6d85381943494b6dd6dc2bf0",
+      "quantark/asset/equity/engine/quad/v2/execution_adapter.py": "0128adeb625e62a3483fbcbcd2c2701f81f23df263e7a2c86c980480553fa326",
+      "quantark/asset/equity/engine/quad/v2/fft.py": "893d8a62feecba684db1efb1b9fc656370455f8c9fa54a6314a74e593619d571",
+      "quantark/asset/equity/engine/quad/v2/gaussian.py": "95d64d7213bbb3cd7daf26192a088d501eb0d731142f653561a0b26a42bfd508",
+      "quantark/asset/equity/engine/quad/v2/operator.py": "4564bfc136ebf7682842cb4c000b082252a57abf1743161ee73bf8cac98800c8",
+      "quantark/asset/equity/param/quad_v2_params.py": "d19609fcaf699ef2780d3b445a6beb49964eb2bc872a52cd03b11303fcc87093"
+    },
+    "scope": "Independent path transitions using QuantArk contractual schedule and payoff amounts; intervals are across eight independent scrambles."
+  },
+  "results": [
+    {
+      "name": "phoenix_reverseFalse_memoryFalse_expiryFalse_continuousFalse",
+      "mc": {
+        "mean": 94.31345881968149,
+        "half95": 0.003588860505839374,
+        "lo95": 94.30986995917564,
+        "hi95": 94.31704768018733,
+        "paths": 524288,
+        "replicates": [
+          94.31969825732784,
+          94.3177189030684,
+          94.30665498408464,
+          94.31378667996057,
+          94.31438811556575,
+          94.3125169253648,
+          94.31425718517185,
+          94.30864950690807
+        ]
+      },
+      "standard": {
+        "price": 94.31138829068195,
+        "delta": 0.5344533268960666,
+        "gamma": -0.02555790354146252
+      },
+      "fine": {
+        "price": 94.31138829068173,
+        "delta": 0.5344533268960657,
+        "gamma": -0.025557903541462024
+      },
+      "inside95": true,
+      "refinement_gap": -2.1316282072803006e-13
+    },
+    {
+      "name": "phoenix_reverseFalse_memoryTrue_expiryFalse_continuousFalse",
+      "mc": {
+        "mean": 94.83326658163836,
+        "half95": 0.0037515945161722677,
+        "lo95": 94.82951498712218,
+        "hi95": 94.83701817615453,
+        "paths": 524288,
+        "replicates": [
+          94.84016596420912,
+          94.83777778596973,
+          94.82635111843192,
+          94.83313122008656,
+          94.8344548219416,
+          94.82937619519438,
+          94.83434101011272,
+          94.83053453716076
+        ]
+      },
+      "standard": {
+        "price": 94.83152563748413,
+        "delta": 0.5023960088723942,
+        "gamma": -0.02486795970734515
+      },
+      "fine": {
+        "price": 94.83152563748426,
+        "delta": 0.5023960088723812,
+        "gamma": -0.024867959707345205
+      },
+      "inside95": true,
+      "refinement_gap": 1.2789769243681803e-13
+    },
+    {
+      "name": "phoenix_reverseFalse_memoryTrue_expiryTrue_continuousFalse",
+      "mc": {
+        "mean": 94.81418452158637,
+        "half95": 0.0037486627749073716,
+        "lo95": 94.81043585881146,
+        "hi95": 94.81793318436128,
+        "paths": 524288,
+        "replicates": [
+          94.8210813770605,
+          94.8187001405567,
+          94.80727327693398,
+          94.81403991414213,
+          94.81536377588765,
+          94.81030300713792,
+          94.81525085084564,
+          94.81146383012641
+        ]
+      },
+      "standard": {
+        "price": 94.81243830620032,
+        "delta": 0.5029007343775624,
+        "gamma": -0.02481933399110038
+      },
+      "fine": {
+        "price": 94.81243830620043,
+        "delta": 0.502900734377549,
+        "gamma": -0.02481933399110045
+      },
+      "inside95": true,
+      "refinement_gap": 1.1368683772161603e-13
+    },
+    {
+      "name": "phoenix_reverseTrue_memoryTrue_expiryFalse_continuousFalse",
+      "mc": {
+        "mean": 92.9714841958445,
+        "half95": 0.0059421321840347026,
+        "lo95": 92.96554206366046,
+        "hi95": 92.97742632802853,
+        "paths": 524288,
+        "replicates": [
+          92.95685957238658,
+          92.96786506412394,
+          92.97561978435087,
+          92.97006992305903,
+          92.97342002285822,
+          92.97119330362449,
+          92.98034957775596,
+          92.97649631859689
+        ]
+      },
+      "standard": {
+        "price": 92.97418031290611,
+        "delta": -0.6667773656811409,
+        "gamma": -0.02345508659120758
+      },
+      "fine": {
+        "price": 92.97418031290574,
+        "delta": -0.6667773656811149,
+        "gamma": -0.023455086591205355
+      },
+      "inside95": true,
+      "refinement_gap": -3.694822225952521e-13
+    },
+    {
+      "name": "phoenix_reverseFalse_memoryTrue_expiryTrue_continuousTrue",
+      "mc": {
+        "mean": 94.20510143278216,
+        "half95": 0.002326674258248709,
+        "lo95": 94.20277475852392,
+        "hi95": 94.2074281070404,
+        "paths": 524288,
+        "replicates": [
+          94.20684373934758,
+          94.20468209207692,
+          94.20127310222041,
+          94.20157159714518,
+          94.20715226238168,
+          94.20623152869717,
+          94.20920561473608,
+          94.20385152565217
+        ]
+      },
+      "standard": {
+        "price": 94.20430261997772,
+        "delta": 0.525676129316654,
+        "gamma": -0.02388779318854933
+      },
+      "fine": {
+        "price": 94.20430261997711,
+        "delta": 0.5256761293166491,
+        "gamma": -0.02388779318854873
+      },
+      "inside95": true,
+      "refinement_gap": -6.110667527536862e-13
+    },
+    {
+      "name": "reset_continuousFalse",
+      "mc": {
+        "mean": 94.015543918668,
+        "half95": 0.010620897712082593,
+        "lo95": 94.00492302095591,
+        "hi95": 94.02616481638009,
+        "paths": 524288,
+        "replicates": [
+          94.00461572081967,
+          94.01438711724263,
+          94.00517901952392,
+          94.02018133566435,
+          94.04095811183922,
+          94.00119374672559,
+          94.01726284790956,
+          94.02057344961906
+        ]
+      },
+      "standard": {
+        "price": 94.0097581528439,
+        "delta": 0.5446560287519658,
+        "gamma": -0.023740621546340025
+      },
+      "fine": {
+        "price": 94.0097581528434,
+        "delta": 0.5446560287519793,
+        "gamma": -0.023740621546339775
+      },
+      "inside95": true,
+      "refinement_gap": -4.973799150320701e-13
+    },
+    {
+      "name": "reset_continuousTrue",
+      "mc": {
+        "mean": 93.4789225985708,
+        "half95": 0.01377442233339783,
+        "lo95": 93.4651481762374,
+        "hi95": 93.4926970209042,
+        "paths": 524288,
+        "replicates": [
+          93.46356589858604,
+          93.47506902085402,
+          93.5059764459871,
+          93.47788361386947,
+          93.45312640847767,
+          93.48629248123122,
+          93.49277366667786,
+          93.47669325288308
+        ]
+      },
+      "standard": {
+        "price": 93.48331372604636,
+        "delta": 0.559658519722083,
+        "gamma": -0.022025317765462377
+      },
+      "fine": {
+        "price": 93.4833137260463,
+        "delta": 0.5596585197220207,
+        "gamma": -0.02202531776545774
+      },
+      "inside95": true,
+      "refinement_gap": -5.684341886080802e-14
+    }
+  ]
+}
