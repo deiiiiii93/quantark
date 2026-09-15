@@ -1,0 +1,1126 @@
+{
+  "metadata": {
+    "date": "2026-09-11T11:10:16.093025",
+    "git_head": "d926e1f54f4392a296cbbacc03c3bb232550bba5",
+    "python": "3.11.8 (main, Feb 26 2024, 15:36:12) [Clang 14.0.6 ]",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "thread_env": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "args": {
+      "phase": "controls",
+      "only": "",
+      "out": "example/gaussian_quad_comparison/results",
+      "power": 18,
+      "replicates": 8
+    },
+    "sha256": {
+      "example/gaussian_quad_comparison/contracts.py": "57ce49e908dc1f282d164ffe360f3fff4c3e576ab72162c9fbeeb7e5895add2d",
+      "example/gaussian_quad_comparison/quad_reference_snapshot.py": "70938c07768f0512765bed99ca9d2c50dd561bb649fe595ebda90bbe3d090ac7",
+      "example/gaussian_quad_comparison/study.py": "cb69f46e0efee43a63a0331225faca865493b01729a38e630bc8a5e328cc95ef",
+      "quantark/asset/equity/engine/quad/quad_adapters.py": "34adb6481fb214c826b0d8cd11a83fef74e79d71a3c91d2f467d197a3f2a04d0",
+      "quantark/asset/equity/engine/quad/quad_core.py": "c2fe64c6b40e397e719ab2be0f25cc50994d752a2d8d44756313e5613d733f83",
+      "quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py": "14b0ff79208573704d8f721522194f6bf38e230a6e6fca50c54b2b4372d72937",
+      "quantark/asset/equity/engine/quad/snowball_quad_engine.py": "bae744b06c51a8d727d57d035d30f321f58e698dba29e76484001b06ce9f69b8",
+      "quantark/asset/equity/engine/quad/european_quad_engine.py": "82a6cebe23880c89224d6185365a7ff66b4d5a0c712119cdec92999beb978fd1",
+      "quantark/asset/equity/engine/quad/__init__.py": "fbbdf49babb80717b25930be94dd181910edf6fbe92691e6703b6c26cc026f58",
+      "quantark/asset/equity/engine/quad/phoenix_quad_engine.py": "9d5c3916d64313bde4ff2eba454832e711aa804b413a42b7c1b19b5985cbcdb1",
+      "quantark/asset/equity/engine/quad/quad_math.py": "eb6e220982a9ea85562894b3bcbd37ccff418d6e10295175ffc5a2af425eda3c",
+      "quantark/asset/equity/engine/quad/discrete_quad_engine.py": "3cd9977fdbf7496a832feb5a0e80b6fdea2198c94e414929533ee22f7572a836",
+      "quantark/asset/equity/engine/quad/term_inputs.py": "4bd0c4e2ac4e50bf19ac80166b607f0624a81723d737e53d277efb9714a85297",
+      "quantark/asset/equity/engine/base_engine.py": "c0f42613f0215972d2f8eabd3c897dfdf4514a8992663bc1e3d38b59b669e633",
+      "quantark/asset/equity/param/engine_params.py": "7a1a1fefa3744d0c501f9c6fc2d013668da01be757071ee9c065ee08dfaef117"
+    }
+  },
+  "results": [
+    {
+      "case": {
+        "name": "vanilla_put_-0.02",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": -0.02,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.0,
+        "ki": 75.0,
+        "ko_times": [
+          1.0
+        ],
+        "ko_levels": [
+          100000000.0
+        ],
+        "ki_times": [
+          1.0
+        ],
+        "already_ki": true,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 0.0,
+      "exact_price": -9.60356674641924,
+      "exact_delta": 0.5147653282800216,
+      "reference": {
+        "price": [
+          -9.603566746419242
+        ],
+        "delta": [
+          0.5147653282800223
+        ],
+        "cells": 40,
+        "nodes": 320,
+        "h": 0.1,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.006393708288669586
+      },
+      "panel": {
+        "price": -9.603566746419238,
+        "delta": 0.5147653282800222,
+        "settings": {
+          "n_grid": 400,
+          "n_gl": 240
+        },
+        "elapsed_s": 0.005906540900468826
+      },
+      "quantark": {
+        "price": -9.603585413579605,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.001": {
+            "down": -9.655160567161273,
+            "up": -9.552207498813166,
+            "delta": 0.5147653417405351,
+            "gamma": -0.019723881522892835
+          },
+          "0.0001": {
+            "down": -9.608734050752197,
+            "up": -9.598438748799026,
+            "delta": 0.5147650976585538,
+            "gamma": -0.019723920132719286
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.02823329111561179
+      }
+    },
+    {
+      "case": {
+        "name": "vanilla_put_0.0",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.0,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.0,
+        "ki": 75.0,
+        "ko_times": [
+          1.0
+        ],
+        "ko_levels": [
+          100000000.0
+        ],
+        "ki_times": [
+          1.0
+        ],
+        "already_ki": true,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 0.0,
+      "exact_price": -8.433318690109608,
+      "exact_delta": 0.4752845054691464,
+      "reference": {
+        "price": [
+          -8.433318690109603
+        ],
+        "delta": [
+          0.47528450546914686
+        ],
+        "cells": 40,
+        "nodes": 320,
+        "h": 0.1,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.005927292164415121
+      },
+      "panel": {
+        "price": -8.433318690109603,
+        "delta": 0.47528450546914675,
+        "settings": {
+          "n_grid": 400,
+          "n_gl": 240
+        },
+        "elapsed_s": 0.005740125197917223
+      },
+      "quantark": {
+        "price": -8.433337356765175,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.001": {
+            "down": -8.480964453843955,
+            "up": -8.385907498516985,
+            "delta": 0.4752847766348456,
+            "gamma": -0.019723883058908594
+          },
+          "0.0001": {
+            "down": -8.438091186659456,
+            "up": -8.42858549926282,
+            "delta": 0.47528436983181876,
+            "gamma": -0.019723919244540866
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.02786608273163438
+      }
+    },
+    {
+      "case": {
+        "name": "vanilla_put_0.03",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.0,
+        "ki": 75.0,
+        "ko_times": [
+          1.0
+        ],
+        "ko_levels": [
+          100000000.0
+        ],
+        "ki_times": [
+          1.0
+        ],
+        "already_ki": true,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 0.0,
+      "exact_price": -6.866891205286137,
+      "exact_delta": 0.4165538547213927,
+      "reference": {
+        "price": [
+          -6.866891205286132
+        ],
+        "delta": [
+          0.4165538547213929
+        ],
+        "cells": 40,
+        "nodes": 320,
+        "h": 0.1,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.006105916108936071
+      },
+      "panel": {
+        "price": -6.86689120528613,
+        "delta": 0.4165538547213927,
+        "settings": {
+          "n_grid": 400,
+          "n_gl": 240
+        },
+        "elapsed_s": 0.00520379189401865
+      },
+      "quantark": {
+        "price": -6.866909524456199,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.001": {
+            "down": -6.908661762034351,
+            "up": -6.825350861990683,
+            "delta": 0.4165545002183402,
+            "gamma": -0.01935751126351803
+          },
+          "0.0001": {
+            "down": -6.871076030947525,
+            "up": -6.862744953719049,
+            "delta": 0.41655386142380735,
+            "gamma": -0.019357541756193086
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.026205166708678007
+      }
+    },
+    {
+      "case": {
+        "name": "vanilla_put_0.1",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.1,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.0,
+        "ki": 75.0,
+        "ko_times": [
+          1.0
+        ],
+        "ko_levels": [
+          100000000.0
+        ],
+        "ki_times": [
+          1.0
+        ],
+        "already_ki": true,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 0.0,
+      "exact_price": -4.03466164007914,
+      "exact_delta": 0.2882625994992622,
+      "reference": {
+        "price": [
+          -4.034661640079136
+        ],
+        "delta": [
+          0.28826259949926203
+        ],
+        "cells": 40,
+        "nodes": 320,
+        "h": 0.1,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.005896249786019325
+      },
+      "panel": {
+        "price": -4.034661640079135,
+        "delta": 0.2882625994992619,
+        "settings": {
+          "n_grid": 400,
+          "n_gl": 240
+        },
+        "elapsed_s": 0.005513375159353018
+      },
+      "quantark": {
+        "price": -4.034677704422081,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.001": {
+            "down": -4.063588981273228,
+            "up": -4.0059361928983765,
+            "delta": 0.2882639418742583,
+            "gamma": -0.016976532744283897
+          },
+          "0.0001": {
+            "down": -4.037561182163802,
+            "up": -4.0317959243346495,
+            "delta": 0.28826289145764683,
+            "gamma": -0.016976542900337677
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.028662499971687794
+      }
+    },
+    {
+      "case": {
+        "name": "one_event_74.99",
+        "spot": 74.99,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          1.0
+        ],
+        "ko_levels": [
+          103.0
+        ],
+        "ki_times": [
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 0.0,
+      "exact_price": -11.471781580465535,
+      "exact_delta": 1.3719134515292895,
+      "reference": {
+        "price": [
+          -11.47178158046551
+        ],
+        "delta": [
+          1.3719134518326273
+        ],
+        "cells": 41,
+        "nodes": 328,
+        "h": 0.09947023542064323,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.00627916632220149
+      },
+      "panel": {
+        "price": -11.471781580465505,
+        "delta": 1.371913451832627,
+        "settings": {
+          "n_grid": 400,
+          "n_gl": 240
+        },
+        "elapsed_s": 0.0056114583276212215
+      },
+      "quantark": {
+        "price": -11.471795296679485,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.001": {
+            "down": -11.574782802007261,
+            "up": -11.36902435575721,
+            "delta": 1.3719058957864478,
+            "gamma": -0.038510607566608644
+          },
+          "0.0001": {
+            "down": -11.48208432422871,
+            "up": -11.461508434785086,
+            "delta": 1.3719088840927893,
+            "gamma": -0.03851079912000633
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.027660374995321035
+      }
+    },
+    {
+      "case": {
+        "name": "one_event_90.0",
+        "spot": 90.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          1.0
+        ],
+        "ko_levels": [
+          103.0
+        ],
+        "ki_times": [
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 0.0,
+      "exact_price": 3.8383872539486745,
+      "exact_delta": 0.6570649545631665,
+      "reference": {
+        "price": [
+          3.838387253948683
+        ],
+        "delta": [
+          0.6570649543459244
+        ],
+        "cells": 42,
+        "nodes": 336,
+        "h": 0.09569820525717394,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.006061957683414221
+      },
+      "panel": {
+        "price": 3.838387253948684,
+        "delta": 0.6570649543459243,
+        "settings": {
+          "n_grid": 400,
+          "n_gl": 240
+        },
+        "elapsed_s": 0.0056901657953858376
+      },
+      "quantark": {
+        "price": 3.8383393780377126,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.001": {
+            "down": 3.7790240555699963,
+            "up": 3.897296147525821,
+            "delta": 0.6570671775323605,
+            "gamma": -0.04426579995157287
+          },
+          "0.0001": {
+            "down": 3.8324239999704655,
+            "up": 3.844251170568686,
+            "delta": 0.6570650332344828,
+            "gamma": -0.04426587992178713
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.027189208194613457
+      }
+    },
+    {
+      "case": {
+        "name": "one_event_100.0",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          1.0
+        ],
+        "ko_levels": [
+          103.0
+        ],
+        "ki_times": [
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 0.0,
+      "exact_price": 8.492731405751163,
+      "exact_delta": 0.3047121018067145,
+      "reference": {
+        "price": [
+          8.49273140575119
+        ],
+        "delta": [
+          0.3047121015121467
+        ],
+        "cells": 40,
+        "nodes": 320,
+        "h": 0.1,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.006480500102043152
+      },
+      "panel": {
+        "price": 8.492731405751188,
+        "delta": 0.3047121015121468,
+        "settings": {
+          "n_grid": 400,
+          "n_gl": 240
+        },
+        "elapsed_s": 0.005678832996636629
+      },
+      "quantark": {
+        "price": 8.492693532300398,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.001": {
+            "down": 8.462091809739183,
+            "up": 8.523035130071715,
+            "delta": 0.3047166016626601,
+            "gamma": -0.02601247898983416
+          },
+          "0.0001": {
+            "down": 8.489645094614485,
+            "up": 8.495739368742989,
+            "delta": 0.304713706425197,
+            "gamma": -0.026012433238520316
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.027106957975775003
+      }
+    },
+    {
+      "case": {
+        "name": "one_event_103.01",
+        "spot": 103.01,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          1.0
+        ],
+        "ko_levels": [
+          103.0
+        ],
+        "ki_times": [
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 0.0,
+      "exact_price": 9.299849228343936,
+      "exact_delta": 0.23408932530213725,
+      "reference": {
+        "price": [
+          9.29984922834392
+        ],
+        "delta": [
+          0.23408932502755875
+        ],
+        "cells": 41,
+        "nodes": 328,
+        "h": 0.0985172057546245,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.006300666835159063
+      },
+      "panel": {
+        "price": 9.29984922834392,
+        "delta": 0.23408932502755875,
+        "settings": {
+          "n_grid": 400,
+          "n_gl": 240
+        },
+        "elapsed_s": 0.005688749719411135
+      },
+      "quantark": {
+        "price": 9.299816242710282,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.001": {
+            "down": 9.275590774743172,
+            "up": 9.32381876601104,
+            "delta": 0.2340937349183015,
+            "gamma": -0.021010593121728725
+          },
+          "0.0001": {
+            "down": 9.29740375657702,
+            "up": 9.302226499403513,
+            "delta": 0.23409100215962733,
+            "gamma": -0.021010530605906637
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.027595041785389185
+      }
+    },
+    {
+      "case": {
+        "name": "no_event_semigroup",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.0,
+        "ki": 75.0,
+        "ko_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "ko_levels": [
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0,
+          100000000.0
+        ],
+        "ki_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "already_ki": true,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "exact_price": -6.866891205286137,
+      "exact_delta": 0.4165538547213927,
+      "reference": {
+        "price": [
+          -6.866891205286108
+        ],
+        "delta": [
+          0.4165538547213916
+        ],
+        "cells": 140,
+        "nodes": 1120,
+        "h": 0.02857142857142857,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.00797879183664918
+      },
+      "panel": {
+        "price": -6.866891224607218,
+        "delta": 0.4165538545340945,
+        "settings": {
+          "n_grid": 1200,
+          "n_gl": 100,
+          "span": 2.5
+        },
+        "elapsed_s": 0.08196054212749004
+      },
+      "quantark": {
+        "price": -6.866909524456138,
+        "actual_grid": 4001,
+        "mode": "transition",
+        "requested_grid": 4001,
+        "bumps": {
+          "0.0001": {
+            "down": -6.871076030947463,
+            "up": -6.862744953718992,
+            "delta": 0.4165538614235409,
+            "gamma": -0.019357541791720223
+          }
+        },
+        "convergence": null,
+        "elapsed_s": 0.08082408411428332
+      }
+    },
+    {
+      "case": {
+        "name": "monthly",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "ko_levels": [
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0
+        ],
+        "ki_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 1.7763568394002505e-15,
+      "reference": {
+        "price": [
+          1.9103640029206879
+        ],
+        "delta": [
+          0.0075685523578106996
+        ],
+        "cells": 140,
+        "nodes": 1120,
+        "h": 0.02857142857142857,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.009605625178664923
+      },
+      "quantark": {
+        "price": 1.909675221114612,
+        "actual_grid": 1001,
+        "mode": "legacy_linear",
+        "requested_grid": 1001,
+        "bumps": {},
+        "convergence": null,
+        "elapsed_s": 0.005565708968788385
+      },
+      "panel": {
+        "price": 1.9103638943951498,
+        "delta": 0.007568565099982067,
+        "settings": {
+          "n_grid": 1200,
+          "n_gl": 100,
+          "span": 2.5
+        },
+        "elapsed_s": 0.1808612090535462
+      }
+    },
+    {
+      "case": {
+        "name": "lowvol_drift_domain",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.4,
+        "vol": 0.005,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "ko_levels": [
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0
+        ],
+        "ki_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": 1.7763568394002505e-15,
+      "reference": {
+        "price": [
+          11.645346402582005
+        ],
+        "delta": [
+          3.771258537092294e-15
+        ],
+        "cells": 140,
+        "nodes": 1120,
+        "h": 0.0007142857142857118,
+        "settings": {
+          "cells_per_sd": 2.0,
+          "n_q": 8,
+          "span_sd": 10.0,
+          "n_gl": 240,
+          "n_sd": 9.0
+        },
+        "elapsed_s": 0.016215417068451643
+      },
+      "quantark": {
+        "price": -30.01254614136275,
+        "actual_grid": 3639,
+        "mode": "legacy_linear",
+        "requested_grid": 1001,
+        "bumps": {},
+        "convergence": null,
+        "elapsed_s": 0.038356749806553125
+      },
+      "panel": {
+        "price": -30.012548779768757,
+        "delta": 0.6703189434142481,
+        "settings": {
+          "n_grid": 1200,
+          "n_gl": 100,
+          "span": 2.5
+        },
+        "elapsed_s": 0.1336205410771072
+      }
+    },
+    {
+      "case": {
+        "name": "zero_vol",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.0,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "ko_levels": [
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0
+        ],
+        "ki_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "contract_error": null,
+      "reference": {
+        "error": "ValueError: audit allocation guard: zero variance or near-coincident event times",
+        "elapsed_s": 6.850017234683037e-05
+      },
+      "quantark": {
+        "error": "ValidationError: volatility must be positive, got 0.0",
+        "elapsed_s": 7.900036871433258e-05
+      }
+    },
+    {
+      "case": {
+        "name": "partial_protection",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "ko_levels": [
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0
+        ],
+        "ki_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": 20.0
+      },
+      "contract_error": 1.7763568394002505e-15,
+      "reference": {
+        "error": "NotImplementedError: more than one terminal break needs sub-cell payoff sampling, which this reference does not yet build",
+        "elapsed_s": 0.000162624754011631
+      },
+      "quantark": {
+        "price": 2.594664108318184,
+        "actual_grid": 1001,
+        "mode": "legacy_linear",
+        "requested_grid": 1001,
+        "bumps": {},
+        "convergence": null,
+        "elapsed_s": 0.006008874624967575
+      },
+      "panel": {
+        "price": 2.595216724517581,
+        "delta": -0.09772915840405792,
+        "settings": {
+          "n_grid": 1200,
+          "n_gl": 100,
+          "span": 2.5
+        },
+        "elapsed_s": 0.18587550008669496
+      }
+    }
+  ]
+}

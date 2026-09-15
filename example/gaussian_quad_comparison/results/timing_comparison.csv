@@ -1,0 +1,5 @@
+scenario,qa_1001_transition_price_ms,qa_4001_transition_price_ms,qa_8001_transition_price_ms,reference_default_price_delta_ms,reference_fine_price_delta_ms
+monthly,4.85,26.31,89.13,8.62,25.43
+daily,58.04,460.01,1600.06,95.31,241.25
+aged_five_days,2.52,12.47,39.83,6.96,19.86
+three_years,15.11,72.32,247.63,13.65,49.84

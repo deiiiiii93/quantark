@@ -1,0 +1,28 @@
+{
+  "git_head": "d926e1f54f4392a296cbbacc03c3bb232550bba5",
+  "files_sha256": {
+    "accuracy.svg": "e45f8f9906744b2cf8028d514e11232a03871dc7731f244ce7de92ffead2437c",
+    "REPORT.md": "91b80057fde4b23af32cfcbcefcc477155e16c0342b1f01f2b3658dc40d21d67",
+    "accuracy.png": "689d8d73b6d0f8c586f9714949c8c4bda50dfa8255baf239be7607e2d287ec43",
+    "build_report.py": "699342e52302b80f74d79ed85fbe36353f52e82990fde5b399459964c7b4777e",
+    "extra_checks.py": "3f9edc4fc6c9af5f9834c941790a6158e632b11d01b3e63867886c10a2d9baca",
+    "contracts.py": "d29170f503a719d10922df55aeca88734868664e8b352005f0ad0f188804bf5d",
+    "performance.svg": "c25853ceb15db36e39b80be63157dbe68a89908f01edd42bc34d1c3cfe595035",
+    "performance.png": "3153c02b9cfa1938ae15a15d56f0d5819078644565716e4d1e04610585767ff0",
+    "quad_reference_snapshot.py": "70938c07768f0512765bed99ca9d2c50dd561bb649fe595ebda90bbe3d090ac7",
+    "supplement.py": "525d2a9208cbb3a9d531007c6425305393acec0cf93607fef333179bcb62e16d",
+    "study.py": "383746284e0d7dda60e0e145f67d2143e2ac0ab104b62683f0344a9831fd0a7f",
+    "results/price_comparison.csv": "edcc29a03400f7487c60a66b5375cde24960a5ee9335024fb6c80fe00cc39fc5",
+    "results/controls.json": "e34e7293304978cfec0afca6ba651e494c60cf171bc5b5e78ea83def6faa04b3",
+    "results/greeks_monthly,near_ki_above,aged_five_days,ki_ko_close.json": "af72b21dda582cb3ccb8494e1a61d1d401eb3b6a4b78704457e60e60c1b75c8f",
+    "results/edges.json": "b8560126978dc819cf9f8faf730c9bd9604b69f4c2ea0188ddc316f64e2e5691",
+    "results/extra_checks.json": "0839c00bb9e42801f577e5082f4c23a0d0969827e3a5f6997fe524f1f6cbc7e3",
+    "results/timing_comparison.csv": "234cedce057224d7d81694254021fc7a58ce426eff6c3886ab7f757d91037354",
+    "results/pytest.txt": "019b71ea97e6a66bb708b55496f4cf85fa48967cb03bdac5d03fa975ca341ae1",
+    "results/matrix.json": "ae55f82cba369db75f254d2f4f6c3147be230a65ff948da4f59de7177bf05d30",
+    "results/mc_monthly,daily,daily_high_carry,near_ki_above,aged_five_days,high_vol,step_down,ki_ko_close,ko_disabled_after_ki.json": "1fa4f031196244fd50ba480c7c3aa4682dd4028a07657bbb723aa21cca9929ed",
+    "results/diagnostics_monthly,near_ki_above,aged_five_days,high_vol,ki_ko_close.json": "3856c0068eeac26622c490b30af060d456333f2cbb60365923e5ac6e717c3fee",
+    "results/events_monthly,near_ki_above,aged_five_days.json": "63499e403b6101040a0d3c4edc6c0a9170dd0d3a264b83b7b2cd8d3d29d1821f",
+    "results/benchmark_monthly,daily,aged_five_days,three_years.json": "67398d254461eb11757c31905f3918b728f1b24eada2182d110a0972380c65a1"
+  }
+}

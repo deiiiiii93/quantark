@@ -1,0 +1,4866 @@
+{
+  "metadata": {
+    "date": "2026-09-11T11:12:18.957442",
+    "git_head": "d926e1f54f4392a296cbbacc03c3bb232550bba5",
+    "python": "3.11.8 (main, Feb 26 2024, 15:36:12) [Clang 14.0.6 ]",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "thread_env": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "args": {
+      "phase": "greeks",
+      "only": "monthly,near_ki_above,aged_five_days,ki_ko_close"
+    },
+    "sha256": {
+      "example/gaussian_quad_comparison/contracts.py": "d29170f503a719d10922df55aeca88734868664e8b352005f0ad0f188804bf5d",
+      "example/gaussian_quad_comparison/quad_reference_snapshot.py": "70938c07768f0512765bed99ca9d2c50dd561bb649fe595ebda90bbe3d090ac7",
+      "example/gaussian_quad_comparison/supplement.py": "525d2a9208cbb3a9d531007c6425305393acec0cf93607fef333179bcb62e16d",
+      "example/gaussian_quad_comparison/study.py": "cb69f46e0efee43a63a0331225faca865493b01729a38e630bc8a5e328cc95ef",
+      "quantark/asset/equity/engine/quad/quad_adapters.py": "34adb6481fb214c826b0d8cd11a83fef74e79d71a3c91d2f467d197a3f2a04d0",
+      "quantark/asset/equity/engine/quad/quad_core.py": "c2fe64c6b40e397e719ab2be0f25cc50994d752a2d8d44756313e5613d733f83",
+      "quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py": "14b0ff79208573704d8f721522194f6bf38e230a6e6fca50c54b2b4372d72937",
+      "quantark/asset/equity/engine/quad/snowball_quad_engine.py": "bae744b06c51a8d727d57d035d30f321f58e698dba29e76484001b06ce9f69b8",
+      "quantark/asset/equity/engine/quad/european_quad_engine.py": "82a6cebe23880c89224d6185365a7ff66b4d5a0c712119cdec92999beb978fd1",
+      "quantark/asset/equity/engine/quad/__init__.py": "fbbdf49babb80717b25930be94dd181910edf6fbe92691e6703b6c26cc026f58",
+      "quantark/asset/equity/engine/quad/phoenix_quad_engine.py": "9d5c3916d64313bde4ff2eba454832e711aa804b413a42b7c1b19b5985cbcdb1",
+      "quantark/asset/equity/engine/quad/quad_math.py": "eb6e220982a9ea85562894b3bcbd37ccff418d6e10295175ffc5a2af425eda3c",
+      "quantark/asset/equity/engine/quad/discrete_quad_engine.py": "3cd9977fdbf7496a832feb5a0e80b6fdea2198c94e414929533ee22f7572a836",
+      "quantark/asset/equity/engine/quad/term_inputs.py": "4bd0c4e2ac4e50bf19ac80166b607f0624a81723d737e53d277efb9714a85297",
+      "quantark/asset/equity/engine/base_engine.py": "c0f42613f0215972d2f8eabd3c897dfdf4514a8992663bc1e3d38b59b669e633",
+      "quantark/asset/equity/param/engine_params.py": "7a1a1fefa3744d0c501f9c6fc2d013668da01be757071ee9c065ee08dfaef117"
+    }
+  },
+  "results": [
+    {
+      "name": "monthly",
+      "case": {
+        "name": "monthly",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.12,
+        "ki": 75.0,
+        "ko_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "ko_levels": [
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0
+        ],
+        "ki_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "reference": {
+        "price": [
+          1.9103640029206657,
+          1.881830238050181,
+          1.8996804014017528,
+          1.9094095725777207,
+          1.9109260018224294,
+          1.9102863538674988,
+          1.9104377276334847,
+          1.9103564147452463,
+          1.9103715518526774
+        ],
+        "delta": [
+          0.007568552357755388,
+          0.05082387009316351,
+          -0.02755910133058201,
+          0.01153362159198535,
+          0.0036850451604756823,
+          0.007961394190825758,
+          0.007176526173711547,
+          0.007607799842045718,
+          0.007529313029961512
+        ],
+        "cells": 334,
+        "nodes": 4008,
+        "h": 0.014431439136847319,
+        "settings": {
+          "cells_per_sd": 4.0,
+          "n_q": 12,
+          "span_sd": 12.0,
+          "n_gl": 480,
+          "n_sd": 10.0
+        }
+      },
+      "matched_bumps": {
+        "0.01": {
+          "down": 1.881830238050181,
+          "up": 1.8996804014017528,
+          "delta": 0.008925081675785873,
+          "gamma": -0.039217366389397545,
+          "gamma_from_delta": -0.03919148571187276
+        },
+        "0.001": {
+          "down": 1.9094095725777207,
+          "up": 1.9109260018224294,
+          "delta": 0.007582146223543695,
+          "gamma": -0.03924314411811735,
+          "gamma_from_delta": -0.039242882157548335
+        },
+        "0.0001": {
+          "down": 1.9102863538674988,
+          "up": 1.9104377276334847,
+          "delta": 0.007568688299297577,
+          "gamma": -0.039243403477939864,
+          "gamma_from_delta": -0.03924340085571056
+        },
+        "1e-05": {
+          "down": 1.9103564147452463,
+          "up": 1.9103715518526774,
+          "delta": 0.007568553715531223,
+          "gamma": -0.03924340763461487,
+          "gamma_from_delta": -0.039243406042103156
+        }
+      },
+      "curve_spots": [
+        99.5,
+        99.55,
+        99.6,
+        99.64999999999999,
+        99.7,
+        99.75,
+        99.8,
+        99.85,
+        99.9,
+        99.94999999999999,
+        100.0,
+        100.05,
+        100.1,
+        100.14999999999998,
+        100.2,
+        100.25,
+        100.29999999999998,
+        100.34999999999998,
+        100.4,
+        100.44999999999999,
+        100.49999999999999
+      ],
+      "curve_reference": {
+        "price": [
+          1.901505281904883,
+          1.902861472636137,
+          1.904110471545457,
+          1.9052532776579907,
+          1.9062908928004692,
+          1.9072243215002738,
+          1.9080545708834513,
+          1.908782650571596,
+          1.9094095725777038,
+          1.9099363512009784,
+          1.9103640029206497,
+          1.910693546288828,
+          1.9109260018224132,
+          1.911062391894125,
+          1.9111037406226545,
+          1.9110510737619641,
+          1.9109054185898122,
+          1.910667803795512,
+          1.9103392593669166,
+          1.9099208164767676,
+          1.909413507368333
+        ],
+        "delta": [
+          0.028202378604492394,
+          0.02604857109128389,
+          0.02391471539857186,
+          0.021800868559015075,
+          0.019707085598729298,
+          0.017633419514635876,
+          0.015579921252421441,
+          0.013546639685064962,
+          0.011533621591986646,
+          0.009540911638815335,
+          0.007568552357756699,
+          0.005616584128623645,
+          0.0036850451604770362,
+          0.0017739714739597975,
+          -0.00011660311574115168,
+          -0.0019866470152539043,
+          -0.0038361308686945088,
+          -0.005665027572664968,
+          -0.007473312290567975,
+          -0.00926096246617934,
+          -0.011027957836578403
+        ],
+        "cells": 334,
+        "nodes": 4008,
+        "h": 0.014401272705530212,
+        "settings": {
+          "cells_per_sd": 4.0,
+          "n_q": 12,
+          "span_sd": 12.0,
+          "n_gl": 480,
+          "n_sd": 10.0
+        }
+      },
+      "curves": {
+        "legacy_linear": {
+          "curve": [
+            {
+              "spot": 99.5,
+              "price": 1.8999284889906134,
+              "delta": 0.028977259258409438,
+              "gamma": -0.043155757507970266,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.55,
+              "price": 1.9010568339899434,
+              "delta": 0.026871356765044256,
+              "gamma": -0.042757200925457935,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.6,
+              "price": 1.9021851789892734,
+              "delta": 0.024765454271679074,
+              "gamma": -0.0423586443429456,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.64999999999999,
+              "price": 1.9033135239886034,
+              "delta": 0.022659551778313893,
+              "gamma": -0.041960087760433265,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.7,
+              "price": 1.9044418689879339,
+              "delta": 0.020553649284948114,
+              "gamma": -0.04156153117792082,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.75,
+              "price": 1.905570213987264,
+              "delta": 0.018447746791582932,
+              "gamma": -0.04116297459540849,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.8,
+              "price": 1.906698558986594,
+              "delta": 0.01634184429821775,
+              "gamma": -0.04076441801289615,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.85,
+              "price": 1.907826903985924,
+              "delta": 0.014235941804852568,
+              "gamma": -0.04036586143038382,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.9,
+              "price": 1.9089552489852541,
+              "delta": 0.012130039311486788,
+              "gamma": -0.03996730484787138,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.94999999999999,
+              "price": 1.9097456320344206,
+              "delta": 0.010093062185973575,
+              "gamma": -0.03956600784744335,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.0,
+              "price": 1.909675464399641,
+              "delta": 0.008231589351451461,
+              "gamma": -0.039157732935712945,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.05,
+              "price": 1.9096052967648613,
+              "delta": 0.006370116516929876,
+              "gamma": -0.03874945802398265,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.1,
+              "price": 1.9095351291300817,
+              "delta": 0.004508643682408291,
+              "gamma": -0.038341183112252354,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.14999999999998,
+              "price": 1.909464961495302,
+              "delta": 0.002647170847887235,
+              "gamma": -0.03793290820052218,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.2,
+              "price": 1.9093947938605222,
+              "delta": 0.0007856980133645919,
+              "gamma": -0.03752463328879165,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.25,
+              "price": 1.9093246262257426,
+              "delta": -0.0010757748211569931,
+              "gamma": -0.037116358377061356,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.29999999999998,
+              "price": 1.909254458590963,
+              "delta": -0.0029372476556780488,
+              "gamma": -0.03670808346533118,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.34999999999998,
+              "price": 1.9091842909561834,
+              "delta": -0.004798720490199634,
+              "gamma": -0.03629980855360088,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.4,
+              "price": 1.9091141233214037,
+              "delta": -0.006660193324722277,
+              "gamma": -0.03589153364187036,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.44999999999999,
+              "price": 1.909043955686624,
+              "delta": -0.008521666159243333,
+              "gamma": -0.03548325873014018,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.49999999999999,
+              "price": 1.9089737880518445,
+              "delta": -0.010383138993764918,
+              "gamma": -0.035074983818409886,
+              "calculation_mode": "engine_grid"
+            }
+          ],
+          "direct": [
+            {
+              "price": 1.8999366856782252,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.8997118298018072,
+                  "up": 1.900161519070186,
+                  "delta": 0.02259745067229844,
+                  "gamma": -0.00022710999404056825
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9010662744155693,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9008414185391471,
+                  "up": 1.901291107807527,
+                  "delta": 0.022586100872920605,
+                  "gamma": -0.00022688198866242462
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9021952959478983,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9019704400714754,
+                  "up": 1.9024201293398595,
+                  "delta": 0.022574762469079725,
+                  "gamma": -0.00022665422357999728
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9033237508445475,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9030988949681376,
+                  "up": 1.9035485842365054,
+                  "delta": 0.022563435442441486,
+                  "gamma": -0.00022642673419160183
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9044516396740208,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9042267837976035,
+                  "up": 1.9046764730659735,
+                  "delta": 0.022552119777837474,
+                  "gamma": -0.00022619980817551266
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9055789630039266,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9053541071274982,
+                  "up": 1.9058037963958756,
+                  "delta": 0.02254081545751412,
+                  "gamma": -0.00022597324780082383
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.906705721401038,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9064808655246084,
+                  "up": 1.9069305547929993,
+                  "delta": 0.022529522464476523,
+                  "gamma": -0.00022574676472370589
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9078319154312875,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9076070595548684,
+                  "up": 1.9080567488232467,
+                  "delta": 0.022518240780084877,
+                  "gamma": -0.00022552065303299592
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9089575456597532,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9087326897833234,
+                  "up": 1.9091823790517002,
+                  "delta": 0.022506970389226257,
+                  "gamma": -0.00022529519229069837
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9097455735594924,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.909759641233945,
+                  "up": 1.9097315072917376,
+                  "delta": -0.0014074008107786123,
+                  "gamma": 1.4081056228959686e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.909675221114612,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9096892887890673,
+                  "up": 1.9096611548468474,
+                  "delta": -0.0014066971109949478,
+                  "gamma": 1.4066907638721204e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9096049038371665,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9096189715116085,
+                  "up": 1.909590837569396,
+                  "delta": -0.0014059941135717883,
+                  "gamma": 1.4052658288461885e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9095346216919877,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9095486893664577,
+                  "up": 1.9095205554242338,
+                  "delta": -0.0014052918193754125,
+                  "gamma": 1.4039068593315597e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9094643746440385,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.909478442318491,
+                  "up": 1.9094503083762768,
+                  "delta": -0.0014045902253682378,
+                  "gamma": 1.4024801677883784e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9093941626582465,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.909408230332702,
+                  "up": 1.9093800963904786,
+                  "delta": -0.001403889332507568,
+                  "gamma": 1.401077739976784e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9093239856996262,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9093380533740922,
+                  "up": 1.9093099194318728,
+                  "delta": -0.0014031891381274246,
+                  "gamma": 1.3997052498364093e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9092538437332753,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.909267911407729,
+                  "up": 1.9092397774655236,
+                  "delta": -0.0014024896413381862,
+                  "gamma": 1.3982994845000065e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9091837367242934,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9091978043987474,
+                  "up": 1.9091696704565393,
+                  "delta": -0.001401790842457927,
+                  "gamma": 1.3969044246491765e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9091136646378608,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9091277323123137,
+                  "up": 1.9090995983700998,
+                  "delta": -0.0014010927397362426,
+                  "gamma": 1.3955055019911837e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9090436274391955,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.909057695113651,
+                  "up": 1.9090295611714387,
+                  "delta": -0.0014003953316251588,
+                  "gamma": 1.3941234157370952e-05
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.908973625093578,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9089876927680323,
+                  "up": 1.908959558825815,
+                  "delta": -0.0013996986177728567,
+                  "gamma": 1.3927290987463977e-05
+                }
+              },
+              "convergence": null
+            }
+          ],
+          "curve_price_error_bp": 0.19397536693872564,
+          "curve_delta_error": 0.0009108721940969111,
+          "direct_price_error_bp": 0.1929526813443161,
+          "direct_delta_error": 0.01097334879723961,
+          "curve_vs_direct_price_bp": 0.0010226855944095448
+        },
+        "transition": {
+          "curve": [
+            {
+              "spot": 99.5,
+              "price": 1.8999284889906134,
+              "delta": 0.028977259258409438,
+              "gamma": -0.043155757507970266,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.55,
+              "price": 1.9010568339899434,
+              "delta": 0.026871356765044256,
+              "gamma": -0.042757200925457935,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.6,
+              "price": 1.9021851789892734,
+              "delta": 0.024765454271679074,
+              "gamma": -0.0423586443429456,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.64999999999999,
+              "price": 1.9033135239886034,
+              "delta": 0.022659551778313893,
+              "gamma": -0.041960087760433265,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.7,
+              "price": 1.9044418689879339,
+              "delta": 0.020553649284948114,
+              "gamma": -0.04156153117792082,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.75,
+              "price": 1.905570213987264,
+              "delta": 0.018447746791582932,
+              "gamma": -0.04116297459540849,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.8,
+              "price": 1.906698558986594,
+              "delta": 0.01634184429821775,
+              "gamma": -0.04076441801289615,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.85,
+              "price": 1.907826903985924,
+              "delta": 0.014235941804852568,
+              "gamma": -0.04036586143038382,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.9,
+              "price": 1.9089552489852541,
+              "delta": 0.012130039311486788,
+              "gamma": -0.03996730484787138,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.94999999999999,
+              "price": 1.9097456320344206,
+              "delta": 0.010093062185973575,
+              "gamma": -0.03956600784744335,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.0,
+              "price": 1.909675464399641,
+              "delta": 0.008231589351451461,
+              "gamma": -0.039157732935712945,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.05,
+              "price": 1.9096052967648613,
+              "delta": 0.006370116516929876,
+              "gamma": -0.03874945802398265,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.1,
+              "price": 1.9095351291300817,
+              "delta": 0.004508643682408291,
+              "gamma": -0.038341183112252354,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.14999999999998,
+              "price": 1.909464961495302,
+              "delta": 0.002647170847887235,
+              "gamma": -0.03793290820052218,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.2,
+              "price": 1.9093947938605222,
+              "delta": 0.0007856980133645919,
+              "gamma": -0.03752463328879165,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.25,
+              "price": 1.9093246262257426,
+              "delta": -0.0010757748211569931,
+              "gamma": -0.037116358377061356,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.29999999999998,
+              "price": 1.909254458590963,
+              "delta": -0.0029372476556780488,
+              "gamma": -0.03670808346533118,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.34999999999998,
+              "price": 1.9091842909561834,
+              "delta": -0.004798720490199634,
+              "gamma": -0.03629980855360088,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.4,
+              "price": 1.9091141233214037,
+              "delta": -0.006660193324722277,
+              "gamma": -0.03589153364187036,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.44999999999999,
+              "price": 1.909043955686624,
+              "delta": -0.008521666159243333,
+              "gamma": -0.03548325873014018,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.49999999999999,
+              "price": 1.9089737880518445,
+              "delta": -0.010383138993764918,
+              "gamma": -0.035074983818409886,
+              "calculation_mode": "engine_grid"
+            }
+          ],
+          "direct": [
+            {
+              "price": 1.901465746188508,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.90118290855294,
+                  "up": 1.9017443031548378,
+                  "delta": 0.028210784014967724,
+                  "gamma": -0.043237991347795095
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9028223971171883,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9025608586666527,
+                  "up": 1.9030796900547524,
+                  "delta": 0.02605883415869997,
+                  "gamma": -0.04283982059298395
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9040719487248794,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9038315324970987,
+                  "up": 1.9043081547873815,
+                  "delta": 0.023926821801344374,
+                  "gamma": -0.04244049772008322
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9052153993105827,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9049959274783617,
+                  "up": 1.9054306965130732,
+                  "delta": 0.021814803547993627,
+                  "gamma": -0.0420400627541999
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9062537499536576,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.906055043843674,
+                  "up": 1.906448317153705,
+                  "delta": 0.019722834003556525,
+                  "gamma": -0.04163855594982863
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9071880044131058,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9070098845249972,
+                  "up": 1.9073620212916498,
+                  "delta": 0.017650965746996372,
+                  "gamma": -0.041236018010428546
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9080191690258061,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9078614550515325,
+                  "up": 1.908172816067752,
+                  "delta": 0.015599249309595976,
+                  "gamma": -0.040832489907623996
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9087482526036208,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9086107634470642,
+                  "up": 1.9088817110781542,
+                  "delta": 0.013567733154233099,
+                  "gamma": -0.04042801330949256
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.909376266329489,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9092588201262986,
+                  "up": 1.9094897182701687,
+                  "delta": 0.011556463657163034,
+                  "gamma": -0.040022630347710815
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9099042236524653,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9098066377902023,
+                  "up": 1.9099978518370513,
+                  "delta": 0.00956548508499071,
+                  "gamma": -0.03961638324828711
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.910333140181789,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.910255231320315,
+                  "up": 1.9104071281117896,
+                  "delta": 0.007594839573732415,
+                  "gamma": -0.03920931473277989
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9106640335800213,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9106056176720512,
+                  "up": 1.9107185654600516,
+                  "delta": 0.005644567116462621,
+                  "gamma": -0.03880146823077912
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9108979234551864,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.910858815767232,
+                  "up": 1.9109331841720816,
+                  "delta": 0.003714705536945311,
+                  "gamma": -0.03839288642688552
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9110358312521571,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9110158463854736,
+                  "up": 1.911052006353784,
+                  "delta": 0.0018052904797953514,
+                  "gamma": -0.03798361426169733
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9110787801429638,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9110777320549737,
+                  "up": 1.9110760558169233,
+                  "delta": -8.364461329157734e-05,
+                  "gamma": -0.037573695231409444
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9110277949164982,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9110454969422692,
+                  "up": 1.9110063579685568,
+                  "delta": -0.001952068514336066,
+                  "gamma": -0.03716317356661801
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9108839018673265,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9109201667412672,
+                  "up": 1.9108439396995818,
+                  "delta": -0.0037999522275880943,
+                  "gamma": -0.03675209470298828
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9106481286836907,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.910702768561538,
+                  "up": 1.9105898292726262,
+                  "delta": -0.005627269004079372,
+                  "gamma": -0.03634050347576517
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.910321504334867,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.910394330815803,
+                  "up": 1.9102450562091895,
+                  "delta": -0.007433994353257131,
+                  "gamma": -0.035928444999247175
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.9099050589578384,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.9099958831068182,
+                  "up": 1.9098106511760595,
+                  "delta": -0.009220106060662033,
+                  "gamma": -0.0355159651052947
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": 1.909399823743226,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": 1.909508456113495,
+                  "up": 1.9092876458711325,
+                  "delta": -0.010985584197135504,
+                  "gamma": -0.03510310957009516
+                }
+              },
+              "convergence": null
+            }
+          ],
+          "curve_price_error_bp": 0.19397536693872564,
+          "curve_delta_error": 0.0009108721940969111,
+          "direct_price_error_bp": 0.00395357163749388,
+          "direct_delta_error": 4.2373639442899735e-05,
+          "curve_vs_direct_price_bp": 0.1901875321979274
+        }
+      },
+      "elapsed_s": 0.7921643750742078
+    },
+    {
+      "name": "near_ki_above",
+      "case": {
+        "name": "near_ki_above",
+        "spot": 90.018,
+        "maturity": 1.0,
+        "rate": 0.02,
+        "div": 0.14,
+        "vol": 0.26,
+        "coupon": 0.18,
+        "ki": 90.0,
+        "ko_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "ko_levels": [
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0
+        ],
+        "ki_times": [
+          0.003968253968253968,
+          0.007936507936507936,
+          0.011904761904761904,
+          0.015873015873015872,
+          0.01984126984126984,
+          0.023809523809523808,
+          0.027777777777777776,
+          0.031746031746031744,
+          0.03571428571428571,
+          0.03968253968253968,
+          0.04365079365079365,
+          0.047619047619047616,
+          0.051587301587301584,
+          0.05555555555555555,
+          0.05952380952380952,
+          0.06349206349206349,
+          0.06746031746031746,
+          0.07142857142857142,
+          0.07539682539682539,
+          0.07936507936507936,
+          0.08333333333333333,
+          0.0873015873015873,
+          0.09126984126984126,
+          0.09523809523809523,
+          0.0992063492063492,
+          0.10317460317460317,
+          0.10714285714285714,
+          0.1111111111111111,
+          0.11507936507936507,
+          0.11904761904761904,
+          0.12301587301587301,
+          0.12698412698412698,
+          0.13095238095238096,
+          0.1349206349206349,
+          0.1388888888888889,
+          0.14285714285714285,
+          0.14682539682539683,
+          0.15079365079365079,
+          0.15476190476190477,
+          0.15873015873015872,
+          0.1626984126984127,
+          0.16666666666666666,
+          0.17063492063492064,
+          0.1746031746031746,
+          0.17857142857142858,
+          0.18253968253968253,
+          0.1865079365079365,
+          0.19047619047619047,
+          0.19444444444444445,
+          0.1984126984126984,
+          0.20238095238095238,
+          0.20634920634920634,
+          0.21031746031746032,
+          0.21428571428571427,
+          0.21825396825396826,
+          0.2222222222222222,
+          0.2261904761904762,
+          0.23015873015873015,
+          0.23412698412698413,
+          0.23809523809523808,
+          0.24206349206349206,
+          0.24603174603174602,
+          0.25,
+          0.25396825396825395,
+          0.25793650793650796,
+          0.2619047619047619,
+          0.26587301587301587,
+          0.2698412698412698,
+          0.27380952380952384,
+          0.2777777777777778,
+          0.28174603174603174,
+          0.2857142857142857,
+          0.2896825396825397,
+          0.29365079365079366,
+          0.2976190476190476,
+          0.30158730158730157,
+          0.3055555555555556,
+          0.30952380952380953,
+          0.3134920634920635,
+          0.31746031746031744,
+          0.32142857142857145,
+          0.3253968253968254,
+          0.32936507936507936,
+          0.3333333333333333,
+          0.3373015873015873,
+          0.3412698412698413,
+          0.34523809523809523,
+          0.3492063492063492,
+          0.3531746031746032,
+          0.35714285714285715,
+          0.3611111111111111,
+          0.36507936507936506,
+          0.36904761904761907,
+          0.373015873015873,
+          0.376984126984127,
+          0.38095238095238093,
+          0.38492063492063494,
+          0.3888888888888889,
+          0.39285714285714285,
+          0.3968253968253968,
+          0.4007936507936508,
+          0.40476190476190477,
+          0.4087301587301587,
+          0.4126984126984127,
+          0.4166666666666667,
+          0.42063492063492064,
+          0.4246031746031746,
+          0.42857142857142855,
+          0.43253968253968256,
+          0.4365079365079365,
+          0.44047619047619047,
+          0.4444444444444444,
+          0.44841269841269843,
+          0.4523809523809524,
+          0.45634920634920634,
+          0.4603174603174603,
+          0.4642857142857143,
+          0.46825396825396826,
+          0.4722222222222222,
+          0.47619047619047616,
+          0.4801587301587302,
+          0.48412698412698413,
+          0.4880952380952381,
+          0.49206349206349204,
+          0.49603174603174605,
+          0.5,
+          0.503968253968254,
+          0.5079365079365079,
+          0.5119047619047619,
+          0.5158730158730159,
+          0.5198412698412699,
+          0.5238095238095238,
+          0.5277777777777778,
+          0.5317460317460317,
+          0.5357142857142857,
+          0.5396825396825397,
+          0.5436507936507936,
+          0.5476190476190477,
+          0.5515873015873016,
+          0.5555555555555556,
+          0.5595238095238095,
+          0.5634920634920635,
+          0.5674603174603174,
+          0.5714285714285714,
+          0.5753968253968254,
+          0.5793650793650794,
+          0.5833333333333334,
+          0.5873015873015873,
+          0.5912698412698413,
+          0.5952380952380952,
+          0.5992063492063492,
+          0.6031746031746031,
+          0.6071428571428571,
+          0.6111111111111112,
+          0.6150793650793651,
+          0.6190476190476191,
+          0.623015873015873,
+          0.626984126984127,
+          0.6309523809523809,
+          0.6349206349206349,
+          0.6388888888888888,
+          0.6428571428571429,
+          0.6468253968253969,
+          0.6507936507936508,
+          0.6547619047619048,
+          0.6587301587301587,
+          0.6626984126984127,
+          0.6666666666666666,
+          0.6706349206349206,
+          0.6746031746031746,
+          0.6785714285714286,
+          0.6825396825396826,
+          0.6865079365079365,
+          0.6904761904761905,
+          0.6944444444444444,
+          0.6984126984126984,
+          0.7023809523809523,
+          0.7063492063492064,
+          0.7103174603174603,
+          0.7142857142857143,
+          0.7182539682539683,
+          0.7222222222222222,
+          0.7261904761904762,
+          0.7301587301587301,
+          0.7341269841269841,
+          0.7380952380952381,
+          0.7420634920634921,
+          0.746031746031746,
+          0.75,
+          0.753968253968254,
+          0.7579365079365079,
+          0.7619047619047619,
+          0.7658730158730159,
+          0.7698412698412699,
+          0.7738095238095238,
+          0.7777777777777778,
+          0.7817460317460317,
+          0.7857142857142857,
+          0.7896825396825397,
+          0.7936507936507936,
+          0.7976190476190477,
+          0.8015873015873016,
+          0.8055555555555556,
+          0.8095238095238095,
+          0.8134920634920635,
+          0.8174603174603174,
+          0.8214285714285714,
+          0.8253968253968254,
+          0.8293650793650794,
+          0.8333333333333334,
+          0.8373015873015873,
+          0.8412698412698413,
+          0.8452380952380952,
+          0.8492063492063492,
+          0.8531746031746031,
+          0.8571428571428571,
+          0.8611111111111112,
+          0.8650793650793651,
+          0.8690476190476191,
+          0.873015873015873,
+          0.876984126984127,
+          0.8809523809523809,
+          0.8849206349206349,
+          0.8888888888888888,
+          0.8928571428571429,
+          0.8968253968253969,
+          0.9007936507936508,
+          0.9047619047619048,
+          0.9087301587301587,
+          0.9126984126984127,
+          0.9166666666666666,
+          0.9206349206349206,
+          0.9246031746031746,
+          0.9285714285714286,
+          0.9325396825396826,
+          0.9365079365079365,
+          0.9404761904761905,
+          0.9444444444444444,
+          0.9484126984126984,
+          0.9523809523809523,
+          0.9563492063492064,
+          0.9603174603174603,
+          0.9642857142857143,
+          0.9682539682539683,
+          0.9722222222222222,
+          0.9761904761904762,
+          0.9801587301587301,
+          0.9841269841269841,
+          0.9880952380952381,
+          0.9920634920634921,
+          0.996031746031746,
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "reference": {
+        "price": [
+          -17.507693489177605,
+          -18.426449786247915,
+          -16.586024466504636,
+          -17.599713224160674,
+          -17.415644404485185,
+          -17.51689679652113,
+          -17.498489888314676,
+          -17.508613833133364,
+          -17.506773142286548
+        ],
+        "delta": [
+          1.022401545884034,
+          1.0187477083602823,
+          1.0251693315940265,
+          1.0220711117443042,
+          1.0227231470442346,
+          1.022368895001023,
+          1.0224341084398805,
+          1.0223982847655069,
+          1.0224048061193018
+        ],
+        "cells": 1531,
+        "nodes": 18372,
+        "h": 0.004090026386230926,
+        "settings": {
+          "cells_per_sd": 4.0,
+          "n_q": 12,
+          "span_sd": 12.0,
+          "n_gl": 480,
+          "n_sd": 10.0
+        }
+      },
+      "matched_bumps": {
+        "0.01": {
+          "down": -18.426449786247915,
+          "up": -16.586024466504636,
+          "delta": 1.022254060156457,
+          "gamma": 0.0035945195825332335,
+          "gamma_from_delta": 0.0035668550921727758
+        },
+        "0.001": {
+          "down": -17.599713224160674,
+          "up": -17.415644404485185,
+          "delta": 1.022400073737965,
+          "gamma": 0.00362197197384611,
+          "gamma_from_delta": 0.0036216939941478878
+        },
+        "0.0001": {
+          "down": -17.51689679652113,
+          "up": -17.498489888314676,
+          "delta": 1.0224015311634689,
+          "gamma": 0.0036222472841107834,
+          "gamma_from_delta": 0.0036222443765390687
+        },
+        "1e-05": {
+          "down": -17.508613833133364,
+          "up": -17.506773142286548,
+          "delta": 1.0224015456996476,
+          "gamma": 0.0036223758759925894,
+          "gamma_from_delta": 0.0036222498805654818
+        }
+      },
+      "curve_spots": [
+        89.56791,
+        89.61291899999999,
+        89.657928,
+        89.70293699999999,
+        89.747946,
+        89.79295499999999,
+        89.837964,
+        89.88297299999999,
+        89.927982,
+        89.972991,
+        90.018,
+        90.063009,
+        90.10801799999999,
+        90.15302699999998,
+        90.198036,
+        90.243045,
+        90.28805399999999,
+        90.33306299999998,
+        90.378072,
+        90.423081,
+        90.46808999999999
+      ],
+      "curve_reference": {
+        "price": [
+          -17.96748343279833,
+          -17.92154012274556,
+          -17.875588647581406,
+          -17.829629092696617,
+          -17.78366154508683,
+          -17.737686093365134,
+          -17.691702827773586,
+          -17.6457118401944,
+          -17.59971322416065,
+          -17.553707074866626,
+          -17.50769348917758,
+          -17.461672565638743,
+          -17.415644404485157,
+          -17.369609107649648,
+          -17.32356677877168,
+          -17.277517523205432,
+          -17.2314614480279,
+          -17.185398662046754,
+          -17.139329275807924,
+          -17.093253401603526,
+          -17.04717115347962
+        ],
+        "delta": [
+          1.0206669651001328,
+          1.0208493125181526,
+          1.0210297804797122,
+          1.0212083334656403,
+          1.0213849356777023,
+          1.0215595510511681,
+          1.0217321432669395,
+          1.021902675762792,
+          1.022071111744301,
+          1.0222374141946733,
+          1.02240154588403,
+          1.0225634693778434,
+          1.0227231470442315,
+          1.0228805410607784,
+          1.0230356134200844,
+          1.023188325934524,
+          1.0233386402400513,
+          1.0234865177989128,
+          1.0236319199016504,
+          1.023774807667887,
+          1.0239151420463486
+        ],
+        "cells": 1527,
+        "nodes": 18324,
+        "h": 0.004094008970188473,
+        "settings": {
+          "cells_per_sd": 4.0,
+          "n_q": 12,
+          "span_sd": 12.0,
+          "n_gl": 480,
+          "n_sd": 10.0
+        }
+      },
+      "curves": {
+        "legacy_linear": {
+          "curve": [
+            {
+              "spot": 89.56791,
+              "price": -17.968013288539492,
+              "delta": 1.0206093308273994,
+              "gamma": 0.003992830431797787,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.61291899999999,
+              "price": -17.92204853761702,
+              "delta": 1.0207840670047919,
+              "gamma": 0.003946909496319531,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.657928,
+              "price": -17.876083786694533,
+              "delta": 1.0209588031821843,
+              "gamma": 0.0039009885608412604,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.70293699999999,
+              "price": -17.830119035772064,
+              "delta": 1.0211335393595768,
+              "gamma": 0.0038550676253630042,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.747946,
+              "price": -17.784154284849578,
+              "delta": 1.0213082755369696,
+              "gamma": 0.0038091466898847333,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.79295499999999,
+              "price": -17.738189533927105,
+              "delta": 1.021483011714362,
+              "gamma": 0.003763225754406477,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.837964,
+              "price": -17.69222478300462,
+              "delta": 1.0216577478917546,
+              "gamma": 0.0037173048189282068,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.88297299999999,
+              "price": -17.646260032082147,
+              "delta": 1.021832484069147,
+              "gamma": 0.0036713838834499506,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.927982,
+              "price": -17.60029528115966,
+              "delta": 1.0220072202465398,
+              "gamma": 0.00362546294797168,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.972991,
+              "price": -17.55433053023719,
+              "delta": 1.0221819564239323,
+              "gamma": 0.003579542012493424,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.018,
+              "price": -17.508327777521497,
+              "delta": 1.0223447640493404,
+              "gamma": 0.0035297880108216204,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.063009,
+              "price": -17.462268003115113,
+              "delta": 1.022489672882496,
+              "gamma": 0.0034742824933264374,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.10801799999999,
+              "price": -17.41620822870873,
+              "delta": 1.0226345817156515,
+              "gamma": 0.003418776975831254,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.15302699999998,
+              "price": -17.37014845430235,
+              "delta": 1.0227794905488068,
+              "gamma": 0.0033632714583360706,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.198036,
+              "price": -17.324088679895937,
+              "delta": 1.0229243993819626,
+              "gamma": 0.0033077659408408525,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.243045,
+              "price": -17.278028905489553,
+              "delta": 1.0230693082151179,
+              "gamma": 0.003252260423345669,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.28805399999999,
+              "price": -17.23196913108317,
+              "delta": 1.0232142170482734,
+              "gamma": 0.003196754905850486,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.33306299999998,
+              "price": -17.185909356676785,
+              "delta": 1.023359125881429,
+              "gamma": 0.003141249388355303,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.378072,
+              "price": -17.139849582270372,
+              "delta": 1.0235040347145845,
+              "gamma": 0.0030857438708600847,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.423081,
+              "price": -17.093789807863992,
+              "delta": 1.02364894354774,
+              "gamma": 0.0030302383533649013,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.46808999999999,
+              "price": -17.047730033457608,
+              "delta": 1.0237938523808954,
+              "gamma": 0.0029747328358697184,
+              "calculation_mode": "engine_grid"
+            }
+          ],
+          "direct": [
+            {
+              "price": -17.967631057376856,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.97679260409917,
+                  "up": -17.95847042676343,
+                  "delta": 1.0228092480744646,
+                  "gamma": -0.01141937187211784
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.921606998949212,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.930768545671505,
+                  "up": -17.912446368335768,
+                  "delta": 1.022295531726665,
+                  "gamma": -0.011407903274851453
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.875606050770273,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.88476759749244,
+                  "up": -17.86644542015674,
+                  "delta": 1.0217823311565477,
+                  "gamma": -0.011396449779874196
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.829628189642758,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.838789736365108,
+                  "up": -17.820467559029296,
+                  "delta": 1.0212696455976307,
+                  "gamma": -0.011385019306351423
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.783673392404474,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.792834939126767,
+                  "up": -17.774512761790984,
+                  "delta": 1.020757474259238,
+                  "gamma": -0.011373601834046267
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.737741635927833,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.74690318265015,
+                  "up": -17.72858100531437,
+                  "delta": 1.020245816377206,
+                  "gamma": -0.011362203245562882
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.691832897120136,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.700994443842504,
+                  "up": -17.68267226650672,
+                  "delta": 1.0197346711788178,
+                  "gamma": -0.011350822312831766
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.64594715292346,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.655108699645794,
+                  "up": -17.63678652231001,
+                  "delta": 1.0192240378933002,
+                  "gamma": -0.011339456493396545
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.60008438031428,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.609245927036596,
+                  "up": -17.590923749700824,
+                  "delta": 1.0187139157516198,
+                  "gamma": -0.011328108219121622
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.55424455630377,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.563406103026097,
+                  "up": -17.545083925690367,
+                  "delta": 1.018204303985493,
+                  "gamma": -0.011316777981068152
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.50826919134139,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.517509983247272,
+                  "up": -17.49902932346853,
+                  "delta": 1.0264980214369424,
+                  "gamma": -0.01140325331373013
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.462079088612278,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.471319880518024,
+                  "up": -17.452839220739335,
+                  "delta": 1.0259850289195227,
+                  "gamma": -0.011391855935400205
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.415912063627122,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.42515285553299,
+                  "up": -17.40667219575426,
+                  "delta": 1.025472548887266,
+                  "gamma": -0.011380480796284275
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.369768093336997,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.379008885242868,
+                  "up": -17.360528225464158,
+                  "delta": 1.02496058056432,
+                  "gamma": -0.01136912050322869
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.323647154727627,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.332887946633466,
+                  "up": -17.314407286854756,
+                  "delta": 1.0244491231887887,
+                  "gamma": -0.011357776120496807
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.277549224818873,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.286790016724712,
+                  "up": -17.268309356945995,
+                  "delta": 1.0239381759955721,
+                  "gamma": -0.011346449406057953
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.2314742806653,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.240715072571092,
+                  "up": -17.22223441279239,
+                  "delta": 1.0234277382201116,
+                  "gamma": -0.0113351387550691
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.185422299355388,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.194663091261255,
+                  "up": -17.176182431482545,
+                  "delta": 1.022917809103305,
+                  "gamma": -0.011323847706493402
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.13939325801224,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.148634049918122,
+                  "up": -17.130153390139352,
+                  "delta": 1.0224083878869732,
+                  "gamma": -0.011312571390717152
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.093387133792977,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.102627925698826,
+                  "up": -17.08414726592009,
+                  "delta": 1.0218994738044278,
+                  "gamma": -0.011301311953095245
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.04740390388878,
+              "actual_grid": 1111,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.05664469579463,
+                  "up": -17.03816403601589,
+                  "delta": 1.0213910661064105,
+                  "gamma": -0.01129006957704404
+                }
+              },
+              "convergence": null
+            }
+          ],
+          "curve_price_error_bp": 0.0634288343917433,
+          "curve_delta_error": 0.00012788518706585705,
+          "direct_price_error_bp": 0.05757021638110871,
+          "direct_delta_error": 0.00409647555291226,
+          "curve_vs_direct_price_bp": 0.049485041786923034
+        },
+        "transition": {
+          "curve": [
+            {
+              "spot": 89.56791,
+              "price": -17.968013288539492,
+              "delta": 1.0206093308273994,
+              "gamma": 0.003992830431797787,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.61291899999999,
+              "price": -17.92204853761702,
+              "delta": 1.0207840670047919,
+              "gamma": 0.003946909496319531,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.657928,
+              "price": -17.876083786694533,
+              "delta": 1.0209588031821843,
+              "gamma": 0.0039009885608412604,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.70293699999999,
+              "price": -17.830119035772064,
+              "delta": 1.0211335393595768,
+              "gamma": 0.0038550676253630042,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.747946,
+              "price": -17.784154284849578,
+              "delta": 1.0213082755369696,
+              "gamma": 0.0038091466898847333,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.79295499999999,
+              "price": -17.738189533927105,
+              "delta": 1.021483011714362,
+              "gamma": 0.003763225754406477,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.837964,
+              "price": -17.69222478300462,
+              "delta": 1.0216577478917546,
+              "gamma": 0.0037173048189282068,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.88297299999999,
+              "price": -17.646260032082147,
+              "delta": 1.021832484069147,
+              "gamma": 0.0036713838834499506,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.927982,
+              "price": -17.60029528115966,
+              "delta": 1.0220072202465398,
+              "gamma": 0.00362546294797168,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.972991,
+              "price": -17.55433053023719,
+              "delta": 1.0221819564239323,
+              "gamma": 0.003579542012493424,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.018,
+              "price": -17.508327777521497,
+              "delta": 1.0223447640493404,
+              "gamma": 0.0035297880108216204,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.063009,
+              "price": -17.462268003115113,
+              "delta": 1.022489672882496,
+              "gamma": 0.0034742824933264374,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.10801799999999,
+              "price": -17.41620822870873,
+              "delta": 1.0226345817156515,
+              "gamma": 0.003418776975831254,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.15302699999998,
+              "price": -17.37014845430235,
+              "delta": 1.0227794905488068,
+              "gamma": 0.0033632714583360706,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.198036,
+              "price": -17.324088679895937,
+              "delta": 1.0229243993819626,
+              "gamma": 0.0033077659408408525,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.243045,
+              "price": -17.278028905489553,
+              "delta": 1.0230693082151179,
+              "gamma": 0.003252260423345669,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.28805399999999,
+              "price": -17.23196913108317,
+              "delta": 1.0232142170482734,
+              "gamma": 0.003196754905850486,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.33306299999998,
+              "price": -17.185909356676785,
+              "delta": 1.023359125881429,
+              "gamma": 0.003141249388355303,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.378072,
+              "price": -17.139849582270372,
+              "delta": 1.0235040347145845,
+              "gamma": 0.0030857438708600847,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.423081,
+              "price": -17.093789807863992,
+              "delta": 1.02364894354774,
+              "gamma": 0.0030302383533649013,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.46808999999999,
+              "price": -17.047730033457608,
+              "delta": 1.0237938523808954,
+              "gamma": 0.0029747328358697184,
+              "calculation_mode": "engine_grid"
+            }
+          ],
+          "direct": [
+            {
+              "price": -17.96814587260188,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.977287894463228,
+                  "up": -17.95900352609631,
+                  "delta": 1.0206986166651055,
+                  "gamma": 0.0040467166638273955
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.922201163851405,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.93134940471738,
+                  "up": -17.913052601552586,
+                  "delta": 1.0208797664985414,
+                  "gamma": 0.004002662768195925
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.87624834658354,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.885402790194266,
+                  "up": -17.86709358481588,
+                  "delta": 1.0210589173099478,
+                  "gamma": 0.003957892540689857
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.83028751149889,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.839448141278346,
+                  "up": -17.821126566903498,
+                  "delta": 1.02123603683391,
+                  "gamma": 0.003912401227897732
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.784318750748888,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.793485549804274,
+                  "up": -17.775151640283045,
+                  "delta": 1.0214110928638,
+                  "gamma": 0.003866198564853786
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.738342157931505,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.747515109054188,
+                  "up": -17.72916889886861,
+                  "delta": 1.0215840533133527,
+                  "gamma": 0.0038192833220737194
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.69235782808767,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.701536913753106,
+                  "up": -17.683178438017173,
+                  "delta": 1.0217548861600096,
+                  "gamma": 0.0037716559058462774
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.64636585769828,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.655551060065836,
+                  "up": -17.63718035452547,
+                  "delta": 1.0219235594469362,
+                  "gamma": 0.0037233217361214437
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.600366344680687,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.609557645593917,
+                  "up": -17.591174746626976,
+                  "delta": 1.0220900412810767,
+                  "gamma": 0.003674278964688554
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.55435938838696,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.563556769373285,
+                  "up": -17.545161713990087,
+                  "delta": 1.022254299804172,
+                  "gamma": 0.0036245275522210096
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.508345089602372,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.517548531872794,
+                  "up": -17.499141357716454,
+                  "delta": 1.022416303202734,
+                  "gamma": 0.0035740701799489485
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.46232355054416,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.471533034992564,
+                  "up": -17.45311378034048,
+                  "delta": 1.0225760196444276,
+                  "gamma": 0.003522908381727283
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.41629487486154,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.42551038206468,
+                  "up": -17.407079085829302,
+                  "delta": 1.0227334173179352,
+                  "gamma": 0.003471034673749635
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.3702591676369,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.379480677852847,
+                  "up": -17.36103737958374,
+                  "delta": 1.0228884643611864,
+                  "gamma": 0.003418454368071297
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.32421653538767,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.333444028555157,
+                  "up": -17.314988768440976,
+                  "delta": 1.0230411288656165,
+                  "gamma": 0.0033651645043701025
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.27816708606875,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.287400541805884,
+                  "up": -17.26893336067682,
+                  "delta": 1.0231913788516815,
+                  "gamma": 0.00331116379398158
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.232110929077084,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.241350326679825,
+                  "up": -17.222871266010745,
+                  "delta": 1.0233391822288955,
+                  "gamma": 0.0032564498223828257
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.186048175256076,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.195293493696745,
+                  "up": -17.176802595610557,
+                  "delta": 1.0234845067850975,
+                  "gamma": 0.003201015397629824
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.139978936902693,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.149230154827777,
+                  "up": -17.130727462099163,
+                  "delta": 1.0236273201653285,
+                  "gamma": 0.0031448614920136174
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.09390332777441,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.103160423502384,
+                  "up": -17.08464597956265,
+                  "delta": 1.0237675898110943,
+                  "gamma": 0.0030879829060285087
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -17.047821463097815,
+              "actual_grid": 1111,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -17.057084414616984,
+                  "up": -17.03855826355847,
+                  "delta": 1.0239052829850201,
+                  "gamma": 0.0030303735514280753
+                }
+              },
+              "convergence": null
+            }
+          ],
+          "curve_price_error_bp": 0.0634288343917433,
+          "curve_delta_error": 0.00012788518706585705,
+          "direct_price_error_bp": 0.06624398035519619,
+          "direct_delta_error": 3.1651564972756674e-05,
+          "curve_vs_direct_price_bp": 0.01684757268272108
+        }
+      },
+      "elapsed_s": 28.79859537491575
+    },
+    {
+      "name": "aged_five_days",
+      "case": {
+        "name": "aged_five_days",
+        "spot": 90.018,
+        "maturity": 0.01984126984126984,
+        "rate": 0.02,
+        "div": 0.14,
+        "vol": 0.26,
+        "coupon": 0.18,
+        "ki": 90.0,
+        "ko_times": [
+          0.01984126984126984
+        ],
+        "ko_levels": [
+          103.0
+        ],
+        "ki_times": [
+          0.003968253968253968,
+          0.007936507936507936,
+          0.011904761904761904,
+          0.015873015873015872,
+          0.01984126984126984
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.9801587301587301,
+        "loss_cap": null
+      },
+      "reference": {
+        "price": [
+          -4.563212311934943,
+          -8.380593688013755,
+          0.053327220356392376,
+          -4.992414684953915,
+          -4.125654143989946,
+          -4.606520759211403,
+          -4.519820269070551,
+          -4.5675469306853795,
+          -4.558876857224408
+        ],
+        "delta": [
+          4.815744466784499,
+          3.585498585491331,
+          5.281947091032442,
+          4.718851327240138,
+          4.904414087993893,
+          4.806416819175904,
+          4.824989817359064,
+          4.814815397021929,
+          4.816672713570636
+        ],
+        "cells": 221,
+        "nodes": 2652,
+        "h": 0.004078610911525667,
+        "settings": {
+          "cells_per_sd": 4.0,
+          "n_q": 12,
+          "span_sd": 12.0,
+          "n_gl": 480,
+          "n_sd": 10.0
+        }
+      },
+      "matched_bumps": {
+        "0.01": {
+          "down": -8.380593688013755,
+          "up": 0.053327220356392376,
+          "delta": 4.684574700821029,
+          "gamma": 0.9862204800289499,
+          "gamma_from_delta": 0.9422829353802078
+        },
+        "0.001": {
+          "down": -4.992414684953915,
+          "up": -4.125654143989946,
+          "delta": 4.814373463995917,
+          "gamma": 1.0311671124051993,
+          "gamma_from_delta": 1.030698086792392
+        },
+        "0.0001": {
+          "down": -4.606520759211403,
+          "up": -4.519820269070551,
+          "delta": 4.815730750563882,
+          "gamma": 1.031631601549884,
+          "gamma_from_delta": 1.0316269070164203
+        },
+        "1e-05": {
+          "down": -4.5675469306853795,
+          "up": -4.558876857224408,
+          "delta": 4.815744329451847,
+          "gamma": 1.0316368083044505,
+          "gamma_from_delta": 1.031636199819246
+        }
+      },
+      "curve_spots": [
+        89.56791,
+        89.61291899999999,
+        89.657928,
+        89.70293699999999,
+        89.747946,
+        89.79295499999999,
+        89.837964,
+        89.88297299999999,
+        89.927982,
+        89.972991,
+        90.018,
+        90.063009,
+        90.10801799999999,
+        90.15302699999998,
+        90.198036,
+        90.243045,
+        90.28805399999999,
+        90.33306299999998,
+        90.378072,
+        90.423081,
+        90.46808999999999
+      ],
+      "curve_reference": {
+        "price": [
+          -6.612154553675619,
+          -6.418964163296787,
+          -6.222989582979528,
+          -6.024292453297762,
+          -5.82293865099673,
+          -5.61899815542386,
+          -5.412544902211418,
+          -5.20365662486163,
+          -4.992414684953921,
+          -4.778903891737938,
+          -4.56321231193495,
+          -4.34543107060505,
+          -4.125654143989954,
+          -3.9039781452542317,
+          -3.680502104092448,
+          -3.4553272411786766,
+          -3.2285567384528107,
+          -3.00029550624372,
+          -2.770649948230778,
+          -2.5397277252436257,
+          -2.307637518883407
+        ],
+        "delta": [
+          4.260899644453155,
+          4.323410862801754,
+          4.3846005393758265,
+          4.444373169848487,
+          4.502636071354161,
+          4.5592996725676,
+          4.614277789930852,
+          4.667487888657187,
+          4.718851327240134,
+          4.768293584308343,
+          4.815744466784494,
+          4.861138298430916,
+          4.904414087993889,
+          4.945515676295721,
+          4.984391861758123,
+          5.020996503982461,
+          5.05528860515205,
+          5.087232369162383,
+          5.116797238524314,
+          5.143957909220275,
+          5.168694323829035
+        ],
+        "cells": 219,
+        "nodes": 2628,
+        "h": 0.0040715058513891384,
+        "settings": {
+          "cells_per_sd": 4.0,
+          "n_q": 12,
+          "span_sd": 12.0,
+          "n_gl": 480,
+          "n_sd": 10.0
+        }
+      },
+      "curves": {
+        "legacy_linear": {
+          "curve": [
+            {
+              "spot": 89.56791,
+              "price": -6.611363632373292,
+              "delta": 4.25980378905417,
+              "gamma": 1.4002554091068249,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.61291899999999,
+              "price": -6.417967578991751,
+              "delta": 4.322118632295806,
+              "gamma": 1.3718578123960796,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.657928,
+              "price": -6.2225905463133,
+              "delta": 4.3835173063915445,
+              "gamma": 1.341933219455768,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.70293699999999,
+              "price": -6.023506701919426,
+              "delta": 4.443009031921133,
+              "gamma": 1.3091672841475397,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.747946,
+              "price": -5.82208597979383,
+              "delta": 4.50112550213512,
+              "gamma": 1.274631569196592,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.79295499999999,
+              "price": -5.618818349259957,
+              "delta": 4.558144386469439,
+              "gamma": 1.2386988691969714,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.837964,
+              "price": -5.411804948957672,
+              "delta": 4.612660565286221,
+              "gamma": 1.1999776679081138,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.88297299999999,
+              "price": -5.202977470103771,
+              "delta": 4.6658079631428855,
+              "gamma": 1.1599366733373848,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.927982,
+              "price": -4.992268454622571,
+              "delta": 4.717535680738914,
+              "gamma": 1.118526807833276,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.972991,
+              "price": -4.778250424627812,
+              "delta": 4.7664534630288475,
+              "gamma": 1.0747802591529598,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.018,
+              "price": -4.5627286381547805,
+              "delta": 4.813956406924954,
+              "gamma": 1.0300065440543333,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.063009,
+              "price": -4.345233920995255,
+              "delta": 4.859577089731572,
+              "gamma": 0.983891730069219,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.10801799999999,
+              "price": -4.1251247384683944,
+              "delta": 4.902395670525566,
+              "gamma": 0.9360839778639763,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.15302699999998,
+              "price": -3.903701501682314,
+              "delta": 4.943690190183222,
+              "gamma": 0.8874590633219114,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.198036,
+              "price": -3.6803058917651192,
+              "delta": 4.9826061194238935,
+              "gamma": 0.8376341268157481,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.243045,
+              "price": -3.4549530790734146,
+              "delta": 5.018857018218921,
+              "gamma": 0.7867114109372558,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.28805399999999,
+              "price": -3.228485779679998,
+              "delta": 5.053502220626827,
+              "gamma": 0.7351913675377946,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.33306299999998,
+              "price": -3.000150479775841,
+              "delta": 5.085259144902304,
+              "gamma": 0.6827322046955564,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.378072,
+              "price": -2.7704526643425713,
+              "delta": 5.1146036395415795,
+              "gamma": 0.6296863319521366,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.423081,
+              "price": -2.539846218901961,
+              "delta": 5.142288634349957,
+              "gamma": 0.576265657925768,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.46808999999999,
+              "price": -2.307588382344907,
+              "delta": 5.166584695519841,
+              "gamma": 0.5222848545605788,
+              "calculation_mode": "engine_grid"
+            }
+          ],
+          "direct": [
+            {
+              "price": -6.611344052768573,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -6.6492545096438,
+                  "up": -6.573437386749479,
+                  "delta": 4.232382049236227,
+                  "gamma": -0.047253330296145736
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -6.417939168454697,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -6.456743781600887,
+                  "up": -6.379138435575784,
+                  "delta": 4.330031143450586,
+                  "gamma": -0.04831927320313525
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -6.222582132060879,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -6.2619023369684905,
+                  "up": -6.182913629340447,
+                  "delta": 4.405004074377176,
+                  "gamma": 4.3328469746779055
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -6.023483075874133,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -6.06315554564319,
+                  "up": -5.983814573153666,
+                  "delta": 4.422428916096953,
+                  "gamma": -0.049300825866505305
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -5.822057603799839,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.862568402441307,
+                  "up": -5.781550856035654,
+                  "delta": 4.513615632253761,
+                  "gamma": -0.05029213250336357
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -5.618815643795216,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.659466001255973,
+                  "up": -5.577503275300261,
+                  "delta": 4.563984221017802,
+                  "gamma": 8.210709752867693
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -5.411777633554254,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.453094133492642,
+                  "up": -5.370465265059254,
+                  "delta": 4.59877232042948,
+                  "gamma": -0.05118963161592181
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -5.202950176118513,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.24503680163234,
+                  "up": -5.160867759056776,
+                  "delta": 4.68214611545858,
+                  "gamma": -0.05209157992842474
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.992264208526589,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.0343508340404375,
+                  "up": -4.949647874674881,
+                  "delta": 4.709488497448815,
+                  "gamma": 6.550087675553558
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.7782200087081295,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -4.82103840949912,
+                  "up": -4.735405889543211,
+                  "delta": 4.758790332751577,
+                  "gamma": -0.05289132173713978
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.562703690427716,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -4.6062129352994905,
+                  "up": -4.519198796262891,
+                  "delta": 4.833152204925677,
+                  "gamma": -0.05369095294493979
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.34522270927678,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -4.3887319541485725,
+                  "up": -4.30154713619949,
+                  "delta": 4.840212364494861,
+                  "gamma": 2.050562433190661
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.125092056604954,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -4.169248845233641,
+                  "up": -4.08093968343439,
+                  "delta": 4.9001833443529454,
+                  "gamma": -0.05438121367478158
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.9036803764838237,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.9484392670505515,
+                  "up": -3.858925961582338,
+                  "delta": 4.964520241134753,
+                  "gamma": -0.05506770400806469
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.680288045492296,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.725046936059096,
+                  "up": -3.63553363059085,
+                  "delta": 4.962042935627,
+                  "gamma": -0.05501276130174868
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.454919216920515,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.500232867205807,
+                  "up": -3.409610097773775,
+                  "delta": 5.021038985997872,
+                  "gamma": -0.05563906974772847
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.2284701525521804,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.2742895719505483,
+                  "up": -3.1826553148666497,
+                  "delta": 5.07455045403341,
+                  "gamma": -0.05620400717827653
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.0001266223373633,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.0459460417357724,
+                  "up": -2.95431178465182,
+                  "delta": 5.072022028299448,
+                  "gamma": -0.05614801350592923
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.7704189547445863,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.8166937645648313,
+                  "up": -2.7241487721740314,
+                  "delta": 5.119880870594359,
+                  "gamma": -0.05664959248793901
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.5398379441805106,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.5863104088415523,
+                  "up": -2.4931639124633036,
+                  "delta": 5.150592932032955,
+                  "gamma": 2.4652499100468606
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.307559435381562,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.3542381347353096,
+                  "up": -2.26088540366434,
+                  "delta": 5.1594286488732894,
+                  "gamma": -0.05703036969853073
+                }
+              },
+              "convergence": null
+            }
+          ],
+          "curve_price_error_bp": 0.09965843050352419,
+          "curve_delta_error": 0.0021935989827346347,
+          "direct_price_error_bp": 0.10249948420897326,
+          "direct_delta_error": 0.028517595216928093,
+          "curve_vs_direct_price_bp": 0.003386215289946648
+        },
+        "transition": {
+          "curve": [
+            {
+              "spot": 89.56791,
+              "price": -6.611363632373292,
+              "delta": 4.25980378905417,
+              "gamma": 1.4002554091068249,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.61291899999999,
+              "price": -6.417967578991751,
+              "delta": 4.322118632295806,
+              "gamma": 1.3718578123960796,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.657928,
+              "price": -6.2225905463133,
+              "delta": 4.3835173063915445,
+              "gamma": 1.341933219455768,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.70293699999999,
+              "price": -6.023506701919426,
+              "delta": 4.443009031921133,
+              "gamma": 1.3091672841475397,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.747946,
+              "price": -5.82208597979383,
+              "delta": 4.50112550213512,
+              "gamma": 1.274631569196592,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.79295499999999,
+              "price": -5.618818349259957,
+              "delta": 4.558144386469439,
+              "gamma": 1.2386988691969714,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.837964,
+              "price": -5.411804948957672,
+              "delta": 4.612660565286221,
+              "gamma": 1.1999776679081138,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.88297299999999,
+              "price": -5.202977470103771,
+              "delta": 4.6658079631428855,
+              "gamma": 1.1599366733373848,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.927982,
+              "price": -4.992268454622571,
+              "delta": 4.717535680738914,
+              "gamma": 1.118526807833276,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 89.972991,
+              "price": -4.778250424627812,
+              "delta": 4.7664534630288475,
+              "gamma": 1.0747802591529598,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.018,
+              "price": -4.5627286381547805,
+              "delta": 4.813956406924954,
+              "gamma": 1.0300065440543333,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.063009,
+              "price": -4.345233920995255,
+              "delta": 4.859577089731572,
+              "gamma": 0.983891730069219,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.10801799999999,
+              "price": -4.1251247384683944,
+              "delta": 4.902395670525566,
+              "gamma": 0.9360839778639763,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.15302699999998,
+              "price": -3.903701501682314,
+              "delta": 4.943690190183222,
+              "gamma": 0.8874590633219114,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.198036,
+              "price": -3.6803058917651192,
+              "delta": 4.9826061194238935,
+              "gamma": 0.8376341268157481,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.243045,
+              "price": -3.4549530790734146,
+              "delta": 5.018857018218921,
+              "gamma": 0.7867114109372558,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.28805399999999,
+              "price": -3.228485779679998,
+              "delta": 5.053502220626827,
+              "gamma": 0.7351913675377946,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.33306299999998,
+              "price": -3.000150479775841,
+              "delta": 5.085259144902304,
+              "gamma": 0.6827322046955564,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.378072,
+              "price": -2.7704526643425713,
+              "delta": 5.1146036395415795,
+              "gamma": 0.6296863319521366,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.423081,
+              "price": -2.539846218901961,
+              "delta": 5.142288634349957,
+              "gamma": 0.576265657925768,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 90.46808999999999,
+              "price": -2.307588382344907,
+              "delta": 5.166584695519841,
+              "gamma": 0.5222848545605788,
+              "calculation_mode": "engine_grid"
+            }
+          ],
+          "direct": [
+            {
+              "price": -6.611947702936987,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -6.650052059309126,
+                  "up": -6.573730836361346,
+                  "delta": 4.2605227110792425,
+                  "gamma": 1.4024488459739164
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -6.418774278076584,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -6.457458920708329,
+                  "up": -6.379979282110347,
+                  "delta": 4.323017231364928,
+                  "gamma": 1.3741818638735086
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -6.222817370334936,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -6.262071107973202,
+                  "up": -6.18345561354699,
+                  "delta": 4.384190900899029,
+                  "gamma": 1.3437651018063885
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -6.024138588664494,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -6.063949353891883,
+                  "up": -5.984222311539964,
+                  "delta": 4.443948270719304,
+                  "gamma": 1.3112578660976457
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -5.822803775853376,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.863158648390432,
+                  "up": -5.78234606694252,
+                  "delta": 4.502196710324263,
+                  "gamma": 1.2767260458178362
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -5.618882875095215,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.659768107779005,
+                  "up": -5.577897644507015,
+                  "delta": 4.558846697493695,
+                  "gamma": 1.2402418186320718
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -5.412449783819562,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.453850831142669,
+                  "up": -5.3709517341778605,
+                  "delta": 4.613812094228276,
+                  "gamma": 1.201883334487211
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -5.203582195438619,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.24548374452178,
+                  "up": -5.161586790431431,
+                  "delta": 4.667010407541212,
+                  "gamma": 1.1617343535601152
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.992361429721905,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -5.034747433579599,
+                  "up": -4.9498848603855645,
+                  "delta": 4.718363033768214,
+                  "gamma": 1.1198838740342898
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.778872252568406,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -4.821725965516555,
+                  "up": -4.735931401460171,
+                  "delta": 4.767795485224262,
+                  "gamma": 1.0764257279242302
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.563202685991163,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -4.606506701036049,
+                  "up": -4.519815089413194,
+                  "delta": 4.815237598194558,
+                  "gamma": 1.031458154283379
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.345443809178608,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -4.389180097217668,
+                  "up": -4.301627617624515,
+                  "delta": 4.8606237213967205,
+                  "gamma": 0.9850833520167177
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -4.125689551529808,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -4.1698395021854795,
+                  "up": -4.081463488533554,
+                  "delta": 4.903892883978713,
+                  "gamma": 0.937407023569888
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.904036478597593,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.9485809425005107,
+                  "up": -3.859419798169938,
+                  "delta": 4.94498894255501,
+                  "gamma": 0.8885379030229045
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.6805835718966677,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.7255029042289722,
+                  "up": -3.635596014740285,
+                  "delta": 4.983860706716895,
+                  "gamma": 0.8385872636748279
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.4554320035571804,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.500706108660317,
+                  "up": -3.4100937522549604,
+                  "delta": 5.020462042551671,
+                  "gamma": 0.7876684422612802
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.228684906812408,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.2742932836641443,
+                  "up": -3.1830165401867223,
+                  "delta": 5.054751954085863,
+                  "gamma": 0.7358963351810817
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -3.0004471433239703,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -3.0463689316857967,
+                  "up": -2.954469590165556,
+                  "delta": 5.086694642483269,
+                  "gamma": 0.6833868999556298
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.770825068343312,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.817039095377789,
+                  "up": -2.724559560708678,
+                  "delta": 5.116259542973609,
+                  "gamma": 0.6302566784339937
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.5399262947053978,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.586411121866941,
+                  "up": -2.49339432098114,
+                  "delta": 5.143421339834725,
+                  "gamma": 0.5766222998028084
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.3078594566384423,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.354593426640927,
+                  "up": -2.26108271456788,
+                  "delta": 5.16815995966351,
+                  "gamma": 0.5226000014254215
+                }
+              },
+              "convergence": null
+            }
+          ],
+          "curve_price_error_bp": 0.09965843050352419,
+          "curve_delta_error": 0.0021935989827346347,
+          "direct_price_error_bp": 0.02219377550352064,
+          "direct_delta_error": 0.0005377266791137814,
+          "curve_vs_direct_price_bp": 0.08066990848325517
+        }
+      },
+      "elapsed_s": 0.3465151251293719
+    },
+    {
+      "name": "ki_ko_close",
+      "case": {
+        "name": "ki_ko_close",
+        "spot": 100.0,
+        "maturity": 1.0,
+        "rate": 0.03,
+        "div": 0.01,
+        "vol": 0.2,
+        "coupon": 0.12,
+        "ki": 102.9,
+        "ko_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "ko_levels": [
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0,
+          103.0
+        ],
+        "ki_times": [
+          0.08333333333333333,
+          0.16666666666666666,
+          0.25,
+          0.3333333333333333,
+          0.4166666666666667,
+          0.5,
+          0.5833333333333334,
+          0.6666666666666666,
+          0.75,
+          0.8333333333333334,
+          0.9166666666666666,
+          1.0
+        ],
+        "already_ki": false,
+        "disable_ko_after_ki": false,
+        "principal": false,
+        "age": 0.0,
+        "loss_cap": null
+      },
+      "reference": {
+        "price": [
+          -1.912336596007089,
+          -2.4089938305055383,
+          -1.4608923407793923,
+          -1.9599861520944208,
+          -1.8651396919850438,
+          -1.9170812005751594,
+          -1.907596518012023,
+          -1.9128108527863994,
+          -1.9118623844935623
+        ],
+        "delta": [
+          0.4742341466168305,
+          0.5188466726491625,
+          0.42852606150823386,
+          0.47875507646805804,
+          0.4697021408354379,
+          0.47468674847437775,
+          0.47378143398788786,
+          0.47427941179776045,
+          0.4741888803281895
+        ],
+        "cells": 334,
+        "nodes": 4008,
+        "h": 0.014431439136847319,
+        "settings": {
+          "cells_per_sd": 4.0,
+          "n_q": 12,
+          "span_sd": 12.0,
+          "n_gl": 480,
+          "n_sd": 10.0
+        }
+      },
+      "matched_bumps": {
+        "0.01": {
+          "down": -2.4089938305055383,
+          "up": -1.4608923407793923,
+          "delta": 0.47405074486307297,
+          "gamma": -0.045212979270752296,
+          "gamma_from_delta": -0.045160305570464326
+        },
+        "0.001": {
+          "down": -1.9599861520944208,
+          "up": -1.8651396919850438,
+          "delta": 0.47423230054688514,
+          "gamma": -0.04526520652865517,
+          "gamma_from_delta": -0.04526467816310081
+        },
+        "0.0001": {
+          "down": -1.9170812005751594,
+          "up": -1.907596518012023,
+          "delta": 0.4742341281568252,
+          "gamma": -0.04526573004204337,
+          "gamma_from_delta": -0.045265724324494716
+        },
+        "1e-05": {
+          "down": -1.9128108527863994,
+          "up": -1.9118623844935623,
+          "delta": 0.47423414641856176,
+          "gamma": -0.04526578356589539,
+          "gamma_from_delta": -0.045265734785471246
+        }
+      },
+      "curve_spots": [
+        99.5,
+        99.55,
+        99.6,
+        99.64999999999999,
+        99.7,
+        99.75,
+        99.8,
+        99.85,
+        99.9,
+        99.94999999999999,
+        100.0,
+        100.05,
+        100.1,
+        100.14999999999998,
+        100.2,
+        100.25,
+        100.29999999999998,
+        100.34999999999998,
+        100.4,
+        100.44999999999999,
+        100.49999999999999
+      ],
+      "curve_reference": {
+        "price": [
+          -2.1550871963942893,
+          -2.130307233754391,
+          -2.105639034168552,
+          -2.081082768080178,
+          -2.0566386023498078,
+          -2.032306700206239,
+          -2.008087221198191,
+          -1.9839803211461051,
+          -1.9599861520944275,
+          -1.9361048622644286,
+          -1.9123365960070962,
+          -1.8886814937568066,
+          -1.8651396919850496,
+          -1.8417113231550932,
+          -1.8183965156767232,
+          -1.795195393861651,
+          -1.7721080778794818,
+          -1.7491346837140946,
+          -1.7262753231205261,
+          -1.7035301035828774,
+          -1.6808991282720513
+        ],
+        "delta": [
+          0.4967157293296168,
+          0.4944821963247955,
+          0.49224521894828793,
+          0.49000486836885093,
+          0.487761216733917,
+          0.48551433716310516,
+          0.4832643037413814,
+          0.4810111915118296,
+          0.47875507646805854,
+          0.4764960355462546,
+          0.47423414661683105,
+          0.47196948847575115,
+          0.4697021408354385,
+          0.46743218431538064,
+          0.46515970043232396,
+          0.4628847715901308,
+          0.46060748106928234,
+          0.458327913016019,
+          0.45604615243111857,
+          0.4537622851583807,
+          0.45147639787268457
+        ],
+        "cells": 334,
+        "nodes": 4008,
+        "h": 0.014401272705530212,
+        "settings": {
+          "cells_per_sd": 4.0,
+          "n_q": 12,
+          "span_sd": 12.0,
+          "n_gl": 480,
+          "n_sd": 10.0
+        }
+      },
+      "curves": {
+        "legacy_linear": {
+          "curve": [
+            {
+              "spot": 99.5,
+              "price": -2.1568096667166414,
+              "delta": 0.49653558333827985,
+              "gamma": -0.04455453617908373,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.55,
+              "price": -2.132062128078245,
+              "delta": 0.49430270657975006,
+              "gamma": -0.044622545837891,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.6,
+              "price": -2.1073145894398486,
+              "delta": 0.4920698298212202,
+              "gamma": -0.044690555496698266,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.64999999999999,
+              "price": -2.0825670508014524,
+              "delta": 0.48983695306269043,
+              "gamma": -0.04475856515550554,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.7,
+              "price": -2.0578195121630487,
+              "delta": 0.48760407630416,
+              "gamma": -0.04482657481431282,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.75,
+              "price": -2.0330719735246525,
+              "delta": 0.4853711995456302,
+              "gamma": -0.044894584473120086,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.8,
+              "price": -2.0083244348862563,
+              "delta": 0.48313832278710034,
+              "gamma": -0.04496259413192735,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.85,
+              "price": -1.9838792472817455,
+              "delta": 0.4808974582510814,
+              "gamma": -0.045026521791207225,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.9,
+              "price": -1.960490666664042,
+              "delta": 0.47862867933555486,
+              "gamma": -0.045076184345567864,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.94999999999999,
+              "price": -1.937102086046352,
+              "delta": 0.4763599004200297,
+              "gamma": -0.045125846899928476,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.0,
+              "price": -1.9137135054286487,
+              "delta": 0.47409112150450317,
+              "gamma": -0.04517550945428911,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.05,
+              "price": -1.890324924810952,
+              "delta": 0.4718223425889773,
+              "gamma": -0.045225172008649735,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.1,
+              "price": -1.8669363441932552,
+              "delta": 0.46955356367345147,
+              "gamma": -0.04527483456301036,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.14999999999998,
+              "price": -1.843547763575565,
+              "delta": 0.46728478475792623,
+              "gamma": -0.045324497117370965,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.2,
+              "price": -1.8201591829578552,
+              "delta": 0.4650160058423991,
+              "gamma": -0.04537415967173162,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.25,
+              "price": -1.7967706023401584,
+              "delta": 0.46274722692687326,
+              "gamma": -0.045423822226092245,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.29999999999998,
+              "price": -1.7733820217224685,
+              "delta": 0.460478448011348,
+              "gamma": -0.04547348478045285,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.34999999999998,
+              "price": -1.7499934411047717,
+              "delta": 0.45820966909582217,
+              "gamma": -0.045523147334813475,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.4,
+              "price": -1.7266048604870616,
+              "delta": 0.455940890180295,
+              "gamma": -0.04557280988917413,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.44999999999999,
+              "price": -1.7033901192787337,
+              "delta": 0.4536690828733191,
+              "gamma": -0.04561983927567961,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.49999999999999,
+              "price": -1.6813872105293772,
+              "delta": 0.45137616468549,
+              "gamma": -0.04564851288032598,
+              "calculation_mode": "engine_grid"
+            }
+          ],
+          "direct": [
+            {
+              "price": -2.1565885872861936,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.1615154730704007,
+                  "up": -2.1516621941659295,
+                  "delta": 0.49513964344076306,
+                  "gamma": -0.004976277800810667
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.1318378234608577,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.1367647092450692,
+                  "up": -2.126911430340594,
+                  "delta": 0.49489095451909504,
+                  "gamma": -0.00497128033316917
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.107099487837813,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.112026373622029,
+                  "up": -2.102173094717563,
+                  "delta": 0.49464251528443054,
+                  "gamma": -0.004966290524219337
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.0823735679420854,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.0873004537262987,
+                  "up": -2.0774471748218257,
+                  "delta": 0.49439432536241656,
+                  "gamma": -0.004961307915717044
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.0576600513174506,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.06258693710165,
+                  "up": -2.0527336581971785,
+                  "delta": 0.49414638437671154,
+                  "gamma": -0.0049563326633022
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.0329589255264326,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.037885811310641,
+                  "up": -2.0280325324061645,
+                  "delta": 0.49389869195370995,
+                  "gamma": -0.004951365283486639
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.008270178150266,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.0131970639344705,
+                  "up": -2.0033437850300073,
+                  "delta": 0.49365124771859675,
+                  "gamma": -0.004946405291939523
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.9838637912878652,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.9885483370819617,
+                  "up": -1.9791797139249163,
+                  "delta": 0.46913486014248085,
+                  "gamma": -0.004698396093377213
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.9604129193942774,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.9650974651883846,
+                  "up": -1.9557288420313346,
+                  "delta": 0.4689000579104106,
+                  "gamma": -0.004693694338003412
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.9369737817378223,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.9416583275319284,
+                  "up": -1.9322897043748855,
+                  "delta": 0.4686654905974437,
+                  "gamma": -0.004688999519140819
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.913546366581301,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.9182309123754087,
+                  "up": -1.9088622892183607,
+                  "delta": 0.4684311578524003,
+                  "gamma": -0.004684311671887542
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.8901306622051604,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8948152079992522,
+                  "up": -1.8854465848422235,
+                  "delta": 0.4681970593217735,
+                  "gamma": -0.004679630749106216
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.8667266569073777,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8714112027014782,
+                  "up": -1.8620425795444393,
+                  "delta": 0.4679631946572878,
+                  "gamma": -0.004674957031796659
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.8433343390035064,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8480188847975978,
+                  "up": -1.8386502616405593,
+                  "delta": 0.467729563506663,
+                  "gamma": -0.004670290064834452
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.8199536968265257,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8246382426206205,
+                  "up": -1.8152696194635718,
+                  "delta": 0.4674961655213908,
+                  "gamma": -0.004665630224236618
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7965847187269435,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8012692645210497,
+                  "up": -1.7919006413640093,
+                  "delta": 0.46726300035114493,
+                  "gamma": -0.004660977701121117
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7732273930726876,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.7779119388667948,
+                  "up": -1.7685433157097459,
+                  "delta": 0.4670300676494963,
+                  "gamma": -0.004656331756598574
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7498817082490474,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.754566254043142,
+                  "up": -1.7451976308861037,
+                  "delta": 0.4667973670671767,
+                  "gamma": -0.00465169267560999
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7265476526586425,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.731232198452751,
+                  "up": -1.7218635752957083,
+                  "delta": 0.46656489825909747,
+                  "gamma": -0.0046470609027454085
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7033818525903455,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.7079097605156288,
+                  "up": -1.6989485902761956,
+                  "delta": 0.44605128120623266,
+                  "gamma": -0.937995160488419
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.6813192297236623,
+              "actual_grid": 1001,
+              "mode": "legacy_linear",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.6857529353862113,
+                  "up": -1.6768859674095216,
+                  "delta": 0.4411426854074494,
+                  "gamma": -0.004389479549593436
+                }
+              },
+              "convergence": null
+            }
+          ],
+          "curve_price_error_bp": 0.18364404204718188,
+          "curve_delta_error": 0.00018014599133692188,
+          "direct_price_error_bp": 0.16230158484131785,
+          "direct_delta_error": 0.011876331369348736,
+          "curve_vs_direct_price_bp": 0.02243046173870944
+        },
+        "transition": {
+          "curve": [
+            {
+              "spot": 99.5,
+              "price": -2.1568096667166414,
+              "delta": 0.49653558333827985,
+              "gamma": -0.04455453617908373,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.55,
+              "price": -2.132062128078245,
+              "delta": 0.49430270657975006,
+              "gamma": -0.044622545837891,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.6,
+              "price": -2.1073145894398486,
+              "delta": 0.4920698298212202,
+              "gamma": -0.044690555496698266,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.64999999999999,
+              "price": -2.0825670508014524,
+              "delta": 0.48983695306269043,
+              "gamma": -0.04475856515550554,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.7,
+              "price": -2.0578195121630487,
+              "delta": 0.48760407630416,
+              "gamma": -0.04482657481431282,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.75,
+              "price": -2.0330719735246525,
+              "delta": 0.4853711995456302,
+              "gamma": -0.044894584473120086,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.8,
+              "price": -2.0083244348862563,
+              "delta": 0.48313832278710034,
+              "gamma": -0.04496259413192735,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.85,
+              "price": -1.9838792472817455,
+              "delta": 0.4808974582510814,
+              "gamma": -0.045026521791207225,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.9,
+              "price": -1.960490666664042,
+              "delta": 0.47862867933555486,
+              "gamma": -0.045076184345567864,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 99.94999999999999,
+              "price": -1.937102086046352,
+              "delta": 0.4763599004200297,
+              "gamma": -0.045125846899928476,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.0,
+              "price": -1.9137135054286487,
+              "delta": 0.47409112150450317,
+              "gamma": -0.04517550945428911,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.05,
+              "price": -1.890324924810952,
+              "delta": 0.4718223425889773,
+              "gamma": -0.045225172008649735,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.1,
+              "price": -1.8669363441932552,
+              "delta": 0.46955356367345147,
+              "gamma": -0.04527483456301036,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.14999999999998,
+              "price": -1.843547763575565,
+              "delta": 0.46728478475792623,
+              "gamma": -0.045324497117370965,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.2,
+              "price": -1.8201591829578552,
+              "delta": 0.4650160058423991,
+              "gamma": -0.04537415967173162,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.25,
+              "price": -1.7967706023401584,
+              "delta": 0.46274722692687326,
+              "gamma": -0.045423822226092245,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.29999999999998,
+              "price": -1.7733820217224685,
+              "delta": 0.460478448011348,
+              "gamma": -0.04547348478045285,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.34999999999998,
+              "price": -1.7499934411047717,
+              "delta": 0.45820966909582217,
+              "gamma": -0.045523147334813475,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.4,
+              "price": -1.7266048604870616,
+              "delta": 0.455940890180295,
+              "gamma": -0.04557280988917413,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.44999999999999,
+              "price": -1.7033901192787337,
+              "delta": 0.4536690828733191,
+              "gamma": -0.04561983927567961,
+              "calculation_mode": "engine_grid"
+            },
+            {
+              "spot": 100.49999999999999,
+              "price": -1.6813872105293772,
+              "delta": 0.45137616468549,
+              "gamma": -0.04564851288032598,
+              "calculation_mode": "engine_grid"
+            }
+          ],
+          "direct": [
+            {
+              "price": -2.1548238332765286,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.1597680212578494,
+                  "up": -2.149884065264098,
+                  "delta": 0.4966812057161598,
+                  "gamma": -0.04464502300448487
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.1300456072391167,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.1349700448699607,
+                  "up": -2.1251256009123995,
+                  "delta": 0.4944472103245164,
+                  "gamma": -0.04471456689962436
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.1053791673349807,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.1102837979323237,
+                  "up": -2.100478979252525,
+                  "delta": 0.4922097730822562,
+                  "gamma": -0.04478269390327276
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.0808246838777302,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.0857094514165735,
+                  "up": -2.0759443699376856,
+                  "delta": 0.4899689653230247,
+                  "gamma": -0.044849384271313464
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.0563823235899337,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.061247172714483,
+                  "up": -2.051521939018918,
+                  "delta": 0.48772485935632415,
+                  "gamma": -0.04491461881667211
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.0320522495543827,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.03689712558917,
+                  "up": -2.0272118488963375,
+                  "delta": 0.48547752846277525,
+                  "gamma": -0.04497837819697872
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -2.0078346211656313,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -2.012659470126598,
+                  "up": -2.0030142582707136,
+                  "delta": 0.4832270468879907,
+                  "gamma": -0.045040642897606994
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.9837295940819162,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.9885343626875225,
+                  "up": -1.9789293220954842,
+                  "delta": 0.4809734898366681,
+                  "gamma": -0.04510139444864251
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.95973732017761,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.964521955859757,
+                  "up": -1.9549571915291697,
+                  "delta": 0.4787169334628325,
+                  "gamma": -0.04516061313256232
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.9358579474958393,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.940622398410818,
+                  "up": -1.9310980138882308,
+                  "delta": 0.4764574548567881,
+                  "gamma": -0.04521828067777296
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.9120916202015703,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.9168358352409949,
+                  "up": -1.9073519325999884,
+                  "delta": 0.4741951320503257,
+                  "gamma": -0.04527437842627435
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.88843847853531,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8931624073368647,
+                  "up": -1.8837190871565537,
+                  "delta": 0.47193004399355426,
+                  "gamma": -0.04532888776158146
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.8648986587669816,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8696022517252358,
+                  "up": -1.860199613068695,
+                  "delta": 0.46966227055647725,
+                  "gamma": -0.04538179071358119
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.8414722931504883,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8461555014275017,
+                  "up": -1.8367936418205293,
+                  "delta": 0.4673918925098575,
+                  "gamma": -0.04543306911194135
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.8181595098785206,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.8228222854144867,
+                  "up": -1.8135013008243484,
+                  "delta": 0.4651189915238674,
+                  "gamma": -0.04548270518654003
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.794960433038229,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.7996027285620102,
+                  "up": -1.7903227133764266,
+                  "delta": 0.4628436501537972,
+                  "gamma": -0.04553068181301182
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7718751825670627,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.7764969516065605,
+                  "up": -1.7672579986128607,
+                  "delta": 0.4605659518295021,
+                  "gamma": -0.04557698088071641
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7489038742092553,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.753505071101805,
+                  "up": -1.7443072714662364,
+                  "delta": 0.45828598084546834,
+                  "gamma": -0.04562158534616697
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7260466194730002,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.7306271993756384,
+                  "up": -1.721470642622872,
+                  "delta": 0.4560038223489181,
+                  "gamma": -0.04566447863966228
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.7033035255880473,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.7078634444876428,
+                  "up": -1.6987482184804668,
+                  "delta": 0.453719562328326,
+                  "gamma": -0.04570564381578397
+                }
+              },
+              "convergence": null
+            },
+            {
+              "price": -1.6806746954638783,
+              "actual_grid": 1001,
+              "mode": "transition",
+              "requested_grid": 1001,
+              "bumps": {
+                "0.0001": {
+                  "down": -1.6852139101872023,
+                  "up": -1.6761401011064208,
+                  "delta": 0.4514332876010742,
+                  "gamma": -0.04574506439513871
+                }
+              },
+              "convergence": null
+            }
+          ],
+          "curve_price_error_bp": 0.18364404204718188,
+          "curve_delta_error": 0.00018014599133692188,
+          "direct_price_error_bp": 0.026336311776065102,
+          "direct_delta_error": 4.3110271610358186e-05,
+          "curve_vs_direct_price_bp": 0.20754704250767197
+        }
+      },
+      "elapsed_s": 0.7401132914237678
+    }
+  ]
+}

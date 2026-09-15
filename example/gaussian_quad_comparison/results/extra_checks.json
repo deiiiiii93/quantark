@@ -1,0 +1,347 @@
+{
+  "metadata": {
+    "date": "2026-09-11T11:18:01.005068",
+    "git_head": "d926e1f54f4392a296cbbacc03c3bb232550bba5",
+    "python": "3.11.8 (main, Feb 26 2024, 15:36:12) [Clang 14.0.6 ]",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "thread_env": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "args": {
+      "phase": "extra_checks"
+    },
+    "sha256": {
+      "example/gaussian_quad_comparison/extra_checks.py": "0c171ecf1a73e51a42d7bc82e20e74ca07a70e3cd386380a02e79af63b193fb4",
+      "example/gaussian_quad_comparison/contracts.py": "d29170f503a719d10922df55aeca88734868664e8b352005f0ad0f188804bf5d",
+      "example/gaussian_quad_comparison/quad_reference_snapshot.py": "70938c07768f0512765bed99ca9d2c50dd561bb649fe595ebda90bbe3d090ac7",
+      "example/gaussian_quad_comparison/supplement.py": "525d2a9208cbb3a9d531007c6425305393acec0cf93607fef333179bcb62e16d",
+      "example/gaussian_quad_comparison/study.py": "cb69f46e0efee43a63a0331225faca865493b01729a38e630bc8a5e328cc95ef",
+      "quantark/asset/equity/engine/quad/quad_adapters.py": "34adb6481fb214c826b0d8cd11a83fef74e79d71a3c91d2f467d197a3f2a04d0",
+      "quantark/asset/equity/engine/quad/quad_core.py": "c2fe64c6b40e397e719ab2be0f25cc50994d752a2d8d44756313e5613d733f83",
+      "quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py": "14b0ff79208573704d8f721522194f6bf38e230a6e6fca50c54b2b4372d72937",
+      "quantark/asset/equity/engine/quad/snowball_quad_engine.py": "bae744b06c51a8d727d57d035d30f321f58e698dba29e76484001b06ce9f69b8",
+      "quantark/asset/equity/engine/quad/european_quad_engine.py": "82a6cebe23880c89224d6185365a7ff66b4d5a0c712119cdec92999beb978fd1",
+      "quantark/asset/equity/engine/quad/__init__.py": "fbbdf49babb80717b25930be94dd181910edf6fbe92691e6703b6c26cc026f58",
+      "quantark/asset/equity/engine/quad/phoenix_quad_engine.py": "9d5c3916d64313bde4ff2eba454832e711aa804b413a42b7c1b19b5985cbcdb1",
+      "quantark/asset/equity/engine/quad/quad_math.py": "eb6e220982a9ea85562894b3bcbd37ccff418d6e10295175ffc5a2af425eda3c",
+      "quantark/asset/equity/engine/quad/discrete_quad_engine.py": "3cd9977fdbf7496a832feb5a0e80b6fdea2198c94e414929533ee22f7572a836",
+      "quantark/asset/equity/engine/quad/term_inputs.py": "4bd0c4e2ac4e50bf19ac80166b607f0624a81723d737e53d277efb9714a85297",
+      "quantark/asset/equity/engine/base_engine.py": "c0f42613f0215972d2f8eabd3c897dfdf4514a8992663bc1e3d38b59b669e633",
+      "quantark/asset/equity/param/engine_params.py": "7a1a1fefa3744d0c501f9c6fc2d013668da01be757071ee9c065ee08dfaef117"
+    }
+  },
+  "results": [
+    {
+      "name": "monthly",
+      "kind": "panel_convergence",
+      "n": 600,
+      "price": 1.9103619042163715,
+      "delta": 0.007568803255064394,
+      "settings": {
+        "n_grid": 600,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.19439179170876741
+    },
+    {
+      "name": "monthly",
+      "kind": "panel_convergence",
+      "n": 1200,
+      "price": 1.910363873753217,
+      "delta": 0.007568567879954846,
+      "settings": {
+        "n_grid": 1200,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.41356854094192386
+    },
+    {
+      "name": "monthly",
+      "kind": "panel_convergence",
+      "n": 2400,
+      "price": 1.9103639944657451,
+      "delta": 0.00756855336990947,
+      "settings": {
+        "n_grid": 2400,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.8461825409904122
+    },
+    {
+      "name": "monthly",
+      "kind": "panel_convergence",
+      "n": 4800,
+      "price": 1.9103640024193962,
+      "delta": 0.007568552417832839,
+      "settings": {
+        "n_grid": 4800,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 1.4670751667581499
+    },
+    {
+      "name": "monthly",
+      "kind": "fft_length",
+      "n": 1013,
+      "fft_length": 4050,
+      "price": 1.9087726544659,
+      "median_s": 0.0062008751556277275,
+      "samples_s": [
+        0.006149625405669212,
+        0.0062333750538527966,
+        0.005468334071338177,
+        0.006359333172440529,
+        0.0062008751556277275,
+        0.005496334284543991,
+        0.006351832766085863
+      ],
+      "actual_grid": 1013
+    },
+    {
+      "name": "monthly",
+      "kind": "fft_length",
+      "n": 7813,
+      "fft_length": 31250,
+      "price": 1.9103471966505898,
+      "median_s": 0.028142584022134542,
+      "samples_s": [
+        0.02586037525907159,
+        0.025389833841472864,
+        0.0255387919023633,
+        0.029033042024821043,
+        0.028142584022134542,
+        0.02866479242220521,
+        0.029160165693610907
+      ],
+      "actual_grid": 7813
+    },
+    {
+      "name": "monthly",
+      "kind": "panel_default_timing",
+      "median_s": 0.8845422090962529,
+      "samples_s": [
+        0.8831087090075016,
+        0.8811441250145435,
+        0.884913541842252,
+        0.8848650828003883,
+        0.8881819159723818,
+        0.8845422090962529,
+        0.8839813331142068
+      ]
+    },
+    {
+      "name": "daily",
+      "kind": "fft_length",
+      "n": 1013,
+      "fft_length": 4802,
+      "price": 1.3381643634907106,
+      "median_s": 0.10015283292159438,
+      "samples_s": [
+        0.10024595772847533,
+        0.0973370410501957,
+        0.06436441605910659,
+        0.09662991622462869,
+        0.10157041624188423,
+        0.10137504199519753,
+        0.10015283292159438
+      ],
+      "actual_grid": 1201
+    },
+    {
+      "name": "daily",
+      "kind": "fft_length",
+      "n": 7813,
+      "fft_length": 31250,
+      "price": 1.3406787543132734,
+      "median_s": 0.45367458276450634,
+      "samples_s": [
+        0.45367458276450634,
+        0.4533360409550369,
+        0.4566838750615716,
+        0.45671462500467896,
+        0.45078558288514614,
+        0.45722150010988116,
+        0.453271749895066
+      ],
+      "actual_grid": 7813
+    },
+    {
+      "name": "aged_five_days",
+      "kind": "panel_convergence",
+      "n": 600,
+      "price": -4.563561886108684,
+      "delta": 4.815498024738986,
+      "settings": {
+        "n_grid": 600,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.05931837484240532
+    },
+    {
+      "name": "aged_five_days",
+      "kind": "panel_convergence",
+      "n": 1200,
+      "price": -4.5632325801886555,
+      "delta": 4.815730453146685,
+      "settings": {
+        "n_grid": 1200,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.10941704176366329
+    },
+    {
+      "name": "aged_five_days",
+      "kind": "panel_convergence",
+      "n": 2400,
+      "price": -4.563213552086599,
+      "delta": 4.815743613031776,
+      "settings": {
+        "n_grid": 2400,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.21171920839697123
+    },
+    {
+      "name": "aged_five_days",
+      "kind": "panel_convergence",
+      "n": 4800,
+      "price": -4.563212389047704,
+      "delta": 4.81574441376467,
+      "settings": {
+        "n_grid": 4800,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.3709863340482116
+    },
+    {
+      "name": "aged_five_days",
+      "kind": "panel_default_timing",
+      "median_s": 0.22455725027248263,
+      "samples_s": [
+        0.22554537514224648,
+        0.22614012518897653,
+        0.22439625021070242,
+        0.2234647497534752,
+        0.22217466728761792,
+        0.22534404089674354,
+        0.22455725027248263
+      ]
+    },
+    {
+      "name": "high_vol",
+      "kind": "panel_convergence",
+      "n": 600,
+      "price": -9.228069891758182,
+      "delta": 0.5368447138831168,
+      "settings": {
+        "n_grid": 600,
+        "n_gl": 240,
+        "span": 8.0
+      },
+      "elapsed_s": 0.19707070803269744
+    },
+    {
+      "name": "high_vol",
+      "kind": "panel_convergence",
+      "n": 1200,
+      "price": -9.228072527441338,
+      "delta": 0.5368448441658608,
+      "settings": {
+        "n_grid": 1200,
+        "n_gl": 240,
+        "span": 8.0
+      },
+      "elapsed_s": 0.40507974987849593
+    },
+    {
+      "name": "high_vol",
+      "kind": "panel_convergence",
+      "n": 2400,
+      "price": -9.228072690609821,
+      "delta": 0.5368448522199933,
+      "settings": {
+        "n_grid": 2400,
+        "n_gl": 240,
+        "span": 8.0
+      },
+      "elapsed_s": 0.8059307080693543
+    },
+    {
+      "name": "high_vol",
+      "kind": "panel_convergence",
+      "n": 4800,
+      "price": -9.228072700849495,
+      "delta": 0.536844852722464,
+      "settings": {
+        "n_grid": 4800,
+        "n_gl": 240,
+        "span": 8.0
+      },
+      "elapsed_s": 1.4282746249809861
+    },
+    {
+      "name": "step_down",
+      "kind": "panel_convergence",
+      "n": 600,
+      "price": 2.5246840638494428,
+      "delta": 0.1091600487356059,
+      "settings": {
+        "n_grid": 600,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.20040887501090765
+    },
+    {
+      "name": "step_down",
+      "kind": "panel_convergence",
+      "n": 1200,
+      "price": 2.5246860881835502,
+      "delta": 0.10915988247935132,
+      "settings": {
+        "n_grid": 1200,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.4062135829590261
+    },
+    {
+      "name": "step_down",
+      "kind": "panel_convergence",
+      "n": 2400,
+      "price": 2.5246862136572155,
+      "delta": 0.10915987216701631,
+      "settings": {
+        "n_grid": 2400,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 0.8201221670024097
+    },
+    {
+      "name": "step_down",
+      "kind": "panel_convergence",
+      "n": 4800,
+      "price": 2.5246862217240835,
+      "delta": 0.10915987153582626,
+      "settings": {
+        "n_grid": 4800,
+        "n_gl": 240,
+        "span": 2.5
+      },
+      "elapsed_s": 1.4704332910478115
+    }
+  ]
+}
