@@ -13,6 +13,9 @@ class EnginePriceOutcome:
     numerical: Mapping[str, object] = field(default_factory=dict)
     components: Mapping[str, float] = field(default_factory=dict)   # engine-native components when available
     records: Tuple[str, ...] = ()
+    #: The engine instance that produced the value when the route priced on a
+    #: refined clone; the kernel parity dispatch must use the same instance.
+    engine_used: object = field(default=None, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, "numerical", MappingProxyType(dict(self.numerical)))

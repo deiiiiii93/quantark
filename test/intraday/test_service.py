@@ -3,9 +3,8 @@ from datetime import datetime, timedelta
 import pytest
 
 from quantark.asset.equity.engine.analytical import DigitalOptionAnalyticalEngine
-from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.quad import SnowballQuadEngine
 from quantark.asset.equity.engine.quad.v2 import SnowballQuadEngineV2
-from quantark.asset.equity.param import PDEParams
 from quantark.execution import PricingSession
 from quantark.execution.errors import CapabilityError
 from quantark.intraday import value_intraday
@@ -93,7 +92,7 @@ def test_confirmed_ko_cash_is_confirmed(sse_calendar, sse_sessions, desk):
 
 def test_unsupported_engine_and_greeks_fail_closed(sse_calendar, sse_sessions, desk):
     ts = datetime(2026, 9, 15, 14, 59, 59, tzinfo=SHANGHAI)
-    with pytest.raises(CapabilityError, match="Plan 2"):
-        value_intraday(SnowballPDESolver(PDEParams()), _snow_req(sse_calendar, sse_sessions, desk, ts))
+    with pytest.raises(CapabilityError, match="intraday inventory"):
+        value_intraday(SnowballQuadEngine(), _snow_req(sse_calendar, sse_sessions, desk, ts))
     with pytest.raises(CapabilityError, match="plan 3"):
         value_intraday(SnowballQuadEngineV2(), _snow_req(sse_calendar, sse_sessions, desk, ts, greeks=("delta",), greek_convention="point"))

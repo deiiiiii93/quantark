@@ -3,9 +3,8 @@ from datetime import datetime
 import pytest
 
 from quantark.asset.equity.engine.analytical import DigitalOptionAnalyticalEngine
-from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.quad import SnowballQuadEngine
 from quantark.asset.equity.engine.quad.v2 import SnowballQuadEngineV2
-from quantark.asset.equity.param import PDEParams
 from quantark.execution.errors import CapabilityError
 from quantark.intraday.capability import find_capability, render_capability_matrix, require_capability
 from intraday.conftest import dated_snowball, digital
@@ -21,9 +20,9 @@ def test_plan1_routes_are_declared(sse_calendar):
 def test_unsupported_engine_names_limitation_and_alternatives(sse_calendar):
     snow = dated_snowball(sse_calendar, datetime(2026, 3, 16))
     with pytest.raises(CapabilityError) as ei:
-        require_capability(snow, SnowballPDESolver(PDEParams()), monitoring="discrete")
+        require_capability(snow, SnowballQuadEngine(), monitoring="discrete")      # legacy QUAD V1: no intraday route
     msg = str(ei.value)
-    assert "SnowballPDESolver" in msg and "SnowballQuadEngineV2" in msg and "Plan 2" in msg
+    assert "SnowballQuadEngine has no intraday route" in msg and "SnowballQuadEngineV2" in msg and "intraday inventory" in msg
 
 
 def test_requesting_an_output_the_route_lacks_is_a_capability_error(sse_calendar):

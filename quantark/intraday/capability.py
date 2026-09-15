@@ -55,7 +55,17 @@ def _rows() -> Tuple[IntradayCapability, ...]:
             IntradayCapability(product, _ANALYTICAL + engine, "discrete", anywhere, price_only, "unsupported",
                                "BGK is an approximation; discrete barriers route to PDE/QUAD/MC"),
         ]
-    return tuple(barrier_rows) + (
+    pde = "quantark.asset.equity.engine.pde."
+    pde_note = "diffusion-layer resolution reported per price (resolved / unqualified / deterministic)"
+    pde_rows = []
+    for product, path, modes in (
+            (SnowballOption, "snowball_pde_solver.SnowballPDESolver", ("discrete", "continuous")),
+            (PhoenixOption, "phoenix_pde_solver.PhoenixPDESolver", ("discrete", "continuous")),
+            (KnockOutResetSnowballOption, "ko_reset_snowball_pde_solver.KOResetSnowballPDESolver", ("discrete", "continuous")),
+            (BarrierOption, "barrier_pde_solver.BarrierPDESolver", ("discrete", "continuous", "terminal")),
+            (OneTouchOption, "one_touch_pde_solver.OneTouchPDESolver", ("discrete", "continuous", "terminal"))):
+        pde_rows += [IntradayCapability(product, pde + path, mode, anywhere, price_only, "supported", pde_note) for mode in modes]
+    return tuple(barrier_rows) + tuple(pde_rows) + (
         IntradayCapability(CashOrNothingDigitalOption, _ANALYTICAL + "digital_option_engine.DigitalOptionAnalyticalEngine",
                            "terminal", anywhere, price_only, "supported",
                            "integrated carry/variance via TradingClockVolSurface; zero variance priced as the exact forward limit"),
@@ -98,7 +108,7 @@ def require_capability(product, engine, *, monitoring: str, outputs: Iterable[st
     name = engine_class_path(engine).rsplit(".", 1)[-1]
     if row is None or row.status == "unsupported":
         alts = _alternatives(product, monitoring)
-        why = f" ({row.note})" if row is not None and row.note else " (PDE/MC routes arrive in Plan 2)"
+        why = f" ({row.note})" if row is not None and row.note else " (not in the intraday inventory)"
         raise CapabilityError(
             f"{name} has no intraday route for {type(product).__name__} with {monitoring} monitoring{why}. "
             f"Intraday alternatives: {alts or 'none'}.")

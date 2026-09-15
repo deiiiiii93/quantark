@@ -62,7 +62,8 @@ def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -
         if outcome.method in _ENGINE_FREE_METHODS:
             records.append(f"manifest:not-dispatched ({outcome.method} route calls no engine)")
         else:
-            records.append(_dispatch_and_compare(session, engine, request, ctx, outcome, price))
+            dispatched = outcome.engine_used if outcome.engine_used is not None else engine
+            records.append(_dispatch_and_compare(session, dispatched, request, ctx, outcome, price))
     cashflows = [CashflowComponent("contingent", outcome.contingent_pv, "model")]
     if state is not None:
         for cf in state.ledger.cashflows:
