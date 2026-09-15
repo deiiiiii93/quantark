@@ -71,6 +71,26 @@ def dated_snowball(cal, t0, months=12, ko=103.0, ki=75.0, ko_rate=0.12):
     )
 
 
+def dated_phoenix(cal, t0, months=12, ko=103.0, ki=75.0, coupon_barrier=80.0, coupon_rate=0.12, memory=True):
+    """Monthly KO/coupon dates from t0 with discrete KI on the same dates; coupons accrue ACT/365 per period."""
+    from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
+    from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+    dates = _monthly_trading_dates(cal, t0, months)
+    ko_schedule = ObservationSchedule(records=[ObservationRecord(observation_date=d, barrier=ko) for d in dates])
+    ki_schedule = ObservationSchedule(records=[ObservationRecord(observation_date=d, barrier=ki) for d in dates])
+    return PhoenixOption(
+        initial_price=100.0, strike=100.0, contract_multiplier=1.0,
+        initial_date=t0, exercise_date=dates[-1],
+        barrier_config=BarrierConfig(
+            ko_barrier=ko, ko_rate=0.0, ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_schedule=ko_schedule,
+            ki_barrier=ki, ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_schedule=ki_schedule),
+        coupon_config=CouponBarrierConfig(coupon_barrier=coupon_barrier, coupon_rate=coupon_rate, memory_coupon=memory),
+        payoff_config=PayoffConfig(include_principal=True),
+    )
+
+
 def digital(expiry, strike=100.0, payout=1.0, option_type=OptionType.CALL):
     return CashOrNothingDigitalOption(strike=strike, option_type=option_type, payout=payout, exercise_date=expiry)
 
