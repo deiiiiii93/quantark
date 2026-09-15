@@ -60,7 +60,7 @@ from quantark.util.enum import (
 )
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import safe_log
+from quantark.util.numerical import is_zero, safe_log
 
 # Optional Dask import
 from quantark.asset.equity.engine.mc.autocallable_dask_batch import (
@@ -989,21 +989,33 @@ class SnowballMCEngine(BaseEngine):
         # continuously monitored KI barrier will actually run the bridge.
         self._ki_bridge_wanted = bool(product.has_ki_barrier and ki_continuous)
 
+        # An observation exactly at valuation is decided on the known spot: it is
+        # no simulation node (a zero step would be rejected) and maps to index -1,
+        # i.e. path column 0 under the "+1" readout of the barrier checks. Grids
+        # without such a record are unchanged.
+        def at_valuation(t):
+            return t <= 0.0 or is_zero(t)
+
+        grid_times = [t for t in list(ko_times) + list(ki_times) if not at_valuation(t)]
+
         # Combine all times and ensure maturity is included
-        all_times_set = set(ko_times) | set(ki_times) | {T}
+        all_times_set = set(grid_times) | {T}
         all_times = np.array(sorted(all_times_set))
 
         # Build dt_array
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)
 
+        def indices_for(times):
+            return np.array([-1 if at_valuation(t) else int(np.searchsorted(all_times, t)) for t in times], dtype=int)
+
         # Find indices for KO and KI observations
-        ko_indices = np.searchsorted(all_times, ko_times)
+        ko_indices = indices_for(ko_times)
         if ki_continuous:
             # All times except t=0 are KI observation points
             ki_indices = np.arange(len(all_times))
-        elif ki_times:
-            ki_indices = np.searchsorted(all_times, ki_times)
+        elif len(ki_times):
+            ki_indices = indices_for(ki_times)
         else:
             ki_indices = np.array([], dtype=int)
 
@@ -1625,9 +1637,11 @@ class SnowballMCEngine(BaseEngine):
                     ko_times[first_ko_idx],
                     np.inf,
                 )
+                # index -1 is an observation at valuation (time 0.0)
+                node_times = np.concatenate([[0.0], all_times])
                 ki_trigger_times = np.where(
                     first_ki_idx >= 0,
-                    all_times[ki_indices[first_ki_idx]]
+                    node_times[ki_indices[first_ki_idx] + 1]
                     if len(ki_indices) > 0
                     else np.inf,
                     np.inf,

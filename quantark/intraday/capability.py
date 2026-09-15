@@ -65,7 +65,16 @@ def _rows() -> Tuple[IntradayCapability, ...]:
             (BarrierOption, "barrier_pde_solver.BarrierPDESolver", ("discrete", "continuous", "terminal")),
             (OneTouchOption, "one_touch_pde_solver.OneTouchPDESolver", ("discrete", "continuous", "terminal"))):
         pde_rows += [IntradayCapability(product, pde + path, mode, anywhere, price_only, "supported", pde_note) for mode in modes]
-    return tuple(barrier_rows) + tuple(pde_rows) + (
+    mc = "quantark.asset.equity.engine.mc."
+    mc_note = "paths, seed, standard error and estimator reported per price"
+    mc_rows = []
+    for product, path, modes in (
+            (SnowballOption, "snowball_mc_engine.SnowballMCEngine", ("discrete", "continuous")),
+            (PhoenixOption, "phoenix_mc_engine.PhoenixMCEngine", ("discrete", "continuous")),
+            (BarrierOption, "barrier_option_mc_engine.BarrierOptionMCEngine", ("discrete", "continuous", "terminal")),
+            (CashOrNothingDigitalOption, "digital_option_mc_engine.DigitalOptionMCEngine", ("terminal",))):
+        mc_rows += [IntradayCapability(product, mc + path, mode, anywhere, price_only, "supported", mc_note) for mode in modes]
+    return tuple(barrier_rows) + tuple(pde_rows) + tuple(mc_rows) + (
         IntradayCapability(CashOrNothingDigitalOption, _ANALYTICAL + "digital_option_engine.DigitalOptionAnalyticalEngine",
                            "terminal", anywhere, price_only, "supported",
                            "integrated carry/variance via TradingClockVolSurface; zero variance priced as the exact forward limit"),

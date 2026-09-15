@@ -45,4 +45,15 @@ PDE_SOLVER_PATHS = {
 for _path in PDE_SOLVER_PATHS.values():
     register_route(_path, PDERoute)
 
+from quantark.intraday.engines.mc import MCRoute  # noqa: E402
+
+MC_ENGINE_PATHS = {
+    "SnowballMCEngine": "quantark.asset.equity.engine.mc.snowball_mc_engine.SnowballMCEngine",
+    "PhoenixMCEngine": "quantark.asset.equity.engine.mc.phoenix_mc_engine.PhoenixMCEngine",
+    "BarrierOptionMCEngine": "quantark.asset.equity.engine.mc.barrier_option_mc_engine.BarrierOptionMCEngine",
+    "DigitalOptionMCEngine": "quantark.asset.equity.engine.mc.digital_option_mc_engine.DigitalOptionMCEngine",
+}
+for _path in MC_ENGINE_PATHS.values():
+    register_route(_path, MCRoute)
+
 __all__ = ["EnginePriceOutcome", "IntradayEngineRoute", "register_route", "route_for"]
