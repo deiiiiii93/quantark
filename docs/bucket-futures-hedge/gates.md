@@ -1403,6 +1403,12 @@ Terminal P&L standard deviation is 541 to 631 bp across every policy, so a
 34-to-239 bp mean difference is a consistent drag well inside one path's
 noise. The pairing is what makes it visible.
 
+> Every number in this section was measured on an engine that carried the
+> alignment defect found further down this file. The whole fleet has since
+> been replayed with the fix on and the coupon re-solved: see "Gate E,
+> replayed" at the end. The gaps move by at most 1.35 bp and the verdict is
+> unchanged.
+
 ### The audit over the full grid
 
 | | |
@@ -1887,15 +1893,92 @@ boundary in roughly a tenth of states, yet only 0.03% report inconclusive,
 because the identity subtracts two finite differences and the kink usually
 cancels between them.
 
+## Gate E, replayed: the economics do not depend on the defect
+
+The fleet P&L was the last thing the alignment fix left standing on the old
+engine. It has now been replayed in full: 406 cells with
+`align_cell_stretch=0.02` and **the coupon re-solved** under the same engine.
+406 ok, 0 failed, 6.7 hours. Evidence in `quad-readout/alignment_fleet_pnl_replay.py`.
+
+### Re-solving the coupon was a decision, and it needed checking
+
+The fair coupon is SOLVED with the QUAD engine, so pinning it would have
+replayed a contract the current engine would not have priced that way. It
+moves very little -- -0.00, +0.61 and +0.32 bp across three inceptions -- but
+it moves, and that raised a question the audit re-run had not answered: those
+7,558 states were audited at the BANKED coupon. Re-audited at both coupons, on
+the state that failed before the fix (2023-07-03 / `term_flat_q` / 2023-10-26):
+
+| coupon | abs(R) | E | abs(R)+E | status |
+|---|---:|---:|---:|---|
+| banked | 0.000076 | 0.000033 | 0.000109 | pass |
+| re-solved | 0.000076 | 0.000034 | 0.000109 | pass |
+
+Identical to six decimals. The banked audit evidence still describes the
+re-solved contract, so the replay did not need to carry the audit: it ran
+`carry_audit_mode=none` and cost 6.7 hours instead of 16.1, the audit being
+63% of the wall clock.
+
+### How far anything actually moved
+
+Paired at the (inception, cell) level, because cell means can hide offsetting
+per-inception moves. All 406 rows matched:
+
+| | mean abs(d) | p95 | max |
+|---|---:|---:|---:|
+| terminal P&L | 3.15 bp | 11.43 | 33.50 bp |
+| daily P&L std | 0.061 bp | 0.173 | 1.253 bp |
+| delta churn | 0.011 hands/day | 0.039 | 0.071 |
+| variance-reduction R2 | 0.0006 | 0.0025 | 0.0090 |
+
+The tail is individual runs, not a systematic shift. The worst is 2024-12-02
+`term_flat_q__buckets_spot_parallel` at +33.5 bp, which is what it looks like
+when a delta shift crosses a whole-contract rounding boundary on a single day.
+No cell mean moves by more than 1.73 bp.
+
+### The economic answer is unchanged
+
+Terminal P&L difference, bucket policy minus its single-contract control, in
+bp of notional. The `off` column reproduces the table earlier in this file
+exactly, which is the check that the two arms are being compared like for like:
+
+| Model | Bucket policy | vs `front` off -> on | vs `far` off -> on |
+|---|---|---:|---:|
+| `term_flat_fwd` | `buckets_nodes` | -214.0 -> -214.1 | -113.3 -> -113.6 |
+| `term_flat_fwd` | `buckets_far` | -194.5 -> -194.4 | -93.8 -> -93.9 |
+| `term_flat_fwd` | `buckets_spot_parallel` | -196.7 -> -197.4 | -95.9 -> -96.9 |
+| `term_flat_q` | `buckets_nodes` | -186.8 -> -186.9 | -83.3 -> -83.4 |
+| `term_flat_q` | `buckets_far` | -137.4 -> -137.0 | -33.9 -> -33.6 |
+| `term_flat_q` | `buckets_spot_parallel` | -239.0 -> -238.5 | -135.6 -> -135.1 |
+
+Gaps of 100 to 240 bp moving by at most 1.35 bp. The hedge-contract pair is
+equally still: `far - front` goes -100.7 to -100.5 for `term_flat_fwd` and
+-103.4 to -103.5 for `term_flat_q`, significant in both arms.
+
+Significance was recomputed with the aggregator's own t-statistic thresholds
+applied identically to both arms, which answers "did significance move?" --
+no star changes on the front comparisons. It is NOT the moving-block bootstrap
+that produced the stars in the original table above, so the two star columns
+are not directly comparable even though the means are identical.
+
+**Gate E's conclusion stands.** The bucket hedge still does not pay for itself,
+and it did not owe that verdict to the alignment defect.
+
+### A note for anyone reading the aligned tables
+
+Every row of the aligned fleet records `audit_coverage="not_measured"` and
+`audits_passed=False`. That is **not** 406 audit failures. `all_measured_passed`
+is `bool(measured and ...)` by design (`_common.py:1141`), so a run that
+measured nothing can never be reused as a passing gate result. The banked arm
+reads 392 True / 14 False, the 14 being the two known states across seven cells.
+
 ### What this does NOT settle
 
-The fleet P&L was **not** replayed. Prices move about 0.9 bp with the option
-on, so Gate E's paired comparison, turnover and tracking error would shift
-slightly if re-run; they were not the failing gate and are untouched.
-`net_delta_audit_error` is holdings-dependent and would need the full replay
-too. It was already passing at 3.8e-12 and is an algebraic consistency check
-that does not depend on the engine's accuracy, so the fix cannot plausibly
-disturb it -- but it was not re-measured and is not claimed to have been.
+`net_delta_audit_error` is an AUDIT column, and this replay deliberately ran
+without the audit, so it remains unmeasured since the engine change. It was
+passing at 3.8e-12 and is an algebraic consistency check that does not depend
+on the engine's accuracy, so the fix cannot plausibly disturb it -- but that is
+reasoning, not a measurement, and it is not claimed as one.
 
 The other four of the five one-contract secant states are at the knock-out
 barrier and are genuine curvature, so the secant question still stands on its
