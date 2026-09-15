@@ -116,6 +116,14 @@ def _portable(value: Any) -> Any:
     return value
 
 
+def _provider_of(out_dir, name: str) -> str:
+    """The provider a run was configured with, from its ``config.json``."""
+    path = Path(out_dir) / "cells" / name / "config.json"
+    if not path.exists():
+        raise ValidationError(f"{path} is missing; every persisted run writes its config")
+    return str(C.read_json(path)["metadata"]["provider"])
+
+
 def aggregate(out_dir, *, es_level: float, historical_dir) -> Dict[str, Any]:
     """Everything the report shows, as plain dicts and lists."""
     out_dir = Path(out_dir)
@@ -127,7 +135,9 @@ def aggregate(out_dir, *, es_level: float, historical_dir) -> Dict[str, Any]:
         "coupon": C.read_json(out_dir / "coupon.json") if (out_dir / "coupon.json").exists() else {},
         "cells": {name: {"n_paths": r.n_paths, "distributions": _distributions(r, es_level), "manifest_mode": r.manifest.get("mode"),
                          "gate": r.manifest.get("gate"), "solves": r.manifest.get("solves"), "engine_calls": r.manifest.get("engine_calls"),
-                         "seconds": r.manifest.get("seconds")}
+                         "seconds": r.manifest.get("seconds"),
+                         "provider": _provider_of(out_dir, name),
+                         "day0_book_mark_bp": float(r.cube.product_mtm[0, 0]) / r.notional * 1e4}
                   for name, r in bootstrap.items()},
         "paired": [], "stress": [], "engine_check": [], "gates": {}, "historical": None,
     }
@@ -145,10 +155,14 @@ def aggregate(out_dir, *, es_level: float, historical_dir) -> Dict[str, Any]:
             agg["stress"] += _stress_rows(name[: -len("__stress")], r)
     for name, r in cells.items():
         for suffix in ("__ladder_quad", "__exact_quad"):
-            if name.endswith(suffix) and name[: -len(suffix)] in bootstrap:
-                surface = bootstrap[name[: -len(suffix)]].take(range(r.n_paths))
-                agg["engine_check"].append({"cell": name[: -len(suffix)], "check": suffix[2:], "n": r.n_paths,
-                                            "measures": _paired(surface, r)})
+            cell = name[: -len(suffix)]
+            if name.endswith(suffix) and cell in bootstrap:
+                same_paths = bootstrap[cell].take(range(r.n_paths))
+                agg["engine_check"].append({
+                    "cell": cell, "check": suffix[2:], "n": r.n_paths,
+                    "pair": f"{_provider_of(out_dir, cell)} minus {_provider_of(out_dir, name)}",
+                    "measures": _paired(same_paths, r),
+                })
     for run_path in sorted((out_dir / "cells").glob("*/run.json")):     # failed runs have a run.json and no results
         run = C.read_json(run_path)
         agg["gates"][run_path.parent.name] = {**run["gate"], "oracle": run.get("oracle", []),
@@ -165,7 +179,7 @@ def write_tables(agg: Dict[str, Any], data_dir) -> None:
                    for p in agg["paired"] for m, d in p["measures"].items()]
     pd.DataFrame(paired_rows).to_csv(data_dir / "fleet_paired.csv", index=False)
     pd.DataFrame(agg["stress"]).to_csv(data_dir / "stress_table.csv", index=False)
-    check_rows = [{"cell": e["cell"], "check": e["check"], "n": e["n"], "measure": m, **d}
+    check_rows = [{"cell": e["cell"], "check": e["check"], "pair": e["pair"], "n": e["n"], "measure": m, **d}
                   for e in agg["engine_check"] for m, d in e["measures"].items()]
     pd.DataFrame(check_rows).to_csv(data_dir / "engine_check.csv", index=False)
     if agg["historical"]["available"]:
@@ -280,15 +294,25 @@ def _stress_section(agg: Dict[str, Any]) -> str:
 
 
 def _engine_section(agg: Dict[str, Any]) -> str:
-    parts = ["<h2>Engine check: life surface against QUAD</h2>",
-             "<p>The surface cell's first paths paired against the same paths on the QUAD spot ladder "
-             "(and on exact QUAD repricing when run): surface minus QUAD per measure.</p>"]
-    headers = ["cell", "check", "n", "measure", "mean difference", "median", "std"]
-    rows = [[html.escape(e["cell"]), html.escape(e["check"]), _fmt(e["n"]), html.escape(m), _fmt(d.get("mean"), 2),
+    parts = ["<h2>Engine check: each cell against QUAD on the same paths</h2>",
+             "<p>A cell's first paths paired against the same paths repriced on QUAD: the cell's provider minus "
+             "the check's, per measure. Reported, not gated: exact PDE and exact QUAD are both exact engines "
+             "with different numerics, so no threshold is claimed.</p>"]
+    headers = ["cell", "pair", "n", "measure", "mean difference", "median", "std"]
+    rows = [[html.escape(e["cell"]), html.escape(e["pair"]), _fmt(e["n"]), html.escape(m), _fmt(d.get("mean"), 2),
              _fmt(d.get("median"), 2), _fmt(d.get("std"), 2)]
             for e in agg["engine_check"] for m, d in e["measures"].items()]
     parts.append(_table(headers, rows) if rows else "<p>No QUAD check run persisted.</p>")
     return "\n".join(parts)
+
+
+def _day0_section(agg: Dict[str, Any]) -> str:
+    headers = ["cell", "provider", "day-0 book mark bp"]
+    rows = [[html.escape(name), html.escape(entry["provider"]), _fmt(entry["day0_book_mark_bp"], 2)]
+            for name, entry in agg["cells"].items()]
+    return ("<h2>Day-0 book marks</h2><p>Every cell books the traded price (0) at inception and the fair coupon "
+            "is solved on QUAD, so a cell's day-0 mark is its provider's price of the traded contract: the "
+            "engine gap at inception, carried in every terminal P&amp;L of that cell.</p>" + _table(headers, rows))
 
 
 def _gate_section(agg: Dict[str, Any]) -> str:
@@ -321,9 +345,9 @@ def _caveats_section() -> str:
     return ("<h2>Caveats</h2><ul>"
             "<li>Every simulated path starts from one state, the history's last day, so a historical inception's "
             "percentile is indicative: its own start state differs.</li>"
-            "<li>On the life surface and the spot ladder the term dividend models enter only through the scalar "
-            "yield at the remaining maturity, flat at the bucket centre; the exact-QUAD check is the run in which "
-            "the engine receives the term object, and the gate reports the gap.</li>"
+            "<li>Under the life surface and the spot ladder the term dividend models enter only through the scalar "
+            "yield at the remaining maturity, flat at the bucket centre; under per_date and exact every state "
+            "hands the engine that date's term dividend object.</li>"
             "<li>Paired t-statistics treat the simulated paths as independent draws, unlike the historical study's "
             "overlapping inceptions.</li>"
             "<li>The stress paths are designed, not sampled; they show mechanics, not probabilities.</li>"
@@ -338,7 +362,7 @@ def build_report(agg: Dict[str, Any], cells: Optional[Dict[str, EnsembleResults]
              "table{border-collapse:collapse;margin:1em 0;font-size:13px}th,td{border:1px solid #ccc;padding:3px 8px;text-align:right}"
              "th:first-child,td:first-child{text-align:left}caption{text-align:left;font-weight:600}</style></head><body>",
              "<h1>Snowball hedging on simulated paths</h1>",
-             _setup_section(agg), _distribution_section(agg, image), _paired_section(agg), _stress_section(agg),
+             _setup_section(agg), _day0_section(agg), _distribution_section(agg, image), _paired_section(agg), _stress_section(agg),
              _engine_section(agg), _gate_section(agg), _historical_section(agg), _caveats_section(),
              "</body></html>"]
     return "\n".join(parts)

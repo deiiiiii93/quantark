@@ -258,6 +258,9 @@ def test_aggregate_reduces_every_cell_and_pairs_them(tiny_fleet):
     check = {row["cell"]: row for row in agg["engine_check"]}
     assert check["term_flat_q__front"]["n"] == 2 and "terminal_pnl_bp" in check["term_flat_q__front"]["measures"]
     assert agg["gates"][C.BASELINE_CELL]["passed"] and agg["historical"]["available"] is False
+    assert agg["cells"][C.BASELINE_CELL]["provider"] == "life_surface"
+    assert np.isfinite(agg["cells"][C.BASELINE_CELL]["day0_book_mark_bp"])
+    assert check["term_flat_q__front"]["pair"] == "life_surface minus ladder"
 
 
 def test_tables_and_report_are_written(tiny_fleet, tmp_path):
@@ -271,6 +274,7 @@ def test_tables_and_report_are_written(tiny_fleet, tmp_path):
     html = S03.build_report(agg)
     assert "<html" in html and "term_flat_q__front" in html and C.BASELINE_CELL in html
     assert "expected shortfall" in html.lower() and "historical" in html.lower()
+    assert "Day-0 book marks" in html and "life_surface minus ladder" in html
     (tmp_path / "report.html").write_text(html)
 
 
