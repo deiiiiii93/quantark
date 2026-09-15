@@ -20,8 +20,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
-from quantark.intraday.resolution import (INTRADAY_PDE_MAX_GRID_CELLS, INTRADAY_PDE_MAX_POINTS, INTRADAY_PDE_MAX_STEPS,
-                                          diffusion_layer, pde_resolution, time_resolved)
+from quantark.intraday.resolution import (COEFFICIENT_BYTES_PER_CELL, INTRADAY_PDE_MAX_GRID_BYTES, INTRADAY_PDE_MAX_POINTS,
+                                          INTRADAY_PDE_MAX_STEPS, diffusion_layer, pde_resolution, time_resolved)
 
 
 def _layout_numbers(solver, spot: float):
@@ -64,6 +64,24 @@ def _barrier_placement(ctx, solver) -> str:
     offset = abs(np.log(node / b))
     return (f"the barrier {b:g} enters the grid by node overwrite at S={node:.10g}, "
             f"{offset / layer if layer > 0.0 else float('inf'):.2e} layers beyond it (first order in dx)")
+
+
+def bytes_per_grid_cell(solver, twin) -> int:
+    """Bytes a solve of ``solver`` keeps per points x time-node cell: its stored value surfaces plus coefficients.
+
+    Read after a solve (a memory Phoenix learns its coupon count from the schedule it resolved).
+    """
+    from quantark.asset.equity.engine.pde import PhoenixPDESolver, SnowballPDESolver
+
+    if isinstance(solver, PhoenixPDESolver):
+        coupons = getattr(solver, "_coupon_barriers", None)
+        states = len(coupons) if coupons is not None and getattr(twin, "has_memory_coupon", False) else 0
+        surfaces = 2 * (states + 1) + 2
+    elif isinstance(solver, SnowballPDESolver):
+        surfaces = 2
+    else:
+        surfaces = 1
+    return 8 * surfaces + COEFFICIENT_BYTES_PER_CELL
 
 
 def _dx_min(solver) -> float:
@@ -148,19 +166,20 @@ class PDERoute:
         status = _time_status(ctx, solver, solver._active_layout, numbers, dx_min)
         budget_bound = False
         if status.status == "unqualified":
+            max_cells = INTRADAY_PDE_MAX_GRID_BYTES // bytes_per_grid_cell(solver, twin)
             points = int(grid.points)
             if status.required_points > numbers["points"]:
                 points = max(points, min(status.required_points, INTRADAY_PDE_MAX_POINTS))
             steps_now = int(numbers["requested_steps"])
-            if points * (steps_now + 1) > INTRADAY_PDE_MAX_GRID_CELLS:
-                points, budget_bound = max(int(grid.points), INTRADAY_PDE_MAX_GRID_CELLS // (steps_now + 1)), True
+            if points * (steps_now + 1) > max_cells:
+                points, budget_bound = max(int(grid.points), max_cells // (steps_now + 1)), True
             # the time floors are judged on the refined space grid: its smallest cell shrinks with the point count
             dx_min *= numbers["points"] / max(points, numbers["points"])
             spd, requested = float(grid.steps_per_day), steps_now
             space_resolvable = status.required_points <= max(points, numbers["points"])
             # a layer the point or memory cap cannot resolve stays unqualified: more steps would buy cost, not a claim
             if space_resolvable and not time_resolved(_time_status(ctx, solver, solver._active_layout, numbers, dx_min)):
-                max_steps = min(INTRADAY_PDE_MAX_STEPS, INTRADAY_PDE_MAX_GRID_CELLS // points - 1)
+                max_steps = min(INTRADAY_PDE_MAX_STEPS, max_cells // points - 1)
                 spd, requested = _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps)
                 budget_bound = budget_bound or max_steps < INTRADAY_PDE_MAX_STEPS
             if points > numbers["points"] or spd > float(grid.steps_per_day):
@@ -177,7 +196,8 @@ class PDERoute:
                 solver, grid = refined, refined.grid_binder.config
             if status.status == "unqualified" and budget_bound:
                 status = replace(status, reason=f"{status.reason}; refinement capped by the grid memory budget "
-                                                f"({INTRADAY_PDE_MAX_GRID_CELLS:.0e} points x time nodes)")
+                                                f"({INTRADAY_PDE_MAX_GRID_BYTES / 2**30:.2f} GiB = {max_cells:.2e} "
+                                                "points x time nodes for this solver)")
         placement = _barrier_placement(ctx, solver) if status.status == "resolved" else ""
         if placement:
             status = replace(status, status="unqualified", reason=placement)

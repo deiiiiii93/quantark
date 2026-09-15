@@ -82,13 +82,30 @@ def test_one_second_out_is_unqualified_at_the_point_cap(sse_calendar, sse_sessio
 
 def test_refinement_respects_the_grid_memory_budget_and_says_so(sse_calendar, sse_sessions, desk, monkeypatch):
     import quantark.intraday.engines.pde as pde_route
-    budget = 2_000_000
-    monkeypatch.setattr(pde_route, "INTRADAY_PDE_MAX_GRID_CELLS", budget)
+    budget = 2_000_000 * 25
+    monkeypatch.setattr(pde_route, "INTRADAY_PDE_MAX_GRID_BYTES", budget)
     ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(minutes=15), spot=102.5)
     out = route_for(ctx, _pde()).price(ctx, _pde())
     n = out.numerical
-    assert n["points"] * (n["requested_steps"] + 1) <= budget
+    assert pde_route.bytes_per_grid_cell(out.engine_used, ctx.numerical.product) == 2 * 8 + 9      # two value surfaces
+    assert n["points"] * (n["requested_steps"] + 1) * 25 <= budget
     assert n["resolution"] == "unqualified" and "grid memory budget" in n["resolution_reason"]
+
+
+def test_a_memory_phoenix_budget_counts_every_coupon_state_surface(sse_calendar, sse_sessions, desk):
+    # a 12-coupon memory Phoenix keeps 2(12+1)+2 surfaces: a per-cell budget sized for a snowball let one price use GiBs
+    from quantark.asset.equity.engine.pde import PhoenixPDESolver
+    import quantark.intraday.engines.pde as pde_route
+    from intraday.conftest import dated_phoenix
+    product = dated_phoenix(sse_calendar, T0)
+    ctx = resolve_context(IntradayValuationRequest(product=product, pricing_env=flat_env(datetime(2026, 4, 16, 14, 59, 50, tzinfo=SHANGHAI)),
+                                                   session_calendar=sse_sessions, variance_profile=desk))
+    engine = PhoenixPDESolver(PDEParams())
+    out = route_for(ctx, engine).price(ctx, engine)
+    per_cell = pde_route.bytes_per_grid_cell(out.engine_used, ctx.numerical.product)
+    assert per_cell == 8 * (2 * (12 + 1) + 2) + 9
+    n = out.numerical
+    assert n["points"] * (n["requested_steps"] + 1) * per_cell <= pde_route.INTRADAY_PDE_MAX_GRID_BYTES
 
 
 def test_the_route_does_not_hand_back_full_value_surfaces(sse_calendar, sse_sessions, desk):
