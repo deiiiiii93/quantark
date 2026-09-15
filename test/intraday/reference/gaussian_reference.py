@@ -255,10 +255,15 @@ def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[P
     half = width_std * sqrt(max(w_rest, 1e-12)) + 0.5
     lo, hi = round(levels[0] - half, 6), round(levels[-1] + half, 6)
     from quantark.execution import greeks as summaries
-    from quantark.intraday.context import value_tree
+    from quantark.intraday.context import market_snapshot_id, value_tree
     env = ctx.request.pricing_env
     anchor = None if _time_homogeneous(env) else to_utc(ctx.valuation_timestamp).isoformat()
-    key = (points, width_std, lo, hi, anchor, tuple(e.event_id for _, g in instants[1:] for e in g),
+    # a greek bump replaces only ctx.pricing_env: the request's summaries would serve the unbumped sweep, so a bumped
+    # context keys on the CONTENT of its own market (a bump label is not an identity)
+    num_env = ctx.pricing_env
+    bumped = None if ctx.market_snapshot_id == market_snapshot_id(env) else repr(value_tree((
+        summaries._vol_summary(num_env), summaries._rate_summary(num_env), summaries._div_summary(num_env))))
+    key = (points, width_std, lo, hi, anchor, bumped, tuple(e.event_id for _, g in instants[1:] for e in g),
            ctx.request.variance_profile.identity(), ctx.request.session_calendar.identity(),
            repr(value_tree((summaries._vol_summary(env), summaries._rate_summary(env), summaries._div_summary(env)))),
            repr(value_tree(ctx.request.product)))

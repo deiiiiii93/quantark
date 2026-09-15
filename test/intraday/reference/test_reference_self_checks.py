@@ -117,6 +117,30 @@ def test_reference_does_not_depend_on_call_order(sse_calendar, sse_sessions, des
     assert after_other.delta == pytest.approx(alone.delta, rel=1e-10)
 
 
+def test_a_bumped_market_never_reuses_the_unbumped_sweep(sse_calendar, sse_sessions, desk):
+    # A greek bump replaces only ctx.pricing_env (the request is shared); a rate or dividend move leaves the sweep's
+    # domain unchanged, so a cache keyed on the REQUEST's market served the unbumped sweep beyond the first interval.
+    from intraday.reference import gaussian_reference
+    from quantark.asset.equity.riskmeasures.greeks import bump_envs
+    from quantark.intraday.greeks import with_pricing_env
+    kos = [e for e in _snow_ctx(sse_calendar, sse_sessions, desk, datetime(2026, 9, 15, tzinfo=SHANGHAI)).timeline.events
+           if e.kind is EventKind.KO]
+    fixings = tuple(Fixing(k.timestamp, 100.0) for k in kos[:5])
+    base = _snow_ctx(sse_calendar, sse_sessions, desk, kos[5].timestamp - timedelta(hours=1), fixings=fixings)
+    rate = with_pricing_env(base, bump_envs.build_rate_bumped_env(base.pricing_env, 1e-3, direction=1.0), "same-label")
+    div = with_pricing_env(base, bump_envs.build_div_bumped_env(base.pricing_env, base.numerical.product, 0.0, 1e-3,
+                                                                direction=1.0), "same-label")
+    fresh = {}
+    for name, bumped in (("rate", rate), ("div", div)):
+        gaussian_reference._SWEEP_CACHE.clear()
+        fresh[name] = reference_snowball(bumped, points=(1001, 2001, 4001)).price
+    gaussian_reference._SWEEP_CACHE.clear()
+    reference_snowball(base, points=(1001, 2001, 4001))
+    # the same bump label on two different markets must not share a sweep either
+    assert reference_snowball(rate, points=(1001, 2001, 4001)).price == pytest.approx(fresh["rate"], abs=1e-12)
+    assert reference_snowball(div, points=(1001, 2001, 4001)).price == pytest.approx(fresh["div"], abs=1e-12)
+
+
 def test_barrier_zero_carry_in_out_parity_and_exact_bridge_mc():
     S, K, u, sigma = 100.0, 100.0, 0.5, 0.25
     for is_call in (True, False):
