@@ -92,11 +92,12 @@ def test_refinement_respects_the_grid_memory_budget_and_says_so(sse_calendar, ss
     assert n["resolution"] == "unqualified" and "grid memory budget" in n["resolution_reason"]
 
 
-def test_a_memory_phoenix_budget_counts_every_coupon_state_surface(sse_calendar, sse_sessions, desk):
+def test_a_memory_phoenix_budget_counts_every_coupon_state_surface(sse_calendar, sse_sessions, desk, monkeypatch):
     # a 12-coupon memory Phoenix keeps 2(12+1)+2 surfaces: a per-cell budget sized for a snowball let one price use GiBs
     from quantark.asset.equity.engine.pde import PhoenixPDESolver
     import quantark.intraday.engines.pde as pde_route
     from intraday.conftest import dated_phoenix
+    monkeypatch.setattr(pde_route, "INTRADAY_PDE_MAX_GRID_BYTES", 200_000_000)       # keeps the test light
     product = dated_phoenix(sse_calendar, T0)
     ctx = resolve_context(IntradayValuationRequest(product=product, pricing_env=flat_env(datetime(2026, 4, 16, 14, 59, 50, tzinfo=SHANGHAI)),
                                                    session_calendar=sse_sessions, variance_profile=desk))
