@@ -136,6 +136,76 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
     return twin
 
 
+def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime, state, schedule_env):
+    """Float-time KO-reset snowball carrying both KO schedules.
+
+    Its engines read the KO accrual through ``compute_ko_accrual_factor``, which
+    for a dateless schedule is ``accrued_offset + tau`` and ignores positional
+    factors. With every fixing at one time of day, (contractual accrual - tau)
+    is the same for every record, so one ``accrued_offset`` reproduces the
+    contract's cash and both contract tenors; that is verified, else fail closed.
+    """
+    from quantark.intraday.events import ko_reset_records
+    twin = deepcopy(product)
+    bc, pbc = twin.barrier_config, twin.post_barrier_config
+    pre_all = [e for e in timeline.events if e.kind is EventKind.KO and e.regime == "pre"]
+    if not pre_all:
+        raise ValidationError("a KO-reset snowball needs a pre-KI KO schedule")
+    offset = float(product._resolve_pre_contract_tenor(schedule_env)) - calendar_year_fraction(ts, pre_all[-1].timestamp)
+    if offset < 0.0:
+        raise CapabilityError("valuation before the contract's accrual origin: the KO-reset twin cannot carry a "
+                              "negative accrued offset")
+
+    def schedule(config, regime):
+        events = [e for e in remaining if e.kind is EventKind.KO and e.regime == regime]
+        src = list(config.ko_observation_schedule.records)
+        records = []
+        for e in events:
+            rate = src[e.index].return_rate
+            rate = float(product._get_barrier_at(config.ko_rate, e.index, "KO rate")) if rate is None else float(rate)
+            records.append(ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier,
+                                             return_rate=rate, settlement_time=calendar_year_fraction(ts, e.payment_timestamp)))
+        indices = [e.index for e in events]
+        barrier = _pick(config.ko_barrier, indices) if indices else (
+            config.ko_barrier[-1] if isinstance(config.ko_barrier, (list, tuple)) else config.ko_barrier)
+        rate = _pick(config.ko_rate, indices) if indices else (
+            config.ko_rate[-1] if isinstance(config.ko_rate, (list, tuple)) else config.ko_rate)
+        new = replace(config, ko_barrier=barrier, ko_rate=rate, ko_observation_dates=None,
+                      ko_observation_schedule=ObservationSchedule(records=records,
+                                                                  aggregation_mode=config.ko_observation_schedule.aggregation_mode,
+                                                                  frequency=config.ko_observation_schedule.frequency))
+        return new, events
+
+    pre_config, pre_events = schedule(bc, "pre")
+    post_config, post_events = schedule(pbc, "post")
+    if product.has_ki_barrier and timeline.continuous_ki_barrier is None:
+        kis = [e for e in remaining if e.kind is EventKind.KI]
+        ki_records = [ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier) for e in kis]
+        pre_config = replace(pre_config, ki_barrier=_pick(bc.ki_barrier, [e.index for e in kis]) if kis else bc.ki_barrier,
+                             ki_observation_dates=None, ki_observation_schedule=ObservationSchedule(records=ki_records))
+    twin.barrier_config, twin.post_barrier_config = pre_config, post_config
+    twin.accrual_config = replace(twin.accrual_config, accrual_factors=None, accrual_dates=None, accrued_offset=offset)
+    terminal = timeline.terminal()
+    twin.maturity = calendar_year_fraction(ts, terminal.timestamp)
+    _clear_dates(twin)
+    twin.settlement_convention = _settlement(calendar_year_fraction(ts, terminal.payment_timestamp) - twin.maturity)
+    setattr(twin, "_otc_lifecycle_knocked_in", bool(state.knocked_in))
+    env = _cash_env(ts, twin)
+    for config, events in ((pre_config, pre_events), (post_config, post_events)):
+        records = ko_reset_records(twin, config, env)
+        if len(records) != len(events):
+            raise ValidationError("KO-reset twin resolves a different number of KO observations")
+        for (_rec, _src, _rate, cash), e in zip(records, events):
+            if not is_close(cash, e.cash, rel_tol=_CASH_REL_TOL, abs_tol=_CASH_ABS_TOL):
+                raise CapabilityError(f"KO-reset twin {e.event_id} pays {cash!r}, the contract pays {e.cash!r}: fixings at "
+                                      "different times of day cannot share one accrued offset")
+    for name in ("_resolve_pre_contract_tenor", "_resolve_post_contract_tenor"):
+        got, want = float(getattr(twin, name)(env)), float(getattr(product, name)(schedule_env))
+        if not is_close(got, want, rel_tol=_CASH_REL_TOL, abs_tol=_CASH_ABS_TOL):
+            raise CapabilityError(f"KO-reset twin {name} = {got!r}, contract {want!r}")
+    return twin
+
+
 def _verify_autocallable_cash(twin, kos, coupons, ts, phoenix) -> None:
     resolved = twin.resolve_ko_observations(_cash_env(ts, twin))
     if len(resolved) != len(kos):
@@ -260,7 +330,9 @@ def _barrier_twin(product, timeline: ContractTimeline, remaining, ts: datetime, 
 
 
 def build_numerical_contract(product, timeline: ContractTimeline, reconstruction: LifecycleReconstruction, *,
-                             valuation_timestamp: datetime, phase: EventPhase, session_calendar) -> NumericalContract:
+                             valuation_timestamp: datetime, phase: EventPhase, session_calendar,
+                             schedule_env=None) -> NumericalContract:
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
     ts = valuation_timestamp
     state = reconstruction.state
     remaining = timeline.remaining(ts, phase)
@@ -276,6 +348,10 @@ def build_numerical_contract(product, timeline: ContractTimeline, reconstruction
         terminated = not tstate.alive
         if terminated:
             twin = None
+        elif type(product) is KnockOutResetSnowballOption:
+            if schedule_env is None:
+                raise ValidationError("a KO-reset twin needs the contract's schedule environment")
+            twin = _ko_reset_twin(product, timeline, remaining, ts, state, schedule_env)
         elif hasattr(product, "barrier_config"):
             twin = _autocallable_twin(product, timeline, remaining, ts, state)
         else:

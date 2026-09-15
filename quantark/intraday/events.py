@@ -62,16 +62,18 @@ class ContractEvent:
     barrier: Optional[float]
     cash: Optional[float]         # contractual cash if determined in the money (KO redemption, coupon); None for KI/terminal
     date_only: bool               # resolved from a date by convention (True) or from an explicit timestamp (False)
+    regime: str = ""              # KO-reset KO events: "pre" (before KI) or "post" (after KI); empty otherwise
 
     @staticmethod
-    def make(kind, index, timestamp, payment_timestamp, barrier, cash, date_only) -> "ContractEvent":
+    def make(kind, index, timestamp, payment_timestamp, barrier, cash, date_only, regime: str = "") -> "ContractEvent":
         require_aware(timestamp, "event timestamp")
         require_aware(payment_timestamp, "payment timestamp")
         if to_utc(payment_timestamp) < to_utc(timestamp):
             raise ValidationError(f"{kind.value}[{index}] pays before it is determined")
-        return ContractEvent(f"{kind.value}[{index}]@{timestamp.isoformat()}", kind, int(index), timestamp,
+        label = f"{kind.value}_{regime}" if regime else kind.value
+        return ContractEvent(f"{label}[{index}]@{timestamp.isoformat()}", kind, int(index), timestamp,
                              payment_timestamp, None if barrier is None else float(barrier),
-                             None if cash is None else float(cash), bool(date_only))
+                             None if cash is None else float(cash), bool(date_only), regime)
 
 
 def _order_key(e: ContractEvent):
@@ -245,6 +247,53 @@ def phoenix_coupon_fractions(product, ko_times: List[float]) -> List[float]:
     return [float(ko_times[0])] + [float(ko_times[i] - ko_times[i - 1]) for i in range(1, n)]
 
 
+def ko_reset_records(product, config, env):
+    """(resolved record, source record, rate, contractual cash) of one KO-reset schedule, as QUAD V2 composes it."""
+    resolved, rates, sources = product._resolve_ko_schedule(config, env)
+    principal = product.initial_price * product.contract_multiplier if product.payoff_config.include_principal else 0.0
+    out = []
+    for rec, rate, src in zip(resolved, rates, sources):
+        accrual = product.compute_ko_accrual_factor(rec.observation_time, src, env)
+        cash = product.initial_price * product.contract_multiplier * float(rate) * float(accrual) + principal
+        out.append((rec, src, float(rate), float(cash)))
+    return out
+
+
+def _ko_reset_events(product, cal, env, origin, fixing_time):
+    from quantark.execution.errors import CapabilityError
+    from quantark.util.enum.option_enums import PostKOScheduleMode
+    if product.post_ko_mode is not PostKOScheduleMode.ABSOLUTE:
+        raise CapabilityError("relative-to-hit (REBASED) KO reset schedules are not in the intraday inventory: the post-KI "
+                              "schedule would depend on the unknown hit instant")
+    terminal = _terminal_event(product, cal, env, origin, fixing_time)
+    events = [terminal]
+    for regime, config in (("pre", product.barrier_config), ("post", product.post_barrier_config)):
+        schedule = config.ko_observation_schedule
+        records = ko_reset_records(product, config, env)
+        if schedule is None or len(records) != len(schedule.records):
+            raise ValidationError(f"schedule env must keep every {regime}-KI KO record active (anchor at initial_date)")
+        for i, (rec, src, _rate, cash) in enumerate(records):
+            ts, date_only = _instant(cal, timestamp=src.observation_timestamp, dt=rec.observation_date,
+                                     tau=rec.observation_time, origin=origin, fixing_time=fixing_time, what=f"ko_{regime}[{i}]")
+            if product.accrual_config.coupon_pay_type.name == "EXPIRY":
+                pay = max(terminal.payment_timestamp, ts, key=to_utc)
+            else:
+                pay = _payment(cal, timestamp=src.settlement_timestamp, dt=rec.settlement_date, tau=rec.settlement_time,
+                               origin=origin, fallback=ts)
+            events.append(ContractEvent.make(EventKind.KO, i, ts, pay, rec.barrier, cash, date_only, regime))
+    continuous = None
+    if product.has_ki_barrier:
+        if _ki_is_continuous(product):
+            continuous = float(product.barrier_config.ki_barrier)
+        else:
+            ki_src = list(product.barrier_config.ki_observation_schedule.records)
+            for i, rec in enumerate(product.resolve_ki_observations(env)):
+                ts, date_only = _instant(cal, timestamp=ki_src[i].observation_timestamp, dt=rec.observation_date,
+                                         tau=rec.observation_time, origin=origin, fixing_time=fixing_time, what=f"ki[{i}]")
+                events.append(ContractEvent.make(EventKind.KI, i, ts, ts, rec.barrier, None, date_only))
+    return events, continuous
+
+
 def _terminal_event(product, cal, env, origin, fixing_time) -> ContractEvent:
     timing = resolve_terminal_timing(product, env)
     exercise = getattr(product, "exercise_date", None)
@@ -350,6 +399,7 @@ def resolve_timeline(product, session_calendar: TradingSessionCalendar, template
     """Resolve every contractual event of ``product`` to aware instants (the product is not mutated)."""
     from quantark.asset.equity.product.option.barrier_option import BarrierOption
     from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
     from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
     from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
@@ -359,7 +409,9 @@ def resolve_timeline(product, session_calendar: TradingSessionCalendar, template
         raise ValidationError("fixing_time_of_day must be a datetime.time")
     env = _schedule_env(product, template_env)
     continuous_barrier = None
-    if type(product) in (BarrierOption, OneTouchOption):
+    if type(product) is KnockOutResetSnowballOption:
+        events, continuous = _ko_reset_events(product, session_calendar, env, schedule_origin, fixing_time_of_day)
+    elif type(product) in (BarrierOption, OneTouchOption):
         events, continuous_barrier = _barrier_events(product, session_calendar, env, schedule_origin, fixing_time_of_day)
         continuous = None
     elif type(product) is PhoenixOption:

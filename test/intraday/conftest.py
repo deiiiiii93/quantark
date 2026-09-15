@@ -94,6 +94,26 @@ def dated_phoenix(cal, t0, months=12, ko=103.0, ki=75.0, coupon_barrier=80.0, co
     )
 
 
+def dated_ko_reset(cal, t0, pre_months=6, post_months=12, pre_ko=103.0, post_ko=95.0, ki=75.0, pre_rate=0.15, post_rate=0.03):
+    """Monthly pre-KI KO dates for ``pre_months``, post-KI KO dates for ``post_months`` (absolute), monthly discrete KI."""
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+    pre_dates = _monthly_trading_dates(cal, t0, pre_months)
+    post_dates = _monthly_trading_dates(cal, t0, post_months)
+    record = lambda d, b: ObservationRecord(observation_date=d, barrier=b)   # noqa: E731
+    return KnockOutResetSnowballOption(
+        initial_price=100.0, strike=100.0, contract_multiplier=1.0, initial_date=t0, exercise_date=post_dates[-1],
+        barrier_config=BarrierConfig(
+            ko_barrier=pre_ko, ko_rate=pre_rate, ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_schedule=ObservationSchedule(records=[record(d, pre_ko) for d in pre_dates]),
+            ki_barrier=ki, ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_schedule=ObservationSchedule(records=[record(d, ki) for d in post_dates])),
+        post_barrier_config=BarrierConfig(
+            ko_barrier=post_ko, ko_rate=post_rate, ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_schedule=ObservationSchedule(records=[record(d, post_ko) for d in post_dates])),
+        payoff_config=PayoffConfig(rebate_rate=pre_rate, include_principal=False),
+    )
+
+
 def digital(expiry, strike=100.0, payout=1.0, option_type=OptionType.CALL):
     return CashOrNothingDigitalOption(strike=strike, option_type=option_type, payout=payout, exercise_date=expiry)
 

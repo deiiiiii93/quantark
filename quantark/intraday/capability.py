@@ -36,6 +36,7 @@ def engine_class_path(engine) -> str:
 
 def _rows() -> Tuple[IntradayCapability, ...]:
     from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
     from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
     price_only = frozenset({"price"})
@@ -52,6 +53,12 @@ def _rows() -> Tuple[IntradayCapability, ...]:
                            "valuations before the first due coupon (coupon replay fails closed)"),
         IntradayCapability(PhoenixOption, _QUAD_V2 + "PhoenixQuadEngineV2", "continuous", anywhere, price_only, "supported",
                            "valuations before the first due coupon (coupon replay fails closed)"),
+        IntradayCapability(KnockOutResetSnowballOption, _QUAD_V2 + "KOResetSnowballQuadEngineV2", "discrete", anywhere,
+                           price_only, "supported",
+                           "absolute post-KI schedules; due fixings must be covered by the checkpoint (no tracker replay)"),
+        IntradayCapability(KnockOutResetSnowballOption, _QUAD_V2 + "KOResetSnowballQuadEngineV2", "continuous", anywhere,
+                           price_only, "supported",
+                           "absolute post-KI schedules; due fixings must be covered by the checkpoint (no tracker replay)"),
     )
 
 

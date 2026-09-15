@@ -124,7 +124,8 @@ def resolve_context(request: IntradayValuationRequest) -> IntradayValuationConte
                                            spot_timestamp=env.spot_quote.timestamp,
                                            schedule_env=_schedule_env(request.product, env), session_calendar=cal)
     numerical = build_numerical_contract(request.product, timeline, reconstruction, valuation_timestamp=ts,
-                                         phase=phase, session_calendar=cal)
+                                         phase=phase, session_calendar=cal,
+                                         schedule_env=_schedule_env(request.product, env))
     last_payment = max((e.payment_timestamp for e in timeline.events), key=to_utc)
     horizon = max(last_payment, ts, key=to_utc) + _HORIZON_PAD
     time_map = IntradayTimeMap(cal, profile, ts, horizon)

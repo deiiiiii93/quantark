@@ -195,8 +195,14 @@ def reconstruct_lifecycle(product, timeline: ContractTimeline, checkpoint, fixin
 # ---------------------------------------------------------------------------
 # autocallables
 def _reconstruct_autocallable(product, timeline, checkpoint, plan: _ReplayPlan, schedule_env) -> LifecycleReconstruction:
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
     from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 
+    if type(product) is KnockOutResetSnowballOption and plan.replay:
+        raise CapabilityError(
+            "KO-reset snowball replay is not in the intraday inventory: the daily lifecycle tracker observes only the "
+            "pre-KI schedule and settles at the post-KI maturity. Supply a checkpoint that covers every fixing due "
+            f"before the valuation instant (first uncovered: {plan.instants[plan.replay[0]][0].timestamp.isoformat()}).")
     state = deepcopy(checkpoint) if checkpoint is not None else AutocallableLifecycleState()
     # The checkpoint is authoritative for everything on or before its day.
     for e in timeline.events:
