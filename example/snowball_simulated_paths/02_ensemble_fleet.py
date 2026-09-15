@@ -247,9 +247,10 @@ def run_cell(paths: MarketPath, config: EnsembleConfig, out_dir, *, resume: bool
             return run
         results.to_dir(out_dir)
         C.write_json(config_path, _config_record(config, paths, fingerprint))
-    # The book's mark on day 0.  Cells start from the traded price (0), and
-    # the coupon is solved on QUAD, so under the PDE this is the engine gap
-    # at inception; it is recorded rather than buried in terminal P&L.
+    # The book's mark on day 0.  Cells start from the traded price (0) and
+    # the coupon is fair under the reference model on QUAD, so this holds the
+    # carry-model gap plus the engine gap; it is recorded rather than buried
+    # in terminal P&L (the report separates the two with the exact-QUAD check).
     day0_mtm = float(results.cube.product_mtm[0, 0])
     single = replace(config, workers=1, batch_paths=None)
     tolerances = oracle_tolerances(config)

@@ -159,11 +159,15 @@ shards; the study prices one product.
 
 Unchanged: solved once under `term_flat_q` with QUAD on a 401-point grid
 at the start state. This keeps the contract identical to the 2026-09-09
-quick run, which stage 1 bridges to. Because cells now mark on PDE, each
-cell's day-0 mark is the PDE-vs-QUAD gap rather than exactly zero —
-measured about 0.5 bp of notional on day 1 (PDE 1,048,796 against QUAD
-1,046,457 on 50M). Every bootstrap run records its day-0 mark in its
-manifest, so the offset is visible, not buried in terminal P&L. Stage 1
+quick run, which stage 1 bridges to. Because cells now mark on PDE, the
+`term_flat_q` cells' day-0 mark is the PDE-vs-QUAD gap rather than exactly
+zero — measured about 0.5 bp of notional on day 1 (PDE 1,048,796 against
+QUAD 1,046,457 on 50M). The other carry models' cells also carry their
+model's price of a contract that is fair under `term_flat_q` (stage 1:
+`flat_from_hedge` +69 bp front, −28 bp far), so the report splits a day-0
+mark into that carry-model gap and the engine gap against the exact-QUAD
+check. Every bootstrap run records its day-0 mark in its manifest, so the
+offset is visible, not buried in terminal P&L. Stage 1
 also checks that the re-solved coupon still equals the banked 37.8254%
 (the aging fixes do not act at inception).
 

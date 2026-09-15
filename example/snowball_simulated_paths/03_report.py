@@ -163,6 +163,14 @@ def aggregate(out_dir, *, es_level: float, historical_dir) -> Dict[str, Any]:
                     "pair": f"{_provider_of(out_dir, cell)} minus {_provider_of(out_dir, name)}",
                     "measures": _paired(same_paths, r),
                 })
+    for name, entry in agg["cells"].items():
+        # The day-0 mark mixes the carry-model gap (the coupon is fair under
+        # the reference model) and the engine gap; the exact-QUAD check
+        # starts from the same state, so the difference is the engine part.
+        check = cells.get(f"{name}__exact_quad")
+        check_mark = None if check is None else float(check.cube.product_mtm[0, 0]) / check.notional * 1e4
+        entry["exact_quad_day0_book_mark_bp"] = check_mark
+        entry["day0_engine_gap_bp"] = None if check_mark is None else entry["day0_book_mark_bp"] - check_mark
     for run_path in sorted((out_dir / "cells").glob("*/run.json")):     # failed runs have a run.json and no results
         run = C.read_json(run_path)
         agg["gates"][run_path.parent.name] = {**run["gate"], "oracle": run.get("oracle", []),
@@ -307,12 +315,16 @@ def _engine_section(agg: Dict[str, Any]) -> str:
 
 
 def _day0_section(agg: Dict[str, Any]) -> str:
-    headers = ["cell", "provider", "day-0 book mark bp"]
-    rows = [[html.escape(name), html.escape(entry["provider"]), _fmt(entry["day0_book_mark_bp"], 2)]
+    headers = ["cell", "provider", "day-0 book mark bp", "exact-QUAD day-0 mark bp", "engine gap bp"]
+    rows = [[html.escape(name), html.escape(entry["provider"]), _fmt(entry["day0_book_mark_bp"], 2),
+             _fmt(entry.get("exact_quad_day0_book_mark_bp"), 2), _fmt(entry.get("day0_engine_gap_bp"), 2)]
             for name, entry in agg["cells"].items()]
-    return ("<h2>Day-0 book marks</h2><p>Every cell books the traded price (0) at inception and the fair coupon "
-            "is solved on QUAD, so a cell's day-0 mark is its provider's price of the traded contract: the "
-            "engine gap at inception, carried in every terminal P&amp;L of that cell.</p>" + _table(headers, rows))
+    return ("<h2>Day-0 book marks</h2><p>Every cell books the traded price (0) at inception, and the coupon is "
+            "fair under the reference carry model on QUAD. A cell's day-0 mark is its own carry model's price "
+            "of that contract on its provider, so it holds the carry-model gap (zero only under the reference "
+            "model) plus the engine gap; the engine part is the difference against the cell's exact-QUAD check, "
+            "which starts from the same state. The mark is carried in every terminal P&amp;L of the cell.</p>"
+            + _table(headers, rows))
 
 
 def _gate_section(agg: Dict[str, Any]) -> str:

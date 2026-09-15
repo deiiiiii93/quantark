@@ -97,9 +97,11 @@ in "Earlier provider" below.
 
 **Engine check.**  Each cell's first 40 bootstrap paths are also repriced on
 exact QUAD and paired with the cell on the same paths.  It is reported, not
-gated.  The fair coupon is solved on QUAD, so each cell's day-0 mark is the
-PDE-vs-QUAD gap at inception (about 0.5 bp of notional measured on day 1),
-shown in the report's day-0 table.
+gated.  The fair coupon is solved under `term_flat_q` on QUAD, so a cell's
+day-0 mark is its own carry model's price of that contract on the PDE: the
+carry-model gap (zero only for `term_flat_q`) plus the engine gap.  The
+report's day-0 table separates them against the exact-QUAD check, which
+starts from the same state.
 
 ## Checks
 
@@ -410,8 +412,9 @@ gates.  Report: `data/simulated_paths_report.html`.
 
 - One start state, the history's last day, for every simulated path; a
   historical inception's percentile is indicative.
-- The fair coupon is solved on QUAD while cells price on the PDE, so each
-  cell's day-0 mark is the engine gap at inception (report, day-0 table).
+- The fair coupon is fair under `term_flat_q` on QUAD while cells price
+  their own carry model on the PDE, so a cell's day-0 mark holds a
+  carry-model gap and an engine gap (report, day-0 table).
 - Paired t-statistics treat the simulated paths as independent draws,
   unlike the historical study's overlapping inceptions.
 - The stress paths are designed, not sampled.

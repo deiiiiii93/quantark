@@ -431,6 +431,11 @@ def test_the_cli_runs_a_per_date_cell_with_an_exact_quad_check(tiny_fleet, tmp_p
     assert check["provider"] == "exact" and check["n_paths"] == 2 and [r["path"] for r in check["oracle"]] == [0]
     assert runs[C.BASELINE_CELL + "__stress"]["oracle"] == []
     assert np.isfinite(main["day0_book_mark_bp"]) and np.isfinite(check["day0_book_mark_bp"])
+    # The day-0 mark mixes the carry-model gap (the coupon is fair under
+    # term_flat_q) and the engine gap; the report separates the engine part.
+    entry = S03.aggregate(tmp_path, es_level=0.25, historical_dir=None)["cells"][C.BASELINE_CELL]
+    assert entry["exact_quad_day0_book_mark_bp"] == pytest.approx(check["day0_book_mark_bp"])
+    assert entry["day0_engine_gap_bp"] == pytest.approx(main["day0_book_mark_bp"] - check["day0_book_mark_bp"])
 
 def test_paths_dir_reads_a_batch_from_elsewhere_and_writes_nothing_there(tiny_fleet, tmp_path):
     out, _, _ = tiny_fleet
