@@ -170,6 +170,58 @@ rate and dividend bumps reused the unbumped sweep (reference rho -0.348 and divi
 fine PDE and a CRN MC agreed on -0.27 and -0.06); fixed in 14128502 (content key for bumped markets) with a regression
 test. Price evidence never used bumped contexts.
 
+## Gate D results
+`example/intraday_benchmark/run_benchmark.py`, one child process per engine x workload, single-threaded BLAS
+(`OPENBLAS/OMP/VECLIB_MAXIMUM_THREADS=1`), medians of 5 repeats (3 for PDE/MC curves). Machine: Apple Silicon
+(Darwin-arm64), 48 GB, shared with another session's 6-core simulation fleet for the QUAD V2 / analytical rows
+(load ~2-7) and quiet for the PDE / MC rows (load ~1.6-2.7). Code: QUAD V2 / analytical at 3bb79729; PDE single /
+curve and MC at b74e4d52; PDE batch at b901e9bf (PDE budget in bytes). There is no SLA; "peak traced" is the
+`tracemalloc` peak of one extra pass (NumPy buffers included). Accuracy column: the Gate C price status of the
+matching cell (spot one standard deviation below KO for snowballs, above the strike for digitals).
+
+| engine | state | cold (ms) | warm (ms) | peak traced (MiB) | Gate C price status |
+|---|---|---|---|---|---|
+| QUAD V2 | snowball 1 h, point (price + delta, gamma, vega, rho, theta) | 82.9 | 82.9 | 2.2 | passed |
+| QUAD V2 | snowball 1 h, desk_bump | 61.1 | 60.0 | 2.4 | passed |
+| QUAD V2 | snowball 1 s, point | 81.1 | 81.9 | 2.2 | passed |
+| QUAD V2 | snowball 1 s, desk_bump | 60.7 | 59.3 | 2.4 | passed |
+| analytical | digital 1 h, point | 2.5 | 2.4 | 0.1 | passed |
+| analytical | digital 1 h, desk_bump | 2.4 | 2.3 | 0.3 | passed |
+| analytical | digital 1 s, point | 2.5 | 2.3 | 0.1 | passed |
+| analytical | digital 1 s, desk_bump | 2.4 | 2.4 | 0.2 | passed |
+| PDE | snowball 1 h, point | 700.8 | 700.6 | 102.3 | unqualified |
+| PDE | snowball 1 h, desk_bump | 1442.6 | 1441.3 | 110.9 | unqualified |
+| PDE | snowball 1 s, point | 1042.9 | 1060.9 | 531.2 | unqualified |
+| PDE | snowball 1 s, desk_bump | 2173.0 | 2161.5 | 534.6 | unqualified |
+| MC (RQMC, 2^14 paths) | snowball 1 h, point | 578.0 | 581.1 | 4.2 | unqualified |
+| MC (RQMC) | snowball 1 h, desk_bump | 826.0 | 828.9 | 4.4 | unqualified |
+| MC (RQMC) | snowball 1 s, point | 574.2 | 570.8 | 4.2 | unqualified |
+| MC (RQMC) | snowball 1 s, desk_bump | 754.6 | 749.7 | 4.4 | unqualified |
+
+| engine | 101-spot curve (95..106, across the KO barrier) | first curve (s) | warm curve (s) | peak traced (MiB) | points with point greeks |
+|---|---|---|---|---|---|
+| QUAD V2 | snowball 1 h before a fixing | 0.029 | 0.028 | 1.4 | 101 |
+| QUAD V2 | snowball 1 s before a fixing | 0.025 | 0.024 | 1.4 | 101 |
+| analytical | digital 1 h before expiry | 0.040 | 0.039 | 0.1 | 0 (per-spot pricing) |
+| analytical | digital 1 s before expiry | 0.039 | 0.039 | 0.1 | 0 |
+| PDE | snowball 1 h before a fixing | 23.4 | 23.5 | 87.3 | 0 |
+| PDE | snowball 1 s before a fixing | 35.3 | 35.9 | 380.4 | 0 |
+| MC (RQMC) | snowball 1 h before a fixing | 11.7 | 11.7 | 4.4 | 0 |
+| MC (RQMC) | snowball 1 s before a fixing | 10.4 | 10.4 | 4.4 | 0 |
+
+| engine | batch: 100 mixed items (median per kind) | total (s) | per-item median (ms) | failures | peak traced (MiB) |
+|---|---|---|---|---|---|
+| QUAD V2 (+ closed forms for digital / barrier) | snowball 9.7 ms, phoenix 17.7 ms, digital 0.4 ms, barrier 0.7 ms | 0.75 | 5.2 | 0 | 2.2 |
+| analytical | 50 items: digital 0.4 ms, barrier 0.6 ms (no autocallable route) | 0.02 | 0.5 | 0 | 0.2 |
+| PDE (+ closed form for digital) | snowball 600 ms, phoenix 3833 ms, digital 0.5 ms, barrier 7.1 ms | 106.5 | 90.5 | 0 | 886.5 |
+| MC (RQMC) | snowball 139 ms, phoenix 1670 ms, digital 155 ms, barrier 199 ms | 55.8 | 198.8 | 0 | 80.8 |
+
+Found while measuring (fixed, each with a regression test): a 101-spot PDE curve kept every spot's copied market —
+and its PDE coefficient memo — alive and grew past 8 GiB (3bb79729: contexts one spot at a time, now 0.73 GiB); the
+PDE route left the legacy coefficient memo on the request's rate curve, so a batch holding its requests kept every
+route's coefficient sets (b74e4d52); the grid budget assumed a snowball's two surfaces while a memory Phoenix keeps
+2(k+1)+2 (b901e9bf: budget in bytes per the solver's surfaces; PDE batch 209 s / 3.5 GiB traced -> 106 s / 0.9 GiB).
+
 ## Open questions (need a desk decision; intraday fails closed meanwhile)
 - **Phoenix realized coupon amount.** `AutocallableLifecycleTracker.observe` books a coupon as
   `get_coupon_payoff(idx)` = principal·coupon_rate·1.0 (pinned by
