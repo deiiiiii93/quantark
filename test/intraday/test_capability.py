@@ -27,8 +27,8 @@ def test_unsupported_engine_names_limitation_and_alternatives(sse_calendar):
 
 def test_requesting_an_output_the_route_lacks_is_a_capability_error(sse_calendar):
     snow = dated_snowball(sse_calendar, datetime(2026, 3, 16))
-    with pytest.raises(CapabilityError, match="vega"):
-        require_capability(snow, SnowballQuadEngineV2(), monitoring="discrete", outputs=("price", "vega"))
+    with pytest.raises(CapabilityError, match="vanna"):
+        require_capability(snow, SnowballQuadEngineV2(), monitoring="discrete", outputs=("price", "vanna"))
 
 
 def test_subclasses_do_not_inherit_a_route(sse_calendar):

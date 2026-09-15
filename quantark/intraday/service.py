@@ -50,9 +50,12 @@ def _cashflow_origin(cf, ctx):
 def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -> IntradayValuationResult:
     """Value one contract at an intraday timestamp; see the module docstring for the sequence."""
     ctx = resolve_context(request)
-    if request.greeks:
-        raise CapabilityError("intraday greeks are delivered by plan 3; request price only")
-    require_capability(request.product, engine, monitoring=_monitoring(ctx), outputs=("price",))
+    if request.greeks and request.greek_convention != "desk_bump":
+        raise CapabilityError(f"{request.greek_convention} greeks are not delivered yet (point greeks arrive in plan 3 task 3)")
+    require_capability(request.product, engine, monitoring=_monitoring(ctx),
+                       outputs=("price",) + tuple(g for g in request.greeks if g != "theta"))
+    if "theta" in request.greeks:
+        raise CapabilityError("intraday theta arrives in plan 3 task 4")
     outcome = route_for(ctx, engine).price(ctx, engine)
     state = ctx.numerical.lifecycle_state
     pending_pv = float(pending_receivable_pv(state, ctx.pricing_env)) if state is not None else 0.0
@@ -76,12 +79,18 @@ def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -
                 cashflows.append(CashflowComponent("paid", float(cf.amount), provenance, event_id=event_id,
                                                    cashflow_id=cf.cashflow_id, payment_tau=float(cf.payment_time)))
     lifecycle = {k: getattr(state, k) for k in _LIFECYCLE_FIELDS if hasattr(state, k)} if state is not None else {}
+    greeks = ()
+    if request.greeks:
+        from quantark.intraday.greeks import assemble_desk_greeks, bump_config_for, desk_bump_cells
+        cells = desk_bump_cells(ctx, engine, request.greeks)
+        greeks = assemble_desk_greeks(cells, request.greeks, spot=ctx.spot, bump_config=bump_config_for(engine))
+        records.extend(f"cell:{bump_id}" for bump_id in cells if bump_id != "base")
     return IntradayValuationResult(
         price=price, contingent_pv=outcome.contingent_pv, pending_receivable_pv=pending_pv,
         paid_cash=ctx.numerical.paid_cash, units="price_per_contract", valuation_timestamp=ctx.valuation_timestamp,
         phase=ctx.phase, provisional=ctx.provisional, assumptions=ctx.reconstruction.assumptions,
         continuous_assumption=ctx.reconstruction.continuous_assumption, lifecycle=lifecycle,
-        cashflows=tuple(cashflows), greeks=(), profile_identity=request.variance_profile.identity(),
+        cashflows=tuple(cashflows), greeks=greeks, profile_identity=request.variance_profile.identity(),
         session_identity=request.session_calendar.identity(), market_snapshot_id=ctx.market_snapshot_id,
         context_identity=ctx.identity, engine=engine_class_path(engine), method=outcome.method,
         numerical=dict(outcome.numerical), records=tuple(records))
