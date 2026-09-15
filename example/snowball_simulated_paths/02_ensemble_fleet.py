@@ -288,6 +288,8 @@ def parse_cells(values: Optional[Sequence[str]]) -> List[Tuple[str, str]]:
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", type=Path, default=C.DEFAULT_OUT_DIR)
+    parser.add_argument("--paths-dir", type=Path, default=None,
+                        help="the batch to run (bootstrap.npz, stress.npz, manifest.json); default <out-dir>/paths")
     parser.add_argument("--cells", nargs="+", default=None, help="model:hedge, default = the full grid")
     parser.add_argument("--provider", choices=PROVIDERS, default="per_date",
                         help="the bootstrap and stress runs' provider; per_date = exact PDE, exact = exact QUAD")
@@ -315,7 +317,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         args.check_paths, args.exact_paths = min(args.check_paths, 8), min(args.exact_paths, 8)
         args.oracle_paths = min(args.oracle_paths, 1)
     cells = parse_cells(args.cells)
-    bootstrap, stress, paths_manifest = S01.load_paths(args.out_dir)
+    bootstrap, stress, paths_manifest = S01.load_paths(args.out_dir, paths_dir=args.paths_dir)
     terms = study_terms(bootstrap.dates, maturity_months=args.maturity_months, lockout_months=args.lockout_months)
     coupon = fair_coupon(bootstrap, terms, model=C.Q.REFERENCE_MODEL, quad_grid=args.quad_grid)
     product = C.Q.build_product(terms, float(bootstrap.spot[0, 0]), coupon.coupon)

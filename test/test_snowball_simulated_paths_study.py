@@ -428,6 +428,18 @@ def test_the_cli_runs_a_per_date_cell_with_an_exact_quad_check(tiny_fleet, tmp_p
     assert runs[C.BASELINE_CELL + "__stress"]["oracle"] == []
     assert np.isfinite(main["day0_book_mark_bp"]) and np.isfinite(check["day0_book_mark_bp"])
 
+def test_paths_dir_reads_a_batch_from_elsewhere_and_writes_nothing_there(tiny_fleet, tmp_path):
+    out, _, _ = tiny_fleet
+    before = sorted((p.name, p.stat().st_mtime_ns) for p in (out / "paths").iterdir())
+    bootstrap, _, manifest = S01.load_paths(tmp_path / "unused", paths_dir=out / "paths")
+    assert bootstrap.n_paths == 4 and manifest["n_paths"] == 4
+    rc = S02.main(["--out-dir", str(tmp_path / "run"), "--paths-dir", str(out / "paths"), "--provider", "exact",
+                   "--cells", f"{C.MODELS[0]}:front", "--exact-paths", "0", "--oracle-paths", "0",
+                   "--quad-grid", "101", "--maturity-months", "1", "--lockout-months", "1"])
+    assert rc == 0 and (tmp_path / "run" / "cells" / C.BASELINE_CELL / "run.json").exists()
+    assert not (tmp_path / "run" / "paths").exists()
+    assert sorted((p.name, p.stat().st_mtime_ns) for p in (out / "paths").iterdir()) == before
+
 def test_the_life_surface_mesh_is_refined_and_its_step_cap_clears_the_request():
     """One surface serves a whole market bucket, so the mesh is cheap enough
     to buy accuracy with.

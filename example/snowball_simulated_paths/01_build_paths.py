@@ -97,8 +97,9 @@ def write_paths(out_dir, bootstrap: MarketPath, stress: MarketPath, *, history: 
     return manifest
 
 
-def load_paths(out_dir) -> Tuple[MarketPath, MarketPath, Dict[str, Any]]:
-    out = Path(out_dir) / "paths"
+def load_paths(out_dir, *, paths_dir=None) -> Tuple[MarketPath, MarketPath, Dict[str, Any]]:
+    """The batch under ``paths_dir``, or ``<out_dir>/paths`` when it is not given."""
+    out = Path(paths_dir) if paths_dir is not None else Path(out_dir) / "paths"
     for name in ("bootstrap.npz", "stress.npz", "manifest.json"):
         if not (out / name).exists():
             raise C.Q.StudyDataError(f"missing {out / name}; run 01_build_paths.py first")
