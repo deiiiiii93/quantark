@@ -11,7 +11,7 @@ Ordering is by instant (UTC) then kind priority — never by a float tolerance.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from enum import Enum
 from typing import List, Optional, Tuple
 
@@ -127,13 +127,32 @@ def _schedule_env(product, template_env: PricingEnvironment) -> PricingEnvironme
     """Naive environment anchored at the contract's inception (dates) or as-is (floats).
 
     Only the product's own resolvers read it, to produce the contractual cash
-    table; nothing from the template's market enters the timeline.
+    table; nothing from the template's market enters the timeline. Without an
+    ``initial_date`` the anchor must still precede every contract date (a
+    same-day date-only expiry is midnight, before any intraday valuation).
     """
     initial = getattr(product, "initial_date", None)
-    anchor = initial if initial is not None else template_env.valuation_date.replace(tzinfo=None)
+    if initial is not None:
+        anchor = initial
+    else:
+        dates = _contract_dates(product)
+        if dates and hasattr(product, "barrier_config"):
+            raise ValidationError("dated autocallables need initial_date in intraday mode: it anchors the "
+                                  "contractual accrual, which must not move with the valuation timestamp")
+        anchor = min(dates) - timedelta(days=1) if dates else template_env.valuation_date.replace(tzinfo=None)
     return PricingEnvironment(rate_curve=template_env.rate_curve, valuation_date=anchor,
                               spot_quote=template_env.spot_quote, vol_surface=template_env.vol_surface,
                               div_yield=template_env.div_yield, basis_yield=template_env.basis_yield)
+
+
+def _contract_dates(product) -> List[datetime]:
+    dates = [getattr(product, name, None) for name in ("exercise_date", "maturity_date", "settlement_date")]
+    bc = getattr(product, "barrier_config", None)
+    for name in ("ko_observation_schedule", "ki_observation_schedule"):
+        schedule = getattr(bc, name, None)
+        if schedule is not None:
+            dates.extend(r.observation_date for r in schedule.records)
+    return [d for d in dates if d is not None]
 
 
 def _instant(cal: TradingSessionCalendar, *, timestamp, dt, tau, origin, fixing_time, what):
