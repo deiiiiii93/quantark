@@ -156,6 +156,16 @@ class PricingSession:
         )
         return value_intraday(engine, request, session=self)
 
+    def value_intraday_many(self, items, *, collect_errors: bool = False) -> list:
+        """Caller-ordered intraday valuation of (engine, IntradayValuationRequest) pairs through this session.
+
+        Each route is re-dispatched through the kernel exactly as ``value_intraday``; with
+        ``collect_errors=True`` a failed item becomes an ``IntradayFailure``.
+        """
+        self._ensure_open()
+        from quantark.intraday.batch import value_intraday_many
+        return value_intraday_many(list(items), session=self, collect_errors=collect_errors)
+
     def price_many(self, items, *, collect_errors: bool = False) -> list:
         """Serial, caller-ordered pricing of (engine, PricingRequest) pairs.
 
