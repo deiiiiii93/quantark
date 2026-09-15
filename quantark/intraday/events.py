@@ -175,10 +175,14 @@ def _instant(cal: TradingSessionCalendar, *, timestamp, dt, tau, origin, fixing_
 
 
 def _payment(cal: TradingSessionCalendar, *, timestamp, dt, tau, origin, fallback):
+    """Payment instant; ``fallback`` is the determination instant (pay at determination)."""
     if timestamp is not None:
         return require_aware(timestamp, "payment timestamp")
     if dt is not None:
-        return cal.payment_at(dt.date())
+        # A date-only payment is deemed made at the calendar's payment time, but
+        # never before its own determination (e.g. a fixing after the close).
+        deemed = cal.payment_at(dt.date())
+        return fallback if to_utc(deemed) < to_utc(fallback) else deemed
     if tau is not None:
         if origin is None:
             raise ValidationError("float schedules need schedule_origin in intraday mode")
