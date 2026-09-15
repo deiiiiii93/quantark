@@ -16,6 +16,7 @@ from math import fsum, isfinite
 from typing import Tuple
 
 from quantark.intraday.session import TradingSessionCalendar
+from quantark.intraday.timestamp import seconds_between
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
@@ -94,12 +95,12 @@ class VarianceProfile:
         if len(bounds) != len(session_calendar.sessions):
             raise ValidationError(f"{reference_date} is a shortened day; pick a normal reference date")
         prev_close = session_calendar.close_at(session_calendar.previous_trading_day(reference_date))
-        overnight = (bounds[0][0] - prev_close).total_seconds()
+        overnight = seconds_between(prev_close, bounds[0][0])
         sessions, breaks = [], []
         for i, (o, c) in enumerate(bounds):
-            sessions.append((c - o).total_seconds())
+            sessions.append(seconds_between(o, c))
             if i > 0:
-                breaks.append((o - bounds[i - 1][1]).total_seconds())
+                breaks.append(seconds_between(bounds[i - 1][1], o))
         total = overnight + sum(sessions) + sum(breaks)
         return cls(name=f"uniform[{session_calendar.name}]", version=version, days_per_year=days_per_year,
                    overnight_weight=overnight / total,

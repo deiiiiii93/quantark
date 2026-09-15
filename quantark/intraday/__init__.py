@@ -8,6 +8,8 @@ from quantark.intraday.timestamp import (
     calendar_year_fraction,
     require_aware,
     same_instant,
+    seconds_between,
+    to_utc,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "calendar_year_fraction",
     "require_aware",
     "same_instant",
+    "seconds_between",
+    "to_utc",
 ]

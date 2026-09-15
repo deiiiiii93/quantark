@@ -37,3 +37,16 @@ def test_add_year_fraction_round_trips():
     tau = 37.0 / SECONDS_PER_YEAR
     assert add_year_fraction(a, tau) == a + timedelta(seconds=37)
     assert calendar_year_fraction(a, add_year_fraction(a, 0.25)) == pytest.approx(0.25, abs=1e-15)
+
+
+def test_arithmetic_is_instant_based_across_a_dst_change():
+    try:
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+    except Exception:  # ZoneInfoNotFoundError when no tz database
+        pytest.skip("no tz database")
+    fri = datetime(2026, 3, 6, 16, 0, tzinfo=ny)      # EST
+    mon = datetime(2026, 3, 9, 16, 0, tzinfo=ny)      # EDT: the weekend lost an hour
+    assert calendar_year_fraction(fri, mon) == (71 * 3600.0) / SECONDS_PER_YEAR
+    moved = add_year_fraction(fri, 72 * 3600.0 / SECONDS_PER_YEAR)
+    assert moved == datetime(2026, 3, 9, 17, 0, tzinfo=ny) and moved.tzinfo is ny
