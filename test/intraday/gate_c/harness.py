@@ -30,6 +30,8 @@ from intraday.reference.gaussian_reference import barrier_zero_carry, reference_
 
 SIGMA_INNER = 0.20
 MC_BASE_PATHS = 2 ** 14
+#: extra points per PDE level for the phase envelope (each moves every barrier's in-cell position substantially)
+PHASE_SHIFTS = (1, 2, 3)
 
 
 @dataclass(frozen=True)
@@ -70,7 +72,11 @@ def build_context(cell: C.Cell):
     return ctx, sw
 
 
-def engine_for(cell: C.Cell, level: int = 0):
+def engine_for(cell: C.Cell, level: int = 0, level0: Optional[dict] = None, phase_shift: int = 0):
+    """The engine for one ladder level. PDE levels >= 1 double the grid the route ACTUALLY solved at level 0
+    (``level0`` = its numerical record): the route raises points and steps per day to the diffusion-layer floor,
+    and a ladder scaling the default request instead would leave the solved grid pinned at that floor.
+    ``phase_shift`` adds points at the same level: a few more points move every barrier's position inside its cell."""
     from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine, DigitalOptionAnalyticalEngine, OneTouchAnalyticalEngine
     from quantark.asset.equity.engine.mc import BarrierOptionMCEngine, DigitalOptionMCEngine, SnowballMCEngine
     from quantark.asset.equity.engine.pde import BarrierPDESolver, OneTouchPDESolver, SnowballPDESolver
@@ -83,8 +89,14 @@ def engine_for(cell: C.Cell, level: int = 0):
         return SnowballQuadEngineV2(QuadV2Params(cells_per_sd=2.0 * 2 ** level))
     if cell.engine == "pde":
         base = resolve_config("standard", None)
-        params = PDEParams() if level == 0 else PDEParams(grid=GridConfig(points=int(base.points) * 2 ** level,
-                                                                          steps_per_day=float(base.steps_per_day) * 2 ** level))
+        if level == 0 and phase_shift == 0:
+            params = PDEParams()
+        else:
+            solved = level0 or {}
+            points = int(solved.get("points") or base.points) * 2 ** level + phase_shift
+            spd = float(solved.get("steps_per_day") or base.steps_per_day) * 2 ** level
+            params = PDEParams(grid=GridConfig(points=points, steps_per_day=spd, max_points=max(points, int(base.max_points)),
+                                               max_steps=10 ** 8))
         return {"snowball_discrete_ki": SnowballPDESolver, "barrier_uo_zero_carry": BarrierPDESolver,
                 "one_touch_zero_carry": OneTouchPDESolver}[cell.product](params)
     if cell.engine == "mc_rqmc":
@@ -145,6 +157,15 @@ def _levels(cell: C.Cell):
     return {"analytical": (0,), "mc_rqmc": (0, 1)}.get(cell.engine, (0, 1, 2))
 
 
+def _decided_now(ctx) -> float:
+    """Cash the lifecycle fixes and pays exactly at the valuation instant (a continuous barrier found hit by the latest
+    spot): the route reports it as paid, the reference as part of the value now."""
+    state = ctx.numerical.lifecycle_state
+    if state is None:
+        return 0.0
+    return float(sum(cf.amount for cf in state.ledger.cashflows if cf.payment_time == 0.0))
+
+
 def run_cell(cell: C.Cell) -> CellResult:
     ctx, _sw = build_context(cell)
     budget = budgets.price_budget(C.notional(cell.product))
@@ -152,21 +173,30 @@ def run_cell(cell: C.Cell) -> CellResult:
     if reference is None:
         return CellResult(cell, None, None, None, budget, False, "inconclusive", "no independent reference")
     ref, unc = reference
+    from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
+    state = ctx.numerical.lifecycle_state
+    fixed_value = (float(pending_receivable_pv(state, ctx.pricing_env)) if state is not None else 0.0) + _decided_now(ctx)
     prices, numerics = [], []
+
+    def record():
+        errors = [abs(p - ref) for p in prices]
+        refinement = {"prices": prices, "errors": errors, "numerical": numerics}
+        return errors, dict(cell=cell, route_price=prices[0], ref_price=ref, ref_uncertainty=unc, budget=budget,
+                            numerical=numerics[0], refinement=refinement)
+
     for level in _levels(cell):
-        engine = engine_for(cell, level)
+        engine = engine_for(cell, level, numerics[0] if numerics else None)
         try:
             out = route_for(ctx, engine).price(ctx, engine)
         except CapabilityError as exc:
             return CellResult(cell, None, ref, unc, budget, False, "unsupported", str(exc))
-        prices.append(out.contingent_pv)
+        prices.append(out.contingent_pv + fixed_value)
         numerics.append({k: v for k, v in out.numerical.items() if isinstance(v, (int, float, str, bool, type(None)))})
-    route = prices[0]
+        if cell.engine == "pde" and level == 0 and numerics[0].get("resolution") == "unqualified":
+            # the route itself declines an accuracy claim: the diffusion layer is below the grid in space or time
+            return CellResult(passed=False, status="unqualified", reason=numerics[0].get("resolution_reason", ""), **record()[1])
     tol = budget + K_REF * unc
-    errors = [abs(p - ref) for p in prices]
-    refinement = {"prices": prices, "errors": errors, "numerical": numerics}
-    base = dict(cell=cell, route_price=route, ref_price=ref, ref_uncertainty=unc, budget=budget, numerical=numerics[0],
-                refinement=refinement)
+    errors, base = record()
 
     if cell.engine == "analytical":
         ok = errors[0] <= tol
@@ -180,16 +210,29 @@ def run_cell(cell: C.Cell) -> CellResult:
             return CellResult(passed=False, status="unqualified", reason=f"sampling uncertainty {se[0]:.2e} above budget", **base)
         ok = errors[0] <= tol + K_REF * se[0] and abs(prices[-1] - prices[-2]) <= K_REF * se[-1]
         return CellResult(passed=ok, status="passed" if ok else "unqualified", **base)
-    if cell.engine == "pde" and numerics[0].get("resolution") == "unqualified":
-        # the route itself declines an accuracy claim: the diffusion layer is below the grid
-        return CellResult(passed=False, status="unqualified", reason=numerics[0].get("resolution_reason", ""), **base)
     ladder_agrees = abs(prices[-1] - prices[-2]) <= tol
     if errors[0] <= tol and ladder_agrees:
         return CellResult(passed=True, status="passed", **base)
     converging = errors[-1] <= tol or (errors[2] < errors[1] < errors[0])
     if not converging:
-        return CellResult(passed=False, status="failed",
-                          reason=f"refinement ladder does not approach the reference: errors {errors}", **base)
+        # One grid per level samples ONE position of each barrier inside its cell, and doubling moves that phase: a
+        # phase-dependent error zig-zags down the ladder. Decide on the envelope over a few phases per level instead.
+        envelope = []
+        for level in _levels(cell):
+            shifted = [prices[level]]
+            for shift in PHASE_SHIFTS:
+                engine = engine_for(cell, level, numerics[0], phase_shift=shift)
+                shifted.append(route_for(ctx, engine).price(ctx, engine).contingent_pv + fixed_value)
+            envelope.append(max(abs(p - ref) for p in shifted))
+        base["refinement"]["phase_envelope"] = envelope
+        if not (envelope[-1] <= tol or envelope[2] < envelope[1] < envelope[0]):
+            return CellResult(passed=False, status="failed",
+                              reason=f"refinement ladder does not approach the reference: errors {errors}, "
+                                     f"phase envelope {envelope}", **base)
+        return CellResult(passed=False, status="unqualified",
+                          reason=f"discretisation error {errors[0]:.2e} above tolerance {tol:.2e} at default settings; "
+                                 f"phase-dependent (barrier position in its cell), phase envelope converges {envelope}",
+                          **base)
     return CellResult(passed=False, status="unqualified",
                       reason=f"discretisation error {errors[0]:.2e} above tolerance {tol:.2e} at default settings; ladder converges",
                       **base)
