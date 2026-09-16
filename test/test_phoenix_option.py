@@ -529,12 +529,33 @@ class TestKOPayoff:
         
         # 2. Accumulated coupons (passed in)
         
-        # 3. Current period coupon: Triggered because spot 105 >= coupon_barrier 85
-        # Default coupon rate 1% per period (not annualized in default get_coupon_payoff)
-        current_coupon = get_principal(phoenix) * 0.01 * 1.0
-        
+        # 3. Current period coupon: Triggered because spot 105 >= coupon_barrier 85.
+        # The rate is annualized (AccrualConfig default), and this period runs from the
+        # previous observation at 0.25 to this one at 0.5.
+        current_coupon = get_principal(phoenix) * 0.01 * 0.25
+
         expected = ko_rebate + accumulated + current_coupon
         assert payoff == expected
+
+    def test_a_per_period_coupon_rate_pays_the_rate_itself(self):
+        """is_annualized_coupon=False: the rate IS the period amount, so no accrual scaling."""
+        phoenix = create_test_phoenix(
+            barrier_config=create_basic_barrier_config(ko_rate=0.15),
+            payoff_config=PayoffConfig(include_principal=False),
+            accrual_config=AccrualConfig(is_annualized_coupon=False),
+        )
+        assert phoenix.coupon_period_fraction(1) == 1.0
+        assert phoenix.get_coupon_payoff(1) == get_principal(phoenix) * 0.01
+        assert phoenix.get_coupon_period_year_fractions([0.25, 0.5, 0.75, 1.0]) == [1.0] * 4
+
+    def test_a_per_period_rate_cannot_also_carry_an_accrual_fraction(self):
+        with pytest.raises(ValidationError, match="is_annualized_coupon=False"):
+            create_test_phoenix(
+                coupon_config=CouponBarrierConfig(
+                    coupon_barrier=85.0, coupon_rate=0.01, fixed_coupon_year_fraction=0.25
+                ),
+                accrual_config=AccrualConfig(is_annualized_coupon=False),
+            )
 
     def test_external_accrual_factors_drive_ko_and_current_coupon(self):
         """Test external accrual factors drive Phoenix KO and current coupon payoffs."""

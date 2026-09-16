@@ -94,9 +94,11 @@ def _rows() -> Tuple[IntradayCapability, ...]:
         IntradayCapability(SnowballOption, _QUAD_V2 + "SnowballQuadEngineV2", "continuous", anywhere, price_only, "supported",
                            "continuous KI via the QUAD V2 survival kernel; touch history disclosed as an assumption"),
         IntradayCapability(PhoenixOption, _QUAD_V2 + "PhoenixQuadEngineV2", "discrete", anywhere, price_only, "supported",
-                           "valuations before the first due coupon (coupon replay fails closed)"),
+                           "realized coupons replay at their contractual amount; memory outstanding at the instant "
+                           "needs equal periods (it reaches the twin as a count)"),
         IntradayCapability(PhoenixOption, _QUAD_V2 + "PhoenixQuadEngineV2", "continuous", anywhere, price_only, "supported",
-                           "valuations before the first due coupon (coupon replay fails closed)"),
+                           "realized coupons replay at their contractual amount; memory outstanding at the instant "
+                           "needs equal periods (it reaches the twin as a count)"),
         IntradayCapability(KnockOutResetSnowballOption, _QUAD_V2 + "KOResetSnowballQuadEngineV2", "discrete", anywhere,
                            price_only, "supported",
                            "absolute post-KI schedules; due fixings must be covered by the checkpoint (no tracker replay)"),

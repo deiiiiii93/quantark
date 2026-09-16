@@ -219,13 +219,16 @@ def _ki_is_continuous(product) -> bool:
 def phoenix_coupon_fractions(product, ko_times: List[float]) -> List[float]:
     """Contractual per-period coupon year fractions over the FULL KO schedule.
 
-    Same precedence the QUAD V2 Phoenix adapter applies at inception: explicit
-    ``coupon_year_fractions``, positional ``accrual_factors``, a fixed fraction,
-    the coupon day count between consecutive contract dates (from
+    A rate that is not annualized is the period's amount, so every fraction is 1.
+    Otherwise the precedence the QUAD V2 Phoenix adapter applies at inception:
+    explicit ``coupon_year_fractions``, positional ``accrual_factors``, a fixed
+    fraction, the coupon day count between consecutive contract dates (from
     ``initial_date``), else consecutive observation-time differences.
     """
     raw = product.barrier_config.ko_observation_schedule.records
     n = len(raw)
+    if not product.is_coupon_rate_annualized:
+        return [1.0] * n
     explicit = getattr(product.coupon_config, "coupon_year_fractions", None)
     if explicit is not None:
         if len(explicit) != n:

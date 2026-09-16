@@ -47,6 +47,11 @@ class AutocallableLifecycleState:
     observed_ko_indices: set[int] = field(default_factory=set)
     observed_ki_indices: set[int] = field(default_factory=set)
     observed_coupon_indices: set[int] = field(default_factory=set)
+    #: Coupon periods observed below their barrier and still unpaid. A memory
+    #: coupon pays these together with the period that finally triggers, so the
+    #: periods themselves are kept: under an annualized rate they need not be
+    #: worth the same, which a bare count cannot express.
+    missed_coupon_indices: set[int] = field(default_factory=set)
     # Pending-settlement state: a terminal cashflow whose settlement date lies
     # after its observation date is parked here (economic termination and cash
     # posting are separate moments); ``settled`` marks cash fully posted.

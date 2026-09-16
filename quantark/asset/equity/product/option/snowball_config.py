@@ -239,6 +239,9 @@ class AccrualConfig:
         is_annualized_ko: If True, KO return accrues with year fraction
         is_annualized_ki: If True, KI return accrues with year fraction
         is_annualized_rebate: If True, rebate accrues with year fraction
+        is_annualized_coupon: If True, a Phoenix coupon rate is per annum and the
+            coupon pays principal x rate x the period's year fraction; if False the
+            rate IS the period's amount and its fraction is 1
         accrual_dates: Calendar dates for annualized coupon calculation
         accrual_factors: Optional externally supplied accrual factors by
             KO/coupon observation
@@ -252,6 +255,7 @@ class AccrualConfig:
     is_annualized_ko: Optional[bool] = None
     is_annualized_ki: Optional[bool] = None
     is_annualized_rebate: Optional[bool] = None
+    is_annualized_coupon: Optional[bool] = None
     accrual_dates: Optional[List[datetime]] = None
     accrual_factors: Optional[List[float]] = None
     #: Year fraction already accrued before the valuation date.

@@ -215,12 +215,6 @@ def _reconstruct_autocallable(product, timeline, checkpoint, plan: _ReplayPlan, 
         if not state.alive:
             break
         group = plan.group(key)
-        if type(product) is PhoenixOption and any(e.kind is EventKind.COUPON for e in group):
-            raise CapabilityError(
-                "Phoenix coupon replay is not in the intraday inventory: the daily lifecycle tracker books "
-                "get_coupon_payoff(idx) while the Phoenix engines pay per-period year fractions, so a realized "
-                "or memorized coupon has no single contractual amount yet. Value before the first due coupon, "
-                "or supply a checkpoint that covers it.")
         value = plan.value(key, group)
         local_day = plan.local_day(group)
         lifecycle_product = tracker.product_for_lifecycle()

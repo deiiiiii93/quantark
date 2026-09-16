@@ -120,6 +120,25 @@ def test_phoenix_twin_reproduces_contractual_coupons(sse_calendar, sse_sessions)
     assert [twin.get_coupon_payoff(i, year_fraction=f) for i, f in enumerate(fractions)] == pytest.approx([c.cash for c in coupons], rel=1e-12)
 
 
+def test_a_per_period_coupon_rate_accrues_no_year_fraction(sse_calendar, sse_sessions):
+    """is_annualized_coupon=False: the rate IS the period amount, in the intraday inventory too."""
+    from dataclasses import replace
+
+    from quantark.intraday.events import phoenix_coupon_fractions
+
+    prod = dated_phoenix(sse_calendar, T0)
+    prod.accrual_config = replace(prod.accrual_config, is_annualized_coupon=False)
+    tl0 = _base_timeline(sse_calendar, sse_sessions, prod=prod)
+    ts = _kos(tl0)[0].timestamp - timedelta(hours=3)
+    _, _, num = _twin(sse_sessions, prod, ts, EventPhase.BEFORE)
+    twin = num.product
+    times = [r.observation_time for r in twin.barrier_config.ko_observation_schedule.records]
+    assert phoenix_coupon_fractions(twin, times) == [1.0] * len(times)
+    unit = twin.initial_price * twin.contract_multiplier
+    coupons = [e for e in num.remaining_events if e.kind is EventKind.COUPON]
+    assert [c.cash for c in coupons] == pytest.approx([unit * twin.coupon_config.coupon_rate] * len(coupons), rel=1e-12)
+
+
 def test_digital_twin(sse_calendar, sse_sessions):
     ts = datetime(2026, 9, 15, 14, 59, 59, tzinfo=SHANGHAI)
     prod = digital(expiry=datetime(2026, 9, 15))

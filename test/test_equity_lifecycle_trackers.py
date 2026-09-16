@@ -71,6 +71,7 @@ def make_snowball(maturity=1.0, ko_barrier=103.0, ki_barrier=70.0,
 
 START = pd.Timestamp("2026-01-05")
 FIRST_KO_OBS = START + pd.Timedelta(days=int(round(365 / 12)))
+SECOND_KO_OBS = START + pd.Timedelta(days=int(round(2 * 365 / 12)))
 
 
 class TestAutocallableLifecycleTracker:
@@ -202,6 +203,85 @@ class TestAutocallableLifecycleTracker:
         assert tracker.lifecycle.alive
         expected = 1.0 * float(phoenix.get_coupon_payoff(0))
         assert almost_equal(coupon_events[0].cashflow, expected)
+        # The tracker books the amount an engine pays for that period: principal x rate
+        # x the period's own fraction (monthly observations, annualized rate).
+        assert almost_equal(coupon_events[0].cashflow, 100.0 * 0.01 * (1.0 / 12.0))
+        engine_fractions = phoenix.get_coupon_period_year_fractions(
+            [rec.observation_time for rec in phoenix.barrier_config.ko_observation_schedule.records]
+        )
+        assert almost_equal(
+            coupon_events[0].cashflow,
+            float(phoenix.get_coupon_payoff(0, year_fraction=engine_fractions[0])),
+        )
+
+    def test_a_per_period_coupon_rate_books_the_rate_itself(self):
+        """The tracker follows the contract's quotation, not a default of its own."""
+        from quantark.asset.equity.lifecycle import LifecycleEventType
+        from quantark.asset.equity.product.option.phoenix_helpers import (
+            create_standard_phoenix,
+        )
+        from quantark.asset.equity.product.option.snowball_config import AccrualConfig
+
+        phoenix = create_standard_phoenix(
+            initial_price=100.0, strike=100.0, maturity=1.0,
+            ko_barrier=103.0, ki_barrier=None,
+            coupon_barrier=85.0, coupon_rate=0.01, num_observations=12,
+        )
+        phoenix.accrual_config = AccrualConfig(is_annualized_coupon=False)
+        tracker = self._tracker(phoenix, quantity=1.0)
+        live = tracker.product_for_lifecycle()
+        events = tracker.observe(FIRST_KO_OBS, live, make_env(spot=100.0), 100.0)
+
+        coupon = next(e for e in events if e.event_type is LifecycleEventType.COUPON)
+        assert almost_equal(coupon.cashflow, 100.0 * 0.01)
+
+    def _memory_phoenix(self):
+        from quantark.asset.equity.product.option.phoenix_helpers import (
+            create_standard_phoenix,
+        )
+
+        return create_standard_phoenix(
+            initial_price=100.0, strike=100.0, maturity=1.0,
+            ko_barrier=103.0, ki_barrier=None,
+            coupon_barrier=85.0, coupon_rate=0.12, num_observations=12,
+        )
+
+    def test_a_memory_coupon_pays_the_periods_it_memorized(self):
+        """A missed period is released with the one that triggers, as every engine pays it."""
+        from quantark.asset.equity.lifecycle import LifecycleEventType
+
+        phoenix = self._memory_phoenix()
+        assert phoenix.has_memory_coupon
+        tracker = self._tracker(phoenix, quantity=1.0)
+        live = tracker.product_for_lifecycle()
+
+        missed = tracker.observe(FIRST_KO_OBS, live, make_env(spot=80.0), 80.0)
+        assert missed == [] and tracker.lifecycle.missed_coupon_indices == {0}
+
+        events = tracker.observe(SECOND_KO_OBS, live, make_env(spot=100.0), 100.0)
+        coupon = next(e for e in events if e.event_type is LifecycleEventType.COUPON)
+        one_period = 100.0 * 0.12 / 12.0
+        assert almost_equal(coupon.cashflow, 2.0 * one_period)
+        assert coupon.metadata["memorized_periods"] == [0]
+        assert not tracker.lifecycle.missed_coupon_indices
+        assert tracker.lifecycle.coupon_memory_count == 0
+
+    def test_a_knock_out_settles_that_period_s_coupon(self):
+        """The engines add the coupon to the knock-out payoff; the tracker books it too."""
+        from quantark.asset.equity.lifecycle import LifecycleEventType
+
+        phoenix = self._memory_phoenix()
+        tracker = self._tracker(phoenix, quantity=1.0)
+        live = tracker.product_for_lifecycle()
+
+        events = tracker.observe(FIRST_KO_OBS, live, make_env(spot=105.0), 105.0)
+        assert [e.event_type for e in events] == [
+            LifecycleEventType.COUPON,
+            LifecycleEventType.KNOCK_OUT,
+        ]
+        assert phoenix.is_coupon_triggered(105.0, 0)
+        assert almost_equal(events[0].cashflow, 100.0 * 0.12 / 12.0)
+        assert not tracker.lifecycle.alive
 
     def test_phoenix_continuous_ki_observe_does_not_crash(self):
         from quantark.asset.equity.lifecycle import LifecycleEventType

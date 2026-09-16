@@ -365,9 +365,20 @@ class PhoenixOption(BaseEquityOption):
             ("is_annualized_ko", self.accrual_config.is_annualized_ko),
             ("is_annualized_ki", self.accrual_config.is_annualized_ki),
             ("is_annualized_rebate", self.accrual_config.is_annualized_rebate),
+            ("is_annualized_coupon", self.accrual_config.is_annualized_coupon),
         ]:
             if flag_value is not None and not isinstance(flag_value, bool):
                 raise ValidationError(f"{flag_name} must be boolean, got {flag_value}")
+
+        # A per-period coupon rate IS the period's amount; there is no accrual to scale.
+        if (
+            not self.is_coupon_rate_annualized
+            and self.coupon_config.fixed_coupon_year_fraction is not None
+        ):
+            raise ValidationError(
+                "fixed_coupon_year_fraction is an annualized-quotation input; it cannot "
+                "be combined with is_annualized_coupon=False"
+            )
 
         accrual_factors = self.accrual_config.accrual_factors
         if accrual_factors is not None:
@@ -778,6 +789,69 @@ class PhoenixOption(BaseEquityOption):
             self.coupon_config.coupon_barrier, observation_idx, "Coupon barrier"
         )
 
+    @property
+    def is_coupon_rate_annualized(self) -> bool:
+        """Whether ``coupon_rate`` is quoted per annum (the accrual default unless overridden)."""
+        return self._effective_annualized_flag(self.accrual_config.is_annualized_coupon)
+
+    def coupon_period_fraction(self, observation_idx: int) -> float:
+        """The period fraction of one coupon, from the contract alone.
+
+        A per-period rate is the period's amount, so its fraction is 1. An annualized
+        rate needs the period's year fraction, in the precedence engines apply: an
+        external accrual factor, the fixed fraction, the coupon day count between
+        consecutive contract dates, else the gap between consecutive observation
+        times. A contract that carries none of those cannot say what it accrues
+        over, so this fails closed rather than picking one.
+
+        Engines pass their own resolved times to
+        ``get_coupon_period_year_fractions``; this is the same answer for callers
+        that hold only the contract (the lifecycle tracker).
+        """
+        if not self.is_coupon_rate_annualized:
+            return 1.0
+
+        factors = self.accrual_config.accrual_factors
+        if factors is not None:
+            return float(factors[observation_idx])
+
+        fixed = self.coupon_config.fixed_coupon_year_fraction
+        if fixed is not None:
+            return float(fixed)
+
+        schedule = self.barrier_config.ko_observation_schedule
+        records = schedule.records if schedule is not None else []
+        if (
+            self.initial_date is not None
+            and observation_idx < len(records)
+            and all(r.observation_date is not None for r in records[: observation_idx + 1])
+        ):
+            start = (
+                self.initial_date
+                if observation_idx == 0
+                else records[observation_idx - 1].observation_date
+            )
+            return float(
+                self.get_coupon_year_fraction(
+                    start, records[observation_idx].observation_date
+                )
+            )
+
+        if observation_idx < len(records) and all(
+            r.observation_time is not None for r in records[: observation_idx + 1]
+        ):
+            current = float(records[observation_idx].observation_time)
+            if observation_idx == 0:
+                return current
+            return current - float(records[observation_idx - 1].observation_time)
+
+        raise ValidationError(
+            f"coupon {observation_idx} is quoted per annum but its accrual period is "
+            "undetermined: give the contract an initial_date with dated KO observations, "
+            "a fixed_coupon_year_fraction, or accrual_factors -- or declare "
+            "is_annualized_coupon=False if the rate is the period amount"
+        )
+
     def get_coupon_payoff(
         self,
         observation_idx: int,
@@ -789,7 +863,13 @@ class PhoenixOption(BaseEquityOption):
         Calculate coupon payoff for a single observation period.
 
         The coupon is calculated as:
-            coupon = initial_price × contract_multiplier × coupon_rate × year_fraction
+            coupon = initial_price × contract_multiplier × coupon_rate × period fraction
+
+        The fraction follows the contract's own quotation
+        (``AccrualConfig.is_annualized_coupon``): a year fraction when the rate is
+        per annum, 1 when the rate is the period's amount. Callers that have already
+        resolved it (every engine, from ``get_coupon_period_year_fractions``) pass it
+        in; callers that have not get it from the contract.
 
         Args:
             observation_idx: Index of observation date
@@ -807,8 +887,7 @@ class PhoenixOption(BaseEquityOption):
                 start_date, end_date, self.coupon_config.day_count_convention
             )
         else:
-            # Default to per-period rate without annualization
-            dcf = 1.0
+            dcf = self.coupon_period_fraction(observation_idx)
 
         principal = self.initial_price * self.contract_multiplier
         return principal * self.coupon_config.coupon_rate * dcf
@@ -836,12 +915,16 @@ class PhoenixOption(BaseEquityOption):
         """
         Resolve coupon period accrual fractions for each observation.
 
-        If fixed_coupon_year_fraction is configured, use that value for every
-        coupon period (e.g., 1/12 for equal monthly coupons). Otherwise, derive
-        period fractions from successive observation times.
+        A rate that is not annualized is the period's amount itself, so every
+        fraction is 1. Otherwise: accrual_factors if supplied, else
+        fixed_coupon_year_fraction for every period (e.g., 1/12 for equal monthly
+        coupons), else successive observation-time differences.
         """
         if not observation_times:
             return []
+
+        if not self.is_coupon_rate_annualized:
+            return [1.0 for _ in observation_times]
 
         accrual_factors = self.accrual_config.accrual_factors
         if accrual_factors is not None:

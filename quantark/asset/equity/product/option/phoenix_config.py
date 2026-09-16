@@ -26,7 +26,10 @@ class CouponBarrierConfig:
         coupon_barrier: Coupon barrier level(s). Can be scalar or time-varying (list).
                        For standard Phoenix: pays coupon when spot >= coupon_barrier.
                        For reverse Phoenix: pays coupon when spot <= coupon_barrier.
-        coupon_rate: Per-period coupon rate (e.g., 0.01 for 1% per period).
+        coupon_rate: Coupon rate for one period. A coupon always pays
+                     principal x coupon_rate x the period's fraction; whether that
+                     fraction is the period's year fraction or 1 is declared by
+                     AccrualConfig.is_annualized_coupon (annualized by default).
         coupon_pay_type: INSTANT (pay at observation) or EXPIRY (accumulate to maturity).
         day_count_convention: Day count convention for year fraction calculation.
                              Supported: ACT_365, THIRTY_360_US, THIRTY_360_EUROPEAN, etc.
@@ -34,7 +37,7 @@ class CouponBarrierConfig:
                       is hit later. If False, only current period coupon is paid.
         fixed_coupon_year_fraction: Optional fixed year fraction used for each coupon
                       period (e.g., 1/12 for equal monthly coupons). If None, engines
-                      use observation-time differences.
+                      use observation-time differences. Annualized quotation only.
     """
 
     # Coupon barrier level(s)

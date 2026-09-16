@@ -131,14 +131,47 @@ def test_product_without_lifecycle_reconstructs_to_nothing(sse_calendar, sse_ses
         _run(prod, tl, AutocallableLifecycleState(), [], ts, EventPhase.BEFORE, 100.0, ts, _schedule_env(prod, env), sse_sessions)
 
 
-def test_phoenix_coupon_replay_fails_closed(sse_calendar, sse_sessions):
+def test_phoenix_coupon_replay_books_the_contractual_amount(sse_calendar, sse_sessions):
+    """The tracker books what the contract event says, which is what the engines pay for that period."""
     prod, env, tl, senv = _setup(sse_calendar, sse_sessions, prod=dated_phoenix(sse_calendar, T0))
     ts = _ko(tl, 0).timestamp + timedelta(seconds=30)
-    with pytest.raises(CapabilityError, match="coupon"):
-        _run(prod, tl, None, [Fixing(_ko(tl, 0).timestamp, 100.0)], ts, EventPhase.AFTER, 100.0, ts, senv, sse_sessions)
-    before_first = _ko(tl, 0).timestamp - timedelta(hours=1)          # nothing due yet: prices fine
-    rec = _run(prod, tl, None, [], before_first, EventPhase.BEFORE, 100.0, before_first, senv, sse_sessions)
-    assert rec.state.alive and rec.applied_event_ids == ()
+    rec = _run(prod, tl, None, [Fixing(_ko(tl, 0).timestamp, 100.0)], ts, EventPhase.AFTER, 100.0, ts, senv, sse_sessions)
+    coupon = next(e for e in tl.events if e.kind is EventKind.COUPON and e.index == 0)
+    assert rec.state.alive and not rec.state.knocked_out            # spot 100: coupon barrier 80, KO barrier 103
+    assert [cf.cashflow_id for cf in rec.state.ledger.cashflows] == ["coupon:0"]
+    assert rec.state.ledger.cashflows[0].amount == pytest.approx(coupon.cash, rel=1e-12)
+    unit = prod.initial_price * prod.contract_multiplier
+    assert coupon.cash < unit * prod.coupon_config.coupon_rate      # an annualized rate accrues over one period
+    assert rec.state.coupon_memory_count == 0 and not rec.state.missed_coupon_indices
+
+
+def test_a_memorized_phoenix_coupon_is_released_with_the_period_that_triggers(sse_calendar, sse_sessions):
+    prod, env, tl, senv = _setup(sse_calendar, sse_sessions, prod=dated_phoenix(sse_calendar, T0))
+    ts = _ko(tl, 1).timestamp + timedelta(seconds=30)
+    fixings = [Fixing(_ko(tl, 0).timestamp, 70.0), Fixing(_ko(tl, 1).timestamp, 100.0)]
+    rec = _run(prod, tl, None, fixings, ts, EventPhase.AFTER, 100.0, ts, senv, sse_sessions)
+    paid = rec.state.ledger.cashflows[-1]
+    c0 = next(e for e in tl.events if e.kind is EventKind.COUPON and e.index == 0)
+    c1 = next(e for e in tl.events if e.kind is EventKind.COUPON and e.index == 1)
+    assert rec.state.knocked_in                                     # spot 70 is below the KI barrier
+    assert paid.amount == pytest.approx(c0.cash + c1.cash, rel=1e-12), "the memorized period is released with it"
+
+
+def test_coupon_memory_outstanding_at_the_valuation_instant_fails_closed(sse_calendar, sse_sessions):
+    """Memory reaches the twin as a COUNT: without equal periods it cannot say what the arrears are worth."""
+    from quantark.intraday import VarianceProfile
+    from quantark.intraday.context import resolve_context
+    from quantark.intraday.request import IntradayValuationRequest
+
+    prod = dated_phoenix(sse_calendar, T0)
+    _, env, tl, _ = _setup(sse_calendar, sse_sessions, prod=prod)
+    ts = _ko(tl, 0).timestamp + timedelta(seconds=30)
+    request = IntradayValuationRequest(
+        product=prod, pricing_env=flat_env(ts, spot=70.0), session_calendar=sse_sessions,
+        variance_profile=VarianceProfile("desk", "1", 244, 0.25, (0.35, 0.35), (0.05,)),
+        fixings=(Fixing(_ko(tl, 0).timestamp, 70.0),))
+    with pytest.raises(CapabilityError, match="fixed_coupon_year_fraction"):
+        resolve_context(request)
 
 
 def test_continuous_ki_history_is_a_disclosed_assumption(sse_calendar, sse_sessions):

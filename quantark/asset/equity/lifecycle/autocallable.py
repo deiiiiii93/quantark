@@ -166,6 +166,18 @@ class AutocallableLifecycleTracker:
                     continue
                 self.lifecycle.observed_ko_indices.add(idx)
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=True):
+                    # A Phoenix knock-out settles this period's coupon too (the engines add
+                    # it to the knock-out payoff), and it is the last chance for memorized
+                    # arrears. Book it before the knock-out ends the position.
+                    if (
+                        isinstance(product, PhoenixOption)
+                        and idx not in self.lifecycle.observed_coupon_indices
+                    ):
+                        coupon_event = self._observe_phoenix_coupon(
+                            product, idx, rec, date, spot, valuation_point
+                        )
+                        if coupon_event is not None:
+                            events.append(coupon_event)
                     before = self._state_snapshot()
                     payoff = float(rec.get("payoff", 0.0))
                     cashflow = self.quantity * payoff
@@ -266,43 +278,73 @@ class AutocallableLifecycleTracker:
                     continue
                 if not self._record_is_due(date, valuation_point, rec):
                     continue
-                self.lifecycle.observed_coupon_indices.add(idx)
-                if product.is_coupon_triggered(spot, idx):
-                    before = self._state_snapshot()
-                    payoff = float(product.get_coupon_payoff(idx))
-                    coupon = self.quantity * payoff
-                    realized = self._record_cashflow(
-                        LifecycleEventType.COUPON,
-                        f"coupon:{idx}",
-                        coupon,
-                        rec,
-                        valuation_point,
-                    )
-                    self.lifecycle.add_cashflow(
-                        coupon,
-                        realized_cashflow=realized,
-                        valuation_point=valuation_point,
-                    )
-                    self.lifecycle.coupon_memory_count = 0
-                    events.append(
-                        LifecycleEvent(
-                            event_type=LifecycleEventType.COUPON,
-                            date=date,
-                            spot=spot,
-                            observation_index=idx,
-                            barrier=product.get_coupon_barrier_at(idx),
-                            payoff=payoff,
-                            cashflow=coupon,
-                            realized_cashflow=realized,
-                            terminates_position=False,
-                            state_before=before,
-                            state_after=self._state_snapshot(),
-                        )
-                    )
-                elif product.has_memory_coupon:
-                    self.lifecycle.coupon_memory_count += 1
+                event = self._observe_phoenix_coupon(
+                    product, idx, rec, date, spot, valuation_point
+                )
+                if event is not None:
+                    events.append(event)
 
         return events
+
+    def _observe_phoenix_coupon(
+        self,
+        product: Any,
+        idx: int,
+        rec: dict,
+        date: pd.Timestamp,
+        spot: float,
+        valuation_point: Any,
+    ) -> Optional[LifecycleEvent]:
+        """Settle coupon period ``idx``: pay it (with any memorized arrears), or memorize it.
+
+        The amount is the one the engines pay for the same periods -- each period's own
+        ``principal x rate x fraction``, summed over the arrears a memory coupon releases.
+        """
+        self.lifecycle.observed_coupon_indices.add(idx)
+        if not product.is_coupon_triggered(spot, idx):
+            if product.has_memory_coupon:
+                self.lifecycle.missed_coupon_indices.add(idx)
+                self.lifecycle.coupon_memory_count += 1
+            return None
+
+        before = self._state_snapshot()
+        memorized = (
+            sorted(self.lifecycle.missed_coupon_indices)
+            if product.has_memory_coupon
+            else []
+        )
+        payoff = float(product.get_coupon_payoff(idx)) + sum(
+            float(product.get_coupon_payoff(i)) for i in memorized
+        )
+        coupon = self.quantity * payoff
+        realized = self._record_cashflow(
+            LifecycleEventType.COUPON,
+            f"coupon:{idx}",
+            coupon,
+            rec,
+            valuation_point,
+        )
+        self.lifecycle.add_cashflow(
+            coupon,
+            realized_cashflow=realized,
+            valuation_point=valuation_point,
+        )
+        self.lifecycle.missed_coupon_indices.clear()
+        self.lifecycle.coupon_memory_count = 0
+        return LifecycleEvent(
+            event_type=LifecycleEventType.COUPON,
+            date=date,
+            spot=spot,
+            observation_index=idx,
+            barrier=product.get_coupon_barrier_at(idx),
+            payoff=payoff,
+            cashflow=coupon,
+            realized_cashflow=realized,
+            terminates_position=False,
+            state_before=before,
+            state_after=self._state_snapshot(),
+            metadata={"memorized_periods": memorized} if memorized else {},
+        )
 
     def settle_maturity_if_due(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float

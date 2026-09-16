@@ -103,7 +103,14 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
                     "float-time twin carries a single accrual_factors list; not in the intraday inventory")
         factors = coupon_factors
         memory = int(getattr(state, "coupon_memory_count", 0) or 0) if state is not None else 0
-        if memory and twin.coupon_config.fixed_coupon_year_fraction is None:
+        # Memory arrives as a COUNT of missed periods, so it only reconstructs an amount when
+        # every period is worth the same: a declared fixed fraction, or a per-period rate
+        # (whose fraction is 1 by construction).
+        if (
+            memory
+            and twin.coupon_config.fixed_coupon_year_fraction is None
+            and product.is_coupon_rate_annualized
+        ):
             raise CapabilityError("aged Phoenix coupon memory needs fixed_coupon_year_fraction on the float-time twin")
     else:
         factors = [0.0 if f is None else f for f in ko_factors]
