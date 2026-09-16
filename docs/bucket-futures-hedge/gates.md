@@ -1664,6 +1664,60 @@ Scanned across the crossover, the 4036-deep spike is gone. What remains is
 the ordinary readout staircase — risers of about 217, or 1.1 hands — which
 is a separate defect already on this record and is unchanged in character.
 
+### Confirmed independently — and the branch gap is a symptom, not the mechanism
+
+The simulated-path study (`example/snowball_simulated_paths`, a separate
+session, same product constants, simulated rather than historical paths)
+reached the same defect from the other side and then measured something this
+record could not: what happens when the two candidate surfaces AGREE.
+
+Their test is the one that settles attribution, and it needs nothing from this
+branch: `align_priority` is a pre-existing `QuadParams` field, so forcing `ki`
+and forcing `ko` on the same states, QUAD alone, isolates the alignment
+without a second engine in the comparison. Delta in hands:
+
+| moneyness | auto − ki | auto − ko | ki − ko |
+|---|---:|---:|---:|
+| ≤ 0.8699 | 0.00 | −1.0 | −1.0 |
+| 0.8709 – 0.8869 | +17.5 … +20.3 | +17.9 … +19.4 | ±1.9 |
+| ≥ 0.8879 | +1.4 | 0.00 | −1.4 |
+
+Outside the window `auto` equals a forced branch EXACTLY. Inside it differs
+from **both** self-consistent branches by about 18–20 hands, and forcing
+either setting removes the error completely. The window they measured,
+0.8709–0.8869, is the one the mechanism predicts: `flip/1.01 < m < flip/0.99`,
+the 1% delta bump straddling the crossover.
+
+**Their `ki − ko` is ±2 hands.** On their configuration the two branch surfaces
+are, for practical purposes, the same surface — and the defect is just as large
+anyway. That is the part this record could not have found: the failing state
+here has a pin-KI/pin-KO price gap of 3977.53 and a 16.83 bp branch gap, and
+those numbers are a property of this product at this resolution, NOT the
+mechanism.
+
+The mechanism is that the three evaluations of one finite difference do not
+share an alignment: the up bump lands on one branch, the down bump on the
+other, and a price shift far too small to see on its own is divided by
+`2·S·0.01` and emerges as tens of hands of delta. So the price is barely
+affected while the delta is badly affected.
+
+**The practical consequence is a false negative worth guarding against.** A
+desk holding a product whose branch surfaces nearly coincide will measure
+`ki − ko`, find a couple of hands, and conclude it is unaffected — while its
+deltas carry the full error. Such a product is MORE exposed, not less, because
+nothing in the price warns it. The diagnostic to run is `auto` against a forced
+priority, not one priority against the other.
+
+Recorded as reported, not reproduced here: the numbers above are theirs. What
+this record verified independently is the mechanism (`_select_alignment_log`
+instrumented, the up and down scenarios aligning to different barriers) and the
+fix. Their route to it is worth noting because three one-sided tests failed
+first — per-arm gamma steps, per-arm delta steps, and an elimination argument —
+all defeated by a state-composition feature at the crossover common to both
+arms and roughly 30× the defect. What worked was same-arm, same-paths,
+different-config, which cancels composition exactly; that is the family of test
+to reach for here.
+
 Turning the option on moves the price by **−215.49, or −0.91 bp**, toward
 the refined value. That is the golden rebase, and it is why this is opt-in.
 
