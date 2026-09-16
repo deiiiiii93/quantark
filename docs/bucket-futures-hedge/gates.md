@@ -1533,7 +1533,10 @@ outright and changes what the remaining question is about.
   check, which confirms it IS a 1% secant of this pricer and nothing more.
   Closure is internal consistency of one numerical surface, not accuracy.
 - **DECIDED 2026-09-12: the 1% pricing bump stays, as a declared
-  approximation to the desk's 0.25% hedge resolution.** The desk re-hedges
+  approximation to the desk's 0.25% hedge resolution.** (The bump stays, but
+  "approximation" is SUPERSEDED 2026-09-16 -- see "The secant question,
+  settled" at the end of this file. One of the three reasons below does not
+  survive measurement.) The desk re-hedges
   on a 0.25% move, so the P&L-relevant slope is the secant across that band,
   not the tangent and not a 1% secant. Measured over all 242 live dates,
   the error of the 1% bump against that 0.25% reference:
@@ -2030,8 +2033,102 @@ exactly linear in spot, so the engine's accuracy cancels out of it entirely.
 What it tests is the bucket mapping arithmetic, which the alignment does not
 touch. The gate now says so from measurement.
 
-### What this does NOT settle
+## The secant question, settled: 1% is the convention, not an approximation
 
-The other four of the five one-contract secant states are at the knock-out
-barrier and are genuine curvature, so the secant question still stands on its
-own.
+### The delta at the barrier is scale-dependent, so there is nothing to approximate
+
+At 2025-07-01, inception 2024-12-02 -- spot 6373.8 against a knock-out barrier
+at 6503.0, 1.99% below it, not knocked in, vol 0.222 -- a central difference
+answers differently depending only on how wide it is:
+
+| bump | half-width | delta, contracts |
+|---|---:|---:|
+| sub-cell | <= 8.99 pts | **2.0845** |
+| 0.25%, the desk's rebalance band | 15.9 pts | **5.2716** |
+| 1%, the pricing bump | 63.7 pts | **7.9743** |
+| 1.75% | 111.6 pts | **12.7893** |
+
+A factor of six, at one state, from one pricer. The recorded pricing delta on
+that row is +7.9743, identical to the 1% secant, which confirms once more that
+the reported Greek IS a 1% secant of this pricer and nothing more.
+
+### The cell is real; the remedy it implies is not
+
+Delta is EXACTLY 2.0845 for every bump out to 8.99 index points -- identical to
+nine significant figures, which is a piecewise-linear readout returning the
+same chord while the whole stencil sits inside one cell. So the lattice cell is
+**18.0 index points**, measured rather than quoted, and the desk's 0.25% bump
+at 15.9 points does sit inside one. The sub-cell argument in the 2026-09-12
+bullet is correct.
+
+What it implies is not. That bullet says adopting 0.25% honestly means also
+adopting `transition` or a finer grid. Measured at the same state:
+
+| readout | 0.25% | 1% | gap |
+|---|---:|---:|---:|
+| `legacy_linear` (production) | 5.2716 | 7.9743 | **+2.7027** |
+| `transition` | 4.6111 | 7.7872 | **+3.1761** |
+
+`transition` does remove the artifact -- the plateau disappears and the
+sub-cell delta becomes a real local slope of 4.3810 -- but the gap the question
+is about gets **larger**. The spread is the product's own convexity beside its
+barrier, not a numerical artifact waiting to be cleaned up. No bump width and
+no readout removes it; they only choose which point on that curve is called
+"the delta".
+
+### The fleet, re-measured on the fixed engine
+
+`pricing_delta_hedge_gap_hands` is computed inside `audit_held_book`, so the
+Gate E replay's `carry_audit_mode=none` leaves it NaN. It does not need the
+audit: the gap is the recorded `product_delta_hands` minus a 0.25% secant, one
+central bump, and it is holdings-free -- so 58 `front` cells cover all 7,558
+distinct market states rather than 406 cells and 52,906 rows. Validated against
+the banked arm, where the recorder did write the column, to 3.9e-11 hands.
+
+| abs gap, contracts | defective engine | current engine |
+|---|---:|---:|
+| mean | 0.0430 | **0.0377** |
+| p95 | 0.1305 | **0.1178** |
+| p99 | 0.3533 | **0.2303** |
+| worst | 2.7103 | **2.7027** |
+| states above half a contract | 44 | **17** |
+| states above one contract | 10 | **6** |
+
+Every aggregate improves, and the shape of the tail changes. The six rows above
+one contract are three states times two q-models, and all three sit within
+2.4% of the barrier: 2025-07-01 (-1.99%), 2025-06-30 (-2.26%), 2025-07-02
+(-2.36%). The two crossover states nearly 15% BELOW the barrier, where no
+convexity story explains them, are gone. That is the alignment fix doing
+exactly what this file predicted it would do here.
+
+The gap concentrates against the barrier monotonically -- mean 0.0126 beyond
+-20%, 0.0294 in [-20,-10)%, 0.0439 in [-10,-5)%, 0.0592 in [-3,-2)%, 0.0894 in
+[-1,0)% -- which is what a curvature story predicts and a numerical-error story
+does not.
+
+### DECIDED 2026-09-16: 1% is the desk convention
+
+Not a declared approximation to a 0.25% reference: a **convention**, because
+there is no more-correct number for it to approximate. This supersedes the
+framing of the 2026-09-12 bullet, which kept the same bump partly for a reason
+that does not survive measurement.
+
+Two things follow, and both are changes to how this record should be read
+rather than to the engine.
+
+`pricing_delta_hedge_gap_hands` is **not an error against a reference**. It is
+a barrier-proximity warning: a gap above one contract says the state sits where
+the payoff bends hardest. It should be flagged on those terms, not budgeted
+against a tolerance, and the note above about re-pointing
+`pricing_delta_local_gap_hands` at the hedge resolution is withdrawn for the
+same reason -- there is no reference to re-point it at.
+
+And the convention makes **no claim that the hedge is accurate** next to the
+barrier. Delta runs from 2 to 13 contracts across a two-percent move in spot,
+so the book is gamma-dominated there and any single delta, at any bump width,
+mis-sizes it between rebalances. That is a gamma exposure to be managed, not a
+bump width to be tuned.
+
+Evidence: `quad-readout/secant_delta_profile.py` (the bump profiles and the
+cell), `quad-readout/secant_gap_after_alignment.py` (the fleet re-measurement),
+`quad-readout/secant_gap_states.csv.gz` (all 7,558 states).
