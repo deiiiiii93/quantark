@@ -268,14 +268,34 @@ def audit_overview(run_dir: Path, fleet: pd.DataFrame) -> Dict[str, Any]:
             frames.append(d)
     a = pd.concat(frames, ignore_index=True)
     measured = a[a["identity_residual_hands"].notna()].copy()
+    base = {
+        "measured": int(len(measured)),
+        "verdicts": a["identity_status"].value_counts().to_dict(),
+        "audit_verdicts": a["audit_status"].value_counts().to_dict(),
+    }
+    # A run with carry_audit_mode=none is a supported configuration, not a
+    # broken one: it records exposure and prices the book but schedules no
+    # audit, so every identity column is NaN. Report that rather than taking
+    # idxmax of an empty frame.
+    if measured.empty:
+        return {
+            **base,
+            "net_delta_audit_error_max": float("nan"),
+            "gated_max": float("nan"),
+            "gated_median": float("nan"),
+            "worst_date": "",
+            "worst_inception": "",
+            "worst_cell": "",
+            "failure_dates": [],
+            "failure_inceptions": [],
+        }
     measured["gated"] = measured["identity_residual_hands"].abs() + measured[
         "identity_spot_refinement_error_hands"
     ].abs()
     worst = measured.loc[measured["gated"].idxmax()]
     failures = measured[measured["identity_status"] == "fail"]
     return {
-        "verdicts": a["identity_status"].value_counts().to_dict(),
-        "audit_verdicts": a["audit_status"].value_counts().to_dict(),
+        **base,
         "net_delta_audit_error_max": float(
             a["net_delta_audit_error_hands"].abs().max()
         ),
@@ -901,19 +921,55 @@ def build_report(
     v = audit["verdicts"]
     verdict_bits = ", ".join(f"{k}: {val}" for k, val in sorted(v.items()))
     fail_dates = ", ".join(audit["failure_dates"]) or "none"
+    # The failure paragraph is chosen by the data, not asserted. An earlier
+    # version hard-coded the crossover narrative and read "Every identity
+    # failure is ONE market state - none in the  inception -" once the engine
+    # fix removed the failures it was describing.
+    if not audit["measured"]:
+        failure_html = ""
+    elif audit["failure_dates"]:
+        failure_html = (
+            f"<p>Identity failures: {html.escape(fail_dates)} in the "
+            f"{html.escape(', '.join(audit['failure_inceptions']))} inception, "
+            "appearing once per cell because the identity is holdings-free. The grid snaps a node onto the "
+            "nearest barrier in log space, so a spot that sits near the geometric mean of the two barriers "
+            "prices its up and down scenarios on DIFFERENTLY aligned lattices and the measured delta is "
+            "discontinuous there. That is an engine defect in <code>_select_alignment_log</code>, not an audit "
+            "one: the tolerance must not be widened to bury it. It is fixed by the opt-in "
+            "<code>align_cell_stretch</code> (commit <code>c570acc9</code>), which this run did NOT carry &mdash; "
+            "re-run with <code>--align-cell-stretch 0.02</code> to clear them. See "
+            "<code>docs/bucket-futures-hedge/gates.md</code>.</p>"
+        )
+    else:
+        failure_html = (
+            "<p><strong>No identity failures anywhere on the grid.</strong> Earlier runs of this study carried "
+            "two, both the same market state under each q model: the grid snaps a node onto the nearest barrier "
+            "in log space, so a spot near the geometric mean of the two barriers priced its up and down "
+            "scenarios on differently aligned lattices and the measured delta jumped. That was an engine defect "
+            "in <code>_select_alignment_log</code>, and it is fixed &mdash; every barrier is put on a node by the "
+            "opt-in <code>align_cell_stretch</code> (commit <code>c570acc9</code>), which this run carries. The "
+            "tolerance was never widened to bury it. See <code>docs/bucket-futures-hedge/gates.md</code>.</p>"
+        )
+
+    if audit["measured"]:
+        audit_head = (
+            f"<p>Identity verdicts: {html.escape(verdict_bits)}. "
+            f"Net delta audit error, max: <code>{audit['net_delta_audit_error_max']:.3e}</code> hands — the audit "
+            "machinery itself is exact across every cell. Worst abs(R)+E against the 0.01-hand tolerance: "
+            f"<code>{audit['gated_max']:.6f}</code> (median {audit['gated_median']:.2e}).</p>"
+        )
+    else:
+        audit_head = (
+            "<p><strong>This run scheduled no audit</strong> "
+            f"(<code>{html.escape(verdict_bits)}</code>), so nothing below is certified by it: the cells record "
+            "exposure and price the book, but the carry identity was not measured on any date. Re-run with "
+            "<code>--carry-audit-mode daily</code> for a report whose audit section stands on its own run.</p>"
+        )
+
     audit_html = (
         "<h2>The audit over the full grid</h2>"
-        f"<p>Identity verdicts: {html.escape(verdict_bits)}. "
-        f"Net delta audit error, max: <code>{audit['net_delta_audit_error_max']:.3e}</code> hands — the audit "
-        "machinery itself is exact across every cell. Worst abs(R)+E against the 0.01-hand tolerance: "
-        f"<code>{audit['gated_max']:.6f}</code> (median {audit['gated_median']:.2e}).</p>"
-        f"<p>Every identity failure is ONE market state — {html.escape(fail_dates)} in the "
-        f"{html.escape(', '.join(audit['failure_inceptions']))} inception — appearing once per cell because the "
-        "identity is holdings-free. The grid snaps a node onto the nearest barrier in log space; that day's spot "
-        "sat 0.52 index points from the geometric mean of the two barriers while the audit bump is 1.45 points, so "
-        "the up and down scenarios priced on DIFFERENTLY aligned lattices and the measured delta is discontinuous "
-        "there. This is an engine defect in <code>_select_alignment_log</code>, not an audit one: the tolerance "
-        "must not be widened to bury it. See <code>docs/bucket-futures-hedge/gates.md</code>, Gate E.</p>"
+        + audit_head
+        + failure_html
     )
 
     carry_html = _carry_section(fleet, recon, regime, regime_by_year)
@@ -930,8 +986,11 @@ def build_report(
         "interpolation-shape stresses at all; they are reported, not mitigated.</li>"
         "<li><strong>The identity certifies consistency, not accuracy.</strong> Its delta term is a repriced "
         "matched-step derivative; closure is internal consistency of one numerical surface.</li>"
-        "<li><strong>The alignment crossover is unfixed.</strong> The 14 identity failures name an engine defect in "
-        "the PDE grid's barrier alignment; nothing in the engine was changed by this study.</li>"
+        "<li><strong>The hedge delta near the knock-out barrier is scale-dependent.</strong> The pricing bump is "
+        "a declared 1% desk convention, not an approximation to a finer one: two percent below the barrier the "
+        "measured delta runs from 2 to 13 contracts depending only on how wide the bump is, and a narrower bump "
+        "or a different readout does not close that. The book is gamma-dominated there and any single delta "
+        "mis-sizes it between rebalances.</li>"
         "<li><strong>Coverage.</strong> QUAD engine, flat-vol scalar channel, two supported futures conventions. "
         "Vol-model runs, other engines and other carry sources are outside it.</li>"
         "</ul>"
@@ -941,6 +1000,7 @@ def build_report(
         "<h2>Appendix — reproduce</h2>"
         "<pre>PYTHONPATH=. .venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \\\n"
         "  --study-grid buckets --workers 6 \\\n"
+        "  --align-cell-stretch 0.02 \\\n"
         "  --carry-audit-mode daily --record-carry-exposure \\\n"
         "  --hedge-resolution-rel 0.0025 \\\n"
         "  --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/gate_e --resume\n"
@@ -1022,7 +1082,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     for _, r in regime_by_year.iterrows():
         print(f"  premium-day share {int(r['year'])}: {r['premium_share']:.1%}")
     print(f"identity verdicts: {audit['verdicts']}")
-    print(f"worst abs(R)+E: {audit['gated_max']:.6f} on {audit['worst_date']}")
+    if audit["measured"]:
+        print(f"worst abs(R)+E: {audit['gated_max']:.6f} on {audit['worst_date']}")
+    else:
+        print("no audit scheduled in this run: identity not measured on any date")
 
     if not args.no_report:
         report = out_dir / "bucket_hedge_report.html"
