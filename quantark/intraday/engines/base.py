@@ -16,6 +16,10 @@ class EnginePriceOutcome:
     #: The engine instance that produced the value when the route priced on a
     #: refined clone; the kernel parity dispatch must use the same instance.
     engine_used: object = field(default=None, compare=False)
+    #: True when the value carries no discretisation or sampling error: a closed form the route has proven
+    #: exact here, or a claim already decided (a fixed ledger, an outcome decided on the known spot). A finite
+    #: difference of exact values is exact as a MOVE; anything else needs a certificate after differencing.
+    exact: bool = False
 
     def __post_init__(self):
         object.__setattr__(self, "numerical", MappingProxyType(dict(self.numerical)))
@@ -42,6 +46,10 @@ class PointGreeks:
 
 
 TERMINATED_POINT_GREEKS = PointGreeks(0.0, 0.0, "ok", "", "terminated")
+
+#: ``point_greeks(ctx, engine, *, certify=True)``: with ``certify`` a numerical route publishes a value only inside a
+#: Gate C certificate. ``certify=False`` returns the raw estimator with the route's OWN evidence only (resolution,
+#: batches, finiteness) -- for the Gate C ladder, which produces the certificates and so must never read them.
 
 
 class IntradayEngineRoute(Protocol):

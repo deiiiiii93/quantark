@@ -312,10 +312,27 @@ def _solve_snowball(ctx, points: int, width_std: float) -> Tuple[float, float, f
     c0, c1 = _apply_instant(ctx, prod, events1, c0, c1, t1)
     branch = c1 if ctx.numerical.knocked_in else c0
     if t1 == 0.0:                               # an event exactly at valuation under BEFORE: pointwise, no derivative
-        return float(branch(ln_s)[0]), float("nan"), float("nan")
+        return _decided_at_spot(prod, events1, branch, ln_s), float("nan"), float("nan")
     value, d1, d2 = expect(branch, np.array([ln_s + m1]), v1_var, disc1, derivatives=True)
     c, cx, cxx = float(value[0]), float(d1[0]), float(d2[0])
     return c, cx / spot, (cxx - cx) / (spot * spot)
+
+
+def _decided_at_spot(prod, events, branch: PLJ, ln_s: float) -> float:
+    """The value of events decided at the known spot, ON a barrier level included.
+
+    A PLJ is right-continuous, which is the contract's side only for a barrier hit from below (standard KO: S >= B).
+    Every autocallable barrier is inclusive (``AutocallableLifecycleTracker._barrier_hit``), so a spot exactly on a
+    KI level of a standard contract, or on a reverse contract's KO level, takes the left limit.
+    """
+    k = int(np.searchsorted(branch.x, ln_s))
+    if k >= len(branch.x) or branch.x[k] != ln_s or branch.j[k] == 0.0:
+        return float(branch(ln_s)[0])
+    hit_from_below = {log(float(e.barrier)): (_ko_hits_above(prod) if e.kind is EventKind.KO else bool(prod.is_reverse))
+                      for e in events if e.barrier is not None and e.kind in (EventKind.KO, EventKind.KI)}
+    if ln_s not in hit_from_below:
+        raise ValueError(f"reference: a jump at the spot {exp(ln_s)!r} that no event of this instant owns")
+    return float(branch.f[k] if hit_from_below[ln_s] else branch.left()[k])
 
 
 def reference_snowball(ctx, *, points=(2001, 4001, 8001), width_std=8.0) -> ReferenceResult:

@@ -56,8 +56,15 @@ class CashflowComponent:
     event_id: Optional[str] = None
     cashflow_id: Optional[str] = None
     payment_tau: Optional[float] = None
+    #: Why a ``provisional`` flow is conditional: the assumed events (or ``"continuous_history"``) whose actual
+    #: outcome can change whether it exists or what it pays. Empty for a confirmed flow.
+    depends_on: Tuple[str, ...] = ()
 
     def __post_init__(self):
+        object.__setattr__(self, "depends_on", tuple(self.depends_on))
+        if (self.provenance == "provisional") != bool(self.depends_on):
+            raise ValidationError(f"cashflow {self.cashflow_id!r}: a provisional flow names what it depends on, "
+                                  "and only a provisional flow does")
         if self.kind not in ("contingent", "pending_receivable", "paid"):
             raise ValidationError(f"unknown cashflow component kind {self.kind!r}")
         if self.provenance not in ("model", "confirmed", "provisional"):

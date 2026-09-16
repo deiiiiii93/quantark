@@ -44,6 +44,22 @@ def move_budget(reference_value: float, notional: float) -> float:
     return max(MOVE_ABS, MOVE_REL * normalised) * notional / POINT_MOVE
 
 
+#: Theta (PnL per hour), frozen with the 2026-09-16 re-review fixes BEFORE any theta ladder ran: normalised
+#: t* = |theta per hour| / N (PnL of a one-hour roll per unit notional), at the move budget's levels. One hour is the
+#: default desk roll, so t* is directly comparable with a move of that roll.
+THETA_ABS, THETA_REL = 1e-6, 1e-4
+
+
+def theta_budget(reference_theta_per_hour: float, notional: float) -> float:
+    """Budget on a theta per hour from t* = |theta| / N."""
+    return max(THETA_ABS, THETA_REL * abs(reference_theta_per_hour) / notional) * notional
+
+
+def desk_move_budget(reference_move: float, notional: float) -> float:
+    """Budget on a desk vega / rho / dividend rho, whose value IS the PnL of a one-point move: m* = |move| / N."""
+    return max(MOVE_ABS, MOVE_REL * abs(reference_move) / notional) * notional
+
+
 #: Reference grid levels used by Gate C. (2001, 4001, 8001) left one 6h gamma cell (gamma crossing zero,
 #: absolute floor) at 3*unc/budget = 1.29; doubling cut that uncertainty 4x (clean O(h^2)) to 0.32.
 GATE_C_POINTS = (4001, 8001, 16001)

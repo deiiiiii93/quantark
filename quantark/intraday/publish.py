@@ -25,6 +25,17 @@ alternatives; an engine subclass does not inherit a row.
 """
 
 
+#: The accuracy knobs a reader recognises; the full configuration of every row is in the evidence file.
+_SETTINGS_SHOWN = ("order", "cells_per_sd", "accuracy", "grid", "num_paths", "seed", "method")
+
+
+def _settings_label(settings: dict) -> str:
+    params = dict(settings.get("params") or {}, method=settings.get("method"))
+    shown = ", ".join(f"{k}={params[k]}" for k in _SETTINGS_SHOWN if params.get(k) is not None)
+    engine = str(settings.get("engine", "?")).rsplit(".", 1)[-1]
+    return f"{engine} ({shown})" if shown else engine
+
+
 def _greek_section() -> str:
     evidence = greek_evidence()
     rows = evidence.get("demonstrated", ())
@@ -34,16 +45,21 @@ def _greek_section() -> str:
                   "`unqualified`.", ""]
         return "\n".join(lines)
     lines += [f"Greek evidence: `quantark/intraday/evidence/gate_c_greeks.json` (git {evidence.get('git_sha', 'n/a')}). "
-              "Each row is one demonstrated FAMILY and speaks only for it: the same product under different "
-              "monitoring, under a variance profile no row names, or at a time to the next fixing outside the swept "
-              "window reports `unqualified` with no value. A `point_*` row lets that route report the point measure "
-              "`ok` inside its window; a `desk_*` row records that the configured finite move matched the same move "
-              "on the reference.", "",
-              "| Product | Route | Measure | Monitoring | Profile | Horizon window (s) | Spot offsets | Barriers |",
-              "|---|---|---|---|---|---|---|---|"]
+              "Each row is one demonstrated CERTIFICATE and speaks only for it: the same product under different "
+              "monitoring, under a variance profile no row names, at other engine settings (the column shows the "
+              "recognisable knobs; the evidence file holds the full record), with another measure knob, or at a time "
+              "to the next fixing outside the window reports `unqualified` with no value. A `point_*` row lets that "
+              "route report the point measure `ok` inside its window; a `desk_*` row lets it report a desk move of "
+              "prices that are not exact. Market and contract levels are recorded, not keyed (see the module README).",
+              "",
+              "| Product | Route | Measure | Monitoring | Profile | Engine settings | Measure settings | "
+              "Horizon window (s) | Spot offsets | Barriers |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
+        knobs = ", ".join(f"{k}={v}" for k, v in sorted((r.get("measure_settings") or {}).items())) or "—"
         lines.append(f"| {r['product']} | {r['route']} | {r['measure']} | {r.get('monitoring', '?')} | "
-                     f"{r.get('profile', '?')} | {r['horizon_s']} – {r.get('horizon_max_s', '?')} | "
+                     f"{r.get('profile', '?')} | {_settings_label(r.get('settings') or {})} | {knobs} | "
+                     f"{r['horizon_s']} – {r.get('horizon_max_s', '?')} | "
                      f"{', '.join(r.get('offsets', ()))} | {', '.join(r.get('barriers', ()))} |")
     lines.append("")
     return "\n".join(lines)

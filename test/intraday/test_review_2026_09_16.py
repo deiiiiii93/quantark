@@ -144,9 +144,10 @@ def test_finding_4_a_desk_greek_is_unqualified_on_an_unresolved_grid(sse_calenda
         return value_intraday(engine, _req(product, sse_sessions, desk, ts, env=flat_env(ts, spot=spot),
                                            fixings=fixings, greeks=("delta", "gamma"), greek_convention="desk_bump"))
 
-    # a day out the mesh resolves the layer and the repriced difference stands
+    # a day out the mesh resolves the layer -- which is necessary, not sufficient (re-review R3): no certificate
     far = value(events[5].timestamp - timedelta(days=1), 100.0)
-    assert far.numerical["resolution"] == "resolved" and all(g.status == "ok" for g in far.greeks)
+    assert far.numerical["resolution"] == "resolved"
+    assert all(g.status == "unqualified" and "discretisation or sampling error" in g.reason for g in far.greeks)
     # a second out, one bp above the barrier, it does not: the difference inherits that
     near = value(events[5].timestamp - timedelta(seconds=1), 102.99)
     assert near.numerical["resolution"] == "unqualified"
@@ -166,11 +167,15 @@ def test_finding_5_local_theta_stops_at_the_clock_boundary(sse_sessions):
     # a step longer than the whole clock horizon still lands on the boundary, never off the map
     far = resolve_theta_step(resolve_context(req), timedelta(days=3650))
     assert far.actual == timedelta(seconds=1) and far.side == "forward_clamped_to_clock"
-    theta = value_intraday(DIGITAL, req).greek("theta")
-    # frozen-market value is constant through the zero-weight break: local theta is exactly zero
-    assert theta.value == 0.0 and "finite roll" in theta.reason
-    half = value_intraday(DIGITAL, replace(req, theta_step=timedelta(milliseconds=500))).greek("theta")
+    roll = value_intraday(DIGITAL, replace(req, greek_convention="desk_bump")).greek("theta")
+    # frozen-market value is constant through the zero-weight break: the finite roll is exactly zero
+    assert roll.status == "ok" and roll.value == 0.0 and "finite roll" in roll.reason and roll.bump == 1.0
+    half = value_intraday(DIGITAL, replace(req, greek_convention="desk_bump",
+                                           theta_step=timedelta(milliseconds=500))).greek("theta")
     assert half.value == 0.0
+    # the derivative there is zero too; its stencil (h = 1 ms) sees only price round-off (re-review R5)
+    point = value_intraday(DIGITAL, req).greek("theta")
+    assert point.status == "ok" and point.value == pytest.approx(0.0, abs=1e-9) and point.bump == 0.001
 
 
 # --- 6: different holiday calendars collide in valuation identity --------------------

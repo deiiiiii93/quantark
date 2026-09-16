@@ -12,7 +12,8 @@ class QuadV2Route:
     def price(self, ctx, engine) -> EnginePriceOutcome:
         num = ctx.numerical
         if num.terminated:
-            return EnginePriceOutcome(0.0, "terminated", {"reason": "lifecycle state is not alive; only the ledger remains"}, {})
+            return EnginePriceOutcome(0.0, "terminated", {"reason": "lifecycle state is not alive; only the ledger remains"}, {},
+                                      exact=True)
         components = engine.price_components(num.product, ctx.pricing_env, lifecycle_state=num.lifecycle_state,
                                              event_phase=ctx.phase.value)
         pending = float(components.get("pending", 0.0))
@@ -27,7 +28,16 @@ class QuadV2Route:
         return EnginePriceOutcome(contingent, method, numerical,
                                   {k: float(components[k]) for k in ("ko", "coupon", "terminal") if k in components})
 
-    def point_greeks(self, ctx, engine) -> PointGreeks:
+    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
+        """The kernel's analytic spot derivatives -- of a DISCRETISED continuation value.
+
+        Differentiating the quadrature exactly does not remove its discretisation error:
+        at ``cells_per_sd=0.1`` the kernel delta is 30% off the reference while being every
+        bit as finite as the demonstrated ``cells_per_sd=2`` one (review 2026-09-16 R4). A
+        value is published only where Gate C demonstrated this family at these settings.
+        """
+        from quantark.intraday.greeks import point_certificate_gap
+
         num = ctx.numerical
         if num.terminated:
             return TERMINATED_POINT_GREEKS
@@ -36,5 +46,9 @@ class QuadV2Route:
         delta, gamma = float(res["delta"]), float(res["gamma"])
         if not (isfinite(delta) and isfinite(gamma)):
             return PointGreeks(None, None, "undefined", "payoff discontinuity of an unfixed event at the query spot",
+                               "kernel_derivative")
+        gap = point_certificate_gap(ctx, engine, self) if certify else ""
+        if gap:
+            return PointGreeks(None, None, "unqualified", f"kernel derivative of the discretised value: {gap}",
                                "kernel_derivative")
         return PointGreeks(delta, gamma, "ok", "", "kernel_derivative")

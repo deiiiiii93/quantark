@@ -87,7 +87,8 @@ def test_continuous_history_assumption_is_recorded_and_hit_uses_latest_spot(sse_
 
 
 def test_authoritative_state_supersedes_the_scenario(sse_sessions, desk):
-    cp = BarrierLifecycleState(alive=True, valuation_point=ValuationPoint(date=datetime(2026, 9, 15)))
+    # stamped AT the valuation instant: a date-only 9/15 stamp would claim that day's 15:00 close, the future at 14:00
+    cp = BarrierLifecycleState(alive=True, valuation_point=ValuationPoint(date=TS.replace(tzinfo=None)))
     ctx = _ctx(sse_sessions, desk, _uo(), spot=105.0, lifecycle_state=cp)
     assert not ctx.provisional and ctx.reconstruction.continuous_assumption is None
 
@@ -95,7 +96,7 @@ def test_authoritative_state_supersedes_the_scenario(sse_sessions, desk):
 def test_knocked_in_history_yields_a_vanilla_twin(sse_sessions, desk):
     ui = _uo(barrier_type=BarrierType.UP_IN, rebate=0.0)
     cp = BarrierLifecycleState(alive=True, knocked_in=True, hit_date=datetime(2026, 9, 1),
-                               valuation_point=ValuationPoint(date=datetime(2026, 9, 15)))
+                               valuation_point=ValuationPoint(date=TS.replace(tzinfo=None)))
     ctx = _ctx(sse_sessions, desk, ui, spot=100.0, lifecycle_state=cp)
     twin = ctx.numerical.product
     assert isinstance(twin, EuropeanVanillaOption) and twin.maturity == ctx.numerical.maturity_tau and twin.exercise_date is None

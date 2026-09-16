@@ -1,4 +1,5 @@
 """Intraday theta (a declared forward step on the frozen market) and the roll-through-events scenario."""
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
@@ -45,9 +46,13 @@ def test_a_step_inside_the_segment_is_taken_as_requested(sse_calendar, sse_sessi
     assert step.actual == timedelta(seconds=30) and not step.adjusted and step.side == "forward"
     res = value_intraday(QUAD, req)
     theta = res.greek("theta")
-    assert theta.status == "ok" and theta.unit == "PnL per hour" and theta.convention == "desk_bump"
+    assert theta.unit == "PnL per hour" and theta.convention == "desk_bump" and theta.bump == 30.0
     assert res.numerical["theta_step_requested_s"] == 30.0 and res.numerical["theta_step_actual_s"] == 30.0
     assert res.numerical["theta_adjusted"] is False and res.numerical["theta_unit"] == "hour"
+    # the roll is a finite move of discretised prices, certified only at the step Gate C swept (one hour)
+    assert theta.status == "unqualified" and theta.value is None and "theta_step_s=30.0 (demonstrated 3600.0)" in theta.reason
+    default = value_intraday(QUAD, replace(req, theta_step=None)).greek("theta")
+    assert default.status == "ok" and default.bump == 60.0            # the default hour, clamped to the fixing
 
 
 def test_a_step_crossing_the_fixing_is_clamped_to_land_on_it_before(sse_calendar, sse_sessions, desk):
@@ -64,15 +69,20 @@ def test_at_the_fixing_before_local_theta_is_undefined_never_zero(sse_calendar, 
 
 
 def test_theta_across_the_lunch_plateau_is_the_pure_carry_of_direct_contexts(sse_calendar, sse_sessions):
+    from quantark.intraday.greeks import _rolled_value
     only = VarianceProfile.sessions_only(sse_sessions, 244)
     ts = datetime(2026, 9, 16, 11, 45, tzinfo=SHANGHAI)
-    req = _req(sse_calendar, sse_sessions, only, ts, greeks=("theta",), greek_convention="point",
-               theta_step=timedelta(minutes=30), theta_unit="minute")
+    req = _req(sse_calendar, sse_sessions, only, ts)
     res = value_intraday(QUAD, req)
     later = value_intraday(QUAD, _req(sse_calendar, sse_sessions, only, ts + timedelta(minutes=30)))
-    theta = res.greek("theta")
-    assert theta.status == "ok" and theta.unit == "PnL per minute" and theta.convention == "point"
-    assert theta.value * 30.0 == pytest.approx(later.price - res.price, abs=1e-10)
+    # the frozen-market roll through the zero-weight lunch IS direct valuation at the later instant
+    rolled, exact = _rolled_value(resolve_context(req), QUAD, timedelta(minutes=30))
+    assert rolled == pytest.approx(later.price, abs=1e-10) and not exact
+    theta = value_intraday(QUAD, replace(req, greeks=("theta",), greek_convention="desk_bump",
+                                         theta_unit="minute")).greek("theta")
+    assert theta.unit == "PnL per minute" and theta.convention == "desk_bump" and theta.bump == 3600.0
+    assert theta.status == "ok" and theta.value * 60.0 == pytest.approx(
+        _rolled_value(resolve_context(req), QUAD, timedelta(hours=1))[0] - res.price, abs=1e-12)
 
 
 def test_roll_through_events_needs_an_outcome_for_every_crossed_instant(sse_calendar, sse_sessions, desk):

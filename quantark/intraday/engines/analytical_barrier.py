@@ -30,7 +30,8 @@ class AnalyticalBarrierRoute:
 
         num, env = ctx.numerical, ctx.pricing_env
         if num.terminated:
-            return EnginePriceOutcome(0.0, "terminated", {"reason": "the barrier outcome is history; only the ledger remains"}, {})
+            return EnginePriceOutcome(0.0, "terminated", {"reason": "the barrier outcome is history; only the ledger remains"},
+                                      {}, exact=True)
         twin = num.product
         if isinstance(twin, EuropeanVanillaOption):
             # A confirmed knock-in IS a European vanilla: report the engine that actually
@@ -40,13 +41,13 @@ class AnalyticalBarrierRoute:
             pv = float(vanilla_engine.price(twin, env))
             return EnginePriceOutcome(pv, "analytical_vanilla_after_ki", {"total_variance": float(
                 env.vol_surface.total_variance(float(twin.strike), num.maturity_tau, float(env.spot)))}, {},
-                engine_used=vanilla_engine)
+                engine_used=vanilla_engine, exact=True)
         observation = twin.observation_type
         if observation == ObservationType.DISCRETE:
             raise CapabilityError("discrete barrier monitoring has no exact closed form: BGK is an approximation; discrete "
                                   f"barriers route to PDE/QUAD/MC intraday ({_NUMERICAL_ALTERNATIVES})")
         if observation == ObservationType.EXPIRY:
-            return EnginePriceOutcome(float(engine.price(twin, env)), "analytical_expiry_monitoring", {}, {})
+            return EnginePriceOutcome(float(engine.price(twin, env)), "analytical_expiry_monitoring", {}, {}, exact=True)
         adm = analytical_barrier_admissibility(ctx)
         if not adm.admissible:
             raise CapabilityError(f"analytical {type(twin).__name__} is not exact here: {adm.reason}. "
@@ -54,7 +55,8 @@ class AnalyticalBarrierRoute:
         if adm.mode == "uniform_calendar_rate":
             pv = float(engine.price(twin, env))
             return EnginePriceOutcome(pv, "analytical_uniform_calendar_rate",
-                                      {"sigma_effective": adm.sigma_effective, "total_variance": adm.total_variance}, {})
+                                      {"sigma_effective": adm.sigma_effective, "total_variance": adm.total_variance}, {},
+                                      exact=True)
         u_T = adm.variance_time_maturity
         proxy = deepcopy(twin)
         proxy.maturity = u_T
@@ -66,9 +68,10 @@ class AnalyticalBarrierRoute:
                                        spot_quote=env.spot_quote, vol_surface=FlatVolSurface(sigma), div_yield=NoDividend())
         pv = float(engine.price(proxy, proxy_env))
         return EnginePriceOutcome(pv, "analytical_zero_carry_time_change",
-                                  {"variance_time_maturity": u_T, "sigma_proxy": sigma, "total_variance": adm.total_variance}, {})
+                                  {"variance_time_maturity": u_T, "sigma_proxy": sigma, "total_variance": adm.total_variance},
+                                  {}, exact=True)
 
-    def point_greeks(self, ctx, engine) -> PointGreeks:
+    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
         """Central difference of the exact closed form (h = 1e-6 S), smooth away from a live barrier; a stencil
         reaching a live barrier is undefined (one side is decided, the other is not)."""
         from quantark.asset.equity.product.option import EuropeanVanillaOption

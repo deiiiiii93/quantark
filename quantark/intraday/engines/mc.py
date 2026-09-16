@@ -32,7 +32,8 @@ class MCRoute:
 
         num, env = ctx.numerical, ctx.pricing_env
         if num.terminated:
-            return EnginePriceOutcome(0.0, "terminated", {"reason": "lifecycle state is not alive; only the ledger remains"}, {})
+            return EnginePriceOutcome(0.0, "terminated", {"reason": "lifecycle state is not alive; only the ledger remains"}, {},
+                                      exact=True)
         twin = num.product
         if isinstance(twin, EuropeanVanillaOption):
             solver = EuropeanMCEngine(params=deepcopy(engine.params), method=engine.method)
@@ -55,15 +56,14 @@ class MCRoute:
         }
         return EnginePriceOutcome(pv, method, numerical, {}, engine_used=solver)
 
-    def point_greeks(self, ctx, engine) -> PointGreeks:
+    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
         """Paired RQMC: the engine's session spec at spot*(1-h), spot, spot*(1+h) on identical scramble batches.
 
         That is a central difference at the finite relative bump h, not a derivative: near a fixing a 1% move
         spans the diffusion layer. It is ``ok`` only inside a Gate C demonstrated bump limit; otherwise the
         estimate and its standard errors are recorded as uncertainty and the status is unqualified.
         """
-        from quantark.intraday.capability import output_qualification_gap
-        from quantark.intraday.greeks import bump_config_for, qualification_scope, seconds_to_first_event
+        from quantark.intraday.greeks import bump_config_for, point_certificate_gap
         from quantark.montecarlo import run_paired_rqmc_greeks
         from quantark.util.enum.engine_enums import MonteCarloMethod
 
@@ -93,11 +93,9 @@ class MCRoute:
             return PointGreeks(None, None, "unqualified",
                                f"paired RQMC gave {res.batches_used} batches (< {min_batches}) or a non-finite standard error",
                                "paired_rqmc", uncertainty)
-        seconds, product = seconds_to_first_event(ctx), type(ctx.request.product).__name__
-        gaps = [g for g in (output_qualification_gap(product, "MCRoute", f"point_{m}", seconds, **qualification_scope(ctx))
-                            for m in ("delta", "gamma")) if g]
-        if gaps:
+        gap = point_certificate_gap(ctx, engine, self) if certify else ""
+        if gap:
             return PointGreeks(None, None, "unqualified",
                                f"paired RQMC central difference at relative bump {h:g}; bump limit not demonstrated: "
-                               + "; ".join(dict.fromkeys(gaps)), "paired_rqmc", uncertainty)
+                               + gap, "paired_rqmc", uncertainty)
         return PointGreeks(float(res.delta), float(res.gamma), "ok", "", "paired_rqmc", uncertainty)

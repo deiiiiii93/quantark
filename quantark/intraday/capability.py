@@ -8,7 +8,9 @@ alternatives. Engine classes match exactly: a subclass does not inherit a row.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, replace
+from enum import Enum
 from datetime import timedelta
 from functools import lru_cache
 from typing import Iterable, Optional, Tuple
@@ -209,15 +211,90 @@ def _plain(value):
     return value
 
 
+#: Engine parameters that bound a resource or choose how a kernel is APPLIED, never what it computes: exceeding a
+#: QUAD V2 memory/size cap raises, and its backend "changes application of a kernel, never its discretization"
+#: (QuadV2Params). Every other field -- and every field of every other params class -- is part of the configuration
+#: a certificate is bound to.
+_APPLICATION_ONLY_PARAMS = {
+    "QuadV2Params": frozenset({"backend", "max_nodes", "max_events", "max_states", "max_work_bytes", "max_cache_bytes"}),
+}
+#: Engine attributes set outside ``params`` that change the estimator (MC method and batching, bridge sampling).
+_ESTIMATOR_ATTRIBUTES = ("method", "num_batches", "use_brownian_bridge")
+
+
+def _canonical(value):
+    """A JSON-stable value: enums by value, dataclasses and mappings as sorted dicts, sequences as lists."""
+    if isinstance(value, Enum):
+        return _canonical(value.value)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _canonical(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, dict):
+        return {str(k): _canonical(v) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))}
+    if isinstance(value, (list, tuple)):
+        return [_canonical(v) for v in value]
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return repr(value)
+
+
+def accuracy_settings(engine) -> dict:
+    """Everything in ``engine`` that can move a number: the configuration a Gate C certificate is bound to.
+
+    A demonstration earned at one quadrature, mesh or path count says nothing about another: QUAD V2 at
+    ``cells_per_sd=0.1`` returns a point delta 30% off the reference with the same kernel-derivative evidence as
+    the demonstrated ``cells_per_sd=2`` (review 2026-09-16 R4). So the certificate records the engine class, every
+    params field except the resource/application ones above, the effective bump configuration, and the estimator
+    attributes set outside ``params``; a request is covered only by an identical record.
+    """
+    params = getattr(engine, "params", None)
+    out = {"engine": engine_class_path(engine)}
+    if params is not None and dataclasses.is_dataclass(params):
+        skip = _APPLICATION_ONLY_PARAMS.get(type(params).__name__, frozenset())
+        out["params"] = {f.name: _canonical(getattr(params, f.name)) for f in dataclasses.fields(params)
+                         if f.name not in skip}
+        getter = getattr(params, "get_effective_bump_config", None)
+        if getter is not None:
+            out["bump_config"] = _canonical(getter())
+    for name in _ESTIMATOR_ATTRIBUTES:
+        if hasattr(engine, name):
+            out[name] = _canonical(getattr(engine, name))
+    return out
+
+
+def _flatten(value, prefix=""):
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            out.update(_flatten(v, f"{prefix}{k}."))
+        return out
+    return {prefix[:-1]: value}
+
+
+def _differences(requested: dict, demonstrated: dict, limit: int = 4) -> str:
+    """The first few settings in which a request differs from a demonstrated configuration, for the reason text."""
+    a, b = _flatten(_plain(requested) or {}), _flatten(_plain(demonstrated) or {})
+    keys = sorted(k for k in set(a) | set(b) if a.get(k, "<absent>") != b.get(k, "<absent>"))
+    shown = ", ".join(f"{k}={a.get(k, '<absent>')!r} (demonstrated {b.get(k, '<absent>')!r})" for k in keys[:limit])
+    return shown + (f", and {len(keys) - limit} more" if len(keys) > limit else "")
+
+
 def output_qualification_gap(product_name: str, route_name: str, measure: str, seconds_to_event: float, *,
-                             monitoring: str, profile_identity) -> str:
+                             monitoring: str, profile_identity, settings: dict,
+                             measure_settings: Optional[dict] = None) -> str:
     """"" when Gate C demonstrated this exact combination here; otherwise why it did not.
 
     A certificate covers only the configurations its cells actually ran. The key is
-    therefore the whole tested family — product, route, measure, MONITORING and the
-    exact variance PROFILE — inside the horizon WINDOW the ladder swept. Outside any
-    of those the evidence is silent, and silence is not a pass: no evidence file, no
+    therefore the whole tested family — product, route, measure, MONITORING, the
+    exact variance PROFILE, the engine's ACCURACY SETTINGS (``accuracy_settings``)
+    and, for a measure with its own knob such as a desk theta's step, those
+    MEASURE SETTINGS — inside the horizon WINDOW the ladder swept. Outside any of
+    those the evidence is silent, and silence is not a pass: no evidence file, no
     matching row, or a horizon the ladder never reached all fail closed.
+
+    Market and contract LEVELS are not keyed. The evidence records the families it
+    ran on, and the swept dimensions are the ones discretisation error depends on
+    (time to the event, the spot's distance to each barrier in standard deviations,
+    the mesh or quadrature per standard deviation); see the module README.
     """
     rows = [r for r in greek_evidence().get("demonstrated", ())
             if (r["product"], r["route"], r["measure"]) == (product_name, route_name, measure)]
@@ -233,7 +310,15 @@ def output_qualification_gap(product_name: str, route_name: str, measure: str, s
         return (f"Gate C demonstrated {measure} for {product_name} on {route_name} only for the variance profiles "
                 f"{sorted({r.get('profile') for r in rows_here})}, not this request's "
                 f"{profile_identity[0] if profile_identity else 'profile'!r}")
-    windows = [(float(r["horizon_s"]), float(r["horizon_max_s"])) for r in rows_profile]
+    rows_settings = [r for r in rows_profile if _plain(r.get("settings")) == _plain(settings)]
+    if not rows_settings:
+        return (f"Gate C demonstrated {measure} for {product_name} on {route_name} only at other engine settings: "
+                f"{_differences(settings, rows_profile[0].get('settings'))}")
+    rows_measure = [r for r in rows_settings if _plain(r.get("measure_settings") or {}) == _plain(measure_settings or {})]
+    if not rows_measure:
+        return (f"Gate C demonstrated {measure} for {product_name} on {route_name} only with "
+                f"{_differences(measure_settings or {}, rows_settings[0].get('measure_settings') or {})}")
+    windows = [(float(r["horizon_s"]), float(r["horizon_max_s"])) for r in rows_measure]
     if any(lo <= seconds_to_event <= hi for lo, hi in windows):
         return ""
     return (f"Gate C swept {measure} for {product_name} on {route_name} over "
@@ -242,10 +327,10 @@ def output_qualification_gap(product_name: str, route_name: str, measure: str, s
 
 
 def point_output_qualified(product_name: str, route_name: str, measure: str, seconds_to_event: float, *,
-                           monitoring: str, profile_identity) -> bool:
+                           monitoring: str, profile_identity, settings: dict) -> bool:
     """Whether Gate C demonstrated point ``measure`` for this exact configuration (see the gap function)."""
     return not output_qualification_gap(product_name, route_name, f"point_{measure}", seconds_to_event,
-                                        monitoring=monitoring, profile_identity=profile_identity)
+                                        monitoring=monitoring, profile_identity=profile_identity, settings=settings)
 
 
 def _horizon_label(horizon: Optional[timedelta]) -> str:

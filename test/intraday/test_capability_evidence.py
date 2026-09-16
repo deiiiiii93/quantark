@@ -84,14 +84,20 @@ def test_greek_evidence_parses_and_every_demonstration_is_backed_by_passing_cell
     import importlib
     from quantark.intraday.capability import greek_evidence
     payload = greek_evidence()
-    assert payload and payload["schema"] == "intraday-gate-c-greeks/1" and payload["git_sha"]
+    assert payload and payload["schema"] == "intraday-gate-c-greeks/2" and payload["git_sha"]
     for row in payload["demonstrated"]:
         module = importlib.import_module(f"quantark.intraday.engines.{_route_module(row['route'])}")
         assert hasattr(module, row["route"]), row["route"]
+        assert row["settings"]["engine"] and row["horizon_s"] <= row["horizon_max_s"]
+        # a window is backed by EVERY cell of its family -- same profile, engine settings and measure settings --
+        # at every swept horizon inside it, and by nothing outside it
         cells = [c for c in payload["cells"] if (c["product"], c["route"]) == (row["product"], row["route"])
-                 and c["cell"]["horizon"] >= row["horizon_s"]]
-        statuses = {m["status"] for c in cells for m in c["measures"] if m["measure"] == row["measure"]}
-        assert cells and statuses <= {"passed", "undefined"}, row
+                 and c["cell"]["profile"] == row["profile"] and c.get("settings") == row["settings"]
+                 and row["horizon_s"] <= c["cell"]["horizon"] <= row["horizon_max_s"]]
+        measures = [m for c in cells for m in c["measures"]
+                    if m["measure"] == row["measure"] and (m.get("measure_settings") or {}) == row["measure_settings"]]
+        assert measures and {m["status"] for m in measures} <= {"passed", "undefined"}, row
+        assert sorted({c["cell"]["horizon"] for c in cells}) == row["swept_horizons_s"], row
 
 
 def _route_module(route: str) -> str:

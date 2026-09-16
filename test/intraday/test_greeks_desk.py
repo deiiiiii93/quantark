@@ -73,9 +73,12 @@ def test_bumps_do_not_rebuild_assumptions_from_bumped_spots(sse_calendar, sse_se
     kos = _kos(sse_calendar, sse_sessions, desk)
     ts = kos[5].timestamp + timedelta(seconds=30)
     fixings = tuple(Fixing(k.timestamp, 100.0) for k in kos[:5])
-    res = value_intraday(E, _req(sse_calendar, sse_sessions, desk, ts, spot=102.99, event_phase="after", fixings=fixings,
-                                 greeks=("delta",), greek_convention="desk_bump"))
-    assert res.lifecycle["alive"] and res.greek("delta").status == "ok" and abs(res.greek("delta").value) < 5.0
+    ctx = resolve_context(_req(sse_calendar, sse_sessions, desk, ts, spot=102.99, event_phase="after", fixings=fixings))
+    cells = desk_bump_cells(ctx, E, ("delta",))
+    # the +1% cell (104.02) prices the SAME alive contract: its sixth fixing stays the assumed 102.99
+    assert all(c.ctx.numerical.lifecycle_state.alive and c.ctx.reconstruction is ctx.reconstruction for c in cells.values())
+    delta = (cells["spot_up"].price - cells["spot_down"].price) / (2.0 * 102.99 * 0.01)
+    assert abs(delta) < 5.0
 
 
 def test_unknown_greeks_fail_closed(sse_calendar, sse_sessions, desk):

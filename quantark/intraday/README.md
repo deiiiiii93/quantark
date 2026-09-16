@@ -33,8 +33,13 @@ close keeps the day's budget (`same_budget`).
   payment time. Date-only observations resolve to the close; a DST gap or fold is an
   error, never a guess.
 - `fixings`: `Fixing(timestamp, value)` at contract event instants.
-- `lifecycle_state`: the authoritative date-based checkpoint (never mutated; events on or
-  before its day are history).
+- `lifecycle_state`: the authoritative date-based checkpoint (never mutated). Its
+  `valuation_point.date` is an INSTANT: a date-only stamp (midnight, as the daily trackers
+  write it) is the state after that day's close, and any other wall-clock time covers exactly
+  the events at or before it. A checkpoint whose instant is after the valuation — including
+  today's close stamped before that close — or whose contents (cashflows, observed events,
+  hit dates) were determined after its instant is rejected; so is one AT the valuation
+  instant under `before` that has decided an event there.
 - `event_phase`: `"before"` (an event exactly at the valuation instant is still open and is
   decided at spot by the engine) or `"after"` (it is history).
 - `ObservationRecord.observation_timestamp` / `settlement_timestamp` give a record an
@@ -48,7 +53,11 @@ that remains. Cash already paid is reported in `paid_cash` and is **not** in `pr
 `result.total_value(include_paid_cash=True)` states the other convention explicitly.
 Every result carries `valuation_timestamp`, `phase`, `provisional`, the `assumptions`,
 the reconstructed `lifecycle`, itemised `cashflows` with provenance
-(`model`/`confirmed`/`provisional`), the profile and session identities, a
+(`model`/`confirmed`/`provisional`; a provisional flow's `depends_on` names the assumed
+events that can change whether it exists or what it pays — an assumed KO observation
+reaches every later flow, an assumed coupon observation the memory of later coupons, an
+assumed knock-in the maturity payoff and, where a knock-in changes the KO rule, every
+later flow), the profile and session identities, a
 `market_snapshot_id` and a `context_identity` covering everything that changes the
 economics (instant, phase, profile, calendar, market, contract, fixings, assumptions,
 checkpoint).
@@ -147,16 +156,17 @@ observation.
   (RANDOMIZED_QUASI engines with an RQMC session spec; others raise `CapabilityError`).
   Where the price function jumps at the query spot (an unfixed event at the valuation
   instant on its level, a continuous barrier hit there) delta and gamma are `undefined`.
-  Point vega/rho/dividend rho are `unqualified` (no value) until a Gate C bump-limit ladder
-  demonstrates them for the (product, route): demonstrated to one second before the fixing
-  for QUAD V2 snowballs and analytical digitals (`evidence/gate_c_greeks.json`). MC point
-  delta/gamma (a paired RQMC difference at the desk bump) stay `unqualified`.
-- `"theta"` under either convention — a declared forward step (`theta_step`, default one
-  hour; `theta_unit` second/minute/hour/day) on the frozen market (`roll_context`),
-  including cash paid during the step. A step that would cross the next event is clamped to
-  land on it (BEFORE) and reported (`result.numerical["theta_adjusted"]`, `theta_side`); at
-  an event instant under BEFORE there is no step inside the segment and theta is
-  `undefined`, never zero.
+  A numerical route (QUAD V2, PDE, MC) publishes delta/gamma, and every route its point
+  vega/rho/dividend rho proxies, only inside a Gate C certificate (below).
+- `"theta"` follows the convention. Under `desk_bump` it is the declared forward roll
+  (`theta_step`, default one hour; `theta_unit` second/minute/hour/day) on the frozen market
+  (`roll_context`), including cash paid during the step. Under `point` it is the time
+  DERIVATIVE: a one-sided second-order stencil `(-3 V(0) + 4 V(h) - V(2h)) / 2h` with `h`
+  one thousandth of the current segment (never below 1 ms, where price round-off dominates;
+  `result.numerical["theta_point_step_s"]`). A roll or stencil that would cross the next
+  event, variance-clock or coefficient boundary is clamped to land on it (BEFORE) and
+  reported (`theta_adjusted`, `theta_side`); at an event instant under BEFORE there is no
+  step inside the segment and theta is `undefined`, never zero.
 
 `roll_through_events(engine, request, to_timestamp, outcomes=...)` is a scenario, not a
 derivative: every event crossed needs a `Fixing` outcome, and the contract is valued at
@@ -168,7 +178,7 @@ derivative: every event crossed needs a `Fixing` outcome, and the contract is va
 | gamma | per unit spot² (derivative) | per unit spot², central relative move `gamma_spot_bump` |
 | vega | per unit trading-quoted vol (proxy, `unqualified` until demonstrated) | PnL per `+vol_bump` of the trading-quoted surface, one-sided |
 | rho / dividend rho | per unit rate / yield (proxy, `unqualified` until demonstrated) | PnL per +1%, one-sided and rescaled |
-| theta | PnL per `theta_unit` over the declared forward step (either convention, same number) | same |
+| theta | PnL per `theta_unit`, the time derivative (stencil) | PnL per `theta_unit` over the declared forward roll |
 
 Every `GreekValue` carries `status` (`ok`, `undefined`, `unqualified`, `failed`) and, when
 not `ok`, a `reason` and no value. `example/intraday_greeks_demo.py` prints both conventions
@@ -183,7 +193,9 @@ roll-through-events row.
 - `spot_curve(engine, request, spots)` resolves ONE context: its confirmed and assumed
   fixings come from the request's own spot and are shared by every point — a curve never
   re-decides an observation at a curve spot. QUAD V2 prepares its operator once over the
-  spots and reads price, delta and gamma from it; other routes price each spot.
+  spots and reads price, delta and gamma from it — under the same certificate as a single
+  point Greek, so a curve at undemonstrated settings reports `unqualified` points; other
+  routes price each spot.
 - `aggregate_intraday([(id, quantity, result), ...])` scales price, paid cash and Greeks by
   quantity; the book is provisional if any position is (and names them), and a Greek is
   summed only when every position reports it `ok` under one convention and unit.
@@ -204,9 +216,13 @@ Every limit below raises rather than approximating. None of them is a silent fal
   evidence. Route continuous barriers to PDE or MC.
 - **A closed-form barrier whose coefficients are not provably piecewise.**
   `quantark.intraday.coefficients` admits only curve families that declare where their law
-  changes and that it is affine between (flat and term-structure volatility, flat and
-  linear/log-linear rates, flat and term-structure dividends, plus their parallel shifts).
-  Anything else — a cubic-spline curve, a shifted term surface, a smile — is inadmissible:
+  changes and its polynomial degree between (flat and term-structure volatility, flat and
+  linear/log-linear rates, flat and term-structure dividends, their parallel shifts, and the
+  frozen-market roll wrappers a theta reprices). A single affine piece is flat by its law; a
+  quadratic cumulative carry — a linearly interpolated zero rate or yield — is sampled at
+  every piece's midpoint too, including the first piece from the valuation instant (pillars
+  `(0, 1%)` and `(T, 10%)` are not a flat forward). Anything else — a cubic-spline curve, a
+  shifted term surface, a smile, a subclass of an admitted family — is inadmissible:
   matching samples at two instants prove nothing about the interval between them.
 - **A digital inside the daily engine's expiry tolerance.** Below `MIN_MATURITY` the daily
   engine switches to the intrinsic payoff, a CALENDAR-TIME shortcut. Intraday that window
@@ -225,12 +241,28 @@ Every limit below raises rather than approximating. None of them is a silent fal
 ## What a status does and does not claim
 
 - A route's `numerical["resolution"]` is a RESOLUTION diagnostic — the mesh covered the
-  diffusion layer — never an error budget. Greek status is bound separately to the Gate C
-  demonstrated families in the capability matrix: product, route, measure, monitoring, the
-  exact variance profile, and the horizon window the ladder actually swept. Outside any of
-  those a Greek reports `unqualified` with no value, whatever the mesh did.
-- A desk bump is exactly its repriced difference, so its only error is the prices' own: a
-  bump cell the route could not resolve makes the desk Greek `unqualified` too.
-- A local theta is a declared one-sided forward roll on the frozen market, clamped to the
-  next event AND the next variance-clock or coefficient boundary. It is a finite roll, not
-  a demonstrated `dV/dt`, and every value says so.
+  diffusion layer — never an error budget. Greek status is bound separately to a Gate C
+  CERTIFICATE (`evidence/gate_c_greeks.json`, listed in the capability matrix): product,
+  route, measure, monitoring, the exact variance profile, the engine's accuracy settings
+  (`capability.accuracy_settings`: every params field except resource caps and the QUAD
+  kernel backend, the effective bump configuration, MC method and batching), a measure's own
+  knob (a desk theta's requested step), and a window of consecutive swept horizons with every
+  cell passing. Outside any of those a Greek reports `unqualified` with no value, whatever
+  the mesh did. QUAD V2 at `cells_per_sd=0.1` has the same kernel-derivative evidence as the
+  certified `cells_per_sd=2` and a delta 30% off the reference.
+- Market and contract LEVELS are not part of the key. The evidence records the market
+  families it ran on (flat vol 20%, r 3%, q 1%; one monthly snowball, one digital); the
+  certificate generalises over levels because the swept dimensions are the ones the
+  discretisation error depends on — time to the next event, the spot's distance to each
+  barrier in standard deviations, the mesh or quadrature per standard deviation.
+- A desk bump is exact as an operation on its prices, so its error is the prices' own. It is
+  `ok` when every contributing price is exact (a closed form the route proved exact, a fixed
+  ledger) or when Gate C demonstrated the same finite move; a bump cell the route could not
+  resolve makes it `unqualified` either way.
+- A desk theta is that declared roll and says so; a point theta is a stencil, so — like a
+  point vega — it needs a certificate even on exact prices.
+- Swept today (horizons 1 s to 29 days, profiles desk and sessions-only): QUAD V2 snowballs
+  and analytical digitals for every point and desk measure; PDE and MC for point and desk
+  delta/gamma only. A desk vega, rho, dividend rho or theta on PDE or MC is therefore
+  `unqualified` — for MC because the summed standard errors of the two prices of such a move
+  alone exceed its budget at the certified path count. The matrix lists what passed.

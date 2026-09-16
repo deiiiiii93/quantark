@@ -80,23 +80,28 @@ def lifecycle_state_fingerprint(state) -> str:
 
 
 #: Declared reading of a checkpoint that carries no time of day.
-DATE_ONLY_CHECKPOINT_CONVENTION = "after that day's close, clamped to the valuation instant"
+DATE_ONLY_CHECKPOINT_CONVENTION = "after that day's close"
 
 
-def checkpoint_instant(checkpoint, cal, valuation_timestamp: datetime):
+def checkpoint_instant(checkpoint, cal, valuation_timestamp: datetime, phase: EventPhase, timeline=None):
     """(instant the checkpoint covers up to and including, convention) — ``(None, "")`` without one.
 
     ``ValuationPoint.date`` is a naive LOCAL datetime. The daily trackers write it
-    with no time of day, so midnight is the legacy date-only checkpoint: the state
-    after that day's close, clamped to the valuation instant when that close has
-    not happened yet. Clamping is the narrowest honest reading — a checkpoint
-    stamped today cannot report today's close at 14:00 — and it never covers an
-    observation the desk could not have seen.
+    with no time of day after observing that day's fixings, so midnight is the
+    legacy date-only checkpoint: the state AFTER THAT DAY'S CLOSE (on a day
+    without a session, after the last close before it). That instant is fixed by
+    the declaration. It is never moved to fit the request: a state that already
+    contains the close's outcomes still contains them when its timestamp is
+    clamped, so a date-only checkpoint whose close is after the valuation instant
+    is rejected like any other report of the future (review 2026-09-16 R1).
 
     Any other wall-clock time is an EXPLICIT intraday checkpoint and covers exactly
     the events at or before that instant: widening it to its whole date would
-    suppress fixings it never saw. A checkpoint that reports the future is
-    rejected, by day for a date-only one and by instant for an explicit one.
+    suppress fixings it never saw.
+
+    Coverage is inclusive, so a checkpoint AT the valuation instant has decided the
+    events there; under ``before`` those events are still open, and the two
+    statements contradict each other.
     """
     point = getattr(checkpoint, "valuation_point", None) if checkpoint is not None else None
     if point is None:
@@ -110,17 +115,65 @@ def checkpoint_instant(checkpoint, cal, valuation_timestamp: datetime):
                               f"trackers write LOCAL naive datetimes on {cal.name}")
     day = local.date()
     if local.time() == time(0, 0):
-        if day > valuation_timestamp.astimezone(cal.tz).date():
-            raise ValidationError(f"checkpoint is dated {day.isoformat()}, after the valuation day "
-                                  f"{valuation_timestamp.astimezone(cal.tz).date().isoformat()}: "
-                                  "a checkpoint cannot report the future")
-        close = cal.close_at(day) if cal.is_trading_day(day) else cal.payment_at(day)
-        return min(close, valuation_timestamp, key=to_utc), DATE_ONLY_CHECKPOINT_CONVENTION
-    instant = cal.localize(day, local.time())
+        close_day = day if cal.is_trading_day(day) else cal.previous_trading_day(day)
+        instant, convention = cal.close_at(close_day), DATE_ONLY_CHECKPOINT_CONVENTION
+    else:
+        instant, convention = cal.localize(day, local.time()), "at the stated local instant"
     if to_utc(instant) > to_utc(valuation_timestamp):
-        raise ValidationError(f"checkpoint covers {instant.isoformat()}, which is after the valuation instant "
-                              f"{valuation_timestamp.isoformat()}: a checkpoint cannot report the future")
-    return instant, "at the stated local instant"
+        raise ValidationError(f"checkpoint covers {instant.isoformat()} ({convention} of {local.isoformat()}), which is "
+                              f"after the valuation instant {valuation_timestamp.isoformat()}: a checkpoint cannot "
+                              "report the future")
+    if (timeline is not None and phase is EventPhase.BEFORE and to_utc(instant) == to_utc(valuation_timestamp)
+            and timeline.at(valuation_timestamp)):
+        raise ValidationError(f"checkpoint covers {instant.isoformat()} inclusively, deciding "
+                              f"{timeline.at(valuation_timestamp)[0].event_id}, but the valuation is BEFORE that event: "
+                              "a checkpoint cannot report the future")
+    return instant, convention
+
+
+def _earliest_instant(stamp: datetime, cal) -> datetime:
+    """The earliest instant a naive LOCAL lifecycle stamp can denote: a date-only stamp is its whole day."""
+    return cal.localize(stamp.date(), stamp.time())
+
+
+def _require_covered_contents(checkpoint, timeline, checkpoint_at: datetime, convention: str, cal) -> None:
+    """Reject a checkpoint carrying an outcome determined after the instant it claims to cover.
+
+    Its instant is a claim about its CONTENTS: every realized cashflow, every
+    observation it marks as seen and every hit/expiry date must lie at or before
+    it. Each is placed as precisely as it can be — a cashflow by the exact
+    determination instant the intraday layer recorded or by the contract event its
+    id names, an observation index by its event, a bare date only by the start of
+    its day — so nothing is rejected on a guess.
+    """
+    from quantark.intraday.twin import event_for_cashflow
+
+    late = []
+    for cf in checkpoint.ledger.cashflows:
+        stamp = cf.metadata.get(DETERMINATION_TIMESTAMP)
+        event = None if stamp else event_for_cashflow(cf, timeline, cal.tz)
+        if stamp:
+            instant = datetime.fromisoformat(stamp)
+        elif event is not None:
+            instant = event.timestamp
+        elif cf.determination_date is not None:
+            instant = _earliest_instant(cf.determination_date, cal)
+        else:
+            continue
+        if to_utc(instant) > to_utc(checkpoint_at):
+            late.append(f"cashflow {cf.cashflow_id} determined {instant.isoformat()}")
+    if isinstance(checkpoint, AutocallableLifecycleState):
+        for kind, seen in ((EventKind.KO, checkpoint.observed_ko_indices), (EventKind.KI, checkpoint.observed_ki_indices),
+                           (EventKind.COUPON, checkpoint.observed_coupon_indices)):
+            late.extend(f"observed {e.event_id}" for e in timeline.events
+                        if e.kind is kind and e.index in seen and to_utc(e.timestamp) > to_utc(checkpoint_at))
+    for name in ("ki_date", "ko_date", "maturity_date", "hit_date", "expiry_date"):
+        stamp = getattr(checkpoint, name, None)
+        if stamp is not None and to_utc(_earliest_instant(stamp, cal)) > to_utc(checkpoint_at):
+            late.append(f"{name} {stamp.isoformat()}")
+    if late:
+        raise ValidationError(f"checkpoint covers {checkpoint_at.isoformat()} ({convention}) but carries outcomes "
+                              f"determined after it: {'; '.join(late)}. A checkpoint cannot report the future")
 
 
 def _covered(checkpoint_at: Optional[datetime], instant: datetime) -> bool:
@@ -136,7 +189,9 @@ class _ReplayPlan:
         self.spot, self._spot_timestamp = float(spot), spot_timestamp
         if checkpoint is not None and not checkpoint.alive and fixings:
             raise ValidationError("checkpoint is already terminal; fixings after termination are contradictory")
-        self.checkpoint_at, self.checkpoint_convention = checkpoint_instant(checkpoint, cal, ts)
+        self.checkpoint_at, self.checkpoint_convention = checkpoint_instant(checkpoint, cal, ts, phase, timeline)
+        if self.checkpoint_at is not None:
+            _require_covered_contents(checkpoint, timeline, self.checkpoint_at, self.checkpoint_convention, cal)
         self.instants = {}
         for e in timeline.events:
             self.instants.setdefault(to_utc(e.timestamp), []).append(e)

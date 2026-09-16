@@ -146,7 +146,8 @@ class PDERoute:
 
         num, env = ctx.numerical, ctx.pricing_env
         if num.terminated:
-            return EnginePriceOutcome(0.0, "terminated", {"reason": "lifecycle state is not alive; only the ledger remains"}, {})
+            return EnginePriceOutcome(0.0, "terminated", {"reason": "lifecycle state is not alive; only the ledger remains"}, {},
+                                      exact=True)
         twin = num.product
         if isinstance(twin, EuropeanVanillaOption):
             solver = EuropeanPDESolver(deepcopy(engine.params))
@@ -160,7 +161,9 @@ class PDERoute:
         numbers = _layout_numbers(solver, ctx.spot)
         records = ()
         if numbers is None:          # an at-valuation event decided the price without a grid
-            return EnginePriceOutcome(pv, self._method(engine), {"resolution": "not_solved"}, {}, engine_used=solver)
+            # decided on the known spot by an event at the valuation instant: no grid, nothing to discretise
+            return EnginePriceOutcome(pv, self._method(engine), {"resolution": "not_solved"}, {}, engine_used=solver,
+                                      exact=True)
         grid = solver.grid_binder.config            # the resolved config the solve used (scheme knobs included)
         dx_min = _dx_min(solver)
         status = _time_status(ctx, solver, solver._active_layout, numbers, dx_min)
@@ -207,7 +210,7 @@ class PDERoute:
                          steps_per_day=float(grid.steps_per_day))
         return EnginePriceOutcome(pv, self._method(engine), numerical, {}, records, engine_used=solver)
 
-    def point_greeks(self, ctx, engine) -> PointGreeks:
+    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
         """The solver's own stencil on the grid the route priced on.
 
         A resolved mesh is a RESOLUTION diagnostic, not an accuracy certificate: it
@@ -218,8 +221,7 @@ class PDERoute:
         configuration — and where it did not, the diagnostics are still reported
         but no number is (review 2026-09-16 finding 4).
         """
-        from quantark.intraday.capability import output_qualification_gap
-        from quantark.intraday.greeks import qualification_scope, seconds_to_first_event
+        from quantark.intraday.greeks import point_certificate_gap
 
         if ctx.numerical.terminated:
             return TERMINATED_POINT_GREEKS
@@ -241,13 +243,11 @@ class PDERoute:
         if resolution != "resolved":
             return PointGreeks(None, None, "unqualified", str(outcome.numerical.get("resolution_reason") or resolution),
                                "grid_stencil")
-        seconds, product = seconds_to_first_event(ctx), type(ctx.request.product).__name__
-        gaps = [g for g in (output_qualification_gap(product, "PDERoute", f"point_{m}", seconds, **qualification_scope(ctx))
-                            for m in ("delta", "gamma")) if g]
-        if gaps:
+        gap = point_certificate_gap(ctx, engine, self) if certify else ""
+        if gap:
             return PointGreeks(None, None, "unqualified",
                                "the mesh resolved the diffusion layer, which is a resolution diagnostic and not an "
-                               "error budget: " + "; ".join(dict.fromkeys(gaps)), "grid_stencil")
+                               "error budget: " + gap, "grid_stencil")
         return PointGreeks(delta, gamma, "ok", "", "grid_stencil")
 
     @staticmethod

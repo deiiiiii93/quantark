@@ -136,18 +136,21 @@ def test_point_vega_and_rho_are_unqualified_proxies_until_demonstrated(sse_calen
 
 def test_demonstrated_quad_proxies_are_central_differences_of_the_frozen_price_function(sse_calendar, sse_sessions, desk):
     import quantark.intraday.greeks as G
-    from quantark.intraday.capability import point_output_qualified
+    from quantark.intraday.capability import accuracy_settings, point_output_qualified
     req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
                     greeks=("vega", "rho", "dividend_rho"), greek_convention="point")
     ctx = resolve_context(req)
-    assert point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0, **G.qualification_scope(ctx))
+    settings = accuracy_settings(QUAD)
+    assert point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0, **G.qualification_scope(ctx),
+                                  settings=settings)
     # ... and the SAME route under a profile Gate C never swept is not qualified by it
     from quantark.intraday import VarianceProfile
     other = VarianceProfile("bespoke", "1", 244, 0.25, (0.35, 0.35), (0.05,))
     assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0, monitoring="discrete",
-                                      profile_identity=other.identity())
+                                      profile_identity=other.identity(), settings=settings)
     # ... nor at a horizon beyond the swept window
-    assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 30 * 86400.0, **G.qualification_scope(ctx))
+    assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 60 * 86400.0, **G.qualification_scope(ctx),
+                                      settings=settings)
     res = value_intraday(QUAD, req)
     for g in res.greeks:
         expected = G.point_proxy_difference(ctx, g.name, G.point_proxy_bump(ctx, g.name), lambda c: G.cell_price(c, QUAD))

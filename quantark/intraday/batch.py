@@ -4,8 +4,8 @@
   silent ``None``.
 - ``spot_curve``: ONE resolved context. Its confirmed and assumed fixings come from the request's base snapshot and
   are shared by every point — a curve never rebuilds an assumption from a curve spot. QUAD V2 prepares the operator
-  once over the declared spots and reads price, delta and gamma from it; other routes price each spot on the same
-  context with only the spot moved.
+  once over the declared spots and reads price, delta and gamma from it, under the same Gate C certificate as a
+  single point Greek; other routes price each spot on the same context with only the spot moved.
 - ``aggregate_intraday``: quantities scale prices, paid cash and Greeks; the book is provisional if any position is,
   and a Greek is summed only when every position reports it ``ok`` under one convention and unit.
 """
@@ -56,7 +56,7 @@ class SpotCurvePoint:
     price: float
     delta: Optional[float]
     gamma: Optional[float]
-    status: str                  # greek status: "ok" | "undefined" | "not_requested"
+    status: str                  # greek status: "ok" | "undefined" | "unqualified" | "not_requested"
     reason: str
     assumptions: Tuple[AssumedFixing, ...] = ()
     #: This spot's own price evidence (PDE resolution, MC standard error, ...). A route that
@@ -159,7 +159,7 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
     """Price (and, on QUAD V2, point delta/gamma) at each spot of one resolved context, in the given order."""
     from quantark.intraday.capability import require_capability
     from quantark.intraday.engines.quad_v2 import QuadV2Route
-    from quantark.intraday.greeks import discontinuity_at_spot
+    from quantark.intraday.greeks import discontinuity_at_spot, point_certificate_gap
     from quantark.intraday.service import _monitoring
 
     ctx = resolve_context(request)
@@ -174,6 +174,9 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
                                   lifecycle_state=num.lifecycle_state)
         values = prepared.evaluate(spots)
         shared = dict(getattr(prepared, "diagnostics", {}) or {})
+        # One context, one horizon, one engine: the certificate is the same for every spot of the curve, and a
+        # kernel derivative of a discretised value needs it exactly as a single point Greek does (review R4).
+        gap = point_certificate_gap(ctx, engine, route)
         points = []
         for i, s in enumerate(spots):
             delta, gamma = float(values["delta"][i]), float(values["gamma"][i])
@@ -181,6 +184,10 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
                 points.append(SpotCurvePoint(s, float(values["price"][i]), None, None, "undefined",
                                              jumps[i] or "payoff discontinuity of an unfixed event at the query spot",
                                              assumptions, method="quad_v2_prepared"))
+            elif gap:
+                points.append(SpotCurvePoint(s, float(values["price"][i]), None, None, "unqualified",
+                                             f"kernel derivative of the discretised value: {gap}", assumptions,
+                                             method="quad_v2_prepared"))
             else:
                 points.append(SpotCurvePoint(s, float(values["price"][i]), delta, gamma, "ok", "", assumptions,
                                              method="quad_v2_prepared"))

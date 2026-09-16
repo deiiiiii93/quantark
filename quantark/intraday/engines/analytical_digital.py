@@ -41,7 +41,7 @@ class AnalyticalDigitalRoute:
     def price(self, ctx, engine) -> EnginePriceOutcome:
         if ctx.numerical.terminated:
             return EnginePriceOutcome(0.0, "terminated",
-                                      {"reason": "the terminal fixing is history; only the ledger remains"}, {})
+                                      {"reason": "the terminal fixing is history; only the ledger remains"}, {}, exact=True)
         twin, env = ctx.numerical.product, ctx.pricing_env
         T = float(ctx.numerical.maturity_tau)
         S, K = float(env.spot), float(twin.strike)
@@ -57,13 +57,15 @@ class AnalyticalDigitalRoute:
             records = ("terminal forward equals the strike: the contract's strict inequality pays 0",) if F == K else ()
             pv = float(twin.get_payoff(F)) * df_pay
             return EnginePriceOutcome(pv, "deterministic_zero_variance",
-                                      {"total_variance": 0.0, "forward": F, "carry": R - Q, "payment_df": df_pay}, {}, records)
+                                      {"total_variance": 0.0, "forward": F, "carry": R - Q, "payment_df": df_pay}, {}, records,
+                                      exact=True)
         _refuse_daily_expiry_tolerance(engine, T, W)
         pv = float(engine.price(twin, env))
         return EnginePriceOutcome(pv, "analytical_bs_effective_variance",
-                                  {"total_variance": W, "effective_vol": (W / T) ** 0.5, "carry": R - Q, "payment_df": df_pay}, {})
+                                  {"total_variance": W, "effective_vol": (W / T) ** 0.5, "carry": R - Q, "payment_df": df_pay},
+                                  {}, exact=True)
 
-    def point_greeks(self, ctx, engine) -> PointGreeks:
+    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
         """Closed-form delta/gamma of payout*df*N(+-d2); the zero-variance limit is flat except at the strike."""
         if ctx.numerical.terminated:
             return TERMINATED_POINT_GREEKS
