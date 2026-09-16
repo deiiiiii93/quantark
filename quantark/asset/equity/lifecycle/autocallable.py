@@ -37,6 +37,10 @@ from .events import LifecycleEvent, LifecycleEventType
 from .cashflows import RealizedCashflow, ValuationPoint
 from .state import AutocallableLifecycleState
 
+#: Ledger metadata key: the contractual coupon periods a memory coupon released
+#: as arrears alongside the period named by its own cashflow id.
+COUPON_ARREARS_INDICES = "coupon_arrears_indices"
+
 DateResolver = Callable[[pd.Timestamp], pd.Timestamp]
 
 
@@ -323,6 +327,10 @@ class AutocallableLifecycleTracker:
             coupon,
             rec,
             valuation_point,
+            # A memory coupon settles several contractual periods in one entry.
+            # Naming them keeps the ledger reconcilable against the contract's
+            # own per-period cash table instead of this period's amount alone.
+            metadata={COUPON_ARREARS_INDICES: tuple(memorized)} if memorized else None,
         )
         self.lifecycle.add_cashflow(
             coupon,
@@ -659,6 +667,7 @@ class AutocallableLifecycleTracker:
         amount: float,
         record: Dict[str, Any],
         valuation_point: ValuationPoint,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> RealizedCashflow:
         # The entry's representation must match the product's timing (the
         # valuation point already encodes that choice): a numeric lifecycle
@@ -681,6 +690,7 @@ class AutocallableLifecycleTracker:
                 amount=amount,
                 determination_date=determination_date,
                 payment_date=payment_date,
+                metadata=dict(metadata or {}),
             )
 
         delay = float(record["settlement_time"]) - float(record["time"])
@@ -691,6 +701,7 @@ class AutocallableLifecycleTracker:
             amount=amount,
             determination_time=determination_time,
             payment_time=determination_time + delay,
+            metadata=dict(metadata or {}),
         )
 
     @staticmethod

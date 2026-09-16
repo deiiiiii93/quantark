@@ -7,7 +7,7 @@ Consumed by ``quantark.backtest.otc`` (single-product historical replay),
 portfolio-driving ``PortfolioLifecycleManager`` is shared by the latter two.
 """
 
-from .autocallable import AutocallableLifecycleTracker, CalendarSchedule
+from .autocallable import COUPON_ARREARS_INDICES, AutocallableLifecycleTracker, CalendarSchedule
 from .barrier import TRACKED_BARRIER_PRODUCTS, BarrierLifecycleTracker
 from .cashflows import (
     LifecycleCashflowLedger,
@@ -21,10 +21,12 @@ from .state import (
     AutocallableLifecycleState,
     BarrierLifecycleState,
     EquityOptionLifecycleState,
+    TerminalLifecycleState,
 )
 
 __all__ = [
     "AutocallableLifecycleTracker",
+    "COUPON_ARREARS_INDICES",
     "CalendarSchedule",
     "BarrierLifecycleTracker",
     "TRACKED_BARRIER_PRODUCTS",
@@ -41,4 +43,5 @@ __all__ = [
     "AutocallableLifecycleState",
     "BarrierLifecycleState",
     "EquityOptionLifecycleState",
+    "TerminalLifecycleState",
 ]

@@ -906,7 +906,13 @@ class PhoenixMCEngine(BaseEngine):
         coupon_probabilities = np.zeros(num_obs, dtype=float)
         coupon_cashflows = np.zeros(num_obs, dtype=float)
 
-        accrued = np.zeros(num_paths, dtype=float)
+        # Arrears already outstanding at the pricing date start in the memory
+        # accumulator: the next period that triggers releases them with its own
+        # coupon, exactly as a period missed inside this simulation would.
+        arrears = float(product.coupon_config.initial_coupon_arrears) if (
+            product.coupon_config.memory_coupon
+        ) else 0.0
+        accrued = np.full(num_paths, arrears, dtype=float)
         expiry_coupon = np.zeros(num_paths, dtype=float)
 
         for obs_idx in range(num_obs):

@@ -255,6 +255,37 @@ class AutocallableLifecycleState:
 
 
 @dataclass
+class TerminalLifecycleState:
+    """Realized lifecycle state of a contract whose single terminal fixing decides everything.
+
+    Digitals and European vanillas have no intermediate observation: before the
+    fixing nothing is realized, and the fixing turns the whole claim into one
+    fixed receivable settling on the contract's own payment date. ``alive`` is
+    False from that moment on -- the remaining value is the ledger, not a
+    contingent payoff.
+    """
+
+    alive: bool = True
+    expired: bool = False
+    expiry_date: Optional[datetime] = None
+    valuation_point: Optional[ValuationPoint] = None
+    ledger: LifecycleCashflowLedger = field(
+        default_factory=LifecycleCashflowLedger
+    )
+
+    def mark_expired(self, timestamp: datetime) -> None:
+        self.expired = True
+        self.alive = False
+        self.expiry_date = timestamp
+
+    @property
+    def realized_cashflows(self) -> float:
+        if self.valuation_point is None:
+            return 0.0
+        return self.ledger.paid_total(self.valuation_point)
+
+
+@dataclass
 class BarrierLifecycleState:
     """Realized lifecycle state for vanilla barrier-family products."""
 

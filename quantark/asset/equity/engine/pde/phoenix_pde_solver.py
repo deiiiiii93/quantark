@@ -46,6 +46,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._coupon_barriers: np.ndarray = np.array([])
         self._coupon_amounts: np.ndarray = np.array([])
         self._coupon_cumulative: np.ndarray = np.array([])
+        self._initial_coupon_arrears: float = 0.0
         # Termination-value surfaces; None whenever coupons pay INSTANT, and on
         # any solve path that never prepared them.
         self._term_w0: Optional[np.ndarray] = None
@@ -564,6 +565,11 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._coupon_cumulative = np.concatenate(
             ([0.0], np.cumsum(self._coupon_amounts))
         )
+        self._initial_coupon_arrears = (
+            float(product.coupon_config.initial_coupon_arrears)
+            if product.has_memory_coupon
+            else 0.0
+        )
         for obs_idx, obs_time in enumerate(ko_times):
             if is_close(obs_time, 0.0):
                 self._coupon_observation_indices[0] = obs_idx
@@ -590,10 +596,21 @@ class PhoenixPDESolver(SnowballPDESolver):
         )
 
     def _accumulated_coupon_amount(self, obs_idx: int, missed_count: int) -> float:
+        """Arrears released by a trigger at ``obs_idx`` from memory state ``missed_count``.
+
+        ``missed_count == obs_idx`` is the state in which EVERY period of this
+        contract has missed, so nothing has paid since the pricing date and any
+        arrears carried in from before it are still outstanding. In every other
+        state a coupon has already paid and reset the memory, so those arrears
+        are gone. No extra memory dimension is needed to say that.
+        """
+        carried = self._initial_coupon_arrears if missed_count == obs_idx else 0.0
         if missed_count <= 0 or obs_idx <= 0:
-            return 0.0
+            return float(carried)
         start = max(obs_idx - missed_count, 0)
-        return float(self._coupon_cumulative[obs_idx] - self._coupon_cumulative[start])
+        return float(
+            self._coupon_cumulative[obs_idx] - self._coupon_cumulative[start] + carried
+        )
 
     def _time_stepping_vector_surface(
         self,

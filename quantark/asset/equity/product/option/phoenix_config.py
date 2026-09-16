@@ -58,6 +58,13 @@ class CouponBarrierConfig:
     # Optional fixed accrual per coupon period (e.g. 1/12)
     fixed_coupon_year_fraction: Optional[float] = None
 
+    #: Cash amount of coupon periods already MISSED before this contract's own first
+    #: observation, still owed and released by the next period that triggers. It is
+    #: how an aged memory Phoenix states its outstanding arrears to engines that take
+    #: no lifecycle state (PDE, MC); engines that do take one read the count from
+    #: there instead, so exactly one of the two carries it for any given route.
+    initial_coupon_arrears: float = 0.0
+
     def __post_init__(self):
         """Validate configuration after initialization."""
         # Validate coupon_barrier is positive
@@ -102,6 +109,28 @@ class CouponBarrierConfig:
                     "fixed_coupon_year_fraction must be positive, "
                     f"got {self.fixed_coupon_year_fraction}"
                 )
+
+        # Validate outstanding arrears
+        if not isinstance(self.initial_coupon_arrears, (int, float)) or isinstance(
+            self.initial_coupon_arrears, bool
+        ):
+            raise ValidationError(
+                "initial_coupon_arrears must be a number, "
+                f"got {type(self.initial_coupon_arrears)}"
+            )
+        if self.initial_coupon_arrears < 0:
+            raise ValidationError(
+                "initial_coupon_arrears must be non-negative, "
+                f"got {self.initial_coupon_arrears}"
+            )
+        if self.initial_coupon_arrears and not self.memory_coupon:
+            raise ValidationError(
+                "initial_coupon_arrears requires memory_coupon=True: without memory "
+                "a missed period is never paid later"
+            )
+        object.__setattr__(
+            self, "initial_coupon_arrears", float(self.initial_coupon_arrears)
+        )
 
     @staticmethod
     def _validate_barrier_positive(
