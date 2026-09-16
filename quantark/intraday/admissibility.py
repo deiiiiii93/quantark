@@ -13,6 +13,12 @@ per unit of variance. On the intraday clock that holds in exactly two cases:
   whatever the profile (plateaus included): price with maturity u(T) and
   sigma' = sqrt(W/u) under zero rates; pay-at-hit timing is irrelevant at r = 0.
 
+Both conditions are statements about whole intervals. They are tested between
+every coefficient breakpoint ``quantark.intraday.coefficients`` declares -- clock
+segment boundaries, volatility pillars, rate and dividend pillars -- because the
+interpolation law is affine between those and only those. A curve family that
+declares no law is inadmissible outright: matching samples would prove nothing.
+
 Anything else is inadmissible, with the first violated condition as reason.
 """
 from __future__ import annotations
@@ -21,6 +27,7 @@ from dataclasses import dataclass
 from math import sqrt
 from typing import Optional
 
+from quantark.intraday.coefficients import coefficient_breaks
 from quantark.intraday.timestamp import calendar_year_fraction
 from quantark.util.numerical import is_close
 
@@ -38,13 +45,10 @@ class Admissibility:
     total_variance: Optional[float] = None
 
 
-def _knots(ctx, t_end: float):
-    taus = {0.0, t_end}
-    for s in ctx.time_map.segments:
-        for t in (s.tau_start, s.tau_end):
-            if 0.0 < t < t_end:
-                taus.add(t)
-    return sorted(taus)
+def _knots(breaks, t_end: float, kind: str):
+    """0, every declared break of ``kind`` below ``t_end``, and ``t_end``."""
+    inner = breaks.variance if kind == "variance" else breaks.carry
+    return sorted({0.0, float(t_end)} | {t for t in inner if 0.0 < t < t_end})
 
 
 def _rates(ctx, knots):
@@ -74,10 +78,17 @@ def analytical_barrier_admissibility(ctx) -> Admissibility:
     spot = float(env.spot)
     W = float(env.vol_surface.total_variance(strike, T, spot))
     t_pay = calendar_year_fraction(ctx.valuation_timestamp, ctx.timeline.terminal().payment_timestamp)
-    pay_knots = _knots(ctx, max(t_pay, T))
+    # Sampling proves constancy only across a family's OWN declared pieces: a term
+    # structure whose pillar sits mid-session has a different variance rate on each
+    # side of it, and no pair of session-boundary samples can see that.
+    breaks = coefficient_breaks(ctx, max(t_pay, T))
+    if not breaks.qualified:
+        return Admissibility(False, "inadmissible",
+                             f"drift per unit variance cannot be qualified here: {breaks.reason}", total_variance=W)
+    pay_knots = _knots(breaks, max(t_pay, T), "carry")
     dfs, carry, fwd, div = _rates(ctx, pay_knots)
 
-    var_knots = _knots(ctx, T)
+    var_knots = _knots(coefficient_breaks(ctx, T), T, "variance")
     w = [0.0 if t == 0.0 else float(env.vol_surface.total_variance(strike, t, spot)) for t in var_knots]
     var_rates = [(w[i + 1] - w[i]) / (var_knots[i + 1] - var_knots[i]) for i in range(len(var_knots) - 1)]
     uniform_variance = W > 0.0 and all(is_close(v, var_rates[0], rel_tol=_REL, abs_tol=_ABS) for v in var_rates)
@@ -93,8 +104,14 @@ def analytical_barrier_admissibility(ctx) -> Admissibility:
         return Admissibility(True, "zero_carry_time_change", "", variance_time_maturity=float(ctx.time_map.to_trading(T)),
                              total_variance=W)
     if not uniform_variance:
-        reason = ("drift per unit variance is not constant: the variance clock is not a constant calendar rate up to expiry "
-                  "(sessions, breaks, overnights or weekends accrue differently) while rates/dividends are not zero")
+        culprit = next((i for i, v in enumerate(var_rates)
+                        if not is_close(v, var_rates[0], rel_tol=_REL, abs_tol=_ABS)), None)
+        where = "" if culprit is None else (
+            f" (dW/dtau is {var_rates[0]:.6g} on [{var_knots[0]:.6g}, {var_knots[1]:.6g}] but "
+            f"{var_rates[culprit]:.6g} on [{var_knots[culprit]:.6g}, {var_knots[culprit + 1]:.6g}])")
+        reason = ("drift per unit variance is not constant: the variance rate differs across the coefficient intervals "
+                  "up to expiry — sessions, breaks, overnights, weekends or volatility pillars accrue differently — "
+                  f"while rates/dividends are not zero{where}")
     elif not flat_rate:
         reason = "drift per unit variance is not constant: the forward rate is not flat up to the payment"
     else:

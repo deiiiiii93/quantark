@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 from typing import Optional, Sequence, Tuple
 
 import pandas as pd
@@ -29,6 +29,8 @@ from quantark.asset.equity.lifecycle import (
     BarrierLifecycleTracker,
     LifecycleEventType,
     RealizedCashflow,
+    TerminalLifecycleState,
+    ValuationPoint,
 )
 from quantark.execution.cache.fingerprint import fingerprint
 from quantark.execution.errors import CapabilityError
@@ -77,18 +79,53 @@ def lifecycle_state_fingerprint(state) -> str:
                         None if point is None else (_iso(point.date), point.time), flows))
 
 
-def _checkpoint_day(checkpoint):
+#: Declared reading of a checkpoint that carries no time of day.
+DATE_ONLY_CHECKPOINT_CONVENTION = "after that day's close, clamped to the valuation instant"
+
+
+def checkpoint_instant(checkpoint, cal, valuation_timestamp: datetime):
+    """(instant the checkpoint covers up to and including, convention) — ``(None, "")`` without one.
+
+    ``ValuationPoint.date`` is a naive LOCAL datetime. The daily trackers write it
+    with no time of day, so midnight is the legacy date-only checkpoint: the state
+    after that day's close, clamped to the valuation instant when that close has
+    not happened yet. Clamping is the narrowest honest reading — a checkpoint
+    stamped today cannot report today's close at 14:00 — and it never covers an
+    observation the desk could not have seen.
+
+    Any other wall-clock time is an EXPLICIT intraday checkpoint and covers exactly
+    the events at or before that instant: widening it to its whole date would
+    suppress fixings it never saw. A checkpoint that reports the future is
+    rejected, by day for a date-only one and by instant for an explicit one.
+    """
     point = getattr(checkpoint, "valuation_point", None) if checkpoint is not None else None
     if point is None:
-        return None
+        return None, ""
     if point.date is None:
         raise ValidationError("intraday reconstruction needs a date-based checkpoint valuation_point "
                               "(time-based checkpoints cannot be placed on the session calendar)")
-    return point.date.date()
+    local = point.date
+    if local.tzinfo is not None:
+        raise ValidationError(f"checkpoint valuation_point {local.isoformat()} is timezone-aware; the daily lifecycle "
+                              f"trackers write LOCAL naive datetimes on {cal.name}")
+    day = local.date()
+    if local.time() == time(0, 0):
+        if day > valuation_timestamp.astimezone(cal.tz).date():
+            raise ValidationError(f"checkpoint is dated {day.isoformat()}, after the valuation day "
+                                  f"{valuation_timestamp.astimezone(cal.tz).date().isoformat()}: "
+                                  "a checkpoint cannot report the future")
+        close = cal.close_at(day) if cal.is_trading_day(day) else cal.payment_at(day)
+        return min(close, valuation_timestamp, key=to_utc), DATE_ONLY_CHECKPOINT_CONVENTION
+    instant = cal.localize(day, local.time())
+    if to_utc(instant) > to_utc(valuation_timestamp):
+        raise ValidationError(f"checkpoint covers {instant.isoformat()}, which is after the valuation instant "
+                              f"{valuation_timestamp.isoformat()}: a checkpoint cannot report the future")
+    return instant, "at the stated local instant"
 
 
-def _covered(checkpoint_day, instant: datetime, tz) -> bool:
-    return checkpoint_day is not None and instant.astimezone(tz).date() <= checkpoint_day
+def _covered(checkpoint_at: Optional[datetime], instant: datetime) -> bool:
+    """Whether the authoritative checkpoint already determined an event at ``instant`` (inclusive)."""
+    return checkpoint_at is not None and to_utc(instant) <= to_utc(checkpoint_at)
 
 
 class _ReplayPlan:
@@ -99,7 +136,7 @@ class _ReplayPlan:
         self.spot, self._spot_timestamp = float(spot), spot_timestamp
         if checkpoint is not None and not checkpoint.alive and fixings:
             raise ValidationError("checkpoint is already terminal; fixings after termination are contradictory")
-        self.checkpoint_day = _checkpoint_day(checkpoint)
+        self.checkpoint_at, self.checkpoint_convention = checkpoint_instant(checkpoint, cal, ts)
         self.instants = {}
         for e in timeline.events:
             self.instants.setdefault(to_utc(e.timestamp), []).append(e)
@@ -112,15 +149,15 @@ class _ReplayPlan:
             if not any(e.event_id in self.due_ids for e in self.instants[key]):
                 raise ValidationError(f"fixing at {f.timestamp.isoformat()} is for an event not yet determined at "
                                       f"{ts.isoformat()} ({phase.value})")
-            if _covered(self.checkpoint_day, f.timestamp, self.tz):
+            if _covered(self.checkpoint_at, f.timestamp):
                 raise ValidationError(f"fixing at {f.timestamp.isoformat()} is already covered by the checkpoint "
-                                      f"(valuation_point {self.checkpoint_day})")
+                                      f"({self.checkpoint_convention}: {self.checkpoint_at.isoformat()})")
             if key in self.supplied and self.supplied[key].value != f.value:
                 raise ValidationError(f"two different fixings supplied for {f.timestamp.isoformat()}")
             self.supplied[key] = f
         self.replay = [key for key in sorted(self.instants)
                        if any(e.event_id in self.due_ids for e in self.instants[key])
-                       and not _covered(self.checkpoint_day, self.instants[key][0].timestamp, self.tz)]
+                       and not _covered(self.checkpoint_at, self.instants[key][0].timestamp)]
         days = [self.instants[key][0].timestamp.astimezone(self.tz).date() for key in self.replay]
         if len(set(days)) != len(days):
             raise ValidationError("two due fixing instants share one local date; the daily lifecycle tracker "
@@ -152,10 +189,7 @@ class _ReplayPlan:
 
     def uncovered_start(self, timeline) -> Optional[datetime]:
         """Start of the interval whose continuous touch history nobody reported."""
-        day = self.checkpoint_day
-        if day is not None:
-            return self.cal.close_at(day) if self.cal.is_trading_day(day) else self.cal.payment_at(day)
-        return timeline.initial_timestamp
+        return self.checkpoint_at if self.checkpoint_at is not None else timeline.initial_timestamp
 
     def result(self, state, checkpoint, continuous) -> "LifecycleReconstruction":
         return LifecycleReconstruction(
@@ -164,10 +198,36 @@ class _ReplayPlan:
             checkpoint_fingerprint=lifecycle_state_fingerprint(checkpoint) if checkpoint is not None else None)
 
 
-def _empty(checkpoint, fixings) -> LifecycleReconstruction:
-    if checkpoint is not None or fixings:
-        raise ValidationError("this product has no lifecycle: a checkpoint or fixings cannot be applied")
-    return LifecycleReconstruction(None, (), (), (), None, None)
+def _reconstruct_terminal(product, timeline, checkpoint, plan: "_ReplayPlan") -> LifecycleReconstruction:
+    """Terminal-only contract (digital, European vanilla): its single fixing decides everything.
+
+    Before the fixing nothing is realized and the whole claim is contingent.
+    At or after it the payoff is a FIXED receivable settling on the contract's
+    own payment instant, so the remaining value is that receivable -- exactly
+    the pending/paid ledger every other family already carries.
+    """
+    state = deepcopy(checkpoint) if checkpoint is not None else TerminalLifecycleState()
+    for key in plan.replay:
+        if not state.alive:
+            break
+        group = plan.group(key)
+        kinds = {e.kind for e in group}
+        if kinds != {EventKind.TERMINAL}:
+            raise ValidationError(f"a terminal-only contract has no {sorted(k.value for k in kinds)} observation at "
+                                  f"{group[0].timestamp.isoformat()}")
+        event = group[0]
+        value = plan.value(key, group)
+        local = event.timestamp.astimezone(plan.tz).replace(tzinfo=None)
+        state.ledger.register(RealizedCashflow(
+            cashflow_id=f"expiry:{local.date().isoformat()}", event_type=LifecycleEventType.EXPIRY,
+            amount=float(product.get_payoff(value)), determination_date=local,
+            payment_date=event.payment_timestamp.astimezone(plan.tz).replace(tzinfo=None),
+            metadata={DETERMINATION_TIMESTAMP: event.timestamp.isoformat(),
+                      PAYMENT_TIMESTAMP: event.payment_timestamp.isoformat()}))
+        state.mark_expired(local)
+        state.valuation_point = ValuationPoint(date=plan.ts.astimezone(plan.tz).replace(tzinfo=None))
+        plan.applied.extend(e.event_id for e in group)
+    return plan.result(state, checkpoint, None)
 
 
 def reconstruct_lifecycle(product, timeline: ContractTimeline, checkpoint, fixings: Sequence[Fixing], *,
@@ -184,7 +244,11 @@ def reconstruct_lifecycle(product, timeline: ContractTimeline, checkpoint, fixin
         plan = _ReplayPlan(timeline, checkpoint, fixings, valuation_timestamp, phase, spot, spot_timestamp, session_calendar)
         return _reconstruct_barrier(product, timeline, checkpoint, plan, schedule_env)
     if not hasattr(product, "barrier_config"):
-        return _empty(checkpoint, fixings)
+        if checkpoint is not None and not isinstance(checkpoint, TerminalLifecycleState):
+            raise ValidationError(f"a terminal-only contract takes a TerminalLifecycleState checkpoint, "
+                                  f"got {type(checkpoint).__name__}")
+        plan = _ReplayPlan(timeline, checkpoint, fixings, valuation_timestamp, phase, spot, spot_timestamp, session_calendar)
+        return _reconstruct_terminal(product, timeline, checkpoint, plan)
     if checkpoint is not None and not isinstance(checkpoint, AutocallableLifecycleState):
         raise ValidationError(f"intraday reconstruction supports AutocallableLifecycleState checkpoints, "
                               f"got {type(checkpoint).__name__}")
@@ -206,7 +270,7 @@ def _reconstruct_autocallable(product, timeline, checkpoint, plan: _ReplayPlan, 
     state = deepcopy(checkpoint) if checkpoint is not None else AutocallableLifecycleState()
     # The checkpoint is authoritative for everything on or before its day.
     for e in timeline.events:
-        if _covered(plan.checkpoint_day, e.timestamp, plan.tz):
+        if _covered(plan.checkpoint_at, e.timestamp):
             {EventKind.KO: state.observed_ko_indices, EventKind.KI: state.observed_ki_indices,
              EventKind.COUPON: state.observed_coupon_indices}.get(e.kind, set()).add(e.index)
     tracker = AutocallableLifecycleTracker(product=product, quantity=1.0, lifecycle=state,

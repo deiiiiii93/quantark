@@ -224,12 +224,14 @@ route's coefficient sets (b74e4d52); the grid budget assumed a snowball's two su
 
 ## Open questions (need a desk decision; intraday fails closed meanwhile)
 - **Phoenix realized coupon amount.** `AutocallableLifecycleTracker.observe` books a coupon as
-  `get_coupon_payoff(idx)` = principal·coupon_rate·1.0 (pinned by
-  `test/test_equity_lifecycle_trackers.py::test_phoenix_coupon_event`), while every Phoenix engine
-  (QUAD V2 adapter, QUAD, PDE) pays principal·coupon_rate·period_year_fraction. A replayed coupon
-  therefore has two amounts; the tracker also resets memory without paying memorized coupons.
-  Intraday reconstruction raises `CapabilityError` when a Phoenix coupon event is due and not
-  covered by the checkpoint.
+  `get_coupon_payoff(idx)` = principal·coupon_rate·1.0, while every Phoenix engine (QUAD V2 adapter,
+  QUAD, PDE) pays principal·coupon_rate·period_year_fraction, so a replayed coupon had two amounts.
+  RESOLVED 2026-09-16: the tracker books each period's own fraction (commit 4a613401) and a memory
+  coupon now names the arrears periods it released in its ledger metadata, so the intraday layer
+  reconciles the entry against the sum of the contract's own per-period amounts instead of the
+  current period alone (review 2026-09-16 finding 10). Outstanding arrears reach the stateless
+  engines on the twin (`CouponBarrierConfig.initial_coupon_arrears`) and QUAD V2 through the
+  lifecycle state's count; both still require equal periods.
 
 ## Known day-resolution hazards that intraday mode must bypass (not fix)
 - calculate_year_fraction → timedelta.days; Calendar._normalize_date → midnight; lifecycle trackers → pd.Timestamp.normalize().

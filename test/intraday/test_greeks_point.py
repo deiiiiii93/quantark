@@ -83,11 +83,16 @@ def test_analytical_digital_point_greeks_are_the_closed_form(sse_sessions, desk)
     assert res.greek("gamma").value == pytest.approx(ref.gamma, rel=1e-12)
 
 
-def test_pde_point_greeks_follow_the_resolution_status(sse_calendar, sse_sessions, desk):
+def test_a_resolved_pde_mesh_is_a_diagnostic_and_not_a_greek_certificate(sse_calendar, sse_sessions, desk):
+    """Review 2026-09-16 finding 4: Gate C marks every PDE point greek unqualified, so the runtime must too."""
     engine = SnowballPDESolver(PDEParams())
     one_day = value_intraday(engine, _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1),
                                                greeks=("delta", "gamma"), greek_convention="point"))
-    assert one_day.greek("delta").status == "ok" and one_day.numerical["resolution"] == "resolved"
+    assert one_day.numerical["resolution"] == "resolved"          # the mesh covered the diffusion layer ...
+    d = one_day.greek("delta")
+    assert d.status == "unqualified" and d.value is None          # ... which is not an error budget
+    assert "resolution diagnostic and not an error budget" in d.reason
+    assert "no point_delta for SnowballOption on PDERoute" in d.reason
     assert "point_evidence:grid_stencil" in one_day.records
     one_second = value_intraday(engine, _snow_req(sse_calendar, sse_sessions, desk,
                                                   lambda kos: kos[5].timestamp - timedelta(seconds=1), spot=102.99,
@@ -125,7 +130,8 @@ def test_point_vega_and_rho_are_unqualified_proxies_until_demonstrated(sse_calen
                     greeks=("vega", "rho", "dividend_rho"), greek_convention="point")
     res = value_intraday(SnowballPDESolver(PDEParams()), req)
     for g in res.greeks:
-        assert g.status == "unqualified" and g.value is None and g.reason == POINT_PROXY_REASON and g.bump > 0.0
+        assert g.status == "unqualified" and g.value is None and g.bump > 0.0
+        assert g.reason.startswith(POINT_PROXY_REASON) and f"no point_{g.name} for SnowballOption on PDERoute" in g.reason
 
 
 def test_demonstrated_quad_proxies_are_central_differences_of_the_frozen_price_function(sse_calendar, sse_sessions, desk):
@@ -134,7 +140,14 @@ def test_demonstrated_quad_proxies_are_central_differences_of_the_frozen_price_f
     req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
                     greeks=("vega", "rho", "dividend_rho"), greek_convention="point")
     ctx = resolve_context(req)
-    assert point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0)
+    assert point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0, **G.qualification_scope(ctx))
+    # ... and the SAME route under a profile Gate C never swept is not qualified by it
+    from quantark.intraday import VarianceProfile
+    other = VarianceProfile("bespoke", "1", 244, 0.25, (0.35, 0.35), (0.05,))
+    assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0, monitoring="discrete",
+                                      profile_identity=other.identity())
+    # ... nor at a horizon beyond the swept window
+    assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 30 * 86400.0, **G.qualification_scope(ctx))
     res = value_intraday(QUAD, req)
     for g in res.greeks:
         expected = G.point_proxy_difference(ctx, g.name, G.point_proxy_bump(ctx, g.name), lambda c: G.cell_price(c, QUAD))
@@ -144,8 +157,9 @@ def test_demonstrated_quad_proxies_are_central_differences_of_the_frozen_price_f
 def test_a_demonstrated_proxy_is_a_central_difference_of_the_frozen_price_function(sse_calendar, sse_sessions, desk, monkeypatch):
     import quantark.intraday.capability as cap
     import quantark.intraday.greeks as G
-    monkeypatch.setattr(cap, "point_output_qualified",
-                        lambda product, route, measure, seconds: (product, route, measure) == ("SnowballOption", "QuadV2Route", "rho"))
+    monkeypatch.setattr(cap, "output_qualification_gap",
+                        lambda product, route, measure, seconds, **scope:
+                        "" if (product, route, measure) == ("SnowballOption", "QuadV2Route", "point_rho") else "not demonstrated")
     req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
                     greeks=("rho",), greek_convention="point")
     ctx = resolve_context(req)

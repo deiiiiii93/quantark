@@ -29,6 +29,11 @@ ENGINES = {
 }
 BARRIERS = {"snowball_discrete_ki": ("ko", "ki"), "digital": ("strike",), "barrier_uo_zero_carry": ("ko",),
             "one_touch_zero_carry": ("ko",)}
+#: Capability-matrix monitoring column each catalogued product falls in. A Greek
+#: demonstration is scoped to it: a certificate earned on discrete fixings says
+#: nothing about the same product under a continuously observed barrier.
+MONITORING = {"snowball_discrete_ki": "discrete", "digital": "terminal",
+              "barrier_uo_zero_carry": "continuous", "one_touch_zero_carry": "continuous"}
 FAST_HORIZON, FAST_OFFSET, FAST_PROFILE = timedelta(hours=1), "sd+1", "desk"
 
 

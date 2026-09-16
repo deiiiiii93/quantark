@@ -33,9 +33,14 @@ class AnalyticalBarrierRoute:
             return EnginePriceOutcome(0.0, "terminated", {"reason": "the barrier outcome is history; only the ledger remains"}, {})
         twin = num.product
         if isinstance(twin, EuropeanVanillaOption):
-            pv = float(BlackScholesEngine().price(twin, env))
+            # A confirmed knock-in IS a European vanilla: report the engine that actually
+            # priced it, so the session's kernel parity dispatch re-runs THIS method and
+            # never hands the vanilla back to the barrier engine (which rejects its type).
+            vanilla_engine = BlackScholesEngine()
+            pv = float(vanilla_engine.price(twin, env))
             return EnginePriceOutcome(pv, "analytical_vanilla_after_ki", {"total_variance": float(
-                env.vol_surface.total_variance(float(twin.strike), num.maturity_tau, float(env.spot)))}, {})
+                env.vol_surface.total_variance(float(twin.strike), num.maturity_tau, float(env.spot)))}, {},
+                engine_used=vanilla_engine)
         observation = twin.observation_type
         if observation == ObservationType.DISCRETE:
             raise CapabilityError("discrete barrier monitoring has no exact closed form: BGK is an approximation; discrete "

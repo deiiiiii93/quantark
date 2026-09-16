@@ -62,7 +62,8 @@ def test_digital_through_the_service(sse_sessions, desk):
     req = IntradayValuationRequest(product=digital(datetime(2026, 9, 15)), pricing_env=flat_env(ts, spot=100.3),
                                    session_calendar=sse_sessions, variance_profile=desk)
     res = value_intraday(DigitalOptionAnalyticalEngine(), req)
-    assert 0.9 < res.price < 1.0 and not res.provisional and res.lifecycle == {}
+    assert 0.9 < res.price < 1.0 and not res.provisional
+    assert dict(res.lifecycle) == {"alive": True, "expired": False} and res.pending_receivable_pv == 0.0
     with PricingSession() as session:
         framed = value_intraday(DigitalOptionAnalyticalEngine(), req, session=session)
     assert framed.price == res.price and any(r.startswith("manifest:") for r in framed.records)

@@ -15,7 +15,7 @@ from quantark.execution.errors import CapabilityError, DeterminismViolation
 from quantark.intraday.capability import engine_class_path, require_capability
 from quantark.intraday.context import resolve_context
 from quantark.intraday.engines import route_for
-from quantark.intraday.events import EventKind
+from quantark.intraday.events import monitoring_of
 from quantark.intraday.provisional import ASSUMED
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.intraday.result import CashflowComponent, IntradayValuationResult
@@ -29,11 +29,7 @@ _PARITY_TOL = 1e-12
 
 
 def _monitoring(ctx) -> str:
-    if ctx.timeline.continuous_ki_barrier is not None or ctx.timeline.continuous_barrier is not None:
-        return "continuous"
-    if all(e.kind is EventKind.TERMINAL for e in ctx.timeline.events):
-        return "terminal"
-    return "discrete"
+    return monitoring_of(ctx.timeline)
 
 
 def _cashflow_origin(cf, ctx):

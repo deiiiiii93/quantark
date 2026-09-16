@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
+from quantark.asset.equity.lifecycle import TerminalLifecycleState
 from quantark.intraday.events import EventKind, EventPhase, _schedule_env, resolve_timeline
 from quantark.intraday.fixings import Fixing
 from quantark.intraday.provisional import LifecycleReconstruction, reconstruct_lifecycle
@@ -143,10 +144,17 @@ def test_digital_twin(sse_calendar, sse_sessions):
     ts = datetime(2026, 9, 15, 14, 59, 59, tzinfo=SHANGHAI)
     prod = digital(expiry=datetime(2026, 9, 15))
     tl = resolve_timeline(prod, sse_sessions, flat_env(ts))
-    rec = LifecycleReconstruction(state=None, applied_event_ids=(), confirmed_event_ids=(), assumptions=(),
-                                  continuous_assumption=None, checkpoint_fingerprint=None)
+    rec = LifecycleReconstruction(state=TerminalLifecycleState(), applied_event_ids=(), confirmed_event_ids=(),
+                                  assumptions=(), continuous_assumption=None, checkpoint_fingerprint=None)
     num = build_numerical_contract(prod, tl, rec, valuation_timestamp=ts, phase=EventPhase.BEFORE, session_calendar=sse_sessions)
-    assert num.product.maturity == 1.0 / SECONDS_PER_YEAR and num.product.exercise_date is None and num.lifecycle_state is None
+    assert num.product.maturity == 1.0 / SECONDS_PER_YEAR and num.product.exercise_date is None and not num.terminated
+    # once the fixing is history the claim is the ledger, not a twin (review 2026-09-16 finding 11)
     after_expiry = ts + timedelta(seconds=5)
+    expired = LifecycleReconstruction(state=TerminalLifecycleState(alive=False, expired=True),
+                                      applied_event_ids=(), confirmed_event_ids=(), assumptions=(),
+                                      continuous_assumption=None, checkpoint_fingerprint=None)
+    done = build_numerical_contract(prod, tl, expired, valuation_timestamp=after_expiry, phase=EventPhase.AFTER,
+                                    session_calendar=sse_sessions)
+    assert done.terminated and done.product is None
     with pytest.raises(ValidationError, match="terminal"):
         build_numerical_contract(prod, tl, rec, valuation_timestamp=after_expiry, phase=EventPhase.AFTER, session_calendar=sse_sessions)

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from quantark.asset.equity.lifecycle import AutocallableLifecycleState, ValuationPoint
+from quantark.asset.equity.lifecycle import TerminalLifecycleState, AutocallableLifecycleState, ValuationPoint
 from quantark.execution.errors import CapabilityError
 from quantark.intraday.events import EventKind, EventPhase, _schedule_env, resolve_timeline
 from quantark.intraday.fixings import Fixing
@@ -120,15 +120,34 @@ def test_terminal_fixing_settles_maturity(sse_calendar, sse_sessions):
     assert len(rec.state.ledger.cashflows) >= 1
 
 
-def test_product_without_lifecycle_reconstructs_to_nothing(sse_calendar, sse_sessions):
+def test_terminal_only_product_is_alive_with_an_empty_ledger_before_its_fixing(sse_calendar, sse_sessions):
     prod = digital(datetime(2026, 12, 15))
     env = flat_env(datetime(2026, 9, 15, 14, 0, tzinfo=SHANGHAI))
     tl = resolve_timeline(prod, sse_sessions, env)
     ts = env.valuation_date
     rec = _run(prod, tl, None, [], ts, EventPhase.BEFORE, 100.0, ts, _schedule_env(prod, env), sse_sessions)
-    assert rec.state is None and not rec.provisional and rec.applied_event_ids == ()
-    with pytest.raises(ValidationError, match="lifecycle"):
+    assert isinstance(rec.state, TerminalLifecycleState) and rec.state.alive and not rec.state.expired
+    assert not rec.provisional and rec.applied_event_ids == () and rec.state.ledger.cashflows == ()
+    with pytest.raises(ValidationError, match="TerminalLifecycleState"):
         _run(prod, tl, AutocallableLifecycleState(), [], ts, EventPhase.BEFORE, 100.0, ts, _schedule_env(prod, env), sse_sessions)
+
+
+def test_terminal_fixing_becomes_a_fixed_receivable(sse_calendar, sse_sessions):
+    """Review 2026-09-16 finding 11: after its fixing a digital still owns a pending claim."""
+    expiry = datetime(2026, 9, 15)
+    prod = digital(expiry)
+    prod.settlement_date = expiry + timedelta(days=5)
+    ts = expiry.replace(hour=15, minute=1, tzinfo=SHANGHAI)
+    env = flat_env(ts)
+    tl = resolve_timeline(prod, sse_sessions, env)
+    fixing = Fixing(expiry.replace(hour=15, tzinfo=SHANGHAI), 101.0)
+    rec = _run(prod, tl, None, [fixing], ts, EventPhase.AFTER, 100.0, ts, _schedule_env(prod, env), sse_sessions)
+    assert rec.state.expired and not rec.state.alive and not rec.provisional
+    (flow,) = rec.state.ledger.cashflows
+    assert flow.amount == 1.0 and flow.payment_date.date() == (expiry + timedelta(days=5)).date()
+    # no supplied fixing: the latest spot is assumed and the receivable is provisional
+    assumed = _run(prod, tl, None, [], ts, EventPhase.AFTER, 100.0, ts, _schedule_env(prod, env), sse_sessions)
+    assert assumed.provisional and assumed.state.ledger.cashflows[0].amount == 0.0   # 100 is not > strike 100
 
 
 def test_phoenix_coupon_replay_books_the_contractual_amount(sse_calendar, sse_sessions):

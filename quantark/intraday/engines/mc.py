@@ -62,8 +62,8 @@ class MCRoute:
         spans the diffusion layer. It is ``ok`` only inside a Gate C demonstrated bump limit; otherwise the
         estimate and its standard errors are recorded as uncertainty and the status is unqualified.
         """
-        from quantark.intraday.capability import point_output_qualified
-        from quantark.intraday.greeks import bump_config_for, seconds_to_first_event
+        from quantark.intraday.capability import output_qualification_gap
+        from quantark.intraday.greeks import bump_config_for, qualification_scope, seconds_to_first_event
         from quantark.montecarlo import run_paired_rqmc_greeks
         from quantark.util.enum.engine_enums import MonteCarloMethod
 
@@ -94,8 +94,10 @@ class MCRoute:
                                f"paired RQMC gave {res.batches_used} batches (< {min_batches}) or a non-finite standard error",
                                "paired_rqmc", uncertainty)
         seconds, product = seconds_to_first_event(ctx), type(ctx.request.product).__name__
-        if not all(point_output_qualified(product, "MCRoute", m, seconds) for m in ("delta", "gamma")):
+        gaps = [g for g in (output_qualification_gap(product, "MCRoute", f"point_{m}", seconds, **qualification_scope(ctx))
+                            for m in ("delta", "gamma")) if g]
+        if gaps:
             return PointGreeks(None, None, "unqualified",
-                               f"paired RQMC central difference at relative bump {h:g}; bump limit not demonstrated",
-                               "paired_rqmc", uncertainty)
+                               f"paired RQMC central difference at relative bump {h:g}; bump limit not demonstrated: "
+                               + "; ".join(dict.fromkeys(gaps)), "paired_rqmc", uncertainty)
         return PointGreeks(float(res.delta), float(res.gamma), "ok", "", "paired_rqmc", uncertainty)

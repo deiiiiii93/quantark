@@ -11,14 +11,17 @@
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from math import isfinite
-from typing import Mapping, Optional, Sequence, Tuple
+from types import MappingProxyType
+from typing import Mapping, Optional, Tuple
 
 from quantark.intraday.context import resolve_context
 from quantark.intraday.engines import route_for
-from quantark.intraday.fixings import AssumedFixing
+from quantark.intraday.fixings import AssumedFixing, ContinuousHistoryAssumption
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.intraday.result import IntradayValuationResult
 
@@ -53,9 +56,77 @@ class SpotCurvePoint:
     price: float
     delta: Optional[float]
     gamma: Optional[float]
-    status: str                  # "ok" | "undefined" | "not_requested"
+    status: str                  # greek status: "ok" | "undefined" | "not_requested"
     reason: str
     assumptions: Tuple[AssumedFixing, ...] = ()
+    #: This spot's own price evidence (PDE resolution, MC standard error, ...). A route that
+    #: prices each spot separately can resolve one and not the next, so it belongs per point.
+    numerical: Mapping[str, object] = field(default_factory=dict)
+    method: str = ""
+
+    def __post_init__(self):
+        object.__setattr__(self, "numerical", MappingProxyType(dict(self.numerical)))
+
+    def to_dict(self) -> dict:
+        """JSON-serialisable view (``dataclasses.asdict`` cannot copy the frozen mappings)."""
+        from quantark.intraday.result import _jsonable
+        return _jsonable(self)
+
+
+@dataclass(frozen=True)
+class SpotCurve(Sequence):
+    """A curve of one resolved context, carrying that context's provenance ONCE.
+
+    The points alone cannot say whether the curve is provisional, what history was
+    assumed to build it, or which clock and market it was resolved on — and a
+    consumer that cannot tell a confirmed curve from one resting on an uncovered
+    touch interval will treat them alike (review 2026-09-16 finding 15). It is a
+    Sequence so existing callers keep indexing and iterating the points.
+    """
+
+    points: Tuple[SpotCurvePoint, ...]
+    valuation_timestamp: datetime
+    phase: object
+    provisional: bool
+    assumptions: Tuple[AssumedFixing, ...]
+    continuous_assumption: Optional[ContinuousHistoryAssumption]
+    lifecycle: Mapping[str, object]
+    profile_identity: tuple
+    session_identity: tuple
+    market_snapshot_id: str
+    context_identity: str
+    engine: str
+    method: str
+    numerical: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self):
+        object.__setattr__(self, "points", tuple(self.points))
+        object.__setattr__(self, "lifecycle", MappingProxyType(dict(self.lifecycle)))
+        object.__setattr__(self, "numerical", MappingProxyType(dict(self.numerical)))
+
+    def __len__(self):
+        return len(self.points)
+
+    def __getitem__(self, index):
+        return self.points[index]
+
+    def to_dict(self) -> dict:
+        """JSON-serialisable view (``dataclasses.asdict`` cannot copy the frozen mappings)."""
+        from quantark.intraday.result import _jsonable
+        return _jsonable(self)
+
+
+def _spot_price(ctx, engine, spot: float):
+    """(price, price evidence, method) at one curve spot, holding nothing that owns a market.
+
+    A route outcome carries the engine instance that produced it, and a PDE solver
+    owns its solved layout and this spot's coefficient memos. Returning plain data
+    lets each spot's market die before the next one is built: a 101-point PDE curve
+    that kept them all alive grew past 8 GiB.
+    """
+    from quantark.intraday.greeks import cell_outcome
+    price, outcome = cell_outcome(_spot_context(ctx, spot), engine)
+    return price, dict(outcome.numerical), outcome.method
 
 
 def _spot_context(ctx, spot: float):
@@ -65,11 +136,30 @@ def _spot_context(ctx, spot: float):
     return with_pricing_env(ctx, env, f"curve_spot:{float(spot)!r}")
 
 
-def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]) -> Tuple[SpotCurvePoint, ...]:
+_LIFECYCLE_FIELDS = ("alive", "knocked_in", "knocked_out", "matured", "expired", "coupon_memory_count")
+
+
+def _curve(ctx, engine, points, method: str, numerical) -> SpotCurve:
+    """Wrap the points in the resolved context's provenance — the same contract a single value reports."""
+    from quantark.intraday.capability import engine_class_path
+
+    state = ctx.numerical.lifecycle_state
+    return SpotCurve(
+        points=tuple(points), valuation_timestamp=ctx.valuation_timestamp, phase=ctx.phase,
+        provisional=ctx.provisional, assumptions=ctx.reconstruction.assumptions,
+        continuous_assumption=ctx.reconstruction.continuous_assumption,
+        lifecycle={k: getattr(state, k) for k in _LIFECYCLE_FIELDS if hasattr(state, k)} if state is not None else {},
+        profile_identity=ctx.request.variance_profile.identity(),
+        session_identity=ctx.request.session_calendar.identity(),
+        market_snapshot_id=ctx.market_snapshot_id, context_identity=ctx.identity,
+        engine=engine_class_path(engine), method=method, numerical=numerical)
+
+
+def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]) -> SpotCurve:
     """Price (and, on QUAD V2, point delta/gamma) at each spot of one resolved context, in the given order."""
     from quantark.intraday.capability import require_capability
     from quantark.intraday.engines.quad_v2 import QuadV2Route
-    from quantark.intraday.greeks import cell_price, discontinuity_at_spot
+    from quantark.intraday.greeks import discontinuity_at_spot
     from quantark.intraday.service import _monitoring
 
     ctx = resolve_context(request)
@@ -83,28 +173,33 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
         prepared = engine.prepare(num.product, ctx.pricing_env, spot_levels=spots, event_phase=ctx.phase.value,
                                   lifecycle_state=num.lifecycle_state)
         values = prepared.evaluate(spots)
+        shared = dict(getattr(prepared, "diagnostics", {}) or {})
         points = []
         for i, s in enumerate(spots):
             delta, gamma = float(values["delta"][i]), float(values["gamma"][i])
             if jumps[i] or not (isfinite(delta) and isfinite(gamma)):
                 points.append(SpotCurvePoint(s, float(values["price"][i]), None, None, "undefined",
-                                             jumps[i] or "payoff discontinuity of an unfixed event at the query spot", assumptions))
+                                             jumps[i] or "payoff discontinuity of an unfixed event at the query spot",
+                                             assumptions, method="quad_v2_prepared"))
             else:
-                points.append(SpotCurvePoint(s, float(values["price"][i]), delta, gamma, "ok", "", assumptions))
-        return tuple(points)
+                points.append(SpotCurvePoint(s, float(values["price"][i]), delta, gamma, "ok", "", assumptions,
+                                             method="quad_v2_prepared"))
+        # one prepared operator serves every spot, so its evidence is the curve's, not a point's
+        return _curve(ctx, engine, points, "quad_v2_prepared", shared)
     points = []
     for s, jump in zip(spots, jumps):
         # one context at a time: each carries a copied market whose engine memos live as long as it does
-        price = cell_price(_spot_context(ctx, s), engine)
+        price, numerical, method = _spot_price(ctx, engine, s)
+        common = dict(assumptions=assumptions, numerical=numerical, method=method)
         if num.terminated and not jump:
-            points.append(SpotCurvePoint(s, price, 0.0, 0.0, "ok", "", assumptions))
+            points.append(SpotCurvePoint(s, price, 0.0, 0.0, "ok", "", **common))
         elif jump:
-            points.append(SpotCurvePoint(s, price, None, None, "undefined", jump, assumptions))
+            points.append(SpotCurvePoint(s, price, None, None, "undefined", jump, **common))
         else:
             points.append(SpotCurvePoint(s, price, None, None, "not_requested",
                                          f"{type(route).__name__} curves price each spot; request point greeks per spot",
-                                         assumptions))
-    return tuple(points)
+                                         **common))
+    return _curve(ctx, engine, points, points[0].method if points else "", {})
 
 
 @dataclass(frozen=True)

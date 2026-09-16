@@ -337,22 +337,41 @@ def append_greek_results(results, jsonl_path) -> None:
 
 
 def demonstrated(rows) -> list:
-    """(product, route, measure, horizon_s): the shortest horizon at and above which every cell passed."""
+    """One row per (product, route, measure, monitoring, profile) family the ladder actually swept.
+
+    A certificate covers only the configurations its cells ran, so the key carries the
+    whole family and the row carries the horizon WINDOW: ``horizon_s`` is the shortest
+    horizon at and above which every cell passed, ``horizon_max_s`` the longest the
+    ladder reached. Beyond either end the evidence is silent (review 2026-09-16
+    finding 4), and the spot offsets and barriers are recorded so a reader can see the
+    domain the claim rests on.
+    """
+    from intraday.gate_c.cells import MONITORING, profile as profile_of
+
     table: dict = {}
     for row in rows:
+        cell = row["cell"]
         for m in row["measures"]:
-            key = (row["product"], row["route"], m["measure"])
-            ok = m["status"] == "passed" or m["status"] == "undefined"
-            table.setdefault(key, {}).setdefault(row["cell"]["horizon"], []).append(ok)
+            key = (row["product"], row["route"], m["measure"], MONITORING[cell["product"]], cell["profile"])
+            ok = m["status"] in ("passed", "undefined")
+            entry = table.setdefault(key, {"by_h": {}, "offsets": set(), "barriers": set()})
+            entry["by_h"].setdefault(cell["horizon"], []).append(ok)
+            entry["offsets"].add(cell["offset"])
+            entry["barriers"].add(cell["barrier"])
     out = []
-    for (product, route, measure), by_h in sorted(table.items()):
+    for (product, route, measure, monitoring, profile_name), entry in sorted(table.items()):
+        by_h = entry["by_h"]
         horizon = None
         for h in sorted(by_h, reverse=True):
             if not all(by_h[h]):
                 break
             horizon = h
-        if horizon is not None:
-            out.append({"product": product, "route": route, "measure": measure, "horizon_s": horizon})
+        if horizon is None:
+            continue
+        out.append({"product": product, "route": route, "measure": measure, "monitoring": monitoring,
+                    "profile": profile_name, "profile_identity": list(profile_of(profile_name).identity()),
+                    "horizon_s": horizon, "horizon_max_s": max(by_h),
+                    "offsets": sorted(entry["offsets"]), "barriers": sorted(entry["barriers"])})
     return out
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -109,8 +110,32 @@ def _validate_env(env: PricingEnvironment) -> datetime:
     return ts
 
 
+def _snapshot_request(request: IntradayValuationRequest) -> IntradayValuationRequest:
+    """The request with its economics copied out of the caller's hands.
+
+    A resolved context is a frozen price function: rolling it, bumping it or
+    curving it must keep answering for the market that was resolved. The frozen
+    dataclass only stops field REASSIGNMENT — the spot quote, curves, surface,
+    product, checkpoint and the session calendar's holiday set are all mutable
+    objects the caller still owns, and editing one of them after resolution
+    silently changes the price while the identity says nothing moved.
+    """
+    env = request.pricing_env
+    snapshot_env = PricingEnvironment(
+        rate_curve=deepcopy(env.rate_curve), valuation_date=env.valuation_date,
+        spot_quote=deepcopy(env.spot_quote), vol_surface=deepcopy(env.vol_surface),
+        div_yield=deepcopy(env.div_yield), basis_yield=env.basis_yield,
+        day_count_convention=env.day_count_convention, bus_days_in_year=env.bus_days_in_year,
+        calendar=env.calendar)
+    return dataclasses.replace(request, product=deepcopy(request.product), pricing_env=snapshot_env,
+                               session_calendar=request.session_calendar.snapshot(),
+                               lifecycle_state=deepcopy(request.lifecycle_state))
+
+
 def resolve_context(request: IntradayValuationRequest) -> IntradayValuationContext:
-    """Resolve the request once: instants, history, twin, clock map and identity."""
+    """Resolve the request once: snapshot, instants, history, twin, clock map and identity."""
+    _validate_env(request.pricing_env)
+    request = _snapshot_request(request)
     env = request.pricing_env
     ts = _validate_env(env)
     phase = request.event_phase

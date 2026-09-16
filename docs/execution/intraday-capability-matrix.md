@@ -8,7 +8,8 @@ A row exists only where the semantics are implemented. `supported`: the route pr
 limits and reports its numerical status per price. `qualified`: every Gate C price cell of the row passed against the
 independent reference (profiles uniform, desk and sessions_only; eleven spot offsets on both sides of each barrier) at
 the qualified horizon and every longer horizon to the next fixing. Timestamp support below the qualified horizon does
-not imply a Greek-accuracy certificate there. Requests outside the matrix raise `CapabilityError` naming the intraday
+not imply a Greek-accuracy certificate there, and neither does a price certificate: Greek statuses are bound
+separately to the demonstrated families below. Requests outside the matrix raise `CapabilityError` naming the intraday
 alternatives; an engine subclass does not inherit a row.
 
 Price evidence: `quantark/intraday/evidence/gate_c_results.json` (git 510c3da0, 3432 cells).
@@ -45,29 +46,43 @@ Price evidence: `quantark/intraday/evidence/gate_c_results.json` (git 510c3da0, 
 | CashOrNothingDigitalOption | DigitalOptionMCEngine | terminal | any | delta, dividend_rho, gamma, price, rho, theta, vega | supported | — | paths, seed, standard error and estimator reported per price |
 | CashOrNothingDigitalOption | DigitalOptionAnalyticalEngine | terminal | any | delta, dividend_rho, gamma, price, rho, theta, vega | qualified | 1 s | integrated carry/variance via TradingClockVolSurface; zero variance priced as the exact forward limit; Gate C qualified to 1 s before expiry around the strike |
 | SnowballOption | SnowballQuadEngineV2 | discrete | any | delta, dividend_rho, gamma, price, rho, theta, vega | qualified | 1 s | exact Gaussian interval moments; a t=0 event under 'before' is decided at spot; Gate C qualified to 1 s before a fixing around the KO and KI barriers |
-| SnowballOption | SnowballQuadEngineV2 | continuous | any | delta, dividend_rho, gamma, price, rho, theta, vega | supported | — | continuous KI via the QUAD V2 survival kernel; touch history disclosed as an assumption |
+| SnowballOption | SnowballQuadEngineV2 | continuous | any | delta, dividend_rho, gamma, price, rho, theta, vega | unsupported | — | continuous monitoring on the intraday clock needs an interval survival/crossing operator split at every session and coefficient knot, with its own time-refinement and first-passage qualification (design §Engine integration). QUAD V2's exact continuous classifier does not recognize TradingClockVolSurface and its continuous grid builder does not carry the intraday map's knots |
 | PhoenixOption | PhoenixQuadEngineV2 | discrete | any | delta, dividend_rho, gamma, price, rho, theta, vega | supported | — | realized coupons replay at their contractual amount; memory outstanding at the instant needs equal periods (it reaches the twin as a count) |
-| PhoenixOption | PhoenixQuadEngineV2 | continuous | any | delta, dividend_rho, gamma, price, rho, theta, vega | supported | — | realized coupons replay at their contractual amount; memory outstanding at the instant needs equal periods (it reaches the twin as a count) |
+| PhoenixOption | PhoenixQuadEngineV2 | continuous | any | delta, dividend_rho, gamma, price, rho, theta, vega | unsupported | — | continuous monitoring on the intraday clock needs an interval survival/crossing operator split at every session and coefficient knot, with its own time-refinement and first-passage qualification (design §Engine integration). QUAD V2's exact continuous classifier does not recognize TradingClockVolSurface and its continuous grid builder does not carry the intraday map's knots |
 | KnockOutResetSnowballOption | KOResetSnowballQuadEngineV2 | discrete | any | delta, dividend_rho, gamma, price, rho, theta, vega | supported | — | absolute post-KI schedules; due fixings must be covered by the checkpoint (no tracker replay) |
-| KnockOutResetSnowballOption | KOResetSnowballQuadEngineV2 | continuous | any | delta, dividend_rho, gamma, price, rho, theta, vega | supported | — | absolute post-KI schedules; due fixings must be covered by the checkpoint (no tracker replay) |
+| KnockOutResetSnowballOption | KOResetSnowballQuadEngineV2 | continuous | any | delta, dividend_rho, gamma, price, rho, theta, vega | unsupported | — | continuous monitoring on the intraday clock needs an interval survival/crossing operator split at every session and coefficient knot, with its own time-refinement and first-passage qualification (design §Engine integration). QUAD V2's exact continuous classifier does not recognize TradingClockVolSurface and its continuous grid builder does not carry the intraday map's knots |
 
 ## Gate C demonstrated Greeks
 
-Greek evidence: `quantark/intraday/evidence/gate_c_greeks.json` (git 9eb643df). A `point_*` row lets that route report the point measure `ok` at the horizon and above (point vega, rho and dividend rho are `unqualified` everywhere else); a `desk_*` row records that the configured finite move matched the same move on the reference.
+Greek evidence: `quantark/intraday/evidence/gate_c_greeks.json` (git 9eb643df). Each row is one demonstrated FAMILY and speaks only for it: the same product under different monitoring, under a variance profile no row names, or at a time to the next fixing outside the swept window reports `unqualified` with no value. A `point_*` row lets that route report the point measure `ok` inside its window; a `desk_*` row records that the configured finite move matched the same move on the reference.
 
-| Product | Route | Measure | Shortest horizon (s) |
-|---|---|---|---|
-| CashOrNothingDigitalOption | AnalyticalDigitalRoute | desk_delta | 1 |
-| CashOrNothingDigitalOption | AnalyticalDigitalRoute | desk_gamma | 1 |
-| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_delta | 1 |
-| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_dividend_rho | 1 |
-| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_gamma | 1 |
-| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_rho | 1 |
-| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_vega | 1 |
-| SnowballOption | MCRoute | desk_delta | 1 |
-| SnowballOption | QuadV2Route | desk_delta | 1 |
-| SnowballOption | QuadV2Route | point_delta | 1 |
-| SnowballOption | QuadV2Route | point_dividend_rho | 1 |
-| SnowballOption | QuadV2Route | point_gamma | 1 |
-| SnowballOption | QuadV2Route | point_rho | 1 |
-| SnowballOption | QuadV2Route | point_vega | 1 |
+| Product | Route | Measure | Monitoring | Profile | Horizon window (s) | Spot offsets | Barriers |
+|---|---|---|---|---|---|---|---|
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | desk_delta | terminal | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | desk_delta | terminal | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | desk_gamma | terminal | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | desk_gamma | terminal | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_delta | terminal | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_delta | terminal | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_dividend_rho | terminal | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_dividend_rho | terminal | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_gamma | terminal | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_gamma | terminal | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_rho | terminal | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_rho | terminal | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_vega | terminal | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| CashOrNothingDigitalOption | AnalyticalDigitalRoute | point_vega | terminal | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | strike |
+| SnowballOption | MCRoute | desk_delta | discrete | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | MCRoute | desk_delta | discrete | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | desk_delta | discrete | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | desk_delta | discrete | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_delta | discrete | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_delta | discrete | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_dividend_rho | discrete | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_dividend_rho | discrete | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_gamma | discrete | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_gamma | discrete | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_rho | discrete | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_rho | discrete | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_vega | discrete | desk | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |
+| SnowballOption | QuadV2Route | point_vega | discrete | sessions_only | 1 – 86400 | bp+1, bp+10, bp-1, bp-10, eq, sd+0.5, sd+1, sd+2, sd-0.5, sd-1, sd-2 | ki, ko |

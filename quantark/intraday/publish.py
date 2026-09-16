@@ -18,7 +18,8 @@ A row exists only where the semantics are implemented. `supported`: the route pr
 limits and reports its numerical status per price. `qualified`: every Gate C price cell of the row passed against the
 independent reference (profiles uniform, desk and sessions_only; eleven spot offsets on both sides of each barrier) at
 the qualified horizon and every longer horizon to the next fixing. Timestamp support below the qualified horizon does
-not imply a Greek-accuracy certificate there. Requests outside the matrix raise `CapabilityError` naming the intraday
+not imply a Greek-accuracy certificate there, and neither does a price certificate: Greek statuses are bound
+separately to the demonstrated families below. Requests outside the matrix raise `CapabilityError` naming the intraday
 alternatives; an engine subclass does not inherit a row.
 
 """
@@ -33,12 +34,17 @@ def _greek_section() -> str:
                   "`unqualified`.", ""]
         return "\n".join(lines)
     lines += [f"Greek evidence: `quantark/intraday/evidence/gate_c_greeks.json` (git {evidence.get('git_sha', 'n/a')}). "
-              "A `point_*` row lets that route report the point measure `ok` at the horizon and above (point vega, rho "
-              "and dividend rho are `unqualified` everywhere else); a `desk_*` row records that the configured finite "
-              "move matched the same move on the reference.", "",
-              "| Product | Route | Measure | Shortest horizon (s) |", "|---|---|---|---|"]
+              "Each row is one demonstrated FAMILY and speaks only for it: the same product under different "
+              "monitoring, under a variance profile no row names, or at a time to the next fixing outside the swept "
+              "window reports `unqualified` with no value. A `point_*` row lets that route report the point measure "
+              "`ok` inside its window; a `desk_*` row records that the configured finite move matched the same move "
+              "on the reference.", "",
+              "| Product | Route | Measure | Monitoring | Profile | Horizon window (s) | Spot offsets | Barriers |",
+              "|---|---|---|---|---|---|---|---|"]
     for r in rows:
-        lines.append(f"| {r['product']} | {r['route']} | {r['measure']} | {r['horizon_s']} |")
+        lines.append(f"| {r['product']} | {r['route']} | {r['measure']} | {r.get('monitoring', '?')} | "
+                     f"{r.get('profile', '?')} | {r['horizon_s']} – {r.get('horizon_max_s', '?')} | "
+                     f"{', '.join(r.get('offsets', ()))} | {', '.join(r.get('barriers', ()))} |")
     lines.append("")
     return "\n".join(lines)
 

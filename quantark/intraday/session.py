@@ -8,15 +8,37 @@ rejected explicitly — never guessed (design: Gate A).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from copy import copy, deepcopy
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from types import MappingProxyType
 from typing import Mapping, Optional, Tuple
 
+from quantark.execution.cache.fingerprint import fingerprint
 from quantark.util.calendar import Calendar
 from quantark.util.exceptions import ValidationError
 
 _SEARCH_DAYS = 3660  # ten years: a calendar with no trading day in that span is broken
+
+
+def calendar_identity(calendar: Calendar) -> tuple:
+    """Value identity of the holiday/weekend rules that decide which days accrue variance.
+
+    ``Calendar`` is mutable and its name is free text, so neither the object nor
+    its name identifies its contents: two calendars called "SSE" can disagree on
+    one holiday and price a contract differently. The holiday set is fingerprinted
+    (it is long and its members are opaque); the rest stays readable.
+    """
+    holidays, weekend = getattr(calendar, "holidays", None), getattr(calendar, "weekend_days", None)
+    if holidays is None or weekend is None:
+        raise ValidationError(f"{type(calendar).__name__} exposes no holidays/weekend_days: the intraday clock cannot "
+                              "identify the variance schedule it would price on")
+    # Holidays are normalized to midnight, so a proleptic ordinal is the whole date and is
+    # an order of magnitude cheaper to build than an ISO string per holiday -- this runs
+    # twice per valuation over a calendar with hundreds of entries.
+    return ("calendar", type(calendar).__name__, str(getattr(calendar, "name", "")),
+            tuple(sorted(int(w) for w in weekend)),
+            fingerprint(tuple(sorted(d.toordinal() for d in holidays))))
 
 
 @dataclass(frozen=True)
@@ -138,10 +160,44 @@ class TradingSessionCalendar:
         return self.localize(d, self.payment_time or self.sessions[-1].close)
 
     def identity(self) -> tuple:
+        """Everything about this clock that moves a price: sessions, timezone AND the holiday calendar.
+
+        Recomputed every call, because ``calendar`` is mutable and a cached identity of an
+        edited calendar is exactly the collision this identity exists to prevent. A
+        ``snapshot()`` owns its calendar, so that one caches (see ``_frozen_identity``).
+        """
+        cached = getattr(self, "_frozen_identity", None)
+        if cached is not None:
+            return cached
+        return self._compute_identity()
+
+    def _compute_identity(self) -> tuple:
         return (
             self.name,
             str(self.tz),
             tuple((s.open.isoformat(), s.close.isoformat()) for s in self.sessions),
             tuple(sorted((d.isoformat(), t.isoformat()) for d, t in self.early_closes.items())),
             None if self.payment_time is None else self.payment_time.isoformat(),
+            calendar_identity(self.calendar),
         )
+
+    def snapshot(self) -> "TradingSessionCalendar":
+        """A copy owning its calendar contents; the caller may keep editing theirs.
+
+        Only the holiday and weekend SETS are mutable — their members are dates, which are
+        not — so a fresh set of the same members isolates the snapshot exactly. Deep-copying
+        hundreds of holiday datetimes per valuation would buy nothing. A calendar subclass
+        this method does not know is deep-copied instead: it may own other mutable state.
+        """
+        source = self.calendar
+        if type(source) is not Calendar:
+            return replace(self, calendar=deepcopy(source))
+        clone = copy(source)
+        clone.holidays = set(source.holidays)
+        clone.weekend_days = set(source.weekend_days)
+        snapshot = replace(self, calendar=clone)
+        # Nothing may edit a snapshot's calendar, so its identity is fixed from here on and
+        # is worth computing once: it hashes every holiday and is read at least twice per
+        # valuation (the context identity and the reported session identity).
+        object.__setattr__(snapshot, "_frozen_identity", snapshot._compute_identity())
+        return snapshot

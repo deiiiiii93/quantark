@@ -103,7 +103,7 @@ def test_a_per_spot_curve_releases_each_spot_market_before_the_next(sse_calendar
     import gc
     import weakref
     import quantark.intraday.greeks as G
-    real, seen = G.cell_price, []
+    real, seen = G.cell_outcome, []
 
     def recording(ctx, engine):
         gc.collect()
@@ -111,7 +111,7 @@ def test_a_per_spot_curve_releases_each_spot_market_before_the_next(sse_calendar
         seen.append(weakref.ref(ctx.pricing_env))
         return real(ctx, engine)
 
-    monkeypatch.setattr(G, "cell_price", recording)
+    monkeypatch.setattr(G, "cell_outcome", recording)
     req = _req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1))
     curve = spot_curve(SnowballPDESolver(PDEParams()), req, [99.0, 100.0, 101.0])
     assert len(seen) == 3 and all(p.status == "not_requested" for p in curve)

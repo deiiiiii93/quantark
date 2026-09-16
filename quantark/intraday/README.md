@@ -187,14 +187,50 @@ roll-through-events row.
 - `aggregate_intraday([(id, quantity, result), ...])` scales price, paid cash and Greeks by
   quantity; the book is provisional if any position is (and names them), and a Greek is
   summed only when every position reports it `ok` under one convention and unit.
+- `spot_curve` returns a `SpotCurve`: a sequence of points that also carries the resolved
+  context's provenance once — `provisional`, the assumptions and any
+  `continuous_assumption`, the lifecycle, the profile/session/context identities and the
+  engine. Each point carries its own price evidence (`numerical`, `method`), because a
+  route that prices every spot separately can resolve one and not the next.
 
-## Not yet covered
+## Not covered — these fail closed
 
-- Batch valuation, spot curves and aggregation; qualification horizons from Gate C in the
-  capability matrix.
-- Phoenix coupon replay: the lifecycle tracker books a coupon as `principal·rate` while the
-  engines pay `principal·rate·period fraction`; until that is settled a due Phoenix coupon
-  not covered by the checkpoint fails closed.
+Every limit below raises rather than approximating. None of them is a silent fallback.
+
+- **Continuous monitoring on QUAD V2.** Its exact continuous-curve classifier does not
+  recognize `TradingClockVolSurface`, and its continuous grid builder does not carry the
+  intraday map's session knots. Qualifying it needs an interval survival/crossing operator
+  split at every clock and coefficient knot, with its own time-refinement and first-passage
+  evidence. Route continuous barriers to PDE or MC.
+- **A closed-form barrier whose coefficients are not provably piecewise.**
+  `quantark.intraday.coefficients` admits only curve families that declare where their law
+  changes and that it is affine between (flat and term-structure volatility, flat and
+  linear/log-linear rates, flat and term-structure dividends, plus their parallel shifts).
+  Anything else — a cubic-spline curve, a shifted term surface, a smile — is inadmissible:
+  matching samples at two instants prove nothing about the interval between them.
+- **A digital inside the daily engine's expiry tolerance.** Below `MIN_MATURITY` the daily
+  engine switches to the intrinsic payoff, a CALENDAR-TIME shortcut. Intraday that window
+  is reachable with variance still on the clock, so the route refuses rather than publish a
+  price and Greeks that describe different functions. The `W == 0` limit is exact and is
+  taken before this check.
+- **Phoenix coupon memory with unequal periods.** Memory reaches the twin as a COUNT, which
+  only reconstructs an amount when every period is worth the same (a declared
+  `fixed_coupon_year_fraction`, or a per-period rate). Otherwise the twin fails closed.
+- **KO-reset snowball replay.** Supply a checkpoint covering every fixing due before the
+  valuation instant; the daily tracker observes only the pre-KI schedule.
 - Dated autocallables without `initial_date` (their accrual would move with the valuation
-  timestamp), time-based checkpoints, and two due fixings on one local date (the daily
-  lifecycle tracker cannot separate them) fail closed.
+  timestamp), time-based checkpoints, checkpoints that report the future, and two due
+  fixings on one local date (the daily lifecycle tracker cannot separate them) fail closed.
+
+## What a status does and does not claim
+
+- A route's `numerical["resolution"]` is a RESOLUTION diagnostic — the mesh covered the
+  diffusion layer — never an error budget. Greek status is bound separately to the Gate C
+  demonstrated families in the capability matrix: product, route, measure, monitoring, the
+  exact variance profile, and the horizon window the ladder actually swept. Outside any of
+  those a Greek reports `unqualified` with no value, whatever the mesh did.
+- A desk bump is exactly its repriced difference, so its only error is the prices' own: a
+  bump cell the route could not resolve makes the desk Greek `unqualified` too.
+- A local theta is a declared one-sided forward roll on the frozen market, clamped to the
+  next event AND the next variance-clock or coefficient boundary. It is a finite roll, not
+  a demonstrated `dV/dt`, and every value says so.

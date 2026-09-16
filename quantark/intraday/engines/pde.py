@@ -208,7 +208,19 @@ class PDERoute:
         return EnginePriceOutcome(pv, self._method(engine), numerical, {}, records, engine_used=solver)
 
     def point_greeks(self, ctx, engine) -> PointGreeks:
-        """The solver's own stencil on the grid the route priced on; ``ok`` only on a resolved grid."""
+        """The solver's own stencil on the grid the route priced on.
+
+        A resolved mesh is a RESOLUTION diagnostic, not an accuracy certificate: it
+        says the diffusion layer is covered by enough cells and steps, which is a
+        necessary condition for a converged stencil and nowhere near a sufficient
+        one. The independent Gate C ladder is what establishes the error budget, so
+        a value is published only where that ladder demonstrated this exact
+        configuration — and where it did not, the diagnostics are still reported
+        but no number is (review 2026-09-16 finding 4).
+        """
+        from quantark.intraday.capability import output_qualification_gap
+        from quantark.intraday.greeks import qualification_scope, seconds_to_first_event
+
         if ctx.numerical.terminated:
             return TERMINATED_POINT_GREEKS
         outcome = self.price(ctx, engine)
@@ -229,6 +241,13 @@ class PDERoute:
         if resolution != "resolved":
             return PointGreeks(None, None, "unqualified", str(outcome.numerical.get("resolution_reason") or resolution),
                                "grid_stencil")
+        seconds, product = seconds_to_first_event(ctx), type(ctx.request.product).__name__
+        gaps = [g for g in (output_qualification_gap(product, "PDERoute", f"point_{m}", seconds, **qualification_scope(ctx))
+                            for m in ("delta", "gamma")) if g]
+        if gaps:
+            return PointGreeks(None, None, "unqualified",
+                               "the mesh resolved the diffusion layer, which is a resolution diagnostic and not an "
+                               "error budget: " + "; ".join(dict.fromkeys(gaps)), "grid_stencil")
         return PointGreeks(delta, gamma, "ok", "", "grid_stencil")
 
     @staticmethod

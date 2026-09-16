@@ -18,6 +18,17 @@ from quantark.execution.errors import CapabilityError
 _QUAD_V2 = "quantark.asset.equity.engine.quad.v2.engine."
 _ANALYTICAL = "quantark.asset.equity.engine.analytical."
 
+#: Every intraday request prices on a ``TradingClockVolSurface``. QUAD V2's exact
+#: continuous-barrier classifier recognizes only its flat/term curve families, so the
+#: clock wrapper falls through to a time-refinement approximation that nothing here has
+#: qualified, and its grid builder does not split at the intraday map's session knots.
+#: Publishing the row would advertise an accuracy claim no evidence supports.
+_CONTINUOUS_QUAD_NOTE = (
+    "continuous monitoring on the intraday clock needs an interval survival/crossing operator split at every "
+    "session and coefficient knot, with its own time-refinement and first-passage qualification (design "
+    "\u00a7Engine integration). QUAD V2's exact continuous classifier does not recognize TradingClockVolSurface "
+    "and its continuous grid builder does not carry the intraday map's knots")
+
 
 @dataclass(frozen=True)
 class IntradayCapability:
@@ -91,20 +102,18 @@ def _rows() -> Tuple[IntradayCapability, ...]:
                            "integrated carry/variance via TradingClockVolSurface; zero variance priced as the exact forward limit"),
         IntradayCapability(SnowballOption, _QUAD_V2 + "SnowballQuadEngineV2", "discrete", anywhere, price_only, "supported",
                            "exact Gaussian interval moments; a t=0 event under 'before' is decided at spot"),
-        IntradayCapability(SnowballOption, _QUAD_V2 + "SnowballQuadEngineV2", "continuous", anywhere, price_only, "supported",
-                           "continuous KI via the QUAD V2 survival kernel; touch history disclosed as an assumption"),
+        IntradayCapability(SnowballOption, _QUAD_V2 + "SnowballQuadEngineV2", "continuous", anywhere, price_only,
+                           "unsupported", _CONTINUOUS_QUAD_NOTE),
         IntradayCapability(PhoenixOption, _QUAD_V2 + "PhoenixQuadEngineV2", "discrete", anywhere, price_only, "supported",
                            "realized coupons replay at their contractual amount; memory outstanding at the instant "
                            "needs equal periods (it reaches the twin as a count)"),
-        IntradayCapability(PhoenixOption, _QUAD_V2 + "PhoenixQuadEngineV2", "continuous", anywhere, price_only, "supported",
-                           "realized coupons replay at their contractual amount; memory outstanding at the instant "
-                           "needs equal periods (it reaches the twin as a count)"),
+        IntradayCapability(PhoenixOption, _QUAD_V2 + "PhoenixQuadEngineV2", "continuous", anywhere, price_only,
+                           "unsupported", _CONTINUOUS_QUAD_NOTE),
         IntradayCapability(KnockOutResetSnowballOption, _QUAD_V2 + "KOResetSnowballQuadEngineV2", "discrete", anywhere,
                            price_only, "supported",
                            "absolute post-KI schedules; due fixings must be covered by the checkpoint (no tracker replay)"),
         IntradayCapability(KnockOutResetSnowballOption, _QUAD_V2 + "KOResetSnowballQuadEngineV2", "continuous", anywhere,
-                           price_only, "supported",
-                           "absolute post-KI schedules; due fixings must be covered by the checkpoint (no tracker replay)"),
+                           price_only, "unsupported", _CONTINUOUS_QUAD_NOTE),
     )
 
 
@@ -193,17 +202,50 @@ def greek_evidence() -> dict:
     return _evidence(GREEK_EVIDENCE_FILE)
 
 
-def point_output_qualified(product_name: str, route_name: str, measure: str, seconds_to_event: float) -> bool:
-    """Whether Gate C demonstrated point ``measure`` for this product on ``route_name`` at this time to the first event.
+def _plain(value):
+    """Tuples and lists compared alike, so a JSON round-trip of an identity still matches."""
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
 
-    A demonstration is a (product, route, measure, horizon) row: every greek cell at that horizon or longer passed
-    its ladder against the reference. No evidence file, or no row, demonstrates nothing (fail closed).
+
+def output_qualification_gap(product_name: str, route_name: str, measure: str, seconds_to_event: float, *,
+                             monitoring: str, profile_identity) -> str:
+    """"" when Gate C demonstrated this exact combination here; otherwise why it did not.
+
+    A certificate covers only the configurations its cells actually ran. The key is
+    therefore the whole tested family — product, route, measure, MONITORING and the
+    exact variance PROFILE — inside the horizon WINDOW the ladder swept. Outside any
+    of those the evidence is silent, and silence is not a pass: no evidence file, no
+    matching row, or a horizon the ladder never reached all fail closed.
     """
-    for row in greek_evidence().get("demonstrated", ()):
-        if (row["product"], row["route"], row["measure"]) == (product_name, route_name, f"point_{measure}") \
-                and seconds_to_event >= float(row["horizon_s"]):
-            return True
-    return False
+    rows = [r for r in greek_evidence().get("demonstrated", ())
+            if (r["product"], r["route"], r["measure"]) == (product_name, route_name, measure)]
+    if not rows:
+        return f"Gate C demonstrated no {measure} for {product_name} on {route_name}"
+    rows_here = [r for r in rows if r.get("monitoring") == monitoring]
+    if not rows_here:
+        return (f"Gate C demonstrated {measure} for {product_name} on {route_name} only under "
+                f"{sorted({r.get('monitoring') for r in rows})} monitoring, not {monitoring!r}")
+    wanted = _plain(profile_identity)
+    rows_profile = [r for r in rows_here if _plain(r.get("profile_identity")) == wanted]
+    if not rows_profile:
+        return (f"Gate C demonstrated {measure} for {product_name} on {route_name} only for the variance profiles "
+                f"{sorted({r.get('profile') for r in rows_here})}, not this request's "
+                f"{profile_identity[0] if profile_identity else 'profile'!r}")
+    windows = [(float(r["horizon_s"]), float(r["horizon_max_s"])) for r in rows_profile]
+    if any(lo <= seconds_to_event <= hi for lo, hi in windows):
+        return ""
+    return (f"Gate C swept {measure} for {product_name} on {route_name} over "
+            f"{[(lo, hi) for lo, hi in sorted(windows)]} s to the next event; this request is "
+            f"{seconds_to_event:g} s away, outside every tested window")
+
+
+def point_output_qualified(product_name: str, route_name: str, measure: str, seconds_to_event: float, *,
+                           monitoring: str, profile_identity) -> bool:
+    """Whether Gate C demonstrated point ``measure`` for this exact configuration (see the gap function)."""
+    return not output_qualification_gap(product_name, route_name, f"point_{measure}", seconds_to_event,
+                                        monitoring=monitoring, profile_identity=profile_identity)
 
 
 def _horizon_label(horizon: Optional[timedelta]) -> str:

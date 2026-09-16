@@ -16,7 +16,8 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Mapping, Optional, Tuple
 
-from quantark.asset.equity.lifecycle import AutocallableLifecycleState, LifecycleCashflowLedger, RealizedCashflow, ValuationPoint
+from quantark.asset.equity.lifecycle import (COUPON_ARREARS_INDICES, AutocallableLifecycleState,
+                                             LifecycleCashflowLedger, RealizedCashflow, ValuationPoint)
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
 from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
 from quantark.execution.errors import CapabilityError
@@ -106,12 +107,13 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
         # Memory arrives as a COUNT of missed periods, so it only reconstructs an amount when
         # every period is worth the same: a declared fixed fraction, or a per-period rate
         # (whose fraction is 1 by construction).
-        if (
-            memory
-            and twin.coupon_config.fixed_coupon_year_fraction is None
-            and product.is_coupon_rate_annualized
-        ):
+        fixed = twin.coupon_config.fixed_coupon_year_fraction
+        if memory and fixed is None and product.is_coupon_rate_annualized:
             raise CapabilityError("aged Phoenix coupon memory needs fixed_coupon_year_fraction on the float-time twin")
+        # Outstanding arrears reach the stateless engines (PDE, MC) on the twin itself;
+        # QUAD V2 takes the lifecycle state and rebuilds the same total from the count,
+        # so exactly one of the two carries it per route and neither double counts.
+        arrears = memory * float(product.get_coupon_payoff(0, year_fraction=1.0 if fixed is None else fixed))
     else:
         factors = [0.0 if f is None else f for f in ko_factors]
     indices = [e.index for e in kos]
@@ -132,7 +134,8 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
     twin.accrual_config = replace(twin.accrual_config, accrual_factors=[float(f) for f in factors],
                                   accrued_offset=0.0, accrual_dates=None)
     if phoenix:
-        twin.coupon_config = replace(twin.coupon_config, coupon_barrier=_pick(twin.coupon_config.coupon_barrier, indices))
+        twin.coupon_config = replace(twin.coupon_config, coupon_barrier=_pick(twin.coupon_config.coupon_barrier, indices),
+                                     initial_coupon_arrears=arrears)
     terminal = timeline.terminal()
     twin.maturity = calendar_year_fraction(ts, terminal.timestamp)
     twin.tenor = timeline.contractual_tenor
@@ -261,6 +264,30 @@ def event_for_cashflow(cf: RealizedCashflow, timeline: ContractTimeline, tz=None
     return None
 
 
+def _arrears_cash(cf: RealizedCashflow, event: ContractEvent, timeline: ContractTimeline) -> float:
+    """Contract cash of the memorized coupon periods this flow settled alongside its own.
+
+    A Phoenix memory coupon is one ledger entry paying several contractual
+    periods, so reconciling it against a single period's amount would reject a
+    correct settlement. The tracker names the periods it released; each one is
+    looked up in the contract's own cash table and summed.
+    """
+    released = cf.metadata.get(COUPON_ARREARS_INDICES) or ()
+    if not released:
+        return 0.0
+    if event.kind is not EventKind.COUPON:
+        raise ValidationError(f"cashflow {cf.cashflow_id!r} claims coupon arrears {tuple(released)} but settles a "
+                              f"{event.kind.value} event")
+    total = 0.0
+    for index in released:
+        arrear = next((e for e in timeline.events if e.kind is EventKind.COUPON and e.index == int(index)), None)
+        if arrear is None:
+            raise ValidationError(f"cashflow {cf.cashflow_id!r} settles memorized coupon period {index}, which this "
+                                  "contract timeline does not contain")
+        total += arrear.cash
+    return total
+
+
 def place_cashflow(cf: RealizedCashflow, timeline: ContractTimeline, cal):
     """(determination instant, payment instant, contract event or None) of a dated ledger flow; cash-checked."""
     if cf.determination_date is None:
@@ -269,7 +296,8 @@ def place_cashflow(cf: RealizedCashflow, timeline: ContractTimeline, cal):
         return (datetime.fromisoformat(cf.metadata[DETERMINATION_TIMESTAMP]),
                 datetime.fromisoformat(cf.metadata[PAYMENT_TIMESTAMP]), None)
     event = event_for_cashflow(cf, timeline, cal.tz)
-    expected = event.cash if event is not None else None
+    # a terminal event carries no contractual cash (cash=None): nothing to reconcile against
+    expected = None if event is None or event.cash is None else event.cash + _arrears_cash(cf, event, timeline)
     if event is None and cf.cashflow_id.startswith("ko:") and timeline.continuous_barrier is not None:
         expected = timeline.continuous_barrier.hit_cash            # a continuous barrier touched at a close
     if expected is not None and not is_close(float(cf.amount), float(expected), rel_tol=_CASH_REL_TOL, abs_tol=_CASH_ABS_TOL):
@@ -346,32 +374,32 @@ def build_numerical_contract(product, timeline: ContractTimeline, reconstruction
     taus = {e.event_id: calendar_year_fraction(ts, e.timestamp) for e in remaining}
     if any(t < 0.0 for t in taus.values()) or (phase is EventPhase.AFTER and any(t == 0.0 for t in taus.values())):
         raise ValidationError("remaining events must be strictly future (or at valuation under BEFORE)")
+    from quantark.asset.equity.product.option.barrier_option import BarrierOption
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
     if state is None:
-        if hasattr(product, "barrier_config") or hasattr(product, "observation_type"):
-            raise ValidationError("a product with a lifecycle needs a reconstructed lifecycle state")
-        twin, tstate, terminated = _digital_twin(product, timeline, remaining, ts), None, False
+        raise ValidationError("a reconstructed lifecycle state is required for every intraday product family")
+    tstate = _time_based_state(state, timeline, ts, session_calendar)
+    terminated = not tstate.alive
+    if terminated:
+        twin = None
+    elif type(product) is KnockOutResetSnowballOption:
+        if schedule_env is None:
+            raise ValidationError("a KO-reset twin needs the contract's schedule environment")
+        twin = _ko_reset_twin(product, timeline, remaining, ts, state, schedule_env)
+    elif hasattr(product, "barrier_config"):
+        twin = _autocallable_twin(product, timeline, remaining, ts, state)
+    elif type(product) in (BarrierOption, OneTouchOption):
+        twin = _barrier_twin(product, timeline, remaining, ts, state)
     else:
-        tstate = _time_based_state(state, timeline, ts, session_calendar)
-        terminated = not tstate.alive
-        if terminated:
-            twin = None
-        elif type(product) is KnockOutResetSnowballOption:
-            if schedule_env is None:
-                raise ValidationError("a KO-reset twin needs the contract's schedule environment")
-            twin = _ko_reset_twin(product, timeline, remaining, ts, state, schedule_env)
-        elif hasattr(product, "barrier_config"):
-            twin = _autocallable_twin(product, timeline, remaining, ts, state)
-        else:
-            twin = _barrier_twin(product, timeline, remaining, ts, state)
+        twin = _digital_twin(product, timeline, remaining, ts)
     pending, paid = [], 0.0
-    if tstate is not None:
-        for cf in tstate.ledger.cashflows:
-            if cf.payment_time > 0.0:
-                pending.append((cf.cashflow_id, float(cf.amount), float(cf.payment_time)))
-            else:
-                paid += float(cf.amount)
+    for cf in tstate.ledger.cashflows:
+        if cf.payment_time > 0.0:
+            pending.append((cf.cashflow_id, float(cf.amount), float(cf.payment_time)))
+        else:
+            paid += float(cf.amount)
     return NumericalContract(product=twin, lifecycle_state=tstate, remaining_events=tuple(remaining),
                              event_taus=MappingProxyType(taus),
                              maturity_tau=calendar_year_fraction(ts, timeline.terminal().timestamp),
-                             knocked_in=bool(state.knocked_in) if state is not None else False,
+                             knocked_in=bool(getattr(state, "knocked_in", False)),
                              terminated=terminated, pending_cashflows=tuple(pending), paid_cash=paid)
