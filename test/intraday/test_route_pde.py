@@ -2,6 +2,7 @@
 the independent reference decides qualification (Gate C)."""
 from datetime import datetime, time, timedelta
 
+import numpy as np
 import pytest
 
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
@@ -144,20 +145,51 @@ def test_before_at_the_fixing_above_the_barrier_is_the_ko_cash(sse_calendar, sse
     assert out.contingent_pv == pytest.approx(kos[5].cash, abs=1e-9)
 
 
-def test_a_one_touch_barrier_snapped_to_the_next_node_is_unqualified(sse_sessions, desk):
+def test_a_continuously_observed_touch_barrier_is_a_hard_grid_edge(sse_sessions, desk):
+    """Absorbing under continuous observation: the domain ends AT the barrier, so it is exactly placed."""
+    from quantark.asset.equity.engine.analytical import OneTouchAnalyticalEngine
     from quantark.asset.equity.engine.pde import OneTouchPDESolver
     from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
     from quantark.util.enum.option_enums import BarrierDirection
     product = OneTouchOption(barrier=103.0, barrier_direction=BarrierDirection.UP, rebate=1.0,
-                             exercise_date=datetime(2026, 9, 16), observation_type=ObservationType.CONTINUOUS)
-    ctx = resolve_context(IntradayValuationRequest(product=product, pricing_env=flat_env(datetime(2026, 9, 15, 15, 0, tzinfo=SHANGHAI),
+                             exercise_date=datetime(2026, 9, 30), observation_type=ObservationType.CONTINUOUS)
+    ctx = resolve_context(IntradayValuationRequest(product=product, pricing_env=flat_env(datetime(2026, 9, 15, 10, 0, tzinfo=SHANGHAI),
                                                                                         spot=101.0, r=0.0, q=0.0),
                                                    session_calendar=sse_sessions, variance_profile=desk))
     out = route_for(ctx, OneTouchPDESolver(PDEParams())).price(ctx, OneTouchPDESolver(PDEParams()))
-    assert out.numerical["resolution"] == "unqualified" and "node overwrite" in out.numerical["resolution_reason"]
+    assert out.numerical["resolution"] == "resolved" and "node overwrite" not in out.numerical["resolution_reason"]
+    layout = out.engine_used._active_layout
+    assert layout.request.hard_upper == 103.0
+    assert float(np.exp(np.asarray(layout.spatial.x, dtype=float)).max()) == pytest.approx(103.0, rel=1e-14)
+    exact = route_for(ctx, OneTouchAnalyticalEngine()).price(ctx, OneTouchAnalyticalEngine())
+    assert out.contingent_pv == pytest.approx(exact.contingent_pv, abs=1e-3), "cross-check, not a qualification"
+
+
+def test_a_discretely_observed_touch_barrier_keeps_the_domain_beyond_it(sse_sessions, desk):
+    """Between two observations the spot may cross the barrier and come back: the overshoot must stay solvable."""
+    from quantark.asset.equity.engine.pde import OneTouchPDESolver
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
+    from quantark.util.enum.option_enums import BarrierDirection
+    dates = [datetime(2026, 9, 18), datetime(2026, 9, 24), datetime(2026, 9, 30)]
+    product = OneTouchOption(barrier=103.0, barrier_direction=BarrierDirection.UP, rebate=1.0,
+                             exercise_date=datetime(2026, 9, 30), observation_type=ObservationType.DISCRETE,
+                             observation_schedule=ObservationSchedule(
+                                 records=[ObservationRecord(observation_date=d, barrier=103.0) for d in dates]))
+    ctx = resolve_context(IntradayValuationRequest(product=product, pricing_env=flat_env(datetime(2026, 9, 15, 10, 0, tzinfo=SHANGHAI),
+                                                                                        spot=101.0, r=0.0, q=0.0),
+                                                   session_calendar=sse_sessions, variance_profile=desk))
+    out = route_for(ctx, OneTouchPDESolver(PDEParams())).price(ctx, OneTouchPDESolver(PDEParams()))
+    layout = out.engine_used._active_layout
+    assert layout.request.hard_upper is None
+    assert float(np.exp(np.asarray(layout.spatial.x, dtype=float)).max()) > 103.0
+
+
+def test_a_continuous_knock_out_barrier_is_a_hard_grid_edge(sse_sessions, desk):
     ko = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=103.0, barrier_type=BarrierType.UP_OUT,
                        exercise_date=datetime(2026, 9, 16), observation_type=ObservationType.CONTINUOUS)
-    ko_ctx = resolve_context(IntradayValuationRequest(product=ko, pricing_env=ctx.request.pricing_env,
+    ko_ctx = resolve_context(IntradayValuationRequest(product=ko, pricing_env=flat_env(datetime(2026, 9, 15, 15, 0, tzinfo=SHANGHAI),
+                                                                                       spot=101.0, r=0.0, q=0.0),
                                                       session_calendar=sse_sessions, variance_profile=desk))
     edge = route_for(ko_ctx, BarrierPDESolver(PDEParams())).price(ko_ctx, BarrierPDESolver(PDEParams()))
     assert "node overwrite" not in edge.numerical["resolution_reason"], "a continuous knock-out barrier is a hard grid edge"

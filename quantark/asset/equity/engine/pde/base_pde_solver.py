@@ -581,9 +581,12 @@ class BasePDESolver(BaseEngine):
 
         - anchors: spot + strike;
         - criticals: spot, strike, and any product barriers;
-        - hard bounds: CONTINUOUS knock-out barriers are absorbing domain
-          edges (single barriers set exactly one side) — ported verbatim
-          from the legacy `_resolve_spatial_bounds` clamping;
+        - hard bounds: CONTINUOUS absorbing barriers — knock-out barriers
+          (ported verbatim from the legacy `_resolve_spatial_bounds`
+          clamping) and touch barriers — are domain edges (single barriers
+          set exactly one side). DISCRETE barriers are NOT: between two
+          observations the spot may cross the barrier and come back
+          unobserved, so the domain has to carry that overshoot;
         - event times: the generic observation schedule (discretely observed
           barrier/touch variants), interior only.
         """
@@ -593,8 +596,14 @@ class BasePDESolver(BaseEngine):
 
         hard_lower = hard_upper = None
         obs_type = getattr(product, "observation_type", None)
-        is_ko = getattr(product, "is_knock_out", False)
-        if obs_type == ObservationType.CONTINUOUS and is_ko:
+        # Absorbing under continuous observation: once the barrier is touched the claim's value
+        # there is known for the rest of its life (KO: the rebate/zero; touch: the rebate or
+        # nothing), so no state beyond it is ever solved. Every TouchType is absorbing.
+        absorbing = (
+            getattr(product, "is_knock_out", False)
+            or getattr(product, "touch_type", None) is not None
+        )
+        if obs_type == ObservationType.CONTINUOUS and absorbing:
             if hasattr(product, "lower_barrier") and hasattr(product, "upper_barrier"):
                 lb = getattr(product, "lower_barrier", 0) or 0
                 ub = getattr(product, "upper_barrier", 0) or 0
