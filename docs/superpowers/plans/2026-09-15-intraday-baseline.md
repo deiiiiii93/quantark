@@ -143,27 +143,41 @@ Defects Gate C found and fixed before this run (each with a regression test):
   capped ladder is `unqualified`.
 
 ## Gate C greeks
-Packaged evidence: `quantark/intraday/evidence/gate_c_greeks.json` (git 9eb643df; 528 groups = snowball and digital
-x desk/sessions-only x 8 horizons x 11 offsets x barriers; 1408 route results). Four workers under the 20 GiB guard,
-which stopped the run once in the heavy short-horizon PDE groups; the resume finished on two workers (about 85
-minutes in total). Budgets for vega/rho/dividend rho were frozen before the run: m* = measure x 0.01 / N,
-absolute 1e-6, relative 1e-4.
+Packaged evidence: `quantark/intraday/evidence/gate_c_greeks.json` (schema `intraday-gate-c-greeks/2`, git 959346b5, the 2026-09-16
+re-review sweep; 792 groups = snowball and digital x desk/sessions-only x 12 horizons (1 s to 29 days) x 11 offsets x
+barriers; 2112 route results). Four workers under a 40 GiB guard, 2 h 22 min, peak ~12 GiB, on a machine shared
+with two other sessions' process pools. Every row records the engine's `accuracy_settings`; a certificate is a
+window of consecutive swept horizons at which every cell of (product, route, measure, monitoring, profile, engine
+settings, measure settings) passed. Budgets frozen before the run: point/desk vega, rho, dividend rho m* = move /
+N and theta t* = |theta per hour| / N, both absolute 1e-6, relative 1e-4.
 
-| product | route | point delta | point gamma | desk delta | desk gamma | point vega / rho / div rho |
-|---|---|---|---|---|---|---|
-| snowball | QUAD V2 | 352 passed | 352 passed | 352 passed | 348 passed, 4 inconclusive | 352 / 352 / 352 passed |
-| snowball | PDE | 352 unqualified | 351 unqualified, 1 passed | 161 passed, 191 unqualified | 64 passed, 284 unqualified, 4 inconclusive | not run (no demonstrated bump limit) |
-| snowball | MC (RQMC) | 352 unqualified | 352 unqualified | 352 passed | 348 passed, 4 inconclusive | not run |
-| digital | analytical | 176 passed | 176 passed | 176 passed | 176 passed | 176 / 176 / 176 passed |
-| digital | MC | 176 unsupported | 176 unsupported | — | — | — |
+| product | route | point delta | point gamma | desk delta | desk gamma | point vega / rho / div rho | desk vega / rho / div rho | desk theta | point theta |
+|---|---|---|---|---|---|---|---|---|---|
+| snowball | QUAD V2 | 528 passed | 528 passed | 528 passed | 528 passed | 528 passed each | 528 passed each | 528 passed | 528 passed |
+| snowball | PDE | 20 passed, 508 unqualified | 5 passed, 8 failed, 515 unqualified | 179 passed, 349 unqualified | 72 passed, 456 unqualified | not run | not run | not run | not run |
+| snowball | MC (RQMC) | 528 unqualified | 528 unqualified | 528 unqualified | 528 unqualified | not run | not run | not run | not run |
+| digital | analytical | 264 passed | 264 passed | 264 passed | 264 passed | 264 passed each | 264 passed each | 264 passed | 264 passed |
+| digital | MC | 264 unsupported | 264 unsupported | — | — | — | — | — | — |
 
-No failed measure. **Demonstrated to 1 second:** QUAD V2 snowball point delta, gamma, vega, rho, dividend rho and
-desk delta; analytical digital every measure; MC snowball desk delta. The four inconclusive desk-gamma cells are
-1 day / 6 h at 10 bp below the KO barrier (a 1% move straddles it; reference uncertainty ~7e-6 against a small
-absolute budget), so QUAD desk gamma is not demonstrated. PDE point Greeks are unqualified (resolution floors and the
-capped ladder). MC point Greeks are unqualified by construction: a paired RQMC difference at the 1% desk bump equals
-the desk move (one hour before a fixing it missed the point delta by 0.08), so the route reports it only inside a
-demonstrated bump limit, and none was demonstrated.
+**Certified, 1 s to 29 days, both profiles:** QUAD V2 snowball and analytical digital, every measure. PDE desk delta
+only within 1-300 s (desk) and 10-60 s (sessions-only) of a fixing. Nothing on MC.
+
+What changed from the first sweep (git 9eb643df, 8 horizons to 1 day):
+- The ladder read the route's GATED point status, and the gate reads this evidence: MC point Greeks could never be
+  measured (they were "unqualified by construction"). Routes now take `certify=False` for the ladder.
+- The desk classifier tested a pass before the sampling error, so a standard error far above the budget widened the
+  tolerance into a pass: MC desk delta was "352 passed" with standard errors ~12x its budget. The sampling check now
+  comes first, and MC desk moves are unqualified.
+- A desk move's reference uncertainty is the Richardson estimate of the MOVE's own levels (its prices share each
+  grid), not the sum of its prices' uncertainties; the sum made the 14- and 29-day QUAD desk cells inconclusive.
+- The reference evaluated an event decided exactly at the spot on its right-continuous side; every autocallable
+  barrier is inclusive, so a spot on a standard KI level now takes the knocked-in side (a one-hour desk theta roll
+  landing on the fixing with the spot on the barrier).
+- An MC point ladder stops after level 0 when both measures are already beyond their noise there (the 4x-path level
+  cannot change that status).
+- The 8 failed cells are PDE point gamma at 3 to 29 days, one or two standard deviations above the KO barrier: the
+  refinement ladder and its phase envelope oscillate at errors of 1e-5 to 4e-4 without approaching the reference.
+  PDE point gamma carries no certificate anywhere; the oscillation is a PDE diagnostic still to explain.
 
 Found while building this gate: the reference's global-sweep cache keyed a bumped context on its REQUEST's market, so
 rate and dividend bumps reused the unbumped sweep (reference rho -0.348 and dividend rho +0.240, where QUAD V2, a
