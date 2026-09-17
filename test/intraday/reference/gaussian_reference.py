@@ -238,6 +238,16 @@ def _time_homogeneous(env) -> bool:
             and (env.div_yield is None or type(env.div_yield) in (NoDividend, ContinuousDividendYield)))
 
 
+def _unclocked(env):
+    """The market inside the intraday clock: the clock's own identity (profile, calendar) is keyed separately, and its
+    repr carries the valuation anchor, which would key an anchor-free sweep on every horizon."""
+    from types import SimpleNamespace
+    from quantark.param.vol import TradingClockVolSurface
+    surface = env.vol_surface
+    return SimpleNamespace(rate_curve=env.rate_curve, div_yield=env.div_yield,
+                           vol_surface=surface.inner if type(surface) is TradingClockVolSurface else surface)
+
+
 def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[PLJ, PLJ]:
     """Backward sweep from maturity down to the SECOND remaining instant (events applied). Cached.
 
@@ -257,10 +267,11 @@ def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[P
     from quantark.execution import greeks as summaries
     from quantark.intraday.context import market_snapshot_id, value_tree
     env = ctx.request.pricing_env
-    anchor = None if _time_homogeneous(env) else to_utc(ctx.valuation_timestamp).isoformat()
     # a greek bump replaces only ctx.pricing_env: the request's summaries would serve the unbumped sweep, so a bumped
-    # context keys on the CONTENT of its own market (a bump label is not an identity)
-    num_env = ctx.pricing_env
+    # context keys on the CONTENT of its own market (a bump label is not an identity), read inside the clock
+    num_env = _unclocked(ctx.pricing_env)
+    anchor = (None if _time_homogeneous(env) and _time_homogeneous(num_env)
+              else to_utc(ctx.valuation_timestamp).isoformat())
     bumped = None if ctx.market_snapshot_id == market_snapshot_id(env) else repr(value_tree((
         summaries._vol_summary(num_env), summaries._rate_summary(num_env), summaries._div_summary(num_env))))
     key = (points, width_std, lo, hi, anchor, bumped, tuple(e.event_id for _, g in instants[1:] for e in g),

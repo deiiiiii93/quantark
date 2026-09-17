@@ -47,3 +47,12 @@ def test_a_daily_ki_miss_splits_only_the_daily_window():
     daily = sorted((r["horizon_s"], r["horizon_max_s"]) for r in rows if r["economic_identity"] == "daily")
     assert daily == [(1, 60), (900, 21600)]
     assert [(r["horizon_s"], r["horizon_max_s"]) for r in rows if r["economic_identity"] == "monthly"] == [(1, 29 * 86400)]
+
+
+def test_only_the_daily_ki_reference_is_one_grid_level_finer():
+    from intraday.gate_c.greek_harness import PROXY_REFERENCE_POINTS, proxy_points_for, reference_points_for
+    from intraday.reference.budgets import GATE_C_POINTS
+    assert reference_points_for("snowball_daily_ki") == (8001, 16001, 32001)
+    assert proxy_points_for("snowball_daily_ki") == (8001, 16001)
+    for fixture in ("snowball_discrete_ki", "snowball_long_gap", "digital"):
+        assert reference_points_for(fixture) == GATE_C_POINTS and proxy_points_for(fixture) == PROXY_REFERENCE_POINTS

@@ -168,3 +168,28 @@ def test_barrier_zero_carry_in_out_parity_and_exact_bridge_mc():
         mc = payoff * survive + rebate * (1.0 - survive)
         closed = barrier_zero_carry(S, K, H, u, sigma, is_call=is_call, is_up=is_up, is_knock_out=True, rebate=rebate)
         assert abs(mc.mean() - closed) <= 4.0 * mc.std(ddof=1) / sqrt(n_paths), (is_call, is_up, H, mc.mean(), closed)
+
+
+def test_a_bumped_flat_market_shares_its_sweep_across_horizons(sse_calendar, sse_sessions, desk):
+    # A bumped context's numerical market wraps its surface in the intraday clock, whose repr carries the valuation
+    # anchor. Keyed on that, every horizon re-solved the same bumped sweep (the 2026-09-17 daily-KI pilot: 27 of a warm
+    # group's 36 sweeps). The sweep is anchor-free for a time-homogeneous market, so equal bumped markets share it.
+    from intraday.reference import gaussian_reference
+    from quantark.asset.equity.riskmeasures.greeks import bump_envs
+    from quantark.intraday.greeks import with_pricing_env
+    kos = [e for e in _snow_ctx(sse_calendar, sse_sessions, desk, datetime(2026, 9, 15, tzinfo=SHANGHAI)).timeline.events
+           if e.kind is EventKind.KO]
+    fixings = tuple(Fixing(k.timestamp, 100.0) for k in kos[:5])
+    far, near = (_snow_ctx(sse_calendar, sse_sessions, desk, kos[5].timestamp - h, fixings=fixings)
+                 for h in (timedelta(hours=1), timedelta(minutes=15)))
+    far_up, near_up = (with_pricing_env(c, bump_envs.build_rate_bumped_env(c.pricing_env, 1e-3, direction=1.0), "rate_up")
+                       for c in (far, near))
+    gaussian_reference._SWEEP_CACHE.clear()
+    alone = reference_snowball(near_up, points=(1001, 2001, 4001))
+    gaussian_reference._SWEEP_CACHE.clear()
+    reference_snowball(far_up, points=(1001, 2001, 4001))
+    solved = len(gaussian_reference._SWEEP_CACHE)
+    shared = reference_snowball(near_up, points=(1001, 2001, 4001))
+    assert len(gaussian_reference._SWEEP_CACHE) == solved
+    assert shared.price == pytest.approx(alone.price, abs=1e-12)
+    assert shared.delta == pytest.approx(alone.delta, rel=1e-10)

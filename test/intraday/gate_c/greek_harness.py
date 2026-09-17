@@ -64,6 +64,20 @@ PROXY_ENGINES = ("quad_v2", "analytical")
 PROXIES = ("vega", "rho", "dividend_rho")
 BUMP_LADDER = (4.0, 2.0, 1.0, 0.5)
 PROXY_REFERENCE_POINTS = (4001, 8001)
+#: Reference grid levels per fixture where the frozen GATE_C_POINTS do not resolve the budgets. The daily-KI claim
+#: carries 129 remaining events: at 4001/8001/16001 points the reference's own Richardson uncertainty exceeded the
+#: budget in 9 of 72 pilot measures (2026-09-17) while the route sat on the reference's extrapolated limit. One level
+#: finer cuts that O(h^2) uncertainty about fourfold; the budgets themselves are unchanged.
+FIXTURE_REFERENCE_POINTS = {"snowball_daily_ki": (8001, 16001, 32001)}
+FIXTURE_PROXY_POINTS = {"snowball_daily_ki": (8001, 16001)}
+
+
+def reference_points_for(fixture: str):
+    return FIXTURE_REFERENCE_POINTS.get(fixture, GATE_C_POINTS)
+
+
+def proxy_points_for(fixture: str):
+    return FIXTURE_PROXY_POINTS.get(fixture, PROXY_REFERENCE_POINTS)
 ROUTE_NAMES = {("snowball_discrete_ki", "quad_v2"): "QuadV2Route", ("snowball_discrete_ki", "pde"): "PDERoute",
                ("snowball_discrete_ki", "mc_rqmc"): "MCRoute", ("digital", "analytical"): "AnalyticalDigitalRoute",
                ("digital", "mc_rqmc"): "MCRoute", ("snowball_long_gap", "quad_v2"): "QuadV2Route",
@@ -461,8 +475,9 @@ def _proxy(cell, ctx, engine, name, notional) -> MeasureResult:
     h0 = point_proxy_bump(ctx, name)
     diffs = [point_proxy_difference(ctx, name, k * h0, lambda c: cell_price(c, engine)) for k in BUMP_LADDER]
     ref_levels = []
-    for level in range(len(PROXY_REFERENCE_POINTS) if cell.product != "digital" else 1):
-        points = (PROXY_REFERENCE_POINTS[level],)
+    proxy_points = proxy_points_for(cell.product)
+    for level in range(len(proxy_points) if cell.product != "digital" else 1):
+        points = (proxy_points[level],)
         ref_levels.append(point_proxy_difference(ctx, name, h0, lambda c: _reference_price_levels(c, cell.product, points)[0]))
     ref_v, ref_unc = ref_levels[-1], _uncertainty(ref_levels)
     route_v = diffs[BUMP_LADDER.index(1.0)]
@@ -484,9 +499,11 @@ def _proxy(cell, ctx, engine, name, notional) -> MeasureResult:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def run_greek_group(group: GreekGroup, *, reference_points=GATE_C_POINTS, proxies: bool = True, moves: bool = True,
+def run_greek_group(group: GreekGroup, *, reference_points=None, proxies: bool = True, moves: bool = True,
                     engines=None):
     """Every engine of the group's product: a GreekCellResult per engine (reference solved once)."""
+    if reference_points is None:
+        reference_points = reference_points_for(group.product)
     base_cell = group.cell(GREEK_ENGINES[group.product][0])
     ctx, _sw = build_context(base_cell)
     notional = C.notional(group.product)
