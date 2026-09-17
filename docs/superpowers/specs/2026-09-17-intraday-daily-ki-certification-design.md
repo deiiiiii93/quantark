@@ -227,7 +227,8 @@ Published private; the link is reported.
 
 The non-intraday suite on `e0ba6ba7` (the base) has 7 failures: replay goldens `scalar_bsm-greeks`,
 `scalar_bsm-surfaces`, `localvol-greeks` (PDE delta off by ~1e-4 relative) and four banked modelvalidation
-certificates. The PDE cubic readout in `e0ba6ba7` is the suspected cause; an A/B on `90e44344` is attributing it.
+certificates. The same seven pass on `90e44344` (A/B 2026-09-17: 16 passed, 11 skipped), so `e0ba6ba7` introduced
+them; its only change outside `quantark/intraday` is the PDE cubic delta/gamma readout.
 Their resolution (regenerated goldens and re-certification, or a readout change) is a user decision and blocks merging
 the branch, not this work's pilot or sweep, which never touch a PDE route.
 
