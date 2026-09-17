@@ -235,11 +235,23 @@ nohup caffeinate -i -m -s .venv/bin/python \
     --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full \
     --resume > bucket_fleet.log 2>&1 &
 
-# 4) aggregate
-.venv/bin/python example/snowball_q_term_structure/03_aggregate_and_report.py \
-    --run-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full \
-    --data-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full_report
+# 4) aggregate — stage 06, NOT stage 03
+.venv/bin/python example/snowball_q_term_structure/06_bucket_hedge_report.py \
+    --run-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full/runs \
+    --out-dir example/snowball_q_term_structure/data
 ```
+
+Two things that are easy to get wrong here. Stage 03 aggregates the SIX-MODEL
+study and writes `fleet_*`; stage 06 aggregates this one and writes `bucket_*`.
+Pointing stage 03 at a bucket run overwrites the other study's published
+results with cells it never ran, because `--data-dir` defaults to `data/`.
+And `--run-dir` for stage 06 is the `runs/` subdirectory, not the fleet
+directory above it.
+
+Add `--align-cell-stretch 0.02` to step 3 to price on the barrier-aligned
+engine. Without it the grid pins whichever barrier is nearest spot, the
+alignment target flips at `sqrt(KI*KO)`, and delta is discontinuous there;
+see `docs/bucket-futures-hedge/gates.md`.
 
 `--study-grid` defaults to `legacy`, so every command in the section above
 runs exactly the cells it always did. An explicit `--cells` overrides the
@@ -658,7 +670,54 @@ daily far-basis change and see whether the residual is basis-driven at
 all; if it is, the replay engine needs one hedge position per contract
 (out of scope, see the caveats).
 
-### 6. Caveats
+### 6. Does the bucket hedge pay for itself? (stages 02, 05-06)
+
+406 cells: 29 inceptions x 14 cells, priced on the barrier-aligned engine
+(`--align-cell-stretch 0.02`) with a daily carry audit, 26.8 hours. Paired by
+inception, because every cell of one inception sells the SAME contract on the
+same spot path with the same vol channel, rate and cost model.
+
+Terminal P&L difference, bucket policy minus its single-contract control, in
+bp of notional (t in brackets):
+
+| Model | Bucket policy | vs `front` | vs `far` |
+|---|---|---:|---:|
+| `term_flat_q` | `buckets_nodes` | -186.9 (-1.30) | -83.4 (-0.62) |
+| `term_flat_q` | `buckets_far` | -137.0 (-4.69) | -33.6 (-1.76) |
+| `term_flat_q` | `buckets_spot_parallel` | -238.5 (-4.90) | -135.1 (-3.75) |
+| `term_flat_fwd` | `buckets_nodes` | -214.1 (-3.82) | -113.6 (-2.23) |
+| `term_flat_fwd` | `buckets_far` | -194.4 (-4.77) | -93.9 (-3.26) |
+| `term_flat_fwd` | `buckets_spot_parallel` | -197.4 (-4.80) | -96.9 (-3.30) |
+
+**All twelve are negative and nine reach significance.** The bucket hedge cost
+between 34 and 239 bp against simply holding one contract, and the extra
+turnover bought nothing: daily tracking error moves by -5.6 to +1.6 bp on
+every cell except `buckets_nodes`, which is WORSE by 21 to 25 bp.
+
+Read it as "the extra exposure and turnover were not rewarded over this
+history", not as "the decomposition is wrong about the risk it names". These
+books deliberately hold different risk: a `nodes` book is MEANT to retain the
+`D_F` spot delta, as Gate A established. Terminal P&L standard deviation is
+541 to 631 bp across every policy, so a 34-to-239 bp mean difference is a
+consistent drag well inside one path's noise; the pairing is what makes it
+visible.
+
+**The audit over the full grid**: 52,892 pass, 0 fail, 14 inconclusive, 406
+not measured (terminal dates). Worst `abs(R)+E` 0.019866 against the 0.01-hand
+tolerance, on 2025-06-30; worst net-delta audit error 3.2e-12 hands. The 14
+inconclusive rows are two market states times seven cells, and they are the
+matched spot ladder stopping before its refinement allowance fits the budget
+rather than the identity breaking — extending the ladder converges them. The
+cause is the readout staircase, a separate defect.
+
+An earlier run of this grid on the unaligned engine reported 14 identity
+FAILURES, all one market state, and that is what found the barrier-alignment
+defect. Re-run with the fix the failures are gone and the economics are
+unchanged: every paired gap above moves by at most 1.35 bp. The verdict never
+depended on the defect, which is worth knowing precisely because it was not
+obvious in advance.
+
+### 7. Caveats
 
 - One product, one underlying, one 3.3-year window of one regime (a deep,
   volatile IM discount); inception windows overlap, so the paired samples

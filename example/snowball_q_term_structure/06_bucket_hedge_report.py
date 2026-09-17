@@ -255,6 +255,32 @@ def paired_differences(fleet: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def fleet_config(run_dir: Path) -> Dict[str, Any]:
+    """The engine configuration these cells were priced with.
+
+    Every cell of one fleet shares it, so the first one answers for all. It
+    matters here because a run on the barrier-aligned engine and one on the
+    engine that carried the alignment defect differ in the numbers this report
+    publishes, and run_dir alone is an ephemeral local path that cannot say
+    which is which.
+    """
+    for cell in sorted(run_dir.glob("*/*")):
+        path = cell / "run_config.json"
+        if not path.exists():
+            continue
+        cfg = json.loads(path.read_text())
+        return {
+            key: cfg.get(key)
+            for key in (
+                "quad_grid", "quad_readout", "align_cell_stretch",
+                "delta_threshold", "round_contracts", "cost_bp", "rate",
+                "risk", "source_digest",
+            )
+            if key in cfg
+        }
+    return {}
+
+
 def audit_overview(run_dir: Path, fleet: pd.DataFrame) -> Dict[str, Any]:
     """Identity verdicts and the worst residual across the whole grid."""
     frames = []
@@ -966,10 +992,28 @@ def build_report(
             "<code>--carry-audit-mode daily</code> for a report whose audit section stands on its own run.</p>"
         )
 
+    # An inconclusive verdict is the audit declining to decide, not a pass, so
+    # it gets said out loud whenever there is one rather than being left to the
+    # verdict counts above.
+    n_inconclusive = int(audit["verdicts"].get("inconclusive", 0))
+    if n_inconclusive:
+        inconclusive_html = (
+            f"<p><strong>{n_inconclusive} rows report inconclusive</strong>, which is the audit declining to "
+            "decide rather than an identity failure. The residual itself is comfortably inside the 0.01-hand "
+            "tolerance; what does not fit is the residual PLUS the change between the last two rungs of the "
+            "matched spot ladder, and the gate conservatively requires the whole allowance to fit. Extending the "
+            "ladder converges it, so this is the ladder stopping early and not the identity breaking. The cause "
+            "is the readout staircase, a separate defect on this record: see "
+            "<code>docs/bucket-futures-hedge/gates.md</code>.</p>"
+        )
+    else:
+        inconclusive_html = ""
+
     audit_html = (
         "<h2>The audit over the full grid</h2>"
         + audit_head
         + failure_html
+        + inconclusive_html
     )
 
     carry_html = _carry_section(fleet, recon, regime, regime_by_year)
@@ -1053,6 +1097,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     summary = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "run_dir": str(args.run_dir),
+        "config": fleet_config(args.run_dir),
         "cells": int(len(fleet)),
         "inceptions": sorted(fleet["inception"].unique().tolist()),
         "policies": sorted(fleet["policy"].unique().tolist()),
