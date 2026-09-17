@@ -28,12 +28,13 @@ ENGINES = {
     "one_touch_zero_carry": ("analytical", "pde"),
 }
 BARRIERS = {"snowball_discrete_ki": ("ko", "ki"), "digital": ("strike",), "barrier_uo_zero_carry": ("ko",),
-            "one_touch_zero_carry": ("ko",)}
+            "one_touch_zero_carry": ("ko",), "snowball_long_gap": ("ko", "ki")}
 #: Capability-matrix monitoring column each catalogued product falls in. A Greek
 #: demonstration is scoped to it: a certificate earned on discrete fixings says
 #: nothing about the same product under a continuously observed barrier.
 MONITORING = {"snowball_discrete_ki": "discrete", "digital": "terminal",
-              "barrier_uo_zero_carry": "continuous", "one_touch_zero_carry": "continuous"}
+              "barrier_uo_zero_carry": "continuous", "one_touch_zero_carry": "continuous",
+              "snowball_long_gap": "discrete"}
 FAST_HORIZON, FAST_OFFSET, FAST_PROFILE = timedelta(hours=1), "sd+1", "desk"
 
 
@@ -80,8 +81,16 @@ def profile(name: str) -> VarianceProfile:
 
 def product(name: str):
     from intraday.conftest import dated_snowball, digital
-    if name == "snowball_discrete_ki":
-        return dated_snowball(sse().calendar, T0)
+    if name in ("snowball_discrete_ki", "snowball_long_gap"):
+        prod = dated_snowball(sse().calendar, T0)
+        if name == "snowball_long_gap":
+            # A long first observation period followed by monthly observations.
+            # Same future cashflows as the sixth-fixing fixture, but no earlier
+            # observations/history to cross when moving valuation >29 days back.
+            # This is an explicit contract, never a future fixing passed as history.
+            for schedule in (prod.barrier_config.ko_observation_schedule, prod.barrier_config.ki_observation_schedule):
+                schedule.records = schedule.records[5:]
+        return prod
     if name == "digital":
         return digital(SHORT_EXPIRY)
     if name == "barrier_uo_zero_carry":
@@ -95,7 +104,8 @@ def product(name: str):
 
 def notional(name: str) -> float:
     """What the price budget scales with: initial notional (snowball, barrier) or the cash amount (digital, touch)."""
-    return {"snowball_discrete_ki": 100.0, "digital": 1.0, "barrier_uo_zero_carry": 100.0, "one_touch_zero_carry": 1.0}[name]
+    return {"snowball_discrete_ki": 100.0, "snowball_long_gap": 100.0, "digital": 1.0,
+            "barrier_uo_zero_carry": 100.0, "one_touch_zero_carry": 1.0}[name]
 
 
 def market(name: str):
@@ -110,8 +120,10 @@ def fixing_and_history(name: str):
     prod = product(name)
     probe = resolve_context(IntradayValuationRequest(product=prod, pricing_env=flat_env(datetime(2026, 9, 1, tzinfo=SHANGHAI)),
                                                      session_calendar=sse(), variance_profile=profile("desk")))
-    if name == "snowball_discrete_ki":
+    if name in ("snowball_discrete_ki", "snowball_long_gap"):
         kos = [e for e in probe.timeline.events if e.kind is EventKind.KO]
+        if name == "snowball_long_gap":
+            return kos[0].timestamp, ()
         return kos[5].timestamp, tuple(Fixing(k.timestamp, 100.0) for k in kos[:5])
     return probe.timeline.terminal().timestamp, ()
 

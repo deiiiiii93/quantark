@@ -74,7 +74,7 @@ def build_context(cell: C.Cell):
     barrier = C.barrier_level(cell)
     probe = resolve_context(IntradayValuationRequest(product=prod, pricing_env=flat_env(ts, spot=barrier, r=r, q=q),
                                                      session_calendar=C.sse(), variance_profile=prof, fixings=fixings))
-    tau = probe.numerical.maturity_tau if cell.product != "snowball_discrete_ki" else min(
+    tau = probe.numerical.maturity_tau if not cell.product.startswith("snowball_") else min(
         t for t in probe.numerical.event_taus.values() if t > 0.0)
     sw = sqrt(max(float(probe.pricing_env.vol_surface.total_variance(100.0, tau, barrier)), 0.0))
     kind, _, amount = cell.offset.partition("+") if "+" in cell.offset else cell.offset.partition("-")

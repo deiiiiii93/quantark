@@ -50,7 +50,13 @@ def _greek_section() -> str:
               "recognisable knobs; the evidence file holds the full record), with another measure knob, or at a time "
               "to the next fixing outside the window reports `unqualified` with no value. A `point_*` row lets that "
               "route report the point measure `ok` inside its window; a `desk_*` row lets it report a desk move of "
-              "prices that are not exact. Market and contract levels are recorded, not keyed (see the module README).",
+              "prices that are not exact. Numerical certificates additionally match conditional payoff/event/state/"
+              "settlement terms, market curves and levels, calendar, and the demonstrated spot envelope. Other "
+              "economics remain unqualified (see the module README).",
+              "",
+              "Analytical barrier/touch point theta is checked per request on admitted exact prices with three "
+              "second-order stencil levels. Its result reports a truncation/cancellation error estimate and the "
+              "frozen error budget; an unresolved limit reports `unqualified`. It does not require a family row below.",
               "",
               "| Product | Route | Measure | Monitoring | Profile | Engine settings | Measure settings | "
               "Horizon window (s) | Spot offsets | Barriers |",

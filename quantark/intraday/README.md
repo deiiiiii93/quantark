@@ -250,19 +250,34 @@ Every limit below raises rather than approximating. None of them is a silent fal
   cell passing. Outside any of those a Greek reports `unqualified` with no value, whatever
   the mesh did. QUAD V2 at `cells_per_sd=0.1` has the same kernel-derivative evidence as the
   certified `cells_per_sd=2` and a delta 30% off the reference.
-- Market and contract LEVELS are not part of the key. The evidence records the market
-  families it ran on (flat vol 20%, r 3%, q 1%; one monthly snowball, one digital); the
-  certificate generalises over levels because the swept dimensions are the ones the
-  discretisation error depends on — time to the next event, the spot's distance to each
-  barrier in standard deviations, the mesh or quadrature per standard deviation.
+- Numerical certificates also match the conditional contract and market: payoff terms,
+  remaining events and payments, KI state, pending ledger, curve families and levels,
+  and the session calendar. Historical observations can differ only when they leave the
+  same future claim and state. Spot must lie inside the tested envelope (two standard
+  deviations or ten basis points beyond the barrier range, whichever is wider).
+  Other economics report `unqualified`; a settings match alone is insufficient.
 - A desk bump is exact as an operation on its prices, so its error is the prices' own. It is
   `ok` when every contributing price is exact (a closed form the route proved exact, a fixed
   ledger) or when Gate C demonstrated the same finite move; a bump cell the route could not
   resolve makes it `unqualified` either way.
-- A desk theta is that declared roll and says so; a point theta is a stencil, so — like a
-  point vega — it needs a certificate even on exact prices.
-- Swept today (horizons 1 s to 29 days, profiles desk and sessions-only): QUAD V2 snowballs
+- A desk theta is that declared roll and says so. Analytical barrier/touch point theta
+  uses a per-request limit of three second-order stencils on admitted exact prices,
+  inside one event/clock/coefficient segment. It reports `error_estimate` and `error_budget`
+  including a floating-point cancellation floor, and declines an unresolved limit.
+  Other point theta proxies still need the matching Gate C certificate.
+- Swept today (see the packaged evidence and generated matrix for horizon windows,
+  profiles desk and sessions-only): QUAD V2 snowballs
   and analytical digitals for every point and desk measure; PDE and MC for point and desk
   delta/gamma only. A desk vega, rho, dividend rho or theta on PDE or MC is therefore
   `unqualified` — for MC because the summed standard errors of the two prices of such a move
   alone exceed its budget at the certified path count. The matrix lists what passed.
+
+The longer-horizon fixture has an explicit long first observation period followed by
+monthly fixings. It shares the original fixture's conditional future claim after five
+confirmed fixings, permitting a sweep beyond 29 days without future fixing history.
+Certificate aggregation requires every offset/barrier cell at each included horizon;
+partial or interrupted runs cannot create a passing horizon.
+
+PDE spot readout uses a local cubic at the requested log spot. The former three-node
+quadratic kept curvature at its nearest node, causing first-order phase oscillations
+under refinement. This correction does not itself certify the default PDE mesh.

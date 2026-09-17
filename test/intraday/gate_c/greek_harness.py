@@ -33,7 +33,7 @@ from typing import Optional, Tuple
 from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
 from quantark.execution.errors import CapabilityError
 from quantark.intraday.engines import route_for
-from quantark.intraday.capability import accuracy_settings
+from quantark.intraday.capability import accuracy_settings, economic_identity
 from quantark.intraday.greeks import (DEFAULT_THETA_STEP, bump_config_for, cell_price, desk_bump_envs, point_proxy_bump,
                                       point_proxy_difference, point_theta_estimate, resolve_theta_step, _spot_env,
                                       with_pricing_env)
@@ -51,21 +51,24 @@ GREEK_PROFILES = ("desk", "sessions_only")
 #: The price ladder's horizons plus the daily regime up to the fixture's fixing gap (its fifth KO fixing is 30 days
 #: before the sixth, so 29 days is the longest horizon with the same confirmed history).
 GREEK_HORIZONS = (timedelta(days=29), timedelta(days=14), timedelta(days=7), timedelta(days=3)) + C.HORIZONS
+LONG_GAP_HORIZONS = tuple(timedelta(days=d) for d in (29, 30, 35, 60, 90))
 #: Engines swept for the desk vega/rho/dividend-rho moves and for theta. PDE is not: its spot moves already miss the
 #: budget at most horizons, and a sweep that cannot pass would only buy grid memory. MC is not: at the certified path
 #: count the summed standard errors of a desk move's two prices alone exceed the budget (its desk delta and gamma
 #: cells record exactly that), and rescaling a one-basis-point move to +1% multiplies them a hundredfold.
 MOVE_ENGINES = ("quad_v2", "analytical")
 DESK_MOVES = (("vega", "vol_up"), ("rho", "rate_up"), ("dividend_rho", "div_up"))
-GREEK_ENGINES = {"snowball_discrete_ki": ("quad_v2", "pde", "mc_rqmc"), "digital": ("analytical", "mc_rqmc")}
+GREEK_ENGINES = {"snowball_discrete_ki": ("quad_v2", "pde", "mc_rqmc"), "digital": ("analytical", "mc_rqmc"),
+                 "snowball_long_gap": ("quad_v2",)}
 PROXY_ENGINES = ("quad_v2", "analytical")
 PROXIES = ("vega", "rho", "dividend_rho")
 BUMP_LADDER = (4.0, 2.0, 1.0, 0.5)
 PROXY_REFERENCE_POINTS = (4001, 8001)
 ROUTE_NAMES = {("snowball_discrete_ki", "quad_v2"): "QuadV2Route", ("snowball_discrete_ki", "pde"): "PDERoute",
                ("snowball_discrete_ki", "mc_rqmc"): "MCRoute", ("digital", "analytical"): "AnalyticalDigitalRoute",
-               ("digital", "mc_rqmc"): "MCRoute"}
-PRODUCT_NAMES = {"snowball_discrete_ki": "SnowballOption", "digital": "CashOrNothingDigitalOption"}
+               ("digital", "mc_rqmc"): "MCRoute", ("snowball_long_gap", "quad_v2"): "QuadV2Route"}
+PRODUCT_NAMES = {"snowball_discrete_ki": "SnowballOption", "snowball_long_gap": "SnowballOption",
+                 "digital": "CashOrNothingDigitalOption"}
 
 
 @dataclass(frozen=True)
@@ -85,12 +88,15 @@ class GreekGroup:
 
 
 def greek_groups():
-    return [GreekGroup(p, prof, h, o, b) for p in GREEK_ENGINES for prof in GREEK_PROFILES for h in GREEK_HORIZONS
+    return [GreekGroup(p, prof, h, o, b) for p in GREEK_ENGINES for prof in GREEK_PROFILES
+            for h in (LONG_GAP_HORIZONS if p == "snowball_long_gap" else
+                      tuple(sorted(set(GREEK_HORIZONS + LONG_GAP_HORIZONS))) if p == "digital" else GREEK_HORIZONS)
             for o in C.SPOT_OFFSETS for b in C.BARRIERS[p]]
 
 
 def fast_greek_groups():
-    return [GreekGroup(p, C.FAST_PROFILE, C.FAST_HORIZON, C.FAST_OFFSET, C.BARRIERS[p][0]) for p in GREEK_ENGINES]
+    return [GreekGroup(p, C.FAST_PROFILE, C.FAST_HORIZON, C.FAST_OFFSET, C.BARRIERS[p][0])
+            for p in ("snowball_discrete_ki", "digital")]
 
 
 @dataclass(frozen=True)
@@ -114,6 +120,7 @@ class GreekCellResult:
     measures: Tuple[MeasureResult, ...]
     settings: dict = field(default_factory=dict)          # accuracy_settings of the level-0 engine every measure used
     market: dict = field(default_factory=dict)            # the families and levels the cell ran on (recorded, not keyed)
+    economics: str = ""
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -465,7 +472,8 @@ def _proxy(cell, ctx, engine, name, notional) -> MeasureResult:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def run_greek_group(group: GreekGroup, *, reference_points=GATE_C_POINTS, proxies: bool = True, moves: bool = True):
+def run_greek_group(group: GreekGroup, *, reference_points=GATE_C_POINTS, proxies: bool = True, moves: bool = True,
+                    engines=None):
     """Every engine of the group's product: a GreekCellResult per engine (reference solved once)."""
     base_cell = group.cell(GREEK_ENGINES[group.product][0])
     ctx, _sw = build_context(base_cell)
@@ -481,8 +489,11 @@ def run_greek_group(group: GreekGroup, *, reference_points=GATE_C_POINTS, proxie
               "rate_curve": type(ctx.request.pricing_env.rate_curve).__name__,
               "div_yield": type(ctx.request.pricing_env.div_yield).__name__,
               "levels": {"vol": SIGMA_INNER, "r": C.market(group.product)[0], "q": C.market(group.product)[1]}}
+    economics = economic_identity(ctx)
     results = []
-    for engine_key in GREEK_ENGINES[group.product]:
+    for engine_key in (GREEK_ENGINES[group.product] if engines is None else engines):
+        if engine_key not in GREEK_ENGINES[group.product]:
+            raise ValueError(f"{engine_key} is not in the Greek inventory for {group.product}")
         cell = group.cell(engine_key)
         route_name = ROUTE_NAMES[(group.product, engine_key)]
         settings = accuracy_settings(engine_for(cell, 0))
@@ -492,7 +503,7 @@ def run_greek_group(group: GreekGroup, *, reference_points=GATE_C_POINTS, proxie
         except CapabilityError as exc:
             results.append(GreekCellResult(cell, route_name, (MeasureResult("point_delta", "unsupported", reason=str(exc)),
                                                               MeasureResult("point_gamma", "unsupported", reason=str(exc))),
-                                           settings, market))
+                                           settings, market, economics))
             continue
         measures = [
             _classify_point(cell, ctx, "delta", ladder, delta, ud,
@@ -507,14 +518,14 @@ def run_greek_group(group: GreekGroup, *, reference_points=GATE_C_POINTS, proxie
             measures.extend(_desk_moves(cell, ctx, engine_for(cell, 0), reference_points, notional, cache))
             measures.append(_desk_theta(cell, ctx, engine_for(cell, 0), reference_points, notional, cache))
             measures.append(_point_theta(cell, ctx, engine_for(cell, 0), reference, notional))
-        results.append(GreekCellResult(cell, route_name, tuple(measures), settings, market))
+        results.append(GreekCellResult(cell, route_name, tuple(measures), settings, market, economics))
     return results
 
 
 def _jsonable(result: GreekCellResult) -> dict:
     return {"cell": {**asdict(result.cell), "horizon": int(result.cell.horizon.total_seconds()), "id": result.cell.id},
             "route": result.route_name, "product": PRODUCT_NAMES[result.cell.product],
-            "settings": result.settings, "market": result.market,
+            "settings": result.settings, "market": result.market, "economic_identity": result.economics,
             "measures": [asdict(m) for m in result.measures]}
 
 
@@ -543,29 +554,45 @@ def demonstrated(rows) -> list:
         for m in row["measures"]:
             knobs = m.get("measure_settings") or {}
             key = (row["product"], row["route"], m["measure"], MONITORING[cell["product"]], cell["profile"],
-                   _json.dumps(settings, sort_keys=True), _json.dumps(knobs, sort_keys=True))
+                   _json.dumps(settings, sort_keys=True), _json.dumps(knobs, sort_keys=True), row.get("economic_identity", ""))
             ok = m["status"] in ("passed", "undefined")
             entry = table.setdefault(key, {"by_h": {}, "offsets": set(), "barriers": set(), "settings": settings,
-                                           "measure_settings": knobs, "markets": []})
+                                           "measure_settings": knobs, "markets": [], "coverage": {}})
             entry["by_h"].setdefault(cell["horizon"], []).append(ok)
+            coverage = entry["coverage"].setdefault(cell["horizon"], {})
+            coverage.setdefault(cell["product"], set()).add((cell["offset"], cell["barrier"]))
             entry["offsets"].add(cell["offset"])
             entry["barriers"].add(cell["barrier"])
             if row.get("market") and row["market"] not in entry["markets"]:
                 entry["markets"].append(row["market"])
     out = []
-    for (product, route, measure, monitoring, profile_name, _s, _k), entry in sorted(table.items()):
+    for (product, route, measure, monitoring, profile_name, _s, _k, economics), entry in sorted(table.items()):
         horizons = sorted(entry["by_h"])
+        fixtures = {fixture for coverage in entry["coverage"].values() for fixture in coverage}
+        expected = {int(h.total_seconds()) for fixture in fixtures
+                    for h in (LONG_GAP_HORIZONS if fixture == "snowball_long_gap" else
+                              GREEK_HORIZONS + LONG_GAP_HORIZONS if fixture == "digital" else GREEK_HORIZONS)}
+        # An entirely absent interior horizon is also a gap, not permission to
+        # bridge directly between its two surviving neighbours.
+        horizons = sorted(set(horizons) | {h for h in expected if horizons[0] <= h <= horizons[-1]})
+        # A stopped/resumed subset must not extend a certificate merely because
+        # its surviving cells passed. Require the full offset/barrier catalogue
+        # for every represented fixture at each candidate horizon.
+        passed = {h: h in entry["by_h"] and all(entry["by_h"][h]) and all(
+            covered == {(o, b) for o in C.SPOT_OFFSETS for b in C.BARRIERS[fixture]}
+            for fixture, covered in entry["coverage"][h].items()) for h in horizons}
         windows, start = [], None
         for i, h in enumerate(horizons):
-            if all(entry["by_h"][h]):
+            if passed[h]:
                 start = h if start is None else start
-                if i == len(horizons) - 1 or not all(entry["by_h"][horizons[i + 1]]):
+                if i == len(horizons) - 1 or not passed[horizons[i + 1]]:
                     windows.append((start, h))
                     start = None
         for lo, hi in windows:
             out.append({"product": product, "route": route, "measure": measure, "monitoring": monitoring,
                         "profile": profile_name, "profile_identity": list(profile_of(profile_name).identity()),
                         "settings": entry["settings"], "measure_settings": entry["measure_settings"],
+                        "economic_identity": economics,
                         "horizon_s": lo, "horizon_max_s": hi, "swept_horizons_s": [h for h in horizons if lo <= h <= hi],
                         "offsets": sorted(entry["offsets"]), "barriers": sorted(entry["barriers"]),
                         "markets": entry["markets"]})
@@ -587,7 +614,7 @@ def aggregate_greeks(jsonl_path, json_path, *, git_sha=None, wall_time_s=None) -
                     "move_per_point": [budgets.MOVE_ABS, budgets.MOVE_REL],
                     "theta_per_hour": [budgets.THETA_ABS, budgets.THETA_REL], "reference_multiplier": K_REF},
         "bump_ladder": list(BUMP_LADDER),
-        "horizons_s": [int(h.total_seconds()) for h in sorted(GREEK_HORIZONS)],
+        "horizons_s": sorted({r["cell"]["horizon"] for r in rows.values()}),
         "demonstrated": demonstrated(rows.values()),
         "cells": [rows[k] for k in sorted(rows)],
     }

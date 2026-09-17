@@ -5,6 +5,19 @@ plans (`plan1-clock-context-result`, `plan2-engines-reference`,
 `plan3-greeks-roll-batch`). Worktree branch `worktree-intraday-plan1`, based on
 `64b2832d` (feat/simulated-path-backtest, which carries QUAD V2).
 
+## 2026-09-17 follow-up
+
+The historical runs below are preserved. The [third review and correction record](../reviews/intraday-pricing-2026-09-16/RESOLUTION.md)
+supersedes the open PDE-gamma diagnosis and the 29-day Greek limit: a query-centred cubic readout removes the eight
+original above-budget refinement failures, and 308 additional cells extend the matching QUAD/digital Greek windows
+to 90 days. Seven of the eight remeasured default PDE gamma values remain unqualified; there is no PDE point-gamma
+certificate. The original failure set also included a 29-day KI cell at +10 bp.
+
+Analytical barrier point theta now reports a per-request truncation/cancellation estimate against the frozen budget.
+Numerical Greek certificates additionally match conditional contract/market economics and the demonstrated spot
+envelope. The resolution record contains the new independent evidence, regression results, and resource controls;
+the earlier timing and curve-qualification counts below have not been rerun as performance claims.
+
 ## Inventory (2026-09-15)
 
 - `PricingEnvironment` (`quantark/priceenv/pricing_environment.py:44-52`): fields `rate_curve, valuation_date: datetime, spot_quote, vol_surface, div_yield, basis_yield, day_count_convention=CALENDAR_DAYS, bus_days_in_year=252, calendar`. No tz validation, `.date()` only in `__repr__`. `__post_init__` calls `validate_trading_clock_configuration` only under `BUSINESS_DAYS`.

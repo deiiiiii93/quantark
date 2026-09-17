@@ -149,7 +149,7 @@ def test_demonstrated_quad_proxies_are_central_differences_of_the_frozen_price_f
     assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0, monitoring="discrete",
                                       profile_identity=other.identity(), settings=settings)
     # ... nor at a horizon beyond the swept window
-    assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 60 * 86400.0, **G.qualification_scope(ctx),
+    assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 91 * 86400.0, **G.qualification_scope(ctx),
                                       settings=settings)
     res = value_intraday(QUAD, req)
     for g in res.greeks:

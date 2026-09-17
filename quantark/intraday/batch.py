@@ -174,11 +174,11 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
                                   lifecycle_state=num.lifecycle_state)
         values = prepared.evaluate(spots)
         shared = dict(getattr(prepared, "diagnostics", {}) or {})
-        # One context, one horizon, one engine: the certificate is the same for every spot of the curve, and a
-        # kernel derivative of a discretised value needs it exactly as a single point Greek does (review R4).
-        gap = point_certificate_gap(ctx, engine, route)
+        # The conditional economics are shared, but each spot must remain in
+        # the demonstrated spatial envelope (review R4).
         points = []
         for i, s in enumerate(spots):
+            gap = point_certificate_gap(ctx, engine, route, spot=s)
             delta, gamma = float(values["delta"][i]), float(values["gamma"][i])
             if jumps[i] or not (isfinite(delta) and isfinite(gamma)):
                 points.append(SpotCurvePoint(s, float(values["price"][i]), None, None, "undefined",

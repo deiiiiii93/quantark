@@ -1487,7 +1487,23 @@ class BasePDESolver(BaseEngine):
         Returns:
             Tuple of (delta, gamma)
         """
-        # Centre the stencil on the node nearest x_target (interior only)
+        # A quadratic's curvature is constant: carrying its first derivative
+        # to the query cannot carry its second derivative there. On refinement
+        # the nearest node changes sides, producing O(dx) gamma oscillations.
+        # Interpolate a local cubic around the QUERY, so both derivatives are
+        # evaluated there (second-order curvature on a non-uniform grid).
+        if len(x_vec) >= 4:
+            start = int(np.clip(np.searchsorted(x_vec, x_target) - 2, 0, len(x_vec) - 4))
+            offsets = x_vec[start:start + 4] - float(x_target)
+            scale = float(np.max(np.abs(offsets)))
+            z = offsets / scale
+            values = v_vec[start:start + 4]
+            coefficients = np.linalg.solve(np.vander(z, 4, increasing=True), values - values[1])
+            dv_dx = float(coefficients[1]) / scale
+            d2v_dx2 = 2.0 * float(coefficients[2]) / (scale * scale)
+            return dv_dx / spot, (d2v_dx2 - dv_dx) / (spot * spot)
+
+        # A minimal three-node grid has only a quadratic interpolant.
         idx = int(np.searchsorted(x_vec, x_target))
         idx = max(1, min(idx, len(x_vec) - 2))
         if idx > 1 and abs(x_vec[idx - 1] - x_target) < abs(x_vec[idx] - x_target):

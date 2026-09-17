@@ -187,7 +187,9 @@ def test_r4_prepared_curve_points_carry_the_same_certificate(sse_calendar, sse_s
     coarse = spot_curve(SnowballQuadEngineV2(QuadV2Params(order=4, cells_per_sd=0.1)), req, [74.0, 76.0])
     assert [p.status for p in coarse] == ["unqualified", "unqualified"] and all(p.delta is None for p in coarse)
     assert "cells_per_sd=0.1" in coarse[0].reason
-    assert [p.status for p in spot_curve(QUAD, req, [74.0, 76.0])] == ["ok", "ok"]
+    curve = spot_curve(QUAD, req, [74.0, 76.0])
+    assert [p.status for p in curve] == ["unqualified", "ok"]
+    assert "spot envelope" in curve[0].reason       # 74 is outside the swept one-hour KI neighbourhood
 
 
 def test_r4_the_default_engines_are_the_certified_configurations():

@@ -278,9 +278,43 @@ def _differences(requested: dict, demonstrated: dict, limit: int = 4) -> str:
     return shown + (f", and {len(keys) - limit} more" if len(keys) > limit else "")
 
 
+def economic_identity(ctx) -> str:
+    """Tested conditional contract and market, excluding spot and valuation time.
+
+    Historical observations enter through their resolved state. Keep every
+    product term except observation schedules, keyed instead by their resolved
+    FUTURE events (cash, barriers and absolute payment times included). A long
+    first period can then qualify the same remaining claim just after a fixing,
+    without certifying different payoffs, curves, event suffixes or KI states.
+    """
+    from quantark.execution.cache.fingerprint import fingerprint
+    from quantark.intraday.context import value_tree
+    from quantark.param.vol import TradingClockVolSurface
+
+    product = ctx.request.product
+    terms = {f.name: getattr(product, f.name) for f in dataclasses.fields(product)}
+    barriers = terms.get("barrier_config")
+    if barriers is not None and dataclasses.is_dataclass(barriers):
+        terms["barrier_config"] = {f.name: getattr(barriers, f.name) for f in dataclasses.fields(barriers)
+            if f.name not in ("ko_observation_schedule", "ki_observation_schedule",
+                              "ko_observation_dates", "ki_observation_dates")}
+    events = [(e.kind.value, e.timestamp, e.payment_timestamp, e.barrier, e.cash, e.regime)
+              for e in ctx.numerical.remaining_events]
+    # Bump contexts intentionally retain their original request. Match the
+    # market actually delivered to the engine, unwrapping only the known clock.
+    env = ctx.pricing_env
+    surface = env.vol_surface.inner if type(env.vol_surface) is TradingClockVolSurface else env.vol_surface
+    state = ctx.numerical.lifecycle_state
+    ledger = () if state is None else tuple((cf.amount, cf.payment_time) for cf in state.ledger.cashflows
+                                           if cf.payment_time > 0.0)
+    return fingerprint(value_tree((terms, events, ctx.numerical.knocked_in, ledger,
+                                   env.rate_curve, env.div_yield, surface, env.basis_yield,
+                                   ctx.request.session_calendar.identity())))
+
+
 def output_qualification_gap(product_name: str, route_name: str, measure: str, seconds_to_event: float, *,
                              monitoring: str, profile_identity, settings: dict,
-                             measure_settings: Optional[dict] = None) -> str:
+                             measure_settings: Optional[dict] = None, economics: Optional[str] = None) -> str:
     """"" when Gate C demonstrated this exact combination here; otherwise why it did not.
 
     A certificate covers only the configurations its cells actually ran. The key is
@@ -291,10 +325,10 @@ def output_qualification_gap(product_name: str, route_name: str, measure: str, s
     those the evidence is silent, and silence is not a pass: no evidence file, no
     matching row, or a horizon the ladder never reached all fail closed.
 
-    Market and contract LEVELS are not keyed. The evidence records the families it
-    ran on, and the swept dimensions are the ones discretisation error depends on
-    (time to the event, the spot's distance to each barrier in standard deviations,
-    the mesh or quadrature per standard deviation); see the module README.
+    Numerical routes also match ``economic_identity``: conditional future
+    contract, lifecycle state, settlement, market curves/levels and calendar.
+    No generalisation to untested economics is inferred from mesh density.
+    The context-level caller additionally checks the demonstrated spot envelope.
     """
     rows = [r for r in greek_evidence().get("demonstrated", ())
             if (r["product"], r["route"], r["measure"]) == (product_name, route_name, measure)]
@@ -318,6 +352,11 @@ def output_qualification_gap(product_name: str, route_name: str, measure: str, s
     if not rows_measure:
         return (f"Gate C demonstrated {measure} for {product_name} on {route_name} only with "
                 f"{_differences(measure_settings or {}, rows_settings[0].get('measure_settings') or {})}")
+    if route_name in ("QuadV2Route", "PDERoute", "MCRoute"):
+        rows_measure = [r for r in rows_measure if economics and r.get("economic_identity") == economics]
+        if not rows_measure:
+            return (f"Gate C demonstrated {measure} only for other conditional contract/market economics "
+                    "(payoff, future events, state, settlement, curve families and levels)")
     windows = [(float(r["horizon_s"]), float(r["horizon_max_s"])) for r in rows_measure]
     if any(lo <= seconds_to_event <= hi for lo, hi in windows):
         return ""
@@ -327,10 +366,11 @@ def output_qualification_gap(product_name: str, route_name: str, measure: str, s
 
 
 def point_output_qualified(product_name: str, route_name: str, measure: str, seconds_to_event: float, *,
-                           monitoring: str, profile_identity, settings: dict) -> bool:
+                           monitoring: str, profile_identity, settings: dict, economics: Optional[str] = None) -> bool:
     """Whether Gate C demonstrated point ``measure`` for this exact configuration (see the gap function)."""
     return not output_qualification_gap(product_name, route_name, f"point_{measure}", seconds_to_event,
-                                        monitoring=monitoring, profile_identity=profile_identity, settings=settings)
+                                        monitoring=monitoring, profile_identity=profile_identity, settings=settings,
+                                        economics=economics)
 
 
 def _horizon_label(horizon: Optional[timedelta]) -> str:

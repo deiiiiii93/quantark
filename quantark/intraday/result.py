@@ -31,8 +31,14 @@ class GreekValue:
     bump: Optional[float] = None
     status: str = "ok"
     reason: Optional[str] = None
+    error_estimate: Optional[float] = None
+    error_budget: Optional[float] = None
 
     def __post_init__(self):
+        for name in ("error_estimate", "error_budget"):
+            value = getattr(self, name)
+            if value is not None and (not isfinite(float(value)) or value < 0.0):
+                raise ValidationError(f"greek {self.name}: {name} must be finite and nonnegative")
         if self.status not in GREEK_STATUSES:
             raise ValidationError(f"unknown greek status {self.status!r}")
         if self.convention not in GREEK_CONVENTIONS:

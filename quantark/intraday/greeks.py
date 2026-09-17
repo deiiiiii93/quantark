@@ -36,7 +36,7 @@ from quantark.asset.equity.riskmeasures.greeks import bump_envs
 from quantark.execution.cache.fingerprint import fingerprint
 from quantark.execution.errors import CapabilityError
 from quantark.intraday.result import GreekValue
-from quantark.intraday.timestamp import to_utc
+from quantark.intraday.timestamp import SECONDS_PER_YEAR, to_utc
 from quantark.util.exceptions import NumericalError, PricingError
 
 DESK_GREEKS = ("delta", "gamma", "vega", "rho", "dividend_rho")
@@ -261,21 +261,40 @@ def qualification_scope(ctx) -> dict:
     a profile whose weights put the variance somewhere else.
     """
     from quantark.intraday.events import monitoring_of
+    from quantark.intraday.capability import economic_identity
     return {"monitoring": monitoring_of(ctx.timeline),
-            "profile_identity": ctx.request.variance_profile.identity()}
+            "profile_identity": ctx.request.variance_profile.identity(),
+            "economics": economic_identity(ctx)}
 
 
-def certificate_gap(ctx, engine, route, measure: str, measure_settings: Optional[dict] = None) -> str:
+def certificate_gap(ctx, engine, route, measure: str, measure_settings: Optional[dict] = None, *, spot=None) -> str:
     """"" when Gate C demonstrated ``measure`` for this request's family, engine settings and horizon; else why not."""
     from quantark.intraday.capability import accuracy_settings, output_qualification_gap
-    return output_qualification_gap(type(ctx.request.product).__name__, type(route).__name__, measure,
+    gap = output_qualification_gap(type(ctx.request.product).__name__, type(route).__name__, measure,
                                     seconds_to_first_event(ctx), **qualification_scope(ctx),
                                     settings=accuracy_settings(engine), measure_settings=measure_settings)
+    if gap or type(route).__name__ not in ("QuadV2Route", "PDERoute", "MCRoute"):
+        return gap
+    # The swept spot envelope: two standard deviations or ten basis points
+    # around the barrier levels, whichever is wider. Do not extend it to an
+    # arbitrary spot merely because all other certificate fields match.
+    from math import exp, sqrt
+    spot = ctx.spot if spot is None else float(spot)
+    levels = [float(e.barrier) for e in ctx.numerical.remaining_events if e.barrier is not None]
+    if not levels:
+        levels = [float(ctx.numerical.product.strike)]
+    tau = seconds_to_first_event(ctx) / SECONDS_PER_YEAR
+    strike = float(getattr(ctx.numerical.product, "strike", levels[0]))
+    sd = sqrt(max(float(ctx.pricing_env.vol_surface.total_variance(strike, tau, spot)), 0.0))
+    lo, hi = min(levels) * min(exp(-2*sd), 0.999), max(levels) * max(exp(2*sd), 1.001)
+    if not lo * (1-1e-12) <= spot <= hi * (1+1e-12):
+        return f"spot {spot:g} is outside the Gate C spot envelope [{lo:g}, {hi:g}]"
+    return ""
 
 
-def point_certificate_gap(ctx, engine, route) -> str:
+def point_certificate_gap(ctx, engine, route, *, spot=None) -> str:
     """The Gate C gaps of point delta and gamma for this request, joined ("" when both are demonstrated)."""
-    gaps = (certificate_gap(ctx, engine, route, f"point_{m}") for m in ("delta", "gamma"))
+    gaps = (certificate_gap(ctx, engine, route, f"point_{m}", spot=spot) for m in ("delta", "gamma"))
     return "; ".join(dict.fromkeys(g for g in gaps if g))
 
 
@@ -419,6 +438,56 @@ def point_theta_estimate(ctx, engine, *, price_base: float, unit: str = "hour"):
     return value, h, exact1 and exact2
 
 
+def analytical_theta_limit(ctx, engine, *, price_base: float, unit: str) -> GreekValue:
+    """A per-request derivative limit on admitted exact analytical prices.
+
+    Three second-order forward stencils share five price evaluations. Their
+    Richardson differences estimate truncation; an explicit cancellation floor
+    covers floating-point price noise. All points remain inside one coefficient
+    segment. The frozen Gate C theta budget is assessed in PnL per hour before
+    conversion to the requested unit. No sampled family certificate is needed.
+    """
+    from math import isfinite
+    from sys import float_info
+    from quantark.intraday.request import THETA_UNITS
+
+    h, why = point_theta_step(ctx)
+    if h is None:
+        return GreekValue("theta", None, f"PnL per {unit}", "point", status="unqualified", reason=why)
+    # Exact dyadic steps in datetime's microsecond representation.
+    h = timedelta(microseconds=4 * int(h / timedelta(microseconds=4)))
+    prices = {0: price_base}
+    for k in (1, 2, 4, 8):
+        value, exact = _rolled_value(ctx, engine, k * (h / 4))
+        if not exact:
+            return GreekValue("theta", None, f"PnL per {unit}", "point", status="unqualified",
+                              reason="the analytical theta limit requires every rolled price to be exact")
+        prices[k] = value
+    seconds = h.total_seconds()
+    derivatives = [(-3 * prices[0] + 4 * prices[k] - prices[2*k]) / (2 * seconds * k / 4) * 3600
+                   for k in (4, 2, 1)]
+    coarse, mid, fine = derivatives
+    rich_coarse, rich_fine = (4 * mid - coarse) / 3, (4 * fine - mid) / 3
+    product = ctx.request.product
+    scale = abs(float(getattr(product, "initial_price", getattr(product, "strike", 1.0))))
+    scale *= abs(float(getattr(product, "contract_multiplier", 1.0)))
+    # Same frozen normalised budget as Gate C: 1e-6 N or 1e-4 |theta/hour|.
+    budget = max(1e-6 * scale, 1e-4 * abs(rich_fine))
+    noise = 64 * float_info.epsilon * max(scale, *(abs(p) for p in prices.values())) * 3600 / (seconds / 4)
+    error = max(abs(rich_fine - rich_coarse), abs(fine - mid) / 3) + noise
+    converging = abs(fine - mid) <= max(abs(mid - coarse), noise)
+    ok = all(isfinite(x) for x in derivatives) and converging and error <= budget
+    factor = THETA_UNITS[unit] / 3600
+    reason = ("per-request analytical theta limit: second-order steps h, h/2, h/4 inside one clock/coefficient "
+              "segment; Richardson truncation estimate plus floating-point cancellation floor")
+    if not ok:
+        reason += "; refinement does not establish the frozen theta error budget"
+    return GreekValue("theta", rich_fine * factor if ok else None, f"PnL per {unit}", "point",
+                      bump=seconds / 4, status="ok" if ok else "unqualified", reason=reason,
+                      error_estimate=error * factor if isfinite(error) else None,
+                      error_budget=budget * factor if isfinite(budget) else None)
+
+
 def intraday_theta(ctx, engine, route, step: ThetaStep, *, price_base: float, base_exact: bool,
                    convention: str) -> GreekValue:
     """Theta under the request's convention: the declared finite roll (desk) or the time derivative (point).
@@ -434,6 +503,9 @@ def intraday_theta(ctx, engine, route, step: ThetaStep, *, price_base: float, ba
     if step.actual is None:
         return GreekValue("theta", None, unit, convention, status="undefined", reason=step.reason)
     if convention == "point":
+        from quantark.intraday.engines.analytical_barrier import AnalyticalBarrierRoute
+        if isinstance(route, AnalyticalBarrierRoute) and base_exact:
+            return analytical_theta_limit(ctx, engine, price_base=price_base, unit=step.unit)
         estimate = point_theta_estimate(ctx, engine, price_base=price_base, unit=step.unit)
         if estimate is None:
             return GreekValue("theta", None, unit, convention, status="unqualified", reason=point_theta_step(ctx)[1])
