@@ -36,6 +36,14 @@ def _settings_label(settings: dict) -> str:
     return f"{engine} ({shown})" if shown else engine
 
 
+def _greek_sources(evidence: dict) -> str:
+    """Every measured revision the packaged Greek evidence rests on, with its cell count."""
+    sources = evidence.get("sources")
+    if not sources:
+        return f"git {evidence.get('git_sha', 'n/a')}"
+    return "; ".join(f"git {s['git_sha']}, {s['cells']} cells" for s in sources)
+
+
 def _greek_section() -> str:
     evidence = greek_evidence()
     rows = evidence.get("demonstrated", ())
@@ -44,7 +52,7 @@ def _greek_section() -> str:
         lines += ["No Greek has a demonstrated bump/refinement limit yet: point finite-difference proxies report "
                   "`unqualified`.", ""]
         return "\n".join(lines)
-    lines += [f"Greek evidence: `quantark/intraday/evidence/gate_c_greeks.json` (git {evidence.get('git_sha', 'n/a')}). "
+    lines += [f"Greek evidence: `quantark/intraday/evidence/gate_c_greeks.json` ({_greek_sources(evidence)}). "
               "Each row is one demonstrated CERTIFICATE and speaks only for it: the same product under different "
               "monitoring, under a variance profile no row names, at other engine settings (the column shows the "
               "recognisable knobs; the evidence file holds the full record), with another measure knob, or at a time "
@@ -58,12 +66,13 @@ def _greek_section() -> str:
               "second-order stencil levels. Its result reports a truncation/cancellation error estimate and the "
               "frozen error budget; an unresolved limit reports `unqualified`. It does not require a family row below.",
               "",
-              "| Product | Route | Measure | Monitoring | Profile | Engine settings | Measure settings | "
+              "| Product | Fixture | Route | Measure | Monitoring | Profile | Engine settings | Measure settings | "
               "Horizon window (s) | Spot offsets | Barriers |",
-              "|---|---|---|---|---|---|---|---|---|---|"]
+              "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         knobs = ", ".join(f"{k}={v}" for k, v in sorted((r.get("measure_settings") or {}).items())) or "—"
-        lines.append(f"| {r['product']} | {r['route']} | {r['measure']} | {r.get('monitoring', '?')} | "
+        fixtures = ", ".join(r.get("fixtures") or ()) or "—"
+        lines.append(f"| {r['product']} | {fixtures} | {r['route']} | {r['measure']} | {r.get('monitoring', '?')} | "
                      f"{r.get('profile', '?')} | {_settings_label(r.get('settings') or {})} | {knobs} | "
                      f"{r['horizon_s']} – {r.get('horizon_max_s', '?')} | "
                      f"{', '.join(r.get('offsets', ()))} | {', '.join(r.get('barriers', ()))} |")

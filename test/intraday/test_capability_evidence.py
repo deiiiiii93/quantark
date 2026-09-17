@@ -80,6 +80,19 @@ def test_rows_without_evidence_are_not_qualified(evidence):
     assert all(_row_key(r) in certified for r in INTRADAY_CAPABILITIES if r.status == "qualified")
 
 
+def _backing_cells(payload, row):
+    """The cells a demonstrated row rests on: its whole family, economic identity and monitoring included, in its window.
+
+    Product, route, profile and settings alone would let the daily-KI cells back (and break) the monthly rows.
+    """
+    from intraday.gate_c.cells import MONITORING
+    return [c for c in payload["cells"] if (c["product"], c["route"]) == (row["product"], row["route"])
+            and c["cell"]["profile"] == row["profile"] and c.get("settings") == row["settings"]
+            and MONITORING[c["cell"]["product"]] == row["monitoring"]
+            and c.get("economic_identity", "") == row.get("economic_identity", "")
+            and row["horizon_s"] <= c["cell"]["horizon"] <= row["horizon_max_s"]]
+
+
 def test_greek_evidence_parses_and_every_demonstration_is_backed_by_passing_cells():
     import importlib
     from quantark.intraday.capability import greek_evidence
@@ -91,9 +104,7 @@ def test_greek_evidence_parses_and_every_demonstration_is_backed_by_passing_cell
         assert row["settings"]["engine"] and row["horizon_s"] <= row["horizon_max_s"]
         # a window is backed by EVERY cell of its family -- same profile, engine settings and measure settings --
         # at every swept horizon inside it, and by nothing outside it
-        cells = [c for c in payload["cells"] if (c["product"], c["route"]) == (row["product"], row["route"])
-                 and c["cell"]["profile"] == row["profile"] and c.get("settings") == row["settings"]
-                 and row["horizon_s"] <= c["cell"]["horizon"] <= row["horizon_max_s"]]
+        cells = _backing_cells(payload, row)
         measures = [m for c in cells for m in c["measures"]
                     if m["measure"] == row["measure"] and (m.get("measure_settings") or {}) == row["measure_settings"]]
         assert measures and {m["status"] for m in measures} <= {"passed", "undefined"}, row
@@ -103,3 +114,17 @@ def test_greek_evidence_parses_and_every_demonstration_is_backed_by_passing_cell
 def _route_module(route: str) -> str:
     return {"QuadV2Route": "quad_v2", "AnalyticalDigitalRoute": "analytical_digital", "AnalyticalBarrierRoute": "analytical_barrier",
             "PDERoute": "pde", "MCRoute": "mc"}[route]
+
+
+def test_backing_cells_never_mix_economic_families():
+    row = {"product": "SnowballOption", "route": "QuadV2Route", "profile": "desk", "settings": {"engine": "E"},
+           "monitoring": "discrete", "economic_identity": "monthly", "horizon_s": 1, "horizon_max_s": 3600}
+
+    def cell(fixture, identity, status):
+        return {"product": "SnowballOption", "route": "QuadV2Route", "settings": {"engine": "E"},
+                "economic_identity": identity, "cell": {"product": fixture, "profile": "desk", "horizon": 60},
+                "measures": [{"measure": "point_delta", "status": status}]}
+
+    payload = {"cells": [cell("snowball_discrete_ki", "monthly", "passed"),
+                         cell("snowball_daily_ki", "daily", "unqualified")]}
+    assert [c["economic_identity"] for c in _backing_cells(payload, row)] == ["monthly"]

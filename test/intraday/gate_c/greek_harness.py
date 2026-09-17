@@ -59,16 +59,30 @@ LONG_GAP_HORIZONS = tuple(timedelta(days=d) for d in (29, 30, 35, 60, 90))
 MOVE_ENGINES = ("quad_v2", "analytical")
 DESK_MOVES = (("vega", "vol_up"), ("rho", "rate_up"), ("dividend_rho", "div_up"))
 GREEK_ENGINES = {"snowball_discrete_ki": ("quad_v2", "pde", "mc_rqmc"), "digital": ("analytical", "mc_rqmc"),
-                 "snowball_long_gap": ("quad_v2",)}
+                 "snowball_long_gap": ("quad_v2",), "snowball_daily_ki": ("quad_v2",)}
 PROXY_ENGINES = ("quad_v2", "analytical")
 PROXIES = ("vega", "rho", "dividend_rho")
 BUMP_LADDER = (4.0, 2.0, 1.0, 0.5)
 PROXY_REFERENCE_POINTS = (4001, 8001)
 ROUTE_NAMES = {("snowball_discrete_ki", "quad_v2"): "QuadV2Route", ("snowball_discrete_ki", "pde"): "PDERoute",
                ("snowball_discrete_ki", "mc_rqmc"): "MCRoute", ("digital", "analytical"): "AnalyticalDigitalRoute",
-               ("digital", "mc_rqmc"): "MCRoute", ("snowball_long_gap", "quad_v2"): "QuadV2Route"}
+               ("digital", "mc_rqmc"): "MCRoute", ("snowball_long_gap", "quad_v2"): "QuadV2Route",
+               ("snowball_daily_ki", "quad_v2"): "QuadV2Route"}
 PRODUCT_NAMES = {"snowball_discrete_ki": "SnowballOption", "snowball_long_gap": "SnowballOption",
-                 "digital": "CashOrNothingDigitalOption"}
+                 "snowball_daily_ki": "SnowballOption", "digital": "CashOrNothingDigitalOption"}
+#: Profiles swept per fixture where they differ from GREEK_PROFILES: the daily-KI certificate is desk only.
+FIXTURE_PROFILES = {"snowball_daily_ki": ("desk",)}
+
+
+def fixture_horizons(fixture: str):
+    """The horizon ladder a fixture is swept on, which is also the rungs a window of its certificates must cover."""
+    if fixture == "snowball_long_gap":
+        return LONG_GAP_HORIZONS
+    if fixture == "snowball_daily_ki":
+        return C.DAILY_KI_HORIZONS
+    if fixture == "digital":
+        return tuple(sorted(set(GREEK_HORIZONS + LONG_GAP_HORIZONS)))
+    return GREEK_HORIZONS
 
 
 @dataclass(frozen=True)
@@ -88,10 +102,8 @@ class GreekGroup:
 
 
 def greek_groups():
-    return [GreekGroup(p, prof, h, o, b) for p in GREEK_ENGINES for prof in GREEK_PROFILES
-            for h in (LONG_GAP_HORIZONS if p == "snowball_long_gap" else
-                      tuple(sorted(set(GREEK_HORIZONS + LONG_GAP_HORIZONS))) if p == "digital" else GREEK_HORIZONS)
-            for o in C.SPOT_OFFSETS for b in C.BARRIERS[p]]
+    return [GreekGroup(p, prof, h, o, b) for p in GREEK_ENGINES for prof in FIXTURE_PROFILES.get(p, GREEK_PROFILES)
+            for h in fixture_horizons(p) for o in C.SPOT_OFFSETS for b in C.BARRIERS[p]]
 
 
 def fast_greek_groups():
@@ -569,9 +581,7 @@ def demonstrated(rows) -> list:
     for (product, route, measure, monitoring, profile_name, _s, _k, economics), entry in sorted(table.items()):
         horizons = sorted(entry["by_h"])
         fixtures = {fixture for coverage in entry["coverage"].values() for fixture in coverage}
-        expected = {int(h.total_seconds()) for fixture in fixtures
-                    for h in (LONG_GAP_HORIZONS if fixture == "snowball_long_gap" else
-                              GREEK_HORIZONS + LONG_GAP_HORIZONS if fixture == "digital" else GREEK_HORIZONS)}
+        expected = {int(h.total_seconds()) for fixture in fixtures for h in fixture_horizons(fixture)}
         # An entirely absent interior horizon is also a gap, not permission to
         # bridge directly between its two surviving neighbours.
         horizons = sorted(set(horizons) | {h for h in expected if horizons[0] <= h <= horizons[-1]})
@@ -592,7 +602,7 @@ def demonstrated(rows) -> list:
             out.append({"product": product, "route": route, "measure": measure, "monitoring": monitoring,
                         "profile": profile_name, "profile_identity": list(profile_of(profile_name).identity()),
                         "settings": entry["settings"], "measure_settings": entry["measure_settings"],
-                        "economic_identity": economics,
+                        "economic_identity": economics, "fixtures": sorted(fixtures),
                         "horizon_s": lo, "horizon_max_s": hi, "swept_horizons_s": [h for h in horizons if lo <= h <= hi],
                         "offsets": sorted(entry["offsets"]), "barriers": sorted(entry["barriers"]),
                         "markets": entry["markets"]})
