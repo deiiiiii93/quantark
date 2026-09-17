@@ -268,7 +268,7 @@ check paired each surface cell's first 200 paths with the QUAD spot ladder.
     --history-end 2026-09-09 --out-dir output/snowball_simulated_paths/per_date_2000
 nohup caffeinate -i -m -s .venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py \
     --out-dir output/snowball_simulated_paths/per_date_2000 \
-    --workers 12 --batch-paths 170 --disk-cache --resume \
+    --workers 12 --batch-paths 50 --resume \
     > output/snowball_simulated_paths/per_date_2000/fleet.log 2>&1 &
 .venv/bin/python example/snowball_simulated_paths/03_report.py \
     --out-dir output/snowball_simulated_paths/per_date_2000
@@ -282,14 +282,133 @@ failure included, and a run interrupted in its oracle reuses its results.
 `--history-end` cuts the history at a day: at 2026-09-09 it reproduces the
 banked batch's history, bootstrap and stress fingerprints from the longer
 cache.  `--batch-paths` must be set for `--workers` to take effect; each run
-is batched for its own path count.  `--provider exact|life_surface|ladder`
-remain available.
+is batched for its own path count.  Keep it well below `n_paths / workers`:
+`batch_for` caps the batch at one per worker, and at that size a single slow
+batch idles every other worker for the rest of the run — at 2,000 paths and
+12 workers, 170 left 11 workers idle for 80 minutes while 50 held them
+within 4% of each other.  `--disk-cache` is omitted deliberately (see
+Caveats).  `--provider exact|life_surface|ladder` remain available.
 
 ## Results
 
+Six cells on 2,000 bootstrap paths and the five stresses, from the
+2026-09-09 start state (history 2023-05-04 to 2026-09-09, 816 days),
+every cell priced by **per-date PDE repricing** — one backward solve from
+maturity to each state's own date, carrying that date's real term
+dividend object.  Fair coupon 37.8254% under `term_flat_q`.  All 18 runs
+passed their gate at 0.00 bp and 0.00 hands, and all 24 replay oracles
+matched at zero tolerance.  Run 2026-09-16 to 2026-09-17.
+
+**Lifecycle** (path-determined, so identical across cells): KO 69.1%,
+KI 25.2%, reaching maturity 30.9%.
+
+**Hedge-cost distributions, 2,000 paths** (bp of notional; ES = mean of
+the 5% loss tail for P&L, of the 5% upper tail for cost-like measures):
+
+| measure | cell | mean | q05 | q50 | q95 | ES |
+|---|---|---|---|---|---|---|
+| terminal P&L | flat_from_hedge front | −324 | −1576 | −252 | 789 | −2332 |
+| | flat_from_hedge far | −66 | −1414 | −45 | 1142 | −2165 |
+| | term_flat_q front | −202 | −1400 | −170 | 884 | −2103 |
+| | term_flat_q far | −41 | −1325 | −25 | 1133 | −2108 |
+| | term_opt_tail front | −190 | −1394 | −166 | 929 | −2095 |
+| | term_opt_tail far | −30 | −1336 | −20 | 1151 | −2104 |
+| daily P&L std | flat_from_hedge front | 218 | 93 | 197 | 428 | 548 |
+| | flat_from_hedge far | 89 | 31 | 84 | 164 | 215 |
+| | term_flat_q front | 91 | 40 | 89 | 146 | 178 |
+| | term_flat_q far | 71 | 32 | 68 | 124 | 154 |
+| | term_opt_tail front | 87 | 37 | 85 | 140 | 171 |
+| | term_opt_tail far | 70 | 31 | 66 | 123 | 153 |
+| variance reduction R² | flat_from_hedge front | 0.40 | 0.08 | 0.41 | 0.68 | |
+| | term_flat_q front | 0.69 | 0.28 | 0.75 | 0.90 | |
+| | term_opt_tail far | 0.80 | 0.56 | 0.83 | 0.95 | |
+| cost | flat_from_hedge front | 30 | 7 | 24 | 75 | 91 |
+| | term_opt_tail far | 15 | 3 | 10 | 42 | 54 |
+
+At 1 bp per side, cost in bp equals turnover by construction.
+
+**Paired against the baseline `flat_from_hedge__front`, same 2,000 paths:**
+
+| variant | terminal mean bp | share > 0 | t | daily std mean bp | share > 0 | t |
+|---|---|---|---|---|---|---|
+| flat_from_hedge far | +258 | 79% | 28.7 | −129 | 0.1% | −65.6 |
+| term_flat_q front | +122 | 66% | 17.2 | −127 | 0.1% | −63.9 |
+| term_flat_q far | +283 | 80% | 29.7 | −146 | 0.1% | −70.7 |
+| term_opt_tail front | +134 | 67% | 17.7 | −131 | 0.1% | −61.8 |
+| term_opt_tail far | +294 | 79% | 29.4 | −148 | 0.2% | −68.5 |
+
+**Two levers, and they compose.**  Holding the carry model fixed, moving
+the hedge from the front contract to the far one is worth +161 bp of
+terminal P&L and −19.6 bp of daily hedge error under `term_flat_q`
+(t 26.5 and −64.6), +160 and −17.0 under `term_opt_tail`.  Holding the
+hedge fixed, the term models cut daily hedge error by 127–131 bp against
+the flat baseline.  Doing both is the best cell in the grid: `term_opt_tail`
+on the far contract cuts daily hedge error from 218 bp to 70 and lifts
+terminal P&L by 294 bp on 79% of paths.  The daily-std improvement is
+near-universal — on 1,998 of 2,000 paths — while the terminal-P&L gain,
+though large in the mean, fails on a fifth to a third of paths.
+
+**A cell's day-0 mark** is its carry model's price of a contract whose
+coupon is fair under `term_flat_q` on QUAD, plus the engine gap:
+`flat_from_hedge` +69.18 bp (front) and −28.43 (far), `term_flat_q`
+−0.29 both, `term_opt_tail` −6.05 both.  The engine gap alone is −0.29 bp
+in all six cells.
+
+**Engine check** (per-date PDE minus exact QUAD on each cell's first 40
+paths; `data/engine_check.csv`):
+
+| cell | terminal P&L bp mean / t | daily std bp mean / t |
+|---|---|---|
+| flat_from_hedge front | +0.14 / 0.08 | −0.01 / −0.36 |
+| flat_from_hedge far | +1.08 / 0.52 | +0.04 / 1.52 |
+| term_flat_q front | −1.74 / −0.80 | +0.00 / 0.03 |
+| term_flat_q far | −8.33 / −2.76 | +0.23 / 2.77 |
+| term_opt_tail front | −1.53 / −0.89 | −0.01 / −0.49 |
+| term_opt_tail far | −0.40 / −0.22 | −0.01 / −0.40 |
+
+Every entry is small against the 122–294 bp effects the study measures —
+at most 8.3 bp, and under 2 bp in five of six cells.  The QUAD reference
+is not itself clean: see the alignment caveat below.
+
+**Stress** (terminal P&L bp / daily std bp; the designed paths move the
+product, not the hedge choice, so cells agree within tens of bp):
+
+| scenario | flat front | flat far | term_flat_q far | termination |
+|---|---|---|---|---|
+| crash 30% over 20 days into KI | +381 / 2.5 | +486 / 4.2 | +486 / 2.9 | maturity, knocked in |
+| V shape 28% down, back over 40 days | +2382 / 27.6 | +2231 / 28.3 | +2226 / 27.9 | maturity, knocked in |
+| vol spike +15 pts decaying over 40 days | −3225 / 12.4 | −3301 / 12.4 | −3302 / 12.0 | maturity |
+| basis blow-out −5 pts over 10 days | −2763 / 13.6 | −3057 / 12.4 | — | maturity |
+| grind +0.2%/day into KO | −296 / 5.3 | −386 / 4.1 | — | knock out, day 66 |
+
+**Historical runs inside the simulated distribution** (29 inceptions per
+cell, 2023-05 to 2025-09; `data/historical_location.csv`):
+
+| cell | realised terminal bp | pct | realised daily std bp | pct |
+|---|---|---|---|---|
+| flat_from_hedge front | 489 | 84 | 384 | 84 |
+| flat_from_hedge far | 426 | 70 | 86 | 46 |
+| term_flat_q front | 546 | 80 | 57 | 20 |
+| term_flat_q far | 442 | 69 | 53 | 31 |
+| term_opt_tail front | 567 | 78 | 56 | 21 |
+
+Realised inceptions earned more than most simulated paths from this one
+38%-coupon start state, so read the terminal percentile as indicative.
+The hedge-error percentiles carry more: on realised history the flat
+front-contract model was worse than the bootstrap suggests (84th
+percentile of its own distribution) and every term model better (20th to
+31st).
+
+Tables: `data/fleet_cells.json`, `data/fleet_paired.csv`,
+`data/engine_check.csv`, `data/stress_table.csv`,
+`data/historical_location.csv`, `data/fleet_summary.json` (gates and
+oracles).  Report: `data/simulated_paths_report.html`.
+
+### Superseded: the 2026-09-09 quick run
+
 **Recorded before Design B, on exact QUAD, before the ageing fixes of
-2026-09-15 (`8cb0ec67`, `f8987344`).  Stage 1 and stage 2 replace this
-section.**  What follows is the quick run of 2026-09-09: 40 bootstrap
+2026-09-15 (`8cb0ec67`, `f8987344`).  The section above replaces it.**
+What follows is the quick run of 2026-09-09: 40 bootstrap
 paths and the five stresses from the 2026-09-09 start state (history
 2023-05-04 to 2026-09-09, 816 days; spot 7659.6, ATM vol 26.1%, front IM
 carry 14.0%), two cells (`flat_from_hedge__front`, `term_flat_q__front`),
@@ -417,6 +536,28 @@ gates.  Report: `data/simulated_paths_report.html`.
   carry-model gap and an engine gap (report, day-0 table).
 - Paired t-statistics treat the simulated paths as independent draws,
   unlike the historical study's overlapping inceptions.
+- **The exact-QUAD reference in the engine check is not clean.**  With
+  `QuadParams.align_priority="auto"` the lattice pins whichever barrier is
+  nearest spot in log space, so the alignment target changes at
+  `sqrt(KI·KO)` = 0.8789 of the inception spot.  A bumped delta evaluates
+  the base, up and down states separately, so within one 1% bump of that
+  level the three evaluations do not share an alignment and the delta
+  carries the grid change as well as the market change.  Measured on this
+  product by forcing the priority: outside the window `auto` reproduces a
+  forced branch exactly, and inside 0.8709–0.8869 it differs from both
+  forced branches by 17.5–20.3 hands.  5.85% of the check cells' priced
+  states sit within 1% of that level.  The two forced branches differ by
+  only about 2 hands here, so the damage does not come from the branches
+  disagreeing — it comes from mixing them inside one finite difference,
+  which means a product whose branches nearly coincide is no safer.  The
+  per-date PDE cells the study reports are unaffected: they are compared
+  against each other, same engine both sides.
+- Do not run the fleet with `--disk-cache` across cells that differ in
+  hedge.  `StateKey` deliberately excludes the hedge, but in this study
+  the hedge selects the active futures contract and therefore the priced
+  dividend, while `env_key` is built from `(rate, spot, carry row)` only —
+  so a `far` cell reads a `front` cell's prices.  The gate does not catch
+  it (it re-prices through the same provider); the oracle does.
 - The stress paths are designed, not sampled.
 - The bootstrap's vol is a random walk of daily changes; its dispersion
   over a year exceeds the history's.
