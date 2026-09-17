@@ -49,16 +49,21 @@ to vouch for.
 | Reference `_solve_snowball`, 2001 / 4001 points (cold) | 5.5 s / 14.9 s; cached re-solve 0.02–0.04 s |
 | Price at 14:00, spot 75.3: QUAD V2 vs reference (4001) | −22.12222 vs −22.12230 |
 
-The reference sweep is cached across spots, horizons and theta rolls of one market; only vol/rate/dividend moves
-trigger a new solve. Estimated sweep: 77 groups, ~1–1.5 h at 4 workers.
+The reference's `_global_sweep` cache key holds market content, product tree, profile/calendar identity and the
+event-id suffix, but not spot or horizon: within one worker the cold solves are the base market and the three desk
+moves at 4001/8001/16001 points plus the proxy markets at 4001/8001. Extrapolating the measured ×2.7 per doubling,
+that is ~15–20 min of reference per worker. The QUAD side is ~70–90 s per group (≈40–50 prices, plus the
+`cells_per_sd` 4 and 8 ladder levels). Estimated sweep: **154 groups** (7 horizons × 11 offsets × 2 barriers),
+~1.5–2.5 h at 4 workers. The pilot's measured per-group wall time replaces this estimate before the fleet launches.
 
 ## Component 1 — the `snowball_daily_ki` fixture (`test/intraday/gate_c/cells.py`)
 
 - `product("snowball_daily_ki")`: `dated_snowball(sse().calendar, T0)` with `ki_observation_schedule.records`
   replaced by one `ObservationRecord(observation_date=d, barrier=75.0)` per SSE business day `T0 < d <= maturity`.
-- `BARRIERS["snowball_daily_ki"] = ("ko", "ki")`. Both are required: the runtime spot envelope spans
-  `[min barrier × e^(−2σ√W), max barrier × e^(2σ√W)]` over every remaining barrier, so sweeping KI offsets alone
-  would let the envelope claim spots near 103 without evidence.
+- `BARRIERS["snowball_daily_ki"] = ("ko", "ki")`. Both are required: the runtime spot envelope
+  (`greeks.certificate_gap`) is `lo = min(levels) × min(e^(−2σ√W), 0.999)`, `hi = max(levels) × max(e^(2σ√W), 1.001)`
+  over `levels` = every remaining event barrier, so sweeping KI offsets alone would let the envelope claim spots near
+  103 without evidence. The ten-basis-point floor dominates below ~40 s to the close (74.925 at 1 s, 10 s and 30 s).
 - `MONITORING` discrete, `notional` 100, `market` (0.03, 0.01).
 - `fixing_and_history("snowball_daily_ki")`: the fixing is the KI event at 2026-09-10 15:00 +08:00; the history
   is `Fixing(t, 100.0)` for every distinct event instant before it (monthly KO instants coincide with KI instants).
@@ -75,7 +80,17 @@ trigger a new solve. Estimated sweep: 77 groups, ~1–1.5 h at 4 workers.
 - `greek_groups()` uses `DAILY_KI_HORIZONS` for this fixture.
 - `demonstrated()` names this fixture's ladder explicitly in its expected-horizon map, so an absent interior rung is
   a gap and the monthly ladder is never inferred for it.
+- `demonstrated()` adds a `fixtures` field (sorted fixture names from its coverage map) to every row, and
+  `publish._greek_section` renders it as a Fixture column. Without it the daily and monthly QUAD V2 rows differ only
+  by window (1–21600 s vs 1–7776000 s) and read as one family.
+- The reference-points knob is `run_greek_group(reference_points=...)`, chosen per fixture by the runner;
+  `GATE_C_POINTS` in `test/intraday/reference/budgets.py` is not edited.
 - `build_context` already treats every `snowball_*` product's first event as its horizon anchor.
+- `test/intraday/test_capability_evidence.py::test_greek_evidence_parses_and_every_demonstration_is_backed_by_passing_cells`
+  selects a row's backing cells by product, route, profile, settings and horizon window only. The daily-KI cells share
+  all five keys with the monthly QUAD V2 desk rows, so one unqualified daily rung would fail the monthly rows' check
+  although their certificates are untouched. Commit (1) adds the `economic_identity` and monitoring filters to that
+  selection.
 
 ## Component 3 — pilot gate
 
@@ -91,26 +106,47 @@ Six desk groups through `test/intraday/gate_c/test_greek_ladders.py` (selected b
 | 1 h | sd+1 | ko |
 
 - **Go**: every measure `passed` (or `undefined` agreeing with the reference). Run the full sweep.
-- **No-go**: stop and report each failing measure's route value, reference, reference uncertainty, budget and
-  ladder. Remedies are user decisions: a refined certified setting (for example `cells_per_sd=4`, which the example
-  would then use) when the QUAD ladder converges above budget, or more reference points when the reference's own
-  uncertainty makes a cell `inconclusive`. The frozen budgets in `test/intraday/reference/budgets.py` are not edited.
+- **No-go**: stop and report each failing measure's route value, reference, reference uncertainty, budget, ladder
+  and measured wall time, classified by cause. Remedies are user decisions; the frozen budgets are not edited.
+
+  | Pilot outcome | Harness status | Candidate remedy |
+  |---|---|---|
+  | QUAD ladder converges above budget | `unqualified` ("ladder converges") | certify a refined setting (`cells_per_sd=4` is already a swept ladder level); the example then uses it |
+  | Reference's own uncertainty too large | `inconclusive` | more reference points via `run_greek_group(reference_points=...)` for this fixture |
+  | QUAD ladder does not approach the reference | `failed` ("refinement ladder does not approach the reference") | none in scope: the known KI-barrier delta lobe (Risks). Daily-KI QUAD V2 Greeks stay `unqualified`; an engine investigation is a separate piece of work |
 
 ## Component 4 — sweep, packaging, matrix
 
 - Runner in `tmp/` (untracked), modelled on `tmp/gate_c_greek_run_v2.py`: resumable, 4 workers, own JSONL, under
   `rss_guard` and `nohup caffeinate -i -m -s`, selecting only `snowball_daily_ki` groups.
 - Packaging combines the packaged `gate_c_greeks.json` cells with the new rows and re-aggregates with
-  `aggregate_greeks`. It asserts that the `demonstrated` rows of every pre-existing family are identical before and
-  after, and that the new fixture has all 77 groups (7 horizons × 11 offsets × 2 barriers). It refuses to write
-  otherwise.
+  `aggregate_greeks`. It asserts that every pre-existing `demonstrated` row is identical before and after on the
+  pre-existing fields (the new `fixtures` field excluded), and that the new fixture has all 154 groups (7 horizons ×
+  11 offsets × 2 barriers). It refuses to write otherwise.
+- Provenance is carried forward, never dropped: `supplement` and `economic_identity_reconstruction` are copied
+  verbatim; a new `sources` list records every measured revision with its cell count and wall time
+  (`959346b5`, the existing cells, 8541 s; commit (1), 154 groups, the measured wall). Top-level `git_sha` and
+  `wall_time_s` name the newest source, and the matrix header lists every source.
 - `python -m quantark.intraday.publish` regenerates `docs/execution/intraday-capability-matrix.md`.
 - Commits: (1) fixture + harness, with catalogue tests that need no evidence (group count, ids, ladder, history);
   (2) evidence + matrix, whose `git_sha` names commit (1); (3) example + its test + docs, after the evidence exists.
 
 ## Component 5 — the example (`example/intraday_snowball_near_ki_demo.py`)
 
-Builds its own contract, market, calendar and profile (no `test/` imports) with terms identical to the fixture.
+Builds its own contract, market, calendar and profile (no `test/` imports; tests may import from `example/`, as
+`test/test_parametric_var_demo.py` does). `economic_identity` includes `initial_date`, `exercise_date` and the
+calendar identity (holiday contents), so the terms are pinned to the fixture's:
+
+| Term | Value |
+|---|---|
+| `initial_date` | 2026-03-16 (`cells.T0`; 2026-03-17 is only the first KI date) |
+| `exercise_date` | 2027-03-16 (the twelfth monthly KO date) |
+| KO schedule | 103.0 on the 12 monthly dates: day `min(16, 28)` of each month from April 2026, rolled forward to an SSE business day |
+| KI schedule | 75.0 on every SSE business day `2026-03-16 < d <= 2027-03-16` |
+| `initial_price`, `strike`, `contract_multiplier` | 100.0, 100.0, 1.0 |
+| `ko_rate`, `rebate_rate`, `include_principal` | 0.12, 0.12, False |
+| Calendar | `create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))`, +08:00, sessions 09:30–11:30 and 13:00–15:00 |
+| Market | `FlatRateCurve(0.03)`, `ContinuousDividendYield(0.01)`, `FlatVolSurface(0.20)` |
 
 - **History**: deterministic synthetic closes 2026-03-17 … 2026-09-09 drifting from 100 to about 75.9, every close
   strictly between 75 and 103, supplied as confirmed `Fixing`s.
@@ -137,8 +173,10 @@ Builds its own contract, market, calendar and profile (no `test/` imports) with 
 - **`spot_curve` snapshots** at 10:00, 14:00, 14:55 and 14:59:59 over 74.5 … 75.5 in 0.1 steps: PV and delta, with
   points outside the envelope reported by their status.
 - **The close**: 15:00:00 under `before` with spot exactly 75.00 (inclusive KI decided at spot, delta and gamma
-  `undefined`); `after` with fixings 74.98 and 75.02 (knocked in vs alive, PV only — the next day's economics are
-  not certified); 15:00:30 with no fixing (provisional, the assumed knock-in and its `depends_on`).
+  `undefined`); `after` with fixings 74.98 and 75.02, each with a spot quote of the same value stamped 15:00:00
+  (knocked in vs alive, PV only — the next day's economics are not certified); 15:00:30 with no fixing and the
+  closing quote 74.98 stamped 15:00:00 (provisional: the assumed knock-in and its `depends_on`). The last stream
+  tick (75.01) would assume no knock-in, so this row names its own quote.
 - `--json PATH` writes the run record: every row above with timestamp, spot, σ distance, price, and each Greek's
   value, status, unit and reason; plus contract/market/profile identities and the evidence `git_sha`.
 - Runtime ~2–3 min.
@@ -155,8 +193,9 @@ Builds its own contract, market, calendar and profile (no `test/` imports) with 
 
 ## Component 7 — the report artifact
 
-Built after the example runs, by a generator in the session scratchpad (not the repo), following the artifact
-page contract. Charts are drawn from the run JSON embedded inline; no number is retyped.
+Built after the example runs, by a generator under the untracked `tmp/near_ki_report/` (not the session
+scratchpad, which has been wiped before; not the repo), next to the run JSON it reads, following the artifact page
+contract. Charts are drawn from the run JSON embedded inline; no number is retyped.
 
 1. The day: spot with the KI line and the shaded Greek envelope; PV, delta, gamma, theta through the session, with
    gaps where a Greek is not `ok`.
@@ -164,19 +203,33 @@ page contract. Charts are drawn from the run JSON embedded inline; no number is 
 3. Point vs desk at the three instants, with why a 1% bump across the barrier differs from the derivative.
 4. The close: knocked-in vs alive PV and the provisional row.
 5. What the Greeks rest on: pilot outcome, groups and measures passed, horizon window, engine settings, and the
-   statement that every pre-existing certificate reproduced.
+   statement that every pre-existing certificate was retained unchanged (packaged, not re-measured).
 
 Published private; the link is reported.
 
 ## Risks
 
 - **QUAD V2 accuracy over 129 events.** The price at 14:00 already sits near the 1e-4 budget. The pilot measures it.
+- **The known QUAD KI-barrier delta lobe.** On the legacy `SnowballQuadEngine`, a 1Y snowball with daily KI shows a
+  smooth delta lobe centred on the KI barrier, against an analytic-derivative Gaussian reference: in the value
+  surface, identical under both readouts, and refinement-resistant (16.7 → 13.0 study hands from 401 to 3201
+  points), seen only under daily KI monitoring. QUAD V2 passed every monthly cell, but daily KI is exactly that
+  regime. A refinement-resistant miss classifies `failed`, which no in-scope remedy addresses; the pilot's five KI
+  groups are placed to catch it.
 - **Reference uncertainty.** The reference delta moved 3.4e-3 between 2001 and 4001 points; at 4001/8001/16001 its
   Richardson uncertainty × 3 may approach the delta budget (~3e-4 at spot 75). An `inconclusive` cell blocks a
   certificate; the pilot measures it.
 - **Envelope arithmetic.** Tick spots assume the desk profile's remaining variance; test (c) pins the one tick meant
   to fall outside, and the example reports every other status as computed.
 - **Memory.** Worker RSS on a 129-event QUAD V2 is unmeasured; the guard kills the process group past its limit.
+
+## Merge prerequisite outside this design
+
+The non-intraday suite on `e0ba6ba7` (the base) has 7 failures: replay goldens `scalar_bsm-greeks`,
+`scalar_bsm-surfaces`, `localvol-greeks` (PDE delta off by ~1e-4 relative) and four banked modelvalidation
+certificates. The PDE cubic readout in `e0ba6ba7` is the suspected cause; an A/B on `90e44344` is attributing it.
+Their resolution (regenerated goldens and re-certification, or a readout change) is a user decision and blocks merging
+the branch, not this work's pilot or sweep, which never touch a PDE route.
 
 ## Out of scope
 
