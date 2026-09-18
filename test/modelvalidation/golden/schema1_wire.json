@@ -1,0 +1,317 @@
+{
+  "aggregates": [
+    {
+      "candidate": "fake.candidate",
+      "cells": 2,
+      "mean_signed_bias_c": 2.0328790734103208e-16,
+      "passed": true,
+      "quantity": "pv",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0007071067811864928,
+      "within_bound": true
+    },
+    {
+      "candidate": "fake.candidate",
+      "cells": 2,
+      "mean_signed_bias_c": 2.0328790734103208e-16,
+      "passed": true,
+      "quantity": "delta",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0007071067811864928,
+      "within_bound": true
+    },
+    {
+      "candidate": "fake.candidate",
+      "cells": 2,
+      "mean_signed_bias_c": 2.0328790734103208e-16,
+      "passed": true,
+      "quantity": "gamma",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0007071067811864928,
+      "within_bound": true
+    }
+  ],
+  "candidate_checkpoint": {
+    "ladders": [
+      {
+        "axis": "grid",
+        "level": "target",
+        "values": {
+          "delta": 0.0004,
+          "gamma": 0.0004,
+          "pv": 0.0004
+        }
+      },
+      {
+        "axis": "grid",
+        "level": "medium",
+        "values": {
+          "delta": 0.0004,
+          "gamma": 0.0004,
+          "pv": 0.0004
+        }
+      }
+    ],
+    "values": {
+      "delta": 0.0004,
+      "gamma": 0.0004,
+      "pv": 0.0004
+    }
+  },
+  "candidate_identity": {
+    "candidate": "fake.candidate",
+    "case": {
+      "environment_params": {},
+      "name": "ordinary",
+      "product_params": {}
+    },
+    "params": {
+      "envelope_c": 0.0,
+      "offset_c": 0.0
+    }
+  },
+  "candidate_identity_hash": "0e430ea24b3e7dc92de09f94f4a0613b13a0e7227ef8dee92edb23b19ef413a0",
+  "cells": [
+    {
+      "candidate": "fake.candidate",
+      "candidate_value": 0.0004,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.0020000000000000486,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0009999999999999564,
+        "signed_err_c": 1.3552527156068805e-16
+      },
+      "identity_hash": "0e430ea24b3e7dc92de09f94f4a0613b13a0e7227ef8dee92edb23b19ef413a0",
+      "quantity": "pv",
+      "reference": {
+        "se": 3.9999999999998256e-07,
+        "value": 0.00039999999999999996
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "fake.candidate",
+      "candidate_value": 0.0004,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.0020000000000000486,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0009999999999999564,
+        "signed_err_c": 1.3552527156068805e-16
+      },
+      "identity_hash": "0e430ea24b3e7dc92de09f94f4a0613b13a0e7227ef8dee92edb23b19ef413a0",
+      "quantity": "delta",
+      "reference": {
+        "se": 3.9999999999998256e-07,
+        "value": 0.00039999999999999996
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "fake.candidate",
+      "candidate_value": 0.0004,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.0020000000000000486,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0009999999999999564,
+        "signed_err_c": 1.3552527156068805e-16
+      },
+      "identity_hash": "0e430ea24b3e7dc92de09f94f4a0613b13a0e7227ef8dee92edb23b19ef413a0",
+      "quantity": "gamma",
+      "reference": {
+        "se": 3.9999999999998256e-07,
+        "value": 0.00039999999999999996
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "fake.candidate",
+      "candidate_value": 0.0008,
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.002000000000000048,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0009999999999998886,
+        "signed_err_c": 2.710505431213761e-16
+      },
+      "identity_hash": "219fb2bf29fd15e394ef35ba896dccd98833c9903679d8e3b5a15e9066af0962",
+      "quantity": "pv",
+      "reference": {
+        "se": 3.9999999999995546e-07,
+        "value": 0.0007999999999999999
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "fake.candidate",
+      "candidate_value": 0.0008,
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.002000000000000048,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0009999999999998886,
+        "signed_err_c": 2.710505431213761e-16
+      },
+      "identity_hash": "219fb2bf29fd15e394ef35ba896dccd98833c9903679d8e3b5a15e9066af0962",
+      "quantity": "delta",
+      "reference": {
+        "se": 3.9999999999995546e-07,
+        "value": 0.0007999999999999999
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "fake.candidate",
+      "candidate_value": 0.0008,
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.002000000000000048,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0009999999999998886,
+        "signed_err_c": 2.710505431213761e-16
+      },
+      "identity_hash": "219fb2bf29fd15e394ef35ba896dccd98833c9903679d8e3b5a15e9066af0962",
+      "quantity": "gamma",
+      "reference": {
+        "se": 3.9999999999995546e-07,
+        "value": 0.0007999999999999999
+      },
+      "verdict": "PASS"
+    }
+  ],
+  "decisions": {
+    "fake.candidate": "ADMITTED"
+  },
+  "payload_keys": [
+    "aggregates",
+    "cells",
+    "decisions",
+    "projected_sha256",
+    "reference_config",
+    "references",
+    "runtime",
+    "schema",
+    "study",
+    "wall_clock_seconds"
+  ],
+  "pinned_at_revision": "4e54171ed6b46b9639411ee41066f062746694bf",
+  "reference_identity_hash": "d2a176967f1bce8e8b71b63c4475ab20fb9409d9c06e1c58a22a7568c3030271",
+  "references": {
+    "near_ko": {
+      "batches": 2,
+      "identity_hash": "8b832c0b83a8eaf6f57f0519228dcc91983bb8637bd15bca8f31f412d9bd313f",
+      "seeds": [
+        100,
+        101
+      ],
+      "std_errors": {
+        "delta": 3.9999999999995546e-07,
+        "gamma": 3.9999999999995546e-07,
+        "pv": 3.9999999999995546e-07
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.0007999999999999999,
+        "gamma": 0.0007999999999999999,
+        "pv": 0.0007999999999999999
+      }
+    },
+    "ordinary": {
+      "batches": 2,
+      "identity_hash": "d2a176967f1bce8e8b71b63c4475ab20fb9409d9c06e1c58a22a7568c3030271",
+      "seeds": [
+        100,
+        101
+      ],
+      "std_errors": {
+        "delta": 3.9999999999998256e-07,
+        "gamma": 3.9999999999998256e-07,
+        "pv": 3.9999999999998256e-07
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.00039999999999999996,
+        "gamma": 0.00039999999999999996,
+        "pv": 0.00039999999999999996
+      }
+    }
+  },
+  "schema": 1,
+  "study": {
+    "bounds": {
+      "cell": 0.5,
+      "envelope_fraction": 0.5,
+      "interval_k": 2.0,
+      "mean_signed_bias": 0.1,
+      "se_budget_fraction": 0.25
+    },
+    "candidates": [
+      {
+        "name": "fake.candidate",
+        "params": {
+          "envelope_c": 0.0,
+          "offset_c": 0.0
+        }
+      }
+    ],
+    "cases": [
+      {
+        "environment_params": {},
+        "name": "ordinary",
+        "product_params": {}
+      },
+      {
+        "environment_params": {},
+        "name": "near_ko",
+        "product_params": {}
+      }
+    ],
+    "name": "fake-study",
+    "quantities": [
+      "pv",
+      "delta",
+      "gamma"
+    ],
+    "quick": false,
+    "sampling": {
+      "bump": 0.01,
+      "max_batches": 8,
+      "min_batches": 2,
+      "paths_per_batch": 1024,
+      "seed": 100
+    },
+    "source_text": "study: fake-study\n"
+  }
+}
