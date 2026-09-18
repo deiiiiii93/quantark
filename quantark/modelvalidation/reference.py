@@ -31,6 +31,7 @@ from quantark.modelvalidation.study import (
     EconomicScale,
     GateBounds,
     SamplingPolicy,
+    batch_seed,
 )
 
 CHECKPOINT_KIND = "reference"
@@ -74,8 +75,45 @@ class ReferenceBuilder(Protocol):
         ...
 
     def run_batch(self, case: CaseSpec, batch_index: int) -> BatchResult:
-        """Run batch ``batch_index``; seed must be ``policy.seed + batch_index``."""
+        """Run batch ``batch_index``; seed must be ``batch_seed(policy, case.name, batch_index)``."""
         ...
+
+
+def reference_targets(builder: Any, quantities: Sequence[str]) -> Dict[str, Optional[dict]]:
+    """Which quantities the reference estimates as targets.
+
+    A builder may declare ``targets()``: quantity -> estimator description, or ``None`` for a
+    quantity it records only as a proxy with no declared estimator (the pipeline gates
+    nothing against such a value). Undeclared quantities are replicate means, which is what
+    every schema-1 reference has always been.
+    """
+    declare = getattr(builder, "targets", None)
+    declared = dict(declare()) if callable(declare) else {}
+    out: Dict[str, Optional[dict]] = {}
+    for quantity in quantities:
+        if quantity in declared:
+            out[quantity] = None if declared[quantity] is None else dict(declared[quantity])
+        else:
+            out[quantity] = {"estimator": "replicate_mean"}
+    return out
+
+
+def bound_reference(builder: Any, policy: SamplingPolicy, *, schema: int = 1) -> Any:
+    """The builder that actually samples under ``policy``.
+
+    Real builders capture their sampling at construction, so the framework's quick policy never
+    reached the engine: the payload recorded one path count and the run used another. A schema-2
+    builder declares ``bind(policy)`` and the pipeline binds the effective policy before sampling.
+    Schema-1 builders are returned unchanged, with the behaviour their banked evidence describes.
+    """
+    bind = getattr(builder, "bind", None)
+    if callable(bind):
+        return bind(policy)
+    if schema == 2:
+        raise ValidationError(
+            f"schema-2 reference {type(builder).__name__} must declare bind(policy) so the path count it runs "
+            "is the one the evidence records")
+    return builder
 
 
 def _estimate(
@@ -102,17 +140,18 @@ def _validate_batch(
     expected_index: int,
     policy: SamplingPolicy,
     quantities: Sequence[str],
+    case_name: str,
 ) -> None:
     if batch.index != expected_index:
         raise ValidationError(
             f"Reference builder returned batch index {batch.index}, expected "
             f"{expected_index}"
         )
-    expected_seed = policy.seed + expected_index
+    expected_seed = batch_seed(policy, case_name, expected_index)
     if batch.seed != expected_seed:
         raise ValidationError(
-            f"Reference builder used seed {batch.seed} for batch {expected_index}, "
-            f"expected {expected_seed} (policy.seed + index)"
+            f"Reference builder used seed {batch.seed} for batch {expected_index} of {case_name!r}, "
+            f"expected {expected_seed} ({policy.seed_scheme} scheme)"
         )
     for quantity in quantities:
         if quantity not in batch.values:
@@ -150,6 +189,7 @@ def _validate_banked_bank(
     scale: EconomicScale,
     bounds: GateBounds,
     policy: SamplingPolicy,
+    case_name: str,
 ) -> None:
     """Replay the stopping policy over a banked bank; reject what it cannot explain."""
     if len(batches) > policy.max_batches:
@@ -158,7 +198,7 @@ def _validate_banked_bank(
             f"{policy.max_batches}; the bank did not come from this configuration"
         )
     for position, batch in enumerate(batches):
-        _validate_batch(batch, position, policy, quantities)
+        _validate_batch(batch, position, policy, quantities, case_name)
 
     if stopped_reason is None:
         # An interrupted bank: no decision was recorded, so there is nothing to
@@ -216,7 +256,7 @@ def run_reference(
         if banked is not None:
             batches, stopped_reason = _deserialize(banked)
             _validate_banked_bank(
-                batches, stopped_reason, quantities, scale, bounds, policy
+                batches, stopped_reason, quantities, scale, bounds, policy, case.name
             )
             if stopped_reason is not None:
                 values, std_errors = _estimate(batches, quantities)
@@ -230,7 +270,7 @@ def run_reference(
 
     while True:
         batch = builder.run_batch(case, len(batches))
-        _validate_batch(batch, len(batches), policy, quantities)
+        _validate_batch(batch, len(batches), policy, quantities, case.name)
         batches.append(batch)
 
         _, std_errors = _estimate(batches, quantities)
