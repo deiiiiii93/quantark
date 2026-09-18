@@ -234,3 +234,34 @@ def test_an_amendment_may_not_change_the_error_model_or_the_qualification_policy
     looser = make_study(qualification=ReferenceQualification(builder=qualifier, max_z=6.0))
     with pytest.raises(ValidationError, match="qualification"):
         amend(looser, parent.path, tmp_path / "amended", reason="looser qualification")
+
+
+# --- payload validation --------------------------------------------------------------------------------------------
+def _restamp(payload):
+    from quantark.modelvalidation.evidence import projected_sha256
+    payload["projected_sha256"] = projected_sha256(payload)
+    return payload
+
+
+def test_a_deterministic_certificate_must_be_typed_all_the_way_down(tmp_path):
+    import copy
+
+    qualifier = StochasticReference(jitter={q: 1e-7 for q in QUANTITIES})
+    good = certify(make_study(qualification=ReferenceQualification(builder=qualifier, max_z=4.0)), out_dir=tmp_path).payload
+    validate_payload(good)
+
+    untyped = copy.deepcopy(good)
+    untyped["references"]["ordinary"].pop("radii")
+    with pytest.raises(ValidationError, match="radii"):
+        validate_payload(_restamp(untyped))
+
+    as_zero_se = copy.deepcopy(good)                         # a deterministic value dressed as a zero standard error
+    gate = _cell(as_zero_se, "ordinary", "pv")["gate"]
+    gate["se_c"], gate["radius_c"] = 0.0, None
+    with pytest.raises(ValidationError, match="radius_c"):
+        validate_payload(_restamp(as_zero_se))
+
+    unqualified = copy.deepcopy(good)
+    unqualified.pop("qualification")
+    with pytest.raises(ValidationError, match="qualification"):
+        validate_payload(_restamp(unqualified))

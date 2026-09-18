@@ -654,6 +654,24 @@ def write_certificate(payload: dict, root: Path) -> Certificate:
     return Certificate(payload=payload, path=path)
 
 
+def _validate_deterministic_payload(payload: Mapping[str, Any], contract: Mapping[str, Any]) -> None:
+    """A deterministic certificate is typed all the way down: no block or gate may pose as a standard error."""
+    for case, block in payload["references"].items():
+        if "error" in block:
+            continue
+        missing = [key for key in ("kind", "values", "radii", "undefined", "evidence") if key not in block]
+        if missing or block.get("kind") != "deterministic":
+            raise ValidationError(f"Deterministic reference block for {case!r} is not typed: missing {missing}")
+    for cell in payload["cells"]:
+        gate = cell.get("gate")
+        if gate is not None and (gate.get("radius_c") is None or gate.get("se_c") is not None):
+            raise ValidationError(
+                f"Cell {cell['candidate']}/{cell['case']}/{cell['quantity']} is gated against a deterministic "
+                "reference and must carry radius_c and no se_c")
+    if ("qualification" in contract) != ("qualification" in payload):
+        raise ValidationError("The contract's qualification policy and the payload's qualification block must come together")
+
+
 def validate_payload(payload: Mapping[str, Any]) -> None:
     """Check a certificate's structure, enums, and digest.
 
@@ -685,6 +703,8 @@ def validate_payload(payload: Mapping[str, Any]) -> None:
         for cell in payload["cells"]:
             if cell.get("kind") not in ("numeric", "semantic", "untargeted"):
                 raise ValidationError(f"Schema-2 cell has unknown kind {cell.get('kind')!r}")
+        if contract.get("reference_kind") == "deterministic":
+            _validate_deterministic_payload(payload, contract)
 
     known_cases = {case["name"] for case in payload["study"]["cases"]}
     known_candidates = {c["name"] for c in payload["study"]["candidates"]}
