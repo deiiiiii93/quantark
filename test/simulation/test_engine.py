@@ -157,3 +157,31 @@ def test_a_disk_cache_serves_a_second_run(tmp_path):
     assert second.manifest["engine_calls"] == 0
     assert second.manifest["cache"]["disk"]["disk_hits"] > 0
     assert second.cube.total_pnl == pytest.approx(first.cube.total_pnl)
+
+
+def test_the_env_key_separates_two_hedge_contracts_on_the_same_market_row():
+    """The active contract fixes the dividend, so it must reach the state key.
+
+    ``StateKey`` deliberately carries nothing about the hedge, on the
+    grounds that the hedge does not price the product.  It does here: the
+    dividend is implied by inverting the ACTIVE futures contract, so two
+    cells whose roll policies pick different contracts price different
+    dividends off one market row.  Were the key blind to that, a shared
+    disk cache would serve one cell's prices to the other.
+    """
+    from quantark.backtest.simulation.carry import day_chain
+
+    paths = _paths(n_paths=3, n_days=8)
+    engine = EnsembleBacktestEngine(ensemble_config())
+    chain = day_chain(paths, 3)
+    rate = paths.rate[:, 3]
+    assert len(chain.contracts) >= 2, "the test needs two listed contracts to choose between"
+
+    near, far = 0, len(chain.contracts) - 1
+    key_near, div_near, _, _, _ = engine._day_market(paths, 3, chain, near, chain.contracts[near], rate)
+    key_far, div_far, _, _, _ = engine._day_market(paths, 3, chain, far, chain.contracts[far], rate)
+
+    # The two contracts really do imply different dividends on this row ...
+    assert div_near[0].get_yield(1.0) != div_far[0].get_yield(1.0)
+    # ... so no state may share a key between them.
+    assert not set(key_near.tolist()) & set(key_far.tolist())
