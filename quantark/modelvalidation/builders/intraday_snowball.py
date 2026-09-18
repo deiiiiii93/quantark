@@ -172,3 +172,181 @@ def build_intraday_snowball_mc_reference(
         sampling=sampling, environment_params=environment_params, product_params=product_params,
         context_params=context_params, quantities=quantities, params=params,
     )
+
+
+_QUAD_V2_APPLICATION_ONLY = ("backend", "max_nodes", "max_events", "max_states", "max_work_bytes", "max_cache_bytes")
+_DESK = (("desk_delta", "delta"), ("desk_gamma", "gamma"), ("desk_theta", "theta"))
+_POINT = (("point_delta", "delta"), ("point_gamma", "gamma"))
+#: Points x time nodes one ladder solve may hold (two-surface solvers keep ~16 bytes per cell, ~1.5 GiB here).
+#: A level above it is skipped and recorded, never silently approximated.
+LADDER_MAX_GRID_CELLS = 100_000_000
+_PLACEMENT_SHIFTS = (1, 2, 3)        # extra points: each moves every barrier's position inside its cell
+
+
+def _measure(engine, environment, product, context, quantities) -> Tuple[dict, dict, dict, dict]:
+    """PV, desk and point quantities through ``value_intraday``, requested exactly as a caller would.
+
+    Returns (values, statuses, reasons, the base price's numerical diagnostics).
+    """
+    desk_greeks = tuple(g for q, g in _DESK if q in quantities)
+    point_greeks = tuple(g for q, g in _POINT if q in quantities)
+    desk = value_intraday(engine, build_request(environment, product, context, greeks=desk_greeks,
+                                                greek_convention="desk_bump" if desk_greeks else None))
+    point = None
+    if point_greeks:
+        point = value_intraday(engine, build_request(environment, product, context, greeks=point_greeks,
+                                                     greek_convention="point"))
+        if not is_close(desk.price, point.price, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValidationError(f"two conventions priced one context differently: {desk.price!r} vs {point.price!r}")
+    values, statuses, reasons = {"pv": float(desk.price)}, {"pv": "ok"}, {"pv": ""}
+    for quantity, name in _DESK + _POINT:
+        if quantity not in quantities:
+            continue
+        greek = (desk if quantity.startswith("desk") else point).greek(name)
+        statuses[quantity], reasons[quantity] = greek.status, greek.reason or ""
+        if greek.status == "ok":
+            values[quantity] = float(greek.value)
+    return ({q: values[q] for q in quantities if q in values}, {q: statuses[q] for q in quantities},
+            {q: reasons[q] for q in quantities}, dict(desk.numerical))
+
+
+class _IntradayCandidate(IntradayArm):
+    base_name = ""
+    trees: Tuple[str, ...] = ()
+
+    def name(self) -> str:
+        label = self._params.get("label")
+        return f"{self.base_name}.{label}" if label else self.base_name
+
+    def _declared(self) -> dict:
+        return {k: v for k, v in self._params.items() if k != "label"}
+
+    def fingerprint(self) -> str:
+        return implementation_fingerprint(*COMMON_TREES, *self.trees)
+
+    def _level(self, label, resolution, engine, specs, settings, *, target=None) -> ConvergenceLevel:
+        """One level with the settings it was asked for and the geometry the route actually solved on."""
+        if target is not None:
+            return ConvergenceLevel(label, float(resolution), target, settings, is_target=True)
+        values, _, _, numerical = _measure(engine, *specs, self.quantities)
+        achieved = {k: numerical[k] for k in ("points", "steps_per_day", "requested_steps", "nodes", "cells", "resolution")
+                    if k in numerical}
+        return ConvergenceLevel(label, float(resolution), values, {**settings, "achieved": achieved})
+
+
+class IntradaySnowballQuadV2Candidate(_IntradayCandidate):
+    """QUAD V2 through the intraday route: kernel point Greeks, desk bumps of its own prices."""
+
+    base_name = "equity.snowball.intraday.quad_v2"
+    trees = QUAD_V2_TREES
+
+    def _settings(self) -> dict:
+        defaults = QuadV2Params()
+        return {"cells_per_sd": float(self._params.get("cells_per_sd", defaults.cells_per_sd)),
+                "order": int(self._params.get("order", defaults.order)),
+                "domain_sd": float(self._params.get("domain_sd", defaults.domain_sd))}
+
+    @staticmethod
+    def _engine(settings: Mapping[str, Any]) -> SnowballQuadEngineV2:
+        return SnowballQuadEngineV2(QuadV2Params(**settings))
+
+    def _axis_levels(self) -> dict:
+        s = self._settings()
+        return {"cells_per_sd": [s["cells_per_sd"] * m for m in (1.0, 2.0, 4.0)],
+                "order": [s["order"] + k for k in (0, 4, 8)],
+                "domain_sd": [s["domain_sd"] + k for k in (0.0, 2.0, 4.0)]}
+
+    def params(self) -> Mapping[str, Any]:
+        engine = self._engine(self._settings())
+        return {**self._declared(), "engine": "SnowballQuadEngineV2",
+                "desk_bump": float(bump_config_for(engine).spot_bump),
+                "grid": engine_config(engine.params, exclude=_QUAD_V2_APPLICATION_ONLY),
+                "convergence_axes": self._axis_levels()}
+
+    def evaluate_target(self, case) -> CandidateResult:
+        values, statuses, reasons, _ = _measure(self._engine(self._settings()), *self.specs(case), self.quantities)
+        return CandidateResult(values=values, statuses=statuses, reasons=reasons)
+
+    def evaluate(self, case) -> CandidateResult:
+        specs, settings = self.specs(case), self._settings()
+        values, statuses, reasons, _ = _measure(self._engine(settings), *specs, self.quantities)
+        axes = []
+        for name, levels in self._axis_levels().items():
+            built = [self._level("target", levels[0], None, specs, dict(settings), target=values)]
+            for value in levels[1:]:
+                probe = {**settings, name: value}
+                built.append(self._level(f"{name}={value:g}", value, self._engine(probe), specs, probe))
+            axes.append(ConvergenceAxis(name, "refinement", tuple(built)))
+        return CandidateResult(values=values, statuses=statuses, reasons=reasons, convergence=tuple(axes))
+
+
+class IntradaySnowballPDECandidate(_IntradayCandidate):
+    """The two-surface PDE through the intraday route: grid-stencil point Greeks, desk bumps of its prices."""
+
+    base_name = "equity.snowball.intraday.pde"
+    trees = PDE_TREES
+
+    def _accuracy(self) -> str:
+        return str(self._params.get("accuracy", "standard"))
+
+    def _target_engine(self) -> SnowballPDESolver:
+        return SnowballPDESolver(params=PDEParams(accuracy=self._accuracy()))
+
+    def _explicit_engine(self, points: int, steps_per_day: float) -> SnowballPDESolver:
+        base = resolve_config(self._accuracy(), None)
+        return SnowballPDESolver(params=PDEParams(grid=GridConfig(
+            points=int(points), steps_per_day=float(steps_per_day),
+            max_points=max(int(points), int(base.max_points)), max_steps=10 ** 8)))
+
+    def params(self) -> Mapping[str, Any]:
+        return {**self._declared(), "engine": "SnowballPDESolver",
+                "desk_bump": float(bump_config_for(self._target_engine()).spot_bump),
+                "grid": engine_config(resolve_config(self._accuracy(), None)),
+                "convergence_axes": {"space": "achieved points x (1, 2, 4)", "time": "achieved steps per day x (1, 2, 4)",
+                                     "placement": f"achieved points + {list(_PLACEMENT_SHIFTS)}"}}
+
+    def evaluate_target(self, case) -> CandidateResult:
+        values, statuses, reasons, _ = _measure(self._target_engine(), *self.specs(case), self.quantities)
+        return CandidateResult(values=values, statuses=statuses, reasons=reasons)
+
+    def evaluate(self, case) -> CandidateResult:
+        specs = self.specs(case)
+        values, statuses, reasons, numerical = _measure(self._target_engine(), *specs, self.quantities)
+        base_pde_solver._ENV_STEP_COEFF_MEMO.clear()
+        points, spd = numerical.get("points"), numerical.get("steps_per_day")
+        if points is None or spd is None:
+            # decided without a grid (terminated, or an event at the valuation instant): nothing to refine
+            return CandidateResult(values=values, statuses=statuses, reasons=reasons, exact=True)
+        points, spd, steps = int(points), float(spd), float(numerical.get("requested_steps") or 0.0)
+        solved = {"points": points, "steps_per_day": spd, "resolution": numerical.get("resolution")}
+
+        def level(label, resolution, p, s):
+            cells = p * (steps * (s / spd) + 1.0)
+            if cells > LADDER_MAX_GRID_CELLS:
+                return None                                  # recorded by its absence: the axis stays short
+            built = self._level(label, resolution, self._explicit_engine(p, s), specs, {"points": p, "steps_per_day": s})
+            base_pde_solver._ENV_STEP_COEFF_MEMO.clear()
+            return built
+
+        target = lambda: self._level("target", 1.0, None, specs, dict(solved), target=values)   # noqa: E731
+        space = [target()] + [lv for lv in (level(f"points x{m}", m, points * m, spd) for m in (2, 4)) if lv]
+        time = [target()] + [lv for lv in (level(f"steps x{m}", m, points, spd * m) for m in (2, 4)) if lv]
+        shifts = [ConvergenceLevel("target", 0.0, values, dict(solved), is_target=True)] + [
+            lv for lv in (level(f"points +{k}", float(k), points + k, spd) for k in _PLACEMENT_SHIFTS) if lv]
+        axes = (ConvergenceAxis("space", "refinement", tuple(space)), ConvergenceAxis("time", "refinement", tuple(time)),
+                ConvergenceAxis("placement", "placement", tuple(shifts)))
+        return CandidateResult(values=values, statuses=statuses, reasons=reasons, convergence=axes)
+
+
+def _candidate_builder(cls):
+    def build(environment_params: Mapping[str, Any], product_params: Mapping[str, Any], quantities: Sequence[str],
+              params: Mapping[str, Any], context_params: Optional[Mapping[str, Any]] = None):
+        if context_params is None:
+            raise ValidationError(f"{cls.base_name} needs the study's context block (intraday.sse)")
+        return cls(environment_params=environment_params, product_params=product_params,
+                   context_params=context_params, quantities=quantities, params=params)
+    return build
+
+
+register_builder("equity.snowball.intraday.quad_v2", kind="candidate")(_candidate_builder(IntradaySnowballQuadV2Candidate))
+register_builder("equity.snowball.intraday.pde", kind="candidate")(_candidate_builder(IntradaySnowballPDECandidate))
