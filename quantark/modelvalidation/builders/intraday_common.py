@@ -64,6 +64,7 @@ COMMON_TREES: Tuple[str, ...] = (
     "quantark/util/calendar",
     "quantark/util/numerical",
     "quantark/modelvalidation/builders/intraday_common.py",
+    "quantark/modelvalidation/builders/intraday_snowball.py",
 )
 QUAD_V2_TREES: Tuple[str, ...] = ("quantark/asset/equity/engine/quad/v2", "quantark/asset/equity/param")
 PDE_TREES: Tuple[str, ...] = ("quantark/asset/equity/engine/pde", "quantark/asset/equity/param")
