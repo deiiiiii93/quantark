@@ -1,9 +1,11 @@
-"""The daily-KI snowball intraday study: one paired-RQMC reference, QUAD V2 and PDE candidates.
+"""The daily-KI snowball intraday study: a deterministic Gaussian-transition reference, the paired-RQMC
+arm that qualifies it, and the QUAD V2 and PDE candidates.
 
-Every arm prices the runtime's own resolved context through the ordinary APIs. The
-reference reuses ``cell_price`` -- the price function the desk bumps difference -- with a
-fresh RQMC engine per batch, so the three bump arms of one case share one scramble while
-different cases never do. The candidates call ``value_intraday`` exactly as a caller would.
+Every arm prices the runtime's own resolved context. The RQMC arm reuses ``cell_price`` -- the
+price function the desk bumps difference -- with a fresh RQMC engine per batch, so the three
+bump arms of one case share one scramble while different cases never do. The Gaussian arm
+solves the same context on a nested refinement ladder with an engine-independent solver and
+states an error radius. The candidates call ``value_intraday`` exactly as a caller would.
 Nothing here bypasses the runtime.
 """
 
@@ -19,6 +21,7 @@ from quantark.asset.equity.engine.quad.v2.engine import SnowballQuadEngineV2
 from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.asset.equity.param.quad_v2_params import QuadV2Params
 from quantark.intraday.context import resolve_context
+from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
 from quantark.intraday.greeks import bump_config_for, cell_price, resolve_theta_step, with_pricing_env
 from quantark.intraday.roll import roll_context
 from quantark.intraday.service import value_intraday
@@ -26,6 +29,7 @@ from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
+from quantark.modelvalidation.builders import intraday_gaussian
 from quantark.modelvalidation.builders.intraday_common import (
     COMMON_TREES,
     MC_TREES,
@@ -39,7 +43,7 @@ from quantark.modelvalidation.builders.intraday_common import (
 )
 from quantark.modelvalidation.candidate import CandidateResult, ConvergenceAxis, ConvergenceLevel
 from quantark.modelvalidation.engine_config import engine_config
-from quantark.modelvalidation.reference import BatchResult
+from quantark.modelvalidation.reference import BatchResult, DeterministicResult
 from quantark.modelvalidation.registry import register_builder
 from quantark.modelvalidation.study import SamplingPolicy, batch_seed
 
@@ -169,6 +173,171 @@ def build_intraday_snowball_mc_reference(
     if context_params is None:
         raise ValidationError("equity.snowball.intraday.mc_rqmc needs the study's context block (intraday.sse)")
     return IntradaySnowballRQMCReference(
+        sampling=sampling, environment_params=environment_params, product_params=product_params,
+        context_params=context_params, quantities=quantities, params=params,
+    )
+
+
+#: What the deterministic reference computes for each quantity. Every one is a declared target,
+#: the point Greeks included: they are the exact derivatives of the last Gaussian expectation.
+_GAUSSIAN_TARGETS: Mapping[str, dict] = {
+    "pv": {"estimator": "richardson_extrapolant_of_the_solve"},
+    "desk_delta": {"estimator": "central_difference_of_solves"},
+    "desk_gamma": {"estimator": "central_difference_of_solves"},
+    "desk_theta": {"estimator": "frozen_market_roll_of_solves",
+                   "step": "the runtime's default hour, clamped to the current segment"},
+    "point_delta": {"estimator": "analytic_derivative_of_the_last_gaussian_expectation"},
+    "point_gamma": {"estimator": "analytic_derivative_of_the_last_gaussian_expectation"},
+}
+GAUSSIAN_TREES: Tuple[str, ...] = ("quantark/modelvalidation/builders/intraday_gaussian.py",)
+#: Solved sweeps kept between cases (a few MB each); the oldest leave first.
+_MAX_CACHED_SWEEPS = 96
+
+
+def _nested(points: Sequence[int], name: str) -> Tuple[int, ...]:
+    levels = tuple(int(p) for p in points)
+    if len(levels) < intraday_gaussian.MIN_LADDER_LEVELS:
+        raise ValidationError(f"{name} needs at least {intraday_gaussian.MIN_LADDER_LEVELS} levels, got {list(levels)}")
+    for coarse, fine in zip(levels, levels[1:]):
+        if fine - 1 != 2 * (coarse - 1):
+            raise ValidationError(
+                f"{name} must be nested, each level halving the spacing (n -> 2n - 1); got {list(levels)}")
+    return levels
+
+
+class IntradaySnowballGaussianReference(IntradayArm):
+    """Deterministic reference: the engine-independent Gaussian-transition solver on a nested ladder.
+
+    It states a value and an error radius per quantity (``intraday_gaussian.ladder_estimate``), never a
+    standard error. It shares the resolved context and the product's payoff functions with every arm and
+    nothing else; the RQMC arm qualifies it case by case.
+    """
+
+    reference_kind = "deterministic"
+
+    def __init__(self, sampling: SamplingPolicy, quick: bool = False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.sampling, self.quick, self._kwargs = sampling, quick, dict(kwargs)
+        unknown_params = sorted(set(self._params) - {"points", "quick_points", "width_std"})
+        if unknown_params:
+            raise ValidationError(f"equity.snowball.intraday.gaussian does not take params {unknown_params}")
+        if "points" not in self._params:
+            raise ValidationError("equity.snowball.intraday.gaussian needs params.points: the nested refinement ladder")
+        self.points = _nested(self._params["points"], "params.points")
+        self.quick_points = _nested(self._params.get("quick_points", (251, 501, 1001, 2001)), "params.quick_points")
+        self.width_std = float(self._params.get("width_std", 8.0))
+        unknown = [q for q in self.quantities if q not in _GAUSSIAN_TARGETS]
+        if unknown:
+            raise ValidationError(
+                f"equity.snowball.intraday.gaussian does not produce {unknown}; it produces {sorted(_GAUSSIAN_TARGETS)}")
+
+    def bind(self, policy: SamplingPolicy, quick: bool = False) -> "IntradaySnowballGaussianReference":
+        """The same solver under ``policy`` (it supplies the desk bump); ``quick`` selects the wiring ladder."""
+        return IntradaySnowballGaussianReference(sampling=policy, quick=quick, **self._kwargs)
+
+    @property
+    def levels(self) -> Tuple[int, ...]:
+        return self.quick_points if self.quick else self.points
+
+    def targets(self) -> Mapping[str, Optional[dict]]:
+        out = {}
+        for quantity in self.quantities:
+            declared = dict(_GAUSSIAN_TARGETS[quantity])
+            if declared["estimator"] == "central_difference_of_solves":
+                declared["bump"] = self.sampling.bump
+            out[quantity] = declared
+        return out
+
+    def error_model(self) -> Mapping[str, Any]:
+        return {
+            "method": ("backward Gaussian transitions of a piecewise-linear value function with exact barrier jumps; "
+                       "closed-form expectations, exact last step"),
+            "discretization_order": 2,
+            "levels": list(self.levels),
+            "value": "Richardson extrapolant of the two finest levels",
+            "radius": ("exact: the floating-point difference; geometric: the last spread of successive extrapolants, "
+                       "when they contract by 2x or more, never credited below 1/16 of the previous spread; "
+                       "correction: the whole Richardson correction when they do not contract; "
+                       "unbounded (infinite) when the observed order is outside the window"),
+            "order_window": list(intraday_gaussian.ORDER_WINDOW),
+            "width_std": self.width_std,
+        }
+
+    def config(self) -> Mapping[str, Any]:
+        return {"engine": "intraday_gaussian.solve_snowball", **self.error_model(), "desk_bump": self.sampling.bump,
+                "quick_ladder": self.quick}
+
+    def identity(self, case) -> Mapping[str, Any]:
+        return {
+            "builder": "equity.snowball.intraday.gaussian",
+            "case": case.name,
+            "inputs": self.resolved_inputs(case),
+            "targets": plain(self.targets()),
+            "config": plain(dict(self.config())),
+            "implementation": implementation_fingerprint(*COMMON_TREES, *GAUSSIAN_TREES),
+        }
+
+    def _price(self, ctx, points: int) -> Tuple[float, float, float]:
+        """(whole remaining claim, point delta, point gamma): the solve plus the pending receivables ``cell_price`` adds."""
+        state = ctx.numerical.lifecycle_state
+        pending = float(pending_receivable_pv(state, ctx.pricing_env)) if state is not None else 0.0
+        value, delta, gamma = intraday_gaussian.solve_snowball(ctx, points, self.width_std)
+        return value + pending, delta, gamma
+
+    def _level(self, ctx, points: int) -> dict:
+        h, spot = self.sampling.bump, ctx.spot
+        base, point_delta, point_gamma = self._price(ctx, points)
+        up = self._price(with_pricing_env(ctx, bumped_env(ctx.pricing_env, 1.0 + h), "gaussian_up"), points)[0]
+        down = self._price(with_pricing_env(ctx, bumped_env(ctx.pricing_env, 1.0 - h), "gaussian_down"), points)[0]
+        values = {"pv": base, "desk_delta": (up - down) / (2.0 * spot * h),
+                  "desk_gamma": (up - 2.0 * base + down) / (spot * h) ** 2,
+                  "point_delta": point_delta, "point_gamma": point_gamma}
+        step = resolve_theta_step(ctx, None, "hour")
+        if step.actual is None:
+            values["desk_theta"] = float("nan")
+        else:
+            rolled = roll_context(ctx, ctx.valuation_timestamp + step.actual)
+            received = float(rolled.numerical.paid_cash) - float(ctx.numerical.paid_cash)
+            values["desk_theta"] = (self._price(rolled, points)[0] + received - base) / step.divisor
+        return values
+
+    def solve(self, case) -> DeterministicResult:
+        environment, product, context = self.specs(case)
+        ctx = resolve_context(build_request(environment, product, context))
+        levels = [self._level(ctx, points) for points in self.levels]
+        values, radii, undefined, ladder = {}, {}, {}, {}
+        for quantity in self.quantities:
+            column = [level[quantity] for level in levels]
+            missing = [value != value for value in column]              # NaN: no such number at this instant
+            if all(missing):
+                undefined[quantity] = ("valuation is at an event instant: no roll or derivative exists inside the segment"
+                                       if quantity in ("desk_theta", "point_delta", "point_gamma") else "the solver has no value")
+                continue
+            if any(missing):
+                raise ValidationError(f"{case.name}: {quantity} is defined on some ladder levels only: {column}")
+            estimate = intraday_gaussian.ladder_estimate(column)
+            values[quantity], radii[quantity] = estimate.value, estimate.radius
+            ladder[quantity] = {"values": column, "extrapolants": list(estimate.extrapolants), "rule": estimate.rule,
+                                "observed_order": estimate.observed_order}
+        cache = intraday_gaussian._SWEEP_CACHE
+        while len(cache) > _MAX_CACHED_SWEEPS:
+            cache.pop(next(iter(cache)))
+        return DeterministicResult(values=values, radii=radii, undefined=undefined,
+                                   evidence={"levels": list(self.levels), "quantities": ladder})
+
+
+@register_builder("equity.snowball.intraday.gaussian", kind="reference")
+def build_intraday_snowball_gaussian_reference(
+    environment_params: Mapping[str, Any],
+    product_params: Mapping[str, Any],
+    sampling: SamplingPolicy,
+    quantities: Sequence[str],
+    params: Mapping[str, Any],
+    context_params: Optional[Mapping[str, Any]] = None,
+) -> IntradaySnowballGaussianReference:
+    if context_params is None:
+        raise ValidationError("equity.snowball.intraday.gaussian needs the study's context block (intraday.sse)")
+    return IntradaySnowballGaussianReference(
         sampling=sampling, environment_params=environment_params, product_params=product_params,
         context_params=context_params, quantities=quantities, params=params,
     )
