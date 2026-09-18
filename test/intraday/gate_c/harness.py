@@ -217,7 +217,7 @@ def run_cell(cell: C.Cell) -> CellResult:
         out = None
         if cell.engine == "pde":
             release_pde_memos()
-        if cell.engine == "pde" and level == 0 and numerics[0].get("resolution") == "unqualified":
+        if cell.engine == "pde" and level == 0 and numerics[0].get("resolution") == "under_resolved":
             # the route itself declines an accuracy claim: the diffusion layer is below the grid in space or time
             return CellResult(passed=False, status="unqualified", reason=numerics[0].get("resolution_reason", ""), **record()[1])
     tol = budget + K_REF * unc

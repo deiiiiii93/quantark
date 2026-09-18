@@ -74,10 +74,10 @@ def test_fifteen_minutes_out_refines_the_grid_to_resolve_the_layer(sse_calendar,
     assert any(r.startswith("manifest:") for r in res.records) and res.contingent_pv == out.contingent_pv
 
 
-def test_one_second_out_is_unqualified_at_the_point_cap(sse_calendar, sse_sessions, desk):
+def test_one_second_out_is_under_resolved_at_the_point_cap(sse_calendar, sse_sessions, desk):
     ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(seconds=1), spot=102.99)
     out = route_for(ctx, _pde()).price(ctx, _pde())
-    assert out.numerical["resolution"] == "unqualified" and out.numerical["points"] == INTRADAY_PDE_MAX_POINTS
+    assert out.numerical["resolution"] == "under_resolved" and out.numerical["points"] == INTRADAY_PDE_MAX_POINTS
     assert "points needed" in out.numerical["resolution_reason"]
 
 
@@ -90,7 +90,7 @@ def test_refinement_respects_the_grid_memory_budget_and_says_so(sse_calendar, ss
     n = out.numerical
     assert pde_route.bytes_per_grid_cell(out.engine_used, ctx.numerical.product) == 2 * 8 + 9      # two value surfaces
     assert n["points"] * (n["requested_steps"] + 1) * 25 <= budget
-    assert n["resolution"] == "unqualified" and "grid memory budget" in n["resolution_reason"]
+    assert n["resolution"] == "under_resolved" and "grid memory budget" in n["resolution_reason"]
 
 
 def test_a_memory_phoenix_budget_counts_every_coupon_state_surface(sse_calendar, sse_sessions, desk, monkeypatch):

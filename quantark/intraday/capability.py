@@ -79,7 +79,7 @@ def _rows() -> Tuple[IntradayCapability, ...]:
                                "BGK is an approximation; discrete barriers route to PDE/QUAD/MC"),
         ]
     pde = "quantark.asset.equity.engine.pde."
-    pde_note = ("resolution reported per price (resolved / unqualified / deterministic): cells and time steps across the "
+    pde_note = ("resolution reported per price (resolved / under_resolved / deterministic): cells and time steps across the "
                 "diffusion layer, grid-mode damping, barrier placement; refinement bounded by a grid-cell memory budget")
     pde_rows = []
     for product, path, modes in (

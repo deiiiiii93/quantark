@@ -35,6 +35,7 @@ from quantark.asset.equity.engine.settlement_support import pending_receivable_p
 from quantark.asset.equity.riskmeasures.greeks import bump_envs
 from quantark.execution.cache.fingerprint import fingerprint
 from quantark.execution.errors import CapabilityError
+from quantark.intraday.resolution import UNDER_RESOLVED
 from quantark.intraday.result import GreekValue
 from quantark.intraday.timestamp import SECONDS_PER_YEAR, to_utc
 from quantark.util.exceptions import NumericalError, PricingError
@@ -43,8 +44,6 @@ DESK_GREEKS = ("delta", "gamma", "vega", "rho", "dividend_rho")
 POINT_UNITS = {"delta": "per unit spot", "gamma": "per unit spot^2", "vega": "per unit vol (trading-quoted)",
                "rho": "per unit rate", "dividend_rho": "per unit dividend yield"}
 POINT_PROXY_REASON = "finite-difference proxy for a point derivative; bump-limit not demonstrated"
-#: The one route resolution verdict that means "this price is not the one you asked for".
-UNRESOLVED = "unqualified"
 
 
 @dataclass(frozen=True)
@@ -53,7 +52,7 @@ class BumpCell:
     ctx: object                  # the resolved context with only pricing_env replaced
     price: float                 # contingent + pending receivables (re-discounted on the cell's env)
     error: str = ""
-    #: The route's own resolution verdict for THIS cell's price ("resolved", "unqualified", ...);
+    #: The route's own resolution verdict for THIS cell's price ("resolved", "under_resolved", ...);
     #: empty when the route reports none (a closed form has nothing to resolve).
     resolution: str = ""
     resolution_reason: str = ""
@@ -550,8 +549,8 @@ def assemble_desk_greeks(cells: Mapping[str, BumpCell], greeks: Sequence[str], *
         # deliver: "deterministic" and "not_solved" are exact prices with no diffusion to
         # resolve, "sampling_uncertainty_reported" carries its own error estimate, and a
         # closed form reports none at all.
-        unresolved = {cells[i].resolution_reason or UNRESOLVED
-                      for i in ids if cells[i].resolution == UNRESOLVED}
+        unresolved = {cells[i].resolution_reason or UNDER_RESOLVED
+                      for i in ids if cells[i].resolution == UNDER_RESOLVED}
         if unresolved:
             return GreekValue(name, None, unit, "desk_bump", bump=bump, status="unqualified",
                               reason="a bump cell priced on a grid the route could not resolve: "

@@ -121,7 +121,7 @@ def test_finding_3_a_volatility_pillar_inside_the_session_breaks_admissibility(s
     assert analytical_barrier_admissibility(resolve_context(req)).admissible
 
 
-def test_finding_3_an_unqualified_curve_family_is_refused_rather_than_sampled(sse_sessions, desk):
+def test_finding_3_an_inadmissible_curve_family_is_refused_rather_than_sampled(sse_sessions, desk):
     from quantark.param.rrf.rate_curve import CubicSplineRateCurve
     ts = datetime(2026, 9, 16, 14, tzinfo=SHANGHAI)
     spline = CubicSplineRateCurve([(0.01, 0.03), (0.5, 0.03), (1.0, 0.03), (2.0, 0.03)])
@@ -150,7 +150,7 @@ def test_finding_4_a_desk_greek_is_unqualified_on_an_unresolved_grid(sse_calenda
     assert all(g.status == "unqualified" and "discretisation or sampling error" in g.reason for g in far.greeks)
     # a second out, one bp above the barrier, it does not: the difference inherits that
     near = value(events[5].timestamp - timedelta(seconds=1), 102.99)
-    assert near.numerical["resolution"] == "unqualified"
+    assert near.numerical["resolution"] == "under_resolved"
     for g in near.greeks:
         assert g.status == "unqualified" and g.value is None and "could not resolve" in g.reason
 

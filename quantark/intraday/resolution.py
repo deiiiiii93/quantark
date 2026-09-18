@@ -31,6 +31,8 @@ REQUIRED_CELLS_PER_LAYER = 4.0
 REQUIRED_STEPS_PER_LAYER = REQUIRED_CELLS_PER_LAYER ** 2
 #: nepers the grid-scale mode must lose between the first event and the valuation (e^-8 ~ 3e-4 of the jump)
 REQUIRED_GRID_MODE_DAMPING = 8.0
+#: The verdict for a price whose grid does not resolve the diffusion layer: a diagnostic, never a gate.
+UNDER_RESOLVED = "under_resolved"
 INTRADAY_PDE_MAX_POINTS = 20_000
 INTRADAY_PDE_MAX_STEPS = 100_000
 #: Memory budget of one refined solve. The solvers keep value surfaces over the whole time grid — one for barrier /
@@ -46,7 +48,7 @@ class ResolutionStatus:
     layer_log_width: float          # sqrt(W(0, tau_first)): tau_first = first remaining event (or maturity)
     cell_log_width: Optional[float]  # achieved dx at the spot (PDE)
     cells_per_layer: float
-    status: str                     # "resolved" | "unqualified" | "deterministic"
+    status: str                     # "resolved" | "under_resolved" | "deterministic"
     required_points: Optional[int]  # points for REQUIRED_CELLS_PER_LAYER over the current domain; None if deterministic
     reason: str
     #: layer^2 / max per-step variance over the steps up to the first event (inf when no time grid was given)
@@ -121,7 +123,7 @@ def pde_resolution(ctx, *, dx_at_spot: float, domain_log_width: float, time_node
     if damping < REQUIRED_GRID_MODE_DAMPING:
         reasons.append(f"the grid-scale mode of the event jump decays by {damping:.2f} nepers before the valuation "
                        f"(< {REQUIRED_GRID_MODE_DAMPING:g}); more steps per day needed")
-    status = "unqualified" if reasons else "resolved"
+    status = UNDER_RESOLVED if reasons else "resolved"
     return ResolutionStatus(layer, dx_at_spot, cells, status, required, "; ".join(reasons), steps, damping)
 
 

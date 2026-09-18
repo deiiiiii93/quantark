@@ -21,7 +21,8 @@ import numpy as np
 
 from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
 from quantark.intraday.resolution import (COEFFICIENT_BYTES_PER_CELL, INTRADAY_PDE_MAX_GRID_BYTES, INTRADAY_PDE_MAX_POINTS,
-                                          INTRADAY_PDE_MAX_STEPS, diffusion_layer, pde_resolution, time_resolved)
+                                          INTRADAY_PDE_MAX_STEPS, UNDER_RESOLVED, diffusion_layer, pde_resolution,
+                                          time_resolved)
 
 
 def _layout_numbers(solver, spot: float):
@@ -168,7 +169,7 @@ class PDERoute:
         dx_min = _dx_min(solver)
         status = _time_status(ctx, solver, solver._active_layout, numbers, dx_min)
         budget_bound = False
-        if status.status == "unqualified":
+        if status.status == UNDER_RESOLVED:
             max_cells = INTRADAY_PDE_MAX_GRID_BYTES // bytes_per_grid_cell(solver, twin)
             points = int(grid.points)
             if status.required_points > numbers["points"]:
@@ -180,7 +181,7 @@ class PDERoute:
             dx_min *= numbers["points"] / max(points, numbers["points"])
             spd, requested = float(grid.steps_per_day), steps_now
             space_resolvable = status.required_points <= max(points, numbers["points"])
-            # a layer the point or memory cap cannot resolve stays unqualified: more steps would buy cost, not a claim
+            # a layer the point or memory cap cannot resolve stays under-resolved: more steps would buy cost, not accuracy
             if space_resolvable and not time_resolved(_time_status(ctx, solver, solver._active_layout, numbers, dx_min)):
                 max_steps = min(INTRADAY_PDE_MAX_STEPS, max_cells // points - 1)
                 spd, requested = _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps)
@@ -197,13 +198,13 @@ class PDERoute:
                 status = _time_status(ctx, refined, refined._active_layout, numbers, _dx_min(refined))
                 records = (f"grid refined to {numbers['points']} points and {spd:g} steps per day for the diffusion layer",)
                 solver, grid = refined, refined.grid_binder.config
-            if status.status == "unqualified" and budget_bound:
+            if status.status == UNDER_RESOLVED and budget_bound:
                 status = replace(status, reason=f"{status.reason}; refinement capped by the grid memory budget "
                                                 f"({INTRADAY_PDE_MAX_GRID_BYTES / 2**30:.2f} GiB = {max_cells:.2e} "
                                                 "points x time nodes for this solver)")
         placement = _barrier_placement(ctx, solver) if status.status == "resolved" else ""
         if placement:
-            status = replace(status, status="unqualified", reason=placement)
+            status = replace(status, status=UNDER_RESOLVED, reason=placement)
         numerical = dict(numbers, resolution=status.status, resolution_reason=status.reason,
                          cells_per_layer=status.cells_per_layer, layer_log_width=status.layer_log_width,
                          steps_per_layer=status.steps_per_layer, grid_mode_damping=status.grid_mode_damping,

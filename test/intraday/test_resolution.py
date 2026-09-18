@@ -31,7 +31,7 @@ def test_layer_shrinks_towards_the_fixing_and_resolution_follows(sse_calendar, s
         res = pde_resolution(ctx, dx_at_spot=0.19 / 400, domain_log_width=0.19)
         statuses.append(res.status)
         required.append(res.required_points)
-    assert statuses == ["resolved", "resolved", "unqualified"]
+    assert statuses == ["resolved", "resolved", "under_resolved"]
     assert required == sorted(required)
     one_second = _ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(seconds=1))
     assert diffusion_layer(one_second) == pytest.approx((0.04 * 0.35 / 244 / 7200.0) ** 0.5, rel=1e-12)
@@ -39,7 +39,7 @@ def test_layer_shrinks_towards_the_fixing_and_resolution_follows(sse_calendar, s
     assert res.cells_per_layer < REQUIRED_CELLS_PER_LAYER and "points needed" in res.reason
 
 
-def test_one_step_carrying_the_session_variance_is_unqualified_however_fine_the_space_grid(sse_calendar, sse_sessions):
+def test_one_step_carrying_the_session_variance_is_under_resolved_however_fine_the_space_grid(sse_calendar, sse_sessions):
     only = VarianceProfile.sessions_only(sse_sessions, 244)
     ctx = _ctx(sse_calendar, sse_sessions, only, lambda kos: kos[5].timestamp - timedelta(days=1))
     t_first = min(t for t in ctx.numerical.event_taus.values() if t > 0.0)
@@ -49,7 +49,7 @@ def test_one_step_carrying_the_session_variance_is_unqualified_however_fine_the_
     assert variance_steps_per_layer(ctx, coarse) < 2.0
     assert variance_steps_per_layer(ctx, fine) >= REQUIRED_STEPS_PER_LAYER
     res = pde_resolution(ctx, dx_at_spot=layer / 40.0, domain_log_width=0.2, time_nodes=coarse)
-    assert res.status == "unqualified" and "steps per day" in res.reason and "points" not in res.reason
+    assert res.status == "under_resolved" and "steps per day" in res.reason and "points" not in res.reason
     assert pde_resolution(ctx, dx_at_spot=layer / 40.0, domain_log_width=0.2, time_nodes=fine).status == "resolved"
 
 
@@ -67,7 +67,7 @@ def test_crank_nicolson_keeps_the_jump_mode_alive_when_each_step_spans_many_cell
     assert grid_mode_damping(ctx, nodes, cn, dx) < REQUIRED_GRID_MODE_DAMPING
     assert grid_mode_damping(ctx, nodes, rannacher, dx) > grid_mode_damping(ctx, nodes, cn, dx)
     res = pde_resolution(ctx, dx_at_spot=dx, domain_log_width=0.2, time_nodes=nodes, theta=cn, dx_min=dx)
-    assert res.status == "unqualified" and "nepers" in res.reason
+    assert res.status == "under_resolved" and "nepers" in res.reason
     one_step = np.array([0.0, t_first])                                   # dx^2 == dW: CN annihilates the mode in one step
     assert grid_mode_damping(ctx, one_step, [0.5], layer) > 30.0
 

@@ -37,7 +37,7 @@ Admitted families and their laws between breaks:
 * The parallel-shift wrappers add a constant to the rate or yield, i.e. a linear
   term to the cumulative quantity: same breaks, same degree -- with one exception:
   ``ParallelShiftVolSurface`` shifts sigma, and (sigma(u) + s)^2 u is affine in u
-  only when sigma is already constant. A shifted TERM surface is unqualified.
+  only when sigma is already constant. A shifted TERM surface is inadmissible.
 * The frozen-market roll wrappers of ``quantark.intraday.roll`` translate their
   inner family by the roll: ``ShiftedTradingVolSurface`` has w'(u) = w(u + du) -
   w(du), ``ShiftedRateCurve`` and ``ShiftedDividendYield`` the cumulative carry
@@ -178,7 +178,7 @@ def coefficient_breaks(ctx, t_end: float) -> CoefficientBreaks:
     env, time_map = ctx.pricing_env, ctx.time_map
     clock = _inside([s.tau_end for s in time_map.segments] + [s.tau_start for s in time_map.segments], t_end)
 
-    def unqualified(reason):
+    def inadmissible(reason):
         # The clock's own segments are always known; only the CURVE law is in doubt,
         # so a caller that just needs somewhere safe to stop still gets the segments.
         return CoefficientBreaks(clock, clock, (), False, reason)
@@ -187,15 +187,15 @@ def coefficient_breaks(ctx, t_end: float) -> CoefficientBreaks:
     inner = surface.inner if isinstance(surface, TradingClockVolSurface) else surface
     pillars_u = _vol_pillars_in_trading_time(inner)
     if pillars_u is None:
-        return unqualified(f"{type(inner).__name__} does not declare where its total-variance law changes, "
+        return inadmissible(f"{type(inner).__name__} does not declare where its total-variance law changes, "
                            "so a constant variance rate cannot be established between samples")
     rate_law = _rate_law(env.rate_curve)
     if rate_law is None:
-        return unqualified(f"{type(env.rate_curve).__name__} does not declare where its forward rate changes, "
+        return inadmissible(f"{type(env.rate_curve).__name__} does not declare where its forward rate changes, "
                            "so a flat forward cannot be established between samples")
     div_law = _div_law(env.div_yield)
     if div_law is None:
-        return unqualified(f"{type(env.div_yield).__name__} does not declare where its yield changes, "
+        return inadmissible(f"{type(env.div_yield).__name__} does not declare where its yield changes, "
                            "so a flat carry cannot be established between samples")
     (rate_taus, rate_degree), (div_taus, div_degree) = rate_law, div_law
     horizon_u = float(time_map.to_trading(float(t_end)))
