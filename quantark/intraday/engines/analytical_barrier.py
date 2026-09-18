@@ -71,7 +71,7 @@ class AnalyticalBarrierRoute:
                                   {"variance_time_maturity": u_T, "sigma_proxy": sigma, "total_variance": adm.total_variance},
                                   {}, exact=True)
 
-    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
+    def point_greeks(self, ctx, engine) -> PointGreeks:
         """Central difference of the exact closed form (h = 1e-6 S), smooth away from a live barrier; a stencil
         reaching a live barrier is undefined (one side is decided, the other is not)."""
         from quantark.asset.equity.product.option import EuropeanVanillaOption

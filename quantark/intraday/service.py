@@ -120,11 +120,9 @@ def value_intraday(engine, request: IntradayValuationRequest, *, session=None) -
         by_name.update((g.name, g) for g in values)
         records.extend(point_records)
     elif sensitivities:
-        from quantark.intraday.greeks import assemble_desk_greeks, bump_config_for, certificate_gap, desk_bump_cells
+        from quantark.intraday.greeks import assemble_desk_greeks, bump_config_for, desk_bump_cells
         cells = desk_bump_cells(ctx, engine, sensitivities)
-        route = route_for(ctx, engine)
-        values = assemble_desk_greeks(cells, sensitivities, spot=ctx.spot, bump_config=bump_config_for(engine),
-                                      certificate=lambda measure: certificate_gap(ctx, engine, route, measure))
+        values = assemble_desk_greeks(cells, sensitivities, spot=ctx.spot, bump_config=bump_config_for(engine))
         by_name.update((g.name, g) for g in values)
         records.extend(f"cell:{bump_id}" for bump_id in cells if bump_id != "base")
     if "theta" in request.greeks:

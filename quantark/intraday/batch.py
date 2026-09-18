@@ -15,7 +15,6 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
-from math import isfinite
 from types import MappingProxyType
 from typing import Mapping, Optional, Tuple
 
@@ -56,16 +55,19 @@ class SpotCurvePoint:
     price: float
     delta: Optional[float]
     gamma: Optional[float]
-    status: str                  # greek status: "ok" | "undefined" | "unqualified" | "not_requested"
+    status: str                  # "ok" | "undefined" | "failed" | "not_requested": the worst of the two outputs
     reason: str
     assumptions: Tuple[AssumedFixing, ...] = ()
     #: This spot's own price evidence (PDE resolution, MC standard error, ...). A route that
     #: prices each spot separately can resolve one and not the next, so it belongs per point.
     numerical: Mapping[str, object] = field(default_factory=dict)
     method: str = ""
+    #: Each output's own status: a finite delta is reported beside a gamma that failed.
+    statuses: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         object.__setattr__(self, "numerical", MappingProxyType(dict(self.numerical)))
+        object.__setattr__(self, "statuses", MappingProxyType(dict(self.statuses)))
 
     def to_dict(self) -> dict:
         """JSON-serialisable view (``dataclasses.asdict`` cannot copy the frozen mappings)."""
@@ -159,7 +161,8 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
     """Price (and, on QUAD V2, point delta/gamma) at each spot of one resolved context, in the given order."""
     from quantark.intraday.capability import require_capability
     from quantark.intraday.engines.quad_v2 import QuadV2Route
-    from quantark.intraday.greeks import discontinuity_at_spot, point_certificate_gap
+    from quantark.intraday.engines.base import point_greeks_from_estimates
+    from quantark.intraday.greeks import discontinuity_at_spot
     from quantark.intraday.service import _monitoring
 
     ctx = resolve_context(request)
@@ -174,23 +177,19 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
                                   lifecycle_state=num.lifecycle_state)
         values = prepared.evaluate(spots)
         shared = dict(getattr(prepared, "diagnostics", {}) or {})
-        # The conditional economics are shared, but each spot must remain in
-        # the demonstrated spatial envelope (review R4).
         points = []
         for i, s in enumerate(spots):
-            gap = point_certificate_gap(ctx, engine, route, spot=s)
-            delta, gamma = float(values["delta"][i]), float(values["gamma"][i])
-            if jumps[i] or not (isfinite(delta) and isfinite(gamma)):
-                points.append(SpotCurvePoint(s, float(values["price"][i]), None, None, "undefined",
-                                             jumps[i] or "payoff discontinuity of an unfixed event at the query spot",
-                                             assumptions, method="quad_v2_prepared"))
-            elif gap:
-                points.append(SpotCurvePoint(s, float(values["price"][i]), None, None, "unqualified",
-                                             f"kernel derivative of the discretised value: {gap}", assumptions,
-                                             method="quad_v2_prepared"))
-            else:
-                points.append(SpotCurvePoint(s, float(values["price"][i]), delta, gamma, "ok", "", assumptions,
-                                             method="quad_v2_prepared"))
+            price = float(values["price"][i])
+            if jumps[i]:
+                points.append(SpotCurvePoint(s, price, None, None, "undefined", jumps[i], assumptions,
+                                             method="quad_v2_prepared", statuses={"delta": "undefined", "gamma": "undefined"}))
+                continue
+            pg = point_greeks_from_estimates(float(values["delta"][i]), float(values["gamma"][i]), "kernel_derivative")
+            statuses = {name: pg.status_of(name) for name in ("delta", "gamma")}
+            worst = next((st for st in statuses.values() if st != "ok"), "ok")
+            reason = "; ".join(sorted({pg.reason_of(n) for n in statuses if statuses[n] != "ok"}))
+            points.append(SpotCurvePoint(s, price, pg.delta, pg.gamma, worst, reason, assumptions,
+                                         method="quad_v2_prepared", statuses=statuses))
         # one prepared operator serves every spot, so its evidence is the curve's, not a point's
         return _curve(ctx, engine, points, "quad_v2_prepared", shared)
     points = []
@@ -199,13 +198,14 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
         price, numerical, method = _spot_price(ctx, engine, s)
         common = dict(assumptions=assumptions, numerical=numerical, method=method)
         if num.terminated and not jump:
-            points.append(SpotCurvePoint(s, price, 0.0, 0.0, "ok", "", **common))
+            points.append(SpotCurvePoint(s, price, 0.0, 0.0, "ok", "", statuses={"delta": "ok", "gamma": "ok"}, **common))
         elif jump:
-            points.append(SpotCurvePoint(s, price, None, None, "undefined", jump, **common))
+            points.append(SpotCurvePoint(s, price, None, None, "undefined", jump,
+                                         statuses={"delta": "undefined", "gamma": "undefined"}, **common))
         else:
             points.append(SpotCurvePoint(s, price, None, None, "not_requested",
                                          f"{type(route).__name__} curves price each spot; request point greeks per spot",
-                                         **common))
+                                         statuses={"delta": "not_requested", "gamma": "not_requested"}, **common))
     return _curve(ctx, engine, points, points[0].method if points else "", {})
 
 

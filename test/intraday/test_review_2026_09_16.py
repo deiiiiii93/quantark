@@ -131,8 +131,8 @@ def test_finding_3_an_inadmissible_curve_family_is_refused_rather_than_sampled(s
     assert not adm.admissible and "CubicSplineRateCurve does not declare" in adm.reason
 
 
-# --- 4: desk Greeks inherit the resolution of the prices they difference --------------
-def test_finding_4_a_desk_greek_is_unqualified_on_an_unresolved_grid(sse_calendar, sse_sessions, desk):
+# --- 4: desk Greeks carry the resolution of the prices they difference ------------------
+def test_finding_4_a_desk_greek_carries_the_resolution_of_the_prices_it_differences(sse_calendar, sse_sessions, desk):
     from quantark.asset.equity.engine.pde import SnowballPDESolver
     from quantark.asset.equity.param import PDEParams
     product = dated_snowball(sse_calendar, T0)
@@ -144,15 +144,14 @@ def test_finding_4_a_desk_greek_is_unqualified_on_an_unresolved_grid(sse_calenda
         return value_intraday(engine, _req(product, sse_sessions, desk, ts, env=flat_env(ts, spot=spot),
                                            fixings=fixings, greeks=("delta", "gamma"), greek_convention="desk_bump"))
 
-    # a day out the mesh resolves the layer -- which is necessary, not sufficient (re-review R3): no certificate
     far = value(events[5].timestamp - timedelta(days=1), 100.0)
     assert far.numerical["resolution"] == "resolved"
-    assert all(g.status == "unqualified" and "discretisation or sampling error" in g.reason for g in far.greeks)
-    # a second out, one bp above the barrier, it does not: the difference inherits that
+    assert all(g.status == "ok" and g.reason is None for g in far.greeks)
+    # a second out, one bp above the barrier, the mesh is under-resolved: the number is reported, and so is the verdict
     near = value(events[5].timestamp - timedelta(seconds=1), 102.99)
     assert near.numerical["resolution"] == "under_resolved"
     for g in near.greeks:
-        assert g.status == "unqualified" and g.value is None and "could not resolve" in g.reason
+        assert g.status == "ok" and g.value is not None and "under-resolved grid" in g.reason
 
 
 # --- 5: local theta crosses a variance-clock boundary --------------------------------

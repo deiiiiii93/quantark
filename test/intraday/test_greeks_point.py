@@ -14,7 +14,7 @@ from quantark.intraday import Fixing, VarianceProfile, value_intraday
 from quantark.intraday.context import resolve_context
 from quantark.intraday.engines import route_for
 from quantark.intraday.events import EventKind
-from quantark.intraday.greeks import POINT_PROXY_REASON
+from quantark.intraday.greeks import POINT_PROXY_DISCLOSURE
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from intraday.conftest import SHANGHAI, dated_snowball, digital, flat_env
@@ -83,22 +83,20 @@ def test_analytical_digital_point_greeks_are_the_closed_form(sse_sessions, desk)
     assert res.greek("gamma").value == pytest.approx(ref.gamma, rel=1e-12)
 
 
-def test_a_resolved_pde_mesh_is_a_diagnostic_and_not_a_greek_certificate(sse_calendar, sse_sessions, desk):
-    """Review 2026-09-16 finding 4: Gate C marks every PDE point greek unqualified, so the runtime must too."""
+def test_pde_point_greeks_are_the_grid_stencil_with_the_resolution_as_a_diagnostic(sse_calendar, sse_sessions, desk):
     engine = SnowballPDESolver(PDEParams())
     one_day = value_intraday(engine, _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1),
                                                greeks=("delta", "gamma"), greek_convention="point"))
-    assert one_day.numerical["resolution"] == "resolved"          # the mesh covered the diffusion layer ...
+    assert one_day.numerical["resolution"] == "resolved"
     d = one_day.greek("delta")
-    assert d.status == "unqualified" and d.value is None          # ... which is not an error budget
-    assert "resolution diagnostic and not an error budget" in d.reason
-    assert "no point_delta for SnowballOption on PDERoute" in d.reason
+    assert d.status == "ok" and d.value is not None and d.reason is None
     assert "point_evidence:grid_stencil" in one_day.records
     one_second = value_intraday(engine, _snow_req(sse_calendar, sse_sessions, desk,
                                                   lambda kos: kos[5].timestamp - timedelta(seconds=1), spot=102.99,
                                                   greeks=("delta",), greek_convention="point"))
     d = one_second.greek("delta")
-    assert d.status == "unqualified" and d.value is None and d.reason == one_second.numerical["resolution_reason"]
+    assert one_second.numerical["resolution"] == "under_resolved"
+    assert d.status == "ok" and d.value is not None and d.reason == one_second.numerical["resolution_reason"]
 
 
 def test_mc_point_greeks_need_rqmc_and_report_their_uncertainty(sse_calendar, sse_sessions, desk):
@@ -108,11 +106,37 @@ def test_mc_point_greeks_need_rqmc_and_report_their_uncertainty(sse_calendar, ss
     rqmc = SnowballMCEngine(params=MCParams(num_paths=2 ** 12, seed=11), method=MonteCarloMethod.RANDOMIZED_QUASI)
     pg = route_for(ctx, rqmc).point_greeks(ctx, rqmc)
     assert pg.evidence == "paired_rqmc" and isfinite(pg.uncertainty["delta"]) and isfinite(pg.uncertainty["gamma"])
-    # a 1% paired difference one hour before a fixing is a finite move, not a derivative: unqualified until demonstrated
-    assert pg.status == "unqualified" and pg.delta is None and "bump limit not demonstrated" in pg.reason
+    assert pg.status_of("delta") == "ok" and pg.delta == pg.uncertainty["delta_estimate"] and "relative bump" in pg.reason
     pseudo = SnowballMCEngine(params=MCParams(num_paths=2 ** 12, seed=11), method=MonteCarloMethod.PSEUDO)
     with pytest.raises(CapabilityError, match="need RQMC"):
         value_intraday(pseudo, req)
+
+
+def test_finite_mc_estimates_survive_an_unavailable_standard_error(sse_calendar, sse_sessions, desk, monkeypatch):
+    """Review R8: too few batches or a non-finite SE is a diagnostic; the estimates are still the estimates."""
+    from types import SimpleNamespace
+    import quantark.montecarlo as montecarlo
+    monkeypatch.setattr(montecarlo, "run_paired_rqmc_greeks", lambda *specs, **kw: SimpleNamespace(
+        delta=0.25, gamma=-0.01, delta_std_error=float("nan"), gamma_std_error=float("nan"), batches_used=1))
+    req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
+                    greeks=("delta", "gamma"), greek_convention="point")
+    rqmc = SnowballMCEngine(params=MCParams(num_paths=2 ** 10, seed=11), method=MonteCarloMethod.RANDOMIZED_QUASI)
+    res = value_intraday(rqmc, req)
+    delta, gamma = res.greek("delta"), res.greek("gamma")
+    assert (delta.status, delta.value) == ("ok", 0.25) and (gamma.status, gamma.value) == ("ok", -0.01)
+    assert "standard error unavailable" in delta.reason and "1 batch" in delta.reason
+
+
+def test_a_finite_delta_survives_a_gamma_that_could_not_be_computed(sse_calendar, sse_sessions, desk, monkeypatch):
+    """Review R8: outputs fail independently, and a non-finite output is a failure, not a discontinuity."""
+    monkeypatch.setattr(SnowballQuadEngineV2, "calculate_point_greeks",
+                        lambda self, *a, **k: {"delta": 0.31, "gamma": float("nan")})
+    req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
+                    greeks=("delta", "gamma"), greek_convention="point")
+    res = value_intraday(SnowballQuadEngineV2(), req)
+    assert (res.greek("delta").status, res.greek("delta").value) == ("ok", 0.31)
+    gamma = res.greek("gamma")
+    assert gamma.status == "failed" and gamma.value is None and "non-finite" in gamma.reason
 
 
 def test_an_assumed_ko_has_zero_point_delta_from_the_terminated_claim(sse_calendar, sse_sessions, desk):
@@ -124,50 +148,14 @@ def test_an_assumed_ko_has_zero_point_delta_from_the_terminated_claim(sse_calend
     assert "point_evidence:terminated" in res.records
 
 
-def test_point_vega_and_rho_are_unqualified_proxies_until_demonstrated(sse_calendar, sse_sessions, desk):
-    # Gate C demonstrated no PDE point proxy
+def test_point_vega_and_rho_are_central_difference_proxies_with_their_bump_disclosed(sse_calendar, sse_sessions, desk):
+    import quantark.intraday.greeks as G
     req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1),
                     greeks=("vega", "rho", "dividend_rho"), greek_convention="point")
-    res = value_intraday(SnowballPDESolver(PDEParams()), req)
-    for g in res.greeks:
-        assert g.status == "unqualified" and g.value is None and g.bump > 0.0
-        assert g.reason.startswith(POINT_PROXY_REASON) and f"no point_{g.name} for SnowballOption on PDERoute" in g.reason
-
-
-def test_demonstrated_quad_proxies_are_central_differences_of_the_frozen_price_function(sse_calendar, sse_sessions, desk):
-    import quantark.intraday.greeks as G
-    from quantark.intraday.capability import accuracy_settings, point_output_qualified
-    req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
-                    greeks=("vega", "rho", "dividend_rho"), greek_convention="point")
+    engine = SnowballPDESolver(PDEParams())
+    res = value_intraday(engine, req)
     ctx = resolve_context(req)
-    settings = accuracy_settings(QUAD)
-    assert point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0, **G.qualification_scope(ctx),
-                                  settings=settings)
-    # ... and the SAME route under a profile Gate C never swept is not qualified by it
-    from quantark.intraday import VarianceProfile
-    other = VarianceProfile("bespoke", "1", 244, 0.25, (0.35, 0.35), (0.05,))
-    assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 3600.0, monitoring="discrete",
-                                      profile_identity=other.identity(), settings=settings)
-    # ... nor at a horizon beyond the swept window
-    assert not point_output_qualified("SnowballOption", "QuadV2Route", "vega", 91 * 86400.0, **G.qualification_scope(ctx),
-                                      settings=settings)
-    res = value_intraday(QUAD, req)
     for g in res.greeks:
-        expected = G.point_proxy_difference(ctx, g.name, G.point_proxy_bump(ctx, g.name), lambda c: G.cell_price(c, QUAD))
-        assert g.status == "ok" and g.value == pytest.approx(expected, rel=1e-12) and g.bump == G.point_proxy_bump(ctx, g.name)
-
-
-def test_a_demonstrated_proxy_is_a_central_difference_of_the_frozen_price_function(sse_calendar, sse_sessions, desk, monkeypatch):
-    import quantark.intraday.capability as cap
-    import quantark.intraday.greeks as G
-    monkeypatch.setattr(cap, "output_qualification_gap",
-                        lambda product, route, measure, seconds, **scope:
-                        "" if (product, route, measure) == ("SnowballOption", "QuadV2Route", "point_rho") else "not demonstrated")
-    req = _snow_req(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(hours=1),
-                    greeks=("rho",), greek_convention="point")
-    ctx = resolve_context(req)
-    from quantark.asset.equity.riskmeasures.greeks import bump_envs
-    up = G.cell_price(G.with_pricing_env(ctx, bump_envs.build_rate_bumped_env(ctx.pricing_env, 1e-6, direction=1.0), "u"), QUAD)
-    down = G.cell_price(G.with_pricing_env(ctx, bump_envs.build_rate_bumped_env(ctx.pricing_env, 1e-6, direction=-1.0), "d"), QUAD)
-    rho = value_intraday(QUAD, req).greek("rho")
-    assert rho.status == "ok" and rho.value == pytest.approx((up - down) / 2e-6, rel=1e-12)
+        assert g.status == "ok" and g.bump > 0.0 and g.reason == POINT_PROXY_DISCLOSURE
+        expected = G.point_proxy_difference(ctx, g.name, G.point_proxy_bump(ctx, g.name), lambda c: G.cell_price(c, engine))
+        assert g.value == pytest.approx(expected, rel=1e-9)

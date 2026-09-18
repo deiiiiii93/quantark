@@ -14,12 +14,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
-from math import isfinite
 from types import SimpleNamespace
 
 import numpy as np
 
-from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
+from quantark.intraday.engines.base import (TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks,
+                                            point_greeks_from_estimates)
 from quantark.intraday.resolution import (COEFFICIENT_BYTES_PER_CELL, INTRADAY_PDE_MAX_GRID_BYTES, INTRADAY_PDE_MAX_POINTS,
                                           INTRADAY_PDE_MAX_STEPS, UNDER_RESOLVED, diffusion_layer, pde_resolution,
                                           time_resolved)
@@ -211,19 +211,14 @@ class PDERoute:
                          steps_per_day=float(grid.steps_per_day))
         return EnginePriceOutcome(pv, self._method(engine), numerical, {}, records, engine_used=solver)
 
-    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
+    def point_greeks(self, ctx, engine) -> PointGreeks:
         """The solver's own stencil on the grid the route priced on.
 
-        A resolved mesh is a RESOLUTION diagnostic, not an accuracy certificate: it
-        says the diffusion layer is covered by enough cells and steps, which is a
-        necessary condition for a converged stencil and nowhere near a sufficient
-        one. The independent Gate C ladder is what establishes the error budget, so
-        a value is published only where that ladder demonstrated this exact
-        configuration — and where it did not, the diagnostics are still reported
-        but no number is (review 2026-09-16 finding 4).
+        The mesh resolution is a diagnostic reported alongside the number: a resolved
+        mesh covers the diffusion layer with enough cells and steps, which is necessary
+        for a converged stencil and not sufficient; an under-resolved one says why in the
+        reason. How close the stencil is to the true derivative is measured offline.
         """
-        from quantark.intraday.greeks import point_certificate_gap
-
         if ctx.numerical.terminated:
             return TERMINATED_POINT_GREEKS
         outcome = self.price(ctx, engine)
@@ -232,24 +227,16 @@ class PDERoute:
         finally:
             _release_market_memo(ctx.pricing_env)
         delta, gamma = float(greeks["delta"]), float(greeks["gamma"])
-        if not (isfinite(delta) and isfinite(gamma)):
-            return PointGreeks(None, None, "failed", f"non-finite grid stencil (delta={delta!r}, gamma={gamma!r})", "grid_stencil")
         resolution = outcome.numerical.get("resolution")
         if resolution == "not_solved":
             # an event at the valuation instant decided the claim on the known spot: constant in a neighbourhood
             # (the query spot on that event's level is caught before the route is asked)
             if delta == 0.0 and gamma == 0.0:
                 return PointGreeks(0.0, 0.0, "ok", "", "decided_at_valuation")
-            return PointGreeks(None, None, "unqualified", "decided at the valuation instant without a grid", "grid_stencil")
-        if resolution != "resolved":
-            return PointGreeks(None, None, "unqualified", str(outcome.numerical.get("resolution_reason") or resolution),
-                               "grid_stencil")
-        gap = point_certificate_gap(ctx, engine, self) if certify else ""
-        if gap:
-            return PointGreeks(None, None, "unqualified",
-                               "the mesh resolved the diffusion layer, which is a resolution diagnostic and not an "
-                               "error budget: " + gap, "grid_stencil")
-        return PointGreeks(delta, gamma, "ok", "", "grid_stencil")
+            return point_greeks_from_estimates(delta, gamma, "grid_stencil",
+                                               note="decided at the valuation instant without a grid")
+        note = "" if resolution == "resolved" else str(outcome.numerical.get("resolution_reason") or resolution)
+        return point_greeks_from_estimates(delta, gamma, "grid_stencil", note=note)
 
     @staticmethod
     def _method(engine) -> str:

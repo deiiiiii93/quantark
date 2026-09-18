@@ -134,24 +134,9 @@ def test_r2_the_same_pillars_log_linear_are_a_flat_forward(sse_sessions, desk):
     assert adm.admissible and adm.mode == "uniform_calendar_rate"
 
 
-# --- R3: a desk move of inexact prices needs a certificate; exact prices do not ------------------------------------
-def test_r3_a_resolved_pde_desk_greek_is_not_a_certified_one():
-    from intraday.controls.fixtures import Cell
-    from intraday.gate_c.harness import build_context, engine_for
-    # the review's Gate C cell: a resolved 418-point mesh whose desk gamma is 35x its budget off the reference
-    cell = Cell("snowball_discrete_ki", "pde", "desk", timedelta(hours=6), "sd+2", "ko")
-    ctx, _ = build_context(cell)
-    res = value_intraday(engine_for(cell), replace(ctx.request, greeks=("delta", "gamma"), greek_convention="desk_bump"))
-    assert res.numerical["resolution"] == "resolved"
-    for g in res.greeks:
-        assert g.status == "unqualified" and g.value is None
-        assert "desk move differences prices that carry discretisation or sampling error" in g.reason
-
-
-def test_r3_exact_prices_difference_exactly_without_any_evidence(sse_sessions, desk, monkeypatch):
-    # a desk MOVE of exact prices is exact; a point theta on the same prices is a stencil and still needs evidence
-    import quantark.intraday.capability as cap
-    monkeypatch.setattr(cap, "greek_evidence", lambda: {})
+# --- R3: exact prices difference exactly ----------------------------------------------------------------------------
+def test_r3_exact_prices_difference_exactly_without_any_evidence(sse_sessions, desk):
+    # a desk MOVE of exact prices is exact; a point theta on the same prices is a second-order stencil
     ts = datetime(2026, 9, 16, 14, tzinfo=SHANGHAI)
     res = value_intraday(DIGITAL, _req(digital(datetime(2026, 9, 16)), sse_sessions, desk, ts,
                                        greeks=("delta", "gamma", "vega", "rho", "dividend_rho", "theta"),
@@ -159,10 +144,10 @@ def test_r3_exact_prices_difference_exactly_without_any_evidence(sse_sessions, d
     assert all(g.status == "ok" for g in res.greeks), [(g.name, g.reason) for g in res.greeks]
     point = value_intraday(DIGITAL, _req(digital(datetime(2026, 9, 16)), sse_sessions, desk, ts, greeks=("theta",),
                                          greek_convention="point")).greek("theta")
-    assert point.status == "unqualified" and "no point_theta" in point.reason
+    assert point.status == "ok" and point.value is not None and "second-order" in point.reason
 
 
-# --- R4: a certificate is bound to the engine settings, on every point output ---------------------------------------
+# --- R4: every quadrature configuration returns its own numbers ------------------------------------------------------
 def _quad_cell(sse_calendar, sse_sessions, desk):
     product = dated_snowball(sse_calendar, T0)
     kos = _events(product, sse_sessions, EventKind.KO)
@@ -172,36 +157,20 @@ def _quad_cell(sse_calendar, sse_sessions, desk):
                 greek_convention="point")
 
 
-def test_r4_a_coarser_quadrature_is_not_covered_by_the_certificate_of_the_default(sse_calendar, sse_sessions, desk):
+def test_r4_a_coarser_quadrature_returns_its_own_numbers(sse_calendar, sse_sessions, desk):
+    """Accuracy is a study's business: the runtime reports what each configuration computes."""
     req = _quad_cell(sse_calendar, sse_sessions, desk)
-    coarse = SnowballQuadEngineV2(QuadV2Params(order=4, cells_per_sd=0.1))
-    res = value_intraday(coarse, req)
-    for g in res.greeks:
-        assert g.status == "unqualified" and g.value is None, g
-        assert "cells_per_sd=0.1 (demonstrated 2.0)" in g.reason and "order=4 (demonstrated 8)" in g.reason
-    assert all(g.status == "ok" for g in value_intraday(QUAD, req).greeks)
+    coarse = value_intraday(SnowballQuadEngineV2(QuadV2Params(order=4, cells_per_sd=0.1)), req)
+    fine = value_intraday(QUAD, req)
+    assert all(g.status == "ok" for g in coarse.greeks) and all(g.status == "ok" for g in fine.greeks)
+    assert coarse.greek("delta").value != fine.greek("delta").value
 
 
-def test_r4_prepared_curve_points_carry_the_same_certificate(sse_calendar, sse_sessions, desk):
+def test_r4_prepared_curve_points_report_the_kernel_derivative_at_every_spot(sse_calendar, sse_sessions, desk):
     req = replace(_quad_cell(sse_calendar, sse_sessions, desk), greeks=())
-    coarse = spot_curve(SnowballQuadEngineV2(QuadV2Params(order=4, cells_per_sd=0.1)), req, [74.0, 76.0])
-    assert [p.status for p in coarse] == ["unqualified", "unqualified"] and all(p.delta is None for p in coarse)
-    assert "cells_per_sd=0.1" in coarse[0].reason
     curve = spot_curve(QUAD, req, [74.0, 76.0])
-    assert [p.status for p in curve] == ["unqualified", "ok"]
-    assert "spot envelope" in curve[0].reason       # 74 is outside the swept one-hour KI neighbourhood
-
-
-def test_r4_the_default_engines_are_the_certified_configurations():
-    from quantark.asset.equity.engine.pde import SnowballPDESolver
-    from quantark.intraday.capability import accuracy_settings, greek_evidence
-    rows = greek_evidence()["demonstrated"]
-    for route, engine in (("QuadV2Route", QUAD), ("AnalyticalDigitalRoute", DIGITAL)):
-        assert {r["measure"] for r in rows if r["route"] == route and r["settings"] == accuracy_settings(engine)}
-    # resource caps and the kernel backend are not accuracy settings; the quadrature is
-    assert accuracy_settings(SnowballQuadEngineV2(QuadV2Params(backend="direct", max_nodes=7))) == accuracy_settings(QUAD)
-    assert accuracy_settings(SnowballQuadEngineV2(QuadV2Params(cells_per_sd=4.0))) != accuracy_settings(QUAD)
-    assert accuracy_settings(SnowballPDESolver())["engine"].endswith("SnowballPDESolver")
+    assert [p.status for p in curve] == ["ok", "ok"] and all(p.delta is not None for p in curve)
+    assert all(p.statuses == {"delta": "ok", "gamma": "ok"} for p in curve)
 
 
 # --- R5: a finite roll is a desk theta; a point theta is a derivative -----------------------------------------------
@@ -218,13 +187,6 @@ def test_r5_point_theta_is_the_time_derivative_not_the_declared_roll(sse_session
     assert roll.convention == "desk_bump" and roll.bump == 1800.0 and "finite roll" in roll.reason
     assert roll.value == pytest.approx(-0.1106317613, rel=1e-9)            # the 1800 s roll, 60.7% off the derivative
 
-
-def test_r5_a_point_theta_without_a_certificate_has_no_value(sse_calendar, sse_sessions, desk, monkeypatch):
-    import quantark.intraday.capability as cap
-    monkeypatch.setattr(cap, "greek_evidence", lambda: {})
-    req = replace(_quad_cell(sse_calendar, sse_sessions, desk), greeks=("theta",))
-    theta = value_intraday(QUAD, req).greek("theta")
-    assert theta.status == "unqualified" and theta.value is None and "no point_theta" in theta.reason
 
 
 # --- R6: the frozen-market roll wrappers are admitted coefficient families ------------------------------------------
@@ -243,9 +205,9 @@ def test_r6_barrier_theta_reprices_the_rolled_context(sse_sessions, desk, hour, 
     later = value_intraday(BARRIER, replace(req, greeks=(), pricing_env=replace(req.pricing_env,
                                                                                  valuation_date=ts + timedelta(seconds=60))))
     assert later.method == mode
-    # the point convention is refused for want of evidence, never by a coefficient the roll introduced
+    # the point convention reprices the rolled context too, and no coefficient the roll introduced refuses it
     point = value_intraday(BARRIER, replace(req, greek_convention="point")).greek("theta")
-    assert point.status in ("ok", "unqualified") and "does not declare" not in (point.reason or "")
+    assert point.status == "ok" and "does not declare" not in (point.reason or "")
 
 
 # --- R7: assumptions reach every flow they can change ---------------------------------------------------------------

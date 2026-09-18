@@ -9,19 +9,13 @@ bumps reuse the daily helpers and conventions exactly (``bump_envs`` and
 rescaled to +1%.
 
 Point Greeks are derivatives of that price function at the query spot, taken
-by each route's own evidence (kernel derivative, closed form, grid stencil,
-paired RQMC). Where the function jumps at the query spot they are undefined;
-where the route cannot vouch for its derivative they are unqualified. Point
-vega/rho/dividend rho are finite-difference proxies that stay unqualified
-(no value) until a Gate C bump-limit ladder demonstrates the (route, measure).
-
-A desk bump is exact as an OPERATION on its prices, but a price with
-discretisation or sampling error keeps that error after differencing. A desk
-Greek is therefore ``ok`` only when every contributing price is exact (a closed
-form, a fixed ledger) or Gate C demonstrated that finite move for this family
-and these engine settings (review 2026-09-16 R3). Theta follows the convention:
-a desk theta is the declared finite roll, a point theta a time derivative, and
-each is qualified the same way as its spot counterpart (R5).
+by each route's own method (kernel derivative, closed form, grid stencil,
+paired RQMC). Where the function jumps at the query spot they are undefined.
+Point vega/rho/dividend rho are finite-difference proxies whose bump is
+disclosed. A desk bump is exact as an OPERATION on its prices; the prices'
+own diagnostics (resolution, standard error) travel with it. Whether any of
+these numbers meets a budget is measured offline by the modelvalidation
+study, never here.
 """
 from __future__ import annotations
 
@@ -29,7 +23,7 @@ import dataclasses
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable, Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence, Tuple
 
 from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
 from quantark.asset.equity.riskmeasures.greeks import bump_envs
@@ -37,13 +31,14 @@ from quantark.execution.cache.fingerprint import fingerprint
 from quantark.execution.errors import CapabilityError
 from quantark.intraday.resolution import UNDER_RESOLVED
 from quantark.intraday.result import GreekValue
-from quantark.intraday.timestamp import SECONDS_PER_YEAR, to_utc
+from quantark.intraday.timestamp import to_utc
 from quantark.util.exceptions import NumericalError, PricingError
 
 DESK_GREEKS = ("delta", "gamma", "vega", "rho", "dividend_rho")
 POINT_UNITS = {"delta": "per unit spot", "gamma": "per unit spot^2", "vega": "per unit vol (trading-quoted)",
                "rho": "per unit rate", "dividend_rho": "per unit dividend yield"}
-POINT_PROXY_REASON = "finite-difference proxy for a point derivative; bump-limit not demonstrated"
+POINT_PROXY_DISCLOSURE = ("central difference of the frozen price function at the disclosed bump; a finite-difference "
+                          "proxy for the point derivative")
 
 
 @dataclass(frozen=True)
@@ -177,9 +172,9 @@ def point_greek_values(ctx, engine, greeks: Sequence[str]) -> Tuple[Tuple[GreekV
         records.extend(f"point_uncertainty:{k}={v!r}" for k, v in pg.uncertainty.items())
         for name in ("delta", "gamma"):
             if name in greeks:
-                ok = pg.status == "ok"
-                values[name] = GreekValue(name, getattr(pg, name) if ok else None, POINT_UNITS[name], "point",
-                                          status=pg.status, reason=None if ok else pg.reason)
+                status = pg.status_of(name)
+                values[name] = GreekValue(name, getattr(pg, name) if status == "ok" else None, POINT_UNITS[name], "point",
+                                          status=status, reason=pg.reason_of(name) or None)
     for name in ("vega", "rho", "dividend_rho"):
         if name in greeks:
             values[name] = _point_proxy(ctx, engine, route, name)
@@ -234,7 +229,7 @@ def point_proxy_difference(ctx, name: str, h: float, price) -> float:
 
 
 def _point_proxy(ctx, engine, route, name: str) -> GreekValue:
-    """Central difference of the frozen price function, ``ok`` only inside a Gate C demonstrated bump limit."""
+    """Central difference of the frozen price function at the disclosed production bump."""
     if name == "vega" and zero_variance_clock(ctx):
         return GreekValue(name, 0.0, POINT_UNITS[name], "point", bump=0.0, reason=ZERO_CLOCK_VEGA_REASON)
     h = point_proxy_bump(ctx, name)
@@ -244,57 +239,8 @@ def _point_proxy(ctx, engine, route, name: str) -> GreekValue:
         # enter it; a pending settlement's discount factors do, so rho is NOT zero.
         return GreekValue(name, point_proxy_difference(ctx, name, h, lambda c: cell_price(c, engine)),
                           POINT_UNITS[name], "point", bump=h, reason="exact derivative of the remaining fixed ledger")
-    gap = certificate_gap(ctx, engine, route, f"point_{name}")
-    if gap:
-        return GreekValue(name, None, POINT_UNITS[name], "point", bump=h, status="unqualified",
-                          reason=f"{POINT_PROXY_REASON}: {gap}")
     return GreekValue(name, point_proxy_difference(ctx, name, h, lambda c: cell_price(c, engine)), POINT_UNITS[name],
-                      "point", bump=h)
-
-
-def qualification_scope(ctx) -> dict:
-    """What a Gate C certificate must have covered to speak for THIS request.
-
-    A demonstration earned on discrete monitoring under the desk profile says
-    nothing about the same product with a continuously observed barrier, or under
-    a profile whose weights put the variance somewhere else.
-    """
-    from quantark.intraday.events import monitoring_of
-    from quantark.intraday.capability import economic_identity
-    return {"monitoring": monitoring_of(ctx.timeline),
-            "profile_identity": ctx.request.variance_profile.identity(),
-            "economics": economic_identity(ctx)}
-
-
-def certificate_gap(ctx, engine, route, measure: str, measure_settings: Optional[dict] = None, *, spot=None) -> str:
-    """"" when Gate C demonstrated ``measure`` for this request's family, engine settings and horizon; else why not."""
-    from quantark.intraday.capability import accuracy_settings, output_qualification_gap
-    gap = output_qualification_gap(type(ctx.request.product).__name__, type(route).__name__, measure,
-                                    seconds_to_first_event(ctx), **qualification_scope(ctx),
-                                    settings=accuracy_settings(engine), measure_settings=measure_settings)
-    if gap or type(route).__name__ not in ("QuadV2Route", "PDERoute", "MCRoute"):
-        return gap
-    # The swept spot envelope: two standard deviations or ten basis points
-    # around the barrier levels, whichever is wider. Do not extend it to an
-    # arbitrary spot merely because all other certificate fields match.
-    from math import exp, sqrt
-    spot = ctx.spot if spot is None else float(spot)
-    levels = [float(e.barrier) for e in ctx.numerical.remaining_events if e.barrier is not None]
-    if not levels:
-        levels = [float(ctx.numerical.product.strike)]
-    tau = seconds_to_first_event(ctx) / SECONDS_PER_YEAR
-    strike = float(getattr(ctx.numerical.product, "strike", levels[0]))
-    sd = sqrt(max(float(ctx.pricing_env.vol_surface.total_variance(strike, tau, spot)), 0.0))
-    lo, hi = min(levels) * min(exp(-2*sd), 0.999), max(levels) * max(exp(2*sd), 1.001)
-    if not lo * (1-1e-12) <= spot <= hi * (1+1e-12):
-        return f"spot {spot:g} is outside the Gate C spot envelope [{lo:g}, {hi:g}]"
-    return ""
-
-
-def point_certificate_gap(ctx, engine, route, *, spot=None) -> str:
-    """The Gate C gaps of point delta and gamma for this request, joined ("" when both are demonstrated)."""
-    gaps = (certificate_gap(ctx, engine, route, f"point_{m}", spot=spot) for m in ("delta", "gamma"))
-    return "; ".join(dict.fromkeys(g for g in gaps if g))
+                      "point", bump=h, reason=POINT_PROXY_DISCLOSURE)
 
 
 def seconds_to_first_event(ctx) -> float:
@@ -329,7 +275,7 @@ THETA_ROLL_CONVENTION = ("one-sided forward roll on the frozen market, inside th
 POINT_THETA_RELATIVE_STEP = 1e-3
 #: ... and never below a millisecond: the stencil divides a price difference by 2h, so round-off in the prices
 #: (~1e-16 of their size) grows as 1/h. A segment shorter than a second leaves no step that is both local and above
-#: that floor, and the derivative is reported unqualified rather than as amplified round-off.
+#: that floor, and the derivative is reported failed rather than as amplified round-off.
 POINT_THETA_MIN_STEP = timedelta(milliseconds=1)
 POINT_THETA_REASON = ("time derivative of the frozen-market price function: one-sided second-order difference "
                       "(-3 V(0) + 4 V(h) - V(2h)) / 2h inside the current event and clock segment")
@@ -423,7 +369,7 @@ def point_theta_step(ctx) -> Tuple[Optional[timedelta], str]:
 def point_theta_estimate(ctx, engine, *, price_base: float, unit: str = "hour"):
     """(dV/dt per ``unit``, step h, every stencil price exact) of the frozen-market price function, or None.
 
-    The same stencil serves the runtime and the Gate C ladder, so a certificate speaks for exactly this estimator.
+    The same stencil serves the runtime and the offline study, so a study measures exactly this estimator.
     """
     from quantark.intraday.request import THETA_UNITS
 
@@ -443,8 +389,8 @@ def analytical_theta_limit(ctx, engine, *, price_base: float, unit: str) -> Gree
     Three second-order forward stencils share five price evaluations. Their
     Richardson differences estimate truncation; an explicit cancellation floor
     covers floating-point price noise. All points remain inside one coefficient
-    segment. The frozen Gate C theta budget is assessed in PnL per hour before
-    conversion to the requested unit. No sampled family certificate is needed.
+    segment. The truncation estimate is reported as a diagnostic; whether it
+    meets a budget is decided offline.
     """
     from math import isfinite
     from sys import float_info
@@ -452,51 +398,47 @@ def analytical_theta_limit(ctx, engine, *, price_base: float, unit: str) -> Gree
 
     h, why = point_theta_step(ctx)
     if h is None:
-        return GreekValue("theta", None, f"PnL per {unit}", "point", status="unqualified", reason=why)
+        return GreekValue("theta", None, f"PnL per {unit}", "point", status="failed", reason=why)
     # Exact dyadic steps in datetime's microsecond representation.
     h = timedelta(microseconds=4 * int(h / timedelta(microseconds=4)))
     prices = {0: price_base}
     for k in (1, 2, 4, 8):
         value, exact = _rolled_value(ctx, engine, k * (h / 4))
         if not exact:
-            return GreekValue("theta", None, f"PnL per {unit}", "point", status="unqualified",
+            return GreekValue("theta", None, f"PnL per {unit}", "point", status="failed",
                               reason="the analytical theta limit requires every rolled price to be exact")
         prices[k] = value
     seconds = h.total_seconds()
     derivatives = [(-3 * prices[0] + 4 * prices[k] - prices[2*k]) / (2 * seconds * k / 4) * 3600
                    for k in (4, 2, 1)]
+    if not all(isfinite(x) for x in derivatives):
+        return GreekValue("theta", None, f"PnL per {unit}", "point", status="failed",
+                          reason="non-finite stencil derivative")
     coarse, mid, fine = derivatives
     rich_coarse, rich_fine = (4 * mid - coarse) / 3, (4 * fine - mid) / 3
     product = ctx.request.product
     scale = abs(float(getattr(product, "initial_price", getattr(product, "strike", 1.0))))
     scale *= abs(float(getattr(product, "contract_multiplier", 1.0)))
-    # Same frozen normalised budget as Gate C: 1e-6 N or 1e-4 |theta/hour|.
-    budget = max(1e-6 * scale, 1e-4 * abs(rich_fine))
     noise = 64 * float_info.epsilon * max(scale, *(abs(p) for p in prices.values())) * 3600 / (seconds / 4)
     error = max(abs(rich_fine - rich_coarse), abs(fine - mid) / 3) + noise
     converging = abs(fine - mid) <= max(abs(mid - coarse), noise)
-    ok = all(isfinite(x) for x in derivatives) and converging and error <= budget
     factor = THETA_UNITS[unit] / 3600
     reason = ("per-request analytical theta limit: second-order steps h, h/2, h/4 inside one clock/coefficient "
               "segment; Richardson truncation estimate plus floating-point cancellation floor")
-    if not ok:
-        reason += "; refinement does not establish the frozen theta error budget"
-    return GreekValue("theta", rich_fine * factor if ok else None, f"PnL per {unit}", "point",
-                      bump=seconds / 4, status="ok" if ok else "unqualified", reason=reason,
-                      error_estimate=error * factor if isfinite(error) else None,
-                      error_budget=budget * factor if isfinite(budget) else None)
+    if not converging:
+        reason += "; the stencil ladder did not converge, so the truncation estimate is unreliable"
+    return GreekValue("theta", rich_fine * factor, f"PnL per {unit}", "point", bump=seconds / 4, reason=reason,
+                      error_estimate=error * factor if isfinite(error) else None)
 
 
 def intraday_theta(ctx, engine, route, step: ThetaStep, *, price_base: float, base_exact: bool,
                    convention: str) -> GreekValue:
     """Theta under the request's convention: the declared finite roll (desk) or the time derivative (point).
 
-    A finite roll published under the point convention would claim a derivative it is not: an 1800 s roll of a
-    digital an hour before expiry is 60.7% off its derivative (review 2026-09-16 R5). So the two are qualified as
-    their spot counterparts are. A desk roll of exact prices is exact as a move; any other roll needs Gate C to have
-    demonstrated the same roll (family, engine settings, requested step). A point theta is a stencil, whose
-    truncation error no exactness of the prices removes, so -- like a point proxy -- it needs the certificate
-    everywhere except on a fixed ledger.
+    A finite roll published under the point convention would claim a derivative it is not: an
+    1800 s roll of a digital an hour before expiry is 60.7% off its derivative. The two
+    conventions never substitute for each other; each discloses its step, and the offline
+    study measures its accuracy.
     """
     unit = f"PnL per {step.unit}"
     if step.actual is None:
@@ -507,24 +449,13 @@ def intraday_theta(ctx, engine, route, step: ThetaStep, *, price_base: float, ba
             return analytical_theta_limit(ctx, engine, price_base=price_base, unit=step.unit)
         estimate = point_theta_estimate(ctx, engine, price_base=price_base, unit=step.unit)
         if estimate is None:
-            return GreekValue("theta", None, unit, convention, status="unqualified", reason=point_theta_step(ctx)[1])
+            return GreekValue("theta", None, unit, convention, status="failed", reason=point_theta_step(ctx)[1])
         value, h, _exact = estimate
-        disclosure, measure, knobs = POINT_THETA_REASON, "point_theta", None
-        bump = h.total_seconds()
-        needs_certificate, why = not ctx.numerical.terminated, "a stencil's truncation needs a demonstrated limit"
-    else:
-        rolled, exact = _rolled_value(ctx, engine, step.actual)
-        value = (rolled - price_base) / step.divisor
-        disclosure = f"{THETA_ROLL_CONVENTION}{'; ' + step.reason if step.reason else ''}"
-        measure, knobs = "desk_theta", {"theta_step_s": step.requested.total_seconds()}
-        bump = step.actual.total_seconds()
-        needs_certificate, why = not (exact and base_exact), "the prices carry discretisation or sampling error"
-    if needs_certificate:
-        gap = certificate_gap(ctx, engine, route, measure, knobs)
-        if gap:
-            return GreekValue("theta", None, unit, convention, bump=bump, status="unqualified",
-                              reason=f"{disclosure}; {why}: {gap}")
-    return GreekValue("theta", value, unit, convention, bump=bump, reason=disclosure)
+        return GreekValue("theta", value, unit, convention, bump=h.total_seconds(), reason=POINT_THETA_REASON)
+    rolled, _exact = _rolled_value(ctx, engine, step.actual)
+    value = (rolled - price_base) / step.divisor
+    disclosure = f"{THETA_ROLL_CONVENTION}{'; ' + step.reason if step.reason else ''}"
+    return GreekValue("theta", value, unit, convention, bump=step.actual.total_seconds(), reason=disclosure)
 
 
 def theta_metadata(step: ThetaStep) -> dict:
@@ -533,9 +464,9 @@ def theta_metadata(step: ThetaStep) -> dict:
             "theta_adjusted": step.adjusted, "theta_side": step.side, "theta_unit": step.unit}
 
 
-def assemble_desk_greeks(cells: Mapping[str, BumpCell], greeks: Sequence[str], *, spot: float, bump_config,
-                         certificate: Callable[[str], str]) -> Tuple[GreekValue, ...]:
-    """Desk Greeks from the repriced cells; ``certificate(measure)`` is the Gate C gap of ``desk_<name>`` ("" = demonstrated)."""
+def assemble_desk_greeks(cells: Mapping[str, BumpCell], greeks: Sequence[str], *, spot: float,
+                         bump_config) -> Tuple[GreekValue, ...]:
+    """Desk Greeks from the repriced cells: exact finite moves of the prices the route produced."""
     bc = bump_config
     out = []
 
@@ -543,52 +474,41 @@ def assemble_desk_greeks(cells: Mapping[str, BumpCell], greeks: Sequence[str], *
         errors = [cells[i].error for i in ids if cells[i].error]
         if errors:
             return GreekValue(name, None, unit, "desk_bump", bump=bump, status="failed", reason="; ".join(errors))
-        # A desk bump IS its repriced difference, so its only error is the prices' own.
-        # A cell the route says it could NOT resolve therefore makes the Greek unqualified
-        # rather than ok (review 2026-09-16 finding 4). Only that verdict is a failure to
-        # deliver: "deterministic" and "not_solved" are exact prices with no diffusion to
-        # resolve, "sampling_uncertainty_reported" carries its own error estimate, and a
-        # closed form reports none at all.
-        unresolved = {cells[i].resolution_reason or UNDER_RESOLVED
-                      for i in ids if cells[i].resolution == UNDER_RESOLVED}
-        if unresolved:
-            return GreekValue(name, None, unit, "desk_bump", bump=bump, status="unqualified",
-                              reason="a bump cell priced on a grid the route could not resolve: "
-                                     + "; ".join(sorted(unresolved)))
-        # Resolution is necessary, not sufficient: a resolved 418-point mesh still published a desk gamma 35x
-        # its budget off the reference (review 2026-09-16 R3). Exact prices difference exactly; any other move
-        # needs a demonstration of the same finite move at the same settings.
-        if not all(cells[i].exact for i in ids):
-            gap = certificate(f"desk_{name}")
-            if gap:
-                return GreekValue(name, None, unit, "desk_bump", bump=bump, status="unqualified",
-                                  reason=f"a desk move differences prices that carry discretisation or sampling "
-                                         f"error: {gap}")
         return None
+
+    def note(*ids):
+        # A desk bump IS its repriced difference; the route's resolution verdict travels with it as a diagnostic.
+        reasons = sorted({cells[i].resolution_reason or UNDER_RESOLVED for i in ids
+                          if cells[i].resolution == UNDER_RESOLVED})
+        return f"a bump cell priced on an under-resolved grid: {'; '.join(reasons)}" if reasons else None
 
     base = cells["base"].price
     for name in greeks:
         if name == "delta":
             h = bc.spot_bump
-            unit, bump = "per unit spot", spot * h
-            out.append(failed(name, unit, bump, "base", "spot_up", "spot_down") or GreekValue(
-                name, (cells["spot_up"].price - cells["spot_down"].price) / (2.0 * spot * h), unit, "desk_bump", bump=bump))
+            unit, bump, ids = "per unit spot", spot * h, ("base", "spot_up", "spot_down")
+            out.append(failed(name, unit, bump, *ids) or GreekValue(
+                name, (cells["spot_up"].price - cells["spot_down"].price) / (2.0 * spot * h), unit, "desk_bump",
+                bump=bump, reason=note(*ids)))
         elif name == "gamma":
             h = bc.gamma_spot_bump if getattr(bc, "gamma_spot_bump", None) else bc.spot_bump
             up, down = ("gamma_up", "gamma_down") if "gamma_up" in cells else ("spot_up", "spot_down")
-            unit, bump = "per unit spot^2", spot * h
-            out.append(failed(name, unit, bump, "base", up, down) or GreekValue(
-                name, (cells[up].price - 2.0 * base + cells[down].price) / (spot * h) ** 2, unit, "desk_bump", bump=bump))
+            unit, bump, ids = "per unit spot^2", spot * h, ("base", up, down)
+            out.append(failed(name, unit, bump, *ids) or GreekValue(
+                name, (cells[up].price - 2.0 * base + cells[down].price) / (spot * h) ** 2, unit, "desk_bump",
+                bump=bump, reason=note(*ids)))
         elif name == "vega":
-            unit = f"PnL per +{bc.vol_bump:g} vol (raw, trading-quoted)"
-            out.append(failed(name, unit, bc.vol_bump, "base", "vol_up") or GreekValue(
-                name, cells["vol_up"].price - base, unit, "desk_bump", bump=bc.vol_bump))
+            unit, ids = f"PnL per +{bc.vol_bump:g} vol (raw, trading-quoted)", ("base", "vol_up")
+            out.append(failed(name, unit, bc.vol_bump, *ids) or GreekValue(
+                name, cells["vol_up"].price - base, unit, "desk_bump", bump=bc.vol_bump, reason=note(*ids)))
         elif name == "rho":
-            unit = "PnL per +1% rate"
-            out.append(failed(name, unit, bc.rate_bump, "base", "rate_up") or GreekValue(
-                name, (cells["rate_up"].price - base) * (0.01 / bc.rate_bump), unit, "desk_bump", bump=bc.rate_bump))
+            unit, ids = "PnL per +1% rate", ("base", "rate_up")
+            out.append(failed(name, unit, bc.rate_bump, *ids) or GreekValue(
+                name, (cells["rate_up"].price - base) * (0.01 / bc.rate_bump), unit, "desk_bump",
+                bump=bc.rate_bump, reason=note(*ids)))
         elif name == "dividend_rho":
-            unit = "PnL per +1% dividend yield"
-            out.append(failed(name, unit, bc.div_bump, "base", "div_up") or GreekValue(
-                name, (cells["div_up"].price - base) * (0.01 / bc.div_bump), unit, "desk_bump", bump=bc.div_bump))
+            unit, ids = "PnL per +1% dividend yield", ("base", "div_up")
+            out.append(failed(name, unit, bc.div_bump, *ids) or GreekValue(
+                name, (cells["div_up"].price - base) * (0.01 / bc.div_bump), unit, "desk_bump",
+                bump=bc.div_bump, reason=note(*ids)))
     return tuple(out)

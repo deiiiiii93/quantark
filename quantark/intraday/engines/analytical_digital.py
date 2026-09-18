@@ -65,7 +65,7 @@ class AnalyticalDigitalRoute:
                                   {"total_variance": W, "effective_vol": (W / T) ** 0.5, "carry": R - Q, "payment_df": df_pay},
                                   {}, exact=True)
 
-    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
+    def point_greeks(self, ctx, engine) -> PointGreeks:
         """Closed-form delta/gamma of payout*df*N(+-d2); the zero-variance limit is flat except at the strike."""
         if ctx.numerical.terminated:
             return TERMINATED_POINT_GREEKS

@@ -13,7 +13,8 @@ from copy import deepcopy
 from math import isfinite
 
 from quantark.execution.errors import CapabilityError
-from quantark.intraday.engines.base import TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks
+from quantark.intraday.engines.base import (TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks,
+                                            point_greeks_from_estimates)
 
 
 def _estimator(engine, result) -> str:
@@ -56,14 +57,13 @@ class MCRoute:
         }
         return EnginePriceOutcome(pv, method, numerical, {}, engine_used=solver)
 
-    def point_greeks(self, ctx, engine, *, certify: bool = True) -> PointGreeks:
+    def point_greeks(self, ctx, engine) -> PointGreeks:
         """Paired RQMC: the engine's session spec at spot*(1-h), spot, spot*(1+h) on identical scramble batches.
 
         That is a central difference at the finite relative bump h, not a derivative: near a fixing a 1% move
-        spans the diffusion layer. It is ``ok`` only inside a Gate C demonstrated bump limit; otherwise the
-        estimate and its standard errors are recorded as uncertainty and the status is unqualified.
+        spans the diffusion layer.
         """
-        from quantark.intraday.greeks import bump_config_for, point_certificate_gap
+        from quantark.intraday.greeks import bump_config_for
         from quantark.montecarlo import run_paired_rqmc_greeks
         from quantark.util.enum.engine_enums import MonteCarloMethod
 
@@ -89,13 +89,10 @@ class MCRoute:
                        "delta_estimate": float(res.delta), "gamma_estimate": float(res.gamma),
                        "batches": float(res.batches_used), "relative_bump": h}
         min_batches = int(getattr(engine.params, "rqmc_min_batches", 2))
+        note = f"paired RQMC central difference at relative bump {h:g}; standard errors in uncertainty"
         if not (isfinite(res.delta_std_error) and isfinite(res.gamma_std_error) and res.batches_used >= min_batches):
-            return PointGreeks(None, None, "unqualified",
-                               f"paired RQMC gave {res.batches_used} batches (< {min_batches}) or a non-finite standard error",
-                               "paired_rqmc", uncertainty)
-        gap = point_certificate_gap(ctx, engine, self) if certify else ""
-        if gap:
-            return PointGreeks(None, None, "unqualified",
-                               f"paired RQMC central difference at relative bump {h:g}; bump limit not demonstrated: "
-                               + gap, "paired_rqmc", uncertainty)
-        return PointGreeks(float(res.delta), float(res.gamma), "ok", "", "paired_rqmc", uncertainty)
+            batches = int(res.batches_used)
+            note = (f"paired RQMC central difference at relative bump {h:g}; standard error unavailable: "
+                    f"{batches} batch{'' if batches == 1 else 'es'} (minimum {min_batches}) or a non-finite estimate of it")
+        return point_greeks_from_estimates(float(res.delta), float(res.gamma), "paired_rqmc", note=note,
+                                           uncertainty=uncertainty)

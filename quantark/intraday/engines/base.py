@@ -18,7 +18,7 @@ class EnginePriceOutcome:
     engine_used: object = field(default=None, compare=False)
     #: True when the value carries no discretisation or sampling error: a closed form the route has proven
     #: exact here, or a claim already decided (a fixed ledger, an outcome decided on the known spot). A finite
-    #: difference of exact values is exact as a MOVE; anything else needs a certificate after differencing.
+    #: difference of exact values is exact as a MOVE; any other value carries its own discretisation or sampling error.
     exact: bool = False
 
     def __post_init__(self):
@@ -29,27 +29,53 @@ class EnginePriceOutcome:
 
 @dataclass(frozen=True)
 class PointGreeks:
-    """Spot derivatives of the conditional price function at the valuation spot."""
+    """Spot derivatives of the conditional price function at the valuation spot.
+
+    ``status`` and ``reason`` apply to both outputs unless ``statuses`` / ``reasons`` override one:
+    a finite delta survives a gamma that could not be computed.
+    """
 
     delta: Optional[float]
     gamma: Optional[float]
-    status: str                   # "ok" | "undefined" | "unqualified" | "failed"
+    status: str                   # "ok" | "undefined" | "failed"
     reason: str
     evidence: str                 # "kernel_derivative" | "closed_form" | "closed_form_fd" | "grid_stencil" | "paired_rqmc" | "terminated"
     uncertainty: Mapping[str, float] = field(default_factory=dict)
+    statuses: Mapping[str, str] = field(default_factory=dict)
+    reasons: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         object.__setattr__(self, "uncertainty", MappingProxyType(dict(self.uncertainty)))
-        if self.status != "ok":
-            object.__setattr__(self, "delta", None)
-            object.__setattr__(self, "gamma", None)
+        object.__setattr__(self, "statuses", MappingProxyType(dict(self.statuses)))
+        object.__setattr__(self, "reasons", MappingProxyType(dict(self.reasons)))
+        for name in ("delta", "gamma"):
+            if self.status_of(name) != "ok":
+                object.__setattr__(self, name, None)
+
+    def status_of(self, name: str) -> str:
+        return self.statuses.get(name, self.status)
+
+    def reason_of(self, name: str) -> str:
+        return self.reasons.get(name, self.reason)
+
+
+def point_greeks_from_estimates(delta: float, gamma: float, evidence: str, *, note: str = "",
+                                uncertainty: Optional[Mapping[str, float]] = None) -> PointGreeks:
+    """Validate each estimate on its own: a finite one is ``ok``, a non-finite one is ``failed``.
+
+    ``undefined`` is never inferred from a non-finite number here. A payoff discontinuity at the query
+    spot is established separately, before the route is asked (``greeks.discontinuity_at_spot``).
+    """
+    from math import isfinite
+    statuses, reasons = {}, {}
+    for name, value in (("delta", delta), ("gamma", gamma)):
+        if not isfinite(value):
+            statuses[name] = "failed"
+            reasons[name] = f"non-finite {name} estimate ({value!r}); no discontinuity is established at the query spot"
+    return PointGreeks(delta, gamma, "ok", note, evidence, uncertainty or {}, statuses, reasons)
 
 
 TERMINATED_POINT_GREEKS = PointGreeks(0.0, 0.0, "ok", "", "terminated")
-
-#: ``point_greeks(ctx, engine, *, certify=True)``: with ``certify`` a numerical route publishes a value only inside a
-#: Gate C certificate. ``certify=False`` returns the raw estimator with the route's OWN evidence only (resolution,
-#: batches, finiteness) -- for the Gate C ladder, which produces the certificates and so must never read them.
 
 
 class IntradayEngineRoute(Protocol):

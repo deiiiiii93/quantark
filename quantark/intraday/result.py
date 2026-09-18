@@ -15,14 +15,18 @@ from quantark.intraday.fixings import AssumedFixing, ContinuousHistoryAssumption
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
-GREEK_STATUSES = ("ok", "undefined", "unqualified", "failed", "not_requested")
+GREEK_STATUSES = ("ok", "undefined", "failed", "not_requested")
 GREEK_CONVENTIONS = ("point", "desk_bump", "engine")
 _RECONCILE_TOL = 1e-12
 
 
 @dataclass(frozen=True)
 class GreekValue:
-    """One sensitivity: a finite value iff ``status == "ok"``, otherwise a reason."""
+    """One sensitivity: a finite value iff ``status == "ok"``, otherwise a reason.
+
+    ``reason`` on an ``ok`` value is a disclosure (the bump, the stencil, a resolution
+    verdict); ``error_estimate`` is the estimator's own diagnostic, never a gate.
+    """
 
     name: str
     value: Optional[float]
@@ -32,13 +36,10 @@ class GreekValue:
     status: str = "ok"
     reason: Optional[str] = None
     error_estimate: Optional[float] = None
-    error_budget: Optional[float] = None
 
     def __post_init__(self):
-        for name in ("error_estimate", "error_budget"):
-            value = getattr(self, name)
-            if value is not None and (not isfinite(float(value)) or value < 0.0):
-                raise ValidationError(f"greek {self.name}: {name} must be finite and nonnegative")
+        if self.error_estimate is not None and (not isfinite(float(self.error_estimate)) or self.error_estimate < 0.0):
+            raise ValidationError(f"greek {self.name}: error_estimate must be finite and nonnegative")
         if self.status not in GREEK_STATUSES:
             raise ValidationError(f"unknown greek status {self.status!r}")
         if self.convention not in GREEK_CONVENTIONS:

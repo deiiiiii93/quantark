@@ -49,8 +49,8 @@ def test_a_step_inside_the_segment_is_taken_as_requested(sse_calendar, sse_sessi
     assert theta.unit == "PnL per hour" and theta.convention == "desk_bump" and theta.bump == 30.0
     assert res.numerical["theta_step_requested_s"] == 30.0 and res.numerical["theta_step_actual_s"] == 30.0
     assert res.numerical["theta_adjusted"] is False and res.numerical["theta_unit"] == "hour"
-    # the roll is a finite move of discretised prices, certified only at the step Gate C swept (one hour)
-    assert theta.status == "unqualified" and theta.value is None and "theta_step_s=30.0 (demonstrated 3600.0)" in theta.reason
+    # the roll is a finite move of the route's prices at the requested step; its accuracy is a study's business
+    assert theta.status == "ok" and theta.value is not None and "finite roll" in theta.reason
     default = value_intraday(QUAD, replace(req, theta_step=None)).greek("theta")
     assert default.status == "ok" and default.bump == 60.0            # the default hour, clamped to the fixing
 
