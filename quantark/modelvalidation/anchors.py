@@ -93,6 +93,9 @@ def extract_anchors(
     errored: set = set()
     for cell in payload["cells"]:
         key = (cell["candidate"], cell["case"])
+        if cell.get("kind") == "semantic":
+            # A semantic assertion has no number to pin; it must not disqualify its case's numbers.
+            continue
         if cell["verdict"] == "ERROR" or cell["candidate_value"] is None:
             errored.add(key)
             continue
@@ -264,7 +267,9 @@ def assert_anchors(anchor_path: str | Path) -> None:
                 f"Anchor names case {case_name!r}, which the study no longer defines"
             )
 
-        result = candidates[name].evaluate(cases[case_name])
+        candidate = candidates[name]
+        # An anchor pins the shipped target output; a candidate may offer it without its convergence ladders.
+        result = getattr(candidate, "evaluate_target", candidate.evaluate)(cases[case_name])
         for quantity, expected in sorted(entry["values"].items()):
             actual = result.values.get(quantity)
             if actual is None:

@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 import traceback
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -26,8 +26,10 @@ import numpy as np
 
 from quantark.util.exceptions import ValidationError
 from quantark.modelvalidation.candidate import (
+    MIN_CONVERGENCE_LEVELS,
     CandidateResult,
     candidate_identity,
+    convergence_evidence,
     deserialize_candidate_result,
     envelope_from_ladders,
     serialize_candidate_result,
@@ -35,7 +37,7 @@ from quantark.modelvalidation.candidate import (
 from quantark.modelvalidation.candidate import CHECKPOINT_KIND as CANDIDATE_KIND
 from quantark.modelvalidation.decisions import Decision, Verdict, decide_candidate, decide_cell
 from quantark.modelvalidation.evidence import (
-    SCHEMA_VERSION,
+    SUPPORTED_SCHEMA_VERSIONS,
     CheckpointStore,
     atomic_write_json,
     atomic_write_text,
@@ -50,9 +52,14 @@ from quantark.modelvalidation.gates import (
     evaluate_cell_gate,
 )
 from quantark.modelvalidation.html_report import render_html
-from quantark.modelvalidation.reference import ReferenceEstimate, run_reference
+from quantark.modelvalidation.reference import (
+    ReferenceEstimate,
+    bound_reference,
+    reference_targets,
+    run_reference,
+)
 from quantark.modelvalidation.report import render_markdown
-from quantark.modelvalidation.study import CertificationStudy, SamplingPolicy
+from quantark.modelvalidation.study import QUANTITY_CATALOGUE, CertificationStudy, SamplingPolicy
 
 CERTIFICATE_NAME = "certificate.json"
 REPORT_NAME = "report.md"
@@ -109,19 +116,32 @@ def quick_policy(policy: SamplingPolicy) -> SamplingPolicy:
         max_batches=max_batches,
         seed=policy.seed,
         bump=policy.bump,
+        seed_scheme=policy.seed_scheme,
     )
 
 
-def _reference_config(study: CertificationStudy) -> dict:
+def _reference_config(reference) -> dict:
     """The benchmark's own configuration, when it declares one.
 
     Optional on the protocol: a reference builder that does not describe itself
     records nothing rather than having something invented on its behalf.
     """
-    describe = getattr(study.reference, "config", None)
+    describe = getattr(reference, "config", None)
     if not callable(describe):
         return {}
     return dict(describe())
+
+
+def stop_quantities(study: CertificationStudy, reference) -> Optional[List[str]]:
+    """Schema 2: the quantities whose standard error drives sampling -- the ones the reference targets.
+
+    An untargeted proxy is recorded, never gated, so it must never keep a reference sampling.
+    ``None`` keeps schema 1's rule, where every quantity counts.
+    """
+    if study.schema != 2:
+        return None
+    targets = reference_targets(reference, study.quantities)
+    return [q for q in study.quantities if targets[q] is not None]
 
 
 def reference_block(estimate: ReferenceEstimate, identity: Mapping[str, Any]) -> dict:
@@ -140,9 +160,10 @@ def evaluate_candidate(
     case,
     store: Optional[CheckpointStore],
     resume: bool,
+    schema: int = 1,
 ) -> CandidateResult:
     """Evaluate one candidate for one case, reusing a matching checkpoint."""
-    identity = candidate_identity(candidate, case)
+    identity = candidate_identity(candidate, case, schema=schema)
     key = f"{candidate.name()}-{case.name}".replace("/", "_")
 
     if resume and store is not None:
@@ -181,6 +202,10 @@ def certify(
     root = validate_durable_root(out_dir) / study.name
     store = CheckpointStore(root / "checkpoints")
     sampling = quick_policy(study.sampling) if quick else study.sampling
+    # The builder that samples is the one bound to the EFFECTIVE policy, so the path count the
+    # payload records is the one that ran (schema-1 builders pass through unchanged).
+    reference = bound_reference(study.reference, sampling, schema=study.schema)
+    stopping = stop_quantities(study, reference)
 
     references: Dict[str, dict] = {}
     estimates: Dict[str, Optional[ReferenceEstimate]] = {}
@@ -189,7 +214,7 @@ def certify(
     for case in study.cases:
         try:
             estimate = run_reference(
-                builder=study.reference,
+                builder=reference,
                 case=case,
                 quantities=study.quantities,
                 scale=study.scale,
@@ -197,10 +222,12 @@ def certify(
                 policy=sampling,
                 store=store,
                 resume=resume,
+                quantity_bounds=study.quantity_bounds if study.schema == 2 else None,
+                stop_quantities=stopping,
             )
             estimates[case.name] = estimate
             references[case.name] = reference_block(
-                estimate, study.reference.identity(case)
+                estimate, reference.identity(case)
             )
         except Exception:  # noqa: BLE001 - recorded, not swallowed
             estimates[case.name] = None
@@ -221,7 +248,7 @@ def certify(
                 error = reference_errors[case.name]
             else:
                 try:
-                    result = evaluate_candidate(candidate, case, store, resume)
+                    result = evaluate_candidate(candidate, case, store, resume, schema=study.schema)
                 except Exception:  # noqa: BLE001 - recorded, not swallowed
                     error = traceback.format_exc()
 
@@ -233,6 +260,7 @@ def certify(
                     estimate=estimate,
                     result=result,
                     error=error,
+                    reference=reference,
                 )
             )
 
@@ -246,6 +274,7 @@ def certify(
         aggregates=aggregates,
         decisions=decisions,
         started=started,
+        reference=reference,
     )
     return write_certificate(payload, root)
 
@@ -257,27 +286,36 @@ def build_cells(
     estimate: Optional[ReferenceEstimate],
     result: Optional[CandidateResult],
     error: Optional[str],
+    reference=None,
 ) -> List[dict]:
-    """Gate one candidate against the benchmark for one case, per quantity."""
+    """Gate one candidate against the benchmark for one case, per quantity.
+
+    ``reference`` is the builder that sampled (bound to the effective policy); schema 2 reads its
+    declared targets. Schema-1 cells keep exactly their original keys.
+    """
     cells: List[dict] = []
     name = candidate.name()
-    cell_identity = identity_hash(candidate_identity(candidate, case))
+    cell_identity = identity_hash(candidate_identity(candidate, case, schema=study.schema))
+    targets = reference_targets(reference or study.reference, study.quantities) if study.schema == 2 else {}
 
     for quantity in study.quantities:
+        base = {
+            "candidate": name,
+            "case": case.name,
+            "quantity": quantity,
+            "reference": None,
+            "candidate_value": None,
+            "gate": None,
+            "error": None,
+            "identity_hash": cell_identity,
+        }
+        if study.schema == 2:
+            base.update(kind="numeric", bound_c=None, reason=None, convergence=None)
         if error is not None or result is None or estimate is None:
-            cells.append(
-                {
-                    "candidate": name,
-                    "case": case.name,
-                    "quantity": quantity,
-                    "reference": None,
-                    "candidate_value": None,
-                    "gate": None,
-                    "verdict": decide_cell(None, error=True).value,
-                    "error": error,
-                    "identity_hash": cell_identity,
-                }
-            )
+            cells.append({**base, "verdict": decide_cell(None, error=True).value, "error": error})
+            continue
+        if study.schema == 2:
+            cells.append(_schema2_cell(study, base, case, quantity, estimate, result, targets[quantity]))
             continue
 
         gate = evaluate_cell_gate(
@@ -291,21 +329,56 @@ def build_cells(
         )
         cells.append(
             {
-                "candidate": name,
-                "case": case.name,
-                "quantity": quantity,
+                **base,
                 "reference": {
                     "value": estimate.values[quantity],
                     "se": estimate.std_errors[quantity],
                 },
                 "candidate_value": result.values[quantity],
-                "gate": cell_gate_wire(gate, study.schema),
+                "gate": cell_gate_wire(gate, 1),
                 "verdict": decide_cell(gate, error=False).value,
-                "error": None,
-                "identity_hash": cell_identity,
             }
         )
     return cells
+
+
+def _schema2_cell(study, base, case, quantity, estimate, result, target) -> dict:
+    """One schema-2 cell: a semantic assertion, an untargeted proxy, or a gated number."""
+    reference = {"value": estimate.values[quantity], "se": estimate.std_errors[quantity]}
+    status = result.status(quantity)
+    expected = case.expected.get(quantity)
+    if expected is not None:
+        held = status == expected
+        reason = f"expected {expected}, candidate reported {status}"
+        if not held and result.reasons.get(quantity):
+            reason += f": {result.reasons[quantity]}"
+        return {**base, "kind": "semantic", "reference": reference,
+                "verdict": (Verdict.PASS if held else Verdict.FAIL).value, "reason": reason}
+    if status != "ok":
+        return {**base, "reference": reference, "verdict": Verdict.ERROR.value,
+                "error": f"unexpected {status} in a numeric cell: {result.reasons.get(quantity, '')}"}
+    value = result.values[quantity]
+    if target is None:
+        return {**base, "kind": "untargeted", "reference": reference, "candidate_value": value,
+                "verdict": Verdict.UNRESOLVED.value,
+                "reason": (f"the reference declares no estimator for {quantity}; its recorded value is a "
+                           "finite-bump proxy whose bias is unassessed, and the quantity is uncertified")}
+    evidence = convergence_evidence(result, quantity)
+    bound_c = study.quantity_bounds[quantity].budget(study.scale.to_economic(quantity, estimate.values[quantity]))
+    gate = evaluate_cell_gate(
+        candidate_raw=value, reference_raw=estimate.values[quantity], reference_se_raw=estimate.std_errors[quantity],
+        quantity=quantity, scale=study.scale, bounds=study.bounds, envelope_raw=evidence.envelope, bound_c=bound_c,
+    )
+    cell = {**base, "reference": reference, "candidate_value": value, "gate": cell_gate_wire(gate, 2), "bound_c": bound_c,
+            "convergence": {"complete": evidence.complete, "missing": list(evidence.missing),
+                            "envelope_raw": evidence.envelope, "observed_orders": dict(evidence.observed_orders),
+                            "non_monotone": list(evidence.non_monotone)}}
+    if not evidence.complete:
+        # Missing required convergence evidence is unresolved, never implicitly acceptable (spec 6.2).
+        return {**cell, "verdict": Verdict.UNRESOLVED.value,
+                "reason": f"convergence evidence has fewer than {MIN_CONVERGENCE_LEVELS} levels on: "
+                          f"{', '.join(evidence.missing)}"}
+    return {**cell, "verdict": decide_cell(gate, error=False, schema=2).value}
 
 
 def aggregate_and_decide(
@@ -322,14 +395,18 @@ def aggregate_and_decide(
     for candidate in study.candidates:
         name = candidate.name()
         own = [cell for cell in cells if cell["candidate"] == name]
-        verdicts = [Verdict(cell["verdict"]) for cell in own]
+        # An untargeted cell is reported, never decided on: it is outside the certified scope (spec 7.2).
+        verdicts = [Verdict(cell["verdict"]) for cell in own if cell.get("kind", "numeric") != "untargeted"]
 
         candidate_aggregates = []
         for quantity in study.quantities:
             gated = [
                 cell
                 for cell in own
-                if cell["quantity"] == quantity and cell["gate"] is not None
+                if cell["quantity"] == quantity
+                and cell["gate"] is not None
+                # an ungated verdict (incomplete convergence evidence) never feeds the mean
+                and not (cell.get("convergence") is not None and not cell["convergence"]["complete"])
             ]
             if not gated:
                 continue
@@ -343,9 +420,31 @@ def aggregate_and_decide(
                 {"candidate": name, "quantity": quantity, **aggregate_gate_wire(aggregate, study.schema)}
             )
 
-        decisions[name] = decide_candidate(verdicts, candidate_aggregates).value
+        decisions[name] = decide_candidate(verdicts, candidate_aggregates, schema=study.schema).value
 
     return aggregates, decisions
+
+
+def sampling_wire(policy: SamplingPolicy, schema: int) -> dict:
+    """The serialized sampling policy. Schema 1 keeps exactly its original keys."""
+    data = asdict(policy)
+    if schema == 1:
+        data.pop("seed_scheme")            # not part of the schema-1 format
+    return data
+
+
+def study_contract(study: CertificationStudy, reference) -> dict:
+    """What an amendment may not change: estimands, budgets, gate policy, scale, targets, seeds, convergence rule."""
+    return {
+        "quantities": list(study.quantities),
+        "quantity_definitions": {q: asdict(QUANTITY_CATALOGUE[q]) for q in study.quantities},
+        "quantity_bounds": {q: asdict(b) for q, b in study.quantity_bounds.items()},
+        "gate_policy": asdict(study.bounds),
+        "scale": asdict(study.scale) if is_dataclass(study.scale) else repr(study.scale),
+        "reference_targets": reference_targets(reference, study.quantities),
+        "seed_scheme": study.sampling.seed_scheme,
+        "min_convergence_levels": MIN_CONVERGENCE_LEVELS,
+    }
 
 
 def assemble_payload(
@@ -358,16 +457,22 @@ def assemble_payload(
     decisions: Dict[str, str],
     started: float,
     extra: Optional[Mapping[str, Any]] = None,
+    reference=None,
 ) -> dict:
-    """Build the certificate payload and stamp its digest."""
+    """Build the certificate payload and stamp its digest.
+
+    ``reference`` is the builder that sampled (bound to the effective policy); it
+    defaults to the study's own for callers that predate binding.
+    """
+    reference = study.reference if reference is None else reference
     payload = {
-        "schema": SCHEMA_VERSION,
+        "schema": study.schema,
         "study": {
             "name": study.name,
             "source_text": study.source_text,
             "quantities": list(study.quantities),
             "bounds": asdict(study.bounds),
-            "sampling": {k: v for k, v in asdict(sampling).items() if not (study.schema == 1 and k == "seed_scheme")},
+            "sampling": sampling_wire(sampling, study.schema),
             "quick": quick,
             "cases": [
                 {
@@ -382,13 +487,27 @@ def assemble_payload(
             ],
         },
         "runtime": runtime_environment(),
-        "reference_config": _reference_config(study),
+        "reference_config": _reference_config(reference),
         "references": references,
         "cells": cells,
         "aggregates": aggregates,
         "decisions": decisions,
         "wall_clock_seconds": time.time() - started,
     }
+    if study.schema == 2:
+        contract = study_contract(study, reference)
+        payload["study"]["quantity_bounds"] = contract["quantity_bounds"]
+        payload["study"]["quantity_definitions"] = contract["quantity_definitions"]
+        payload["study"]["scale"] = contract["scale"]
+        payload["study"]["uncertified_quantities"] = [
+            q for q, target in contract["reference_targets"].items() if target is None
+        ]
+        for case_block, case in zip(payload["study"]["cases"], study.cases):
+            case_block["context_params"] = dict(case.context_params)
+            case_block["expected"] = dict(case.expected)
+        payload["reference_targets"] = contract["reference_targets"]
+        payload["contract"] = contract
+        payload["contract_sha256"] = identity_hash(contract)
     if extra:
         payload.update(extra)
     payload["projected_sha256"] = projected_sha256(payload)
@@ -421,14 +540,27 @@ def validate_payload(payload: Mapping[str, Any]) -> None:
         ValidationError: wrong schema, unknown enum value, dangling reference,
             or a digest that does not match the content.
     """
-    if payload.get("schema") != SCHEMA_VERSION:
+    if payload.get("schema") not in SUPPORTED_SCHEMA_VERSIONS:
         raise ValidationError(
-            f"Certificate schema must be {SCHEMA_VERSION}, got {payload.get('schema')}"
+            f"Certificate schema must be one of {SUPPORTED_SCHEMA_VERSIONS}, got {payload.get('schema')}"
         )
 
     for key in ("study", "runtime", "references", "cells", "aggregates", "decisions"):
         if key not in payload:
             raise ValidationError(f"Certificate is missing required key {key!r}")
+
+    if payload["schema"] == 2:
+        contract = payload.get("contract")
+        if not isinstance(contract, Mapping):
+            raise ValidationError("A schema-2 certificate must carry its contract block")
+        if payload.get("contract_sha256") != identity_hash(contract):
+            raise ValidationError("The schema-2 contract digest does not match its contract block")
+        stray = sorted(set(payload["study"].get("uncertified_quantities", [])) - set(payload["study"]["quantities"]))
+        if stray:
+            raise ValidationError(f"uncertified_quantities names quantities the study does not certify: {stray}")
+        for cell in payload["cells"]:
+            if cell.get("kind") not in ("numeric", "semantic", "untargeted"):
+                raise ValidationError(f"Schema-2 cell has unknown kind {cell.get('kind')!r}")
 
     known_cases = {case["name"] for case in payload["study"]["cases"]}
     known_candidates = {c["name"] for c in payload["study"]["candidates"]}

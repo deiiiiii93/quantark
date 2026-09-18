@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
+from typing import Mapping, Optional
 
 from quantark.util.exceptions import ValidationError
 from quantark.modelvalidation.study import EconomicScale, GateBounds, SamplingPolicy
@@ -51,6 +51,7 @@ def should_stop(
     scale: EconomicScale,
     bounds: GateBounds,
     policy: SamplingPolicy,
+    budgets_c: Optional[Mapping[str, float]] = None,
 ) -> StopDecision:
     """Decide whether the reference arm has sampled enough.
 
@@ -60,6 +61,9 @@ def should_stop(
         scale: Raw-to-economic converter.
         bounds: Study bounds (supplies the standard-error budget).
         policy: Sampling policy (supplies min/max batch limits).
+        budgets_c: Schema 2: each targeted quantity's own cell budget in
+            economic units. A quantity absent from it (an untargeted proxy)
+            never drives sampling. ``None`` keeps schema 1's single bound.
 
     Raises:
         ValidationError: empty ``std_errors_raw`` or a negative batch count.
@@ -74,13 +78,14 @@ def should_stop(
             stop=False, reason=StopReason.BELOW_MIN_BATCHES, batches=batches
         )
 
-    budget_c = bounds.se_budget_fraction * bounds.cell
     budget_met = True
     for quantity, raw_se in std_errors_raw.items():
-        if not math.isfinite(raw_se):
-            budget_met = False
-            break
-        if abs(scale.to_economic(quantity, raw_se)) > budget_c:
+        if budgets_c is not None and quantity not in budgets_c:
+            continue                                  # schema 2: an untargeted quantity never drives sampling
+        # Schema 2 gate values are fractions of the cell's own budget, so the SE budget is that budget scaled
+        # exactly as the gate scales it; with budgets_c None this is schema 1's arithmetic (x * 1.0 == x).
+        budget_c = bounds.se_budget_fraction * bounds.cell * (1.0 if budgets_c is None else budgets_c[quantity])
+        if not math.isfinite(raw_se) or abs(scale.to_economic(quantity, raw_se)) > budget_c:
             budget_met = False
             break
 

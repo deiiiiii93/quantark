@@ -32,6 +32,9 @@ from quantark.util.exceptions import ValidationError
 
 #: Evidence schema version. Independent of any prior certification work.
 SCHEMA_VERSION: int = 1
+#: Every schema a certificate may declare: schema 1's format is preserved exactly; schema 2 adds the
+#: catalogue quantities, per-quantity budgets, case context and the amendment contract.
+SUPPORTED_SCHEMA_VERSIONS: tuple[int, ...] = (1, 2)
 
 #: Fields excluded from the projected hash: they vary between identical runs.
 VOLATILE_KEYS = frozenset(

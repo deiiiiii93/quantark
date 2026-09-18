@@ -116,7 +116,7 @@ def test_run_returns_zero_even_when_rejected(tmp_path, study_file, capsys):
 
 def test_run_reports_a_bad_study_file(tmp_path, capsys):
     path = tmp_path / "broken.yaml"
-    path.write_text("study: broken\nschema: 2\n", encoding="utf-8")
+    path.write_text("study: broken\nschema: 3\n", encoding="utf-8")
     code = main(["run", str(path), "--out", str(tmp_path / "out")])
     assert code == 1
     assert "schema" in capsys.readouterr().err

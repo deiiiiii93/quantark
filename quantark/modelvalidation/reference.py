@@ -182,6 +182,21 @@ def _deserialize(payload: Mapping[str, Any]) -> Tuple[List[BatchResult], Optiona
     return batches, payload.get("stopped_reason")
 
 
+def _stop_budgets(
+    values: Mapping[str, float],
+    quantity_bounds: Optional[Mapping[str, Any]],
+    stop_quantities: Optional[Sequence[str]],
+    scale: EconomicScale,
+) -> Optional[Dict[str, float]]:
+    """Schema 2: each targeted quantity's budget at the current estimate; None keeps schema 1's single bound."""
+    if quantity_bounds is None:
+        return None
+    return {
+        q: quantity_bounds[q].budget(scale.to_economic(q, values[q]))
+        for q in (stop_quantities if stop_quantities is not None else quantity_bounds)
+    }
+
+
 def _validate_banked_bank(
     batches: Sequence[BatchResult],
     stopped_reason: Optional[str],
@@ -190,6 +205,8 @@ def _validate_banked_bank(
     bounds: GateBounds,
     policy: SamplingPolicy,
     case_name: str,
+    quantity_bounds: Optional[Mapping[str, Any]] = None,
+    stop_quantities: Optional[Sequence[str]] = None,
 ) -> None:
     """Replay the stopping policy over a banked bank; reject what it cannot explain."""
     if len(batches) > policy.max_batches:
@@ -205,13 +222,14 @@ def _validate_banked_bank(
         # contradict. Sampling continues from here.
         return
 
-    _, std_errors = _estimate(batches, quantities)
+    values, std_errors = _estimate(batches, quantities)
     replayed = should_stop(
         std_errors_raw=std_errors,
         batches=len(batches),
         scale=scale,
         bounds=bounds,
         policy=policy,
+        budgets_c=_stop_budgets(values, quantity_bounds, stop_quantities, scale),
     )
     if not replayed.stop or replayed.reason.value != stopped_reason:
         raise ValidationError(
@@ -230,6 +248,8 @@ def run_reference(
     policy: SamplingPolicy,
     store: Optional[CheckpointStore] = None,
     resume: bool = False,
+    quantity_bounds: Optional[Mapping[str, Any]] = None,
+    stop_quantities: Optional[Sequence[str]] = None,
 ) -> ReferenceEstimate:
     """Sample the benchmark for ``case`` until the stopping policy says stop.
 
@@ -242,6 +262,10 @@ def run_reference(
         policy: Sampling budget and limits.
         store: Checkpoint store; ``None`` disables banking.
         resume: Reuse a banked bank when its identity and stop decision hold up.
+        quantity_bounds: Schema 2: per-quantity budgets; the stop rule measures
+            each quantity's SE against its own budget. ``None`` for schema 1.
+        stop_quantities: Schema 2: the targeted quantities that drive stopping
+            (an untargeted proxy never does).
 
     Raises:
         ValidationError: a malformed batch, or a banked bank the current policy
@@ -256,7 +280,8 @@ def run_reference(
         if banked is not None:
             batches, stopped_reason = _deserialize(banked)
             _validate_banked_bank(
-                batches, stopped_reason, quantities, scale, bounds, policy, case.name
+                batches, stopped_reason, quantities, scale, bounds, policy, case.name,
+                quantity_bounds=quantity_bounds, stop_quantities=stop_quantities,
             )
             if stopped_reason is not None:
                 values, std_errors = _estimate(batches, quantities)
@@ -273,13 +298,14 @@ def run_reference(
         _validate_batch(batch, len(batches), policy, quantities, case.name)
         batches.append(batch)
 
-        _, std_errors = _estimate(batches, quantities)
+        values, std_errors = _estimate(batches, quantities)
         decision = should_stop(
             std_errors_raw=std_errors,
             batches=len(batches),
             scale=scale,
             bounds=bounds,
             policy=policy,
+            budgets_c=_stop_budgets(values, quantity_bounds, stop_quantities, scale),
         )
         stopped_reason = decision.reason.value if decision.stop else None
 

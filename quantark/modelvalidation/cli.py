@@ -83,7 +83,7 @@ def _print_decisions(payload: dict) -> None:
     unresolved = sum(1 for cell in payload["cells"] if cell["verdict"] == "UNRESOLVED")
     errored = sum(1 for cell in payload["cells"] if cell["verdict"] == "ERROR")
     if unresolved:
-        print(f"\n  {unresolved} cell(s) UNRESOLVED: the benchmark never met its budget.")
+        print(f"\n  {unresolved} cell(s) UNRESOLVED: the evidence could not decide (see the report).")
     if errored:
         print(f"  {errored} cell(s) ERROR: see the report for the exceptions.")
 

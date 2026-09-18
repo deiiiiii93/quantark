@@ -14,6 +14,11 @@ Three rules keep that chain honest:
 * scope may grow but never silently shrink. Dropping a case or a candidate is a
   new certification, not an amendment, because a shrunken amendment would read
   as though the missing coverage had passed.
+
+Schema 2 adds a fourth: the parent's *contract* (estimands, budgets, gate
+policy, scale, reference targets, seed scheme, convergence rule) must be
+identical. Case context and semantic expectations are not in the contract; they
+live in the cell identity, so changing them re-evaluates exactly those cells.
 """
 
 from __future__ import annotations
@@ -39,10 +44,12 @@ from quantark.modelvalidation.pipeline import (
     assemble_payload,
     build_cells,
     quick_policy,
+    stop_quantities,
+    study_contract,
     validate_payload,
     write_certificate,
 )
-from quantark.modelvalidation.reference import ReferenceEstimate, run_reference
+from quantark.modelvalidation.reference import ReferenceEstimate, bound_reference, run_reference
 from quantark.modelvalidation.study import CertificationStudy
 
 
@@ -60,6 +67,23 @@ def validate_parent(parent_path: str | Path) -> dict:
 
     validate_payload(payload)
     return payload
+
+
+def _check_contract(study: CertificationStudy, reference, parent: Mapping[str, Any]) -> None:
+    """A schema-2 amendment keeps its parent's contract; anything else is a new certification."""
+    if parent.get("schema") != study.schema:
+        raise ValidationError(
+            f"Amendment schema {study.schema} does not match the parent's {parent.get('schema')}; "
+            "the first certification under a new schema is a full run")
+    if study.schema != 2:
+        return
+    current, banked = study_contract(study, reference), parent.get("contract") or {}
+    changed = sorted(key for key in set(current) | set(banked) if current.get(key) != banked.get(key))
+    if changed:
+        raise ValidationError(
+            f"Amendment changes the certification contract ({', '.join(changed)}). Estimands, budgets, gate policy, "
+            "scale, reference targets, seed scheme and the convergence rule are fixed by the parent; changing one "
+            "is a new certification, not an amendment")
 
 
 def _check_coverage(study: CertificationStudy, parent: Mapping[str, Any]) -> None:
@@ -110,11 +134,16 @@ def amend(
 
     started = time.time()
     parent_payload = validate_parent(parent)
+    sampling = quick_policy(study.sampling) if quick else study.sampling
+    reference = bound_reference(study.reference, sampling, schema=study.schema)
+    # The schema and contract are the more fundamental refusal: a study offered against a parent of
+    # another schema must be told so, not told it dropped a case.
+    _check_contract(study, reference, parent_payload)
     _check_coverage(study, parent_payload)
+    stopping = stop_quantities(study, reference)
 
     root = validate_durable_root(out_dir) / study.name
     store = CheckpointStore(root / "checkpoints")
-    sampling = quick_policy(study.sampling) if quick else study.sampling
     parent_digest = parent_payload["projected_sha256"]
 
     parent_references: Dict[str, dict] = dict(parent_payload["references"])
@@ -129,7 +158,7 @@ def amend(
     reference_carried: Dict[str, bool] = {}
 
     for case in study.cases:
-        current_identity = identity_hash(study.reference.identity(case))
+        current_identity = identity_hash(reference.identity(case))
         banked = parent_references.get(case.name)
         if banked is not None and banked.get("identity_hash") == current_identity:
             references[case.name] = dict(banked)
@@ -140,7 +169,7 @@ def amend(
         reference_carried[case.name] = False
         try:
             estimate = run_reference(
-                builder=study.reference,
+                builder=reference,
                 case=case,
                 quantities=study.quantities,
                 scale=study.scale,
@@ -148,10 +177,12 @@ def amend(
                 policy=sampling,
                 store=store,
                 resume=resume,
+                quantity_bounds=study.quantity_bounds if study.schema == 2 else None,
+                stop_quantities=stopping,
             )
             estimates[case.name] = estimate
             references[case.name] = reference_block(
-                estimate, study.reference.identity(case)
+                estimate, reference.identity(case)
             )
         except Exception:  # noqa: BLE001 - recorded, not swallowed
             estimates[case.name] = None
@@ -165,7 +196,7 @@ def amend(
     for candidate in study.candidates:
         name = candidate.name()
         for case in study.cases:
-            current_identity = identity_hash(candidate_identity(candidate, case))
+            current_identity = identity_hash(candidate_identity(candidate, case, schema=study.schema))
             keys = [(name, case.name, quantity) for quantity in study.quantities]
             banked_cells = [parent_cells.get(key) for key in keys]
 
@@ -204,7 +235,7 @@ def amend(
                 )
             else:
                 try:
-                    result = evaluate_candidate(candidate, case, store, resume)
+                    result = evaluate_candidate(candidate, case, store, resume, schema=study.schema)
                 except Exception:  # noqa: BLE001 - recorded, not swallowed
                     error = traceback.format_exc()
 
@@ -215,6 +246,7 @@ def amend(
                 estimate=estimate,
                 result=result,
                 error=error,
+                reference=reference,
             )
             cells.extend(fresh)
             replaced.extend(
@@ -232,6 +264,7 @@ def amend(
         aggregates=aggregates,
         decisions=decisions,
         started=started,
+        reference=reference,
         extra={
             "amendment": {
                 "parent": str(Path(parent)),

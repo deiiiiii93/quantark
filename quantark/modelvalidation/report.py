@@ -90,6 +90,8 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
         )
         parts.append("")
 
+    schema2 = payload.get("schema") == 2
+
     parts.append("## Decisions")
     parts.append("")
     parts.append(
@@ -99,6 +101,14 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
         )
     )
     parts.append("")
+    uncertified = study.get("uncertified_quantities") or []
+    if schema2 and uncertified:
+        parts.append(
+            "Uncertified quantities (no reference estimator; outside every decision): "
+            + ", ".join(f"`{q}`" for q in uncertified)
+            + "."
+        )
+        parts.append("")
     parts.append(
         f"Bounds: cell {_fmt(bounds['cell'])} c, mean signed bias "
         f"{_fmt(bounds['mean_signed_bias'])} c, standard-error budget "
@@ -106,6 +116,22 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
         f"{_fmt(bounds['interval_k'])}."
     )
     parts.append("")
+    if schema2:
+        parts.append(
+            "Schema 2: gate values are a fraction of each cell's own budget (quantity_bounds below); "
+            "the cell bound of 1 is that budget."
+        )
+        parts.append("")
+        parts.append(
+            _table(
+                ["quantity", "abs floor", "relative"],
+                [
+                    [quantity, _fmt(spec["abs_floor"]), _fmt(spec["rel"])]
+                    for quantity, spec in (study.get("quantity_bounds") or {}).items()
+                ],
+            )
+        )
+        parts.append("")
 
     config_rows = []
     for candidate in study["candidates"]:
@@ -190,6 +216,45 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
         )
     )
     parts.append("")
+
+    if schema2:
+        reason_rows = [
+            [cell["candidate"], cell["case"], cell["quantity"], cell.get("kind") or _NA, cell["verdict"],
+             str(cell["reason"])]
+            for cell in payload["cells"]
+            if cell.get("reason")
+        ]
+        if reason_rows:
+            parts.append("## Semantic, uncertified and unresolved cells")
+            parts.append("")
+            parts.append(_table(["candidate", "case", "quantity", "kind", "verdict", "reason"], reason_rows))
+            parts.append("")
+        convergence_rows = []
+        for cell in payload["cells"]:
+            block = cell.get("convergence")
+            if not block:
+                continue
+            orders = block.get("observed_orders") or {}
+            convergence_rows.append(
+                [
+                    cell["candidate"],
+                    cell["case"],
+                    cell["quantity"],
+                    _fmt(block.get("envelope_raw"), 3),
+                    ", ".join(f"{axis}: {_fmt(order, 3)}" for axis, order in sorted(orders.items())) or _NA,
+                    ", ".join(block.get("non_monotone") or []) or _NA,
+                ]
+            )
+        if convergence_rows:
+            parts.append("## Convergence")
+            parts.append("")
+            parts.append(
+                _table(
+                    ["candidate", "case", "quantity", "envelope", "observed order per axis", "non-monotone axes"],
+                    convergence_rows,
+                )
+            )
+            parts.append("")
 
     parts.append("## Aggregate bias")
     parts.append("")

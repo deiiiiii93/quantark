@@ -400,48 +400,61 @@ def _decisions_section(payload: Mapping[str, Any]) -> str:
 
 def _cells_section(payload: Mapping[str, Any]) -> str:
     bound = payload["study"]["bounds"]["cell"]
+    schema2 = payload.get("schema") == 2
     rows = []
     for cell in payload["cells"]:
         gate = cell["gate"]
         reference = cell["reference"]
         kind = _VERDICT_CLASS.get(cell["verdict"], "warn")
-        rows.append(
-            [
-                f'<td class="name">{_esc(cell["candidate"])}</td>',
-                f'<td>{_esc(cell["case"])}</td>',
-                f'<td>{_esc(cell["quantity"])}</td>',
-                f'<td class="num">{_fmt(reference["value"]) if reference else _NA}</td>',
-                f'<td class="num">{_fmt(reference["se"], 3) if reference else _NA}</td>',
-                f'<td class="num">{_fmt(cell["candidate_value"])}</td>',
-                f'<td class="num">{_fmt(gate["signed_err_c"], 4) if gate else _NA}</td>',
-                f'<td class="num">{_fmt(gate["envelope_c"], 3) if gate else _NA}</td>',
-                f'<td>{_gauge(gate["interval_c"] if gate else None, bound, kind)}</td>',
-                f'<td>{_pill(cell["verdict"], kind)}</td>',
-            ]
+        row = [
+            f'<td class="name">{_esc(cell["candidate"])}</td>',
+            f'<td>{_esc(cell["case"])}</td>',
+            f'<td>{_esc(cell["quantity"])}</td>',
+            f'<td class="num">{_fmt(reference["value"]) if reference else _NA}</td>',
+            f'<td class="num">{_fmt(reference["se"], 3) if reference else _NA}</td>',
+            f'<td class="num">{_fmt(cell["candidate_value"])}</td>',
+            f'<td class="num">{_fmt(gate["signed_err_c"], 4) if gate else _NA}</td>',
+            f'<td class="num">{_fmt(gate["envelope_c"], 3) if gate else _NA}</td>',
+            f'<td>{_gauge(gate["interval_c"] if gate else None, bound, kind)}</td>',
+            f'<td>{_pill(cell["verdict"], kind)}</td>',
+        ]
+        if schema2:
+            row.append(f'<td>{_esc(cell.get("reason") or _NA)}</td>')
+        rows.append(row)
+    headers = [
+        "candidate",
+        "case",
+        "quantity",
+        "reference",
+        "SE",
+        "candidate",
+        "err (c)",
+        "envelope (c)",
+        "interval vs bound",
+        "verdict",
+    ]
+    if schema2:
+        lede = (
+            '<p class="lede">One row per candidate &times; case &times; quantity. Gate values are '
+            "what fraction of each cell's own budget (its quantity bound at the reference value) "
+            "the disagreement consumed; the gauge shows how much of that budget the interval "
+            "(|error| + k&middot;SE) used &mdash; a pass near 100% is a pass with no room left. "
+            "Envelope is the candidate's own discretization error from its convergence axes. A "
+            "reason explains a semantic, uncertified or unresolved cell.</p>"
+        )
+        headers.append("reason")
+    else:
+        lede = (
+            f'<p class="lede">One row per candidate &times; case &times; quantity. The gauge shows '
+            f"how much of the {bound:g} c cell bound the disagreement interval "
+            f"(|error| + k&middot;SE) consumed &mdash; a pass near 100% is a pass with no room "
+            "left. Envelope is the candidate's own discretization error from its refinement "
+            "ladder.</p>"
         )
     return (
         "<section><h2>Cells</h2>"
-        f'<p class="lede">One row per candidate &times; case &times; quantity. The gauge shows '
-        f"how much of the {bound:g} c cell bound the disagreement interval "
-        f"(|error| + k&middot;SE) consumed &mdash; a pass near 100% is a pass with no room "
-        "left. Envelope is the candidate's own discretization error from its refinement "
-        "ladder.</p>"
-        + _table(
-            [
-                "candidate",
-                "case",
-                "quantity",
-                "reference",
-                "SE",
-                "candidate",
-                "err (c)",
-                "envelope (c)",
-                "interval vs bound",
-                "verdict",
-            ],
-            rows,
-            "No cells.",
-        )
+        + lede
+        + _table(headers, rows, "No cells.")
         + "</section>"
     )
 
