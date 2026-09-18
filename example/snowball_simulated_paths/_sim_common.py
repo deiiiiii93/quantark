@@ -170,13 +170,21 @@ def cell_name(model: str, hedge: str) -> str:
 
 def engine_config(
     model: str, engine: str, *, quad_grid: int, s0: Optional[float] = None,
-    spot_range: Optional[Tuple[float, float]] = None,
+    spot_range: Optional[Tuple[float, float]] = None, quad_align: str = "auto",
 ) -> AutocallableEngineConfig:
     """The replay engine config of one carry model on the PDE (life surface) or QUAD (repricing) engine.
 
     With ``s0`` the PDE grid spans ``spot_range`` (default
     ``SURFACE_SPOT_RANGE``) times it, so one surface covers every spot a
     bootstrap or stress path can read.
+
+    ``quad_align`` is ``QuadParams.align_priority``.  Under the default
+    ``"auto"`` the lattice pins whichever barrier is nearest spot in log
+    space, so the target changes at ``sqrt(KI*KO)`` and a bumped delta
+    within one bump of that level differences two differently aligned
+    lattices; ``"ki"`` or ``"ko"`` pins one barrier for every evaluation.
+    It reaches only the QUAD branch, so a PDE cell's fingerprint does not
+    move with it.
     """
     if model not in Q.Q_MODELS:
         raise ValidationError(f"unknown carry model {model!r}; one of {tuple(Q.Q_MODELS)}")
@@ -202,7 +210,8 @@ def engine_config(
                           max_points=SURFACE_MAX_POINTS)
         kwargs: Dict[str, Any] = dict(pricing_engine_type=EngineType.PDE, pde_params=PDEParams(grid=grid))
     elif engine == "quad":
-        kwargs = dict(pricing_engine_type=EngineType.QUADRATURE, quad_params=QuadParams(grid_points=int(quad_grid)))
+        kwargs = dict(pricing_engine_type=EngineType.QUADRATURE,
+                      quad_params=QuadParams(grid_points=int(quad_grid), align_priority=str(quad_align)))
     else:
         raise ValidationError("engine must be 'pde' or 'quad'")
     return AutocallableEngineConfig(

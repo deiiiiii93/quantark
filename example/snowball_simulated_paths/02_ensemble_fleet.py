@@ -130,7 +130,7 @@ def _coupon_of(product) -> float:
 def cell_config(
     product, model: str, hedge: str, *, provider: str, cost_bp: float, workers: int, batch_paths: Optional[int],
     quad_grid: int, disk_dir: Optional[str] = None, gate_override: Optional[Dict[str, Any]] = None,
-    spot_range: Optional[Tuple[float, float]] = None,
+    spot_range: Optional[Tuple[float, float]] = None, quad_align: str = "auto",
 ) -> EnsembleConfig:
     """One cell: the q study's product, model and hedge policy on the named provider.
 
@@ -146,7 +146,7 @@ def cell_config(
         products=[ReplayProduct(product=product, quantity=C.Q.PRODUCT_QUANTITY, position_id=1,
                                 has_lifecycle=True, initial_price=0.0)],
         engine_config=C.engine_config(model, engine, quad_grid=quad_grid, s0=float(product.initial_price),
-                                      spot_range=spot_range),
+                                      spot_range=spot_range, quad_align=quad_align),
         hedge=HedgeSpec(kind="futures", multiplier=C.Q.FUTURES_MULTIPLIER, roll_policy=C.Q.HEDGE_POLICIES[hedge]()),
         strategy=AutocallableDeltaHedgeStrategy(delta_threshold=0.0, hedge_ratio=1.0, target_delta=0.0),
         transaction_cost_model=ProportionalCostModel(commission_rate=float(cost_bp) * 1e-4) if cost_bp else ZeroCostModel(),
@@ -154,7 +154,7 @@ def cell_config(
         underlying=C.Q.UNDERLYING_NAME, workers=int(workers), batch_paths=batch_paths,
         metadata={"study": "snowball_simulated_paths", "model": model, "hedge": hedge, "provider": provider,
                   "engine": engine, "cost_bp": float(cost_bp), "quad_grid": int(quad_grid),
-                  "coupon": _coupon_of(product), "spot_range": list(spot_range)},
+                  "coupon": _coupon_of(product), "spot_range": list(spot_range), "quad_align": str(quad_align)},
     )
 
 
@@ -302,6 +302,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--batch-paths", type=int, default=None)
     parser.add_argument("--quad-grid", type=int, default=C.Q.DEFAULT_QUAD_GRID)
+    parser.add_argument("--quad-align", choices=("auto", "ko", "ki", "coupon"), default="auto",
+                        help="QuadParams.align_priority for QUAD cells; 'ko'/'ki' pin one barrier for every "
+                             "evaluation of a bumped delta (the coupon solve stays on 'auto')")
     parser.add_argument("--cost-bp", type=float, default=C.COST_BP)
     parser.add_argument("--maturity-months", type=int, default=C.Q.MATURITY_MONTHS)
     parser.add_argument("--lockout-months", type=int, default=C.Q.LOCKOUT_MONTHS)
@@ -329,8 +332,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     disk_dir = str(args.out_dir / "cache") if args.disk_cache else None
     runs: Dict[str, Any] = {}
     oracle = list(range(args.oracle_paths))
+    # The coupon above is solved on the default alignment on purpose: --quad-align
+    # measures the QUAD reference against itself, so the product must not move with it.
     common = dict(cost_bp=args.cost_bp, workers=args.workers, quad_grid=args.quad_grid, disk_dir=disk_dir,
-                  spot_range=tuple(args.spot_range))
+                  spot_range=tuple(args.spot_range), quad_align=args.quad_align)
     for model, hedge in cells:
         cell = C.cell_name(model, hedge)
         plan = [(cell, bootstrap, args.provider, oracle),

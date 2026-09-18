@@ -368,7 +368,8 @@ paths; `data/engine_check.csv`):
 
 Every entry is small against the 122–294 bp effects the study measures —
 at most 8.3 bp, and under 2 bp in five of six cells.  The QUAD reference
-is not itself clean: see the alignment caveat below.
+is not itself clean, but re-running it with a forced lattice alignment
+moves these numbers by less than 0.71 bp: see the alignment caveat below.
 
 **Stress** (terminal P&L bp / daily std bp; the designed paths move the
 product, not the hedge choice, so cells agree within tens of bp):
@@ -536,7 +537,8 @@ gates.  Report: `data/simulated_paths_report.html`.
   carry-model gap and an engine gap (report, day-0 table).
 - Paired t-statistics treat the simulated paths as independent draws,
   unlike the historical study's overlapping inceptions.
-- **The exact-QUAD reference in the engine check is not clean.**  With
+- **The exact-QUAD reference in the engine check is not clean, though it
+  costs the study at most 0.71 bp.**  With
   `QuadParams.align_priority="auto"` the lattice pins whichever barrier is
   nearest spot in log space, so the alignment target changes at
   `sqrt(KI·KO)` = 0.8789 of the inception spot.  A bumped delta evaluates
@@ -549,9 +551,19 @@ gates.  Report: `data/simulated_paths_report.html`.
   states sit within 1% of that level.  The two forced branches differ by
   only about 2 hands here, so the damage does not come from the branches
   disagreeing — it comes from mixing them inside one finite difference,
-  which means a product whose branches nearly coincide is no safer.  The
-  per-date PDE cells the study reports are unaffected: they are compared
-  against each other, same engine both sides.
+  which means a product whose branches nearly coincide is no safer.
+  Re-running all six check cells with `--quad-align ko`, which makes every
+  evaluation share one alignment, moves the engine check by −0.71 to
+  +0.65 bp of terminal P&L and at most 0.09 bp of daily std
+  (`data/engine_check_align_ko.csv`).  The state-level error is real but
+  smaller than one futures contract, so it rounds away before it reaches a
+  trade.  Note the largest engine gap, `term_flat_q__far` at −8.33 bp,
+  **survives** forcing (−8.81 bp, t −3.14): that cell's PDE-QUAD
+  difference is something else, not the alignment.  `align_cell_stretch`
+  (unmerged elsewhere) is the better fix than forcing, since it puts both
+  barriers on nodes instead of pinning around the inconsistency.  The
+  per-date PDE cells the study reports are unaffected either way: they are
+  compared against each other, same engine both sides.
 - Do not run the fleet with `--disk-cache` across cells that differ in
   hedge.  `StateKey` deliberately excludes the hedge, but in this study
   the hedge selects the active futures contract and therefore the priced
