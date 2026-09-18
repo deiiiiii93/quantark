@@ -133,7 +133,7 @@ def test_certification_study_accepts_valid_config():
 
 def test_certification_study_rejects_wrong_schema():
     with pytest.raises(ValidationError):
-        _study(schema=2)
+        _study(schema=3)
 
 
 def test_certification_study_rejects_duplicate_case_names():

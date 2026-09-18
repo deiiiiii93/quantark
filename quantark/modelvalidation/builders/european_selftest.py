@@ -36,7 +36,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.modelvalidation.candidate import CandidateResult, LadderRung
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
-from quantark.modelvalidation.study import HedgeContractScale, SamplingPolicy
+from quantark.modelvalidation.study import HedgeContractScale, NormalizedScale, SamplingPolicy
 
 VALUATION_DATE = datetime(2024, 1, 1)
 
@@ -48,6 +48,12 @@ _PRODUCT_KEYS = ("strike", "maturity", "option_type")
 def build_hedge_contract_scale(params: Mapping[str, Any]) -> HedgeContractScale:
     """Economic scale in hedge contracts."""
     return HedgeContractScale(**dict(params))
+
+
+@register_builder("normalized", kind="economic_scale")
+def build_normalized_scale(params: Mapping[str, Any]) -> NormalizedScale:
+    """Schema-2 economic scale: notional-normalized, with a recorded spot scale."""
+    return NormalizedScale(**dict(params))
 
 
 @register_builder("flat_bsm", kind="environment")

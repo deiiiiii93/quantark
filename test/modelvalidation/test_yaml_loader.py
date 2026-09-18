@@ -141,7 +141,7 @@ def test_optional_bounds_fields_default():
 
 def test_rejects_wrong_schema():
     with pytest.raises(ValidationError):
-        load_study_text(VALID.replace("schema: 1", "schema: 2"))
+        load_study_text(VALID.replace("schema: 1", "schema: 3"))
 
 
 def test_rejects_unknown_builder_and_names_the_registered_ones():

@@ -19,25 +19,37 @@ from quantark.modelvalidation.pipeline import Certificate, certify, validate_pay
 from quantark.modelvalidation.registry import register_builder
 from quantark.modelvalidation.study import (
     QUANTITIES,
+    QUANTITY_CATALOGUE,
+    SUPPORTED_SCHEMAS,
     CaseSpec,
     CertificationStudy,
     EconomicScale,
     GateBounds,
     HedgeContractScale,
+    NormalizedScale,
+    QuantityBounds,
+    QuantityDefinition,
     SamplingPolicy,
+    batch_seed,
 )
 from quantark.modelvalidation.yaml_loader import load_study, load_study_text
 
 __all__ = [
     "QUANTITIES",
+    "QUANTITY_CATALOGUE",
+    "SUPPORTED_SCHEMAS",
     "CaseSpec",
     "Certificate",
     "CertificationStudy",
     "EconomicScale",
     "GateBounds",
     "HedgeContractScale",
+    "NormalizedScale",
+    "QuantityBounds",
+    "QuantityDefinition",
     "SamplingPolicy",
     "amend",
+    "batch_seed",
     "assert_anchors",
     "resolve_supersession",
     "certify",

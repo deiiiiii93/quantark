@@ -24,6 +24,7 @@ BUILDER_KINDS: Tuple[str, ...] = (
     "reference",
     "candidate",
     "economic_scale",
+    "context",
 )
 
 #: (kind, name) -> builder callable.

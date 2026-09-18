@@ -362,7 +362,7 @@ def assemble_payload(
             "source_text": study.source_text,
             "quantities": list(study.quantities),
             "bounds": asdict(study.bounds),
-            "sampling": asdict(sampling),
+            "sampling": {k: v for k, v in asdict(sampling).items() if not (study.schema == 1 and k == "seed_scheme")},
             "quick": quick,
             "cases": [
                 {
