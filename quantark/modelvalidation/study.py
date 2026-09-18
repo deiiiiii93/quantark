@@ -168,9 +168,11 @@ class GateBounds:
             within ``envelope_fraction * cell``.
         radius_budget_fraction: Schema 2, deterministic references only: the
             reference's declared error radius must sit within
-            ``radius_budget_fraction * cell``. A radius is a bound, not a
-            standard deviation, so it is a separate field and ``interval_k``
-            never multiplies it. ``None`` for every stochastic reference.
+            ``radius_budget_fraction * cell``. A radius is the reference's whole
+            declared allowance (analytical, or a calibrated estimate with its
+            evidence), not a standard deviation, so it is a separate field and
+            ``interval_k`` never multiplies it. ``None`` for every stochastic
+            reference.
     """
 
     cell: float

@@ -48,7 +48,8 @@ class CellGateResult:
         bound_c: Schema 2: the per-cell budget every value above was divided by;
             ``None`` for schema 1.
         radius_c: Schema 2, deterministic reference: its declared error radius.
-            ``se_c`` is then ``None`` -- a radius is a bound, never a zero
+            ``se_c`` is then ``None`` -- a radius is the reference's whole declared
+            allowance (analytical or a calibrated estimate), never a zero
             standard error -- the interval edges are ``|err| +/- radius_c``
             without ``interval_k``, and ``se_budget_met`` reads "the radius is
             within ``radius_budget_fraction`` of the bound".
@@ -162,7 +163,7 @@ def evaluate_cell_gate(
         signed_err_c /= bound_c
         se_c /= bound_c
         envelope_c = None if envelope_c is None else envelope_c / bound_c
-    # a standard error is widened by interval_k; a radius already is the bound
+    # a standard error is widened by interval_k; a radius is already the whole declared allowance
     half_width_c = se_c if deterministic else bounds.interval_k * se_c
     sharp_fraction = bounds.radius_budget_fraction if deterministic else bounds.se_budget_fraction
     interval_c = abs(signed_err_c) + half_width_c

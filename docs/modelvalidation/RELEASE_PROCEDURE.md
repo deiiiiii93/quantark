@@ -119,13 +119,16 @@ child records its parent's digest, and a chain whose parent has been replaced
 cannot be verified; the CI guard globs `*/*/anchors.json`, so both directories
 keep being checked.
 
-Copy in `certificate.json`, `report.md`, and `report.html` (never
-`checkpoints/`), then extract the anchors:
+Bank through the command, never by hand:
 
 ```bash
-python -m quantark.modelvalidation anchors \
-    docs/modelvalidation/certificates/<study>/<date>/certificate.json
+python -m quantark.modelvalidation bank output/modelvalidation/<study>
 ```
+
+It validates the certificate's digest, refuses a quick run, copies
+`certificate.json`, `report.md` and `report.html` (never `checkpoints/`), extracts
+`anchors.json`, and prints the directory it created. On a same-day repeat it takes
+the next suffix itself instead of touching the existing directory.
 
 Reference the banked certificate from the release notes or PR description by
 its digest, so a reader can tell which evidence backs which release.
@@ -268,6 +271,7 @@ Before a certification is accepted as backing a release:
 | `european_selftest.yaml` | The framework's own calibration check: the candidate is closed-form Black-Scholes, so the framework **must** admit it. Runs in CI on every commit. | ~3 s |
 | `snowball_flat_bsm.yaml` | The demonstration study: PDE and quadrature snowball engines against one paired-RQMC benchmark, five scenarios, PV and both spot Greeks. | minutes |
 | `adi2d_snowball_greeks.yaml` | **Imported, not runnable** (see §10): the 2D ADI Heston and Heston-SLV solvers, spot Greeks, seven variance regimes. Its candidate arm is live and anchored. | anchors ~6 min |
+| `snowball_intraday_daily_ki_bsm.yaml` | **Schema 2, deterministic reference.** The daily-KI snowball on the intraday clock: QUAD V2 and PDE intraday routes against the engine-independent Gaussian-transition solver (a five-level nested ladder; every radius declares itself analytical or a calibrated estimate; qualified case by case by paired RQMC) on PV, desk spot Greeks, desk theta and point spot Greeks, 23 cases. | hours (the reference about 5 h on one worker) |
 
 If `european_selftest` ever fails, suspect the certification machinery before
 suspecting the engine — that study exists precisely to make that distinction
@@ -327,3 +331,80 @@ The rule for importing one:
   benchmark, record its configuration, and raise. A simplified stand-in would
   make `run` appear to work while certifying against something the evidence does
   not describe.
+
+## 11. Schema 2 and the intraday studies
+
+Schema 2 keeps everything in sections 1-8 and adds: quantities from a shared catalogue
+(`point_delta`, `desk_gamma`, `desk_theta`, ...), a budget per quantity
+(`quantity_bounds`: absolute floor and relative term on the notional-normalized value), a
+`context` block (valuation instant, phase, variance profile, calendar, history, checkpoint)
+with per-case overrides, semantic assertions (`expect:`) for cells where no number exists,
+independent per-case random substreams, and convergence evidence with at least three levels
+per axis. Gate values are fractions of each cell's own budget, so a schema-2 study declares
+`bounds: {cell: 1.0, mean_signed_bias: 0.2}`. Schema-1 studies and their banked evidence keep
+their format and their verdict rule exactly.
+
+Verdicts are three-way, on cells and on the aggregate mean signed error alike. Writing `d`
+for the disagreement and `R` for the reference's uncertainty radius: PASS when
+`d + R <= budget`, FAIL when `d - R > budget` (or a refinement envelope exceeds its share),
+UNRESOLVED when the interval straddles the budget, the reference is not sharp enough, or an
+axis shows fewer than three levels. A reference that declares no estimator for a quantity
+leaves those cells UNRESOLVED by construction; they are reported, listed in the certificate
+as `uncertified_quantities`, and kept out of the candidate decision.
+
+**Reference selection belongs to each study.** A study declares one primary reference
+builder, its estimands, its error policy and an optional qualification policy; all are
+frozen before any candidate is compared and are part of the certification contract. Schema 2
+supports two kinds of primary reference through the same builder, evidence and gate
+protocols, and there is no global default: RQMC stays the reference of every study it can
+resolve.
+
+A *stochastic* reference states replicate standard errors: `R = interval_k x SE`, sharp
+enough when `SE <= se_budget_fraction x budget`, and cell errors add in quadrature in the
+aggregate. A *deterministic* reference (`reference_kind = "deterministic"`) states a
+*radius*: `R` is the radius itself (`interval_k` never multiplies it), sharp enough when
+`radius <= radius_budget_fraction x budget`, and radii add **linearly** in the aggregate,
+because discretization errors may share a sign. Its record is typed (`kind`, `values`,
+`radii`, `radius_basis`, `undefined`, `evidence`) and is never written as batches with a
+zero standard error; a gate under it has `se_c: null` and a `radius_c`.
+
+**A deterministic method does not, by itself, establish an error bound.** Every radius
+declares what it is: `analytical` (a named exactness basis or a proved bound) or
+`calibrated_estimate` (a numerical estimate with its calibration evidence in the
+certificate). A radius that does not say is refused. Equal values across a refinement
+ladder do not establish exactness: a builder must validate that every level refines every
+discretization it uses, and must treat unexplained stagnation as unresolved. The executed
+error policy is one structured, versioned object that also serializes into the `contract`,
+so the certificate describes the policy that ran and a changed parameter is a changed
+contract.
+
+Use a deterministic reference only when a study revision shows the stochastic one cannot
+resolve the budgets (the daily-KI study's is
+`docs/superpowers/specs/2026-09-18-intraday-deterministic-reference-revision.md`). When the
+study qualifies it, `reference_qualification` names a stochastic arm that simulates every
+case; the deterministic value must sit within `max_z` of its standard errors plus the
+radius. Qualification is an **eligibility condition**: a case that fails (or whose arm
+errored, or had nothing to compare) has no decision-eligible gate, so its cells are
+UNRESOLVED and feed no aggregate, whatever the candidate says -- nobody knows which arm is
+wrong. The qualifier's sampling, seed and method are frozen in the contract; weakening them
+is a new study revision, never an amendment. When reviewing such a certificate, read the
+"Reference qualification" table and each case's `radius_basis` before the cells: a z near
+`max_z` deserves a rerun of the qualifier with more paths before it deserves a conclusion.
+Qualification at the qualifier's precision checks the formulation; it cannot vouch for the
+radius at the certification budget, which is what the calibration evidence is for.
+
+A certificate constrains the release, never the code. `quantark.intraday` reads no
+certificate and carries no certification status; researchers exercise any engine in
+development, test and standalone studies. A production release ships an intraday engine
+only for the studies that admit its shipped configuration, and the exclusion of a REJECTED,
+INCONCLUSIVE or not-yet-studied engine is recorded in the release notes
+(`docs/modelvalidation/legacy/intraday-gate-c/2026-09-18/INVENTORY.md` lists what is pending).
+
+An amendment to a schema-2 certificate needs a schema-2 parent with an identical `contract`
+block: estimands, budgets, gate policy, scale, reference targets, seed scheme, the
+convergence rule, and under a deterministic reference its kind, its structured error
+policy and the whole qualification policy (threshold, targets, sampling, seed, method). Case context and semantic expectations live in the cell identity, so
+changing them re-evaluates exactly those cells. A solved reference and its qualification are
+carried together or not at all. The implementation digest in every intraday identity covers
+the whole dependency tree, so an edit to the runtime, an engine family, the products, the
+calendar data or the builders re-runs the affected work.
