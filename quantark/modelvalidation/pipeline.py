@@ -43,7 +43,12 @@ from quantark.modelvalidation.evidence import (
     projected_sha256,
     validate_durable_root,
 )
-from quantark.modelvalidation.gates import evaluate_aggregate_gate, evaluate_cell_gate
+from quantark.modelvalidation.gates import (
+    aggregate_gate_wire,
+    cell_gate_wire,
+    evaluate_aggregate_gate,
+    evaluate_cell_gate,
+)
 from quantark.modelvalidation.html_report import render_html
 from quantark.modelvalidation.reference import ReferenceEstimate, run_reference
 from quantark.modelvalidation.report import render_markdown
@@ -294,7 +299,7 @@ def build_cells(
                     "se": estimate.std_errors[quantity],
                 },
                 "candidate_value": result.values[quantity],
-                "gate": asdict(gate),
+                "gate": cell_gate_wire(gate, study.schema),
                 "verdict": decide_cell(gate, error=False).value,
                 "error": None,
                 "identity_hash": cell_identity,
@@ -335,7 +340,7 @@ def aggregate_and_decide(
             )
             candidate_aggregates.append(aggregate)
             aggregates.append(
-                {"candidate": name, "quantity": quantity, **asdict(aggregate)}
+                {"candidate": name, "quantity": quantity, **aggregate_gate_wire(aggregate, study.schema)}
             )
 
         decisions[name] = decide_candidate(verdicts, candidate_aggregates).value
