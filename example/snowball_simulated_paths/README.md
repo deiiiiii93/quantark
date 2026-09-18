@@ -286,8 +286,11 @@ is batched for its own path count.  Keep it well below `n_paths / workers`:
 `batch_for` caps the batch at one per worker, and at that size a single slow
 batch idles every other worker for the rest of the run — at 2,000 paths and
 12 workers, 170 left 11 workers idle for 80 minutes while 50 held them
-within 4% of each other.  `--disk-cache` is omitted deliberately (see
-Caveats).  `--provider exact|life_surface|ladder` remain available.
+within 4% of each other.  `--disk-cache` is omitted above because the
+committed run predates the key fix in `3eb2157f`; it is safe to pass now,
+and buys little here since cells that differ in carry model, engine or
+hedge contract share no states.  `--provider exact|life_surface|ladder`
+remain available.
 
 ## Results
 
@@ -589,12 +592,16 @@ gates.  Report: `data/simulated_paths_report.html`.
   barriers on nodes instead of pinning around the inconsistency.  The
   per-date PDE cells the study reports are unaffected either way: they are
   compared against each other, same engine both sides.
-- Do not run the fleet with `--disk-cache` across cells that differ in
-  hedge.  `StateKey` deliberately excludes the hedge, but in this study
-  the hedge selects the active futures contract and therefore the priced
-  dividend, while `env_key` is built from `(rate, spot, carry row)` only —
-  so a `far` cell reads a `front` cell's prices.  The gate does not catch
-  it (it re-prices through the same provider); the oracle does.
+- `--disk-cache` was unsafe across cells that differ in hedge until
+  `3eb2157f`, and the committed results were produced without it.  The
+  hedge selects the active futures contract and therefore the priced
+  dividend, while `env_key` was built from `(rate, spot, carry row)`
+  only, so a `far` cell read a `front` cell's prices — all three far runs
+  returned the front cell's day-0 marks and finished 3–35× too fast.  The
+  gate could not see it, because it re-prices through the same provider
+  and a poisoned cache satisfies it; the oracle failed on exactly the
+  three corrupt cells.  The contract is now in the key.  Shards written
+  before that commit are stale rather than wrong: they miss.
 - The stress paths are designed, not sampled.
 - The bootstrap's vol is a random walk of daily changes; its dispersion
   over a year exceeds the history's.
