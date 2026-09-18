@@ -1788,6 +1788,17 @@ Not like for like with the 20.2 hands above, and neither bounds the other: this
 record's figure is the worst state at a refinement grid, theirs a windowed
 distribution at a production configuration.
 
+Read those quantiles for magnitude, not for weight of evidence. The six check
+cells price the SAME 40 spot paths, so a pooled row count across cells is
+six-fold duplicated, and consecutive days of one path are near-duplicates on
+top of that; the underlying sample is roughly 335 distinct in-window states
+drawn from 40 paths. Quantiles are unaffected by duplication, which is why
+these survive and why the 15.3% rate does — both numerator and denominator
+inflate together. Counts hung on the same pooling do not survive, and a time
+structure that study first reported across these buckets did not: restated with
+distinct counts beside it, its extremes rest on 6 states from 2 paths at one end
+and 57 from 8 at the other, so it is an observation and not a structure.
+
 And "a sub-contract error rounds away" is wrong even at a tenth of a contract.
 They measured it: comparing default against forced runs state by state, the
 rounded hedge differs on **15.3%** of states inside the ±1% band (307 of
