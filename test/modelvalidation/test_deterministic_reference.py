@@ -188,7 +188,8 @@ def test_an_agreeing_qualifier_is_recorded_and_changes_nothing(tmp_path):
     assert block["qualified"] and set(block["checks"]) == {"pv", "desk_delta"}          # the qualifier targets no point greek
     assert block["checks"]["pv"]["within"] and block["batches"] == 2
     assert payload["decisions"] == {"fake.cand": "ADMITTED"}
-    assert payload["contract"]["qualification"] == {"max_z": 4.0, "targets": qualifier.targets() | {"pv": {"estimator": "replicate_mean"}}}
+    policy = payload["contract"]["qualification"]
+    assert policy["max_z"] == 4.0 and policy["targets"] == qualifier.targets() | {"pv": {"estimator": "replicate_mean"}}
     assert "qualif" in render_markdown(payload).lower() and "qualif" in render_html(payload).lower()
 
 
@@ -265,3 +266,98 @@ def test_a_deterministic_certificate_must_be_typed_all_the_way_down(tmp_path):
     unqualified.pop("qualification")
     with pytest.raises(ValidationError, match="qualification"):
         validate_payload(_restamp(unqualified))
+
+
+# --- review 2026-09-18 (docs/superpowers/reviews/intraday-deterministic-reference-2026-09-18) -------------------------
+QUALIFIER = dict(jitter={q: 1e-7 for q in QUANTITIES})
+
+
+@pytest.mark.parametrize("candidate_offset, agrees_with", [(0.0, "the qualifier"), (1e-3, "the shifted reference")])
+def test_r2_an_unqualified_case_feeds_neither_a_confident_pass_nor_a_confident_rejection(tmp_path, candidate_offset, agrees_with):
+    # the deterministic PV sits ten budgets from the qualifier: whichever arm the candidate agrees with, nobody
+    # knows which arm is wrong, so the aggregate must not turn the reference's small radius into a rejection
+    study = make_study(reference=Deterministic(shift={"pv": 1e-3}), cases=CASES[:1],
+                       candidates=(Candidate(offsets={"pv": candidate_offset}),),
+                       qualification=ReferenceQualification(builder=StochasticReference(**QUALIFIER), max_z=4.0))
+    payload = certify(study, out_dir=tmp_path).payload
+    assert not payload["qualification"]["ordinary"]["qualified"]
+    assert payload["decisions"] == {"fake.cand": "INCONCLUSIVE"}, agrees_with
+    assert payload["aggregates"] == []                                   # no decision-eligible gate fed a mean
+    cell = _cell(payload, "ordinary", "pv")
+    assert cell["verdict"] == "UNRESOLVED" and cell["gate"] is None
+    assert cell["diagnostic_gate"]["radius_c"] is not None               # the discrepancy is kept, as a diagnostic only
+    validate_payload(payload)
+    why = "the reference is not qualified on this case: it disagrees with its qualifying arm on [&#x27;pv&#x27;]"
+    assert why.replace("&#x27;", "'") in render_markdown(payload) and why in render_html(payload)
+
+
+def test_r2_a_failure_in_a_qualified_case_still_rejects(tmp_path):
+    # one case unqualified, the other qualified and ten budgets out: the independent failure stands
+    class Partly(Deterministic):
+        def solve(self, case):
+            self.shift = {"pv": 1e-3} if case.name == "ordinary" else {}
+            return super().solve(case)
+
+        def bind(self, policy, quick=False):
+            return self
+
+    study = make_study(reference=Partly(), candidates=(Candidate(statuses=HONEST, offsets={"desk_delta": 1.0}),),
+                       qualification=ReferenceQualification(builder=StochasticReference(**QUALIFIER), max_z=4.0))
+    payload = certify(study, out_dir=tmp_path).payload
+    assert not payload["qualification"]["ordinary"]["qualified"] and payload["qualification"]["on_barrier"]["qualified"]
+    assert _cell(payload, "on_barrier", "desk_delta")["verdict"] == "FAIL"
+    assert payload["decisions"] == {"fake.cand": "REJECTED"}
+
+
+def test_r2_an_amendment_aggregates_only_qualified_cells(tmp_path):
+    from quantark.modelvalidation.amendment import amend
+
+    qualification = ReferenceQualification(builder=StochasticReference(**QUALIFIER), max_z=4.0)
+    reference = Deterministic(shift={"pv": 1e-3})
+    parent = certify(make_study(reference=reference, cases=CASES[:1], candidates=(Candidate(),), qualification=qualification),
+                     out_dir=tmp_path / "parent")
+    changed = make_study(reference=reference, cases=CASES[:1], candidates=(Candidate(offsets={"desk_delta": 1e-9}),),
+                         qualification=qualification)
+    amended = amend(changed, parent.path, tmp_path / "amended", reason="candidate retuned").payload
+    assert amended["decisions"] == {"fake.cand": "INCONCLUSIVE"} and amended["aggregates"] == []
+
+
+def test_r2_a_case_with_nothing_to_compare_is_not_vacuously_qualified(tmp_path):
+    class Blind(StochasticReference):
+        def bind(self, policy):
+            return Blind(policy, self.jitter, self._targets)
+
+    blind = Blind(jitter=QUALIFIER["jitter"], targets={q: None for q in QUANTITIES})
+    payload = certify(make_study(cases=CASES[:1], qualification=ReferenceQualification(builder=blind, max_z=4.0)),
+                      out_dir=tmp_path).payload
+    block = payload["qualification"]["ordinary"]
+    assert block["checks"] == {} and not block["qualified"]
+    assert payload["decisions"] == {"fake.cand": "INCONCLUSIVE"}
+
+
+def test_r3_the_qualifiers_sampling_and_method_are_frozen_in_the_contract(tmp_path):
+    from quantark.modelvalidation.amendment import amend
+    from quantark.modelvalidation.pipeline import sampling_wire
+
+    qualification = ReferenceQualification(builder=StochasticReference(**QUALIFIER), max_z=4.0)
+    parent = certify(make_study(qualification=qualification), out_dir=tmp_path / "parent")
+    frozen = parent.payload["contract"]["qualification"]
+    assert frozen["sampling"] == sampling_wire(SAMPLING, 2) and frozen["max_z"] == 4.0
+    assert frozen["builder"] == {"class": "Reference", "config": {}}              # the fake declares no config
+    # 2 replicates of 128 paths would widen max_z * SE and make qualification easier: refused, like any other change
+    for change in (dict(paths_per_batch=128), dict(seed=8), dict(paths_per_batch=65536)):
+        weaker = make_study(qualification=qualification, sampling=dataclasses.replace(SAMPLING, **change))
+        with pytest.raises(ValidationError, match="qualification"):
+            amend(weaker, parent.path, tmp_path / f"amended-{list(change)[0]}-{list(change.values())[0]}", reason="cheaper qualifier")
+
+
+def test_r3_the_daily_ki_study_contract_changes_with_its_qualifier_sampling():
+    from quantark.modelvalidation.pipeline import study_contract
+    from quantark.modelvalidation.yaml_loader import load_study
+
+    study = load_study("example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml")
+    smaller = dataclasses.replace(study, sampling=dataclasses.replace(study.sampling, paths_per_batch=128, min_batches=2, max_batches=2))
+    contracts = [study_contract(s, s.reference.bind(s.sampling), s.qualification.builder.bind(s.sampling)) for s in (study, smaller)]
+    assert contracts[0]["qualification"]["sampling"]["paths_per_batch"] == 32768
+    assert contracts[0]["qualification"]["builder"]["config"]["engine"] == "SnowballMCEngine"
+    assert contracts[0] != contracts[1]

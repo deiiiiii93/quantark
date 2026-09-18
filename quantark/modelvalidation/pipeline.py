@@ -340,7 +340,8 @@ def qualify_case(study, qualifier, reference, case, estimate, sampling, store, r
                             "qualifier_se": se, "difference": difference, "z": difference / se if se > 0.0 else None,
                             "allowed": allowed, "within": abs(difference) <= allowed}
     block = reference_block(sampled, qualifier.identity(case))
-    return {**block, "checks": checks, "qualified": all(c["within"] for c in checks.values())}
+    # a case where nothing could be compared is not vacuously qualified
+    return {**block, "checks": checks, "qualified": bool(checks) and all(c["within"] for c in checks.values())}
 
 
 def qualify_references(study, qualifier, reference, estimates, sampling, store, resume) -> Dict[str, dict]:
@@ -464,17 +465,27 @@ def _schema2_cell(study, base, case, quantity, estimate, result, target, qualifi
             "convergence": {"complete": evidence.complete, "missing": list(evidence.missing),
                             "envelope_raw": evidence.envelope, "observed_orders": dict(evidence.observed_orders),
                             "non_monotone": list(evidence.non_monotone)}}
+    if qualification is not None and not qualification["qualified"]:
+        # Qualification is an eligibility condition, not a footnote: against a reference nobody can vouch for,
+        # the comparison decides nothing. The gate is kept as a diagnostic and is NOT decision-eligible, so it
+        # feeds neither a cell verdict nor the aggregate mean (review 2026-09-18, R2).
+        return {**cell, "gate": None, "diagnostic_gate": cell["gate"], "verdict": Verdict.UNRESOLVED.value,
+                "reason": f"the reference is not qualified on this case: {_unqualified_reason(qualification)}"}
     if not evidence.complete:
         # Missing required convergence evidence is unresolved, never implicitly acceptable (spec 6.2).
         return {**cell, "verdict": Verdict.UNRESOLVED.value,
                 "reason": f"convergence evidence has fewer than {MIN_CONVERGENCE_LEVELS} levels on: "
                           f"{', '.join(evidence.missing)}"}
-    if qualification is not None and not qualification["qualified"]:
-        failed = sorted(q for q, check in qualification["checks"].items() if not check["within"])
-        why = "its qualifying arm errored" if "error" in qualification else f"it disagrees with its qualifying arm on {failed}"
-        return {**cell, "verdict": Verdict.UNRESOLVED.value,
-                "reason": f"the reference is not qualified on this case: {why}"}
     return {**cell, "verdict": decide_cell(gate, error=False, schema=2).value}
+
+
+def _unqualified_reason(qualification: Mapping[str, Any]) -> str:
+    if "error" in qualification:
+        return "its qualifying arm errored"
+    if not qualification["checks"]:
+        return "its qualifying arm had no quantity to compare"
+    failed = sorted(q for q, check in qualification["checks"].items() if not check["within"])
+    return f"it disagrees with its qualifying arm on {failed}"
 
 
 def aggregate_and_decide(
@@ -552,8 +563,17 @@ def study_contract(study: CertificationStudy, reference, qualifier=None) -> dict
         contract["reference_error_model"] = dict(reference.error_model())
         if study.qualification is not None:
             arm = study.qualification.builder if qualifier is None else qualifier
-            contract["qualification"] = {"max_z": study.qualification.max_z,
-                                         "targets": reference_targets(arm, study.quantities)}
+            # The whole qualification policy is frozen, not only its threshold: fewer paths or replicates widen
+            # max_z * SE and make qualification EASIER, so sampling, seed and the arm's own method are part of the
+            # contract and an amendment may not move them in either direction (review 2026-09-18, R3). The source
+            # fingerprint stays in the evidence identity: it invalidates reuse, it is not numerical policy.
+            sampling = getattr(arm, "sampling", None) or study.sampling
+            contract["qualification"] = {
+                "max_z": study.qualification.max_z,
+                "targets": reference_targets(arm, study.quantities),
+                "sampling": sampling_wire(sampling, study.schema),
+                "builder": {"class": type(arm).__name__, "config": _reference_config(arm)},
+            }
     return contract
 
 
@@ -662,8 +682,13 @@ def _validate_deterministic_payload(payload: Mapping[str, Any], contract: Mappin
         missing = [key for key in ("kind", "values", "radii", "undefined", "evidence") if key not in block]
         if missing or block.get("kind") != "deterministic":
             raise ValidationError(f"Deterministic reference block for {case!r} is not typed: missing {missing}")
+    unqualified = {case for case, block in payload.get("qualification", {}).items() if not block.get("qualified")}
     for cell in payload["cells"]:
-        gate = cell.get("gate")
+        if cell["case"] in unqualified and cell.get("gate") is not None:
+            raise ValidationError(
+                f"Cell {cell['candidate']}/{cell['case']}/{cell['quantity']} carries a decision-eligible gate although "
+                "its reference is not qualified on that case")
+        gate = cell.get("gate") or cell.get("diagnostic_gate")
         if gate is not None and (gate.get("radius_c") is None or gate.get("se_c") is not None):
             raise ValidationError(
                 f"Cell {cell['candidate']}/{cell['case']}/{cell['quantity']} is gated against a deterministic "
