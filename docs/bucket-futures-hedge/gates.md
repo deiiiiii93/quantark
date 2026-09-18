@@ -1765,22 +1765,38 @@ rebalance, and cancels in paired comparisons. A risk report, a VaR bucket or a
 margin calculation takes the unrounded delta and is exposed at the full error,
 with none of those three protections.
 
-Two unit traps sit under that, both found by checking rather than reading.
-Delta leaves the pricer in raw index units and becomes hands only where
-`repricing.py` applies `hands_per_unit_delta`; the simulated-path study read
-the raw cube column, reported ~19, and called it hands in its README and commit
-message. Corrected, its per-state error is **0.095 of a contract**, not 19 —
-roughly two hundred times smaller than the step measured here, though the two
-are not like for like (this is the worst state at a refinement grid; theirs is
-a median across the window at their own configuration).
+A unit trap sits under that, and it is worth the space because it nearly
+certified a wrong number instead of catching one. Delta leaves the pricer in
+raw index units and becomes hands only where `repricing.py` applies
+`hands_per_unit_delta`. The simulated-path study read the raw cube column,
+reported ~19, and called it hands. This file then took that 19, converted it
+into contracts under ITS convention, and built a percentage-of-book from it —
+while carrying its own measurement three sections above. 19 against 20.2 looked
+right, and the coincidence is what stopped either side noticing. **A peer's
+figure needs its unit provenance attached or it should not be used, however
+plausible it looks beside your own.**
 
-And "a sub-contract error rounds away" is wrong even at 0.095 contracts. They
-measured it rather than assuming: comparing default against forced runs state
-by state, the rounded hedge differs on **15.3%** of states inside the ±1% band
-(307 of 2,010) against 0.4% outside it. A tenth-of-a-contract error straddles a
-rounding boundary often enough to change the trade about one affected state in
-six. Rounding attenuates; it does not protect. What protects is transience —
-each difference is one contract for one day, corrected at the next rebalance.
+Their corrected per-state error, measured across every in-window state the
+check cells actually price rather than at one valuation date:
+
+| | median | p90 | max |
+|---|---:|---:|---:|
+| raw units | 14.7 | 80.5 | 137.1 |
+| contracts | **0.07** | **0.40** | 0.69 |
+
+Not like for like with the 20.2 hands above, and neither bounds the other: this
+record's figure is the worst state at a refinement grid, theirs a windowed
+distribution at a production configuration.
+
+And "a sub-contract error rounds away" is wrong even at a tenth of a contract.
+They measured it: comparing default against forced runs state by state, the
+rounded hedge differs on **15.3%** of states inside the ±1% band (307 of
+2,010) against 0.4% outside it. The distribution is what makes that add up — a
+0.07 median with a 0.40 p90 crosses a rounding boundary about one state in six,
+where the single point estimate it replaced would have predicted roughly a
+tenth and only agreed by accident. Rounding attenuates; it does not protect.
+What protects is transience — each difference is one contract for one day,
+corrected at the next rebalance.
 
 **And one caution from the same re-run.** That study's largest engine gap,
 `term_flat_q__far` at −8.33 bp, SURVIVED forcing at −8.81 and moved the wrong
