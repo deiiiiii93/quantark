@@ -1,0 +1,148 @@
+# example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml
+#
+# Daily-KI snowball on the intraday clock: the first schema-2 study.
+#
+# Two intraday routes -- QUAD V2 and the two-surface PDE -- are certified against one
+# paired-RQMC reference on the runtime's own resolved context: PV, desk delta/gamma, desk
+# theta, and the point delta/gamma the routes return. The reference declares no point
+# estimator (a 1% bump one second before a fixing spans about 112 diffusion widths), so
+# the point cells are UNRESOLVED by construction, reported as such, listed in the
+# certificate as uncertified quantities, and kept out of the candidate decision; see the
+# spec, sections 6.1 and 7.2. Only a later revision that declares a reference able to
+# measure them can change that.
+#
+# Budgets are the frozen engineering tolerances (spec 7.1): PV 1e-6 of notional; delta
+# 1e-5 floor / 1e-4 relative on delta*S/N; gamma 1e-4 / 1e-3 on gamma*S^2/N; theta per
+# hour 1e-6 / 1e-4 on theta/N. Gate values are fractions of each cell's own budget, so
+# the shared bounds are cell 1.0 and mean signed bias 0.2. S is the recorded spot_scale.
+#
+# Sampling is a FROZEN budget (min_batches == max_batches): the batch count is chosen by
+# the independent pilot in the implementation plan, Task 17, and recorded there. Seeds are
+# per-case substreams (schema 2's default), so cases share no scramble and neither does the pilot.
+#
+# This is an offline study (hours). Run it with:
+#   python -m quantark.modelvalidation run example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml --quick
+#   python -m quantark.modelvalidation run example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml --out output/modelvalidation
+
+study: snowball-intraday-daily-ki-bsm
+schema: 2
+
+quantities: [pv, desk_delta, desk_gamma, desk_theta, point_delta, point_gamma]
+
+quantity_bounds:
+  pv:          {abs_floor: 1.0e-6}
+  desk_delta:  {abs_floor: 1.0e-5, rel: 1.0e-4}
+  desk_gamma:  {abs_floor: 1.0e-4, rel: 1.0e-3}
+  desk_theta:  {abs_floor: 1.0e-6, rel: 1.0e-4}
+  point_delta: {abs_floor: 1.0e-5, rel: 1.0e-4}
+  point_gamma: {abs_floor: 1.0e-4, rel: 1.0e-3}
+
+bounds:
+  cell: 1.0
+  mean_signed_bias: 0.2
+  se_budget_fraction: 0.25
+  interval_k: 2.0
+  envelope_fraction: 0.5
+
+sampling:
+  paths_per_batch: 65536
+  min_batches: 8          # placeholder until Task 17 freezes the pilot's choice
+  max_batches: 8
+  seed: 20260918
+  bump: 0.01
+
+economic_scale:
+  builder: normalized
+  params: {notional: 100.0, spot_scale: 100.0}
+
+environment:
+  builder: flat_bsm
+  params: {spot: 100.0, vol: 0.20, rate: 0.03, div_yield: 0.01}
+
+product:
+  builder: equity.snowball.intraday
+  params:
+    initial_date: "2026-03-16"
+    months: 12
+    initial_price: 100.0
+    strike: 100.0
+    ko_barrier: 103.0
+    ki_barrier: 75.0
+    ko_rate: 0.12
+    rebate_rate: 0.12
+    contract_multiplier: 1.0
+    ki_observation: daily_close
+
+context:
+  builder: intraday.sse
+  params:
+    valuation: "2026-09-10T14:00:00+08:00"   # one hour before an ordinary KI close
+    phase: before
+    profile: desk
+    calendar: SSE
+    history_level: 100.0                     # every earlier observation fixed at 100
+
+reference:
+  builder: equity.snowball.intraday.mc_rqmc
+  params: {}
+
+candidates:
+  - builder: equity.snowball.intraday.quad_v2
+    params: {order: 8, cells_per_sd: 2.0}
+  - builder: equity.snowball.intraday.pde
+    params: {accuracy: standard}
+
+cases:
+  # Interior spot one hour before an ordinary KI close: the smooth baseline every other case is read against.
+  - {name: ordinary}
+  # Just above the daily KI barrier an hour before it is observed; the value function turns over here.
+  - {name: near_ki_above, environment: {spot: 75.2}}
+  # Just below the barrier an hour before the close. The fixing is still ahead, so nothing is decided: this
+  # is an alive claim whose spot sits under the level it will be observed against.
+  - {name: near_ki_below, environment: {spot: 74.9}}
+  # One second before the fixing: the transition is narrower than any desk bump; point and desk part company.
+  - {name: near_ki_1s, environment: {spot: 75.2}, context: {valuation: "2026-09-10T14:59:59+08:00"}}
+  # Intermediate horizons, so convergence in time-to-event is observed rather than inferred from two ends.
+  - {name: near_ki_10s, environment: {spot: 75.2}, context: {valuation: "2026-09-10T14:59:50+08:00"}}
+  - {name: near_ki_5m, environment: {spot: 75.2}, context: {valuation: "2026-09-10T14:55:00+08:00"}}
+  # A simultaneous KI/KO close (2026-09-16 is the sixth monthly KO date); the KO discontinuity sits inside the stencil.
+  - {name: near_ko_on_ko_day, environment: {spot: 102.9}, context: {valuation: "2026-09-16T14:00:00+08:00"}}
+  - {name: near_ko_on_ko_day_1s, environment: {spot: 102.9}, context: {valuation: "2026-09-16T14:59:59+08:00"}}
+  # The same spot on a day that observes no KO: the difference isolates the KO event from the spot level.
+  - {name: ko_level_on_ki_day, environment: {spot: 102.9}}
+  # Before the session opens, inside the overnight segment: under the desk profile it carries 25% of the day's
+  # variance at a far lower rate than a session, and a local theta must stay inside it.
+  - {name: pre_open, context: {valuation: "2026-09-10T09:00:00+08:00"}}
+  # Inside the lunch break: under the desk profile a low-variance segment (5% of the day over 90 minutes).
+  - {name: lunch_break, environment: {spot: 76.0}, context: {valuation: "2026-09-10T12:00:00+08:00"}}
+  # The zero-variance control: the same instant under sessions_only, where the break carries no variance at all.
+  - {name: lunch_break_zero_variance, environment: {spot: 76.0},
+     context: {valuation: "2026-09-10T12:00:00+08:00", profile: sessions_only}}
+  # An hour before the last close ahead of the National Day holiday: that close is observed as usual, and the
+  # fixing after it lies across a folded overnight of several days.
+  - {name: holiday_eve, environment: {spot: 76.0}, context: {valuation: "2026-09-30T14:00:00+08:00"}}
+  # The last observation: KO, KI and terminal payoff resolve together.
+  - {name: maturity_day, context: {valuation: "2027-03-16T14:00:00+08:00"}}
+  # Post-KI dispatch: the knocked-in claim with no KI barrier remaining. The checkpoint covers all earlier events.
+  - {name: already_ki, environment: {spot: 90.0},
+     context: {checkpoint: {as_of: "2026-09-09", knocked_in: true, ki_date: "2026-06-15"}}}
+  # Knocked out on the August observation with a 30-day settlement lag: PV is the pending ledger only.
+  - {name: terminated_pending_cash, product: {settlement_lag_days: 30},
+     context: {fixings: [{date: "2026-08-17", level: 104.0}]}}
+  # A due observation with no fixing supplied: thirty seconds after the close, under AFTER, the 15:00 fixing is
+  # missing, so the runtime assumes the latest spot. Below the barrier that is a provisional knock-in, and every
+  # arm must price that assumed state.
+  - {name: provisional_ki_after_close, environment: {spot: 74.9},
+     context: {valuation: "2026-09-10T15:00:30+08:00", phase: after, unfixed_from: "2026-09-10"}}
+  # The transition width scales with volatility, so the near-barrier case is re-examined at both ends.
+  - {name: low_vol, environment: {spot: 75.2, vol: 0.12}}
+  - {name: high_vol, environment: {spot: 75.2, vol: 0.35}}
+  # Distinct rate and carry levels exercise the integrated drift in the interval moments.
+  - {name: carry, environment: {rate: 0.05, div_yield: 0.03}}
+  # Each supported clock, with its coefficients recorded.
+  - {name: uniform_profile, environment: {spot: 75.2}, context: {profile: uniform}}
+  - {name: sessions_only_profile, environment: {spot: 75.2}, context: {profile: sessions_only}}
+  # At the close with the spot exactly on the barrier, under BEFORE: the point derivatives and a local theta
+  # do not exist. The candidate must say so; the reference's values here are recorded and never gated.
+  - {name: on_ki_barrier_at_close, environment: {spot: 75.0}, context: {valuation: "2026-09-10T15:00:00+08:00"},
+     expect: {point_delta: undefined, point_gamma: undefined, desk_theta: undefined}}
