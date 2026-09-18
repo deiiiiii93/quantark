@@ -547,17 +547,26 @@ gates.  Report: `data/simulated_paths_report.html`.
   carries the grid change as well as the market change.  Measured on this
   product by forcing the priority: outside the window `auto` reproduces a
   forced branch exactly, and inside 0.8709–0.8869 it differs from both
-  forced branches by 17.5–20.3 hands.  5.85% of the check cells' priced
-  states sit within 1% of that level.  The two forced branches differ by
-  only about 2 hands here, so the damage does not come from the branches
+  forced branches by 17.5–20.3 index-delta units (0.09–0.10 of an IM
+  contract).  5.85% of the check cells' priced states sit within 1% of
+  that level.  The two forced branches differ by only about 2 units
+  here, so the damage does not come from the branches
   disagreeing — it comes from mixing them inside one finite difference,
   which means a product whose branches nearly coincide is no safer.
   Re-running all six check cells with `--quad-align ko`, which makes every
   evaluation share one alignment, moves the engine check by −0.71 to
   +0.65 bp of terminal P&L and at most 0.09 bp of daily std
-  (`data/engine_check_align_ko.csv`).  The state-level error is real but
-  smaller than one futures contract, so it rounds away before it reaches a
-  trade.  Note the largest engine gap, `term_flat_q__far` at −8.33 bp,
+  (`data/engine_check_align_ko.csv`).  Two things attenuate it, and the
+  second matters more.  The cube's `delta` is in index units, 200 to an IM
+  contract, so 19 units is 0.095 contracts against a book averaging 35 —
+  but that does *not* mean it rounds away: comparing the forced and
+  default runs state by state, the rounded hedge differs on 15.3% of the
+  states inside the window (307 of 2,010), and on 1.2% of all states.
+  What keeps those from mattering is that the hedge rebalances daily, so
+  each one is a one-contract difference for one day that the next
+  rebalance corrects; the error appears and disappears as a path crosses
+  the window and never compounds.  Note the largest engine gap,
+  `term_flat_q__far` at −8.33 bp,
   **survives** forcing (−8.81 bp, t −3.14): that cell's PDE-QUAD
   difference is something else, not the alignment.  `align_cell_stretch`
   (unmerged elsewhere) is the better fix than forcing, since it puts both
