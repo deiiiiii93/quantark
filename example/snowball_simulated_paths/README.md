@@ -552,10 +552,18 @@ gates.  Report: `data/simulated_paths_report.html`.
   case.  Over every in-window state the six check cells actually price,
   `auto` minus forced `ko` has median 14.7 units, p90 80.5 and maximum
   137.1 — 0.07, 0.40 and 0.69 of an IM contract (200 index units to a
-  contract).  It is not uniform in the product's life: essentially zero
-  inside 20 days of expiry, largest 100–150 days out (median 41.8, p90
-  121.7).  5.85% of the check cells' priced states sit within 1% of that
-  level.  The two forced branches differ by only about 2 units here, so
+  contract).  **Mind the sample.**  The six cells run the same 40 spot
+  paths, so those are 335 distinct states repeated six times, not 2,010
+  independent ones, and consecutive days of one path are near-duplicates
+  besides.  5.85% of the check cells' priced states sit within 1% of that
+  level.  The error looks strongly time-dependent — near zero close to
+  expiry, largest 100–150 days out — but the near-expiry buckets rest on
+  6 states from 2 paths and the peak on 57 from 8, so it is an
+  observation, not a result.  Two mechanisms were tested against it and
+  neither survived: a knocked-in state has only the knock-out left to
+  align to, yet within the 0–20-day bucket knocked-in and live states are
+  both at zero; and the reachability filter runs a 10-standard-deviation
+  envelope (`num_std_devs`), far too wide to drop a knock-out 17% away.  The two forced branches differ by only about 2 units here, so
   the damage does not come from the branches
   disagreeing — it comes from mixing them inside one finite difference,
   which means a product whose branches nearly coincide is no safer.
@@ -567,8 +575,9 @@ gates.  Report: `data/simulated_paths_report.html`.
   the median, 0.40 at p90 — against a book averaging 35, but that does
   *not* mean it rounds away: comparing the forced and default runs state
   by state, the rounded hedge differs on 15.3% of the states inside the
-  window (307 of 2,010), and on 1.2% of all states, which is about what
-  those two fractions straddling a rounding boundary would give.
+  window (307 of 2,010 cell-states, so about 51 of 335 distinct ones) and
+  on 1.2% of all states, which is about what those two fractions
+  straddling a rounding boundary would give.
   What keeps those from mattering is that the hedge rebalances daily, so
   each one is a one-contract difference for one day that the next
   rebalance corrects; the error appears and disappears as a path crosses
