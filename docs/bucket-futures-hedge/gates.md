@@ -1718,6 +1718,58 @@ arms and roughly 30× the defect. What worked was same-arm, same-paths,
 different-config, which cancels composition exactly; that is the family of test
 to reach for here.
 
+### Settled by forcing — and why Gate E's economics never felt it
+
+That study then re-ran its six exact-QUAD reference cells with
+`align_priority='ko'`, everything else identical, and measured what the defect
+costs downstream rather than per state. PDE minus exact QUAD, terminal P&L in
+bp of notional, 40 paths (reported, not reproduced here):
+
+| cell | auto | ko | shift |
+|---|---:|---:|---:|
+| `flat_from_hedge` front | 0.14 | -0.57 | -0.71 |
+| `flat_from_hedge` far | 1.08 | 0.90 | -0.18 |
+| `term_flat_q` front | -1.74 | -2.33 | -0.59 |
+| `term_flat_q` far | -8.33 | -8.81 | -0.49 |
+| `term_opt_tail` front | -1.53 | -0.89 | +0.65 |
+| `term_opt_tail` far | -0.40 | +0.08 | +0.48 |
+
+At most 0.71 bp against study effects of 122 to 294 bp, and the shifts land in
+both directions across all six cells rather than in the crossover window —
+which is what `auto − ko` being −1.0 below the flip and 0.00 above it predicts,
+and why a reference change like this has to be re-baselined whole rather than
+assumed local.
+
+**This record should not take that as reassurance by analogy, because the
+reason Gate E's numbers held is a different one.** Gate E is PAIRED WITHIN
+INCEPTION: both cells of a comparison run the same engine on the same spot
+path, so an alignment error at a given state hits both sides and cancels in the
+difference. That is why the twelve paired gaps moved by at most 1.35 bp while
+the per-state delta error was of order 19 contracts. It is common-mode
+cancellation, not smallness.
+
+The carry-identity audit is the one comparison in this study where it does NOT
+cancel, because it checks an engine quantity against an independent repricing
+rather than one cell against another. That asymmetry is the whole reason the
+audit caught a defect the P&L could not see, and it is the argument for keeping
+an audit whose reference is outside the engine.
+
+**What is not protected is any consumer that does not round.** One hand is one
+IM contract here and hedges round to whole contracts, on books averaging 41.0
+contracts (8.4 to 130.6). A 19-contract delta error is therefore about 46% of
+the typical book — it does not round away; what saves the hedge is that the
+error lives in a ±1% moneyness band, is corrected at the next daily rebalance,
+and cancels in paired comparisons. A risk report, a VaR bucket or a margin
+calculation takes the unrounded delta and is exposed at the full error, with
+none of those three protections.
+
+**And one caution from the same re-run.** That study's largest engine gap,
+`term_flat_q__far` at −8.33 bp, SURVIVED forcing at −8.81 and moved the wrong
+way: it is a genuine PDE-versus-QUAD difference and not this defect at all.
+Without the control it would have been attributed to the alignment and filed as
+explained. A known bug in the neighbourhood is a hypothesis, not an
+explanation, and only a control separates them.
+
 Turning the option on moves the price by **−215.49, or −0.91 bp**, toward
 the refined value. That is the golden rebase, and it is why this is opt-in.
 
