@@ -42,6 +42,15 @@ def _first_line(text: str) -> str:
     return lines[-1] if lines else _NA
 
 
+def _flat(value) -> str:
+    """A nested error-model entry on one table line."""
+    if isinstance(value, dict):
+        return "; ".join(f"{k}: {_flat(v)}" for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_flat(v) for v in value)
+    return str(value)
+
+
 def _reference_spread(reference):
     """A cell reference's uncertainty: the radius of a deterministic value, else the standard error."""
     return reference.get("radius") if reference.get("kind") == "deterministic" else reference["se"]
@@ -51,17 +60,19 @@ def _deterministic_reference_section(payload) -> list:
     """The deterministic reference: its declared error model, each case's radii, and the qualifying arm's checks."""
     contract = payload["contract"]
     parts = ["## Deterministic reference", ""]
-    parts.append("The reference is a deterministic solve. Its uncertainty is a declared error radius from a refinement "
-                 "ladder, not a standard error; a radius consumes the budget as a bound and radii add linearly across cells.")
+    parts.append("The reference is a deterministic solve. Its uncertainty is a declared radius, not a standard error: "
+                 "`analytical` where the solve names an exactness basis, otherwise a `calibrated_estimate` from a refinement "
+                 "ladder -- a numerical estimate with calibration evidence, not a proved bound. A radius consumes the budget "
+                 "whole (no interval multiplier) and radii add linearly across cells.")
     parts.append("")
-    parts.append(_table(["error model", "value"], [[str(k), str(v)] for k, v in sorted(contract["reference_error_model"].items())]))
+    parts.append(_table(["error model", "value"], [[str(k), _flat(v)] for k, v in sorted(contract["reference_error_model"].items())]))
     parts.append("")
     rows = []
     for case, block in sorted(payload["references"].items()):
         if "error" in block:
             rows.append([case, _first_line(block["error"]), _NA])
             continue
-        rows.append([case, ", ".join(f"{q}: {_fmt(r, 3)}" for q, r in sorted(block["radii"].items())),
+        rows.append([case, ", ".join(f"{q}: {_fmt(r, 3)} ({block['radius_basis'][q]})" for q, r in sorted(block["radii"].items())),
                      ", ".join(f"{q} ({why})" for q, why in sorted(block["undefined"].items())) or "none"])
     parts.append(_table(["case", "radii (raw)", "undefined here"], rows))
     parts.append("")

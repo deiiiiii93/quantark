@@ -54,7 +54,7 @@ def test_case_list_is_the_declared_one(study):
 
 
 def test_the_reference_is_deterministic_targets_every_quantity_and_is_qualified_by_rqmc(study):
-    assert reference_kind(study.reference) == "deterministic" and study.reference.levels == (4001, 8001, 16001, 32001)
+    assert reference_kind(study.reference) == "deterministic" and study.reference.levels == (2001, 4001, 8001, 16001, 32001)
     targets = reference_targets(study.reference, study.quantities)
     assert all(targets[q] is not None for q in study.quantities)              # the point Greeks are certified here
     assert targets["desk_delta"]["bump"] == study.sampling.bump
@@ -117,7 +117,8 @@ def test_quick_certification_runs_end_to_end(tmp_path_factory, study):
     bound = small.reference.bind(sampling, quick=True)
     qualifier = small.qualification.builder.bind(sampling)
     assert payload["contract"]["reference_kind"] == "deterministic"
-    assert payload["contract"]["reference_error_model"]["levels"] == [251, 501, 1001, 2001]
+    assert payload["contract"]["reference_error_model"]["levels"] == [101, 201, 401, 801, 1601]
+    assert payload["contract"]["reference_error_model"]["ladder_policy"]["radius_kind"] == "calibrated_numerical_estimate"
     for case in small.cases:
         block = payload["references"][case.name]
         assert block["kind"] == "deterministic" and block["identity_hash"] == identity_hash(bound.identity(case))
@@ -131,9 +132,18 @@ def test_quick_certification_runs_end_to_end(tmp_path_factory, study):
     for cell in payload["cells"]:
         if cell["case"] == "ordinary":
             assert cell["kind"] == "numeric" and cell["reference"]["kind"] == "deterministic"
-            assert cell["gate"] is not None and cell["gate"]["se_c"] is None and cell["gate"]["radius_c"] is not None
+            assert cell["reference"]["basis"] == "calibrated_estimate"
+            # The wiring ladder is pre-asymptotic on purpose, so a radius may be unbounded or uncalibrated there
+            # (desk theta is: the rule one level down did not cover it). A cell is then ungated WITH its reason;
+            # a gated one is typed by its radius, never by a standard error.
+            if cell["gate"] is None:
+                assert cell["verdict"] == "UNRESOLVED" and ("could not bound" in cell["reason"] or "not qualified" in cell["reason"])
+            else:
+                assert cell["gate"]["se_c"] is None and cell["gate"]["radius_c"] is not None
         if cell["case"] == "on_ki_barrier_at_close" and cell["quantity"] in ("point_delta", "point_gamma", "desk_theta"):
             assert cell["kind"] == "semantic" and cell["verdict"] == "PASS" and cell["reference"]["value"] is None
+    rules = {q: rec["rule"] for q, rec in payload["references"]["ordinary"]["evidence"]["quantities"].items()}
+    assert set(rules.values()) <= {"geometric", "correction", "unextrapolated", "unbounded", "uncalibrated"}
     assert (certificate.path.parent / "report.md").exists()
     anchors = extract_anchors(payload, small)["anchors"]
     assert {a["candidate"] for a in anchors} == set(CANDIDATES)

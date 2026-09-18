@@ -34,11 +34,13 @@ class Deterministic:
 
     reference_kind = "deterministic"
 
+    basis = "calibrated_estimate"
+
     def __init__(self, radii=None, shift=None, quick=False):
         self.radii, self.shift, self.quick, self.solves = radii or {}, shift or {}, quick, []
 
     def bind(self, policy, quick=False):
-        bound = Deterministic(self.radii, self.shift, quick)
+        bound = type(self)(self.radii, self.shift, quick)
         bound.solves = self.solves
         return bound
 
@@ -57,7 +59,8 @@ class Deterministic:
         undefined = {"point_delta": "valuation is on the event"} if case.name == "on_barrier" else {}
         values = {q: TRUTH[q] + self.shift.get(q, 0.0) for q in QUANTITIES if q not in undefined}
         return DeterministicResult(values=values, radii={q: self.radii.get(q, 1e-9) for q in values},
-                                   evidence={"levels": [101, 201, 401, 801]}, undefined=undefined)
+                                   evidence={"levels": [101, 201, 401, 801]}, undefined=undefined,
+                                   radius_basis={q: self.basis for q in values})
 
 
 def make_study(**overrides):
@@ -136,7 +139,8 @@ def test_a_matching_candidate_is_admitted_and_the_record_is_typed_never_a_zero_s
     assert block["kind"] == "deterministic" and block["radii"]["pv"] == 1e-9 and block["evidence"] == {"levels": [101, 201, 401, 801]}
     assert not {"std_errors", "batches", "seeds"} & set(block)
     cell = _cell(payload, "ordinary", "pv")
-    assert cell["reference"] == {"kind": "deterministic", "value": 0.5, "radius": 1e-9}
+    assert cell["reference"] == {"kind": "deterministic", "value": 0.5, "radius": 1e-9, "basis": "calibrated_estimate"}
+    assert block["radius_basis"]["pv"] == "calibrated_estimate"
     assert cell["gate"]["se_c"] is None and cell["gate"]["radius_c"] == pytest.approx(1e-5)
     point = _cell(payload, "ordinary", "point_delta")                       # the deterministic reference targets it
     assert point["kind"] == "numeric" and point["verdict"] == "PASS" and payload["study"]["uncertified_quantities"] == []
@@ -361,3 +365,18 @@ def test_r3_the_daily_ki_study_contract_changes_with_its_qualifier_sampling():
     assert contracts[0]["qualification"]["sampling"]["paths_per_batch"] == 32768
     assert contracts[0]["qualification"]["builder"]["config"]["engine"] == "SnowballMCEngine"
     assert contracts[0] != contracts[1]
+
+
+def test_r1_a_radius_whose_kind_is_not_declared_is_not_an_allowance(tmp_path):
+    class Undeclared(Deterministic):
+        basis = None
+
+    class Bare(Deterministic):
+        def solve(self, case):
+            return dataclasses.replace(super().solve(case), evidence={})
+
+    payload = certify(make_study(reference=Undeclared(), cases=CASES[:1]), out_dir=tmp_path / "a").payload
+    assert "what kind of radius" in payload["references"]["ordinary"]["error"]
+    assert payload["decisions"] == {"fake.cand": "INCONCLUSIVE"}
+    payload = certify(make_study(reference=Bare(), cases=CASES[:1]), out_dir=tmp_path / "b").payload
+    assert "no evidence" in payload["references"]["ordinary"]["error"]

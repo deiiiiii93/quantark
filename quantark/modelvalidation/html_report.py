@@ -608,6 +608,15 @@ def _is_deterministic(payload: Mapping[str, Any]) -> bool:
     return payload.get("contract", {}).get("reference_kind") == "deterministic"
 
 
+def _flat(value) -> str:
+    """A nested error-model entry on one table line."""
+    if isinstance(value, dict):
+        return "; ".join(f"{k}: {_flat(v)}" for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_flat(v) for v in value)
+    return str(value)
+
+
 def _reference_spread(reference: Mapping[str, Any]):
     """A cell reference's uncertainty: the radius of a deterministic value, else the standard error."""
     return reference.get("radius") if reference.get("kind") == "deterministic" else reference["se"]
@@ -616,21 +625,23 @@ def _reference_spread(reference: Mapping[str, Any]):
 def _deterministic_section(payload: Mapping[str, Any]) -> str:
     """The deterministic reference: declared error model, per-case radii, and the qualifying arm's checks."""
     contract = payload["contract"]
-    model = [[f'<td class="name">{_esc(k)}</td>', f'<td class="wrap">{_esc(v)}</td>']
+    model = [[f'<td class="name">{_esc(k)}</td>', f'<td class="wrap">{_esc(_flat(v))}</td>']
              for k, v in sorted(contract["reference_error_model"].items())]
     rows = []
     for case, block in sorted(payload["references"].items()):
         if "error" in block:
             rows.append([f"<td>{_esc(case)}</td>", f'<td class="wrap">{_esc(_first_line(block["error"]))}</td>', f"<td>{_NA}</td>"])
             continue
-        radii = ", ".join(f"{_esc(q)} {_fmt(r, 3)}" for q, r in sorted(block["radii"].items()))
+        radii = ", ".join(f"{_esc(q)} {_fmt(r, 3)} ({_esc(block['radius_basis'][q])})" for q, r in sorted(block["radii"].items()))
         undefined = ", ".join(f"{_esc(q)} ({_esc(why)})" for q, why in sorted(block["undefined"].items())) or "none"
         rows.append([f"<td>{_esc(case)}</td>", f'<td class="name">{radii}</td>', f'<td class="wrap">{undefined}</td>'])
     html = (
         "<section><h2>Deterministic reference</h2>"
-        '<p class="lede">The reference is a deterministic solve. Its uncertainty is a declared error radius from a '
-        "refinement ladder, not a standard error: a radius consumes the budget as a bound, and radii add linearly "
-        "across cells because discretization errors may share a sign.</p>"
+        '<p class="lede">The reference is a deterministic solve. Its uncertainty is a declared radius, not a standard '
+        "error: <code>analytical</code> where the solve names an exactness basis, otherwise a "
+        "<code>calibrated_estimate</code> from a refinement ladder &mdash; a numerical estimate with calibration "
+        "evidence, not a proved bound. A radius consumes the budget whole (no interval multiplier), and radii add "
+        "linearly across cells because discretization errors may share a sign.</p>"
         + _table(["error model", "value"], model, "No error model declared.")
         + _table(["case", "radius (raw units)", "undefined here"], rows, "No reference ran.")
         + "</section>"

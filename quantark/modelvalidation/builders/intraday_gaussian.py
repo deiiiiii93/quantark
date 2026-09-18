@@ -33,7 +33,7 @@ variance interval is an exact shift.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import exp, inf, log, log2, sqrt
+from math import exp, inf, isfinite, log, log2, sqrt
 from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
@@ -45,70 +45,132 @@ from quantark.intraday.timestamp import calendar_year_fraction
 _SAT = 9.0             # standard deviations beyond which a ramp / Heaviside is saturated (Phi(-9) ~ 1e-19)
 _LOCAL_STD = 15.0      # half-width of the local grid at the first event, in remaining standard deviations
 _CHUNK = 256
+MIN_POINTS = 101       # the coarsest admissible level: a 26-knot local grid
 _INV_SQRT_2PI = 1.0 / sqrt(2.0 * np.pi)
 
-#: The observed order over the three finest levels must support the O(h^2) model before Richardson is used.
-ORDER_WINDOW: Tuple[float, float] = (1.5, 2.5)
-#: Richardson turns O(h^2) into O(h^4) at best: successive extrapolants contract at most 16x per doubling.
-#: A smaller spread is luck, and is not credited.
-MAX_CONTRACTION = 16.0
-#: Safety factor on the largest recent movement of a ladder whose order is not confirmed (Roache's grid
-#: convergence index uses 3 for exactly that case).
-UNCONFIRMED_SAFETY = 3.0
-#: Differences below this relative floor are floating point: the solve is exact at this resolution.
-EXACT_FLOOR = 1e-13
-MIN_LADDER_LEVELS = 4
+@dataclass(frozen=True)
+class LadderPolicy:
+    """How a nested refinement ladder becomes a value and an uncertainty radius.
+
+    One object executes (:func:`ladder_estimate`) and serializes (:meth:`describe`, which goes into the
+    certificate's contract), so the recorded policy is the policy that ran and a changed parameter is a
+    changed contract. Bump ``version`` with any change of logic that the parameters do not express.
+
+    A ladder radius is a CALIBRATED NUMERICAL ESTIMATE, not an analytical bound: finitely many
+    contracting extrapolants do not prove the next ones contract, and a spacing ladder cannot see an
+    error its levels share (the builder accounts for those separately). It is accepted as the gate's
+    allowance only with its calibration evidence.
+    """
+
+    version: int = 2
+    discretization_order: int = 2        # O(h^2): Richardson weight (2^p v_n - v_{n-1}) / (2^p - 1)
+    refinement_ratio: int = 2            # every level halves every spacing in play
+    min_levels: int = 5                  # four for the estimate, one coarser to calibrate the rule one level down
+    order_window: Tuple[float, float] = (1.5, 2.5)
+    contraction: float = 0.5             # successive extrapolant spreads must shrink at least this much
+    max_contraction: float = 16.0        # O(h^4) at best: a smaller spread is luck and is not credited
+    unconfirmed_safety: float = 3.0      # Roache's grid-convergence-index factor for an unconfirmed order
+    stagnation_floor: float = 1e-13      # relative: differences below it are floating point
+    roundoff_factor: float = 16.0        # multiples of eps x value span x instants (an estimate, builder-side)
+
+    def describe(self) -> dict:
+        lo, hi = self.order_window
+        weight = self.refinement_ratio ** self.discretization_order
+        return {
+            "version": self.version,
+            "radius_kind": "calibrated_numerical_estimate",
+            "parameters": {
+                "discretization_order": self.discretization_order, "refinement_ratio": self.refinement_ratio,
+                "min_levels": self.min_levels, "order_window": [lo, hi], "contraction": self.contraction,
+                "max_contraction": self.max_contraction, "unconfirmed_safety": self.unconfirmed_safety,
+                "stagnation_floor": self.stagnation_floor, "roundoff_factor": self.roundoff_factor,
+            },
+            "branches": {
+                "exact": ("the last two differences are below the stagnation floor AND the solve names an exactness "
+                          "basis; value: finest level; radius: the larger difference"),
+                "stagnant": ("the last two differences are below the stagnation floor and no exactness basis is named: "
+                             "equal values do not establish exactness; radius: infinite"),
+                "geometric": (f"the last two differences share a sign with observed order in [{lo}, {hi}] and successive "
+                              f"extrapolants contract to {self.contraction} or less; value: Richardson extrapolant "
+                              f"({weight} v_n - v_(n-1)) / {weight - 1}; radius: the last extrapolant spread, never below "
+                              f"1/{self.max_contraction} of the previous spread"),
+                "correction": ("order confirmed as for geometric, extrapolants do not contract; value: Richardson "
+                               "extrapolant; radius: the whole correction |E_n - v_n|"),
+                "unextrapolated": (f"order not confirmed (outside the window, or alternating differences) and the last "
+                                   f"difference did not grow; value: finest level; radius: {self.unconfirmed_safety} x the "
+                                   "previous difference"),
+                "unbounded": "the last difference grew; value: finest level; radius: infinite",
+                "uncalibrated": ("the same rule applied one level down (without the finest level) did not cover this "
+                                 "value with its own radius; radius: infinite"),
+            },
+            "calibration": ("in-ladder: |value - value one level down| <= radius one level down, recorded per quantity; "
+                            "an infinite radius one level down is no evidence and does not calibrate"),
+        }
+
+
+LADDER_POLICY = LadderPolicy()
 
 
 @dataclass(frozen=True)
 class LadderEstimate:
-    """A value and its declared error radius from one nested refinement ladder (see :func:`ladder_estimate`)."""
+    """A value and its uncertainty radius from one nested refinement ladder (see :func:`ladder_estimate`)."""
 
     value: float
     radius: float
-    rule: str                                  # exact | geometric | correction | unextrapolated | unbounded
+    rule: str                                  # a key of LadderPolicy.describe()["branches"]
     observed_order: Optional[float]
     extrapolants: Tuple[float, ...]
+    basis: Optional[str] = None                # the named exactness basis, for rule "exact" only
+    calibration: Optional[dict] = None         # the rule one level down against this value; None for "exact"
 
 
-def ladder_estimate(values: Sequence[float]) -> LadderEstimate:
-    """Turn a nested ladder (each level halves h) of an O(h^2) scheme into a value and an error radius.
-
-    A refinement difference is an estimate, not a bound, so both the value and the radius are chosen by
-    what the ladder shows, and every branch is declared:
-
-    * ``exact``: the last difference is floating point. Value ``v_n``, radius that difference.
-    * The ladder CONFIRMS second order -- the last two differences share a sign and their observed order
-      lies in :data:`ORDER_WINDOW`. The value is the Richardson extrapolant of the two finest levels,
-      ``E_n = (4 v_n - v_{n-1}) / 3``, and the radius is
-        - ``geometric``: successive extrapolants contract by 2x or more. If that continues the remaining
-          movement is a geometric series bounded by the last spread ``|E_n - E_{n-1}|``; the spread is
-          never credited below ``|E_{n-1} - E_{n-2}| / 16`` (no better than O(h^4)).
-        - ``correction``: the extrapolants do not contract (their spread sits on a non-asymptotic floor).
-          The claim is then only that extrapolating did not make the finest level worse: the radius is
-          the whole correction ``|E_n - v_n|``, which bounds the extrapolant's error for any order >= 1.3.
-    * ``unextrapolated``: the order is NOT confirmed (it is outside the window, or the differences
-      alternate) but the ladder still converges. Richardson is unjustified: the value is the finest level
-      and the radius is :data:`UNCONFIRMED_SAFETY` times the largest movement over the last two doublings.
-    * ``unbounded``: the last difference grew. Nothing is claimed; the radius is infinite.
-    """
-    v = [float(x) for x in values]
-    if len(v) < MIN_LADDER_LEVELS:
-        raise ValueError(f"a ladder needs at least {MIN_LADDER_LEVELS} levels, got {len(v)}")
-    floor = EXACT_FLOOR * max(1.0, abs(v[-1]))
+def _rule(v: Sequence[float], policy: LadderPolicy, exact_basis: Optional[str]) -> LadderEstimate:
+    """The policy on the four finest levels of ``v``, without calibration."""
+    floor = policy.stagnation_floor * max(1.0, abs(v[-1]))
     d_prev, d_last = v[-2] - v[-3], v[-1] - v[-2]
-    extrapolants = tuple((4.0 * v[k] - v[k - 1]) / 3.0 for k in range(len(v) - 3, len(v)))
-    if abs(d_last) <= floor:
-        return LadderEstimate(v[-1], abs(d_last), "exact", None, extrapolants)
-    order = log2(abs(d_prev) / abs(d_last)) if abs(d_prev) > floor else inf
-    if d_prev * d_last > 0.0 and ORDER_WINDOW[0] <= order <= ORDER_WINDOW[1]:
+    weight = float(policy.refinement_ratio ** policy.discretization_order)
+    extrapolants = tuple((weight * v[k] - v[k - 1]) / (weight - 1.0) for k in range(len(v) - 3, len(v)))
+    if abs(d_last) <= floor and abs(d_prev) <= floor:
+        if exact_basis is None:
+            return LadderEstimate(v[-1], inf, "stagnant", None, extrapolants)
+        return LadderEstimate(v[-1], max(abs(d_last), abs(d_prev)), "exact", None, extrapolants, basis=exact_basis)
+    if exact_basis is not None:
+        raise ValueError(f"exactness basis {exact_basis!r} claimed for a ladder that does not stagnate: {list(v)}")
+    order = log2(abs(d_prev) / abs(d_last)) if abs(d_last) > 0.0 and abs(d_prev) > 0.0 else inf
+    if d_prev * d_last > 0.0 and policy.order_window[0] <= order <= policy.order_window[1]:
         s1, s2 = abs(extrapolants[1] - extrapolants[0]), abs(extrapolants[2] - extrapolants[1])
-        if s2 <= 0.5 * s1:
-            return LadderEstimate(extrapolants[2], max(s2, s1 / MAX_CONTRACTION), "geometric", order, extrapolants)
+        if s2 <= policy.contraction * s1:
+            return LadderEstimate(extrapolants[2], max(s2, s1 / policy.max_contraction), "geometric", order, extrapolants)
         return LadderEstimate(extrapolants[2], abs(extrapolants[2] - v[-1]), "correction", order, extrapolants)
     if abs(d_last) <= abs(d_prev):
-        return LadderEstimate(v[-1], UNCONFIRMED_SAFETY * abs(d_prev), "unextrapolated", order, extrapolants)
+        return LadderEstimate(v[-1], policy.unconfirmed_safety * abs(d_prev), "unextrapolated", order, extrapolants)
     return LadderEstimate(v[-1], inf, "unbounded", order, extrapolants)
+
+
+def ladder_estimate(values: Sequence[float], policy: LadderPolicy = LADDER_POLICY,
+                    exact_basis: Optional[str] = None) -> LadderEstimate:
+    """Turn a nested ladder of an O(h^2) scheme into a value and a calibrated uncertainty radius.
+
+    Every branch is declared in ``policy.describe()``. The estimate comes from the four finest levels.
+    It is then CALIBRATED: the same rule on the ladder without its finest level must have covered this
+    value with its own radius, or the radius is infinite (``uncalibrated``) -- a rule that was too
+    optimistic one level down is not trusted at this one. ``exact_basis`` names why a stagnating ladder
+    is exact (a terminated claim, a claim decided at the valuation instant, an analytical single
+    integral); without one, stagnation is unresolved, because equal values do not establish exactness.
+    """
+    v = [float(x) for x in values]
+    if len(v) < policy.min_levels:
+        raise ValueError(f"a ladder needs at least {policy.min_levels} levels, got {len(v)}")
+    fine = _rule(v, policy, exact_basis)
+    if fine.rule == "exact" or not isfinite(fine.radius):
+        return fine
+    coarse = _rule(v[:-1], policy, None)
+    move = abs(fine.value - coarse.value)
+    calibration = {"coarse_value": coarse.value, "coarse_radius": coarse.radius, "coarse_rule": coarse.rule, "move": move,
+                   "covered": isfinite(coarse.radius) and move <= coarse.radius}
+    if not calibration["covered"]:
+        return LadderEstimate(fine.value, inf, "uncalibrated", fine.observed_order, fine.extrapolants, calibration=calibration)
+    return LadderEstimate(fine.value, fine.radius, fine.rule, fine.observed_order, fine.extrapolants, calibration=calibration)
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +363,28 @@ def _unclocked(env):
                            vol_surface=surface.inner if type(surface) is TradingClockVolSurface else surface)
 
 
+def _domain(ctx, prod, instants, width_std: float) -> Tuple[float, float, list]:
+    """(lo, hi, barrier and strike levels) of the global log-spot grid; the value is extended flat beyond it."""
+    t_second, t_mat = instants[1][0], instants[-1][0]
+    _, w_rest, _ = moments(ctx, t_second, t_mat, float(prod.strike))
+    levels = sorted(_barrier_logs(ctx, prod) | {log(float(prod.initial_price))})
+    half = width_std * sqrt(max(w_rest, 1e-12)) + 0.5
+    return round(levels[0] - half, 6), round(levels[-1] + half, 6), levels
+
+
+def local_points(points: int) -> int:
+    """Knots of the uniform local grid at the first event: nested with the global ladder, a quarter as many cells.
+
+    ``points // 4`` with a floor of 201 (the Gate C control) repeated one local grid across a whole ladder of
+    small levels, and a repeated discretization reads as convergence (review 2026-09-18, R1). The count is now
+    exact and the level is refused when it cannot be.
+    """
+    if points < MIN_POINTS or (points - 1) % 4 != 0:
+        raise ValueError(f"a grid level needs at least {MIN_POINTS} points with (points - 1) divisible by 4, so that the "
+                         f"local grid is nested too; got {points}")
+    return (points - 1) // 4 + 1
+
+
 def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[PLJ, PLJ]:
     """Backward sweep from maturity down to the SECOND remaining instant (events applied). Cached.
 
@@ -312,11 +396,8 @@ def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[P
     """
     from quantark.intraday.timestamp import to_utc
     strike = float(prod.strike)
-    t_second, t_mat = instants[1][0], instants[-1][0]
-    _, w_rest, _ = moments(ctx, t_second, t_mat, strike)
-    levels = sorted(_barrier_logs(ctx, prod) | {log(float(prod.initial_price))})
-    half = width_std * sqrt(max(w_rest, 1e-12)) + 0.5
-    lo, hi = round(levels[0] - half, 6), round(levels[-1] + half, 6)
+    t_mat = instants[-1][0]
+    lo, hi, levels = _domain(ctx, prod, instants, width_std)
     from quantark.execution import greeks as summaries
     from quantark.intraday.context import market_snapshot_id, value_tree
     env = ctx.request.pricing_env
@@ -348,9 +429,20 @@ def _global_sweep(ctx, prod, instants, points: int, width_std: float) -> Tuple[P
     return v0, v1
 
 
-def solve_snowball(ctx, points: int, width_std: float) -> Tuple[float, float, float]:
+def solve_snowball(ctx, points: int, width_std: float, diagnostics: Optional[dict] = None) -> Tuple[float, float, float]:
+    """(value, point delta, point gamma) of the remaining claim, pending receivables excluded.
+
+    ``diagnostics``, when given, is filled with what the solve actually did: the number of remaining
+    instants, the spacing of each discretization in play (``None`` for one that is not used), the global
+    domain, and ``basis`` -- the reason the result is exact when it structurally is (``"terminated"``: no
+    contingent claim remains; ``"decided_at_valuation"``: the only remaining instant is the valuation
+    instant and its events are decided at the known spot), else ``None``.
+    """
     prod = ctx.numerical.product
+    note = {} if diagnostics is None else diagnostics
+    note.update(points=points, instants=0, global_spacing=None, local_spacing=None, domain=None, basis=None)
     if ctx.numerical.terminated:
+        note["basis"] = "terminated"
         return 0.0, 0.0, 0.0
     if ctx.timeline.continuous_ki_barrier is not None:
         raise NotImplementedError("reference: continuous KI is not in the reference inventory")
@@ -362,13 +454,19 @@ def solve_snowball(ctx, points: int, width_std: float) -> Tuple[float, float, fl
     t1, events1 = instants[0]
     m1, v1_var, disc1 = moments(ctx, 0.0, t1, strike)
     sd1 = sqrt(v1_var)
+    n_local = local_points(points)
     local_half = max(_LOCAL_STD * sd1, 1e-9)
-    local = np.union1d(np.linspace(ln_s + m1 - local_half, ln_s + m1 + local_half, max(points // 4, 201)),
+    local = np.union1d(np.linspace(ln_s + m1 - local_half, ln_s + m1 + local_half, n_local),
                        np.array([lv for lv in _barrier_logs(ctx, prod) if abs(lv - ln_s - m1) <= local_half]))
+    note["instants"] = len(instants)
+    if sd1 > 0.0:                               # a zero-variance first interval is an exact shift: no local discretization
+        note["local_spacing"] = 2.0 * local_half / (n_local - 1)
     if len(instants) == 1:
         c0, c1 = _terminal(ctx, prod, local, t1)
     else:
         g0, g1 = _global_sweep(ctx, prod, instants, points, width_std)
+        lo, hi, _ = _domain(ctx, prod, instants, width_std)
+        note["global_spacing"], note["domain"] = (hi - lo) / (points - 1), [lo, hi]
         t2 = instants[1][0]                     # this context's own time to the second instant
         m12, v12, disc12 = moments(ctx, t1, t2, strike)
         c0 = PLJ.sample(local, expect(g0, local + m12, v12, disc12)[0])
@@ -376,6 +474,8 @@ def solve_snowball(ctx, points: int, width_std: float) -> Tuple[float, float, fl
     c0, c1 = _apply_instant(ctx, prod, events1, c0, c1, t1)
     branch = c1 if ctx.numerical.knocked_in else c0
     if t1 == 0.0:                               # an event exactly at valuation under BEFORE: pointwise, no derivative
+        if len(instants) == 1:
+            note["basis"] = "decided_at_valuation"
         return _decided_at_spot(prod, events1, branch, ln_s), float("nan"), float("nan")
     value, d1, d2 = expect(branch, np.array([ln_s + m1]), v1_var, disc1, derivatives=True)
     c, cx, cxx = float(value[0]), float(d1[0]), float(d2[0])
@@ -397,3 +497,130 @@ def _decided_at_spot(prod, events, branch: PLJ, ln_s: float) -> float:
     if ln_s not in hit_from_below:
         raise ValueError(f"reference: a jump at the spot {exp(ln_s)!r} that no event of this instant owns")
     return float(branch.f[k] if hit_from_below[ln_s] else branch.left()[k])
+
+
+# ---------------------------------------------------------------------------
+# the identified analytical case: one remaining instant is one Gaussian integral
+_QUAD_HALF_WIDTH = 12.0       # standard deviations integrated; the tail beyond is bounded, not ignored
+
+
+def single_instant_quadrature(ctx) -> Optional[dict]:
+    """Value, point delta and point gamma of a claim with ONE remaining instant, by adaptive quadrature.
+
+    With a single instant ahead the value is ``disc * E[f(Y)]``, ``Y ~ N(ln S + m, v)``, where ``f`` is the
+    instant's pointwise outcome: knock-out cash, the knocked-in payoff at or beyond the KI level, else the alive
+    payoff. The integral is split at every level where ``f`` jumps or kinks, so Gauss-Kronrod sees smooth
+    pieces; derivatives differentiate the Gaussian weight. This does not use the piecewise-linear grid at all,
+    which is what makes it an exactness BASIS for a stagnating ladder rather than another level of it.
+
+    Returns ``None`` unless exactly one instant remains, strictly ahead, on a live claim. Otherwise a dict of
+    ``value``, ``delta``, ``gamma`` and their absolute ``errors`` (QUADPACK's estimate plus the bounded tail).
+    """
+    from scipy.integrate import quad
+
+    prod = ctx.numerical.product
+    if ctx.numerical.terminated:
+        return None
+    instants = _instants(ctx)
+    t1, events = instants[0]
+    if len(instants) != 1 or t1 <= 0.0:
+        return None
+    strike, spot = float(prod.strike), float(ctx.pricing_env.spot)
+    m1, v, disc = moments(ctx, 0.0, t1, strike)
+    if v <= 0.0:
+        return None
+    sd, mu = sqrt(v), log(spot) + m1
+    term = ctx.timeline.terminal()
+    pay = calendar_year_fraction(ctx.valuation_timestamp, term.payment_timestamp)
+    delay = float(ctx.pricing_env.get_discount_factor(pay)) / float(ctx.pricing_env.get_discount_factor(t1))
+    disable = bool(prod.barrier_config.disable_ko_after_ki)
+    knock_outs, knock_ins = [], []
+    for e in events:
+        if e.kind is EventKind.KO:
+            ko_pay = calendar_year_fraction(ctx.valuation_timestamp, e.payment_timestamp)
+            cash = float(e.cash) * float(ctx.pricing_env.get_discount_factor(ko_pay)) / float(ctx.pricing_env.get_discount_factor(t1))
+            knock_outs.append((log(float(e.barrier)), cash))
+        elif e.kind is EventKind.KI:
+            knock_ins.append(log(float(e.barrier)))
+    above, reverse, alive = _ko_hits_above(prod), bool(prod.is_reverse), not ctx.numerical.knocked_in
+
+    def outcome(y: float) -> float:
+        for level, cash in knock_outs:
+            if ((y >= level) if above else (y <= level)) and (alive or not disable):
+                return cash
+        hit = any((y >= level) if reverse else (y <= level) for level in knock_ins)
+        state_in = (not alive) or hit
+        payoff = prod.get_maturity_payoff_v1 if state_in else prod.get_maturity_payoff_v0
+        return float(payoff(exp(y), ctx.pricing_env)) * delay
+
+    lo, hi = mu - _QUAD_HALF_WIDTH * sd, mu + _QUAD_HALF_WIDTH * sd
+    breaks = sorted({lv for lv in [lv for lv, _ in knock_outs] + knock_ins + [log(strike)] if lo < lv < hi})
+    edges = [lo, *breaks, hi]
+    import warnings
+    from scipy.integrate import IntegrationWarning
+
+    span = max(abs(outcome(lo)), abs(outcome(hi)), *(abs(c) for _, c in knock_outs), 1e-300)
+    weights = (lambda z: 1.0, lambda z: z / sd, lambda z: (z * z - 1.0) / v)          # value, d/dmu, d2/dmu2
+    scales = (span, span / sd, span / v)                                              # the size each integral can reach
+    totals, errors = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", IntegrationWarning)       # an unconverged piece is no exactness basis
+        try:
+            for a, b in zip(edges, edges[1:]):
+                # the right end of a piece is its left limit: a right-continuous jump at b belongs to the next piece
+                inside = b - 1e-15 * max(1.0, abs(b))
+                for k, weight in enumerate(weights):
+                    part, err = quad(lambda y: outcome(min(y, inside)) * weight((y - mu) / sd)
+                                     * exp(-0.5 * ((y - mu) / sd) ** 2) * _INV_SQRT_2PI / sd, a, b,
+                                     epsabs=1e-12 * scales[k], epsrel=1e-12, limit=400)
+                    totals[k] += part
+                    errors[k] += max(err, 1e-13 * scales[k])     # QUADPACK's estimate, never credited below roundoff
+        except IntegrationWarning:
+            return None
+    tail = 2.0 * float(ndtr(-_QUAD_HALF_WIDTH)) * span * (1.0 + _QUAD_HALF_WIDTH / sd + (_QUAD_HALF_WIDTH ** 2 + 1.0) / v)
+    c, cx, cxx = (disc * t for t in totals)
+    e0, e1, e2 = (disc * e + tail for e in errors)
+    return {"value": c, "delta": cx / spot, "gamma": (cxx - cx) / (spot * spot),
+            "errors": {"value": e0, "delta": e1 / spot, "gamma": (e2 + e1) / (spot * spot)}, "pieces": len(edges) - 1}
+
+
+# ---------------------------------------------------------------------------
+# what a spacing ladder cannot see: errors every level shares
+def residual_components(ctx, width_std: float, policy: LadderPolicy = LADDER_POLICY) -> dict:
+    """Sup-norm allowance for the errors common to every level of a ladder, with each component named.
+
+    * ``truncation`` (analytical bound): the global grid is finite and extended flat. A path reaches beyond it
+      with probability at most ``2 Phi(-a)`` per side by reflection, ``a`` the distance from the spot (bumped 1%
+      either way) to the end in total standard deviations after allowing the whole drift; the local grid adds
+      ``2 Phi(-15)``. The mis-valued amount is at most the value span.
+    * ``saturation`` (analytical bound): ramps and jumps further than 9 standard deviations are set to 0 or 1,
+      at most ``Phi(-9)`` of the total variation per expectation, per state, per instant.
+    * ``roundoff`` (estimate): ``roundoff_factor x eps x span x instants``.
+
+    ``span`` bounds the value function: terminal payoffs at the domain ends and every knock-out cash.
+    """
+    prod = ctx.numerical.product
+    if ctx.numerical.terminated:
+        return {"span": 0.0, "truncation": 0.0, "saturation": 0.0, "roundoff": 0.0, "total": 0.0, "first_sd": 0.0}
+    instants = _instants(ctx)
+    strike, spot = float(prod.strike), float(ctx.pricing_env.spot)
+    t1, t_mat = instants[0][0], instants[-1][0]
+    _, v1, _ = moments(ctx, 0.0, t1, strike)
+    m_all, w_all, _ = moments(ctx, 0.0, t_mat, strike) if t_mat > 0.0 else (0.0, 0.0, 1.0)
+    if len(instants) > 1:
+        lo, hi, _ = _domain(ctx, prod, instants, width_std)
+    else:
+        lo, hi = log(spot) - _LOCAL_STD * sqrt(v1) - 1.0, log(spot) + _LOCAL_STD * sqrt(v1) + 1.0
+    cashes = [abs(float(e.cash)) for e in ctx.numerical.remaining_events if e.kind is EventKind.KO]
+    ends = [abs(float(f(exp(y), ctx.pricing_env))) for y in (lo, hi)
+            for f in (prod.get_maturity_payoff_v0, prod.get_maturity_payoff_v1)]
+    span = max(cashes + ends + [0.0])
+    truncation = 2.0 * float(ndtr(-_LOCAL_STD)) * span
+    if len(instants) > 1 and w_all > 0.0:
+        sd_all, reach = sqrt(w_all), abs(m_all) + log(1.01)
+        a_lo, a_hi = (log(spot) - reach - lo) / sd_all, (hi - log(spot) - reach) / sd_all
+        truncation += 2.0 * span * (float(ndtr(-a_lo)) + float(ndtr(-a_hi)))
+    saturation = 4.0 * float(ndtr(-_SAT)) * span * len(instants)
+    roundoff = policy.roundoff_factor * float(np.finfo(float).eps) * span * len(instants)
+    return {"span": span, "truncation": truncation, "saturation": saturation, "roundoff": roundoff,
+            "total": truncation + saturation + roundoff, "first_sd": sqrt(v1)}

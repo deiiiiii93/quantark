@@ -154,6 +154,7 @@ def reference_block(estimate: ReferenceEstimate, identity: Mapping[str, Any]) ->
             "kind": "deterministic",
             "values": dict(estimate.values),
             "radii": dict(estimate.radii),
+            "radius_basis": dict(estimate.radius_basis),
             "undefined": dict(estimate.undefined),
             "evidence": dict(estimate.evidence),
             "identity_hash": identity_hash(identity),
@@ -419,7 +420,8 @@ def build_cells(
 def _reference_record(estimate: ReferenceEstimate, quantity: str) -> dict:
     """A cell's reference: value with its standard error, or a typed deterministic value with its radius."""
     if estimate.kind == "deterministic":
-        return {"kind": "deterministic", "value": estimate.values.get(quantity), "radius": estimate.radii.get(quantity)}
+        return {"kind": "deterministic", "value": estimate.values.get(quantity), "radius": estimate.radii.get(quantity),
+                "basis": estimate.radius_basis.get(quantity)}
     return {"value": estimate.values[quantity], "se": estimate.std_errors[quantity]}
 
 
@@ -679,7 +681,7 @@ def _validate_deterministic_payload(payload: Mapping[str, Any], contract: Mappin
     for case, block in payload["references"].items():
         if "error" in block:
             continue
-        missing = [key for key in ("kind", "values", "radii", "undefined", "evidence") if key not in block]
+        missing = [key for key in ("kind", "values", "radii", "radius_basis", "undefined", "evidence") if key not in block]
         if missing or block.get("kind") != "deterministic":
             raise ValidationError(f"Deterministic reference block for {case!r} is not typed: missing {missing}")
     unqualified = {case for case, block in payload.get("qualification", {}).items() if not block.get("qualified")}

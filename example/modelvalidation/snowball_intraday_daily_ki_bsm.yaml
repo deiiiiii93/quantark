@@ -10,10 +10,14 @@
 # above a quarter of each cell's budget, and its measured convergence is N^-0.35..-0.5 across the
 # payoff jumps, so no affordable path count closes the gap. The reference is therefore the
 # engine-independent Gaussian-transition solver on a nested refinement ladder. It states a value
-# and an error RADIUS per quantity (never a standard error), including the exact point Greeks,
-# so the point cells are certified here too. The RQMC arm stays in the study as the QUALIFIER:
-# it simulates every case, and the deterministic value must sit within max_z of its standard
-# errors plus the reference's radius, or the case is unresolved whatever the candidate says.
+# and an uncertainty RADIUS per quantity (never a standard error), including the exact point
+# Greeks, so the point cells are certified here too. A radius says what kind it is: analytical
+# where the solve names an exactness basis, otherwise a calibrated numerical estimate from the
+# ladder (not a proved bound), calibrated one level down inside the ladder. The RQMC arm stays in
+# the study as the QUALIFIER: it simulates every case, and the deterministic value must sit within
+# max_z of its standard errors plus the reference's radius, or the case is not decision-eligible:
+# its cells are unresolved and feed no aggregate, whatever the candidate says. The qualifier's
+# sampling below is part of the certification contract; an amendment may not change it.
 #
 # Budgets are the frozen engineering tolerances (spec 7.1), unchanged: PV 1e-6 of notional; delta
 # 1e-5 floor / 1e-4 relative on delta*S/N; gamma 1e-4 / 1e-3 on gamma*S^2/N; theta per hour
@@ -92,9 +96,10 @@ context:
 
 reference:
   builder: equity.snowball.intraday.gaussian
-  # Nested ladder, each level halving the log-spot spacing. With 16001 as the finest level two PV cells
-  # (the lunch-break pair) held a radius of twice their allowance; one more doubling quarters it.
-  params: {points: [4001, 8001, 16001, 32001], width_std: 8.0}
+  # Nested ladder, each level halving every spacing in play. The four finest levels give the estimate; the
+  # coarsest calibrates the rule one level down. With 16001 as the finest level two PV cells (the lunch-break
+  # pair) held a radius of twice their allowance; one more doubling quarters it.
+  params: {points: [2001, 4001, 8001, 16001, 32001], width_std: 8.0}
 
 reference_qualification:
   builder: equity.snowball.intraday.mc_rqmc

@@ -313,7 +313,8 @@ def _estimate_from_block(block: Mapping[str, Any], quantities) -> Optional[Refer
     if block.get("kind") == "deterministic":
         return ReferenceEstimate(values=dict(block["values"]), std_errors={}, batches=0, seeds=(),
                                  stopped_reason="deterministic", kind="deterministic", radii=dict(block["radii"]),
-                                 evidence=dict(block["evidence"]), undefined=dict(block["undefined"]))
+                                 evidence=dict(block["evidence"]), undefined=dict(block["undefined"]),
+                                 radius_basis=dict(block["radius_basis"]))
     return ReferenceEstimate(
         values={q: block["values"][q] for q in quantities},
         std_errors={q: block["std_errors"][q] for q in quantities},

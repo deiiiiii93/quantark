@@ -15,10 +15,14 @@ the current configuration would never have chosen -- which is exactly how a
 sequential estimator acquires selection bias.
 
 **Two kinds, never confused.** A deterministic reference (schema 2) states a
-value, an error *radius* and the refinement ladder that justifies it. It has no
-batches, seeds or standard error, and it is never written as identical batches
-with zero standard error: the record is typed, and a consumer that forgets the
-radius meets ``None`` where it expected a standard error.
+value, an uncertainty *radius*, which KIND of radius it is, and the evidence that
+justifies it. It has no batches, seeds or standard error, and it is never
+written as identical batches with zero standard error: the record is typed, and
+a consumer that forgets the radius meets ``None`` where it expected a standard
+error. A deterministic method does not, by itself, establish an error bound: a
+radius is ``analytical`` (a named exactness basis or a proved bound) or a
+``calibrated_estimate`` (a numerical estimate with its calibration evidence),
+and the gate accepts neither without that declaration (review 2026-09-18, R1).
 """
 
 from __future__ import annotations
@@ -76,6 +80,11 @@ class ReferenceEstimate:
     radii: Mapping[str, float] = field(default_factory=dict)
     evidence: Mapping[str, Any] = field(default_factory=dict)
     undefined: Mapping[str, str] = field(default_factory=dict)
+    radius_basis: Mapping[str, str] = field(default_factory=dict)
+
+
+#: What a deterministic radius may be: an analytical statement, or a numerical estimate with calibration evidence.
+RADIUS_BASES: Tuple[str, ...] = ("analytical", "calibrated_estimate")
 
 
 @dataclass(frozen=True)
@@ -91,12 +100,15 @@ class DeterministicResult:
         undefined: quantity -> why it has no value here (a derivative on an event instant).
             A case must declare the matching expected status; a numeric cell without a
             reference value is an error.
+        radius_basis: quantity -> one of :data:`RADIUS_BASES`, for every quantity with a
+            value. Required: a radius whose kind is not declared is not an allowance.
     """
 
     values: Mapping[str, float]
     radii: Mapping[str, float]
     evidence: Mapping[str, Any]
     undefined: Mapping[str, str] = field(default_factory=dict)
+    radius_basis: Mapping[str, str] = field(default_factory=dict)
 
 
 class DeterministicReferenceBuilder(Protocol):
@@ -311,12 +323,19 @@ def _validate_deterministic(result: DeterministicResult, quantities: Sequence[st
             raise ValidationError(f"deterministic reference for {case_name!r} produced non-finite {quantity}: {value}")
         if math.isnan(radius) or radius < 0.0:
             raise ValidationError(f"deterministic reference for {case_name!r} has an invalid radius for {quantity}: {radius}")
+        if result.radius_basis.get(quantity) not in RADIUS_BASES:
+            raise ValidationError(
+                f"deterministic reference for {case_name!r} does not say what kind of radius {quantity} carries "
+                f"(one of {RADIUS_BASES}): a deterministic method does not by itself establish an error bound")
+    if "calibrated_estimate" in result.radius_basis.values() and not result.evidence:
+        raise ValidationError(
+            f"deterministic reference for {case_name!r} declares a calibrated estimate and carries no evidence of it")
 
 
 def _deterministic_estimate(result: DeterministicResult) -> ReferenceEstimate:
     return ReferenceEstimate(values=dict(result.values), std_errors={}, batches=0, seeds=(), stopped_reason="deterministic",
                              kind="deterministic", radii=dict(result.radii), evidence=dict(result.evidence),
-                             undefined=dict(result.undefined))
+                             undefined=dict(result.undefined), radius_basis=dict(result.radius_basis))
 
 
 def run_deterministic_reference(
@@ -334,7 +353,8 @@ def run_deterministic_reference(
             if banked.get("kind") != "deterministic":
                 raise ValidationError(f"banked reference for {case.name!r} is not a deterministic solve")
             result = DeterministicResult(values=dict(banked["values"]), radii=dict(banked["radii"]),
-                                         evidence=dict(banked["evidence"]), undefined=dict(banked["undefined"]))
+                                         evidence=dict(banked["evidence"]), undefined=dict(banked["undefined"]),
+                                         radius_basis=dict(banked["radius_basis"]))
             _validate_deterministic(result, quantities, case.name)
             return _deterministic_estimate(result)
     result = builder.solve(case)
@@ -342,7 +362,8 @@ def run_deterministic_reference(
     if store is not None:
         store.save(CHECKPOINT_KIND, case.name, identity,
                    {"kind": "deterministic", "values": dict(result.values), "radii": dict(result.radii),
-                    "evidence": dict(result.evidence), "undefined": dict(result.undefined)})
+                    "evidence": dict(result.evidence), "undefined": dict(result.undefined),
+                    "radius_basis": dict(result.radius_basis)})
     return _deterministic_estimate(result)
 
 
