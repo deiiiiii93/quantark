@@ -65,10 +65,13 @@ PROXIES = ("vega", "rho", "dividend_rho")
 BUMP_LADDER = (4.0, 2.0, 1.0, 0.5)
 PROXY_REFERENCE_POINTS = (4001, 8001)
 #: Reference grid levels per fixture where the frozen GATE_C_POINTS do not resolve the budgets. The daily-KI claim
-#: carries 129 remaining events: at 4001/8001/16001 points the reference's own Richardson uncertainty exceeded the
-#: budget in 9 of 72 pilot measures (2026-09-17) while the route sat on the reference's extrapolated limit. One level
-#: finer cuts that O(h^2) uncertainty about fourfold; the budgets themselves are unchanged.
-FIXTURE_REFERENCE_POINTS = {"snowball_daily_ki": (8001, 16001, 32001)}
+#: carries 129 remaining events, and its reference needs two levels beyond the frozen 4001/8001/16001: at those points
+#: 9 of 72 pilot measures were inconclusive (2026-09-17), and at 8001/16001/32001 the full sweep left 22 of 1848 -
+#: point and desk GAMMA just below the KO barrier, where normalised gamma is tiny so the budget sits on its absolute
+#: floor (~9.4e-7 per unit spot^2). In every one the route sat on the reference's extrapolated limit (error ~ the
+#: reference's own uncertainty). The reference converges O(h^2), so each level cuts that uncertainty fourfold; the
+#: worst cell (3.27x budget) is predicted at 0.82x. The budgets themselves are unchanged.
+FIXTURE_REFERENCE_POINTS = {"snowball_daily_ki": (16001, 32001, 64001)}
 FIXTURE_PROXY_POINTS = {"snowball_daily_ki": (8001, 16001)}
 
 
