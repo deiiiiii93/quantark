@@ -545,23 +545,30 @@ gates.  Report: `data/simulated_paths_report.html`.
   the base, up and down states separately, so within one 1% bump of that
   level the three evaluations do not share an alignment and the delta
   carries the grid change as well as the market change.  Measured on this
-  product by forcing the priority: outside the window `auto` reproduces a
-  forced branch exactly, and inside 0.8709–0.8869 it differs from both
-  forced branches by 17.5–20.3 index-delta units (0.09–0.10 of an IM
-  contract).  5.85% of the check cells' priced states sit within 1% of
-  that level.  The two forced branches differ by only about 2 units
-  here, so the damage does not come from the branches
+  product by forcing the priority.  Swept across moneyness at one
+  valuation date, outside the window `auto` reproduces a forced branch
+  exactly and inside 0.8709–0.8869 it differs from both by 17.5–20.3
+  index-delta units; those are point values at that date, not a worst
+  case.  Over every in-window state the six check cells actually price,
+  `auto` minus forced `ko` has median 14.7 units, p90 80.5 and maximum
+  137.1 — 0.07, 0.40 and 0.69 of an IM contract (200 index units to a
+  contract).  It is not uniform in the product's life: essentially zero
+  inside 20 days of expiry, largest 100–150 days out (median 41.8, p90
+  121.7).  5.85% of the check cells' priced states sit within 1% of that
+  level.  The two forced branches differ by only about 2 units here, so
+  the damage does not come from the branches
   disagreeing — it comes from mixing them inside one finite difference,
   which means a product whose branches nearly coincide is no safer.
   Re-running all six check cells with `--quad-align ko`, which makes every
   evaluation share one alignment, moves the engine check by −0.71 to
   +0.65 bp of terminal P&L and at most 0.09 bp of daily std
   (`data/engine_check_align_ko.csv`).  Two things attenuate it, and the
-  second matters more.  The cube's `delta` is in index units, 200 to an IM
-  contract, so 19 units is 0.095 contracts against a book averaging 35 —
-  but that does *not* mean it rounds away: comparing the forced and
-  default runs state by state, the rounded hedge differs on 15.3% of the
-  states inside the window (307 of 2,010), and on 1.2% of all states.
+  second matters more.  The error is a fraction of a contract — 0.07 at
+  the median, 0.40 at p90 — against a book averaging 35, but that does
+  *not* mean it rounds away: comparing the forced and default runs state
+  by state, the rounded hedge differs on 15.3% of the states inside the
+  window (307 of 2,010), and on 1.2% of all states, which is about what
+  those two fractions straddling a rounding boundary would give.
   What keeps those from mattering is that the hedge rebalances daily, so
   each one is a one-contract difference for one day that the next
   rebalance corrects; the error appears and disappears as a path crosses
