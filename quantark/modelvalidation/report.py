@@ -168,12 +168,22 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
             + "."
         )
         parts.append("")
-    parts.append(
-        f"Bounds: cell {_fmt(bounds['cell'])} c, mean signed bias "
-        f"{_fmt(bounds['mean_signed_bias'])} c, standard-error budget "
-        f"{_fmt(bounds['se_budget_fraction'])} x cell, interval k "
-        f"{_fmt(bounds['interval_k'])}."
-    )
+    if payload.get("contract", {}).get("reference_kind") == "deterministic":
+        # the standard-error fraction and interval k belong to a stochastic reference; printing them here would
+        # describe a policy this certificate did not use
+        parts.append(
+            f"Bounds: cell {_fmt(bounds['cell'])} c, mean signed bias "
+            f"{_fmt(bounds['mean_signed_bias'])} c, reference radius at most "
+            f"{_fmt(bounds['radius_budget_fraction'])} x cell (deterministic reference: a radius is consumed whole, "
+            "with no interval multiplier)."
+        )
+    else:
+        parts.append(
+            f"Bounds: cell {_fmt(bounds['cell'])} c, mean signed bias "
+            f"{_fmt(bounds['mean_signed_bias'])} c, standard-error budget "
+            f"{_fmt(bounds['se_budget_fraction'])} x cell, interval k "
+            f"{_fmt(bounds['interval_k'])}."
+        )
     parts.append("")
     if schema2:
         parts.append(

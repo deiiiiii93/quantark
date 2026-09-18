@@ -271,7 +271,7 @@ Before a certification is accepted as backing a release:
 | `european_selftest.yaml` | The framework's own calibration check: the candidate is closed-form Black-Scholes, so the framework **must** admit it. Runs in CI on every commit. | ~3 s |
 | `snowball_flat_bsm.yaml` | The demonstration study: PDE and quadrature snowball engines against one paired-RQMC benchmark, five scenarios, PV and both spot Greeks. | minutes |
 | `adi2d_snowball_greeks.yaml` | **Imported, not runnable** (see §10): the 2D ADI Heston and Heston-SLV solvers, spot Greeks, seven variance regimes. Its candidate arm is live and anchored. | anchors ~6 min |
-| `snowball_intraday_daily_ki_bsm.yaml` | **Schema 2, deterministic reference.** The daily-KI snowball on the intraday clock: QUAD V2 and PDE intraday routes against the engine-independent Gaussian-transition solver (a five-level nested ladder; every radius declares itself analytical or a calibrated estimate; qualified case by case by paired RQMC) on PV, desk spot Greeks, desk theta and point spot Greeks, 23 cases. | hours (the reference about 5 h on one worker) |
+| `snowball_intraday_daily_ki_bsm.yaml` | **Schema 2, deterministic reference.** The daily-KI snowball on the intraday clock: QUAD V2 and PDE intraday routes against the engine-independent Gaussian-transition solver (a five-level nested ladder; every radius declares itself analytical or a calibrated estimate; qualified case by case by paired RQMC) on PV, desk spot Greeks, desk theta and point spot Greeks, 23 cases. | about 4.6 h on one worker; anchors 5 min |
 
 If `european_selftest` ever fails, suspect the certification machinery before
 suspecting the engine — that study exists precisely to make that distinction

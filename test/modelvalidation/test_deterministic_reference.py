@@ -147,7 +147,9 @@ def test_a_matching_candidate_is_admitted_and_the_record_is_typed_never_a_zero_s
     assert payload["contract"]["reference_kind"] == "deterministic"
     assert payload["contract"]["reference_error_model"] == {"method": "fake ladder", "radius": "declared"}
     validate_payload(payload)
-    assert "deterministic" in render_markdown(payload) and "radius" in render_html(payload)
+    markdown = render_markdown(payload)
+    assert "deterministic" in markdown and "radius" in render_html(payload)
+    assert "reference radius at most 0.25 x cell" in markdown and "interval k" not in markdown    # the policy that ran
 
 
 def test_an_undefined_reference_value_serves_a_semantic_cell_and_errors_a_numeric_one(tmp_path):

@@ -178,8 +178,11 @@ coarser than production, so the table is pessimistic):
 - In-ladder calibration: the rule applied one level down covered every cell's value, the move never above 0.56 of
   that radius. It is not a formality: on the wiring ladder (101 to 1601) `ordinary`'s desk theta fails it and is
   `uncalibrated`.
-- Out-of-ladder coverage: five cases were solved one level further (32001) before the review stopped that run. Across
-  their 30 cells the 32001 extrapolant moved by at most 0.18 of the radius this policy declares at 16001.
+- Out-of-ladder coverage, all 135 cells: the production reference (finest level 32001, policy already frozen) against
+  this pre-flight (finest level 16001). No production value moved by more than 0.34 of the radius declared one level
+  coarser: at most 0.34 on the `geometric` branch, 0.004 on `correction`, 0.02 on `unextrapolated`, and exactly 0 on
+  the analytical cells. This is the out-of-sample check the in-ladder calibration cannot be, because it shares no
+  level with the estimate it tests.
 - Three cells exceed the allowance with 16001 as the finest level, all on the `correction` branch, whose radius
   quarters with each doubling. The production ladder therefore ends at 32001.
 - Closed form (`test_intraday_snowball_gaussian_reference.py`): a single-event snowball at spots 70, 75, 78 and 101,

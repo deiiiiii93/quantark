@@ -7,6 +7,43 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+Intraday certification moves out of the runtime and into `quantark.modelvalidation`
+(spec: `docs/superpowers/specs/2026-09-18-intraday-modelvalidation-certification-design.md`,
+reference revision: `docs/superpowers/specs/2026-09-18-intraday-deterministic-reference-revision.md`).
+A certificate constrains the release, never the code.
+
+### Added
+- `quantark.modelvalidation` schema 2: a quantity catalogue with per-quantity budgets,
+  a `context` block with per-case overrides, semantic `expect:` cells, per-case random
+  substreams, convergence axes with at least three levels, three-way verdicts on cells
+  and aggregates, and a `contract` block an amendment may not change. Schema-1 studies,
+  evidence and wire format are unchanged.
+- A deterministic reference kind (`reference_kind = "deterministic"`): a typed record
+  with a radius per quantity that declares itself `analytical` or a `calibrated_estimate`,
+  consumed whole by the gate (`bounds.radius_budget_fraction`, no interval multiplier) and
+  added linearly in the aggregate. `reference_qualification` names a stochastic arm that
+  must agree with it case by case; an unqualified case is not decision-eligible, and the
+  arm's sampling is frozen in the contract.
+- `python -m quantark.modelvalidation bank <run dir>`: validates, refuses quick runs,
+  extracts anchors and never overwrites a banked directory.
+- Study `snowball_intraday_daily_ki_bsm.yaml`: the daily-KI snowball on the intraday
+  clock, 23 cases, QUAD V2 and PDE intraday routes against the engine-independent
+  Gaussian-transition reference, qualified by paired RQMC.
+
+### Changed
+- `quantark.intraday` returns what it computes. Every requested output carries its own
+  status (`ok`, `undefined`, `failed`, `not_requested`) with diagnostics; the `unqualified`
+  status, the `certify=` flags, `GreekValue.error_budget` and the packaged Gate C evidence
+  (`quantark/intraday/evidence`) are removed. The PDE resolution verdict is `under_resolved`.
+  The runtime reads no certificate and does not import `quantark.modelvalidation`.
+- The Gate C evidence is archived under `docs/modelvalidation/legacy/intraday-gate-c/2026-09-18/`
+  with an inventory of what each fixture's successor study is.
+
+### Fixed
+- The QUAD V2 intraday route raised at the maturity instant under `BEFORE`; it now values
+  the claim decided there through the runtime's event resolution, as the PDE route does.
+
+
 ## [0.4.7] - 2026-08-25
 
 Settlement-date-aware payoff discounting across the equity option stack

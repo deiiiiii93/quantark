@@ -467,7 +467,7 @@ def _aggregates_section(payload: Mapping[str, Any]) -> str:
     deterministic = _is_deterministic(payload)
     for aggregate in payload["aggregates"]:
         kind = "pass" if aggregate["passed"] else "fail"
-        # a standard error is widened by interval_k; a deterministic mean radius already is the bound
+        # a standard error is widened by interval_k; a deterministic mean radius is consumed whole
         spread = aggregate.get("radius_of_mean_c") if deterministic else aggregate["se_of_mean_c"]
         consumed = abs(aggregate["mean_signed_bias_c"]) + (spread if deterministic else interval_k * spread)
         rows.append(
