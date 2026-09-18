@@ -20,10 +20,11 @@ import yaml
 from quantark.util.exceptions import ValidationError
 from quantark.modelvalidation.registry import get_builder
 from quantark.modelvalidation.study import (
-    SCHEMA,
+    SUPPORTED_SCHEMAS,
     CaseSpec,
     CertificationStudy,
     GateBounds,
+    QuantityBounds,
     SamplingPolicy,
 )
 
@@ -40,11 +41,15 @@ TOP_LEVEL_KEYS = frozenset(
         "reference",
         "candidates",
         "cases",
+        "context",
+        "quantity_bounds",
     }
 )
 
 _BOUNDS_OPTIONAL = ("se_budget_fraction", "interval_k", "envelope_fraction")
 _SAMPLING_OPTIONAL = ("bump",)
+_CASE_KEYS_SCHEMA_1 = frozenset({"name", "environment", "product"})
+_CASE_KEYS_SCHEMA_2 = _CASE_KEYS_SCHEMA_1 | {"context", "expect"}
 
 
 def _require(mapping: Mapping[str, Any], key: str, path: str) -> Any:
@@ -85,7 +90,7 @@ def _bounds(document: Mapping[str, Any]) -> GateBounds:
     return GateBounds(**kwargs)
 
 
-def _sampling(document: Mapping[str, Any]) -> SamplingPolicy:
+def _sampling(document: Mapping[str, Any], schema: int) -> SamplingPolicy:
     spec = _require_mapping(_require(document, "sampling", "sampling"), "sampling")
     required = ("paths_per_batch", "min_batches", "max_batches", "seed")
     kwargs: dict[str, Any] = {
@@ -94,26 +99,47 @@ def _sampling(document: Mapping[str, Any]) -> SamplingPolicy:
     for optional in _SAMPLING_OPTIONAL:
         if optional in spec:
             kwargs[optional] = float(spec[optional])
-    unknown = set(spec) - {*required, *_SAMPLING_OPTIONAL}
+    # Each schema has its own seed scheme; the study's validation refuses the other one.
+    kwargs["seed_scheme"] = str(spec.get("seed_scheme", "substream" if schema == 2 else "sequential"))
+    unknown = set(spec) - {*required, *_SAMPLING_OPTIONAL, "seed_scheme"}
     if unknown:
         raise ValidationError(f"Unknown keys in sampling: {sorted(unknown)}")
     return SamplingPolicy(**kwargs)
 
 
-def _cases(document: Mapping[str, Any]) -> tuple[CaseSpec, ...]:
+def _quantity_bounds(document: Mapping[str, Any]) -> dict:
+    raw = _require_mapping(_require(document, "quantity_bounds", "quantity_bounds"), "quantity_bounds")
+    out = {}
+    for quantity, spec in raw.items():
+        path = f"quantity_bounds.{quantity}"
+        spec = _require_mapping(spec, path)
+        unknown = set(spec) - {"abs_floor", "rel"}
+        if unknown:
+            raise ValidationError(f"Unknown keys in {path}: {sorted(unknown)}")
+        out[str(quantity)] = QuantityBounds(
+            abs_floor=float(_require(spec, "abs_floor", f"{path}.abs_floor")),
+            rel=float(spec.get("rel", 0.0)),
+        )
+    return out
+
+
+def _cases(document: Mapping[str, Any], schema: int) -> tuple[CaseSpec, ...]:
     raw = _require(document, "cases", "cases")
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise ValidationError("cases must be a list")
     if not raw:
         raise ValidationError("cases must not be empty")
 
+    allowed = _CASE_KEYS_SCHEMA_2 if schema == 2 else _CASE_KEYS_SCHEMA_1
     cases = []
     for index, entry in enumerate(raw):
         path = f"cases[{index}]"
         spec = _require_mapping(entry, path)
-        unknown = set(spec) - {"name", "environment", "product"}
+        unknown = set(spec) - allowed
         if unknown:
-            raise ValidationError(f"Unknown keys in {path}: {sorted(unknown)}")
+            raise ValidationError(
+                f"Unknown keys in {path}: {sorted(unknown)}; expected a subset of {sorted(allowed)}"
+            )
         cases.append(
             CaseSpec(
                 name=str(_require(spec, "name", f"{path}.name")),
@@ -123,6 +149,13 @@ def _cases(document: Mapping[str, Any]) -> tuple[CaseSpec, ...]:
                 product_params=dict(
                     _require_mapping(spec.get("product", {}), f"{path}.product")
                 ),
+                context_params=dict(
+                    _require_mapping(spec.get("context", {}), f"{path}.context")
+                ),
+                expected={
+                    str(k): str(v)
+                    for k, v in _require_mapping(spec.get("expect", {}), f"{path}.expect").items()
+                },
             )
         )
     return tuple(cases)
@@ -170,14 +203,17 @@ def load_study_text(text: str) -> CertificationStudy:
         )
 
     schema = int(_require(document, "schema", "schema"))
-    if schema != SCHEMA:
-        raise ValidationError(f"Study schema must be {SCHEMA}, got {schema}")
+    if schema not in SUPPORTED_SCHEMAS:
+        raise ValidationError(f"Study schema must be one of {SUPPORTED_SCHEMAS}, got {schema}")
+    if schema == 1 and ({"quantity_bounds", "context"} & set(document)):
+        raise ValidationError("quantity_bounds and context are schema-2 keys; this study declares schema 1")
 
     name = str(_require(document, "study", "study"))
     quantities = _quantities(document)
+    quantity_bounds = _quantity_bounds(document) if schema == 2 else {}
     bounds = _bounds(document)
-    sampling = _sampling(document)
-    cases = _cases(document)
+    sampling = _sampling(document, schema)
+    cases = _cases(document, schema)
 
     scale_name, scale_params = _builder_spec(document, "economic_scale")
     scale = get_builder(scale_name, kind="economic_scale")(scale_params)
@@ -191,6 +227,13 @@ def load_study_text(text: str) -> CertificationStudy:
     get_builder(environment_builder, kind="environment")
     get_builder(product_builder, kind="product")
 
+    # Schema 2: the study-level intraday context (valuation instant, clock, history) reaches every arm.
+    arm_extra: dict = {}
+    if "context" in document:
+        context_builder, context_params = _builder_spec(document, "context")
+        get_builder(context_builder, kind="context")
+        arm_extra["context_params"] = context_params
+
     reference_name, reference_params = _builder_spec(document, "reference")
     reference = get_builder(reference_name, kind="reference")(
         environment_params=environment_params,
@@ -198,6 +241,7 @@ def load_study_text(text: str) -> CertificationStudy:
         sampling=sampling,
         quantities=quantities,
         params=reference_params,
+        **arm_extra,
     )
 
     raw_candidates = _require(document, "candidates", "candidates")
@@ -218,6 +262,7 @@ def load_study_text(text: str) -> CertificationStudy:
                 product_params=product_params,
                 quantities=quantities,
                 params=params,
+                **arm_extra,
             )
         )
 
@@ -232,6 +277,7 @@ def load_study_text(text: str) -> CertificationStudy:
         candidates=tuple(candidates),
         sampling=sampling,
         source_text=text,
+        quantity_bounds=quantity_bounds,
     )
 
 
