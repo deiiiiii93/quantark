@@ -1,0 +1,53 @@
+{
+  "admission_rule": "|route - ref| <= budget + 3 * ref_uncertainty (Gate C; not the schema-2 rule, which is |route - ref| + k * SE <= budget)",
+  "archived_at_revision": "7ffba4765a4d26e12c072bad17a88f714342558a",
+  "budgets_source": "test/intraday/reference/budgets.py at archived_at_revision",
+  "commands": [
+    "QUANTARK_GATE_C=1 QUANTARK_WRITE_GATE_C=<dir> python -m pytest -n auto -m slow test/intraday/gate_c",
+    "QUANTARK_GATE_C_GREEKS=1 QUANTARK_WRITE_GATE_C=<dir> python -m pytest -n 4 -m slow test/intraday/gate_c/test_greek_ladders.py"
+  ],
+  "files": [
+    {
+      "bytes": 3759838,
+      "git_sha": "510c3da0",
+      "original_path": "quantark/intraday/evidence/gate_c_results.json",
+      "path": "gate_c_results.json",
+      "schema": "intraday-gate-c/1",
+      "sha256": "7263074c6a921ed515c37bdfd160fc4a772352e4050904bf39bc3e79a2240bd2",
+      "sources": null
+    },
+    {
+      "bytes": 8939453,
+      "git_sha": "959346b5",
+      "original_path": "quantark/intraday/evidence/gate_c_greeks.json",
+      "path": "gate_c_greeks.json",
+      "schema": "intraday-gate-c-greeks/2",
+      "sha256": "34e99db0f1658ea63fd36b3b4a1c131209daa25c7c6e531c2d8313837cf822a6",
+      "sources": null
+    },
+    {
+      "bytes": 812996,
+      "original_path": "tmp/near_ki/sweep_v2_32001/gate_c_greeks.jsonl",
+      "path": "source-records/sweep_v2_32001/gate_c_greeks.jsonl",
+      "sha256": "fb4e5f367222d8c4550f115c13c5917536b2efd0a5cc96147f8fa547e41d776f"
+    },
+    {
+      "bytes": 0,
+      "original_path": "tmp/near_ki/sweep.log",
+      "path": "source-records/daily_ki_2026-09-18/sweep.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "label": "historical Gate C decisions; not a modelvalidation certificate",
+  "schema": "intraday-gate-c-archive/1",
+  "unretained": [
+    {
+      "original_path": "tmp/near_ki/gate_c_greeks.jsonl",
+      "reason": "not present on the archiving machine"
+    },
+    {
+      "original_path": "tmp/near_ki/pilot.log",
+      "reason": "not present on the archiving machine"
+    }
+  ]
+}
