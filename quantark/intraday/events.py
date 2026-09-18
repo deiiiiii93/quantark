@@ -79,9 +79,9 @@ class ContractEvent:
 def monitoring_of(timeline: "ContractTimeline") -> str:
     """Which capability-matrix monitoring column this contract falls in.
 
-    Lives here rather than in the service because the qualification gate needs it
-    too: a certificate earned on discrete monitoring says nothing about the same
-    product under a continuously observed barrier.
+    Lives here rather than in the service because the capability matrix and the
+    offline studies read it too: discrete and continuous monitoring are different
+    contracts, and a route's support for one says nothing about the other.
     """
     if timeline.continuous_ki_barrier is not None or timeline.continuous_barrier is not None:
         return "continuous"

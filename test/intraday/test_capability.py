@@ -13,7 +13,7 @@ from intraday.conftest import dated_snowball, digital
 def test_plan1_routes_are_declared(sse_calendar):
     snow = dated_snowball(sse_calendar, datetime(2026, 3, 16))
     cap = require_capability(snow, SnowballQuadEngineV2(), monitoring="discrete")
-    assert cap.status in ("supported", "qualified") and "price" in cap.outputs
+    assert cap.status == "supported" and "price" in cap.outputs
     assert find_capability(digital(datetime(2026, 12, 15)), DigitalOptionAnalyticalEngine(), monitoring="terminal") is not None
 
 
@@ -40,4 +40,4 @@ def test_subclasses_do_not_inherit_a_route(sse_calendar):
 
 def test_matrix_renders_every_row():
     md = render_capability_matrix()
-    assert "| Product | Engine | Monitoring | Profiles | Outputs | Status | Qualified horizon | Note |" in md and "SnowballQuadEngineV2" in md
+    assert "| Product | Engine | Monitoring | Profiles | Outputs | Status | Note |" in md and "SnowballQuadEngineV2" in md

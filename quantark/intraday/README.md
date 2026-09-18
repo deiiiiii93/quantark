@@ -119,27 +119,19 @@ digitals, barriers and one-touches — is generated into
 (`python -m quantark.intraday.publish`).
 
 `supported` means the semantics are implemented and every price reports its numerical
-status. `qualified` means every Gate C price cell of the row passed against the independent
-Gaussian-transition reference (profiles uniform, desk and sessions-only; eleven spot offsets
-on both sides of each barrier) at the qualified horizon and every longer horizon
-(`quantark/intraday/evidence/gate_c_results.json`):
-
-| Product | Engine | Monitoring | Qualified horizon |
-|---|---|---|---|
-| SnowballOption | SnowballQuadEngineV2 | discrete | 1 s |
-| CashOrNothingDigitalOption | DigitalOptionAnalyticalEngine | terminal | 1 s |
-| BarrierOption (zero carry) | BarrierAnalyticalEngine | continuous | 1 s |
-| OneTouchOption (zero carry) | OneTouchAnalyticalEngine | continuous | 1 s |
-
-PDE and MC routes miss the 1e-6-of-notional price budget at default settings while their
-refinement converges — `supported`, with the per-price status saying so. Timestamp support
-below the qualified horizon does not imply a Greek-accuracy certificate there.
+diagnostics (PDE resolution, MC standard error, theta truncation estimate). Accuracy is not a
+property of a row: it is measured offline (see the last section).
 
 PDE routes report a resolution status with every price: `resolved` needs at least 4 grid
 cells across the diffusion layer `sqrt(W)` to the first event, at least 16 time steps across
 its variance, and a Crank–Nicolson grid-scale mode damped by e^-8 before the valuation; the
 route refines points and steps per day on a clone to reach them. A barrier that enters the
-grid by node overwrite (one-touch, discrete barriers) is `unqualified` unless a node sits on it.
+grid by node overwrite (one-touch, discrete barriers) is `under_resolved` unless a node sits on it.
+The verdict is a diagnostic reported with the price; it never withholds a number.
+
+PDE spot readout uses a local cubic at the requested log spot. The former three-node
+quadratic kept curvature at its nearest node, causing first-order phase oscillations
+under refinement.
 
 ## Greeks
 
@@ -150,14 +142,14 @@ observation.
 - `greek_convention="desk_bump"` — the daily conventions (`bump_envs`): relative central
   spot bumps, one-sided raw vega per `vol_bump` of the trading-quoted surface, one-sided rho
   and dividend rho rescaled to +1%.
-- `greek_convention="point"` — derivatives at the query spot from the route's own evidence:
+- `greek_convention="point"` — derivatives at the query spot by the route's own method:
   QUAD V2 kernel derivative, closed forms (digital; central difference of the barrier closed
-  form), the PDE solver's stencil (`ok` only on a `resolved` grid), paired RQMC for MC
+  form), the PDE solver's stencil (its resolution verdict travels as the reason), paired RQMC for MC
   (RANDOMIZED_QUASI engines with an RQMC session spec; others raise `CapabilityError`).
   Where the price function jumps at the query spot (an unfixed event at the valuation
   instant on its level, a continuous barrier hit there) delta and gamma are `undefined`.
-  A numerical route (QUAD V2, PDE, MC) publishes delta/gamma, and every route its point
-  vega/rho/dividend rho proxies, only inside a Gate C certificate (below).
+  Every route returns the number it computes; the value's diagnostics (`reason`,
+  `error_estimate`, `numerical`) travel with it, and its accuracy is measured offline.
 - `"theta"` follows the convention. Under `desk_bump` it is the declared forward roll
   (`theta_step`, default one hour; `theta_unit` second/minute/hour/day) on the frozen market
   (`roll_context`), including cash paid during the step. Under `point` it is the time
@@ -176,12 +168,12 @@ derivative: every event crossed needs a `Fixing` outcome, and the contract is va
 |---|---|---|
 | delta | per unit spot (derivative) | per unit spot, central relative move `spot_bump` |
 | gamma | per unit spot² (derivative) | per unit spot², central relative move `gamma_spot_bump` |
-| vega | per unit trading-quoted vol (proxy, `unqualified` until demonstrated) | PnL per `+vol_bump` of the trading-quoted surface, one-sided |
-| rho / dividend rho | per unit rate / yield (proxy, `unqualified` until demonstrated) | PnL per +1%, one-sided and rescaled |
+| vega | per unit trading-quoted vol (finite-difference proxy, bump disclosed) | PnL per `+vol_bump` of the trading-quoted surface, one-sided |
+| rho / dividend rho | per unit rate / yield (finite-difference proxy, bump disclosed) | PnL per +1%, one-sided and rescaled |
 | theta | PnL per `theta_unit`, the time derivative (stencil) | PnL per `theta_unit` over the declared forward roll |
 
-Every `GreekValue` carries `status` (`ok`, `undefined`, `unqualified`, `failed`) and, when
-not `ok`, a `reason` and no value. `example/intraday_greeks_demo.py` prints both conventions
+Every `GreekValue` carries `status` (`ok`, `undefined`, `failed`) and, when not `ok`, a
+`reason` and no value. `example/intraday_greeks_demo.py` prints both conventions
 side by side one hour and one second before a fixing, the undefined point Greeks at the
 fixing, the zero delta and non-zero rho of an assumed knock-out paid later, and a
 roll-through-events row.
@@ -193,9 +185,8 @@ roll-through-events row.
 - `spot_curve(engine, request, spots)` resolves ONE context: its confirmed and assumed
   fixings come from the request's own spot and are shared by every point — a curve never
   re-decides an observation at a curve spot. QUAD V2 prepares its operator once over the
-  spots and reads price, delta and gamma from it — under the same certificate as a single
-  point Greek, so a curve at undemonstrated settings reports `unqualified` points; other
-  routes price each spot.
+  spots and reads price, delta and gamma from it, each point with its own per-output
+  `statuses`; other routes price each spot.
 - `aggregate_intraday([(id, quantity, result), ...])` scales price, paid cash and Greeks by
   quantity; the book is provisional if any position is (and names them), and a Greek is
   summed only when every position reports it `ok` under one convention and unit.
@@ -211,7 +202,7 @@ Every limit below raises rather than approximating. None of them is a silent fal
 
 - **Continuous monitoring on QUAD V2.** Its exact continuous-curve classifier does not
   recognize `TradingClockVolSurface`, and its continuous grid builder does not carry the
-  intraday map's session knots. Qualifying it needs an interval survival/crossing operator
+  intraday map's session knots. Supporting it needs an interval survival/crossing operator
   split at every clock and coefficient knot, with its own time-refinement and first-passage
   evidence. Route continuous barriers to PDE or MC.
 - **A closed-form barrier whose coefficients are not provably piecewise.**
@@ -240,44 +231,22 @@ Every limit below raises rather than approximating. None of them is a silent fal
 
 ## What a status does and does not claim
 
-- A route's `numerical["resolution"]` is a RESOLUTION diagnostic — the mesh covered the
-  diffusion layer — never an error budget. Greek status is bound separately to a Gate C
-  CERTIFICATE (`evidence/gate_c_greeks.json`, listed in the capability matrix): product,
-  route, measure, monitoring, the exact variance profile, the engine's accuracy settings
-  (`capability.accuracy_settings`: every params field except resource caps and the QUAD
-  kernel backend, the effective bump configuration, MC method and batching), a measure's own
-  knob (a desk theta's requested step), and a window of consecutive swept horizons with every
-  cell passing. Outside any of those a Greek reports `unqualified` with no value, whatever
-  the mesh did. QUAD V2 at `cells_per_sd=0.1` has the same kernel-derivative evidence as the
-  certified `cells_per_sd=2` and a delta 30% off the reference.
-- Numerical certificates also match the conditional contract and market: payoff terms,
-  remaining events and payments, KI state, pending ledger, curve families and levels,
-  and the session calendar. Historical observations can differ only when they leave the
-  same future claim and state. Spot must lie inside the tested envelope (two standard
-  deviations or ten basis points beyond the barrier range, whichever is wider).
-  Other economics report `unqualified`; a settings match alone is insufficient.
-- A desk bump is exact as an operation on its prices, so its error is the prices' own. It is
-  `ok` when every contributing price is exact (a closed form the route proved exact, a fixed
-  ledger) or when Gate C demonstrated the same finite move; a bump cell the route could not
-  resolve makes it `unqualified` either way.
-- A desk theta is that declared roll and says so. Analytical barrier/touch point theta
-  uses a per-request limit of three second-order stencils on admitted exact prices,
-  inside one event/clock/coefficient segment. It reports `error_estimate` and `error_budget`
-  including a floating-point cancellation floor, and declines an unresolved limit.
-  Other point theta proxies still need the matching Gate C certificate.
-- Swept today (see the packaged evidence and generated matrix for horizon windows,
-  profiles desk and sessions-only): QUAD V2 snowballs
-  and analytical digitals for every point and desk measure; PDE and MC for point and desk
-  delta/gamma only. A desk vega, rho, dividend rho or theta on PDE or MC is therefore
-  `unqualified` — for MC because the summed standard errors of the two prices of such a move
-  alone exceed its budget at the certified path count. The matrix lists what passed.
+- `ok`: a finite result was computed by the declared algorithm and convention. It is not a
+  per-request accuracy claim. A route's `numerical["resolution"]` (`resolved` /
+  `under_resolved` / `deterministic`), an MC `std_error` and a theta `error_estimate` are
+  diagnostics that travel with the number.
+- `undefined`: the requested derivative does not exist at this instant and spot (a payoff
+  discontinuity of an unfixed event at the query spot; a theta at an event boundary).
+- `failed`: the computation could not produce the result (a non-finite output, no admissible
+  stencil step, a bump cell whose pricing raised). Too few RQMC batches for a standard error
+  is not a failure: the estimate is reported `ok` and the reason says the error is unavailable.
 
-The longer-horizon fixture has an explicit long first observation period followed by
-monthly fixings. It shares the original fixture's conditional future claim after five
-confirmed fixings, permitting a sweep beyond 29 days without future fixing history.
-Certificate aggregation requires every offset/barrier cell at each included horizon;
-partial or interrupted runs cannot create a passing horizon.
+Each requested output carries its own status: a finite delta is reported `ok` beside a gamma
+that `failed`.
 
-PDE spot readout uses a local cubic at the requested log spot. The former three-node
-quadratic kept curvature at its nearest node, causing first-order phase oscillations
-under refinement. This correction does not itself certify the default PDE mesh.
+Accuracy is certified offline. The daily-KI snowball study
+`example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml` measures QUAD V2 and PDE
+against a paired-RQMC reference on PV, desk and point spot Greeks and desk theta; its banked
+certificate lives under `docs/modelvalidation/certificates/snowball-intraday-daily-ki-bsm/`.
+A production release ships an engine only for the studies that admit its shipped
+configuration; nothing in this package reads that decision.

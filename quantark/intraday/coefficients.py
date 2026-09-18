@@ -14,7 +14,7 @@ polynomial of degree d equals c * t on a piece iff it matches at d + 1 points of
 it, so sampling at every declared break (plus the midpoint of every piece whose
 law is quadratic; the origin matches for free, since every cumulative quantity
 is zero there) is then a proof rather than a spot check. A family that declares
-neither is UNQUALIFIED -- the caller refuses instead of guessing, because a
+neither is INADMISSIBLE -- the caller refuses instead of guessing, because a
 wrapper or an interpolation this module has not seen can bend the coefficient
 anywhere between two matching samples.
 

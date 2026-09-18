@@ -4,8 +4,8 @@
   silent ``None``.
 - ``spot_curve``: ONE resolved context. Its confirmed and assumed fixings come from the request's base snapshot and
   are shared by every point — a curve never rebuilds an assumption from a curve spot. QUAD V2 prepares the operator
-  once over the declared spots and reads price, delta and gamma from it, under the same Gate C certificate as a
-  single point Greek; other routes price each spot on the same context with only the spot moved.
+  once over the declared spots and reads price, delta and gamma from it, each point with its own per-output
+  statuses; other routes price each spot on the same context with only the spot moved.
 - ``aggregate_intraday``: quantities scale prices, paid cash and Greeks; the book is provisional if any position is,
   and a Greek is summed only when every position reports it ``ok`` under one convention and unit.
 """

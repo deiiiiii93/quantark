@@ -12,11 +12,10 @@ marches in calendar time with per-step variance dW_k, so
   mu = dW_k / dx_min^2, which tends to -1 for Crank-Nicolson when mu >> 1; the
   implicit (Rannacher) steps of the solver's own schedule count at theta = 1.
 
-Below any floor the price can still be computed, but no accuracy claim can be
-attached to it. W == 0 exactly is a deterministic
-interval: there is no layer at all (the route's accuracy is then a matter of
-barrier/spot placement on the grid, judged by Gate C, not of diffusion
-resolution).
+Below any floor the price is still computed and reported ``under_resolved``: a
+diagnostic, never a gate. W == 0 exactly is a deterministic interval: there is
+no layer at all (the route's accuracy is then a matter of barrier/spot placement
+on the grid, measured offline, not of diffusion resolution).
 """
 from __future__ import annotations
 

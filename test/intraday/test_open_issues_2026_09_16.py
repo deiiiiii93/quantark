@@ -120,24 +120,6 @@ def test_long_gap_fixture_has_no_future_history_or_hidden_fixings(days):
     assert ctx.numerical.lifecycle_state.alive
 
 
-
-def test_long_gap_and_monthly_history_have_the_same_conditional_economics():
-    from quantark.intraday.capability import economic_identity
-    a, _ = build_context(C.Cell("snowball_discrete_ki", "quad_v2", "desk", timedelta(days=29), "bp+1", "ki"))
-    b, _ = build_context(C.Cell("snowball_long_gap", "quad_v2", "desk", timedelta(days=35), "sd-1", "ko"))
-    assert economic_identity(a) == economic_identity(b)
-
-
-def test_economic_identity_reads_the_delivered_market_of_a_bump_context():
-    from quantark.intraday.capability import economic_identity
-    from quantark.intraday.greeks import point_proxy_env, with_pricing_env
-    ctx, _ = build_context(C.Cell("snowball_discrete_ki", "quad_v2", "desk", timedelta(hours=1), "bp+1", "ki"))
-    bumped = with_pricing_env(ctx, point_proxy_env(ctx, "rho", 0.01, 1.0), "rate")
-    assert bumped.request is ctx.request
-    assert economic_identity(bumped) != economic_identity(ctx)
-
-
-
 @pytest.mark.parametrize("convention", ["point", "desk_bump"])
 def test_monthly_contract_immediately_after_a_fixing_is_inside_the_extended_window(convention):
     from quantark.asset.equity.engine.quad.v2 import SnowballQuadEngineV2
