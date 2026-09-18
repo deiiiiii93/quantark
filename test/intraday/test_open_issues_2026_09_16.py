@@ -12,8 +12,8 @@ from quantark.intraday import resolve_context, value_intraday
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.intraday.timestamp import SECONDS_PER_YEAR
 from intraday.conftest import SHANGHAI, flat_env
-from intraday.gate_c import cells as C
-from intraday.gate_c.harness import build_context
+from intraday.controls import fixtures as C
+from intraday.controls.fixtures import build_context
 
 
 @pytest.mark.parametrize("offset", [-0.47, -0.05, 0.0, 0.05, 0.47])

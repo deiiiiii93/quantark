@@ -15,7 +15,7 @@ from quantark.intraday.profile import VarianceProfile
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.util.enum.option_enums import BarrierDirection, BarrierType, ObservationType, OptionType, TouchType
 from intraday.conftest import SHANGHAI, flat_env
-from intraday.reference.gaussian_reference import barrier_zero_carry
+from intraday.controls.gaussian_control import barrier_zero_carry
 
 TS = datetime(2026, 9, 15, 10, 0, tzinfo=SHANGHAI)          # Tuesday
 FRIDAY = datetime(2026, 9, 18)                              # same trading week: no weekend inside

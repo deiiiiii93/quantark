@@ -13,7 +13,7 @@ from quantark.intraday.fixings import Fixing
 from quantark.intraday.profile import VarianceProfile
 from quantark.intraday.request import IntradayValuationRequest
 from intraday.conftest import SHANGHAI, dated_snowball, digital, flat_env
-from intraday.reference.gaussian_reference import (
+from intraday.controls.gaussian_control import (
     PLJ, barrier_zero_carry, expect, reference_digital, reference_snowball, splice,
 )
 
@@ -102,7 +102,7 @@ def test_reference_converges_and_reports_uncertainty(sse_calendar, sse_sessions,
 
 def test_reference_does_not_depend_on_call_order(sse_calendar, sse_sessions, desk):
     # The global sweep is cached across horizons; its cached event times must never leak into another context.
-    from intraday.reference import gaussian_reference
+    from intraday.controls import gaussian_control as gaussian_reference
     kos = [e for e in _snow_ctx(sse_calendar, sse_sessions, desk, datetime(2026, 9, 15, tzinfo=SHANGHAI)).timeline.events
            if e.kind is EventKind.KO]
     fixings = tuple(Fixing(k.timestamp, 100.0) for k in kos[:5])
@@ -120,7 +120,7 @@ def test_reference_does_not_depend_on_call_order(sse_calendar, sse_sessions, des
 def test_a_bumped_market_never_reuses_the_unbumped_sweep(sse_calendar, sse_sessions, desk):
     # A greek bump replaces only ctx.pricing_env (the request is shared); a rate or dividend move leaves the sweep's
     # domain unchanged, so a cache keyed on the REQUEST's market served the unbumped sweep beyond the first interval.
-    from intraday.reference import gaussian_reference
+    from intraday.controls import gaussian_control as gaussian_reference
     from quantark.asset.equity.riskmeasures.greeks import bump_envs
     from quantark.intraday.greeks import with_pricing_env
     kos = [e for e in _snow_ctx(sse_calendar, sse_sessions, desk, datetime(2026, 9, 15, tzinfo=SHANGHAI)).timeline.events
@@ -174,7 +174,7 @@ def test_a_bumped_flat_market_shares_its_sweep_across_horizons(sse_calendar, sse
     # A bumped context's numerical market wraps its surface in the intraday clock, whose repr carries the valuation
     # anchor. Keyed on that, every horizon re-solved the same bumped sweep (the 2026-09-17 daily-KI pilot: 27 of a warm
     # group's 36 sweeps). The sweep is anchor-free for a time-homogeneous market, so equal bumped markets share it.
-    from intraday.reference import gaussian_reference
+    from intraday.controls import gaussian_control as gaussian_reference
     from quantark.asset.equity.riskmeasures.greeks import bump_envs
     from quantark.intraday.greeks import with_pricing_env
     kos = [e for e in _snow_ctx(sse_calendar, sse_sessions, desk, datetime(2026, 9, 15, tzinfo=SHANGHAI)).timeline.events

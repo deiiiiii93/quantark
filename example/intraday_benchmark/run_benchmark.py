@@ -23,7 +23,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO, "test"))
 
 from intraday.conftest import SHANGHAI, dated_phoenix, dated_snowball, digital, flat_env  # noqa: E402
-from intraday.gate_c import cells as C  # noqa: E402
+from intraday.controls import fixtures as C  # noqa: E402
 from quantark.execution.manifest import platform_tag  # noqa: E402
 from quantark.intraday import (EventKind, Fixing, resolve_context, spot_curve, value_intraday,  # noqa: E402
                                value_intraday_many)

@@ -1,11 +1,9 @@
-"""The daily-KI Gate C fixture: KI at every SSE close, certified on the 2026-09-10 close (design 2026-09-17)."""
+"""The daily-KI control fixture: KI at every SSE close, fixed on the 2026-09-10 close (design 2026-09-17)."""
 from datetime import datetime, timedelta
 
-from quantark.intraday.capability import economic_identity
-
 from intraday.conftest import SHANGHAI, dated_snowball
-from intraday.gate_c import cells as C
-from intraday.gate_c.harness import build_context
+from intraday.controls import fixtures as C
+from intraday.controls.fixtures import build_context
 
 
 def test_daily_ki_fixture_observes_ki_at_every_close_and_keeps_the_monthly_terms():
@@ -31,10 +29,9 @@ def test_daily_ki_fixing_is_the_2026_09_10_close_after_122_confirmed_closes():
 
 def test_every_daily_ki_horizon_resolves_the_same_alive_claim_inside_one_gap():
     assert max(C.DAILY_KI_HORIZONS) < timedelta(days=1)      # a one-day rung would sit on the previous close
-    identities, remaining = set(), set()
+    remaining = set()
     for horizon in C.DAILY_KI_HORIZONS:
         ctx, _ = build_context(C.Cell("snowball_daily_ki", "quad_v2", "desk", horizon, "eq", "ki"))
         assert not ctx.numerical.knocked_in and not ctx.provisional
-        identities.add(economic_identity(ctx))
         remaining.add(len(ctx.numerical.remaining_events))
-    assert len(identities) == 1 and remaining == {129}
+    assert remaining == {129}

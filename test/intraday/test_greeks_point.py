@@ -18,8 +18,8 @@ from quantark.intraday.greeks import POINT_PROXY_REASON
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from intraday.conftest import SHANGHAI, dated_snowball, digital, flat_env
-from intraday.reference import budgets
-from intraday.reference.gaussian_reference import reference_digital, reference_snowball
+from intraday.controls import tolerances as budgets
+from intraday.controls.gaussian_control import reference_digital, reference_snowball
 
 T0 = datetime(2026, 3, 16)
 QUAD = SnowballQuadEngineV2()

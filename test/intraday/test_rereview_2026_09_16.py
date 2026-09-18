@@ -136,7 +136,7 @@ def test_r2_the_same_pillars_log_linear_are_a_flat_forward(sse_sessions, desk):
 
 # --- R3: a desk move of inexact prices needs a certificate; exact prices do not ------------------------------------
 def test_r3_a_resolved_pde_desk_greek_is_not_a_certified_one():
-    from intraday.gate_c.cells import Cell
+    from intraday.controls.fixtures import Cell
     from intraday.gate_c.harness import build_context, engine_for
     # the review's Gate C cell: a resolved 418-point mesh whose desk gamma is 35x its budget off the reference
     cell = Cell("snowball_discrete_ki", "pde", "desk", timedelta(hours=6), "sd+2", "ko")

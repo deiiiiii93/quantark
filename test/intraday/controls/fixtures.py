@@ -1,9 +1,15 @@
-"""Gate C cell catalogue: time-to-fixing ladder x spot offsets x profiles x (product, engine, barrier)."""
+"""Fixtures of the independent numerical controls: products, clocks, markets, confirmed history, cell contexts.
+
+A ``Cell`` names one (product, engine, profile, time-to-fixing, spot offset, barrier) point; ``build_context``
+resolves it. The controls in this package compare the runtime with independent implementations on these
+points as regression tests. They license nothing: accuracy is certified offline by modelvalidation.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
+from math import exp, sqrt
 
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord
@@ -17,31 +23,17 @@ SHANGHAI = timezone(timedelta(hours=8))
 T0 = datetime(2026, 3, 16)
 SHORT_EXPIRY = datetime(2026, 9, 16)          # the snowball's sixth fixing day: every product's ladder ends at its 15:00 close
 
-HORIZONS = (timedelta(days=1), timedelta(hours=6), timedelta(hours=1), timedelta(minutes=15), timedelta(minutes=5),
-            timedelta(minutes=1), timedelta(seconds=10), timedelta(seconds=1))
-#: The daily-KI fixture's certified close and its ladder. Every rung sits inside the 24 h gap after the previous
-#: close (2026-09-09 15:00): a one-day rung would value exactly at that close, itself an event.
+#: The daily-KI fixture's close and its time-to-fixing ladder. Every rung sits inside the 24 h gap after the
+#: previous close (2026-09-09 15:00): a one-day rung would value exactly at that close, itself an event.
 DAILY_KI_DAY = datetime(2026, 9, 10)
 DAILY_KI_HORIZONS = (timedelta(hours=6), timedelta(hours=1), timedelta(minutes=15), timedelta(minutes=5),
                      timedelta(minutes=1), timedelta(seconds=10), timedelta(seconds=1))
-SPOT_OFFSETS = ("bp-10", "bp-1", "bp+1", "bp+10", "sd-2", "sd-1", "sd-0.5", "sd+0.5", "sd+1", "sd+2", "eq")
-PROFILES = ("uniform", "desk", "sessions_only")
-PRODUCTS = ("snowball_discrete_ki", "digital", "barrier_uo_zero_carry", "one_touch_zero_carry")
-ENGINES = {
-    "snowball_discrete_ki": ("quad_v2", "pde", "mc_rqmc"),
-    "digital": ("analytical", "mc_rqmc"),
-    "barrier_uo_zero_carry": ("analytical", "pde", "mc_rqmc"),
-    "one_touch_zero_carry": ("analytical", "pde"),
-}
 BARRIERS = {"snowball_discrete_ki": ("ko", "ki"), "digital": ("strike",), "barrier_uo_zero_carry": ("ko",),
             "one_touch_zero_carry": ("ko",), "snowball_long_gap": ("ko", "ki"), "snowball_daily_ki": ("ko", "ki")}
-#: Capability-matrix monitoring column each catalogued product falls in. A Greek
-#: demonstration is scoped to it: a certificate earned on discrete fixings says
-#: nothing about the same product under a continuously observed barrier.
+#: Capability-matrix monitoring column each product falls in.
 MONITORING = {"snowball_discrete_ki": "discrete", "digital": "terminal",
               "barrier_uo_zero_carry": "continuous", "one_touch_zero_carry": "continuous",
               "snowball_long_gap": "discrete", "snowball_daily_ki": "discrete"}
-FAST_HORIZON, FAST_OFFSET, FAST_PROFILE = timedelta(hours=1), "sd+1", "desk"
 
 
 @dataclass(frozen=True)
@@ -57,14 +49,6 @@ class Cell:
     def id(self) -> str:
         return f"{self.product}-{self.engine}-{self.profile}-{int(self.horizon.total_seconds())}s-{self.offset}-{self.barrier}"
 
-
-def all_cells():
-    return [Cell(p, e, prof, h, o, b) for p in PRODUCTS for e in ENGINES[p] for prof in PROFILES for h in HORIZONS
-            for o in SPOT_OFFSETS for b in BARRIERS[p]]
-
-
-def fast_cells():
-    return [Cell("snowball_discrete_ki", e, FAST_PROFILE, FAST_HORIZON, FAST_OFFSET, "ko") for e in ENGINES["snowball_discrete_ki"]]
 
 
 @lru_cache(maxsize=None)
@@ -99,7 +83,7 @@ def product(name: str):
         return prod
     if name == "snowball_daily_ki":
         # The monthly fixture's terms with KI 75 observed at EVERY SSE close after the trade date: the contract
-        # desks book. Its remaining events differ from the monthly fixture's, so it earns its own certificate.
+        # desks book. Its remaining events differ from the monthly fixture's, so it has its own study.
         prod = dated_snowball(sse().calendar, T0)
         cal, maturity = sse().calendar, prod.exercise_date
         closes = [d for d in (T0 + timedelta(days=k) for k in range(1, (maturity - T0).days + 1)) if cal.is_business_day(d)]
@@ -150,3 +134,28 @@ def fixing_and_history(name: str):
 
 def barrier_level(cell: Cell) -> float:
     return {"ko": 103.0, "ki": 75.0, "strike": 100.0}[cell.barrier]
+
+
+def build_context(cell: Cell):
+    """(resolved context, sqrt of the variance to the first event) of one cell, at its spot offset from its barrier."""
+    from intraday.conftest import flat_env
+    fixing_ts, fixings = fixing_and_history(cell.product)
+    ts = fixing_ts - cell.horizon
+    prod, prof, (r, q) = product(cell.product), profile(cell.profile), market(cell.product)
+    barrier = barrier_level(cell)
+    probe = resolve_context(IntradayValuationRequest(product=prod, pricing_env=flat_env(ts, spot=barrier, r=r, q=q),
+                                                     session_calendar=sse(), variance_profile=prof, fixings=fixings))
+    tau = probe.numerical.maturity_tau if not cell.product.startswith("snowball_") else min(
+        t for t in probe.numerical.event_taus.values() if t > 0.0)
+    sw = sqrt(max(float(probe.pricing_env.vol_surface.total_variance(100.0, tau, barrier)), 0.0))
+    kind, _, amount = cell.offset.partition("+") if "+" in cell.offset else cell.offset.partition("-")
+    sign = 1.0 if "+" in cell.offset else -1.0
+    if cell.offset == "eq":
+        spot = barrier
+    elif kind == "bp":
+        spot = barrier * (1.0 + sign * float(amount) * 1e-4)
+    else:
+        spot = barrier * exp(sign * float(amount) * sw)
+    ctx = resolve_context(IntradayValuationRequest(product=prod, pricing_env=flat_env(ts, spot=spot, r=r, q=q),
+                                                   session_calendar=sse(), variance_profile=prof, fixings=fixings))
+    return ctx, sw
