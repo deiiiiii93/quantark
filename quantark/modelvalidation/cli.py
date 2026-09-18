@@ -14,6 +14,7 @@ problem and deserves a different signal.
 from __future__ import annotations
 
 import argparse
+import datetime
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
@@ -22,6 +23,7 @@ from quantark.util.exceptions import QuantArkException
 from quantark.modelvalidation import builders  # noqa: F401 - registers builtin builders
 from quantark.modelvalidation.amendment import amend, validate_parent
 from quantark.modelvalidation.anchors import extract_anchors
+from quantark.modelvalidation.banking import bank_certificate
 from quantark.modelvalidation.evidence import atomic_write_json
 from quantark.modelvalidation.pipeline import certify
 from quantark.modelvalidation.registry import list_builders
@@ -70,6 +72,17 @@ def _build_parser() -> argparse.ArgumentParser:
     anchors.add_argument("certificate", help="path to a certificate.json")
     anchors.add_argument(
         "--out", default=None, help="anchor file (default: anchors.json beside the certificate)"
+    )
+
+    bank = subparsers.add_parser(
+        "bank", help="copy a finished certification into the evidence bank (never overwrites)"
+    )
+    bank.add_argument("run_dir", help="the run directory a certification wrote (holds certificate.json)")
+    bank.add_argument(
+        "--bank", default="docs/modelvalidation/certificates", help="bank root (default: docs/modelvalidation/certificates)"
+    )
+    bank.add_argument(
+        "--date", default=None, help="bank date YYYY-MM-DD (default: today); a same-day repeat takes a suffix"
     )
 
     subparsers.add_parser("list", help="list registered builders and known studies")
@@ -147,6 +160,15 @@ def _cmd_anchors(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_bank(args: argparse.Namespace) -> int:
+    date = args.date or datetime.date.today().isoformat()
+    # The study is always re-loaded from the certificate's own source text, never taken from the caller.
+    dest = bank_certificate(args.run_dir, args.bank, date)
+    print(f"Banked {args.run_dir} -> {dest}")
+    print(f"The local checkout excludes docs/: stage it with  git add -f {dest}")
+    return 0
+
+
 def _cmd_list(args: argparse.Namespace) -> int:
     print("Registered builders:")
     for kind, names in sorted(list_builders().items()):
@@ -170,6 +192,7 @@ _COMMANDS = {
     "run": _cmd_run,
     "amend": _cmd_amend,
     "anchors": _cmd_anchors,
+    "bank": _cmd_bank,
     "list": _cmd_list,
 }
 

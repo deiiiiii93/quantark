@@ -15,6 +15,7 @@ from quantark.modelvalidation.anchors import (
     extract_anchors,
     resolve_supersession,
 )
+from quantark.modelvalidation.banking import bank_certificate
 from quantark.modelvalidation.pipeline import Certificate, certify, validate_payload
 from quantark.modelvalidation.registry import register_builder
 from quantark.modelvalidation.study import (
@@ -49,6 +50,7 @@ __all__ = [
     "QuantityDefinition",
     "SamplingPolicy",
     "amend",
+    "bank_certificate",
     "batch_seed",
     "assert_anchors",
     "resolve_supersession",
