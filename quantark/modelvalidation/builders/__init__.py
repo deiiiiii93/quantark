@@ -13,6 +13,7 @@ from quantark.modelvalidation.builders import equity_snowball  # noqa: F401
 from quantark.modelvalidation.builders import equity_snowball_localvol  # noqa: F401
 from quantark.modelvalidation.builders import equity_snowball_vol  # noqa: F401
 from quantark.modelvalidation.builders import european_selftest  # noqa: F401
+from quantark.modelvalidation.builders import intraday_common  # noqa: F401
 
 __all__: list[str] = [
     "equity_ko_reset",
@@ -21,4 +22,5 @@ __all__: list[str] = [
     "equity_snowball_localvol",
     "equity_snowball_vol",
     "european_selftest",
+    "intraday_common",
 ]
