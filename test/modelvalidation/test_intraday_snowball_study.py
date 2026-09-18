@@ -7,8 +7,9 @@ import pytest
 from quantark.modelvalidation.anchors import extract_anchors
 from quantark.modelvalidation.builders.intraday_common import build_request, make_snowball
 from quantark.modelvalidation.evidence import identity_hash
-from quantark.modelvalidation.pipeline import certify, validate_payload
+from quantark.modelvalidation.pipeline import certify, quick_policy, validate_payload
 from quantark.modelvalidation.reference import reference_targets
+from quantark.modelvalidation.study import reference_kind
 from quantark.modelvalidation.yaml_loader import load_study
 from quantark.intraday.context import resolve_context
 from quantark.intraday.timestamp import to_utc
@@ -39,7 +40,8 @@ def test_study_declares_schema_2_with_the_frozen_budgets(study):
     assert (qb["desk_theta"].abs_floor, qb["desk_theta"].rel) == (1e-6, 1e-4)
     assert study.bounds.cell == 1.0 and study.bounds.mean_signed_bias == 0.2
     assert study.bounds.se_budget_fraction == 0.25 and study.bounds.envelope_fraction == 0.5
-    assert study.sampling.min_batches == study.sampling.max_batches           # frozen budget, no stopping rule
+    assert study.bounds.radius_budget_fraction == 0.25                        # the deterministic reference's allowance
+    assert study.sampling.min_batches == study.sampling.max_batches == 32     # frozen budget, no stopping rule
     assert study.scale.notional == 100.0 and study.scale.spot_scale == 100.0
 
 
@@ -51,10 +53,15 @@ def test_case_list_is_the_declared_one(study):
     assert on_barrier.expected == {"point_delta": "undefined", "point_gamma": "undefined", "desk_theta": "undefined"}
 
 
-def test_reference_targets_and_candidate_bumps_agree(study):
+def test_the_reference_is_deterministic_targets_every_quantity_and_is_qualified_by_rqmc(study):
+    assert reference_kind(study.reference) == "deterministic" and study.reference.levels == (4001, 8001, 16001, 32001)
     targets = reference_targets(study.reference, study.quantities)
-    assert targets["point_delta"] is None and targets["point_gamma"] is None
+    assert all(targets[q] is not None for q in study.quantities)              # the point Greeks are certified here
     assert targets["desk_delta"]["bump"] == study.sampling.bump
+    qualifier = study.qualification.builder
+    assert reference_kind(qualifier) == "stochastic" and study.qualification.max_z == 4.0
+    assert qualifier.config()["engine"] == "SnowballMCEngine"
+    assert reference_targets(qualifier, study.quantities)["point_gamma"] is None   # it qualifies PV and the desk moves only
     for candidate in study.candidates:
         assert candidate.params()["desk_bump"] == study.sampling.bump
 
@@ -99,26 +106,34 @@ def test_the_desk_lunch_carries_variance_and_the_sessions_only_lunch_does_not(st
 
 def test_quick_certification_runs_end_to_end(tmp_path_factory, study):
     by_name = {case.name: case for case in study.cases}
-    small = dataclasses.replace(
-        study, cases=(by_name["ordinary"], by_name["on_ki_barrier_at_close"]),
-        sampling=dataclasses.replace(study.sampling, paths_per_batch=2048, min_batches=2, max_batches=2),
-    )
-    certificate = certify(small, out_dir=tmp_path_factory.mktemp("intraday"))
+    small = dataclasses.replace(study, cases=(by_name["ordinary"], by_name["on_ki_barrier_at_close"]))
+    certificate = certify(small, out_dir=tmp_path_factory.mktemp("intraday"), quick=True)
     payload = certificate.payload
     validate_payload(payload)
     assert set(payload["decisions"]) == set(CANDIDATES)
-    # Review R10: the reference ran under the policy the payload records, not the study's original one
-    assert payload["study"]["sampling"]["paths_per_batch"] == 2048
-    bound = small.reference.bind(small.sampling)
+    # Review R10: every arm ran under the policy the payload records -- the quick one, wiring ladder included
+    sampling = quick_policy(small.sampling)
+    assert payload["study"]["sampling"]["paths_per_batch"] == sampling.paths_per_batch == 4096
+    bound = small.reference.bind(sampling, quick=True)
+    qualifier = small.qualification.builder.bind(sampling)
+    assert payload["contract"]["reference_kind"] == "deterministic"
+    assert payload["contract"]["reference_error_model"]["levels"] == [251, 501, 1001, 2001]
     for case in small.cases:
-        assert payload["references"][case.name]["identity_hash"] == identity_hash(bound.identity(case))
-    assert payload["study"]["uncertified_quantities"] == ["point_delta", "point_gamma"]
+        block = payload["references"][case.name]
+        assert block["kind"] == "deterministic" and block["identity_hash"] == identity_hash(bound.identity(case))
+        assert payload["qualification"][case.name]["identity_hash"] == identity_hash(qualifier.identity(case))
+        assert payload["qualification"][case.name]["batches"] == sampling.max_batches
+    assert set(payload["qualification"]["ordinary"]["checks"]) == {"pv", "desk_delta", "desk_gamma", "desk_theta"}
+    assert set(payload["qualification"]["on_ki_barrier_at_close"]["checks"]) == {"pv", "desk_delta", "desk_gamma"}
+    assert set(payload["references"]["on_ki_barrier_at_close"]["undefined"]) == {"desk_theta", "point_delta", "point_gamma"}
+    assert payload["study"]["uncertified_quantities"] == []
     assert not [c for c in payload["cells"] if c["verdict"] == "ERROR"], [c["error"] for c in payload["cells"] if c["verdict"] == "ERROR"]
     for cell in payload["cells"]:
-        if cell["quantity"] in ("point_delta", "point_gamma") and cell["case"] == "ordinary":
-            assert cell["kind"] == "untargeted" and cell["verdict"] == "UNRESOLVED" and "no estimator" in cell["reason"]
+        if cell["case"] == "ordinary":
+            assert cell["kind"] == "numeric" and cell["reference"]["kind"] == "deterministic"
+            assert cell["gate"] is not None and cell["gate"]["se_c"] is None and cell["gate"]["radius_c"] is not None
         if cell["case"] == "on_ki_barrier_at_close" and cell["quantity"] in ("point_delta", "point_gamma", "desk_theta"):
-            assert cell["kind"] == "semantic" and cell["verdict"] == "PASS"
+            assert cell["kind"] == "semantic" and cell["verdict"] == "PASS" and cell["reference"]["value"] is None
     assert (certificate.path.parent / "report.md").exists()
     anchors = extract_anchors(payload, small)["anchors"]
     assert {a["candidate"] for a in anchors} == set(CANDIDATES)

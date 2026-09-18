@@ -2,25 +2,32 @@
 #
 # Daily-KI snowball on the intraday clock: the first schema-2 study.
 #
-# Two intraday routes -- QUAD V2 and the two-surface PDE -- are certified against one
-# paired-RQMC reference on the runtime's own resolved context: PV, desk delta/gamma, desk
-# theta, and the point delta/gamma the routes return. The reference declares no point
-# estimator (a 1% bump one second before a fixing spans about 112 diffusion widths), so
-# the point cells are UNRESOLVED by construction, reported as such, listed in the
-# certificate as uncertified quantities, and kept out of the candidate decision; see the
-# spec, sections 6.1 and 7.2. Only a later revision that declares a reference able to
-# measure them can change that.
+# Two intraday routes -- QUAD V2 and the two-surface PDE -- are certified on the runtime's own
+# resolved context: PV, desk delta/gamma, desk theta, and the point delta/gamma the routes return.
 #
-# Budgets are the frozen engineering tolerances (spec 7.1): PV 1e-6 of notional; delta
-# 1e-5 floor / 1e-4 relative on delta*S/N; gamma 1e-4 / 1e-3 on gamma*S^2/N; theta per
-# hour 1e-6 / 1e-4 on theta/N. Gate values are fractions of each cell's own budget, so
-# the shared bounds are cell 1.0 and mean signed bias 0.2. S is the recorded spot_scale.
+# The reference is DETERMINISTIC (study revision 2026-09-18, spec section 6.1's escape clause). The
+# pilot showed that the RQMC arm cannot resolve these budgets: its standard errors sit 200-700x
+# above a quarter of each cell's budget, and its measured convergence is N^-0.35..-0.5 across the
+# payoff jumps, so no affordable path count closes the gap. The reference is therefore the
+# engine-independent Gaussian-transition solver on a nested refinement ladder. It states a value
+# and an error RADIUS per quantity (never a standard error), including the exact point Greeks,
+# so the point cells are certified here too. The RQMC arm stays in the study as the QUALIFIER:
+# it simulates every case, and the deterministic value must sit within max_z of its standard
+# errors plus the reference's radius, or the case is unresolved whatever the candidate says.
 #
-# Sampling is a FROZEN budget (min_batches == max_batches): the batch count is chosen by
-# the independent pilot in the implementation plan, Task 17, and recorded there. Seeds are
-# per-case substreams (schema 2's default), so cases share no scramble and neither does the pilot.
+# Budgets are the frozen engineering tolerances (spec 7.1), unchanged: PV 1e-6 of notional; delta
+# 1e-5 floor / 1e-4 relative on delta*S/N; gamma 1e-4 / 1e-3 on gamma*S^2/N; theta per hour
+# 1e-6 / 1e-4 on theta/N. Gate values are fractions of each cell's own budget, so the shared
+# bounds are cell 1.0 and mean signed bias 0.2. S is the recorded spot_scale. The reference's
+# radius may use at most a quarter of a cell's budget (radius_budget_fraction).
 #
-# This is an offline study (hours). Run it with:
+# Sampling is the qualifier's FROZEN budget (min_batches == max_batches), chosen from the
+# independent pilot (seed 20260917): 32 replicates, because few-replicate standard errors of a
+# scrambled-Sobol estimate understate its error across payoff jumps, and 32768 paths each, where
+# the pilot's one 3.2-sigma disagreement (near_ko_on_ko_day_1s desk delta at 2048 paths) fell to
+# 1.3 sigma. Seeds are per-case substreams, so cases share no scramble and neither does the pilot.
+#
+# This is an offline study (hours: the ladder's finest level dominates). Run it with:
 #   python -m quantark.modelvalidation run example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml --quick
 #   python -m quantark.modelvalidation run example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml --out output/modelvalidation
 
@@ -43,11 +50,12 @@ bounds:
   se_budget_fraction: 0.25
   interval_k: 2.0
   envelope_fraction: 0.5
+  radius_budget_fraction: 0.25   # the deterministic reference's radius, as a bound (interval_k never multiplies it)
 
-sampling:
-  paths_per_batch: 65536
-  min_batches: 8          # placeholder until Task 17 freezes the pilot's choice
-  max_batches: 8
+sampling:                 # the qualifying RQMC arm; the deterministic reference reads only the bump
+  paths_per_batch: 32768
+  min_batches: 32
+  max_batches: 32
   seed: 20260918
   bump: 0.01
 
@@ -83,8 +91,15 @@ context:
     history_level: 100.0                     # every earlier observation fixed at 100
 
 reference:
+  builder: equity.snowball.intraday.gaussian
+  # Nested ladder, each level halving the log-spot spacing. With 16001 as the finest level two PV cells
+  # (the lunch-break pair) held a radius of twice their allowance; one more doubling quarters it.
+  params: {points: [4001, 8001, 16001, 32001], width_std: 8.0}
+
+reference_qualification:
   builder: equity.snowball.intraday.mc_rqmc
   params: {}
+  max_z: 4.0
 
 candidates:
   - builder: equity.snowball.intraday.quad_v2
@@ -143,6 +158,6 @@ cases:
   - {name: uniform_profile, environment: {spot: 75.2}, context: {profile: uniform}}
   - {name: sessions_only_profile, environment: {spot: 75.2}, context: {profile: sessions_only}}
   # At the close with the spot exactly on the barrier, under BEFORE: the point derivatives and a local theta
-  # do not exist. The candidate must say so; the reference's values here are recorded and never gated.
+  # do not exist. The candidate must say so, and the reference records them as undefined.
   - {name: on_ki_barrier_at_close, environment: {spot: 75.0}, context: {valuation: "2026-09-10T15:00:00+08:00"},
      expect: {point_delta: undefined, point_gamma: undefined, desk_theta: undefined}}
