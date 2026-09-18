@@ -42,6 +42,54 @@ def _first_line(text: str) -> str:
     return lines[-1] if lines else _NA
 
 
+def _reference_spread(reference):
+    """A cell reference's uncertainty: the radius of a deterministic value, else the standard error."""
+    return reference.get("radius") if reference.get("kind") == "deterministic" else reference["se"]
+
+
+def _deterministic_reference_section(payload) -> list:
+    """The deterministic reference: its declared error model, each case's radii, and the qualifying arm's checks."""
+    contract = payload["contract"]
+    parts = ["## Deterministic reference", ""]
+    parts.append("The reference is a deterministic solve. Its uncertainty is a declared error radius from a refinement "
+                 "ladder, not a standard error; a radius consumes the budget as a bound and radii add linearly across cells.")
+    parts.append("")
+    parts.append(_table(["error model", "value"], [[str(k), str(v)] for k, v in sorted(contract["reference_error_model"].items())]))
+    parts.append("")
+    rows = []
+    for case, block in sorted(payload["references"].items()):
+        if "error" in block:
+            rows.append([case, _first_line(block["error"]), _NA])
+            continue
+        rows.append([case, ", ".join(f"{q}: {_fmt(r, 3)}" for q, r in sorted(block["radii"].items())),
+                     ", ".join(f"{q} ({why})" for q, why in sorted(block["undefined"].items())) or "none"])
+    parts.append(_table(["case", "radii (raw)", "undefined here"], rows))
+    parts.append("")
+    qualification = payload.get("qualification")
+    if qualification is None:
+        parts.append("No qualifying arm was declared.")
+        parts.append("")
+        return parts
+    policy = contract["qualification"]
+    parts.append("## Reference qualification")
+    parts.append("")
+    parts.append(f"An independent stochastic arm simulates every case. The deterministic value must sit within "
+                 f"{_fmt(policy['max_z'])} of its standard errors plus the reference's radius; a case that does not is "
+                 "not qualified and its cells are unresolved.")
+    parts.append("")
+    rows = []
+    for case, block in sorted(qualification.items()):
+        if "error" in block:
+            rows.append([case, _NA, _NA, _NA, _NA, _first_line(block["error"])])
+            continue
+        for quantity, check in block["checks"].items():
+            rows.append([case, quantity, _fmt(check["difference"], 3), _fmt(check["qualifier_se"], 3),
+                         _NA if check["z"] is None else _fmt(check["z"], 3), "yes" if check["within"] else "NO"])
+    parts.append(_table(["case", "quantity", "reference - qualifier", "qualifier SE", "z", "within"], rows))
+    parts.append("")
+    return parts
+
+
 def render_markdown(payload: Mapping[str, Any]) -> str:
     """Render a certificate as a markdown report."""
     study = payload["study"]
@@ -150,10 +198,13 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
         parts.append(_table(["engine", "setting", "value"], config_rows))
         parts.append("")
 
-    parts.append("## Benchmark sampling")
+    deterministic = payload.get("contract", {}).get("reference_kind") == "deterministic"
+    if deterministic:
+        parts.extend(_deterministic_reference_section(payload))
+    parts.append("## Qualifying arm sampling" if deterministic else "## Benchmark sampling")
     parts.append("")
     reference_rows = []
-    for case, block in sorted(payload["references"].items()):
+    for case, block in sorted((payload.get("qualification", {}) if deterministic else payload["references"]).items()):
         if "error" in block:
             reference_rows.append([case, _NA, _first_line(block["error"]), _NA])
             continue
@@ -190,7 +241,7 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
                 cell["case"],
                 cell["quantity"],
                 _fmt(reference["value"]) if reference else _NA,
-                _fmt(reference["se"], 3) if reference else _NA,
+                _fmt(_reference_spread(reference), 3) if reference else _NA,
                 _fmt(cell["candidate_value"]),
                 _fmt(gate["signed_err_c"], 4) if gate else _NA,
                 _fmt(gate["interval_c"], 4) if gate else _NA,
@@ -205,7 +256,7 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
                 "case",
                 "quantity",
                 "reference",
-                "SE",
+                "radius" if deterministic else "SE",
                 "candidate",
                 "err (c)",
                 "interval (c)",
@@ -264,7 +315,7 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
             aggregate["quantity"],
             str(aggregate["cells"]),
             _fmt(aggregate["mean_signed_bias_c"], 4),
-            _fmt(aggregate["se_of_mean_c"], 3),
+            _fmt(aggregate.get("radius_of_mean_c") if deterministic else aggregate["se_of_mean_c"], 3),
             "yes" if aggregate["passed"] else "no",
         ]
         for aggregate in payload["aggregates"]
@@ -272,7 +323,8 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
     if aggregate_rows:
         parts.append(
             _table(
-                ["candidate", "quantity", "cells", "mean bias (c)", "SE (c)", "passed"],
+                ["candidate", "quantity", "cells", "mean bias (c)",
+                 "mean radius (c)" if deterministic else "SE (c)", "passed"],
                 aggregate_rows,
             )
         )

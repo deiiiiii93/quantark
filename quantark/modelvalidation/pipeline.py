@@ -13,6 +13,7 @@ lattice makes sure the resulting decision can never be ADMITTED.
 
 from __future__ import annotations
 
+import math
 import platform
 import subprocess
 import sys
@@ -59,9 +60,11 @@ from quantark.modelvalidation.reference import (
     run_reference,
 )
 from quantark.modelvalidation.report import render_markdown
-from quantark.modelvalidation.study import QUANTITY_CATALOGUE, CertificationStudy, SamplingPolicy
+from quantark.modelvalidation.study import QUANTITY_CATALOGUE, CertificationStudy, SamplingPolicy, reference_kind
 
 CERTIFICATE_NAME = "certificate.json"
+#: Checkpoint directory of the qualifying arm, apart from the reference's own bank.
+QUALIFIER_KIND = "qualifier"
 REPORT_NAME = "report.md"
 HTML_REPORT_NAME = "report.html"
 
@@ -145,6 +148,16 @@ def stop_quantities(study: CertificationStudy, reference) -> Optional[List[str]]
 
 
 def reference_block(estimate: ReferenceEstimate, identity: Mapping[str, Any]) -> dict:
+    if estimate.kind == "deterministic":
+        # typed: a deterministic solve has no batches, seeds or standard error to report (spec section 5)
+        return {
+            "kind": "deterministic",
+            "values": dict(estimate.values),
+            "radii": dict(estimate.radii),
+            "undefined": dict(estimate.undefined),
+            "evidence": dict(estimate.evidence),
+            "identity_hash": identity_hash(identity),
+        }
     return {
         "values": dict(estimate.values),
         "std_errors": dict(estimate.std_errors),
@@ -204,8 +217,10 @@ def certify(
     sampling = quick_policy(study.sampling) if quick else study.sampling
     # The builder that samples is the one bound to the EFFECTIVE policy, so the path count the
     # payload records is the one that ran (schema-1 builders pass through unchanged).
-    reference = bound_reference(study.reference, sampling, schema=study.schema)
+    reference = bound_reference(study.reference, sampling, schema=study.schema, quick=quick)
     stopping = stop_quantities(study, reference)
+    qualifier = (None if study.qualification is None
+                 else bound_reference(study.qualification.builder, sampling, schema=study.schema))
 
     references: Dict[str, dict] = {}
     estimates: Dict[str, Optional[ReferenceEstimate]] = {}
@@ -234,6 +249,7 @@ def certify(
             reference_errors[case.name] = traceback.format_exc()
             references[case.name] = {"error": reference_errors[case.name]}
 
+    qualification = qualify_references(study, qualifier, reference, estimates, sampling, store, resume)
     cells: List[dict] = []
 
     for candidate in study.candidates:
@@ -261,10 +277,12 @@ def certify(
                     result=result,
                     error=error,
                     reference=reference,
+                    qualification=qualification.get(case.name),
                 )
             )
 
     aggregates, decisions = aggregate_and_decide(study, cells)
+    extra = {"qualification": qualification} if qualifier is not None else None
     payload = assemble_payload(
         study=study,
         sampling=sampling,
@@ -275,8 +293,62 @@ def certify(
         decisions=decisions,
         started=started,
         reference=reference,
+        extra=extra,
+        qualifier=qualifier,
     )
     return write_certificate(payload, root)
+
+
+#: Two exact computations of one number agree to floating point, not to zero.
+_QUALIFICATION_FLOAT_TOLERANCE = 1e-12
+
+
+def qualification_targets(study, qualifier, reference) -> List[str]:
+    """The quantities both arms target: the only ones a qualifier can check."""
+    theirs = reference_targets(qualifier, study.quantities)
+    ours = reference_targets(reference, study.quantities)
+    return [q for q in study.quantities if theirs[q] is not None and ours[q] is not None]
+
+
+def qualify_case(study, qualifier, reference, case, estimate, sampling, store, resume) -> dict:
+    """Sample the qualifying arm on one case and compare it with the deterministic reference.
+
+    The check covers the quantities both arms target and the reference defines. The allowance is
+    ``max_z`` qualifier standard errors plus the reference's radius (plus floating point for two
+    exact values). A case that fails is not qualified: nobody knows which arm is wrong, so its
+    cells are unresolved whatever the candidate says.
+    """
+    max_z = study.qualification.max_z
+    shared = qualification_targets(study, qualifier, reference)
+    try:
+        sampled = run_reference(
+            builder=qualifier, case=case, quantities=study.quantities, scale=study.scale, bounds=study.bounds,
+            policy=sampling, store=store, resume=resume, quantity_bounds=study.quantity_bounds,
+            stop_quantities=shared, checkpoint_kind=QUALIFIER_KIND,
+        )
+    except Exception:  # noqa: BLE001 - recorded, not swallowed
+        return {"qualified": False, "error": traceback.format_exc(), "checks": {},
+                "identity_hash": identity_hash(qualifier.identity(case))}
+    checks = {}
+    for quantity in shared:
+        if quantity in estimate.undefined or quantity in case.expected:
+            continue                                    # no number to compare on a semantic cell
+        difference = estimate.values[quantity] - sampled.values[quantity]
+        se, radius = sampled.std_errors[quantity], estimate.radii[quantity]
+        allowed = max_z * se + radius + _QUALIFICATION_FLOAT_TOLERANCE * max(1.0, abs(estimate.values[quantity]))
+        checks[quantity] = {"reference": estimate.values[quantity], "qualifier": sampled.values[quantity],
+                            "qualifier_se": se, "difference": difference, "z": difference / se if se > 0.0 else None,
+                            "allowed": allowed, "within": abs(difference) <= allowed}
+    block = reference_block(sampled, qualifier.identity(case))
+    return {**block, "checks": checks, "qualified": all(c["within"] for c in checks.values())}
+
+
+def qualify_references(study, qualifier, reference, estimates, sampling, store, resume) -> Dict[str, dict]:
+    """The qualifying arm on every case whose reference solved (a failed reference already errors its cells)."""
+    if qualifier is None:
+        return {}
+    return {case.name: qualify_case(study, qualifier, reference, case, estimates[case.name], sampling, store, resume)
+            for case in study.cases if estimates[case.name] is not None}
 
 
 def build_cells(
@@ -287,6 +359,7 @@ def build_cells(
     result: Optional[CandidateResult],
     error: Optional[str],
     reference=None,
+    qualification: Optional[Mapping[str, Any]] = None,
 ) -> List[dict]:
     """Gate one candidate against the benchmark for one case, per quantity.
 
@@ -315,7 +388,7 @@ def build_cells(
             cells.append({**base, "verdict": decide_cell(None, error=True).value, "error": error})
             continue
         if study.schema == 2:
-            cells.append(_schema2_cell(study, base, case, quantity, estimate, result, targets[quantity]))
+            cells.append(_schema2_cell(study, base, case, quantity, estimate, result, targets[quantity], qualification))
             continue
 
         gate = evaluate_cell_gate(
@@ -342,9 +415,17 @@ def build_cells(
     return cells
 
 
-def _schema2_cell(study, base, case, quantity, estimate, result, target) -> dict:
+def _reference_record(estimate: ReferenceEstimate, quantity: str) -> dict:
+    """A cell's reference: value with its standard error, or a typed deterministic value with its radius."""
+    if estimate.kind == "deterministic":
+        return {"kind": "deterministic", "value": estimate.values.get(quantity), "radius": estimate.radii.get(quantity)}
+    return {"value": estimate.values[quantity], "se": estimate.std_errors[quantity]}
+
+
+def _schema2_cell(study, base, case, quantity, estimate, result, target, qualification=None) -> dict:
     """One schema-2 cell: a semantic assertion, an untargeted proxy, or a gated number."""
-    reference = {"value": estimate.values[quantity], "se": estimate.std_errors[quantity]}
+    reference = _reference_record(estimate, quantity)
+    deterministic = estimate.kind == "deterministic"
     status = result.status(quantity)
     expected = case.expected.get(quantity)
     if expected is not None:
@@ -358,6 +439,10 @@ def _schema2_cell(study, base, case, quantity, estimate, result, target) -> dict
         return {**base, "reference": reference, "verdict": Verdict.ERROR.value,
                 "error": f"unexpected {status} in a numeric cell: {result.reasons.get(quantity, '')}"}
     value = result.values[quantity]
+    if deterministic and quantity in estimate.undefined:
+        return {**base, "reference": reference, "candidate_value": value, "verdict": Verdict.ERROR.value,
+                "error": f"the reference is undefined here ({estimate.undefined[quantity]}) and the case declares no "
+                         f"expected status for {quantity}"}
     if target is None:
         return {**base, "kind": "untargeted", "reference": reference, "candidate_value": value,
                 "verdict": Verdict.UNRESOLVED.value,
@@ -365,8 +450,14 @@ def _schema2_cell(study, base, case, quantity, estimate, result, target) -> dict
                            "finite-bump proxy whose bias is unassessed, and the quantity is uncertified")}
     evidence = convergence_evidence(result, quantity)
     bound_c = study.quantity_bounds[quantity].budget(study.scale.to_economic(quantity, estimate.values[quantity]))
+    if deterministic and not math.isfinite(estimate.radii[quantity]):
+        return {**base, "reference": reference, "candidate_value": value, "bound_c": bound_c,
+                "verdict": Verdict.UNRESOLVED.value,
+                "reason": f"the reference's refinement ladder could not bound its error in {quantity}"}
     gate = evaluate_cell_gate(
-        candidate_raw=value, reference_raw=estimate.values[quantity], reference_se_raw=estimate.std_errors[quantity],
+        candidate_raw=value, reference_raw=estimate.values[quantity],
+        reference_se_raw=None if deterministic else estimate.std_errors[quantity],
+        reference_radius_raw=estimate.radii[quantity] if deterministic else None,
         quantity=quantity, scale=study.scale, bounds=study.bounds, envelope_raw=evidence.envelope, bound_c=bound_c,
     )
     cell = {**base, "reference": reference, "candidate_value": value, "gate": cell_gate_wire(gate, 2), "bound_c": bound_c,
@@ -378,6 +469,11 @@ def _schema2_cell(study, base, case, quantity, estimate, result, target) -> dict
         return {**cell, "verdict": Verdict.UNRESOLVED.value,
                 "reason": f"convergence evidence has fewer than {MIN_CONVERGENCE_LEVELS} levels on: "
                           f"{', '.join(evidence.missing)}"}
+    if qualification is not None and not qualification["qualified"]:
+        failed = sorted(q for q, check in qualification["checks"].items() if not check["within"])
+        why = "its qualifying arm errored" if "error" in qualification else f"it disagrees with its qualifying arm on {failed}"
+        return {**cell, "verdict": Verdict.UNRESOLVED.value,
+                "reason": f"the reference is not qualified on this case: {why}"}
     return {**cell, "verdict": decide_cell(gate, error=False, schema=2).value}
 
 
@@ -410,11 +506,17 @@ def aggregate_and_decide(
             ]
             if not gated:
                 continue
-            aggregate = evaluate_aggregate_gate(
-                [cell["gate"]["signed_err_c"] for cell in gated],
-                [cell["gate"]["se_c"] for cell in gated],
-                study.bounds,
-            )
+            if any(cell["gate"].get("radius_c") is not None for cell in gated):
+                aggregate = evaluate_aggregate_gate(
+                    [cell["gate"]["signed_err_c"] for cell in gated], None, study.bounds,
+                    radii_c=[cell["gate"]["radius_c"] for cell in gated],
+                )
+            else:
+                aggregate = evaluate_aggregate_gate(
+                    [cell["gate"]["signed_err_c"] for cell in gated],
+                    [cell["gate"]["se_c"] for cell in gated],
+                    study.bounds,
+                )
             candidate_aggregates.append(aggregate)
             aggregates.append(
                 {"candidate": name, "quantity": quantity, **aggregate_gate_wire(aggregate, study.schema)}
@@ -425,6 +527,14 @@ def aggregate_and_decide(
     return aggregates, decisions
 
 
+def bounds_wire(bounds, schema: int) -> dict:
+    """The serialized gate bounds. Schema 1 keeps exactly its original keys; a stochastic schema-2 study has no radius."""
+    data = asdict(bounds)
+    if schema == 1 or data["radius_budget_fraction"] is None:
+        data.pop("radius_budget_fraction")
+    return data
+
+
 def sampling_wire(policy: SamplingPolicy, schema: int) -> dict:
     """The serialized sampling policy. Schema 1 keeps exactly its original keys."""
     data = asdict(policy)
@@ -433,13 +543,26 @@ def sampling_wire(policy: SamplingPolicy, schema: int) -> dict:
     return data
 
 
-def study_contract(study: CertificationStudy, reference) -> dict:
-    """What an amendment may not change: estimands, budgets, gate policy, scale, targets, seeds, convergence rule."""
+def study_contract(study: CertificationStudy, reference, qualifier=None) -> dict:
+    """What an amendment may not change: estimands, budgets, gate policy, scale, targets, seeds, convergence rule,
+    and -- under a deterministic reference -- its kind, error model and qualification policy."""
+    contract = _base_contract(study, reference)
+    if reference_kind(reference) == "deterministic":
+        contract["reference_kind"] = "deterministic"
+        contract["reference_error_model"] = dict(reference.error_model())
+        if study.qualification is not None:
+            arm = study.qualification.builder if qualifier is None else qualifier
+            contract["qualification"] = {"max_z": study.qualification.max_z,
+                                         "targets": reference_targets(arm, study.quantities)}
+    return contract
+
+
+def _base_contract(study: CertificationStudy, reference) -> dict:
     return {
         "quantities": list(study.quantities),
         "quantity_definitions": {q: asdict(QUANTITY_CATALOGUE[q]) for q in study.quantities},
         "quantity_bounds": {q: asdict(b) for q, b in study.quantity_bounds.items()},
-        "gate_policy": asdict(study.bounds),
+        "gate_policy": bounds_wire(study.bounds, study.schema),
         "scale": asdict(study.scale) if is_dataclass(study.scale) else repr(study.scale),
         "reference_targets": reference_targets(reference, study.quantities),
         "seed_scheme": study.sampling.seed_scheme,
@@ -458,6 +581,7 @@ def assemble_payload(
     started: float,
     extra: Optional[Mapping[str, Any]] = None,
     reference=None,
+    qualifier=None,
 ) -> dict:
     """Build the certificate payload and stamp its digest.
 
@@ -471,7 +595,7 @@ def assemble_payload(
             "name": study.name,
             "source_text": study.source_text,
             "quantities": list(study.quantities),
-            "bounds": asdict(study.bounds),
+            "bounds": bounds_wire(study.bounds, study.schema),
             "sampling": sampling_wire(sampling, study.schema),
             "quick": quick,
             "cases": [
@@ -495,7 +619,7 @@ def assemble_payload(
         "wall_clock_seconds": time.time() - started,
     }
     if study.schema == 2:
-        contract = study_contract(study, reference)
+        contract = study_contract(study, reference, qualifier)
         payload["study"]["quantity_bounds"] = contract["quantity_bounds"]
         payload["study"]["quantity_definitions"] = contract["quantity_definitions"]
         payload["study"]["scale"] = contract["scale"]

@@ -47,10 +47,15 @@ class CellGateResult:
         lower_exceeds_bound: Schema 2: the whole interval lies beyond the bound.
         bound_c: Schema 2: the per-cell budget every value above was divided by;
             ``None`` for schema 1.
+        radius_c: Schema 2, deterministic reference: its declared error radius.
+            ``se_c`` is then ``None`` -- a radius is a bound, never a zero
+            standard error -- the interval edges are ``|err| +/- radius_c``
+            without ``interval_k``, and ``se_budget_met`` reads "the radius is
+            within ``radius_budget_fraction`` of the bound".
     """
 
     signed_err_c: float
-    se_c: float
+    se_c: Optional[float]
     interval_c: float
     se_budget_met: bool
     interval_within_bound: bool
@@ -62,14 +67,20 @@ class CellGateResult:
     lower_error_c: float = 0.0
     lower_exceeds_bound: bool = False
     bound_c: Optional[float] = None
+    radius_c: Optional[float] = None
 
 
 @dataclass(frozen=True)
 class AggregateGateResult:
-    """Outcome of one aggregate (mean signed bias) gate, in economic units."""
+    """Outcome of one aggregate (mean signed bias) gate, in economic units.
+
+    Under a deterministic reference ``se_of_mean_c`` is ``None`` and ``radius_of_mean_c`` is the
+    MEAN of the cell radii: discretization errors may share a sign across cells, so they add
+    linearly, never in quadrature.
+    """
 
     mean_signed_bias_c: float
-    se_of_mean_c: float
+    se_of_mean_c: Optional[float]
     within_bound: bool
     se_adequate: bool
     passed: bool
@@ -77,6 +88,7 @@ class AggregateGateResult:
     #: Schema 2: ``max(0, |mean| - k*SE)`` and whether it exceeds the aggregate bound.
     lower_c: float = 0.0
     lower_exceeds_bound: bool = False
+    radius_of_mean_c: Optional[float] = None
 
 
 def _require_finite(value: float, name: str) -> float:
@@ -88,12 +100,13 @@ def _require_finite(value: float, name: str) -> float:
 def evaluate_cell_gate(
     candidate_raw: float,
     reference_raw: float,
-    reference_se_raw: float,
+    reference_se_raw: Optional[float],
     quantity: str,
     scale: EconomicScale,
     bounds: GateBounds,
     envelope_raw: Optional[float] = None,
     bound_c: Optional[float] = None,
+    reference_radius_raw: Optional[float] = None,
 ) -> CellGateResult:
     """Compare one candidate quantity against the benchmark for one case.
 
@@ -112,24 +125,31 @@ def evaluate_cell_gate(
         bound_c: Schema 2: this cell's own budget in economic units. Every
             economic value is divided by it, so the study's shared bounds read
             as fractions of the budget. ``None`` keeps schema 1's arithmetic.
+        reference_radius_raw: Schema 2, deterministic reference: its declared
+            error radius, engine units. Exactly one of this and
+            ``reference_se_raw`` is given.
 
     Raises:
-        ValidationError: non-finite input, a negative standard error, or a
-            non-positive budget.
+        ValidationError: non-finite input, a negative standard error or radius,
+            both or neither uncertainty, or a non-positive budget.
     """
     _require_finite(candidate_raw, "candidate_raw")
     _require_finite(reference_raw, "reference_raw")
-    _require_finite(reference_se_raw, "reference_se_raw")
-    if reference_se_raw < 0.0:
-        raise ValidationError(
-            f"reference_se_raw must be non-negative, got {reference_se_raw}"
-        )
+    if (reference_se_raw is None) == (reference_radius_raw is None):
+        raise ValidationError("a cell gate takes exactly one of reference_se_raw and reference_radius_raw")
+    deterministic = reference_radius_raw is not None
+    if deterministic and bounds.radius_budget_fraction is None:
+        raise ValidationError("a deterministic reference needs bounds.radius_budget_fraction")
+    uncertainty_raw = reference_radius_raw if deterministic else reference_se_raw
+    name = "reference_radius_raw" if deterministic else "reference_se_raw"
+    _require_finite(uncertainty_raw, name)
+    if uncertainty_raw < 0.0:
+        raise ValidationError(f"{name} must be non-negative, got {uncertainty_raw}")
 
     signed_err_c = scale.to_economic(quantity, candidate_raw - reference_raw)
-    se_c = scale.to_economic(quantity, reference_se_raw)
-    # to_economic is linear but may carry a sign for exotic scales; an SE is a
-    # magnitude either way.
-    se_c = abs(se_c)
+    # to_economic is linear but may carry a sign for exotic scales; an SE or a
+    # radius is a magnitude either way.
+    se_c = abs(scale.to_economic(quantity, uncertainty_raw))
 
     envelope_c: Optional[float] = None
     if envelope_raw is not None:
@@ -142,15 +162,19 @@ def evaluate_cell_gate(
         signed_err_c /= bound_c
         se_c /= bound_c
         envelope_c = None if envelope_c is None else envelope_c / bound_c
-    interval_c = abs(signed_err_c) + bounds.interval_k * se_c
-    lower_error_c = max(0.0, abs(signed_err_c) - bounds.interval_k * se_c)
-    se_budget_met = se_c <= bounds.se_budget_fraction * bounds.cell
+    # a standard error is widened by interval_k; a radius already is the bound
+    half_width_c = se_c if deterministic else bounds.interval_k * se_c
+    sharp_fraction = bounds.radius_budget_fraction if deterministic else bounds.se_budget_fraction
+    interval_c = abs(signed_err_c) + half_width_c
+    lower_error_c = max(0.0, abs(signed_err_c) - half_width_c)
+    se_budget_met = se_c <= sharp_fraction * bounds.cell
     interval_within_bound = interval_c <= bounds.cell
     envelope_within_bound = envelope_c is None or envelope_c <= bounds.envelope_fraction * bounds.cell
 
     return CellGateResult(
         signed_err_c=signed_err_c,
-        se_c=se_c,
+        se_c=None if deterministic else se_c,
+        radius_c=se_c if deterministic else None,
         interval_c=interval_c,
         se_budget_met=se_budget_met,
         interval_within_bound=interval_within_bound,
@@ -165,8 +189,9 @@ def evaluate_cell_gate(
 
 def evaluate_aggregate_gate(
     signed_errs_c: Sequence[float],
-    ses_c: Sequence[float],
+    ses_c: Optional[Sequence[float]],
     bounds: GateBounds,
+    radii_c: Optional[Sequence[float]] = None,
 ) -> AggregateGateResult:
     """Check the mean signed error across the cells of one quantity.
 
@@ -175,40 +200,57 @@ def evaluate_aggregate_gate(
 
     Args:
         signed_errs_c: Per-cell signed errors, economic units.
-        ses_c: Per-cell benchmark standard errors, economic units.
+        ses_c: Per-cell benchmark standard errors, economic units; ``None``
+            under a deterministic reference.
         bounds: Study bounds.
+        radii_c: Per-cell deterministic radii, economic units; exactly one of
+            this and ``ses_c`` is given.
 
     Raises:
-        ValidationError: empty input, or mismatched sequence lengths.
+        ValidationError: empty input, mismatched sequence lengths, or both or
+            neither uncertainty.
     """
     if len(signed_errs_c) == 0:
         raise ValidationError("evaluate_aggregate_gate requires at least one cell")
-    if len(signed_errs_c) != len(ses_c):
+    if (ses_c is None) == (radii_c is None):
+        raise ValidationError("an aggregate gate takes exactly one of ses_c and radii_c")
+    deterministic = radii_c is not None
+    if deterministic and bounds.radius_budget_fraction is None:
+        raise ValidationError("a deterministic reference needs bounds.radius_budget_fraction")
+    spreads = radii_c if deterministic else ses_c
+    label = "radii_c" if deterministic else "ses_c"
+    if len(signed_errs_c) != len(spreads):
         raise ValidationError(
-            f"signed_errs_c ({len(signed_errs_c)}) and ses_c ({len(ses_c)}) must have "
+            f"signed_errs_c ({len(signed_errs_c)}) and {label} ({len(spreads)}) must have "
             "the same length"
         )
 
     count = len(signed_errs_c)
     for value in signed_errs_c:
         _require_finite(value, "signed_errs_c entry")
-    for value in ses_c:
-        _require_finite(value, "ses_c entry")
+    for value in spreads:
+        _require_finite(value, f"{label} entry")
 
     mean_signed_bias_c = sum(signed_errs_c) / count
-    # Cells are independent runs, so their errors add in quadrature.
-    se_of_mean_c = math.sqrt(sum(se * se for se in ses_c)) / count
+    if deterministic:
+        # Discretization errors may share a sign in every cell: the radius of the mean is the mean radius.
+        spread_of_mean_c = sum(spreads) / count
+        half_width_c = spread_of_mean_c
+        sharp_fraction = bounds.radius_budget_fraction
+    else:
+        # Cells are independent runs, so their errors add in quadrature.
+        spread_of_mean_c = math.sqrt(sum(se * se for se in spreads)) / count
+        half_width_c = bounds.interval_k * spread_of_mean_c
+        sharp_fraction = bounds.se_budget_fraction
 
-    within_bound = (
-        abs(mean_signed_bias_c) + bounds.interval_k * se_of_mean_c
-        <= bounds.mean_signed_bias
-    )
-    se_adequate = se_of_mean_c <= bounds.se_budget_fraction * bounds.mean_signed_bias
-    lower_c = max(0.0, abs(mean_signed_bias_c) - bounds.interval_k * se_of_mean_c)
+    within_bound = abs(mean_signed_bias_c) + half_width_c <= bounds.mean_signed_bias
+    se_adequate = spread_of_mean_c <= sharp_fraction * bounds.mean_signed_bias
+    lower_c = max(0.0, abs(mean_signed_bias_c) - half_width_c)
 
     return AggregateGateResult(
         mean_signed_bias_c=mean_signed_bias_c,
-        se_of_mean_c=se_of_mean_c,
+        se_of_mean_c=None if deterministic else spread_of_mean_c,
+        radius_of_mean_c=spread_of_mean_c if deterministic else None,
         within_bound=within_bound,
         se_adequate=se_adequate,
         passed=within_bound and se_adequate,

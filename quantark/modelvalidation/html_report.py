@@ -411,7 +411,7 @@ def _cells_section(payload: Mapping[str, Any]) -> str:
             f'<td>{_esc(cell["case"])}</td>',
             f'<td>{_esc(cell["quantity"])}</td>',
             f'<td class="num">{_fmt(reference["value"]) if reference else _NA}</td>',
-            f'<td class="num">{_fmt(reference["se"], 3) if reference else _NA}</td>',
+            f'<td class="num">{_fmt(_reference_spread(reference), 3) if reference else _NA}</td>',
             f'<td class="num">{_fmt(cell["candidate_value"])}</td>',
             f'<td class="num">{_fmt(gate["signed_err_c"], 4) if gate else _NA}</td>',
             f'<td class="num">{_fmt(gate["envelope_c"], 3) if gate else _NA}</td>',
@@ -426,7 +426,7 @@ def _cells_section(payload: Mapping[str, Any]) -> str:
         "case",
         "quantity",
         "reference",
-        "SE",
+        "radius" if _is_deterministic(payload) else "SE",
         "candidate",
         "err (c)",
         "envelope (c)",
@@ -434,11 +434,12 @@ def _cells_section(payload: Mapping[str, Any]) -> str:
         "verdict",
     ]
     if schema2:
+        width = "|error| + radius" if _is_deterministic(payload) else "|error| + k&middot;SE"
         lede = (
             '<p class="lede">One row per candidate &times; case &times; quantity. Gate values are '
             "what fraction of each cell's own budget (its quantity bound at the reference value) "
             "the disagreement consumed; the gauge shows how much of that budget the interval "
-            "(|error| + k&middot;SE) used &mdash; a pass near 100% is a pass with no room left. "
+            f"({width}) used &mdash; a pass near 100% is a pass with no room left. "
             "Envelope is the candidate's own discretization error from its convergence axes. A "
             "reason explains a semantic, uncertified or unresolved cell.</p>"
         )
@@ -463,16 +464,19 @@ def _aggregates_section(payload: Mapping[str, Any]) -> str:
     bound = payload["study"]["bounds"]["mean_signed_bias"]
     interval_k = payload["study"]["bounds"]["interval_k"]
     rows = []
+    deterministic = _is_deterministic(payload)
     for aggregate in payload["aggregates"]:
         kind = "pass" if aggregate["passed"] else "fail"
-        consumed = abs(aggregate["mean_signed_bias_c"]) + interval_k * aggregate["se_of_mean_c"]
+        # a standard error is widened by interval_k; a deterministic mean radius already is the bound
+        spread = aggregate.get("radius_of_mean_c") if deterministic else aggregate["se_of_mean_c"]
+        consumed = abs(aggregate["mean_signed_bias_c"]) + (spread if deterministic else interval_k * spread)
         rows.append(
             [
                 f'<td class="name">{_esc(aggregate["candidate"])}</td>',
                 f'<td>{_esc(aggregate["quantity"])}</td>',
                 f'<td class="num">{aggregate["cells"]}</td>',
                 f'<td class="num">{_fmt(aggregate["mean_signed_bias_c"], 4)}</td>',
-                f'<td class="num">{_fmt(aggregate["se_of_mean_c"], 3)}</td>',
+                f'<td class="num">{_fmt(spread, 3)}</td>',
                 f"<td>{_gauge(consumed, bound, kind)}</td>",
                 f'<td>{_pill("PASS" if aggregate["passed"] else "FAIL", kind)}</td>',
             ]
@@ -488,7 +492,7 @@ def _aggregates_section(payload: Mapping[str, Any]) -> str:
                 "quantity",
                 "cells",
                 "mean bias (c)",
-                "SE (c)",
+                "mean radius (c)" if deterministic else "SE (c)",
                 "bias vs bound",
                 "passed",
             ],
@@ -600,10 +604,69 @@ def _configuration_section(payload: Mapping[str, Any]) -> str:
     )
 
 
+def _is_deterministic(payload: Mapping[str, Any]) -> bool:
+    return payload.get("contract", {}).get("reference_kind") == "deterministic"
+
+
+def _reference_spread(reference: Mapping[str, Any]):
+    """A cell reference's uncertainty: the radius of a deterministic value, else the standard error."""
+    return reference.get("radius") if reference.get("kind") == "deterministic" else reference["se"]
+
+
+def _deterministic_section(payload: Mapping[str, Any]) -> str:
+    """The deterministic reference: declared error model, per-case radii, and the qualifying arm's checks."""
+    contract = payload["contract"]
+    model = [[f'<td class="name">{_esc(k)}</td>', f'<td class="wrap">{_esc(v)}</td>']
+             for k, v in sorted(contract["reference_error_model"].items())]
+    rows = []
+    for case, block in sorted(payload["references"].items()):
+        if "error" in block:
+            rows.append([f"<td>{_esc(case)}</td>", f'<td class="wrap">{_esc(_first_line(block["error"]))}</td>', f"<td>{_NA}</td>"])
+            continue
+        radii = ", ".join(f"{_esc(q)} {_fmt(r, 3)}" for q, r in sorted(block["radii"].items()))
+        undefined = ", ".join(f"{_esc(q)} ({_esc(why)})" for q, why in sorted(block["undefined"].items())) or "none"
+        rows.append([f"<td>{_esc(case)}</td>", f'<td class="name">{radii}</td>', f'<td class="wrap">{undefined}</td>'])
+    html = (
+        "<section><h2>Deterministic reference</h2>"
+        '<p class="lede">The reference is a deterministic solve. Its uncertainty is a declared error radius from a '
+        "refinement ladder, not a standard error: a radius consumes the budget as a bound, and radii add linearly "
+        "across cells because discretization errors may share a sign.</p>"
+        + _table(["error model", "value"], model, "No error model declared.")
+        + _table(["case", "radius (raw units)", "undefined here"], rows, "No reference ran.")
+        + "</section>"
+    )
+    qualification = payload.get("qualification")
+    if qualification is None:
+        return html
+    checks = []
+    for case, block in sorted(qualification.items()):
+        if "error" in block:
+            checks.append([f"<td>{_esc(case)}</td>", f"<td>{_NA}</td>", f'<td class="num">{_NA}</td>', f'<td class="num">{_NA}</td>',
+                           f'<td class="num">{_NA}</td>', f'<td>{_pill("ERROR", "err")}</td>'])
+            continue
+        for quantity, check in block["checks"].items():
+            kind = "pass" if check["within"] else "fail"
+            checks.append([f"<td>{_esc(case)}</td>", f"<td>{_esc(quantity)}</td>",
+                           f'<td class="num">{_fmt(check["difference"], 3)}</td>',
+                           f'<td class="num">{_fmt(check["qualifier_se"], 3)}</td>',
+                           f'<td class="num">{_NA if check["z"] is None else _fmt(check["z"], 3)}</td>',
+                           f'<td>{_pill("WITHIN" if check["within"] else "OUTSIDE", kind)}</td>'])
+    return html + (
+        "<section><h2>Reference qualification</h2>"
+        '<p class="lede">An independent stochastic arm simulates every case. The deterministic value must sit within '
+        f'{contract["qualification"]["max_z"]:g} of its standard errors plus the reference\'s radius; a case that does '
+        "not is not qualified, and its cells are unresolved whatever the candidate says.</p>"
+        + _table(["case", "quantity", "reference &minus; qualifier", "qualifier SE", "z", "within"], checks, "No checks ran.")
+        + "</section>"
+    )
+
+
 def _benchmark_section(payload: Mapping[str, Any]) -> str:
     sampling = payload["study"]["sampling"]
     rows = []
-    for case, block in sorted(payload["references"].items()):
+    deterministic = _is_deterministic(payload)
+    blocks = payload.get("qualification", {}) if deterministic else payload["references"]
+    for case, block in sorted(blocks.items()):
         if "error" in block:
             rows.append(
                 [
@@ -627,6 +690,14 @@ def _benchmark_section(payload: Mapping[str, Any]) -> str:
                 f'<td class="name">{ses}</td>',
             ]
         )
+    if deterministic:
+        return _deterministic_section(payload) + (
+            "" if not blocks else
+            "<section><h2>Qualifying arm sampling</h2>"
+            + _table(["case", "batches", "stopped because", "standard errors (raw units)"], rows, "No qualifier ran.")
+            + f'<p class="lede">Policy: {sampling["paths_per_batch"]:,} paths per batch, '
+            f'{sampling["min_batches"]}&ndash;{sampling["max_batches"]} batches, seed '
+            f'{sampling["seed"]}, relative bump {sampling["bump"]:g}.</p></section>')
     return (
         "<section><h2>Benchmark sampling</h2>"
         '<p class="lede">Sampling continues until the benchmark is sharp enough for the '

@@ -30,8 +30,11 @@ from quantark.modelvalidation.study import (
     NormalizedScale,
     QuantityBounds,
     QuantityDefinition,
+    REFERENCE_KINDS,
+    ReferenceQualification,
     SamplingPolicy,
     batch_seed,
+    reference_kind,
 )
 from quantark.modelvalidation.yaml_loader import load_study, load_study_text
 
@@ -48,6 +51,8 @@ __all__ = [
     "NormalizedScale",
     "QuantityBounds",
     "QuantityDefinition",
+    "REFERENCE_KINDS",
+    "ReferenceQualification",
     "SamplingPolicy",
     "amend",
     "bank_certificate",
@@ -58,6 +63,7 @@ __all__ = [
     "extract_anchors",
     "load_study",
     "load_study_text",
+    "reference_kind",
     "register_builder",
     "validate_parent",
     "validate_payload",

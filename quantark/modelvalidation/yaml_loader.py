@@ -25,6 +25,7 @@ from quantark.modelvalidation.study import (
     CertificationStudy,
     GateBounds,
     QuantityBounds,
+    ReferenceQualification,
     SamplingPolicy,
 )
 
@@ -43,10 +44,11 @@ TOP_LEVEL_KEYS = frozenset(
         "cases",
         "context",
         "quantity_bounds",
+        "reference_qualification",
     }
 )
 
-_BOUNDS_OPTIONAL = ("se_budget_fraction", "interval_k", "envelope_fraction")
+_BOUNDS_OPTIONAL = ("se_budget_fraction", "interval_k", "envelope_fraction", "radius_budget_fraction")
 _SAMPLING_OPTIONAL = ("bump",)
 _CASE_KEYS_SCHEMA_1 = frozenset({"name", "environment", "product"})
 _CASE_KEYS_SCHEMA_2 = _CASE_KEYS_SCHEMA_1 | {"context", "expect"}
@@ -205,8 +207,9 @@ def load_study_text(text: str) -> CertificationStudy:
     schema = int(_require(document, "schema", "schema"))
     if schema not in SUPPORTED_SCHEMAS:
         raise ValidationError(f"Study schema must be one of {SUPPORTED_SCHEMAS}, got {schema}")
-    if schema == 1 and ({"quantity_bounds", "context"} & set(document)):
-        raise ValidationError("quantity_bounds and context are schema-2 keys; this study declares schema 1")
+    if schema == 1 and ({"quantity_bounds", "context", "reference_qualification"} & set(document)):
+        raise ValidationError(
+            "quantity_bounds, context and reference_qualification are schema-2 keys; this study declares schema 1")
 
     name = str(_require(document, "study", "study"))
     quantities = _quantities(document)
@@ -244,6 +247,21 @@ def load_study_text(text: str) -> CertificationStudy:
         **arm_extra,
     )
 
+    # A deterministic reference is qualified case by case by an independent stochastic arm.
+    qualification = None
+    if "reference_qualification" in document:
+        spec = _require_mapping(document["reference_qualification"], "reference_qualification")
+        unknown = set(spec) - {"builder", "params", "max_z"}
+        if unknown:
+            raise ValidationError(f"Unknown keys in reference_qualification: {sorted(unknown)}")
+        qualifier_name, qualifier_params = _builder_spec(document, "reference_qualification")
+        qualification = ReferenceQualification(
+            builder=get_builder(qualifier_name, kind="reference")(
+                environment_params=environment_params, product_params=product_params, sampling=sampling,
+                quantities=quantities, params=qualifier_params, **arm_extra),
+            max_z=float(_require(spec, "max_z", "reference_qualification.max_z")),
+        )
+
     raw_candidates = _require(document, "candidates", "candidates")
     if not isinstance(raw_candidates, Sequence) or isinstance(raw_candidates, (str, bytes)):
         raise ValidationError("candidates must be a list")
@@ -278,6 +296,7 @@ def load_study_text(text: str) -> CertificationStudy:
         sampling=sampling,
         source_text=text,
         quantity_bounds=quantity_bounds,
+        qualification=qualification,
     )
 
 

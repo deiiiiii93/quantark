@@ -13,8 +13,9 @@ produce this type.
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Protocol, Tuple, runtime_checkable
+from typing import Any, Dict, Mapping, Optional, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 
@@ -165,6 +166,11 @@ class GateBounds:
         interval_k: Interval half-width multiplier on the reference SE.
         envelope_fraction: The candidate's own discretization envelope must sit
             within ``envelope_fraction * cell``.
+        radius_budget_fraction: Schema 2, deterministic references only: the
+            reference's declared error radius must sit within
+            ``radius_budget_fraction * cell``. A radius is a bound, not a
+            standard deviation, so it is a separate field and ``interval_k``
+            never multiplies it. ``None`` for every stochastic reference.
     """
 
     cell: float
@@ -172,12 +178,16 @@ class GateBounds:
     se_budget_fraction: float = 0.25
     interval_k: float = 2.0
     envelope_fraction: float = 0.5
+    radius_budget_fraction: Optional[float] = None
 
     def __post_init__(self) -> None:
         for name in ("cell", "mean_signed_bias", "se_budget_fraction", "envelope_fraction"):
             value = getattr(self, name)
             if not (value > 0.0):
                 raise ValidationError(f"GateBounds.{name} must be positive, got {value}")
+        if self.radius_budget_fraction is not None and not (0.0 < self.radius_budget_fraction <= 1.0):
+            raise ValidationError(
+                f"GateBounds.radius_budget_fraction must lie in (0, 1], got {self.radius_budget_fraction}")
         if self.interval_k < 0.0:
             raise ValidationError(
                 f"GateBounds.interval_k must be non-negative, got {self.interval_k}"
@@ -313,6 +323,42 @@ class HedgeContractScale:
         )
 
 
+#: How a reference states its uncertainty: replicate standard errors, or a declared deterministic radius.
+REFERENCE_KINDS: Tuple[str, ...] = ("stochastic", "deterministic")
+
+
+def reference_kind(builder: Any) -> str:
+    """The kind a reference builder declares; every builder that declares none is stochastic.
+
+    The attribute is ``reference_kind``: a bare ``kind`` already names a builder's registry slot.
+    """
+    kind = getattr(builder, "reference_kind", "stochastic")
+    if kind not in REFERENCE_KINDS:
+        raise ValidationError(f"reference kind must be one of {REFERENCE_KINDS}, got {kind!r}")
+    return kind
+
+
+@dataclass(frozen=True)
+class ReferenceQualification:
+    """An independent stochastic arm every case's deterministic reference value must agree with.
+
+    A deterministic reference is sharp but shares no sampling error with anything, so an economic
+    mistake in it would be invisible. The qualifier simulates the same case; the two must agree within
+    ``max_z`` qualifier standard errors plus the reference's own radius, or the case is unresolved.
+
+    Attributes:
+        builder: A stochastic ``ReferenceBuilder``, sampled under the study's sampling policy.
+        max_z: Allowed disagreement in qualifier standard errors.
+    """
+
+    builder: Any
+    max_z: float
+
+    def __post_init__(self) -> None:
+        if not (self.max_z > 0.0) or not math.isfinite(self.max_z):
+            raise ValidationError(f"ReferenceQualification.max_z must be positive and finite, got {self.max_z}")
+
+
 @dataclass(frozen=True)
 class CertificationStudy:
     """The complete, typed definition of one certification run.
@@ -334,6 +380,8 @@ class CertificationStudy:
             Embedded in evidence so a certificate ships its own definition;
             anchors require it.
         quantity_bounds: Schema 2 only: one budget per certified quantity.
+        qualification: Schema 2, deterministic references only: the stochastic
+            arm that qualifies the reference case by case.
     """
 
     name: str
@@ -347,6 +395,7 @@ class CertificationStudy:
     sampling: SamplingPolicy
     source_text: str | None = None
     quantity_bounds: Mapping[str, QuantityBounds] = field(default_factory=dict)
+    qualification: Optional[ReferenceQualification] = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -355,6 +404,7 @@ class CertificationStudy:
             raise ValidationError(
                 f"CertificationStudy.schema must be one of {SUPPORTED_SCHEMAS}, got {self.schema}"
             )
+        self._validate_reference_kind()
         if not self.cases:
             raise ValidationError("CertificationStudy.cases must not be empty")
         if not self.candidates:
@@ -411,3 +461,25 @@ class CertificationStudy:
             raise ValidationError(
                 f"CertificationStudy.cases has duplicate case names: {duplicates}"
             )
+
+    def _validate_reference_kind(self) -> None:
+        """A radius fraction belongs to a deterministic reference and to nothing else; so does a qualifier."""
+        deterministic = reference_kind(self.reference) == "deterministic"
+        declared = self.bounds.radius_budget_fraction is not None
+        if self.schema == 1 and (deterministic or declared or self.qualification is not None):
+            raise ValidationError(
+                "a deterministic reference, bounds.radius_budget_fraction and reference qualification are "
+                "schema-2 fields; this is a schema 1 study")
+        if deterministic and not declared:
+            raise ValidationError(
+                "a deterministic reference states a radius, not a standard error: declare "
+                "bounds.radius_budget_fraction (se_budget_fraction is never reinterpreted)")
+        if declared and not deterministic:
+            raise ValidationError(
+                "bounds.radius_budget_fraction applies to a deterministic reference only; this study's "
+                "reference is stochastic")
+        if self.qualification is not None:
+            if not deterministic:
+                raise ValidationError("reference qualification is for a deterministic reference; this study's is stochastic")
+            if reference_kind(self.qualification.builder) != "stochastic":
+                raise ValidationError("the qualifying arm must be a stochastic reference builder")

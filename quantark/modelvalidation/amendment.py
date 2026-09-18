@@ -43,6 +43,7 @@ from quantark.modelvalidation.pipeline import (
     aggregate_and_decide,
     assemble_payload,
     build_cells,
+    qualify_case,
     quick_policy,
     stop_quantities,
     study_contract,
@@ -69,7 +70,7 @@ def validate_parent(parent_path: str | Path) -> dict:
     return payload
 
 
-def _check_contract(study: CertificationStudy, reference, parent: Mapping[str, Any]) -> None:
+def _check_contract(study: CertificationStudy, reference, parent: Mapping[str, Any], qualifier=None) -> None:
     """A schema-2 amendment keeps its parent's contract; anything else is a new certification."""
     if parent.get("schema") != study.schema:
         raise ValidationError(
@@ -77,13 +78,13 @@ def _check_contract(study: CertificationStudy, reference, parent: Mapping[str, A
             "the first certification under a new schema is a full run")
     if study.schema != 2:
         return
-    current, banked = study_contract(study, reference), parent.get("contract") or {}
+    current, banked = study_contract(study, reference, qualifier), parent.get("contract") or {}
     changed = sorted(key for key in set(current) | set(banked) if current.get(key) != banked.get(key))
     if changed:
         raise ValidationError(
             f"Amendment changes the certification contract ({', '.join(changed)}). Estimands, budgets, gate policy, "
-            "scale, reference targets, seed scheme and the convergence rule are fixed by the parent; changing one "
-            "is a new certification, not an amendment")
+            "scale, reference targets, seed scheme, the convergence rule and a deterministic reference's error model "
+            "and qualification policy are fixed by the parent; changing one is a new certification, not an amendment")
 
 
 def _check_coverage(study: CertificationStudy, parent: Mapping[str, Any]) -> None:
@@ -135,10 +136,12 @@ def amend(
     started = time.time()
     parent_payload = validate_parent(parent)
     sampling = quick_policy(study.sampling) if quick else study.sampling
-    reference = bound_reference(study.reference, sampling, schema=study.schema)
+    reference = bound_reference(study.reference, sampling, schema=study.schema, quick=quick)
+    qualifier = (None if study.qualification is None
+                 else bound_reference(study.qualification.builder, sampling, schema=study.schema))
     # The schema and contract are the more fundamental refusal: a study offered against a parent of
     # another schema must be told so, not told it dropped a case.
-    _check_contract(study, reference, parent_payload)
+    _check_contract(study, reference, parent_payload, qualifier)
     _check_coverage(study, parent_payload)
     stopping = stop_quantities(study, reference)
 
@@ -189,6 +192,27 @@ def amend(
             reference_errors[case.name] = traceback.format_exc()
             references[case.name] = {"error": reference_errors[case.name]}
 
+    # The qualifying arm is carried with its reference, or sampled again; cells judged under a
+    # qualification that did not carry are re-gated, never carried.
+    qualification: Dict[str, dict] = {}
+    qualification_carried: Dict[str, bool] = {}
+    parent_qualification: Dict[str, dict] = dict(parent_payload.get("qualification", {}))
+    for case in study.cases:
+        qualification_carried[case.name] = True
+        if qualifier is None:
+            continue
+        banked = parent_qualification.get(case.name)
+        if (reference_carried[case.name] and banked is not None
+                and banked.get("identity_hash") == identity_hash(qualifier.identity(case))):
+            qualification[case.name] = dict(banked)
+            continue
+        qualification_carried[case.name] = False
+        estimate = estimates[case.name]
+        if estimate is None and reference_carried[case.name]:
+            estimate = _estimate_from_block(references[case.name], study.quantities)
+        if estimate is not None:
+            qualification[case.name] = qualify_case(study, qualifier, reference, case, estimate, sampling, store, resume)
+
     cells: List[dict] = []
     replaced: List[dict] = []
     carried: List[dict] = []
@@ -202,6 +226,7 @@ def amend(
 
             can_carry = (
                 reference_carried[case.name]
+                and qualification_carried[case.name]
                 and all(cell is not None for cell in banked_cells)
                 and all(cell["identity_hash"] == current_identity for cell in banked_cells)
             )
@@ -247,6 +272,7 @@ def amend(
                 result=result,
                 error=error,
                 reference=reference,
+                qualification=qualification.get(case.name),
             )
             cells.extend(fresh)
             replaced.extend(
@@ -265,7 +291,9 @@ def amend(
         decisions=decisions,
         started=started,
         reference=reference,
+        qualifier=qualifier,
         extra={
+            **({"qualification": qualification} if qualifier is not None else {}),
             "amendment": {
                 "parent": str(Path(parent)),
                 "parent_projected_sha256": parent_digest,
@@ -282,6 +310,10 @@ def _estimate_from_block(block: Mapping[str, Any], quantities) -> Optional[Refer
     """Rebuild a reference estimate from a carried-forward reference block."""
     if "error" in block:
         return None
+    if block.get("kind") == "deterministic":
+        return ReferenceEstimate(values=dict(block["values"]), std_errors={}, batches=0, seeds=(),
+                                 stopped_reason="deterministic", kind="deterministic", radii=dict(block["radii"]),
+                                 evidence=dict(block["evidence"]), undefined=dict(block["undefined"]))
     return ReferenceEstimate(
         values={q: block["values"][q] for q in quantities},
         std_errors={q: block["std_errors"][q] for q in quantities},
