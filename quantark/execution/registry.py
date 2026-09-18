@@ -104,6 +104,14 @@ def build_default_registry() -> AdapterRegistry:
             path,
             (lambda s: (lambda: LegacyPriceAdapter(call_shape=s)))(shape),
         )
+    for name in (
+        "AutocallableQuadEngineV2", "SnowballQuadEngineV2",
+        "PhoenixQuadEngineV2", "KOResetSnowballQuadEngineV2",
+    ):
+        registry.register(
+            f"quantark.asset.equity.engine.quad.v2.engine.{name}",
+            _quad_v2_adapter, exact=True,
+        )
     # Specialized exact-class adapters (lazy factory import at resolve time —
     # this module keeps zero static asset-code dependencies).
     # exact=True on both (code-gate finding 2026-07-16): these adapters
@@ -230,6 +238,12 @@ def build_default_registry() -> AdapterRegistry:
         _fx_pde_lv_adapter, exact=True,
     )
     return registry
+
+
+def _quad_v2_adapter():
+    from quantark.asset.equity.engine.quad.v2.execution_adapter import QuadV2ExecutionAdapter
+
+    return QuadV2ExecutionAdapter()
 
 
 def _dcn_mc_adapter():

@@ -110,13 +110,30 @@ class AutocallableLifecycleTracker:
             elapsed = 0.0
         barrier_config = getattr(product, "barrier_config", None)
         if barrier_config is not None and hasattr(barrier_config, "time_shift"):
-            shifted_config, dropped_all = barrier_config.time_shift(
+            # The shift is kept even when nothing survives it.  An aged
+            # contract with every observation behind it is its terminal
+            # payoff, and that is what an emptied schedule says; falling
+            # back to the ORIGINAL schedule instead would re-arm
+            # observations that have already happened, against a maturity
+            # that has gone on decaying.
+            shifted_config, _dropped_all = barrier_config.time_shift(
                 elapsed,
                 pd.Timestamp(date).to_pydatetime(),
                 pricing_env,
             )
-            if shifted_config is not None and not dropped_all:
+            if shifted_config is not None:
+                dropped = barrier_config.ko_observation_count - shifted_config.ko_observation_count
                 product.barrier_config = shifted_config
+                # The accrual has to move with the schedule.  This path
+                # shifts the barrier config directly rather than going
+                # through ``product.time_shift``, so it banks the elapsed
+                # period itself: without it a contract with no
+                # ``initial_date`` loses exactly that much off every
+                # surviving coupon, and explicit accrual factors slide
+                # onto observations that have already paid.
+                accrual = getattr(product, "accrual_config", None)
+                if accrual is not None and hasattr(accrual, "shifted"):
+                    product.accrual_config = accrual.shifted(elapsed, dropped)
         return product
 
     # ------------------------------------------------------------------

@@ -465,13 +465,23 @@ class PhoenixOption(BaseEquityOption):
         if dropped_all:
             return True
 
+        before = self._ko_observation_count()
         if self.barrier_config is not None:
             new_config, dropped_all = self.barrier_config.time_shift(
                 time_bump, bumped_date, pricing_env
             )
             self.barrier_config = new_config
 
+        # The schedule has just lost the observations that are now behind
+        # the valuation date; the accrual has to follow it.
+        self.accrual_config = self.accrual_config.shifted(
+            time_bump, before - self._ko_observation_count()
+        )
         return dropped_all
+
+    def _ko_observation_count(self) -> int:
+        config = getattr(self, "barrier_config", None)
+        return 0 if config is None else config.ko_observation_count
 
     def _validate_barrier_array(
         self, barrier: Union[float, List[float]], name: str
@@ -608,7 +618,9 @@ class PhoenixOption(BaseEquityOption):
                     )
                 else:
                     if accrual_start_date is None:
-                        accrual_factor = rec.observation_time
+                        accrual_factor = (
+                            self.accrual_config.accrued_offset + rec.observation_time
+                        )
                     else:
                         if pricing_env is None:
                             raise ValidationError(
@@ -1200,6 +1212,10 @@ class PhoenixOption(BaseEquityOption):
         if flag is None:
             return bool(self.accrual_config.is_annualized)
         return flag
+
+    def _elapsed_since_origin(self) -> float:
+        """The accrual offset is the elapsed time, banked by ``time_shift``."""
+        return float(self.accrual_config.accrued_offset)
 
     def get_contract_tenor(self, pricing_env=None) -> float:
         """

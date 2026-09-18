@@ -74,6 +74,9 @@ from .quad import (
     SnowballQuadEngine,
     KOResetSnowballQuadEngine,
     PhoenixQuadEngine,
+    SnowballQuadEngineV2,
+    PhoenixQuadEngineV2,
+    KOResetSnowballQuadEngineV2,
 )
 
 __all__ = [
@@ -147,4 +150,7 @@ __all__ = [
     "SnowballQuadEngine",
     "KOResetSnowballQuadEngine",
     "PhoenixQuadEngine",
+    "SnowballQuadEngineV2",
+    "PhoenixQuadEngineV2",
+    "KOResetSnowballQuadEngineV2",
 ]

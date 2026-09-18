@@ -1553,6 +1553,9 @@ class SnowballPDESolver(BasePDESolver):
                 v1=np.array(branch_v1, dtype=float), step_of=dict(layout.time.step_of),
                 t0_readout=None if result.readout_vec is None else np.array(result.readout_vec, dtype=float),
                 knocked_in_at_valuation=bool(self._knocked_in_at_valuation),
+                requested_steps=int(layout.time.requested_steps),
+                actual_steps=int(layout.time.actual_steps),
+                fill_scaled=bool(layout.time.fill_scaled),
             )
         finally:
             self._extra_time_nodes = ()

@@ -188,12 +188,46 @@ def _schedule_node(node: Any) -> bool:
     return isinstance(node, tuple) and len(node) == 2 and node[0] == "ObservationSchedule"
 
 
+def _accrual_node(node: Any) -> bool:
+    return isinstance(node, tuple) and len(node) == 2 and node[0] == "AccrualConfig"
+
+
+_MISSING = object()
+
+
+def _float_leaf(node: Any) -> Optional[float]:
+    """The number behind a normalised numeric leaf, or ``None`` if it is not one."""
+    if isinstance(node, tuple) and len(node) == 2 and node[0] in ("float", "int"):
+        return float(node[1])
+    return None
+
+
+def _rolled_suffix(a: Any, b: Any) -> bool:
+    """`b` is `a` with a prefix removed, for a normalised sequence or ``None``."""
+    if a is None or b is None:
+        return a == b
+    if not (isinstance(a, tuple) and a[:1] == ("seq",)):
+        return a == b
+    if not (isinstance(b, tuple) and b[:1] == ("seq",)):
+        return False
+    sa, sb = a[1], b[1]
+    return len(sb) <= len(sa) and sa[len(sa) - len(sb):] == sb
+
+
 def _rolled_equal(a: Any, b: Any) -> bool:
     """Fingerprint equality where `b` may be `a` rolled forward in time.
 
     A rolled observation schedule keeps its non-record terms and its records
     are a SUFFIX of the original's (the shifter drops observations that have
     passed); a schedule whose observations have all passed becomes ``None``.
+
+    A rolled accrual moves with it: ``accrued_offset`` banks the elapsed
+    period, so it only advances, and ``accrual_factors`` are addressed by
+    position in the knock-out schedule, so a roll takes the same prefix off
+    them.  Both are bookkeeping that keeps the aged contract paying what the
+    original promised -- the thing this check exists to confirm -- so
+    neither may read as a different contract.
+
     Everything else must match exactly.
     """
     if _schedule_node(a):
@@ -207,8 +241,21 @@ def _rolled_equal(a: Any, b: Any) -> bool:
         ra, rb = fa.pop("records"), fb.pop("records")
         if fa != fb:
             return False
-        recs_a, recs_b = ra[1], rb[1]                # ("seq", (...))
-        return len(recs_b) <= len(recs_a) and recs_a[len(recs_a) - len(recs_b):] == recs_b
+        return _rolled_suffix(ra, rb)
+    if _accrual_node(a):
+        if not _accrual_node(b):
+            return False
+        fa, fb = dict(a[1]), dict(b[1])
+        if set(fa) != set(fb):
+            return False
+        oa, ob = fa.pop("accrued_offset", _MISSING), fb.pop("accrued_offset", _MISSING)
+        if oa is not _MISSING or ob is not _MISSING:
+            va, vb = _float_leaf(oa), _float_leaf(ob)
+            if va is None or vb is None or vb < va - ROLL_TOL:
+                return False
+        if not _rolled_suffix(fa.pop("accrual_factors", None), fb.pop("accrual_factors", None)):
+            return False
+        return fa == fb
     if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):
         return all(_rolled_equal(x, y) for x, y in zip(a, b))
     return a == b

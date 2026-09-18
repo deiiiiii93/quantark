@@ -107,6 +107,81 @@ def test_contract_fingerprint_and_roll():
     assert contract_fingerprint(p2) == contract_fingerprint(p1)
 
 
+def _snowball(maturity=1.0):
+    """A snowball with a time-based schedule and no ``initial_date``.
+
+    That is the contract whose accrual moves when it is rolled: its coupons
+    accrue from the product's own time origin, so ageing banks the elapsed
+    period rather than dropping it.
+    """
+    from quantark.asset.equity.product.option import create_standard_snowball
+
+    return create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=maturity, contract_multiplier=1.0,
+        ko_barrier=103.0, ki_barrier=75.0, ko_rate=0.12, num_observations=4,
+        ko_observation_dates=[0.25, 0.5, 0.75, 1.0], ki_continuous=True,
+    )
+
+
+def test_a_rolled_accrual_is_still_the_same_contract():
+    """Ageing banks the elapsed accrual, and that bookkeeping is what keeps
+    the aged contract paying what the original promised -- exactly what this
+    check exists to confirm, so it must not read as a replacement."""
+    p0 = _snowball()
+    p1 = deepcopy(p0)
+    env = _env(date=D0 + timedelta(days=3))
+    p1.time_shift(3 / 365, env.valuation_date, env)
+    assert p1.accrual_config.accrued_offset > p0.accrual_config.accrued_offset
+    check_contract_roll(p0, p1, calendar_days=3)
+
+
+def test_an_accrual_that_runs_backwards_is_not_a_time_step():
+    """The offset only ever advances; a smaller one is a different contract."""
+    from dataclasses import replace
+
+    p0 = _snowball()
+    p1 = deepcopy(p0)
+    env = _env(date=D0 + timedelta(days=3))
+    p1.time_shift(3 / 365, env.valuation_date, env)
+    p1.accrual_config = replace(p1.accrual_config, accrued_offset=0.0)
+    p0.accrual_config = replace(p0.accrual_config, accrued_offset=0.5)
+    with pytest.raises(ValidationError):
+        check_contract_roll(p0, p1, calendar_days=3)
+
+
+def test_the_rest_of_the_accrual_still_has_to_match():
+    """Only the offset and the dropped factors are rolled; the accrual's
+    terms are contract identity like any other."""
+    from dataclasses import replace
+
+    p0 = _snowball()
+    p1 = deepcopy(p0)
+    env = _env(date=D0 + timedelta(days=3))
+    p1.time_shift(3 / 365, env.valuation_date, env)
+    p1.accrual_config = replace(p1.accrual_config, is_annualized_ko=False)
+    with pytest.raises(ValidationError):
+        check_contract_roll(p0, p1, calendar_days=3)
+
+
+def test_explicit_accrual_factors_may_only_lose_a_prefix():
+    """They are addressed by position in the knock-out schedule, so a roll
+    takes the same records off the front -- and nothing else."""
+    from dataclasses import replace
+
+    p0 = _snowball()
+    p0.accrual_config = replace(p0.accrual_config, accrual_factors=[0.25, 0.5, 0.75, 1.0])
+    p1 = deepcopy(p0)
+    env = _env(date=D0 + timedelta(days=100))
+    p1.time_shift(100 / 365, env.valuation_date, env)
+    assert p1.accrual_config.accrual_factors == [0.5, 0.75, 1.0]
+    check_contract_roll(p0, p1, calendar_days=100)
+
+    altered = deepcopy(p1)
+    altered.accrual_config = replace(altered.accrual_config, accrual_factors=[0.5, 0.75, 2.0])
+    with pytest.raises(ValidationError):
+        check_contract_roll(p0, altered, calendar_days=100)
+
+
 def test_value_rejects_non_finite_price():
     class NanEngine:
         def price(self, product, env):

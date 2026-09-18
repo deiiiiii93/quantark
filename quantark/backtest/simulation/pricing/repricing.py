@@ -20,15 +20,18 @@ import pandas as pd
 
 from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
 from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.backtest.replay.engine_factory import create_pricing_engine
 from quantark.backtest.replay.market import ImpliedBasisYield, SignedDividendYield
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 
 from ..config import GateConfig
 from .base import (
-    DayStates, GateReport, GateScale, StateKey, bucket_centre, bucket_key, float_key, row_keys, state_row,
+    DayStates, GateReport, GateScale, StateKey, bucket_centre, bucket_key, delta_usage, float_key,
+    row_keys, state_row,
 )
 from .cache import StateCache
 
@@ -129,6 +132,11 @@ class RepricingPricer:
     rather than assumed: sixty single-path oracle comparisons, discrete and
     continuous knock-in, matched the replay to the bit through one engine.
     One engine per path was tried too and bought nothing but ~0.5 MB a path.
+
+    On the flat-vol PDE engine a snowball state is one ``calculate_greeks``
+    call: its price is read off the same solve, through the same readout,
+    as ``price()``'s, so the replay's separate ``price()`` call only repeated
+    the backward solve.  Every other engine keeps the replay's two calls.
     """
 
     def __init__(
@@ -171,6 +179,14 @@ class RepricingPricer:
         self._engine = create_pricing_engine(
             product, engine_config,
             delta_bump_size=delta_bump_size, gamma_bump_size=gamma_bump_size,
+        )
+        # One call per state where it is proven bitwise (Phase 0 of the
+        # per-date PDE design, 2026-09-15): the snowball PDE solver family,
+        # flat vol.  Elsewhere price() and calculate_greeks() stay separate.
+        self._greeks_carry_price = (
+            getattr(engine_config, "pricing_engine_type", None) == EngineType.PDE
+            and getattr(engine_config, "vol_model", "bsm") == "bsm"
+            and isinstance(product, SnowballOption)
         )
         self._aged: Dict[Tuple[pd.Timestamp, bool], Any] = {}
         self._engine_calls = 0
@@ -368,11 +384,7 @@ class RepricingPricer:
         self, date: pd.Timestamp, *, knocked_in: bool, key: StateKey, spot: float, vol: float,
         rate: float, div_yield: Any, basis_yield: Any, label: str,
     ) -> Tuple[float, float, float]:
-        """One engine call: mark with ``price``, greeks from ``calculate_greeks``.
-
-        The replay makes the two calls separately, so they are separate
-        calls here; both modes come through this one method.
-        """
+        """One state: on the flat-vol PDE engine one calculate_greeks call (price read off the same solve); otherwise price then calculate_greeks, as the replay calls them."""
         product = self.aged_product(date, knocked_in=knocked_in)
         self._seed_engine(self._engine, key)
         env = PricingEnvironment(
@@ -382,8 +394,17 @@ class RepricingPricer:
             valuation_date=pd.Timestamp(date).to_pydatetime(),
         )
         try:
-            price = float(self._engine.price(product, env))
-            greeks = self._engine.calculate_greeks(product, env)
+            if self._greeks_carry_price:
+                greeks = self._engine.calculate_greeks(product, env)
+                if "price" not in greeks:
+                    raise ValidationError(
+                        f"{type(self._engine).__name__}.calculate_greeks returned no price; "
+                        "one-call repricing reads the price off the same solve"
+                    )
+                price = float(greeks["price"])
+            else:
+                price = float(self._engine.price(product, env))
+                greeks = self._engine.calculate_greeks(product, env)
         except Exception as exc:  # fail closed with the state in the message
             raise ValidationError(
                 f"pricing failed at {label}: spot={spot!r}, vol={vol!r}, knocked_in={knocked_in}: {exc}"
@@ -455,19 +476,25 @@ class RepricingPricer:
         if self.spot_step is None:
             return GateReport(mode="exact", sampled=0, max_pv_gap_bp=0.0,
                               max_delta_gap_hands=0.0, passed=True)
-        worst_pv = worst_delta = 0.0
+        worst_pv = worst_delta = worst_use = 0.0
         count = 0
+        delta_ok = True
         for row in samples:
             if len(row) != 1:
                 raise ValidationError("verify takes one-row DayStates (see state_row)")
             exact = self.price_exact(row)
             pv, delta, _ = self._price_ladder(row, sample=False)
+            exact_hands = exact[1] * float(scale.hands_per_unit_delta)
+            gap_hands = (float(delta[0]) - exact[1]) * float(scale.hands_per_unit_delta)
             worst_pv = max(worst_pv, abs(float(pv[0]) - exact[0]) / float(scale.unit_notional) * 1e4)
-            worst_delta = max(worst_delta, abs(float(delta[0]) - exact[1]) * float(scale.hands_per_unit_delta))
+            worst_delta = max(worst_delta, abs(gap_hands))
+            worst_use = max(worst_use, delta_usage(gate, gap_hands, exact_hands))
+            delta_ok = delta_ok and gate.passes_delta(gap_hands=gap_hands, exact_delta_hands=exact_hands)
             count += 1
         return GateReport(
             mode="ladder", sampled=count, max_pv_gap_bp=worst_pv, max_delta_gap_hands=worst_delta,
-            passed=worst_pv <= float(gate.pv_tolerance_bp) and worst_delta <= float(gate.delta_tolerance_hands),
+            max_delta_usage=worst_use,
+            passed=worst_pv <= float(gate.pv_tolerance_bp) and delta_ok,
         )
 
     def fingerprint(self) -> str:

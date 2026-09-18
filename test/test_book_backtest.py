@@ -82,10 +82,17 @@ def test_single_product_summary_is_stable(single_summary):
     # test_pde_quad_audit_regressions.py). Correcting it moved PV -- and hence
     # the hedge ladder and realised P&L -- by a genuine amount. Day count and
     # trade count are unchanged; only the P&L level moved.
+    # Re-pinned 2026-09-14: this contract has a time-based KO schedule and no
+    # initial_date, so its accrual ran from the product's own time origin --
+    # and ageing moved that origin every day, shrinking all twelve coupons by
+    # the elapsed period (see test/test_aged_accrual.py). Banking the elapsed
+    # accrual restores the coupons the contract promised at inception, which
+    # moves PV, the hedge ladder and the realised P&L, and fires one more
+    # rebalance over the 86 days. Day count is unchanged.
     assert single_summary["num_days"] == 86
-    assert single_summary["num_trades"] == 5
+    assert single_summary["num_trades"] == 6
     assert single_summary["num_trades"] > 0, "hedging must produce at least one trade"
-    assert single_summary["total_pnl"] == pytest.approx(-3164.8326029009986, rel=1e-9)
+    assert single_summary["total_pnl"] == pytest.approx(10848.943648048378, rel=1e-9)
 
 
 def test_book_config_rejects_empty_products():

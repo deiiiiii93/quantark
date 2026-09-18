@@ -20,7 +20,7 @@ from quantark.backtest.simulation.paths.market_path import trading_calendar
 from quantark.backtest.simulation.pricing.base import GateScale, bucket_centre
 from quantark.backtest.simulation.pricing.surface import LifeSurfacePricer
 
-from .conftest import RATE, SPOT, pde_engine_config
+from .conftest import INCEPTION, RATE, SPOT, pde_engine_config
 
 DATES = trading_calendar(pd.Timestamp("2024-01-02").date(), 8)
 #: The shared short fixture puts its knock-in 25% away, which six days of
@@ -33,13 +33,17 @@ def near_barrier_snowball(ko_days=(2, 5), ki_days=(1, 3)):
     from quantark.asset.equity.product.option import create_standard_snowball
     from quantark.util.enum import ObservationType
 
-    return create_standard_snowball(
+    product = create_standard_snowball(
         initial_price=SPOT, strike=SPOT, maturity=6 / 365.0, contract_multiplier=1.0,
         ko_barrier=1.03 * SPOT, ki_barrier=KI_BARRIER, ko_rate=0.20,
         num_observations=len(ko_days), ko_observation_dates=[d / 365.0 for d in ko_days],
         ki_observation_type=ObservationType.DISCRETE,
         ki_observation_dates=[d / 365.0 for d in ki_days], include_principal=True,
     )
+    # The annualized KO coupon needs an inception to accrue from, or ageing
+    # would shift the observation time it uses as its accrual factor.
+    product.initial_date = INCEPTION
+    return product
 SCALE = GateScale(unit_notional=SPOT, hands_per_unit_delta=5.0)
 VOL, Q = 0.22, 0.05
 LOOSE = GateConfig(sample_states=0, pv_tolerance_bp=1.0e6, delta_tolerance_hands=1.0e6)
@@ -175,3 +179,57 @@ def test_the_day_zero_gate_runs_the_designed_states_too():
     with pytest.raises(GateFailure) as raised:
         EnsembleBacktestEngine(cfg).run(paths)
     assert "life_surface" in str(raised.value)
+
+
+def test_a_scaled_time_grid_fails_the_surface_closed():
+    """The gate compares the surface against exact solves that are mostly
+    under the cap, so a surface whose fill was cut measures the cap, not
+    itself.  It refuses, naming the knob."""
+    from quantark.asset.equity.engine.pde.grid import GridConfig
+    from quantark.asset.equity.param import PDEParams
+    from quantark.util.exceptions import ValidationError
+
+    pricer = LifeSurfacePricer(
+        near_barrier_snowball(), engine_config=pde_engine_config(pde_params=PDEParams(grid=GridConfig(max_steps=10))),
+        start_date=DATES[0], dates=DATES, underlying="CSI1000", vol_step=0.01, q_step=0.0025,
+        surface_cache_bytes=200_000_000, gate=LOOSE,
+    )
+    with pytest.raises(ValidationError, match="max_steps"):
+        pricer.barrier_stress_cases(vol=VOL, rate=RATE, q=Q)
+
+
+def test_the_attribution_rows_carry_the_market_each_leg_priced_at():
+    """The exact leg prices at the state's own corner values and the surface
+    at the bucket centre; a reader building an outside reference from a row
+    must be able to see both."""
+    pricer = _pricer(vol_step=0.01, q_step=0.0025)
+    cases = pricer.barrier_stress_cases(vol=VOL, rate=RATE, q=Q)
+    report = pricer.verify_stress(cases, LOOSE, SCALE)
+    for row, case in zip(report.attribution, cases):
+        state = case.states
+        assert row["vol"] == float(state.vol[0])
+        assert row["q"] == float(state.q_T[0])
+        assert row["rate"] == float(state.rate[0])
+        assert row["surface_vol"] == float(bucket_centre(state.vol, pricer.vol_step)[0])
+        assert row["surface_q"] == float(bucket_centre(state.q_T, pricer.q_step)[0])
+        assert row["surface_rate"] == float(bucket_centre(state.rate, pricer.q_step)[0])
+        assert abs(row["vol"] - row["surface_vol"]) >= 0.49 * pricer.vol_step
+
+
+def test_a_designed_state_is_judged_on_its_own_delta_scale():
+    """Beside the barrier the delta runs an order of magnitude above a
+    typical state, so the same absolute hand budget is a far tighter rule
+    there.  The relative allowance is what lets the two be judged alike."""
+    from dataclasses import replace
+
+    pricer = _pricer(vol_step=0.01, q_step=0.0025)
+    cases = pricer.barrier_stress_cases(vol=VOL, rate=RATE, q=Q)
+    strict = GateConfig(sample_states=0, pv_tolerance_bp=1e9, delta_tolerance_hands=0.0,
+                        barrier_offsets=LOOSE.barrier_offsets, barrier_dates=LOOSE.barrier_dates)
+    report = pricer.verify_stress(cases, strict, SCALE)
+    assert not report.passed
+    worst = max(abs(row["delta_gap_rel"]) for row in report.attribution
+                if np.isfinite(row["delta_gap_rel"]))
+
+    assert pricer.verify_stress(cases, replace(strict, delta_tolerance_rel=worst * 1.01), SCALE).passed
+    assert not pricer.verify_stress(cases, replace(strict, delta_tolerance_rel=worst * 0.99), SCALE).passed

@@ -126,3 +126,28 @@ def test_the_product_fingerprint_sees_every_contract_term():
     knocked_in = short_snowball()
     knocked_in._otc_lifecycle_knocked_in = True            # lifecycle state is NOT a term
     assert same == product_fingerprint(knocked_in)
+
+
+def test_exact_pde_repricing_solves_each_state_once(monkeypatch):
+    from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+
+    count = {"n": 0}
+    original = SnowballPDESolver._solve
+
+    def counting(self, product, pricing_env):
+        count["n"] += 1
+        return original(self, product, pricing_env)
+
+    monkeypatch.setattr(SnowballPDESolver, "_solve", counting)
+    pricer = _pricer()
+    pricer.price_day(_states(3, [SPOT * 0.9, SPOT, SPOT * 1.02]))
+    assert count["n"] == 3 and pricer.stats()["engine_calls"] == 3
+
+
+def test_only_the_flat_vol_pde_engine_takes_the_one_call_path():
+    from quantark.util.enum.engine_enums import EngineType
+
+    assert _pricer()._greeks_carry_price
+    quad = RepricingPricer(short_snowball(), engine_config=pde_engine_config(pricing_engine_type=EngineType.QUADRATURE),
+                           start_date=START, underlying="CSI1000", cache=StateCache(CacheConfig(memory_bytes=1_000_000)))
+    assert not quad._greeks_carry_price

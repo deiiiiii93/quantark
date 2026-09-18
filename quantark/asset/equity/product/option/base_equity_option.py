@@ -341,7 +341,9 @@ class BaseEquityOption(BaseEquityProduct):
         Resolution order:
         1. If tenor is directly set, return it
         2. If initial_date is available, calculate from initial_date to tenor end date
-        3. Fall back to maturity as an approximation
+        3. Fall back to the remaining maturity plus the elapsed time an aged
+           product has banked (``_elapsed_since_origin``), which is the same
+           duration read from the other end
 
         Args:
             pricing_env: Pricing environment for date-based calculations (optional)
@@ -366,15 +368,30 @@ class BaseEquityOption(BaseEquityProduct):
                     self.annualization_day_count,
                 )
 
-        # Fall back to maturity if no other information available
+        # Fall back to the remaining maturity plus whatever has already gone.
+        # The tenor is inception to expiry, a constant of the deal, while
+        # maturity is what is LEFT of it -- the two agree only on the trade
+        # date, so the bare maturity would shrink an annualized payoff a
+        # little more every day the contract is aged.
         if self.maturity is not None:
-            return self.maturity
+            return self.maturity + self._elapsed_since_origin()
 
         # Cannot determine tenor
         raise ValidationError(
             "Tenor cannot be determined: set tenor, or provide initial_date with "
             "exercise_date/settlement_date/maturity_date"
         )
+
+    def _elapsed_since_origin(self) -> float:
+        """How much of the contract has already gone, in years.
+
+        ``time_shift`` shortens ``maturity`` without recording by how much,
+        so a product that wants its CONTRACT tenor back from the remaining
+        one has to bank the shift somewhere and say so here.  Zero for an
+        option that banks nothing -- which is also the right answer for one
+        that has never been aged.
+        """
+        return 0.0
 
     def get_tenor_end_date(self) -> Optional[datetime]:
         """

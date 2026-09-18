@@ -33,6 +33,14 @@ class GateConfig:
     sample_states: int
     pv_tolerance_bp: float
     delta_tolerance_hands: float
+    #: A second delta budget, as a fraction of the state's OWN exact delta,
+    #: taken whenever it is the larger of the two.  Hands alone are
+    #: calibrated on a typical state; beside a barrier near expiry the delta
+    #: is an order of magnitude above that and neither the provider nor the
+    #: exact solve it is scored against is converged, so an absolute rule
+    #: there measures the mesh rather than the provider.  0.0 leaves hands
+    #: as the only rule.
+    delta_tolerance_rel: float = 0.0
     #: Signed fractions of the knock-in barrier the designed stress set
     #: places spots at.  Whether a run's reservoir ever lands beside the
     #: barrier is luck; these states are visited whether it does or not.
@@ -46,6 +54,11 @@ class GateConfig:
             raise ValidationError("GateConfig.sample_states must be non-negative")
         if float(self.pv_tolerance_bp) < 0.0 or float(self.delta_tolerance_hands) < 0.0:
             raise ValidationError("GateConfig tolerances must be non-negative")
+        rel = float(self.delta_tolerance_rel)
+        if not np.isfinite(rel) or rel < 0.0:
+            raise ValidationError(
+                "GateConfig.delta_tolerance_rel must be a finite non-negative fraction"
+            )
         offsets = tuple(float(x) for x in self.barrier_offsets)
         if any(x == 0.0 or not np.isfinite(x) or x <= -1.0 for x in offsets):
             raise ValidationError(
@@ -54,6 +67,15 @@ class GateConfig:
         object.__setattr__(self, "barrier_offsets", offsets)
         if int(self.barrier_dates) < 0:
             raise ValidationError("GateConfig.barrier_dates must be non-negative")
+
+    def delta_allowance(self, exact_delta_hands: float) -> float:
+        """The delta budget ONE state is judged against, in hands."""
+        return max(float(self.delta_tolerance_hands),
+                   float(self.delta_tolerance_rel) * abs(float(exact_delta_hands)))
+
+    def passes_delta(self, *, gap_hands: float, exact_delta_hands: float) -> bool:
+        """Whether one state's delta gap is inside its own budget."""
+        return abs(float(gap_hands)) <= self.delta_allowance(exact_delta_hands)
 
 
 @dataclass(frozen=True)

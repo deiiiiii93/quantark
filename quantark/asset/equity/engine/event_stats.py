@@ -219,12 +219,18 @@ class PhoenixEventStats(AutocallableEventStats):
     Attributes:
         coupon_probability: Coupon trigger probability at each observation time.
         expected_discounted_coupon_cashflow: Expected discounted coupon cashflow per observation.
+        coupon_payment_is_path_dependent: True when an earning observation has
+            no single deterministic payment date (for example QUAD V2 deferred
+            coupons paid at KO or maturity). The additive cashflow ledger uses
+            actual payment-event buckets; its coupon rows must not be used as
+            payment dates for the earning-observation probabilities.
     """
 
     coupon_probability: np.ndarray = field(default_factory=lambda: np.array([]))
     expected_discounted_coupon_cashflow: np.ndarray = field(
         default_factory=lambda: np.array([])
     )
+    coupon_payment_is_path_dependent: bool = False
 
 
 @dataclass(frozen=True)

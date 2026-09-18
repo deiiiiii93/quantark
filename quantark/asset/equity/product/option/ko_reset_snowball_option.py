@@ -329,7 +329,10 @@ class KnockOutResetSnowballOption(SnowballOption):
                 pricing_env.bus_days_in_year,
                 calendar=getattr(pricing_env, "calendar", None),
             )
-        return self.get_pre_maturity_time(pricing_env)
+        # The remaining time to the last pre-KO observation, plus whatever
+        # has already gone: a CONTRACT tenor does not shorten as the
+        # contract ages (see ``BaseEquityOption.get_tenor``).
+        return self.get_pre_maturity_time(pricing_env) + self._elapsed_since_origin()
 
     def _resolve_post_contract_tenor(self, pricing_env: PricingEnv) -> float:
         if self.post_ko_mode == PostKOScheduleMode.ABSOLUTE:
@@ -344,7 +347,7 @@ class KnockOutResetSnowballOption(SnowballOption):
                     pricing_env.bus_days_in_year,
                     calendar=getattr(pricing_env, "calendar", None),
                 )
-        return self.get_post_maturity_time(pricing_env)
+        return self.get_post_maturity_time(pricing_env) + self._elapsed_since_origin()
 
     def get_contract_tenor(self, pricing_env: PricingEnv = None) -> float:
         """
@@ -526,7 +529,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             )
 
         if accrual_start_date is None:
-            return float(observation_time)
+            return float(self.accrual_config.accrued_offset + observation_time)
 
         if pricing_env is None:
             raise ValidationError(

@@ -1,0 +1,117 @@
+{
+  "metadata": {
+    "date": "2026-09-11T11:12:18.957176",
+    "git_head": "d926e1f54f4392a296cbbacc03c3bb232550bba5",
+    "python": "3.11.8 (main, Feb 26 2024, 15:36:12) [Clang 14.0.6 ]",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "thread_env": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "args": {
+      "phase": "events",
+      "only": "monthly,near_ki_above,aged_five_days"
+    },
+    "sha256": {
+      "example/gaussian_quad_comparison/contracts.py": "d29170f503a719d10922df55aeca88734868664e8b352005f0ad0f188804bf5d",
+      "example/gaussian_quad_comparison/quad_reference_snapshot.py": "70938c07768f0512765bed99ca9d2c50dd561bb649fe595ebda90bbe3d090ac7",
+      "example/gaussian_quad_comparison/supplement.py": "525d2a9208cbb3a9d531007c6425305393acec0cf93607fef333179bcb62e16d",
+      "example/gaussian_quad_comparison/study.py": "cb69f46e0efee43a63a0331225faca865493b01729a38e630bc8a5e328cc95ef",
+      "quantark/asset/equity/engine/quad/quad_adapters.py": "34adb6481fb214c826b0d8cd11a83fef74e79d71a3c91d2f467d197a3f2a04d0",
+      "quantark/asset/equity/engine/quad/quad_core.py": "c2fe64c6b40e397e719ab2be0f25cc50994d752a2d8d44756313e5613d733f83",
+      "quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py": "14b0ff79208573704d8f721522194f6bf38e230a6e6fca50c54b2b4372d72937",
+      "quantark/asset/equity/engine/quad/snowball_quad_engine.py": "bae744b06c51a8d727d57d035d30f321f58e698dba29e76484001b06ce9f69b8",
+      "quantark/asset/equity/engine/quad/european_quad_engine.py": "82a6cebe23880c89224d6185365a7ff66b4d5a0c712119cdec92999beb978fd1",
+      "quantark/asset/equity/engine/quad/__init__.py": "fbbdf49babb80717b25930be94dd181910edf6fbe92691e6703b6c26cc026f58",
+      "quantark/asset/equity/engine/quad/phoenix_quad_engine.py": "9d5c3916d64313bde4ff2eba454832e711aa804b413a42b7c1b19b5985cbcdb1",
+      "quantark/asset/equity/engine/quad/quad_math.py": "eb6e220982a9ea85562894b3bcbd37ccff418d6e10295175ffc5a2af425eda3c",
+      "quantark/asset/equity/engine/quad/discrete_quad_engine.py": "3cd9977fdbf7496a832feb5a0e80b6fdea2198c94e414929533ee22f7572a836",
+      "quantark/asset/equity/engine/quad/term_inputs.py": "4bd0c4e2ac4e50bf19ac80166b607f0624a81723d737e53d277efb9714a85297",
+      "quantark/asset/equity/engine/base_engine.py": "c0f42613f0215972d2f8eabd3c897dfdf4514a8992663bc1e3d38b59b669e633",
+      "quantark/asset/equity/param/engine_params.py": "7a1a1fefa3744d0c501f9c6fc2d013668da01be757071ee9c065ee08dfaef117"
+    }
+  },
+  "results": [
+    {
+      "name": "monthly",
+      "results": {
+        "legacy_linear": {
+          "price": 1.9096243581290278,
+          "event_pv": 1.9096243581290278,
+          "ko_pv": 2.2597223109894053,
+          "maturity_pv": -0.3500979528603776,
+          "reconciliation": 0.0,
+          "ko_probability_sum": 0.7464792198169877,
+          "min_ko_probability": 0.010681812031388948,
+          "cashflow_sum": 1.9096243581290278
+        },
+        "transition": {
+          "price": 1.909919916404206,
+          "event_pv": 1.909919916404206,
+          "ko_pv": 2.2598237203847655,
+          "maturity_pv": -0.34990380398055954,
+          "reconciliation": 0.0,
+          "ko_probability_sum": 0.7464871549994487,
+          "min_ko_probability": 0.010681838229255136,
+          "cashflow_sum": 1.909919916404206
+        }
+      },
+      "elapsed_s": 0.3387238751165569
+    },
+    {
+      "name": "near_ki_above",
+      "results": {
+        "legacy_linear": {
+          "price": -17.507202730301604,
+          "event_pv": -17.507202730301604,
+          "ko_pv": 2.3055439735489243,
+          "maturity_pv": -19.81274670385053,
+          "reconciliation": 0.0,
+          "ko_probability_sum": 0.30882792852935465,
+          "min_ko_probability": 0.0103771850088194,
+          "cashflow_sum": -17.507202730301604
+        },
+        "transition": {
+          "price": -17.507244137705015,
+          "event_pv": -17.507244137705015,
+          "ko_pv": 2.305565308878052,
+          "maturity_pv": -19.812809446583067,
+          "reconciliation": 0.0,
+          "ko_probability_sum": 0.3088231970877999,
+          "min_ko_probability": 0.010377349079739744,
+          "cashflow_sum": -17.507244137705015
+        }
+      },
+      "elapsed_s": 6.307205167133361
+    },
+    {
+      "name": "aged_five_days",
+      "results": {
+        "legacy_linear": {
+          "price": -4.563046793522032,
+          "event_pv": -4.563046793522032,
+          "ko_pv": 0.0015179565921498643,
+          "maturity_pv": -4.564564750114182,
+          "reconciliation": 0.0,
+          "ko_probability_sum": 8.436439307829617e-05,
+          "min_ko_probability": 8.436439307829617e-05,
+          "cashflow_sum": -4.563046793522032
+        },
+        "transition": {
+          "price": -4.563211051010427,
+          "event_pv": -4.563211051010427,
+          "ko_pv": 0.001517638846181966,
+          "maturity_pv": -4.564728689856609,
+          "reconciliation": 0.0,
+          "ko_probability_sum": 8.434673351815233e-05,
+          "min_ko_probability": 8.434673351815233e-05,
+          "cashflow_sum": -4.563211051010427
+        }
+      },
+      "elapsed_s": 0.09430408291518688
+    }
+  ]
+}

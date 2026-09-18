@@ -22,6 +22,12 @@ probes:
                                        # largest ADI grids this study builds.
   - dir: output/volmodel_timing_quad   # flat_bsm_quad per-replay-day cost, the
                                        # last unmeasured variant: ~11.7 s/day
+  - dir: output/volmodel_timing_1d     # ts_bsm + localvol per-replay-day cost,
+                                       # 2 inceptions x 2 variants at workers=4:
+                                       # 4 runs in 74.6 s, all censored at data end
+  - dir: output/volmodel_timing_pde1d  # flat_bsm 1-D PDE control for the same
+                                       # two inceptions at workers=2: 2 runs in
+                                       # 27.0 s, the cheapest variant measured
 
 # Scoped invalidations.  These replace the hand-maintained
 # gate_decision_pre_*.json renaming convention.  A DOCUMENTATION commit can
