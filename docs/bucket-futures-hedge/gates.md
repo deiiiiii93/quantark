@@ -1745,8 +1745,10 @@ reason Gate E's numbers held is a different one.** Gate E is PAIRED WITHIN
 INCEPTION: both cells of a comparison run the same engine on the same spot
 path, so an alignment error at a given state hits both sides and cancels in the
 difference. That is why the twelve paired gaps moved by at most 1.35 bp while
-the per-state delta error was of order 19 contracts. It is common-mode
-cancellation, not smallness.
+the per-state delta error was of order 20 contracts — the worst delta step
+across the crossover measured above is 4036 units, and the same table prices a
+217-unit riser at 1.1 hands, so 200 units to the contract makes it 20.2 hands.
+It is common-mode cancellation, not smallness.
 
 The carry-identity audit is the one comparison in this study where it does NOT
 cancel, because it checks an engine quantity against an independent repricing
@@ -1756,12 +1758,29 @@ an audit whose reference is outside the engine.
 
 **What is not protected is any consumer that does not round.** One hand is one
 IM contract here and hedges round to whole contracts, on books averaging 41.0
-contracts (8.4 to 130.6). A 19-contract delta error is therefore about 46% of
-the typical book — it does not round away; what saves the hedge is that the
-error lives in a ±1% moneyness band, is corrected at the next daily rebalance,
-and cancels in paired comparisons. A risk report, a VaR bucket or a margin
-calculation takes the unrounded delta and is exposed at the full error, with
-none of those three protections.
+contracts (8.4 to 130.6). A 20-hand delta step is therefore about half the
+typical book — nowhere near the rounding increment; what saves the hedge is
+that the error lives in a ±1% moneyness band, is corrected at the next daily
+rebalance, and cancels in paired comparisons. A risk report, a VaR bucket or a
+margin calculation takes the unrounded delta and is exposed at the full error,
+with none of those three protections.
+
+Two unit traps sit under that, both found by checking rather than reading.
+Delta leaves the pricer in raw index units and becomes hands only where
+`repricing.py` applies `hands_per_unit_delta`; the simulated-path study read
+the raw cube column, reported ~19, and called it hands in its README and commit
+message. Corrected, its per-state error is **0.095 of a contract**, not 19 —
+roughly two hundred times smaller than the step measured here, though the two
+are not like for like (this is the worst state at a refinement grid; theirs is
+a median across the window at their own configuration).
+
+And "a sub-contract error rounds away" is wrong even at 0.095 contracts. They
+measured it rather than assuming: comparing default against forced runs state
+by state, the rounded hedge differs on **15.3%** of states inside the ±1% band
+(307 of 2,010) against 0.4% outside it. A tenth-of-a-contract error straddles a
+rounding boundary often enough to change the trade about one affected state in
+six. Rounding attenuates; it does not protect. What protects is transience —
+each difference is one contract for one day, corrected at the next rebalance.
 
 **And one caution from the same re-run.** That study's largest engine gap,
 `term_flat_q__far` at −8.33 bp, SURVIVED forcing at −8.81 and moved the wrong
