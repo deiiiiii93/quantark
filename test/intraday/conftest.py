@@ -77,8 +77,13 @@ def dated_snowball(cal, t0, months=12, ko=103.0, ki=75.0, ko_rate=0.12, rebate_r
     )
 
 
-def dated_phoenix(cal, t0, months=12, ko=103.0, ki=75.0, coupon_barrier=80.0, coupon_rate=0.12, memory=True):
-    """Monthly KO/coupon dates from t0 with discrete KI on the same dates; coupons accrue ACT/365 per period."""
+def dated_phoenix(cal, t0, months=12, ko=103.0, ki=75.0, coupon_barrier=80.0, coupon_rate=0.12, memory=True,
+                  rebate_rate=None, fixed_fraction=None):
+    """Monthly KO/coupon dates from t0 with discrete KI on the same dates; coupons accrue ACT/365 per period.
+
+    With the default zero rebate a knock-out and a survival above the coupon barrier pay the same cash (principal plus
+    the coupon), so a test that must tell them apart passes ``rebate_rate``. ``fixed_fraction`` gives every period
+    the same coupon, which the float-time twin needs to carry memory arrears."""
     from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
     from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
     dates = _monthly_trading_dates(cal, t0, months)
@@ -92,13 +97,19 @@ def dated_phoenix(cal, t0, months=12, ko=103.0, ki=75.0, coupon_barrier=80.0, co
             ko_observation_schedule=ko_schedule,
             ki_barrier=ki, ki_observation_type=ObservationType.DISCRETE,
             ki_observation_schedule=ki_schedule),
-        coupon_config=CouponBarrierConfig(coupon_barrier=coupon_barrier, coupon_rate=coupon_rate, memory_coupon=memory),
-        payoff_config=PayoffConfig(include_principal=True),
+        coupon_config=CouponBarrierConfig(coupon_barrier=coupon_barrier, coupon_rate=coupon_rate, memory_coupon=memory,
+                                          fixed_coupon_year_fraction=fixed_fraction),
+        payoff_config=(PayoffConfig(include_principal=True) if rebate_rate is None
+                       else PayoffConfig(include_principal=True, rebate_rate=rebate_rate)),
     )
 
 
-def dated_ko_reset(cal, t0, pre_months=6, post_months=12, pre_ko=103.0, post_ko=95.0, ki=75.0, pre_rate=0.15, post_rate=0.03):
-    """Monthly pre-KI KO dates for ``pre_months``, post-KI KO dates for ``post_months`` (absolute), monthly discrete KI."""
+def dated_ko_reset(cal, t0, pre_months=6, post_months=12, pre_ko=103.0, post_ko=95.0, ki=75.0, pre_rate=0.15, post_rate=0.03,
+                   rebate_rate=None):
+    """Monthly pre-KI KO dates for ``pre_months``, post-KI KO dates for ``post_months`` (absolute), monthly discrete KI.
+
+    ``rebate_rate`` defaults to the pre-KI knock-out coupon; pass another rate where a test must tell a knock-out from
+    a survival."""
     from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
     pre_dates = _monthly_trading_dates(cal, t0, pre_months)
     post_dates = _monthly_trading_dates(cal, t0, post_months)
@@ -113,7 +124,7 @@ def dated_ko_reset(cal, t0, pre_months=6, post_months=12, pre_ko=103.0, post_ko=
         post_barrier_config=BarrierConfig(
             ko_barrier=post_ko, ko_rate=post_rate, ko_observation_type=ObservationType.DISCRETE,
             ko_observation_schedule=ObservationSchedule(records=[record(d, post_ko) for d in post_dates])),
-        payoff_config=PayoffConfig(rebate_rate=pre_rate, include_principal=False),
+        payoff_config=PayoffConfig(rebate_rate=pre_rate if rebate_rate is None else rebate_rate, include_principal=False),
     )
 
 

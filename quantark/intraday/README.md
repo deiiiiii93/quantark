@@ -224,7 +224,13 @@ Every limit below raises rather than approximating. None of them is a silent fal
   only reconstructs an amount when every period is worth the same (a declared
   `fixed_coupon_year_fraction`, or a per-period rate). Otherwise the twin fails closed.
 - **KO-reset snowball replay.** Supply a checkpoint covering every fixing due before the
-  valuation instant; the daily tracker observes only the pre-KI schedule.
+  valuation instant; the daily tracker observes only the pre-KI schedule. For the same reason
+  its maturity close under `BEFORE` is decided from the float-time twin
+  (`KnockOutResetSnowballOption.decide_observations_at_valuation`), not through the
+  `BEFORE` / `AFTER` lifecycle identity the snowball and the Phoenix resolve it with.
+- **A knocked-in KO-reset snowball after its pre-KI schedule has ended.** The twin fails
+  closed there, and so does every day-level engine; the contract can be valued up to the
+  last pre-KI observation, and at a final maturity both schedules share.
 - Dated autocallables without `initial_date` (their accrual would move with the valuation
   timestamp), time-based checkpoints, checkpoints that report the future, and two due
   fixings on one local date (the daily lifecycle tracker cannot separate them) fail closed.

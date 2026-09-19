@@ -78,7 +78,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
         if is_zero(maturity, tol=Tolerance.ZERO):
-            return product.get_payoff(spot, pricing_env=pricing_env)
+            return self._decided_at_valuation(product, pricing_env, float(spot))
 
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
@@ -614,6 +614,39 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
         return math_utils.interpolate(value_surface, x=0.0)
+
+    def _decided_at_valuation(self, product, pricing_env, spot: float) -> float:
+        """Zero time to maturity: the observations still pending at this instant are decided on the spot.
+
+        The backward induction decides an observation at the valuation instant on the known spot when
+        more of the claim lies ahead. The shortcut used to return the redemption of a never-knocked-in
+        claim instead: no last coupon, no memory arrears, no knock-out, no knock-in, not even a knock-in
+        carried from an earlier day.
+        """
+        from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+
+        def discounted(cash: float, payment_time) -> float:
+            if payment_time is not None and payment_time > 0.0:
+                return float(cash) * float(pricing_env.get_discount_factor(payment_time))
+            return float(cash)
+
+        decision = product.decide_observations_at_valuation(
+            spot,
+            pricing_env,
+            knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
+        )
+        if decision.knocked_out:
+            record = decision.ko_record
+            return discounted(float(record.payoff or 0.0) + decision.coupon, record.settlement_time)
+        value = product.get_payoff(spot, knocked_in=decision.knocked_in, pricing_env=pricing_env)
+        if decision.coupon:
+            if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
+                records = product.resolve_ko_observations(pricing_env)
+                payment_time = records[decision.coupon_index].settlement_time
+            else:
+                payment_time = resolve_terminal_timing(product, pricing_env).payment_time
+            value += discounted(decision.coupon, payment_time)
+        return value
 
     def _event_stats_product_type(self) -> type:
         return PhoenixOption

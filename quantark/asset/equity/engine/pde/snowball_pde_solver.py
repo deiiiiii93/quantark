@@ -1881,9 +1881,21 @@ class SnowballPDESolver(BasePDESolver):
             if decision.knocked_out:
                 return self._get_immediate_ko_payoff(product, pricing_env)
             carried = decision.knocked_in
+        else:
+            decided, carried = self._decide_variant_at_valuation(product, spot, pricing_env, carried)
+            if decided is not None:
+                return decided
         # the spot-only proxy is kept: it also covers a knock-in level with no record at this instant
         knocked_in = carried or self._is_already_knocked_in(product, spot)
         return product.get_payoff(spot, pricing_env, knocked_in=knocked_in)
+
+    def _decide_variant_at_valuation(
+        self, product, spot: float, pricing_env: PricingEnvironment, carried: bool
+    ) -> Tuple[Optional[float], bool]:
+        """Hook for a snowball variant whose pending observations need their own decision at zero
+        maturity: (the value of a knock-out decided now, else ``None``; the knock-in state after the
+        instant). The base keeps the carried state."""
+        return None, carried
 
     def _build_grids(
         self,

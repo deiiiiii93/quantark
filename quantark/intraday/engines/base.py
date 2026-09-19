@@ -83,14 +83,21 @@ DECIDED_STENCIL = 1e-6
 _DECIDED_REASON = "every remaining event is at the valuation instant: decided on the spot"
 
 
-def plain_snowball(product) -> bool:
-    """Exactly a ``SnowballOption``: the claim the decided-at-valuation resolution is demonstrated on for the Monte
-    Carlo and PDE routes. Phoenix is left out on purpose: the autocallable lifecycle raises at a Phoenix maturity
-    (``get_payoff`` is called with the environment where Phoenix takes ``knocked_in``), so that resolution cannot
-    serve it yet; the knock-out-reset snowball is untested there. Both keep their routes' previous behaviour."""
+def decides_at_valuation(product) -> bool:
+    """The autocallables whose maturity close the routes resolve themselves: the snowball, the Phoenix and the
+    knock-out-reset snowball, matched exactly (a subclass does not inherit the resolution). The Monte Carlo and PDE
+    routes also serve barrier, one-touch and digital claims, which are not resolved here."""
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+    from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
 
-    return type(product) is SnowballOption
+    return type(product) in (SnowballOption, PhoenixOption, KnockOutResetSnowballOption)
+
+
+def _ko_reset(product) -> bool:
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+
+    return type(product) is KnockOutResetSnowballOption
 
 
 def decided_at_valuation(ctx) -> bool:
@@ -112,9 +119,13 @@ def decided_value(ctx) -> float:
     cash paid at the instant, less the ledger already pending -- the identity that relates BEFORE and AFTER at every
     other fixing instant. The route resolves the decided claim through the runtime's own event resolution instead of
     re-stating the payoff, so every route agrees by construction. The ledger is discounted on this context's
-    market, so a bumped cell prices its own.
+    market, so a bumped cell prices its own. The knock-out-reset snowball is the exception: the runtime cannot
+    replay it, so its decided claim is read off the twin (``_decided_value_ko_reset``).
     """
     import dataclasses
+
+    if _ko_reset(ctx.numerical.product):
+        return _decided_value_ko_reset(ctx)
 
     from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
     from quantark.intraday.context import resolve_context
@@ -134,6 +145,34 @@ def decided_value(ctx) -> float:
 
     received = float(decided.numerical.paid_cash) - float(ctx.numerical.paid_cash)
     return pending(decided.numerical.lifecycle_state) + received - pending(ctx.numerical.lifecycle_state)
+
+
+def _ko_reset_decision(ctx):
+    state = ctx.numerical.lifecycle_state
+    return ctx.numerical.product.decide_observations_at_valuation(
+        float(ctx.spot), ctx.pricing_env, knocked_in=bool(getattr(state, "knocked_in", False)), post_ko_at_knock_in=True)
+
+
+def _decided_value_ko_reset(ctx) -> float:
+    """The knock-out-reset snowball has no lifecycle replay in the runtime (the daily tracker observes only its
+    pre-KI schedule), so the BEFORE / AFTER identity above cannot be evaluated for it. The decided claim is read
+    off the float-time twin instead: its own decision on the schedule the knock-in state puts in force, paid on the
+    twin's payment times, which are the timeline's. Both routes that serve it (PDE, QUAD V2) give a fresh knock-in
+    a knocked-in surface that has already applied this instant's post-KI knock-out, hence ``post_ko_at_knock_in``."""
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+
+    twin, env = ctx.numerical.product, ctx.pricing_env
+    decision = _ko_reset_decision(ctx)
+
+    def discounted(cash, payment_time):
+        if payment_time is not None and payment_time > 0.0:
+            return float(cash) * float(env.get_discount_factor(payment_time))
+        return float(cash)
+
+    if decision.knocked_out:
+        return discounted(decision.ko_record.payoff, decision.ko_record.settlement_time)
+    redemption = twin.get_payoff(float(ctx.spot), env, knocked_in=decision.knocked_in)
+    return discounted(redemption, resolve_terminal_timing(twin, env).payment_time)
 
 
 def decided_price_outcome(ctx) -> EnginePriceOutcome:

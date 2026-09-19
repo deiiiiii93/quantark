@@ -236,6 +236,51 @@ class ResolvedObservationRecord:
     settlement_date: Optional[datetime] = None
 
 
+#: An observation whose resolved time is within this of zero sits AT the valuation instant.
+AT_VALUATION_TOL = 1e-10
+
+
+@dataclass(frozen=True)
+class ObservationsAtValuation:
+    """What the observations scheduled at the valuation instant decide on the known spot.
+
+    Attributes:
+        knocked_out: a discrete knock-out observation at time zero is breached (and not disabled by an
+            earlier knock-in).
+        knocked_in: the carried knock-in state, or a knock-in decided at this instant.
+        ko_record: the breached knock-out record (payoff and settlement), when ``knocked_out``.
+        ko_index: its position in the resolved knock-out schedule it came from.
+    """
+
+    knocked_out: bool
+    knocked_in: bool
+    ko_record: Optional[ResolvedObservationRecord] = None
+    ko_index: Optional[int] = None
+
+
+def knock_in_decided_at_valuation(product, spot: float, pricing_env) -> bool:
+    """Whether a knock-in observation AT the valuation instant is breached by the known spot.
+
+    Continuous monitoring observes its level now; discrete monitoring observes the records resolved to
+    time zero. Shared by the autocallables' ``decide_observations_at_valuation``.
+    """
+    from quantark.util.enum import ObservationType
+
+    config = product.barrier_config
+    if config.ki_barrier is None:
+        return False
+    if config.ki_observation_type == ObservationType.CONTINUOUS or config.ki_continuous:
+        level = config.ki_barrier[0] if isinstance(config.ki_barrier, list) else config.ki_barrier
+        levels = [level]
+    else:
+        levels = [
+            record.barrier
+            for record in product.resolve_ki_observations(pricing_env)
+            if abs(record.observation_time) <= AT_VALUATION_TOL and record.barrier is not None
+        ]
+    return any((spot >= level) if product.is_reverse else (spot <= level) for level in levels)
+
+
 @dataclass
 class ObservationSchedule:
     """Ordered schedule of observation records with aggregation semantics."""

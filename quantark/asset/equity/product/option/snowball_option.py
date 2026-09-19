@@ -31,30 +31,15 @@ from quantark.util.enum import (
 from quantark.util.exceptions import ValidationError
 
 from .observation_schedule import (
+    AT_VALUATION_TOL,
+    ObservationsAtValuation,
+    knock_in_decided_at_valuation,
     ObservationRecord,
     ObservationSchedule,
     PricingEnv,
     ResolvedObservationRecord,
 )
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
-
-
-@dataclass(frozen=True)
-class ObservationsAtValuation:
-    """What the observations scheduled at the valuation instant decide on the known spot.
-
-    Attributes:
-        knocked_out: a discrete knock-out observation at time zero is breached (and not disabled by an
-            earlier knock-in).
-        knocked_in: the carried knock-in state, or a knock-in decided at this instant.
-        ko_record: the breached knock-out record (payoff and settlement), when ``knocked_out``.
-        ko_index: its position in ``resolve_ko_observations``.
-    """
-
-    knocked_out: bool
-    knocked_in: bool
-    ko_record: Optional[ResolvedObservationRecord] = None
-    ko_index: Optional[int] = None
 
 
 @dataclass
@@ -1212,25 +1197,14 @@ class SnowballOption(BaseEquityOption):
             knocked_in and config.disable_ko_after_ki
         ):
             for index, record in enumerate(self.resolve_ko_observations(pricing_env)):
-                if abs(record.observation_time) > 1e-10 or record.barrier is None:
+                if abs(record.observation_time) > AT_VALUATION_TOL or record.barrier is None:
                     continue
                 breached = spot <= record.barrier if self.is_reverse else spot >= record.barrier
                 if breached:
                     return ObservationsAtValuation(True, knocked_in, record, index)
         if knocked_in or not self.has_ki_barrier:
             return ObservationsAtValuation(False, knocked_in)
-        continuous = config.ki_observation_type == ObservationType.CONTINUOUS or config.ki_continuous
-        if continuous:
-            level = config.ki_barrier[0] if isinstance(config.ki_barrier, list) else config.ki_barrier
-            levels = [level]
-        else:
-            levels = [
-                record.barrier
-                for record in self.resolve_ki_observations(pricing_env)
-                if abs(record.observation_time) <= 1e-10 and record.barrier is not None
-            ]
-        hit = any((spot >= level) if self.is_reverse else (spot <= level) for level in levels)
-        return ObservationsAtValuation(False, hit)
+        return ObservationsAtValuation(False, knock_in_decided_at_valuation(self, spot, pricing_env))
 
     def get_ko_observation_profile(
         self, pricing_env

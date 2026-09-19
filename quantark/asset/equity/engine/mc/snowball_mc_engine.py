@@ -277,6 +277,18 @@ class SnowballMCEngine(BaseEngine):
                         float(payment_time)
                     ) / self._df(float(T))
                 knocked_in = decision.knocked_in
+            elif isinstance(product, KnockOutResetSnowballOption):
+                # Same decision on the schedule the knock-in state puts in force. The path loop counts a
+                # post-KI observation strictly after the knock-in, so a knock-in decided now does not
+                # also test this instant's post-KI knock-out.
+                decision = product.decide_observations_at_valuation(
+                    S, pricing_env, knocked_in=knocked_in, post_ko_at_knock_in=False
+                )
+                if decision.knocked_out:
+                    return self._ko_reset_decided_knock_out(
+                        product, pricing_env, decision, float(T)
+                    )
+                knocked_in = decision.knocked_in
             payoff = product.get_payoff(
                 S, pricing_env, knocked_in=knocked_in
             )
@@ -316,6 +328,33 @@ class SnowballMCEngine(BaseEngine):
                 result = self._price_mc_or_qmc(product, pricing_env, S, T, r, q, sigma)
 
         return self._complete_price(product, result)
+
+    def _ko_reset_decided_knock_out(self, product, pricing_env, decision, maturity: float) -> float:
+        """A KO-reset knock-out decided at the valuation instant, paid as ``_compute_ko_schedule_payoffs``
+        pays it: at the record's own settlement under INSTANT, else with the terminal payment."""
+        profile = (
+            product.get_pre_ko_observation_profile(pricing_env)
+            if decision.ko_regime == "pre"
+            else product.get_post_ko_observation_profile(pricing_env)
+        )
+        if product.accrual_config.coupon_pay_type == CouponPayType.INSTANT:
+            payment_time = self._resolve_payment_time(
+                product,
+                pricing_env,
+                float(decision.ko_record.observation_time),
+                CashflowKind.REDEMPTION,
+                record=profile["records"][decision.ko_index],
+                cashflow_id=f"ko_reset[{decision.ko_index}]",
+            )
+        else:
+            payment_time = self._resolve_payment_time(
+                product,
+                pricing_env,
+                maturity,
+                CashflowKind.TERMINAL,
+                cashflow_id="ko_reset_terminal",
+            )
+        return float(decision.ko_record.payoff) * self._df(float(payment_time)) / self._df(maturity)
 
     def _complete_price(self, product, result) -> float:
         """price() postamble shared with the session adaptive path."""

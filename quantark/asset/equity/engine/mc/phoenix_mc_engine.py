@@ -172,10 +172,7 @@ class PhoenixMCEngine(BaseEngine):
 
 
         if T < 1e-10:
-            return (
-                product.get_payoff(S, pricing_env=pricing_env)
-                * self._payment_timings.terminal.delay_df
-            )
+            return self._decided_at_valuation(product, pricing_env, float(S))
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             result = self._price_rqmc(product, pricing_env, S, T, r, q, sigma)
@@ -185,6 +182,41 @@ class PhoenixMCEngine(BaseEngine):
             result = self._price_mc_or_qmc(product, pricing_env, S, T, r, q, sigma)
 
         return self._complete_price(product, result)
+
+    def _decided_at_valuation(self, product, pricing_env, spot: float) -> float:
+        """Zero time to maturity: the observations still pending at this instant are decided on the spot.
+
+        ``_compute_payoffs`` decides an observation at the valuation instant on the known spot (path
+        index 0) when more of the claim lies ahead. The shortcut used to return the redemption of a
+        never-knocked-in claim instead: no last coupon, no memory arrears, no knock-out, no knock-in,
+        not even a knock-in carried from an earlier day. Cash is discounted as the path loop discounts
+        it: a knock-out and the coupon it settles at the knock-out's payment, an INSTANT coupon at its
+        observation's payment, an EXPIRY coupon with the redemption.
+        """
+        timings = self._payment_timings
+        decision = product.decide_observations_at_valuation(
+            spot,
+            pricing_env,
+            knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
+        )
+        if decision.knocked_out:
+            payment = float(timings.observation_payment_times[decision.ko_index])
+            return (float(decision.ko_record.payoff) + decision.coupon) * float(self._df(payment))
+        redemption = (
+            product.get_maturity_payoff_v1(spot, pricing_env=pricing_env)
+            if decision.knocked_in
+            else product.get_maturity_payoff_v0(spot, pricing_env=pricing_env)
+        )
+        value = float(redemption) * float(timings.terminal.delay_df)
+        if decision.coupon:
+            instant = product.coupon_config.coupon_pay_type == CouponPayType.INSTANT
+            coupon_df = (
+                timings.observation_payment_dfs[decision.coupon_index]
+                if instant
+                else timings.terminal.delay_df
+            )
+            value += decision.coupon * float(coupon_df)
+        return value
 
     def _complete_price(self, product, result) -> float:
         """price() postamble shared with the session adaptive path."""

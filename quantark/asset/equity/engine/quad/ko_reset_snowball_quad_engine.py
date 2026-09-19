@@ -86,7 +86,29 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         validate_positive(spot, "spot")
         validate_positive(maturity, "maturity", allow_zero=True)
         if is_zero(maturity, tol=Tolerance.ZERO):
-            return product.get_payoff(spot, pricing_env)
+            # The observations still pending at this instant are decided on the known spot, on the
+            # schedule the knock-in state puts in force, as the backward induction decides them when
+            # more of the claim lies ahead (a fresh knock-in reads a knocked-in surface that has already
+            # applied this instant's post-KI knock-out). The shortcut returned the never-knocked-in
+            # payoff whatever was pending, and whatever knock-in the contract carried.
+            decision = product.decide_observations_at_valuation(
+                spot,
+                pricing_env,
+                knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
+                post_ko_at_knock_in=True,
+            )
+            if decision.knocked_out:
+                record = decision.ko_record
+                settlement = record.settlement_time
+                if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
+                    settlement = resolve_terminal_timing(product, pricing_env).payment_time
+                discount = (
+                    pricing_env.get_discount_factor(settlement)
+                    if settlement is not None and settlement > 0.0
+                    else 1.0
+                )
+                return float(record.payoff) * float(discount)
+            return product.get_payoff(spot, pricing_env, knocked_in=decision.knocked_in)
 
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)

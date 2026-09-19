@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from quantark.intraday.engines.base import (TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks, decided_at_valuation,
-                                            decided_point_greeks, decided_price_outcome, plain_snowball,
+                                            decided_point_greeks, decided_price_outcome, decides_at_valuation,
                                             point_greeks_from_estimates)
 from quantark.intraday.resolution import (COEFFICIENT_BYTES_PER_CELL, INTRADAY_PDE_MAX_GRID_BYTES, INTRADAY_PDE_MAX_POINTS,
                                           INTRADAY_PDE_MAX_STEPS, UNDER_RESOLVED, diffusion_layer, pde_resolution,
@@ -151,7 +151,7 @@ class PDERoute:
             return EnginePriceOutcome(0.0, "terminated", {"reason": "lifecycle state is not alive; only the ledger remains"}, {},
                                       exact=True)
         twin = num.product
-        if plain_snowball(twin) and decided_at_valuation(ctx):
+        if decides_at_valuation(twin) and decided_at_valuation(ctx):
             # nothing is left to solve: the day-level solver's zero-maturity shortcut means "already processed"
             return decided_price_outcome(ctx)
         if isinstance(twin, EuropeanVanillaOption):
@@ -225,7 +225,7 @@ class PDERoute:
         """
         if ctx.numerical.terminated:
             return TERMINATED_POINT_GREEKS
-        if plain_snowball(ctx.numerical.product) and decided_at_valuation(ctx):
+        if decides_at_valuation(ctx.numerical.product) and decided_at_valuation(ctx):
             return decided_point_greeks(ctx)
         outcome = self.price(ctx, engine)
         try:

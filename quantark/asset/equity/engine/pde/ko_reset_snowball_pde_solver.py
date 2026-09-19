@@ -222,6 +222,27 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     ) -> List[ResolvedObservationRecord]:
         return self._get_cached_pre_ko_records(pricing_env, product)
 
+    def _decide_variant_at_valuation(self, product, spot, pricing_env, carried):
+        """Zero time to maturity: the pending observations of the schedule in force are decided on the spot.
+
+        ``_apply_step_modifications_two_surface`` applies this instant's pre-KI knock-out to the
+        not-knocked-in surface and its post-KI knock-out to the knocked-in one before the knock-in moves
+        value across, so a fresh knock-in sees the post-KI observation (``post_ko_at_knock_in``). The
+        inherited shortcut went straight to the carried state's terminal payoff.
+        """
+        decision = product.decide_observations_at_valuation(
+            spot, pricing_env, knocked_in=carried, post_ko_at_knock_in=True
+        )
+        if decision.knocked_out:
+            record = decision.ko_record
+            settlement_time = record.settlement_time
+            if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
+                settlement_time = self._terminal_payment_time(product, pricing_env)
+            if settlement_time is not None and settlement_time > 0.0:
+                return float(record.payoff) * float(pricing_env.get_discount_factor(settlement_time)), decision.knocked_in
+            return float(record.payoff), decision.knocked_in
+        return None, decision.knocked_in
+
     def _uses_grid_layer(self) -> bool:
         return True
 

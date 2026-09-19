@@ -55,6 +55,24 @@ A certificate constrains the release, never the code.
   They now share `SnowballOption.decide_observations_at_valuation`. Day-level dated products
   cannot reach this state (valuation on the exercise date is refused); a time-based product
   at zero maturity can.
+- The same defect in the other two autocallables. At zero maturity `PhoenixMCEngine`,
+  `PhoenixPDESolver` and `PhoenixQuadEngine` returned the redemption alone: the last coupon,
+  the memory arrears it releases, a knock-out and a knock-in at the last observation were
+  dropped (Monte Carlo and QUAD V1 also dropped a knock-in carried from an earlier day). The
+  knock-out-reset snowball's shortcut in `SnowballMCEngine`, `KOResetSnowballPDESolver` and
+  `KOResetSnowballQuadEngine` ignored the pending knock-out of the schedule in force (pre-KI
+  before a knock-in, post-KI after one), and QUAD V1 the carried knock-in. They now call
+  `PhoenixOption.decide_observations_at_valuation` and
+  `KnockOutResetSnowballOption.decide_observations_at_valuation`. The Monte Carlo and PDE
+  intraday routes resolve the maturity close for all three autocallables; the knock-out-reset
+  snowball, which the runtime cannot replay, is decided from its float-time twin, and its QUAD
+  V2 route no longer raises there.
+- `AutocallableLifecycleTracker.settle_maturity_if_due` raised `TypeError` for every Phoenix
+  alive at maturity: it called `get_payoff` with the snowball's signature. This reached the
+  portfolio lifecycle manager and the backtest replay, not only intraday valuation.
+- `PhoenixPDESolver`: a knock-out decided at the valuation instant (any instant, not only
+  the last) left out the memory coupons in arrears, which Monte Carlo, QUAD V2 and the
+  lifecycle tracker release with that period's coupon (101 against 106 with five owed).
 
 
 ## [0.4.7] - 2026-08-25

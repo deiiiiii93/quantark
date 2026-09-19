@@ -264,6 +264,11 @@ class PhoenixPDESolver(SnowballPDESolver):
         coupon_payoff = 0.0
         if product.is_coupon_triggered(spot, 0):
             coupon_payoff = product.get_coupon_payoff(0)
+            if product.has_memory_coupon:
+                # A knock-out is the memory arrears' last chance: Monte Carlo, QUAD V2 and the lifecycle
+                # tracker all release them with the period's coupon. Leaving them out paid a knock-out
+                # decided at the valuation instant short by every coupon owed.
+                coupon_payoff += float(product.coupon_config.initial_coupon_arrears)
 
         payoff = float(ko_record_0.payoff or 0.0) + float(coupon_payoff)
         settlement_time = ko_record_0.settlement_time
@@ -275,14 +280,38 @@ class PhoenixPDESolver(SnowballPDESolver):
     def _calculate_terminal_value(
         self, product: PhoenixOption, spot: float, pricing_env: PricingEnvironment
     ) -> float:
-        """Calculate terminal payoff when already expired."""
-        knocked_in = self._is_already_knocked_in(product, spot)
-        return product.get_payoff(
+        """Value at zero time to maturity: the observations still pending at this instant are decided on the spot.
+
+        The shortcut used to return the redemption alone, from a spot-only knock-in proxy: the last period's
+        coupon, the memory arrears it releases, a knock-out at the last observation and a knock-in carried
+        from an earlier day were all dropped. Everywhere else the solver decides an observation at the
+        valuation instant on the known spot; this is the same decision.
+        """
+        carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        decision = product.decide_observations_at_valuation(spot, pricing_env, knocked_in=carried)
+
+        def discounted(cash: float, payment_time) -> float:
+            if payment_time is not None and payment_time > 0.0:
+                return float(cash) * float(pricing_env.get_discount_factor(payment_time))
+            return float(cash)
+
+        if decision.knocked_out:
+            record = decision.ko_record
+            return discounted(float(record.payoff or 0.0) + decision.coupon, record.settlement_time)
+        # the spot-only proxy is kept: it also covers a knock-in level with no record at this instant
+        knocked_in = decision.knocked_in or self._is_already_knocked_in(product, spot)
+        value = product.get_payoff(
             spot,
             knocked_in=knocked_in,
             accumulated_coupons=0.0,
             pricing_env=pricing_env,
         )
+        if decision.coupon:
+            value += discounted(
+                decision.coupon,
+                self._coupon_payment_time(product, pricing_env, decision.coupon_index),
+            )
+        return value
 
     def _solve(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

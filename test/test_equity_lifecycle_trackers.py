@@ -283,6 +283,37 @@ class TestAutocallableLifecycleTracker:
         assert almost_equal(events[0].cashflow, 100.0 * 0.12 / 12.0)
         assert not tracker.lifecycle.alive
 
+    def test_a_phoenix_settles_its_maturity_in_either_knock_in_state(self):
+        """A Phoenix alive at maturity redeems: principal plus the 2% rebate when it never knocked in, principal
+        less the loss below the strike when it did. The tracker called ``get_payoff(spot, env, knocked_in=...)``, the snowball signature;
+        Phoenix takes ``knocked_in`` second, so every Phoenix reaching maturity raised ``TypeError`` (2026-09-19).
+        Coupons are their own ledger entries, so none is folded into the redemption."""
+        from quantark.asset.equity.lifecycle import LifecycleEventType
+        from quantark.asset.equity.product.option.phoenix_helpers import (
+            create_standard_phoenix,
+        )
+
+        maturity_date = START + pd.Timedelta(days=365)
+        from quantark.asset.equity.product.option.snowball_config import PayoffConfig
+
+        for spot, knocked_in, expected in ((90.0, False, 102.0), (90.0, True, 90.0), (110.0, True, 100.0)):
+            phoenix = create_standard_phoenix(
+                initial_price=100.0, strike=100.0, maturity=1.0,
+                ko_barrier=200.0, ki_barrier=70.0,
+                coupon_barrier=85.0, coupon_rate=0.12, num_observations=12,
+            )
+            phoenix.payoff_config = PayoffConfig(rebate_rate=0.02)
+            tracker = self._tracker(phoenix, quantity=2.0)
+            if knocked_in:
+                tracker.lifecycle.mark_ki(START.to_pydatetime())
+            live = tracker.product_for_lifecycle()
+            event = tracker.settle_maturity_if_due(maturity_date, live, make_env(spot=spot), spot)
+
+            assert event is not None and event.event_type is LifecycleEventType.MATURITY
+            assert tracker.lifecycle.matured and not tracker.lifecycle.alive
+            assert almost_equal(event.payoff, expected)
+            assert almost_equal(event.cashflow, 2.0 * expected)
+
     def test_phoenix_continuous_ki_observe_does_not_crash(self):
         from quantark.asset.equity.lifecycle import LifecycleEventType
         from quantark.asset.equity.product.option.phoenix_helpers import (

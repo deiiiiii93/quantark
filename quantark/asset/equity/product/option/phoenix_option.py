@@ -32,13 +32,30 @@ from quantark.util.enum import (
 from quantark.util.exceptions import ValidationError
 
 from .observation_schedule import (
+    AT_VALUATION_TOL,
     ObservationAggregation,
+    ObservationsAtValuation,
+    knock_in_decided_at_valuation,
     ObservationRecord,
     ObservationSchedule,
     ResolvedObservationRecord,
 )
 from .phoenix_config import CouponBarrierConfig
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
+
+
+@dataclass(frozen=True)
+class PhoenixObservationsAtValuation(ObservationsAtValuation):
+    """``ObservationsAtValuation`` plus the coupon the period observed at this instant releases.
+
+    Attributes:
+        coupon: the period's own coupon plus the memory arrears it releases, ``0.0`` when the coupon
+            level is not met (the arrears then stay owed, or lapse if this was the last period).
+        coupon_index: the observation that paid it, position in ``resolve_ko_observations``.
+    """
+
+    coupon: float = 0.0
+    coupon_index: Optional[int] = None
 
 
 @dataclass
@@ -741,6 +758,53 @@ class PhoenixOption(BaseEquityOption):
             )
             for rec in resolved_schedule
         ]
+
+    def decide_observations_at_valuation(
+        self, spot: float, pricing_env, knocked_in: bool = False
+    ) -> PhoenixObservationsAtValuation:
+        """Apply the observations scheduled AT the valuation instant (time zero) to the known spot.
+
+        The Phoenix counterpart of ``SnowballOption.decide_observations_at_valuation``, in the order every
+        engine and the lifecycle tracker apply one observation: the knock-out first (it settles this
+        period's coupon too, and is the last chance for the memory arrears), else the knock-in, then the
+        coupon. The coupon level is tested on the spot whatever the knock-in state. ``knocked_in`` is the
+        state carried into the instant; the arrears carried into it are the contract's
+        ``coupon_config.initial_coupon_arrears``.
+
+        A period's coupon is ``get_coupon_payoff`` at the fraction ``get_coupon_period_year_fractions``
+        gives the resolved schedule -- the amount the engines pay for the same period.
+        """
+        config = self.barrier_config
+        records = self.resolve_ko_observations(pricing_env)
+        fractions = self.get_coupon_period_year_fractions(
+            [record.observation_time for record in records]
+        )
+        arrears = (
+            float(self.coupon_config.initial_coupon_arrears) if self.has_memory_coupon else 0.0
+        )
+        ko_allowed = config.ko_observation_type == ObservationType.DISCRETE and not (
+            knocked_in and config.disable_ko_after_ki
+        )
+        coupon, coupon_index = 0.0, None
+        for index, record in enumerate(records):
+            if abs(record.observation_time) > AT_VALUATION_TOL:
+                continue
+            own = float(self.get_coupon_payoff(index, year_fraction=fractions[index]))
+            if self.is_coupon_triggered(spot, index):
+                coupon, coupon_index, arrears = coupon + own + arrears, index, 0.0
+            elif self.has_memory_coupon:
+                arrears += own
+            if ko_allowed and record.barrier is not None:
+                breached = spot <= record.barrier if self.is_reverse else spot >= record.barrier
+                if breached:
+                    return PhoenixObservationsAtValuation(
+                        True, knocked_in, record, index, coupon, coupon_index
+                    )
+        if not knocked_in and self.has_ki_barrier:
+            knocked_in = knock_in_decided_at_valuation(self, spot, pricing_env)
+        return PhoenixObservationsAtValuation(
+            False, knocked_in, coupon=coupon, coupon_index=coupon_index
+        )
 
     def get_ko_observation_profile(self, pricing_env) -> Dict[str, List[Optional[float]]]:
         """Return KO observation attributes for engine consumption."""

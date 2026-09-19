@@ -26,13 +26,29 @@ from quantark.util.enum import (
 from quantark.util.exceptions import ValidationError
 
 from .observation_schedule import (
+    AT_VALUATION_TOL,
     ObservationRecord,
+    ObservationsAtValuation,
+    knock_in_decided_at_valuation,
     ObservationSchedule,
     PricingEnv,
     ResolvedObservationRecord,
 )
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
 from .snowball_option import SnowballOption
+
+
+@dataclass(frozen=True)
+class KOResetObservationsAtValuation(ObservationsAtValuation):
+    """``ObservationsAtValuation`` plus the schedule a knock-out came from.
+
+    Attributes:
+        ko_regime: ``"pre"`` (the pre-KI schedule) or ``"post"`` (the post-KI one) when ``knocked_out``.
+            ``ko_index`` is the position in that schedule's resolved records, and ``ko_record.payoff``
+            carries the contractual knock-out cash (the schedule's own resolution leaves it at zero).
+    """
+
+    ko_regime: Optional[str] = None
 
 
 @dataclass
@@ -498,6 +514,72 @@ class KnockOutResetSnowballOption(SnowballOption):
             downside = max(downside, -floor)
 
         return principal + downside
+
+    def decide_observations_at_valuation(
+        self,
+        spot: float,
+        pricing_env: PricingEnv,
+        knocked_in: bool = False,
+        post_ko_at_knock_in: bool = True,
+    ) -> KOResetObservationsAtValuation:
+        """Apply the observations scheduled AT the valuation instant (time zero) to the known spot.
+
+        The knock-out schedule in force follows the knock-in state: the pre-KI schedule before a
+        knock-in, the post-KI schedule after one. A contract not yet knocked in tests its pre-KI
+        knock-out, then its knock-in; a knocked-in one -- carried, or decided at this instant -- tests
+        the post-KI knock-out, unless the contract disables knock-outs after a knock-in.
+
+        ``post_ko_at_knock_in`` is the caller's rule for a post-KI observation at the very instant of the
+        knock-in, which the engines do not share and which matters only when the post-KI level is at or
+        below the knock-in level: the two-surface engines (PDE, QUAD V1, QUAD V2) hand the fresh
+        knock-in a knocked-in surface that has already applied it (``True``); Monte Carlo counts post-KI
+        observations strictly after the knock-in (``False``).
+        """
+        def breached(config: BarrierConfig, regime: str, state: bool):
+            resolved, rates, sources = self._resolve_ko_schedule(config, pricing_env)
+            for index, (record, rate, source) in enumerate(zip(resolved, rates, sources)):
+                if abs(record.observation_time) > AT_VALUATION_TOL or record.barrier is None:
+                    continue
+                hit = spot <= record.barrier if self.is_reverse else spot >= record.barrier
+                if hit:
+                    cash = self._ko_cash(record.observation_time, rate, source, pricing_env)
+                    return KOResetObservationsAtValuation(
+                        True, state, replace(record, payoff=cash), index, regime
+                    )
+            return None
+
+        fresh = False
+        if not knocked_in:
+            decided = breached(self.barrier_config, "pre", False)
+            if decided is not None:
+                return decided
+            fresh = self.has_ki_barrier and knock_in_decided_at_valuation(self, spot, pricing_env)
+        state = bool(knocked_in or fresh)
+        # TODO: a REBASED post-KI schedule holds offsets from the knock-in time, which a carried state does
+        # not record, so nothing places its records at this instant; they are left undecided here.
+        if (
+            state
+            and not self.barrier_config.disable_ko_after_ki
+            and self.post_ko_mode == PostKOScheduleMode.ABSOLUTE
+            and (post_ko_at_knock_in or not fresh)
+        ):
+            decided = breached(self.post_barrier_config, "post", True)
+            if decided is not None:
+                return decided
+        return KOResetObservationsAtValuation(False, state)
+
+    def _ko_cash(
+        self,
+        observation_time: float,
+        rate: float,
+        schedule_record: ObservationRecord,
+        pricing_env: PricingEnv,
+    ) -> float:
+        """Contractual cash of one knock-out: the principal, if included, plus rate x accrual on the notional."""
+        notional = self.initial_price * self.contract_multiplier
+        principal = notional if self.payoff_config.include_principal else 0.0
+        accrual = self.compute_ko_accrual_factor(observation_time, schedule_record, pricing_env)
+        return float(principal + notional * float(rate) * float(accrual))
 
     def compute_ko_accrual_factor(
         self,

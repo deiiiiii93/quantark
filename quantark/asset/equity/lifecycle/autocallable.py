@@ -369,9 +369,22 @@ class AutocallableLifecycleTracker:
             return None
 
         before = self._state_snapshot()
-        payoff = float(
-            product.get_payoff(spot, env, knocked_in=self.lifecycle.knocked_in)
-        )
+        if isinstance(product, PhoenixOption):
+            # Phoenix takes the knock-in state second and the environment by keyword; the snowball
+            # call below raised TypeError for every Phoenix alive at maturity. Its coupons are
+            # ledger entries of their own (``_observe_phoenix_coupon``), so none is folded in here.
+            payoff = float(
+                product.get_payoff(
+                    spot,
+                    knocked_in=self.lifecycle.knocked_in,
+                    accumulated_coupons=0.0,
+                    pricing_env=env,
+                )
+            )
+        else:
+            payoff = float(
+                product.get_payoff(spot, env, knocked_in=self.lifecycle.knocked_in)
+            )
         cashflow = self.quantity * payoff
         realized = self._timing_cashflow(
             LifecycleEventType.MATURITY,
