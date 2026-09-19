@@ -28,7 +28,9 @@ A certificate constrains the release, never the code.
   extracts anchors and never overwrites a banked directory.
 - Study `snowball_intraday_daily_ki_bsm.yaml`: the daily-KI snowball on the intraday
   clock, 23 cases, QUAD V2 and PDE intraday routes against the engine-independent
-  Gaussian-transition reference, qualified by paired RQMC.
+  Gaussian-transition reference, qualified by paired RQMC. Banked 2026-09-19
+  (`docs/modelvalidation/certificates/snowball-intraday-daily-ki-bsm/2026-09-19`, digest
+  `a0569e97687cc01c...`): `SnowballQuadEngineV2` ADMITTED, `SnowballPDESolver` REJECTED.
 
 ### Changed
 - `quantark.intraday` returns what it computes. Every requested output carries its own

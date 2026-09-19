@@ -1,0 +1,559 @@
+{
+  "abs_tol": 1e-12,
+  "anchors": [
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "already_ki",
+      "values": {
+        "desk_delta": 1.0451638101209682,
+        "desk_gamma": -0.003891762783865189,
+        "desk_theta": 0.000315191481721655,
+        "point_delta": 1.045426111530187,
+        "point_gamma": -0.004072250901479076,
+        "pv": -8.268076566883465
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "carry",
+      "values": {
+        "desk_delta": -0.15884181713817114,
+        "desk_gamma": -0.09529068489773884,
+        "desk_theta": 0.01158636383948597,
+        "point_delta": -0.1603636196307951,
+        "point_gamma": -0.09667876551036439,
+        "pv": 7.9279060522498055
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "high_vol",
+      "values": {
+        "desk_delta": 1.4059649654401198,
+        "desk_gamma": 0.0954026534255385,
+        "desk_theta": 0.11400698808911613,
+        "point_delta": 1.447453504846999,
+        "point_gamma": 0.084100912589169,
+        "pv": -23.14989665016713
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "holiday_eve",
+      "values": {
+        "desk_delta": 2.8703329414483743,
+        "desk_gamma": -0.31569789374140217,
+        "desk_theta": -0.0061145063608201156,
+        "point_delta": 2.7815489533359345,
+        "point_gamma": -0.19315440417193375,
+        "pv": -20.004888801787395
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "ko_level_on_ki_day",
+      "values": {
+        "desk_delta": -0.32642533798771567,
+        "desk_gamma": 0.002284371552554043,
+        "desk_theta": -0.0005474744037066159,
+        "point_delta": -0.334818716731561,
+        "point_gamma": 0.0026680094091588303,
+        "pv": 7.176455528027531
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "low_vol",
+      "values": {
+        "desk_delta": 4.259758629588849,
+        "desk_gamma": 1.6235377820552974,
+        "desk_theta": 0.20824294226326856,
+        "point_delta": 5.560749213344963,
+        "point_gamma": -2.0127504567275456,
+        "pv": -21.64039691537381
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "lunch_break",
+      "values": {
+        "desk_delta": 2.663444586453098,
+        "desk_gamma": -0.13115190280212008,
+        "desk_theta": 0.0028715878958891494,
+        "point_delta": 2.6695254460782145,
+        "point_gamma": -0.1960607677399462,
+        "pv": -20.199795247743133
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "lunch_break_zero_variance",
+      "values": {
+        "desk_delta": 2.64683489168926,
+        "desk_gamma": -0.060476537746908386,
+        "desk_theta": -0.0006169509339564172,
+        "point_delta": 2.670453813405378,
+        "point_gamma": -0.126790208745442,
+        "pv": -20.202747528452658
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "maturity_day",
+      "values": {
+        "desk_delta": -2.842170943040401e-14,
+        "desk_gamma": -2.2737367544323206e-13,
+        "desk_theta": 4.109581987954414e-05,
+        "point_delta": 0.0,
+        "point_gamma": -0.0,
+        "pv": 11.99995890418012
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "near_ki_10s",
+      "values": {
+        "desk_delta": 2.728355147689968,
+        "desk_gamma": -0.4420340482316904,
+        "desk_theta": -2.839078038642242,
+        "point_delta": 2.4391491385942734,
+        "point_gamma": 0.5393072689160615,
+        "pv": -22.17770544451646
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "near_ki_1s",
+      "values": {
+        "desk_delta": 2.7636163544369876,
+        "desk_gamma": -0.4043803530104534,
+        "desk_theta": -85.51775004282973,
+        "point_delta": 2.509712679451304,
+        "point_gamma": 0.5350540540750115,
+        "pv": -22.16183684183498
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "near_ki_5m",
+      "values": {
+        "desk_delta": 2.6923009096440076,
+        "desk_gamma": -0.3236076984603384,
+        "desk_theta": 0.6303049204255302,
+        "point_delta": 3.1967895938760087,
+        "point_gamma": -11.47170180195017,
+        "pv": -22.238117182437165
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "near_ki_above",
+      "values": {
+        "desk_delta": 2.6141671851077204,
+        "desk_gamma": 0.5223112482660468,
+        "desk_theta": 0.23207899849869662,
+        "point_delta": 3.0024212507144745,
+        "point_gamma": 0.11764855205718701,
+        "pv": -22.417670770900404
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "near_ki_below",
+      "values": {
+        "desk_delta": 2.346311582423359,
+        "desk_gamma": 1.4671919411756194,
+        "desk_theta": -0.614627654870187,
+        "point_delta": 2.6677476475314235,
+        "point_gamma": 2.069575577967192,
+        "pv": -23.283479972660736
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "near_ko_on_ko_day",
+      "values": {
+        "desk_delta": -0.9697790417815199,
+        "desk_gamma": -0.15400100819343351,
+        "desk_theta": 0.8285253675322011,
+        "point_delta": -1.4977385285397031,
+        "point_gamma": -0.36947494641059847,
+        "pv": 7.227030169476874
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "near_ko_on_ko_day_1s",
+      "values": {
+        "desk_delta": -1.0420504266292812,
+        "desk_gamma": -1.7693194873403302,
+        "desk_theta": -9.87632056170753,
+        "point_delta": -0.1391029447637854,
+        "point_gamma": -0.010618635278659664,
+        "pv": 8.05829895938747
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "on_ki_barrier_at_close",
+      "values": {
+        "desk_delta": 2.4854340909709385,
+        "desk_gamma": 3.937235935948283,
+        "pv": -23.797113537910988
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "ordinary",
+      "values": {
+        "desk_delta": -0.16472992460854563,
+        "desk_gamma": -0.09671085173381933,
+        "desk_theta": 0.011738835043431983,
+        "point_delta": -0.1662833517101539,
+        "point_gamma": -0.09812664241026735,
+        "pv": 7.976199602713547
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "pre_open",
+      "values": {
+        "desk_delta": -0.15953699702005464,
+        "desk_gamma": -0.08794640216859229,
+        "desk_theta": 0.0035502896656822713,
+        "point_delta": -0.1618276805113481,
+        "point_gamma": -0.09002021644412825,
+        "pv": 7.930110852737648
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "provisional_ki_after_close",
+      "values": {
+        "desk_delta": 1.0095866956583484,
+        "desk_gamma": 0.0026652920829294,
+        "desk_theta": -0.0002881910051577563,
+        "point_delta": 1.009589368690392,
+        "point_gamma": 0.0028826505641590967,
+        "pv": -23.8981089381423
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "sessions_only_profile",
+      "values": {
+        "desk_delta": 2.5687445631900534,
+        "desk_gamma": 0.5853408810569342,
+        "desk_theta": 0.2171503447251233,
+        "point_delta": 2.84556007294285,
+        "point_gamma": 0.43519721704665026,
+        "pv": -22.402363803746677
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "terminated_pending_cash",
+      "values": {
+        "desk_delta": 0.0,
+        "desk_gamma": 0.0,
+        "desk_theta": 1.7330509659352344e-05,
+        "point_delta": 0.0,
+        "point_gamma": 0.0,
+        "pv": 5.060500155002375
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.pde",
+      "case": "uniform_profile",
+      "values": {
+        "desk_delta": 2.6859856097361132,
+        "desk_gamma": 0.044075657561477743,
+        "desk_theta": 0.15742741381345837,
+        "point_delta": 3.543404823561904,
+        "point_gamma": -5.182433129350999,
+        "pv": -22.3430386357705
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "already_ki",
+      "values": {
+        "desk_delta": 1.045173746199598,
+        "desk_gamma": -0.004092718280675526,
+        "desk_theta": 0.00022699786364022145,
+        "point_delta": 1.0454368057771113,
+        "point_gamma": -0.004070640582691694,
+        "pv": -8.267976639802141
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "carry",
+      "values": {
+        "desk_delta": -0.15890451149847795,
+        "desk_gamma": -0.09492803032444819,
+        "desk_theta": 0.014088276012018675,
+        "point_delta": -0.16059451944643213,
+        "point_gamma": -0.0963501664444083,
+        "pv": 7.926018488851598
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "high_vol",
+      "values": {
+        "desk_delta": 1.4035893040337397,
+        "desk_gamma": 0.09394308239895055,
+        "desk_theta": 0.11438094943484955,
+        "point_delta": 1.4450292896703487,
+        "point_gamma": 0.0834243563844251,
+        "pv": -23.151113774805516
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "holiday_eve",
+      "values": {
+        "desk_delta": 2.865804111281047,
+        "desk_gamma": -0.30406237864305874,
+        "desk_theta": -0.0017045648800220192,
+        "point_delta": 2.7757036212396042,
+        "point_gamma": -0.18155506702067106,
+        "pv": -20.015947530566148
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "ko_level_on_ki_day",
+      "values": {
+        "desk_delta": -0.3253874028835288,
+        "desk_gamma": 0.002153280660047896,
+        "desk_theta": -0.0003268800113636061,
+        "point_delta": -0.33359714212652786,
+        "point_gamma": 0.0025930606804921916,
+        "pv": 7.176283682282706
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "low_vol",
+      "values": {
+        "desk_delta": 4.252915935474041,
+        "desk_gamma": 1.6266153318496754,
+        "desk_theta": 0.2047149823431944,
+        "point_delta": 5.542560748283735,
+        "point_gamma": -1.961343169921195,
+        "pv": -21.648525478769017
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "lunch_break",
+      "values": {
+        "desk_delta": 2.6629237121020597,
+        "desk_gamma": -0.13707819895975287,
+        "desk_theta": 0.002790306562783229,
+        "point_delta": 2.666754041820368,
+        "point_gamma": -0.20152662291385406,
+        "pv": -20.2071164556232
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "lunch_break_zero_variance",
+      "values": {
+        "desk_delta": 2.641349603009226,
+        "desk_gamma": -0.06452234010928337,
+        "desk_theta": -0.0005317216710167827,
+        "point_delta": 2.66537310774691,
+        "point_gamma": -0.1279764114622558,
+        "pv": -20.216251711270413
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "maturity_day",
+      "values": {
+        "desk_delta": 0.0,
+        "desk_gamma": 0.0,
+        "desk_theta": 4.109582004119261e-05,
+        "point_delta": 2.1737051545990157e-15,
+        "point_gamma": -1.963318611935641e-17,
+        "pv": 11.999958904179959
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "near_ki_10s",
+      "values": {
+        "desk_delta": 2.686303676674296,
+        "desk_gamma": -0.4871528133854603,
+        "desk_theta": -0.04367544103658361,
+        "point_delta": 2.3601161526641863,
+        "point_gamma": 0.5324510097034074,
+        "pv": -22.19641693322757
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "near_ki_1s",
+      "values": {
+        "desk_delta": 2.6862888867724486,
+        "desk_gamma": -0.48681015234526853,
+        "desk_theta": -0.04367831059397531,
+        "point_delta": 2.360233720798894,
+        "point_gamma": 0.532521531789649,
+        "pv": -22.196526121033006
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "near_ki_5m",
+      "values": {
+        "desk_delta": 2.6867874729155483,
+        "desk_gamma": -0.33510193801377275,
+        "desk_theta": 0.5096228713827742,
+        "point_delta": 3.193923575513855,
+        "point_gamma": -11.708366057080836,
+        "pv": -22.239006826512348
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "near_ki_above",
+      "values": {
+        "desk_delta": 2.6102721260442103,
+        "desk_gamma": 0.5165637418253534,
+        "desk_theta": 0.22476713199708342,
+        "point_delta": 2.993517251495087,
+        "point_gamma": 0.12079301375416227,
+        "pv": -22.42130538589423
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "near_ki_below",
+      "values": {
+        "desk_delta": 2.34312978382739,
+        "desk_gamma": 1.4574387221917184,
+        "desk_theta": -0.6134216792846274,
+        "point_delta": 2.6634779821077412,
+        "point_gamma": 2.057730653175186,
+        "pv": -23.284794769430558
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "near_ko_on_ko_day",
+      "values": {
+        "desk_delta": -0.9721926280960931,
+        "desk_gamma": -0.15487209046225975,
+        "desk_theta": 0.8289253127275229,
+        "point_delta": -1.4925165710537434,
+        "point_gamma": -0.37008892167346247,
+        "pv": 7.2268800910254045
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "near_ko_on_ko_day_1s",
+      "values": {
+        "desk_delta": -1.0388836274378144,
+        "desk_gamma": -1.7707636971025666,
+        "desk_theta": 0.0017513245893496787,
+        "point_delta": -0.13540095803869515,
+        "point_gamma": -0.011139693698530493,
+        "pv": 8.055804917273877
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "on_ki_barrier_at_close",
+      "values": {
+        "desk_delta": 2.4793446545258746,
+        "desk_gamma": 3.9214019160703453,
+        "pv": -23.797242989044356
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "ordinary",
+      "values": {
+        "desk_delta": -0.1647954630990256,
+        "desk_gamma": -0.09634003384166334,
+        "desk_theta": 0.014282048770640543,
+        "point_delta": -0.16651977311840518,
+        "point_gamma": -0.09779076396048554,
+        "pv": 7.974280600517666
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "pre_open",
+      "values": {
+        "desk_delta": -0.15980460632782556,
+        "desk_gamma": -0.08872335532557685,
+        "desk_theta": 0.0010605758629385065,
+        "point_delta": -0.1619872689651279,
+        "point_gamma": -0.08991544902037826,
+        "pv": 7.9292603399266985
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "provisional_ki_after_close",
+      "values": {
+        "desk_delta": 1.0096233678870543,
+        "desk_gamma": 0.0028831185091659295,
+        "desk_theta": -0.00027240541916029315,
+        "point_delta": 1.0095898075930705,
+        "point_gamma": 0.0028834665165802732,
+        "pv": -23.89821871876164
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "sessions_only_profile",
+      "values": {
+        "desk_delta": 2.5612719863961217,
+        "desk_gamma": 0.5792274858472195,
+        "desk_theta": 0.21422208698659162,
+        "point_delta": 2.8312971434019953,
+        "point_gamma": 0.43103448822261303,
+        "pv": -22.410760340883723
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "terminated_pending_cash",
+      "values": {
+        "desk_delta": 0.0,
+        "desk_gamma": 0.0,
+        "desk_theta": 1.7330509659352344e-05,
+        "point_delta": 0.0,
+        "point_gamma": 0.0,
+        "pv": 5.060500155002375
+      }
+    },
+    {
+      "candidate": "equity.snowball.intraday.quad_v2",
+      "case": "uniform_profile",
+      "values": {
+        "desk_delta": 2.685997456003149,
+        "desk_gamma": 0.04224807600162097,
+        "desk_theta": 0.14664175006700475,
+        "point_delta": 3.5483534023551404,
+        "point_gamma": -5.251040816573992,
+        "pv": -22.343180003964108
+      }
+    }
+  ],
+  "certificate_sha256": "a0569e97687cc01cc67df75b00612b3fc6a3c4e215ffe7bde5b3a2ede9a9893d",
+  "fingerprint": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "rel_tol": 1e-09,
+  "schema": 1,
+  "study_source_text": "# example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml\n#\n# Daily-KI snowball on the intraday clock: the first schema-2 study.\n#\n# Two intraday routes -- QUAD V2 and the two-surface PDE -- are certified on the runtime's own\n# resolved context: PV, desk delta/gamma, desk theta, and the point delta/gamma the routes return.\n#\n# The reference is DETERMINISTIC (study revision 2026-09-18, spec section 6.1's escape clause). The\n# pilot showed that the RQMC arm cannot resolve these budgets: its standard errors sit 200-700x\n# above a quarter of each cell's budget, and its measured convergence is N^-0.35..-0.5 across the\n# payoff jumps, so no affordable path count closes the gap. The reference is therefore the\n# engine-independent Gaussian-transition solver on a nested refinement ladder. It states a value\n# and an uncertainty RADIUS per quantity (never a standard error), including the exact point\n# Greeks, so the point cells are certified here too. A radius says what kind it is: analytical\n# where the solve names an exactness basis, otherwise a calibrated numerical estimate from the\n# ladder (not a proved bound), calibrated one level down inside the ladder. The RQMC arm stays in\n# the study as the QUALIFIER: it simulates every case, and the deterministic value must sit within\n# max_z of its standard errors plus the reference's radius, or the case is not decision-eligible:\n# its cells are unresolved and feed no aggregate, whatever the candidate says. The qualifier's\n# sampling below is part of the certification contract; an amendment may not change it.\n#\n# Budgets are the frozen engineering tolerances (spec 7.1), unchanged: PV 1e-6 of notional; delta\n# 1e-5 floor / 1e-4 relative on delta*S/N; gamma 1e-4 / 1e-3 on gamma*S^2/N; theta per hour\n# 1e-6 / 1e-4 on theta/N. Gate values are fractions of each cell's own budget, so the shared\n# bounds are cell 1.0 and mean signed bias 0.2. S is the recorded spot_scale. The reference's\n# radius may use at most a quarter of a cell's budget (radius_budget_fraction).\n#\n# Sampling is the qualifier's FROZEN budget (min_batches == max_batches), chosen from the\n# independent pilot (seed 20260917): 32 replicates, because few-replicate standard errors of a\n# scrambled-Sobol estimate understate its error across payoff jumps, and 32768 paths each, where\n# the pilot's one 3.2-sigma disagreement (near_ko_on_ko_day_1s desk delta at 2048 paths) fell to\n# 1.3 sigma. Seeds are per-case substreams, so cases share no scramble and neither does the pilot.\n#\n# This is an offline study (hours: the ladder's finest level dominates). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml --quick\n#   python -m quantark.modelvalidation run example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml --out output/modelvalidation\n\nstudy: snowball-intraday-daily-ki-bsm\nschema: 2\n\nquantities: [pv, desk_delta, desk_gamma, desk_theta, point_delta, point_gamma]\n\nquantity_bounds:\n  pv:          {abs_floor: 1.0e-6}\n  desk_delta:  {abs_floor: 1.0e-5, rel: 1.0e-4}\n  desk_gamma:  {abs_floor: 1.0e-4, rel: 1.0e-3}\n  desk_theta:  {abs_floor: 1.0e-6, rel: 1.0e-4}\n  point_delta: {abs_floor: 1.0e-5, rel: 1.0e-4}\n  point_gamma: {abs_floor: 1.0e-4, rel: 1.0e-3}\n\nbounds:\n  cell: 1.0\n  mean_signed_bias: 0.2\n  se_budget_fraction: 0.25\n  interval_k: 2.0\n  envelope_fraction: 0.5\n  radius_budget_fraction: 0.25   # the deterministic reference's radius, as a bound (interval_k never multiplies it)\n\nsampling:                 # the qualifying RQMC arm; the deterministic reference reads only the bump\n  paths_per_batch: 32768\n  min_batches: 32\n  max_batches: 32\n  seed: 20260918\n  bump: 0.01\n\neconomic_scale:\n  builder: normalized\n  params: {notional: 100.0, spot_scale: 100.0}\n\nenvironment:\n  builder: flat_bsm\n  params: {spot: 100.0, vol: 0.20, rate: 0.03, div_yield: 0.01}\n\nproduct:\n  builder: equity.snowball.intraday\n  params:\n    initial_date: \"2026-03-16\"\n    months: 12\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ki_barrier: 75.0\n    ko_rate: 0.12\n    rebate_rate: 0.12\n    contract_multiplier: 1.0\n    ki_observation: daily_close\n\ncontext:\n  builder: intraday.sse\n  params:\n    valuation: \"2026-09-10T14:00:00+08:00\"   # one hour before an ordinary KI close\n    phase: before\n    profile: desk\n    calendar: SSE\n    history_level: 100.0                     # every earlier observation fixed at 100\n\nreference:\n  builder: equity.snowball.intraday.gaussian\n  # Nested ladder, each level halving every spacing in play. The four finest levels give the estimate; the\n  # coarsest calibrates the rule one level down. With 16001 as the finest level two PV cells (the lunch-break\n  # pair) held a radius of twice their allowance; one more doubling quarters it.\n  params: {points: [2001, 4001, 8001, 16001, 32001], width_std: 8.0}\n\nreference_qualification:\n  builder: equity.snowball.intraday.mc_rqmc\n  params: {}\n  max_z: 4.0\n\ncandidates:\n  - builder: equity.snowball.intraday.quad_v2\n    params: {order: 8, cells_per_sd: 2.0}\n  - builder: equity.snowball.intraday.pde\n    params: {accuracy: standard}\n\ncases:\n  # Interior spot one hour before an ordinary KI close: the smooth baseline every other case is read against.\n  - {name: ordinary}\n  # Just above the daily KI barrier an hour before it is observed; the value function turns over here.\n  - {name: near_ki_above, environment: {spot: 75.2}}\n  # Just below the barrier an hour before the close. The fixing is still ahead, so nothing is decided: this\n  # is an alive claim whose spot sits under the level it will be observed against.\n  - {name: near_ki_below, environment: {spot: 74.9}}\n  # One second before the fixing: the transition is narrower than any desk bump; point and desk part company.\n  - {name: near_ki_1s, environment: {spot: 75.2}, context: {valuation: \"2026-09-10T14:59:59+08:00\"}}\n  # Intermediate horizons, so convergence in time-to-event is observed rather than inferred from two ends.\n  - {name: near_ki_10s, environment: {spot: 75.2}, context: {valuation: \"2026-09-10T14:59:50+08:00\"}}\n  - {name: near_ki_5m, environment: {spot: 75.2}, context: {valuation: \"2026-09-10T14:55:00+08:00\"}}\n  # A simultaneous KI/KO close (2026-09-16 is the sixth monthly KO date); the KO discontinuity sits inside the stencil.\n  - {name: near_ko_on_ko_day, environment: {spot: 102.9}, context: {valuation: \"2026-09-16T14:00:00+08:00\"}}\n  - {name: near_ko_on_ko_day_1s, environment: {spot: 102.9}, context: {valuation: \"2026-09-16T14:59:59+08:00\"}}\n  # The same spot on a day that observes no KO: the difference isolates the KO event from the spot level.\n  - {name: ko_level_on_ki_day, environment: {spot: 102.9}}\n  # Before the session opens, inside the overnight segment: under the desk profile it carries 25% of the day's\n  # variance at a far lower rate than a session, and a local theta must stay inside it.\n  - {name: pre_open, context: {valuation: \"2026-09-10T09:00:00+08:00\"}}\n  # Inside the lunch break: under the desk profile a low-variance segment (5% of the day over 90 minutes).\n  - {name: lunch_break, environment: {spot: 76.0}, context: {valuation: \"2026-09-10T12:00:00+08:00\"}}\n  # The zero-variance control: the same instant under sessions_only, where the break carries no variance at all.\n  - {name: lunch_break_zero_variance, environment: {spot: 76.0},\n     context: {valuation: \"2026-09-10T12:00:00+08:00\", profile: sessions_only}}\n  # An hour before the last close ahead of the National Day holiday: that close is observed as usual, and the\n  # fixing after it lies across a folded overnight of several days.\n  - {name: holiday_eve, environment: {spot: 76.0}, context: {valuation: \"2026-09-30T14:00:00+08:00\"}}\n  # The last observation: KO, KI and terminal payoff resolve together.\n  - {name: maturity_day, context: {valuation: \"2027-03-16T14:00:00+08:00\"}}\n  # Post-KI dispatch: the knocked-in claim with no KI barrier remaining. The checkpoint covers all earlier events.\n  - {name: already_ki, environment: {spot: 90.0},\n     context: {checkpoint: {as_of: \"2026-09-09\", knocked_in: true, ki_date: \"2026-06-15\"}}}\n  # Knocked out on the August observation with a 30-day settlement lag: PV is the pending ledger only.\n  - {name: terminated_pending_cash, product: {settlement_lag_days: 30},\n     context: {fixings: [{date: \"2026-08-17\", level: 104.0}]}}\n  # A due observation with no fixing supplied: thirty seconds after the close, under AFTER, the 15:00 fixing is\n  # missing, so the runtime assumes the latest spot. Below the barrier that is a provisional knock-in, and every\n  # arm must price that assumed state.\n  - {name: provisional_ki_after_close, environment: {spot: 74.9},\n     context: {valuation: \"2026-09-10T15:00:30+08:00\", phase: after, unfixed_from: \"2026-09-10\"}}\n  # The transition width scales with volatility, so the near-barrier case is re-examined at both ends.\n  - {name: low_vol, environment: {spot: 75.2, vol: 0.12}}\n  - {name: high_vol, environment: {spot: 75.2, vol: 0.35}}\n  # Distinct rate and carry levels exercise the integrated drift in the interval moments.\n  - {name: carry, environment: {rate: 0.05, div_yield: 0.03}}\n  # Each supported clock, with its coefficients recorded.\n  - {name: uniform_profile, environment: {spot: 75.2}, context: {profile: uniform}}\n  - {name: sessions_only_profile, environment: {spot: 75.2}, context: {profile: sessions_only}}\n  # At the close with the spot exactly on the barrier, under BEFORE: the point derivatives and a local theta\n  # do not exist. The candidate must say so, and the reference records them as undefined.\n  - {name: on_ki_barrier_at_close, environment: {spot: 75.0}, context: {valuation: \"2026-09-10T15:00:00+08:00\"},\n     expect: {point_delta: undefined, point_gamma: undefined, desk_theta: undefined}}\n"
+}
