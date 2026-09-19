@@ -78,5 +78,93 @@ def point_greeks_from_estimates(delta: float, gamma: float, evidence: str, *, no
 TERMINATED_POINT_GREEKS = PointGreeks(0.0, 0.0, "ok", "", "terminated")
 
 
+#: Relative spot step of the point-Greek stencil on a claim decided at the valuation instant.
+DECIDED_STENCIL = 1e-6
+_DECIDED_REASON = "every remaining event is at the valuation instant: decided on the spot"
+
+
+def plain_snowball(product) -> bool:
+    """Exactly a ``SnowballOption``: the claim the decided-at-valuation resolution is demonstrated on for the Monte
+    Carlo and PDE routes. Phoenix is left out on purpose: the autocallable lifecycle raises at a Phoenix maturity
+    (``get_payoff`` is called with the environment where Phoenix takes ``knocked_in``), so that resolution cannot
+    serve it yet; the knock-out-reset snowball is untested there. Both keep their routes' previous behaviour."""
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+
+    return type(product) is SnowballOption
+
+
+def decided_at_valuation(ctx) -> bool:
+    """Every remaining event sits at the valuation instant (the maturity close) and has not happened yet.
+
+    No route may hand this state to its day-level engine: those engines' zero-maturity shortcuts mean "the lifecycle
+    has already processed today", which is the AFTER phase, and under BEFORE the last observation is still pending.
+    Monte Carlo priced a knocked-in claim at its rebate that way, and the PDE solver a knocked-out one (2026-09-19).
+    """
+    from quantark.intraday.events import EventPhase
+
+    return ctx.numerical.maturity_tau == 0.0 and ctx.phase is EventPhase.BEFORE and not ctx.numerical.terminated
+
+
+def decided_value(ctx) -> float:
+    """The contingent value of a claim whose every remaining event is decided on the known spot now.
+
+    It is what the lifecycle books when those events are fixed at the spot: the pending ledger they leave plus the
+    cash paid at the instant, less the ledger already pending -- the identity that relates BEFORE and AFTER at every
+    other fixing instant. The route resolves the decided claim through the runtime's own event resolution instead of
+    re-stating the payoff, so every route agrees by construction. The ledger is discounted on this context's
+    market, so a bumped cell prices its own.
+    """
+    import dataclasses
+
+    from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
+    from quantark.intraday.context import resolve_context
+    from quantark.intraday.events import EventPhase
+    from quantark.intraday.fixings import Fixing
+    from quantark.intraday.timestamp import to_utc
+
+    now = to_utc(ctx.valuation_timestamp)
+    instants = sorted({e.timestamp for e in ctx.numerical.remaining_events}, key=to_utc)
+    history = tuple(f for f in ctx.request.fixings if to_utc(f.timestamp) != now)
+    decided = resolve_context(dataclasses.replace(
+        ctx.request, event_phase=EventPhase.AFTER,
+        fixings=history + tuple(Fixing(t, float(ctx.spot)) for t in instants)))
+
+    def pending(state):
+        return float(pending_receivable_pv(state, ctx.pricing_env)) if state is not None else 0.0
+
+    received = float(decided.numerical.paid_cash) - float(ctx.numerical.paid_cash)
+    return pending(decided.numerical.lifecycle_state) + received - pending(ctx.numerical.lifecycle_state)
+
+
+def decided_price_outcome(ctx) -> EnginePriceOutcome:
+    return EnginePriceOutcome(decided_value(ctx), "decided_at_valuation", {"reason": _DECIDED_REASON}, {}, exact=True)
+
+
+def decided_point_greeks(ctx) -> PointGreeks:
+    """Central differences of the exact decided value at h = 1e-6 S; undefined when the stencil reaches the
+    level of an event decided at this instant (one side of it knocks, the other does not). At a payoff kink
+    (the strike of a knocked-in claim) the difference is the average of the one-sided slopes."""
+    from copy import deepcopy
+
+    from quantark.intraday.greeks import with_pricing_env
+
+    spot = float(ctx.spot)
+    h = DECIDED_STENCIL * spot
+    for event in ctx.numerical.remaining_events:
+        if event.barrier is not None and abs(spot - float(event.barrier)) <= h:
+            return PointGreeks(None, None, "undefined",
+                               f"the difference stencil reaches the level {float(event.barrier):g} of "
+                               f"{event.event_id}, decided at this instant", "decided_at_valuation")
+
+    def at(s):
+        env = deepcopy(ctx.pricing_env)
+        env.spot_quote.spot = s
+        return decided_value(with_pricing_env(ctx, env, f"decided_spot:{s!r}"))
+
+    base, up, down = decided_value(ctx), at(spot + h), at(spot - h)
+    return point_greeks_from_estimates((up - down) / (2.0 * h), (up - 2.0 * base + down) / (h * h),
+                                       "decided_at_valuation")
+
+
 class IntradayEngineRoute(Protocol):
     def price(self, ctx, engine) -> EnginePriceOutcome: ...

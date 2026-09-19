@@ -39,6 +39,24 @@ from .observation_schedule import (
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
 
 
+@dataclass(frozen=True)
+class ObservationsAtValuation:
+    """What the observations scheduled at the valuation instant decide on the known spot.
+
+    Attributes:
+        knocked_out: a discrete knock-out observation at time zero is breached (and not disabled by an
+            earlier knock-in).
+        knocked_in: the carried knock-in state, or a knock-in decided at this instant.
+        ko_record: the breached knock-out record (payoff and settlement), when ``knocked_out``.
+        ko_index: its position in ``resolve_ko_observations``.
+    """
+
+    knocked_out: bool
+    knocked_in: bool
+    ko_record: Optional[ResolvedObservationRecord] = None
+    ko_index: Optional[int] = None
+
+
 @dataclass
 class SnowballOption(BaseEquityOption):
     """
@@ -1174,6 +1192,45 @@ class SnowballOption(BaseEquityOption):
             )
             for rec in resolved_schedule
         ]
+
+    def decide_observations_at_valuation(
+        self, spot: float, pricing_env, knocked_in: bool = False
+    ) -> ObservationsAtValuation:
+        """Apply the observations scheduled AT the valuation instant (time zero) to the known spot.
+
+        Every engine decides such an observation on the known spot when more of the claim lies ahead.
+        This is the same decision for the case where nothing does: at zero time to maturity the last
+        knock-out and knock-in observations are still pending, and returning the terminal payoff of the
+        carried state alone prices a claim that knocks out, or in, at that instant as if it had survived.
+
+        A knock-out is decided first (its level and a knock-in level cannot both be breached), and an
+        earlier knock-in blocks it under ``disable_ko_after_ki``. Continuous knock-out monitoring is not
+        decided here. ``knocked_in`` is the state carried into the instant.
+        """
+        config = self.barrier_config
+        if config.ko_observation_type == ObservationType.DISCRETE and not (
+            knocked_in and config.disable_ko_after_ki
+        ):
+            for index, record in enumerate(self.resolve_ko_observations(pricing_env)):
+                if abs(record.observation_time) > 1e-10 or record.barrier is None:
+                    continue
+                breached = spot <= record.barrier if self.is_reverse else spot >= record.barrier
+                if breached:
+                    return ObservationsAtValuation(True, knocked_in, record, index)
+        if knocked_in or not self.has_ki_barrier:
+            return ObservationsAtValuation(False, knocked_in)
+        continuous = config.ki_observation_type == ObservationType.CONTINUOUS or config.ki_continuous
+        if continuous:
+            level = config.ki_barrier[0] if isinstance(config.ki_barrier, list) else config.ki_barrier
+            levels = [level]
+        else:
+            levels = [
+                record.barrier
+                for record in self.resolve_ki_observations(pricing_env)
+                if abs(record.observation_time) <= 1e-10 and record.barrier is not None
+            ]
+        hit = any((spot >= level) if self.is_reverse else (spot <= level) for level in levels)
+        return ObservationsAtValuation(False, hit)
 
     def get_ko_observation_profile(
         self, pricing_env

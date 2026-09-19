@@ -166,6 +166,24 @@ class SnowballQuadEngine(BaseEngine):
         validate_positive(maturity, "maturity", allow_zero=True)
         if is_zero(maturity, tol=Tolerance.ZERO):
             knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+            if type(product) is SnowballOption:
+                # The observations still pending at this instant are decided on the known spot, as the
+                # backward induction decides them when more of the claim lies ahead. Going straight to
+                # the carried state's payoff priced a claim that knocks in or out at the last
+                # observation as if it had survived.
+                decision = product.decide_observations_at_valuation(
+                    spot, pricing_env, knocked_in=knocked_in
+                )
+                if decision.knocked_out:
+                    record = decision.ko_record
+                    settlement = record.settlement_time
+                    discount = (
+                        pricing_env.get_discount_factor(settlement)
+                        if settlement is not None and settlement > 0.0
+                        else 1.0
+                    )
+                    return float(record.payoff) * float(discount)
+                knocked_in = decision.knocked_in
             return product.get_payoff(spot, pricing_env, knocked_in=knocked_in)
 
         rate = pricing_env.get_rate(maturity)

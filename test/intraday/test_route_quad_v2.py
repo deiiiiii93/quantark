@@ -105,7 +105,11 @@ def test_at_the_maturity_instant_the_claim_is_decided_on_the_spot(sse_calendar, 
     after = resolve_context(replace(ctx.request, event_phase=EventPhase.AFTER,
                                     fixings=tuple(fixings) + (Fixing(last.timestamp, spot),)))
     assert after.numerical.terminated and out.contingent_pv == pytest.approx(after.numerical.paid_cash, abs=1e-12)
-    pde = SnowballPDESolver(PDEParams())                      # an independent route that already prices the instant
+    # Every route resolves this instant through the same runtime resolution (test_maturity_instant.py), so this is
+    # a consistency check, not an independent one: the independent statement is the lifecycle identity above. The
+    # fixture pays the same cash for a knock-out and a survival, which is how the PDE solver's missed knock-out at
+    # this instant went unseen here until 2026-09-19.
+    pde = SnowballPDESolver(PDEParams())
     assert out.contingent_pv == pytest.approx(route_for(ctx, pde).price(ctx, pde).contingent_pv, abs=1e-9)
 
 

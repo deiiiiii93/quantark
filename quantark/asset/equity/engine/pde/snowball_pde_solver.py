@@ -1869,11 +1869,20 @@ class SnowballPDESolver(BasePDESolver):
     def _calculate_terminal_value(
         self, product: SnowballOption, spot: float, pricing_env: PricingEnvironment
     ) -> float:
-        """Calculate terminal payoff when already expired."""
-        # Determine if knocked-in based on current spot
-        knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
-        if not knocked_in:
-            knocked_in = self._is_already_knocked_in(product, spot)
+        """Value at zero time to maturity: the observations still pending at this instant are decided on the spot.
+
+        The shortcut used to go straight to the terminal payoff, so a knock-out decided at the last observation
+        was paid as a survival (the rebate instead of the knock-out coupon). Everywhere else the solver already
+        decides an observation at the valuation instant on the known spot; this is the same decision.
+        """
+        carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        if type(product) is SnowballOption:
+            decision = product.decide_observations_at_valuation(spot, pricing_env, knocked_in=carried)
+            if decision.knocked_out:
+                return self._get_immediate_ko_payoff(product, pricing_env)
+            carried = decision.knocked_in
+        # the spot-only proxy is kept: it also covers a knock-in level with no record at this instant
+        knocked_in = carried or self._is_already_knocked_in(product, spot)
         return product.get_payoff(spot, pricing_env, knocked_in=knocked_in)
 
     def _build_grids(

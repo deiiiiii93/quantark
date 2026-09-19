@@ -255,6 +255,28 @@ class SnowballMCEngine(BaseEngine):
         # Handle near-expiry case
         if T < 1e-10:
             knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+            if type(product) is SnowballOption:
+                # The observations still pending at this instant are decided on the known spot, as
+                # _build_time_grid decides them (index -1) when more of the claim lies ahead. Going
+                # straight to the carried state's payoff priced a claim that knocks in or out at the
+                # last observation as if it had survived.
+                decision = product.decide_observations_at_valuation(
+                    S, pricing_env, knocked_in=knocked_in
+                )
+                if decision.knocked_out:
+                    timings = self._payment_timings
+                    instant = (
+                        product.accrual_config.coupon_pay_type == CouponPayType.INSTANT
+                    )
+                    payment_time = (
+                        timings.observation_payment_times[decision.ko_index]
+                        if instant
+                        else timings.terminal.payment_time
+                    )
+                    return float(decision.ko_record.payoff) * self._df(
+                        float(payment_time)
+                    ) / self._df(float(T))
+                knocked_in = decision.knocked_in
             payoff = product.get_payoff(
                 S, pricing_env, knocked_in=knocked_in
             )

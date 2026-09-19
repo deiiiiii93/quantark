@@ -13,7 +13,8 @@ from copy import deepcopy
 from math import isfinite
 
 from quantark.execution.errors import CapabilityError
-from quantark.intraday.engines.base import (TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks,
+from quantark.intraday.engines.base import (TERMINATED_POINT_GREEKS, EnginePriceOutcome, PointGreeks, decided_at_valuation,
+                                            decided_point_greeks, decided_price_outcome, plain_snowball,
                                             point_greeks_from_estimates)
 
 
@@ -36,6 +37,9 @@ class MCRoute:
             return EnginePriceOutcome(0.0, "terminated", {"reason": "lifecycle state is not alive; only the ledger remains"}, {},
                                       exact=True)
         twin = num.product
+        if plain_snowball(twin) and decided_at_valuation(ctx):
+            # nothing is left to simulate: the day-level engine's zero-maturity shortcut means "already processed"
+            return decided_price_outcome(ctx)
         if isinstance(twin, EuropeanVanillaOption):
             solver = EuropeanMCEngine(params=deepcopy(engine.params), method=engine.method)
             method = "mc_vanilla_after_ki"
@@ -70,6 +74,8 @@ class MCRoute:
         num = ctx.numerical
         if num.terminated:
             return TERMINATED_POINT_GREEKS
+        if plain_snowball(num.product) and decided_at_valuation(ctx):
+            return decided_point_greeks(ctx)
         if getattr(engine, "method", None) != MonteCarloMethod.RANDOMIZED_QUASI:
             raise CapabilityError(f"point greeks on MC need RQMC: {type(engine).__name__} runs "
                                   f"{getattr(getattr(engine, 'method', None), 'name', 'an unknown method')}")

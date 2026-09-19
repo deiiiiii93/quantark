@@ -42,8 +42,19 @@ A certificate constrains the release, never the code.
   with an inventory of what each fixture's successor study is.
 
 ### Fixed
-- The QUAD V2 intraday route raised at the maturity instant under `BEFORE`; it now values
-  the claim decided there through the runtime's event resolution, as the PDE route does.
+- The maturity close under `BEFORE`, where every remaining event is decided on the known
+  spot. The QUAD V2 intraday route raised there; the Monte Carlo route priced a claim that
+  knocks in or out at that instant as if it had survived (12 where the lifecycle pays -30 at
+  spot 70), and the PDE route paid a knock-out decided there as a survival (the rebate, not
+  the knock-out coupon; its desk theta one hour earlier was wrong by 7 per hour). All three
+  routes now resolve the decided claim through the runtime's own event resolution.
+- The same defect at its source: the zero-maturity shortcut of `SnowballMCEngine`,
+  `SnowballPDESolver` and `SnowballQuadEngine` returned the terminal payoff of the carried
+  knock-in state and never applied the observations still pending at that instant, although
+  each engine decides such observations correctly whenever more of the claim lies ahead.
+  They now share `SnowballOption.decide_observations_at_valuation`. Day-level dated products
+  cannot reach this state (valuation on the exercise date is refused); a time-based product
+  at zero maturity can.
 
 
 ## [0.4.7] - 2026-08-25

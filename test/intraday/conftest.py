@@ -57,8 +57,11 @@ def _monthly_trading_dates(cal, t0, months):
     return out
 
 
-def dated_snowball(cal, t0, months=12, ko=103.0, ki=75.0, ko_rate=0.12):
-    """Monthly KO dates from t0 with daily-close discrete KI on the same dates."""
+def dated_snowball(cal, t0, months=12, ko=103.0, ki=75.0, ko_rate=0.12, rebate_rate=None):
+    """Monthly KO dates from t0 with daily-close discrete KI on the same dates.
+
+    ``rebate_rate`` defaults to the knock-out coupon. Pass another rate where a test must tell a knock-out from a
+    survival: with equal rates the two pay the same cash, and an engine that misses the knock-out looks right."""
     dates = _monthly_trading_dates(cal, t0, months)
     ko_schedule = ObservationSchedule(records=[ObservationRecord(observation_date=d, barrier=ko) for d in dates])
     ki_schedule = ObservationSchedule(records=[ObservationRecord(observation_date=d, barrier=ki) for d in dates])
@@ -70,7 +73,7 @@ def dated_snowball(cal, t0, months=12, ko=103.0, ki=75.0, ko_rate=0.12):
             ko_observation_schedule=ko_schedule,
             ki_barrier=ki, ki_observation_type=ObservationType.DISCRETE,
             ki_observation_schedule=ki_schedule),
-        payoff_config=PayoffConfig(rebate_rate=ko_rate, include_principal=False),
+        payoff_config=PayoffConfig(rebate_rate=ko_rate if rebate_rate is None else rebate_rate, include_principal=False),
     )
 
 
