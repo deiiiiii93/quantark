@@ -101,7 +101,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 spot,
                 pricing_env,
                 knocked_in=carried_knock_in,
-                post_ko_at_knock_in=True,
             )
             if decision.knocked_out:
                 record = decision.ko_record

@@ -227,12 +227,12 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
 
         ``_apply_step_modifications_two_surface`` applies this instant's pre-KI knock-out to the
         not-knocked-in surface and its post-KI knock-out to the knocked-in one before the knock-in moves
-        value across, so a fresh knock-in sees the post-KI observation (``post_ko_at_knock_in``). The
+        value across, so a fresh knock-in sees the post-KI observation, as the decision applies it. The
         inherited shortcut went straight to the carried state's terminal payoff.
         """
         product.require_alive(pricing_env, carried)
         decision = product.decide_observations_at_valuation(
-            spot, pricing_env, knocked_in=carried, post_ko_at_knock_in=True
+            spot, pricing_env, knocked_in=carried
         )
         if decision.knocked_out:
             record = decision.ko_record

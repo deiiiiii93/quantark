@@ -279,11 +279,10 @@ class SnowballMCEngine(BaseEngine):
                 knocked_in = decision.knocked_in
             elif isinstance(product, KnockOutResetSnowballOption):
                 product.require_alive(pricing_env, knocked_in)
-                # Same decision on the schedule the knock-in state puts in force. The path loop counts a
-                # post-KI observation strictly after the knock-in, so a knock-in decided now does not
-                # also test this instant's post-KI knock-out.
+                # Same decision on the schedule the knock-in state puts in force, as the path loop
+                # applies it (a knock-in puts this instant's post-KI observation in force too).
                 decision = product.decide_observations_at_valuation(
-                    S, pricing_env, knocked_in=knocked_in, post_ko_at_knock_in=False
+                    S, pricing_env, knocked_in=knocked_in
                 )
                 if decision.knocked_out:
                     return self._ko_reset_decided_knock_out(
@@ -1970,7 +1969,12 @@ class SnowballMCEngine(BaseEngine):
                     post_hit = post_prices <= post_barriers
                 else:
                     post_hit = post_prices >= post_barriers
-                time_mask = post_times[None, :] > ki_time[:, None]
+                # The second schedule is in force from the observation that knocks the path in, that
+                # observation included -- the rule of the PDE and QUAD engines, and of this engine's own
+                # REBASED branch, which tests an offset of zero at the knock-in instant. Counting it
+                # strictly after the knock-in left a path knocked in and out at one instant alive
+                # until the next date. (The tolerance only absorbs two spellings of one time.)
+                time_mask = post_times[None, :] >= ki_time[:, None] - 1e-12
                 post_hit_filtered = post_hit & time_mask
                 post_triggered = post_hit_filtered.any(axis=1)
                 post_triggered &= post_allowed

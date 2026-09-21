@@ -81,6 +81,11 @@ A certificate constrains the release, never the code.
   or refused the wrong way round past the first schedule: a knocked-in contract is now valued
   there on all of them, and one not knocked in is refused as matured instead of being priced
   with the first schedule extended to the final maturity.
+- `SnowballMCEngine`, knock-out-reset contracts: the second schedule is in force from the
+  observation that knocks the contract in, that observation included, as in the PDE and QUAD
+  engines (and in this engine's own REBASED branch). Monte Carlo counted it strictly after the
+  knock-in, which only shows when the second schedule's level is at or below the knock-in
+  level: 4.60 against 4.75 there, now 4.74 +/- 0.01. The usual contract is unchanged.
 - `PhoenixQuadEngine` never read `CouponBarrierConfig.initial_coupon_arrears`: memory coupons
   owed at the pricing date were worth nothing. They are released by the first period that pays,
   as the Monte Carlo and PDE engines release them.

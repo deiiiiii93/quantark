@@ -338,17 +338,16 @@ def test_the_ko_reset_decision_uses_the_schedule_the_knock_in_state_puts_in_forc
     assert not late.decide_observations_at_valuation(70.0, env).knocked_in
 
 
-def test_a_post_ki_knock_out_at_the_knock_in_instant_follows_the_calling_engine_s_rule():
-    """Only reachable when the post-KI level is at or below the knock-in level. The two-surface engines (PDE, QUAD V1,
-    QUAD V2) hand a fresh knock-in to a knocked-in surface that has already applied this instant's post-KI knock-out;
-    Monte Carlo counts post-KI observations strictly after the knock-in. The decision takes the rule from its caller
-    instead of settling that disagreement silently."""
+def test_a_post_ki_observation_at_the_knock_in_instant_is_in_force():
+    """Only reachable when the post-KI level is at or below the knock-in level. The second schedule is in force from
+    the observation that knocks the contract in, that observation included: every engine applies it so (Monte Carlo
+    counted it strictly after the knock-in until 2026-09-21; ``test_ko_reset_contract_rules.py`` pins the engines)."""
     env = flat_env(datetime(2027, 3, 16))
     product = _float_ko_reset([0.0], [0.0], [0.0], post_ko=70.0)
-    surfaces = product.decide_observations_at_valuation(72.0, env)
-    assert surfaces.knocked_in and surfaces.knocked_out and surfaces.ko_regime == "post"
-    paths = product.decide_observations_at_valuation(72.0, env, post_ko_at_knock_in=False)
-    assert paths.knocked_in and not paths.knocked_out
+    both = product.decide_observations_at_valuation(72.0, env)
+    assert both.knocked_in and both.knocked_out and both.ko_regime == "post" and both.ko_record.payoff == pytest.approx(3.0)
+    only_in = product.decide_observations_at_valuation(65.0, env)
+    assert only_in.knocked_in and not only_in.knocked_out
 
 
 def test_a_rebased_post_schedule_is_not_decided_here():

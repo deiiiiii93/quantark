@@ -151,3 +151,36 @@ def test_monte_carlo_pays_the_rebate_on_the_spot_at_the_end_of_the_first_schedul
     value, error = float(mc.price(contract(), env(100.0))), float(mc.get_last_std_error())
     reference = float(KOResetSnowballQuadEngine(params=QuadParams(grid_points=2001)).price(contract(), env(100.0)))
     assert value == pytest.approx(reference, abs=4.0 * error + 5e-3)
+
+
+# --- the knock-in instant: the second schedule is in force from the observation that knocks the contract in -------------
+def _second_level_below_the_knock_in_level(pre, post, ki, maturity, level=60.0):
+    """Only then can one spot both knock the contract in (S <= 75) and knock it out on the second schedule (S >= 60)."""
+    product = ko_reset(pre, post, ki, maturity, False)
+    product.post_barrier_config = replace(product.post_barrier_config, ko_barrier=level,
+                                          ko_observation_schedule=_schedule(post, level))
+    return product
+
+
+@pytest.mark.parametrize("name", sorted(ENGINES))
+def test_a_second_schedule_observation_at_the_knock_in_instant_counts(name):
+    """The lattice engines hand a fresh knock-in to a knocked-in surface that has already applied this instant's
+    second-schedule knock-out. Monte Carlo counted that schedule strictly AFTER the knock-in (4.60 against 4.75 here,
+    seventeen standard errors), although its own REBASED branch tests an offset of zero at the knock-in instant."""
+    make = ENGINES[name][0] if name != "mc" else (lambda: SnowballMCEngine(params=MCParams(seed=7, num_paths=131072)))
+    engine = make()
+    value = float(engine.price(_second_level_below_the_knock_in_level(MONTHS[:6], MONTHS, MONTHS[:6], 1.0), env(80.0)))
+    reference = float(KOResetSnowballPDESolver(PDEParams()).price(
+        _second_level_below_the_knock_in_level(MONTHS[:6], MONTHS, MONTHS[:6], 1.0), env(80.0)))
+    tolerance = 4.0 * float(engine.get_last_std_error()) + 5e-3 if name == "mc" else 5e-3
+    assert value == pytest.approx(reference, abs=tolerance)
+
+
+@pytest.mark.parametrize("name", ["mc", "pde", "quad_v1"])
+def test_the_same_rule_decides_a_contract_at_zero_time_to_maturity(name):
+    """Both schedules and the knock-in observed now, spot 72: knocked in (<= 75) and out on the second schedule
+    (>= 70) at once, which pays that schedule's 3. At 65 it is only knocked in, and redeems at the loss."""
+    paid = _second_level_below_the_knock_in_level([0.0], [0.0], [0.0], 0.0, level=70.0)
+    lost = _second_level_below_the_knock_in_level([0.0], [0.0], [0.0], 0.0, level=70.0)
+    assert float(ENGINES[name][0]().price(paid, env(72.0))) == pytest.approx(3.0, abs=1e-12)
+    assert float(ENGINES[name][0]().price(lost, env(65.0))) == pytest.approx(-35.0, abs=1e-12)

@@ -552,7 +552,6 @@ class KnockOutResetSnowballOption(SnowballOption):
         spot: float,
         pricing_env: PricingEnv,
         knocked_in: bool = False,
-        post_ko_at_knock_in: bool = True,
     ) -> KOResetObservationsAtValuation:
         """Apply the observations scheduled AT the valuation instant (time zero) to the known spot.
 
@@ -561,11 +560,11 @@ class KnockOutResetSnowballOption(SnowballOption):
         knock-out, then its knock-in; a knocked-in one -- carried, or decided at this instant -- tests
         the post-KI knock-out, unless the contract disables knock-outs after a knock-in.
 
-        ``post_ko_at_knock_in`` is the caller's rule for a post-KI observation at the very instant of the
-        knock-in, which the engines do not share and which matters only when the post-KI level is at or
-        below the knock-in level: the two-surface engines (PDE, QUAD V1, QUAD V2) hand the fresh
-        knock-in a knocked-in surface that has already applied it (``True``); Monte Carlo counts post-KI
-        observations strictly after the knock-in (``False``).
+        The second schedule is in force from the observation that knocks the contract in: a post-KI
+        observation at that same instant is tested. Every engine applies it that way (the lattice engines
+        hand a fresh knock-in a knocked-in surface that has already applied it; Monte Carlo counts a
+        post-KI observation at or after the knock-in). It matters only when the post-KI level is at or
+        below the knock-in level, so that one spot can breach both.
         """
         def breached(config: BarrierConfig, regime: str, state: bool):
             resolved, rates, sources = self._resolve_ko_schedule(config, pricing_env)
@@ -599,7 +598,6 @@ class KnockOutResetSnowballOption(SnowballOption):
             state
             and not self.barrier_config.disable_ko_after_ki
             and self.post_ko_mode == PostKOScheduleMode.ABSOLUTE
-            and (post_ko_at_knock_in or not fresh)
         ):
             decided = breached(self.post_barrier_config, "post", True)
             if decided is not None:

@@ -150,15 +150,14 @@ def decided_value(ctx) -> float:
 def _ko_reset_decision(ctx):
     state = ctx.numerical.lifecycle_state
     return ctx.numerical.product.decide_observations_at_valuation(
-        float(ctx.spot), ctx.pricing_env, knocked_in=bool(getattr(state, "knocked_in", False)), post_ko_at_knock_in=True)
+        float(ctx.spot), ctx.pricing_env, knocked_in=bool(getattr(state, "knocked_in", False)))
 
 
 def _decided_value_ko_reset(ctx) -> float:
     """The knock-out-reset snowball has no lifecycle replay in the runtime (the daily tracker observes only its
     pre-KI schedule), so the BEFORE / AFTER identity above cannot be evaluated for it. The decided claim is read
     off the float-time twin instead: its own decision on the schedule the knock-in state puts in force, paid on the
-    twin's payment times, which are the timeline's. Both routes that serve it (PDE, QUAD V2) give a fresh knock-in
-    a knocked-in surface that has already applied this instant's post-KI knock-out, hence ``post_ko_at_knock_in``."""
+    twin's payment times, which are the timeline's."""
     from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 
     twin, env = ctx.numerical.product, ctx.pricing_env
