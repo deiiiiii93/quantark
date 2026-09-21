@@ -40,6 +40,29 @@ A certificate constrains the release, never the code.
   The runtime reads no certificate and does not import `quantark.modelvalidation`.
 - The Gate C evidence is archived under `docs/modelvalidation/legacy/intraday-gate-c/2026-09-18/`
   with an inventory of what each fixture's successor study is.
+- A knock-out and a knock-in observed at the same instant: the knock-out wins, on every
+  autocallable and every engine (desk ruling, 2026-09-21). The knock-in observed with it neither
+  disables that knock-out under `disable_ko_after_ki` nor, on a knock-out-reset snowball,
+  replaces the first schedule. The rule is for a discretely observed knock-in; a continuously
+  monitored level breached at an observation was touched before it and keeps its precedence.
+  One spot breaches both only when the knock-out level is at or below the knock-in level, so the
+  usual contract is unchanged: 240 prices (three products, Monte Carlo, PDE, QUAD V1 in both
+  event projections and QUAD V2, discrete and continuous knock-in, flag on and off) are
+  byte-identical before and after. On a tie contract the engines used to disagree (spot 70,
+  knock-out at 60 under a knock-in at 75, monthly observations): the snowball under
+  `disable_ko_after_ki` was -22.4 on Monte Carlo, PDE and QUAD V1 against 14.0 on QUAD V2; the
+  Phoenix 82.1 on Monte Carlo and both QUAD engines against 100.2 on PDE; the knock-out-reset
+  snowball -21.6 against 14.0 on QUAD V2, with or without the flag. All four now agree with a
+  semi-analytic reference (the snowball under the flag with two observations: 3.0803, where the
+  knock-in winning gives -18.1045).
+  Changed: `SnowballMCEngine` (both products) and `PhoenixMCEngine` (a knock-out at the knock-in
+  instant is valid), `SnowballPDESolver` and `KOResetSnowballPDESolver` (the knock-out jump on
+  the not-knocked-in surface goes after the knock-in jump where the knocked-in surface does not
+  carry it, at interior observations and in the terminal condition), `SnowballQuadEngine`,
+  `KOResetSnowballQuadEngine` and `PhoenixQuadEngine` (the same, in both event projections),
+  and QUAD V2's Phoenix, which let the knock-in win under the flag on purpose. `PhoenixPDESolver`
+  already let the knock-out win. The event-statistics sweeps of the PDE and QUAD V1 engines are
+  not reordered, and the two-dimensional vol-model solvers were not examined.
 
 ### Fixed
 - The maturity close under `BEFORE`, where every remaining event is decided on the known
@@ -95,6 +118,17 @@ A certificate constrains the release, never the code.
 - `PhoenixPDESolver`: a knock-out decided at the valuation instant (any instant, not only
   the last) left out the memory coupons in arrears, which Monte Carlo, QUAD V2 and the
   lifecycle tracker release with that period's coupon (101 against 106 with five owed).
+- An observation at the valuation instant with more of the claim ahead. `PhoenixQuadEngine` and
+  `KOResetSnowballQuadEngine` skipped it (their time grid drops time zero): no knock-out, no
+  coupon, no missed-coupon memory and no knock-in from it, so a Phoenix observed now at 104 was
+  94.54 against 101 on PDE and QUAD V2, and one at 90 exactly one coupon short.
+  `SnowballMCEngine` refused a knock-out-reset contract observed now (`dt_array must have
+  strictly positive entries`, in pricing and in the event statistics): its grid kept time zero as
+  a simulation node where the plain snowball's grid reads such a record off the known spot. All
+  three now decide the observation on the known spot, and each engine satisfies the identities
+  that need no second engine: a coupon observed now raises the price by exactly the coupon, a
+  memory coupon missed now equals the contract carrying it as arrears, and a knock-in observed
+  now equals the contract carrying the knock-in (to 1e-8, on all four engines).
 
 
 ## [0.4.7] - 2026-08-25

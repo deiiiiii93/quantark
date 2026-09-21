@@ -472,11 +472,10 @@ def compile_contract(
             ko_hit = record is not None and (
                 x <= np.log(record[1]) if product.is_reverse else x >= np.log(record[1])
             )
+            # ``disable`` suppresses the knock-outs AFTER a knock-in, read on the state carried INTO
+            # this observation: a knock-out wins a tie with a knock-in observed at the same instant,
+            # on every product (the Phoenix used to let the knock-in win under the flag).
             ko_hit = ko_hit and not (hit and disable)
-            # Phoenix disables KO also on a simultaneous new KI; Snowball's
-            # existing contract gives the incoming-state KO precedence.
-            if phoenix and disable and ki_hit:
-                ko_hit = False
             if reset and not hit and ki_hit and not ko_hit:
                 record = po
                 ko_hit = record is not None and (

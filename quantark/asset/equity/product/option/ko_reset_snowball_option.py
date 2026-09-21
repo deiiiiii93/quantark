@@ -67,6 +67,13 @@ class KnockOutResetSnowballOption(SnowballOption):
     2. The second schedule only becomes effective through a knock-in DURING the first one. A
        contract not knocked in when the first schedule ends matures there, so a knock-in is never
        tested after that (``first_schedule_ended``, ``require_alive``).
+
+    Two rules fix what one instant decides:
+
+    * A first-schedule knock-out and a knock-in observed at the same instant: the knock-out wins, as
+      on every autocallable, so that knock-in does not replace the schedule the knock-out belongs to.
+    * Otherwise the second schedule is in force FROM the observation that knocks the contract in,
+      that observation included.
     """
 
     post_barrier_config: BarrierConfig = field(

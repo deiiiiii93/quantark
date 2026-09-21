@@ -381,30 +381,40 @@ class SnowballQuadEngine(BaseEngine):
                     if ko_is_reachable
                     else np.zeros_like(grid)
                 )
-                if self._use_cell_average_events() and ko_is_reachable:
-                    v_out = self._project_quad_event(
+            # The knock-out wins a tie with a knock-in OBSERVED at the same instant. While it survives
+            # a knock-in the knocked-in surface carries it too, so the knock-in copy keeps it. Under
+            # disable_ko_after_ki that surface does not, and the copy would overwrite the knock-out
+            # wherever both levels are breached: it is then applied to the not-knocked-in surface
+            # AFTER the knock-in. (A continuously monitored knock-in breached at a node was touched
+            # before the observation, so it did come first. The two events write disjoint nodes
+            # unless the knock-out level is at or below the knock-in level.)
+            ki_record = (
+                self._match_record(obs_time, ki_records)
+                if ki_records and not (ki_continuous and log_ki_barrier is not None)
+                else None
+            )
+            ko_out_last = (
+                ko_record is not None and ki_record is not None and disable_ko_after_ki
+            )
+
+            def knock_out(surface):
+                if self._use_cell_average_events():
+                    return self._project_quad_event(
                         grid,
                         ko_record.barrier,
                         spot,
-                        v_survive=v_out,
+                        v_survive=surface,
                         v_breach=ko_value,
                         breach_up=not product.is_reverse,
                     )
-                    if not disable_ko_after_ki:
-                        v_in = self._project_quad_event(
-                            grid,
-                            ko_record.barrier,
-                            spot,
-                            v_survive=v_in,
-                            v_breach=ko_value,
-                            breach_up=not product.is_reverse,
-                        )
-                elif ko_is_reachable:
-                    # KO always applies to the not-yet-KI surface; KI surface
-                    # only if enabled.
-                    v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
-                    if not disable_ko_after_ki:
-                        v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
+                return ko_weight * ko_value + (1.0 - ko_weight) * surface
+
+            if ko_record is not None and ko_is_reachable:
+                # KO always applies to the not-yet-KI surface; KI surface only if enabled.
+                if not ko_out_last:
+                    v_out = knock_out(v_out)
+                if not disable_ko_after_ki:
+                    v_in = knock_out(v_in)
 
             if ki_continuous and log_ki_barrier is not None:
                 ki_mask = (
@@ -413,22 +423,23 @@ class SnowballQuadEngine(BaseEngine):
                     else spot_grid <= ki_barrier_continuous
                 )
                 v_out[ki_mask] = v_in[ki_mask]
-            elif ki_records:
-                ki_record = self._match_record(obs_time, ki_records)
-                if ki_record is not None:
-                    v_out = self._blend_ki_transition(
-                        v_out,
-                        v_in,
-                        grid,
-                        spot_grid,
-                        ki_record.barrier,
-                        spot,
-                        smoothing_width,
-                        product.is_reverse,
-                        ko_weight=(
-                            ko_weight if not disable_ko_after_ki else None
-                        ),
-                    )
+            elif ki_record is not None:
+                v_out = self._blend_ki_transition(
+                    v_out,
+                    v_in,
+                    grid,
+                    spot_grid,
+                    ki_record.barrier,
+                    spot,
+                    smoothing_width,
+                    product.is_reverse,
+                    ko_weight=(
+                        ko_weight if not disable_ko_after_ki else None
+                    ),
+                )
+
+            if ko_out_last and ko_is_reachable:
+                v_out = knock_out(v_out)
 
             # Post-event continuation surfaces AT obs_time (before diffusing back to
             # the previous step): v_out = value of a not-yet-knocked-in contract,

@@ -89,6 +89,18 @@ class SnowballMCResult:
     batches_used: Optional[int] = None
 
 
+def _knock_out_first(ko_times: np.ndarray, ki_times: np.ndarray, ki_continuous: bool) -> np.ndarray:
+    """Per path: whether the first knock-out is not preceded by the first knock-in.
+
+    The knock-out wins a tie with a DISCRETE knock-in, which is observed at the same instant. A continuously
+    monitored one is detected inside the step that the knock-out observation closes, so an equal grid time means
+    the knock-in came first. The tolerance only absorbs two spellings of one observation time.
+    """
+    if ki_continuous:
+        return ko_times < ki_times
+    return ko_times <= ki_times + 1e-12
+
+
 class SnowballMCEngine(BaseEngine):
     """
     Monte Carlo pricing engine for Snowball (autocallable) options.
@@ -619,7 +631,12 @@ class SnowballMCEngine(BaseEngine):
                     )
                 else:
                     ki_trigger_times = np.full(len(paths), np.inf, dtype=float)
-                ko_valid = ko_triggered & (ko_trigger_times < ki_trigger_times)
+                # A knock-out and a knock-in observed at the SAME instant: the knock-out wins, so the
+                # knock-in observed with it does not disable it. A continuously monitored knock-in is
+                # different: a touch found inside a step happened BEFORE the observation closing it.
+                ko_valid = ko_triggered & _knock_out_first(
+                    ko_trigger_times, ki_trigger_times, ki_continuous
+                )
         else:
             ko_valid = ko_triggered
 
@@ -1187,20 +1204,35 @@ class SnowballMCEngine(BaseEngine):
                 for offset in post_times:
                     all_times_set.add(t_ki + offset)
 
-        all_times = np.array(sorted(all_times_set), dtype=float)
+        # An observation exactly at valuation is decided on the known spot, as in _build_time_grid: it
+        # is no simulation node (a zero step is rejected) and maps to index -1, i.e. path column 0 under
+        # the "+1" readout of the barrier checks. This grid used to keep time zero as a node, so a
+        # contract observed now could not be priced at all. Grids without such a record are unchanged.
+        def at_valuation(t):
+            return t <= 0.0 or is_zero(t)
+
+        all_times = np.array(
+            sorted(t for t in all_times_set if not at_valuation(t)), dtype=float
+        )
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)
 
-        pre_indices = np.searchsorted(all_times, pre_times)
+        def indices_for(times):
+            return np.array(
+                [-1 if at_valuation(t) else int(np.searchsorted(all_times, t)) for t in times],
+                dtype=int,
+            )
+
+        pre_indices = indices_for(pre_times)
 
         if post_mode == PostKOScheduleMode.ABSOLUTE:
-            post_indices = np.searchsorted(all_times, post_times)
+            post_indices = indices_for(post_times)
         else:
             post_indices = np.array([], dtype=int)
             post_indices_by_ki = []
             for t_ki in ki_times:
                 actual_times = t_ki + post_times
-                post_indices_by_ki.append(np.searchsorted(all_times, actual_times))
+                post_indices_by_ki.append(indices_for(actual_times))
 
         if ki_continuous:
             ki_indices = np.array([], dtype=int)
@@ -1208,7 +1240,7 @@ class SnowballMCEngine(BaseEngine):
                 0, int(np.searchsorted(all_times, pre_maturity, side="right") - 1)
             )
         else:
-            ki_indices = np.searchsorted(all_times, np.array(ki_times, dtype=float))
+            ki_indices = indices_for(ki_times)
             ki_horizon_idx = None
 
         # See _build_time_grid: the vol-model engines record the realized
@@ -1219,7 +1251,7 @@ class SnowballMCEngine(BaseEngine):
             "carried_knock_in": carried_knock_in,
             "ki_barriers": np.array(ki_barriers, dtype=float),
             # the not-knocked-in contract matures HERE: its rebate is read off this node
-            "pre_maturity_idx": int(np.searchsorted(all_times, pre_maturity)) if len(pre_times) else None,
+            "pre_maturity_idx": int(indices_for([pre_maturity])[0]) if len(pre_times) else None,
             "all_times": all_times,
             "dt_array": dt_array,
             "pre_times": pre_times,
@@ -1735,9 +1767,12 @@ class SnowballMCEngine(BaseEngine):
                     np.inf,
                 )
 
-                # KO is only valid if it happens before KI
-                ko_before_ki = ko_trigger_times < ki_trigger_times
-                ko_valid = ko_triggered & ko_before_ki
+                # A knock-out and a knock-in observed at the SAME instant: the knock-out wins, so the
+                # knock-in observed with it does not disable it. A continuously monitored knock-in is
+                # different: a touch found inside a step happened BEFORE the observation closing it.
+                ko_valid = ko_triggered & _knock_out_first(
+                    ko_trigger_times, ki_trigger_times, ki_continuous
+                )
         else:
             ko_valid = ko_triggered
 
@@ -1951,7 +1986,10 @@ class SnowballMCEngine(BaseEngine):
             pre_ko_time = np.where(
                 first_pre_idx >= 0, pre_times[first_pre_idx], np.inf
             )
-        pre_valid = pre_ko_triggered & (pre_ko_time < ki_time)
+        # A first-schedule knock-out and a knock-in observed at the SAME instant: the knock-out wins, so
+        # the knock-in observed with it does not replace the schedule that knock-out belongs to. (A
+        # continuously monitored knock-in found inside a step happened BEFORE the observation closing it.)
+        pre_valid = pre_ko_triggered & _knock_out_first(pre_ko_time, ki_time, ki_continuous)
 
         # Post-KO hits
         post_ko_triggered = np.zeros(num_paths, dtype=bool)

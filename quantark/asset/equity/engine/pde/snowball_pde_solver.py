@@ -451,8 +451,17 @@ class SnowballPDESolver(BasePDESolver):
             self._grid_v1, x_vec, s_vec, product, pricing_env
         )
 
+        is_terminal_ki = product.has_ki_barrier and (
+            self._ki_continuous
+            or self._bgk_active
+            or (num_t - 1) in self._ki_observation_indices
+        )
+        terminal_ko = self._has_terminal_ko and self._ko_terminal_record is not None
+        # the knock-out wins a tie with a knock-in observed with it (see _ko_jump_goes_last)
+        ko_last = terminal_ko and is_terminal_ki and self._ko_jump_goes_last(product)
+
         # Apply terminal KO if at maturity observation
-        if self._has_terminal_ko and self._ko_terminal_record is not None:
+        if terminal_ko and not ko_last:
             self._apply_terminal_ko(
                 self._grid_v0,
                 self._grid_v1,
@@ -463,15 +472,20 @@ class SnowballPDESolver(BasePDESolver):
             )
 
         # Apply terminal KI if at maturity observation (European KI fix)
-        if product.has_ki_barrier:
-            is_terminal_ki = self._ki_continuous or self._bgk_active
-            if not is_terminal_ki:
-                if (num_t - 1) in self._ki_observation_indices:
-                    is_terminal_ki = True
-            if is_terminal_ki:
-                self._apply_ki_jump(
-                    self._grid_v0, self._grid_v1, s_vec, num_t - 1, product
-                )
+        if is_terminal_ki:
+            self._apply_ki_jump(
+                self._grid_v0, self._grid_v1, s_vec, num_t - 1, product
+            )
+
+        if ko_last:
+            self._apply_terminal_ko(
+                self._grid_v0,
+                self._grid_v1,
+                s_vec,
+                product,
+                pricing_env,
+                self._ko_terminal_record,
+            )
 
         # Build operator matrices
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
@@ -2441,6 +2455,7 @@ class SnowballPDESolver(BasePDESolver):
         tau = layout.request.tau
         is_reverse = bool(getattr(product, "is_reverse", False))
         interior: dict = {}
+        ko_stages: dict = {}
 
         def _chain(prev, fn):
             if prev is None:
@@ -2482,7 +2497,16 @@ class SnowballPDESolver(BasePDESolver):
                     else states["ki"],
                 }
 
-            interior[step] = _chain(interior.get(step), _ko)
+            ko_stages[step] = _chain(ko_stages.get(step), _ko)
+
+        # The knock-out wins a tie with a knock-in observed at the same instant. With the knock-out
+        # staged first (certified order) that holds while it survives a knock-in: "ki" carries it
+        # too, so the copy below keeps it. Under disable_ko_after_ki "ki" does not, and the copy
+        # would overwrite the knock-out wherever both levels are breached, so the knock-out is
+        # staged last there (``_ko_jump_goes_last``; the two stages commute on disjoint nodes).
+        ko_last = self._ko_jump_goes_last(product)
+        if not ko_last:
+            interior.update(ko_stages)
 
         # Discrete KI: alive <- ki below the (possibly per-date) barrier.
         # Applied AFTER any coincident KO (certified order: KO first).
@@ -2516,6 +2540,10 @@ class SnowballPDESolver(BasePDESolver):
                     }
 
                 interior[step] = _chain(interior.get(step), _ki)
+
+        if ko_last:
+            for step, stage in ko_stages.items():
+                interior[step] = _chain(interior.get(step), stage)
 
         # Continuous (or BGK-shifted continuous) KI: nodal coupling per step.
         continuous = None
@@ -3062,12 +3090,25 @@ class SnowballPDESolver(BasePDESolver):
         Order of operations:
         1. Apply KO jump to both surfaces (KO takes precedence)
         2. Apply KI jump: V0 <- V1 in breached region
+
+        The knock-out wins a tie with a knock-in OBSERVED at the same instant. While the knock-out
+        survives a knock-in that order delivers it: V1 carries the knock-out too, so copying V1 into
+        V0 keeps it. Under ``disable_ko_after_ki`` V1 does not, and the copy would overwrite the
+        knock-out wherever both levels are breached; the knock-out is then applied last
+        (``_ko_jump_goes_last``).
         """
         current_time = self._total_tau - tau
 
-        # 1. Apply KO jump if this is a KO observation time
         ko_record = self._ko_observation_indices.get(t_idx)
-        if ko_record is not None:
+        should_apply_ki = product.has_ki_barrier and (
+            self._ki_continuous
+            or self._bgk_active
+            or t_idx in self._ki_observation_indices
+        )
+        ko_last = ko_record is not None and should_apply_ki and self._ko_jump_goes_last(product)
+
+        # 1. Apply KO jump if this is a KO observation time
+        if ko_record is not None and not ko_last:
             self._apply_ko_jump(
                 grid_v0,
                 grid_v1,
@@ -3082,14 +3123,33 @@ class SnowballPDESolver(BasePDESolver):
         # 2. Apply KI jump
         # For continuous KI: apply at every time step
         # For discrete KI: apply only at observation times
-        if product.has_ki_barrier:
-            should_apply_ki = (
-                self._ki_continuous
-                or self._bgk_active
-                or t_idx in self._ki_observation_indices
+        if should_apply_ki:
+            self._apply_ki_jump(grid_v0, grid_v1, s_vec, t_idx, product)
+
+        if ko_last:
+            self._apply_ko_jump(
+                grid_v0,
+                grid_v1,
+                s_vec,
+                t_idx,
+                current_time,
+                product,
+                pricing_env,
+                ko_record,
             )
-            if should_apply_ki:
-                self._apply_ki_jump(grid_v0, grid_v1, s_vec, t_idx, product)
+
+    def _ko_jump_goes_last(self, product: SnowballOption) -> bool:
+        """Whether a knock-out sharing an observation with a knock-in must be applied after it.
+
+        Only under ``disable_ko_after_ki`` (see ``_apply_step_modifications_two_surface``), and only
+        for a DISCRETE knock-in: a continuously monitored one breached at this node was touched
+        before the observation, so it did come first and the knock-out is already disabled. The two
+        jumps write disjoint nodes unless the knock-out level is at or below the knock-in level, so
+        the order changes nothing for any other contract.
+        """
+        return not self._ko_survives_ki(product) and not (
+            self._ki_continuous or self._bgk_active
+        )
 
     def _apply_ko_jump(
         self,

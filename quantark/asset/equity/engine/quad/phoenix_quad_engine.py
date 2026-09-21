@@ -21,6 +21,7 @@ from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadE
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.observation_schedule import AT_VALUATION_TOL
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
@@ -78,6 +79,16 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
         if is_zero(maturity, tol=Tolerance.ZERO):
+            return self._decided_at_valuation(product, pricing_env, float(spot))
+
+        # An observation AT the valuation instant is decided on the known spot: the recursion below
+        # starts after it (``_merge_times`` drops time zero). The engine used to skip it -- no
+        # knock-out, no coupon, no missed-coupon memory and no knock-in from an observation now.
+        carried_knock_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        decision = product.decide_observations_at_valuation(
+            float(spot), pricing_env, knocked_in=carried_knock_in
+        )
+        if decision.knocked_out:
             return self._decided_at_valuation(product, pricing_env, float(spot))
 
         rate = pricing_env.get_rate(maturity)
@@ -517,15 +528,15 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         spot,
                         smoothing_width,
                         product.is_reverse,
-                        ko_weight=(
-                            ko_weight if not disable_ko_after_ki else None
-                        ),
+                        # the knock-out wins a tie on the not-knocked-in surface whatever the
+                        # flag: v_out already carries it, so the knock-in must not overwrite it
+                        ko_weight=ko_weight,
                     )
                 if expiry_coupons:
                     w_out = self._blend_ki_transition(
                         w_out, w_in, grid, spot_grid, ki_record.barrier, spot,
                         smoothing_width, product.is_reverse,
-                        ko_weight=(ko_weight if not disable_ko_after_ki else None),
+                        ko_weight=ko_weight,
                     )
 
             # Diffusion Step
@@ -616,14 +627,35 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 [arr.copy() for arr in v_out_list],
             )
 
-        # Final result is value at t=0 with 0 accumulated coupons.
+        # The state the valuation instant leaves behind. With no observation now that is memory
+        # state 0 on the carried knock-in regime. An observation now has been decided above: its
+        # coupon is paid here, a missed memory coupon starts the claim in memory state 1 (the
+        # surfaces are indexed by the periods missed since the pricing date, this one included),
+        # and a discrete knock-in observed now reads the knocked-in regime. A continuously
+        # monitored level stays with the surfaces, which already carry it.
+        observed_now = any(
+            abs(record.observation_time) <= AT_VALUATION_TOL for record in ko_records
+        )
+        missed_now = observed_now and decision.coupon_index is None
+        memory_state = 1 if (use_memory and missed_now) else 0
+        knocked_in_now = carried_knock_in or (decision.knocked_in and not ki_continuous)
         value_surface = (
-            v_in_list[0]
-            if getattr(product, "_otc_lifecycle_knocked_in", False)
-            else v_out_list[0]
+            v_in_list[memory_state] if knocked_in_now else v_out_list[memory_state]
         )
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
-        return math_utils.interpolate(value_surface, x=0.0)
+        value = math_utils.interpolate(value_surface, x=0.0)
+        if decision.coupon:
+            if expiry_coupons:
+                # paid at termination: the regime's own termination-value surface discounts it
+                coupon_discount = math_utils.interpolate(
+                    w_in if knocked_in_now else w_out, x=0.0
+                )
+            else:
+                coupon_discount = event_delay_by_record[
+                    id(ko_records[decision.coupon_index])
+                ]
+            value += float(decision.coupon) * float(coupon_discount)
+        return value
 
     def _decided_at_valuation(self, product, pricing_env, spot: float) -> float:
         """Zero time to maturity: the observations still pending at this instant are decided on the spot.
@@ -830,9 +862,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         Coupon, KO, and an optional coincident discrete-KI transition are
         resolved as one piecewise function. This avoids sequentially averaging
-        the same threshold cell and preserves the contractual precedence:
-        ordinary KO overrides KI; when KO is disabled after KI, a simultaneous
-        KI transition enters the already-KI continuation instead.
+        the same threshold cell and preserves the contractual precedence: a
+        knock-out overrides a knock-in observed at the same instant, also when
+        the knock-out is disabled after a knock-in (that flag suppresses the
+        knock-outs AFTER the knock-in observation, not the one tied with it).
         """
         thresholds = [float(coupon_barrier)]
         if ko_barrier is not None:
@@ -899,11 +932,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 branch_in = continue_in
 
             if ko_hit:
-                branch_out = (
-                    continue_in
-                    if disable_ko_after_ki and ki_hit
-                    else ko_value
-                )
+                # the knock-out wins a tie with a knock-in observed at the same instant, whether
+                # or not the knocked-in regime keeps its knock-out
+                branch_out = ko_value
             elif ki_hit:
                 branch_out = continue_in
             else:

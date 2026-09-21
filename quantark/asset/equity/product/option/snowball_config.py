@@ -33,7 +33,12 @@ class BarrierConfig:
         ki_observation_dates: Year fractions for KI observations (legacy)
         ki_observation_schedule: ObservationSchedule for KI (preferred)
         ki_continuous: If True, KI monitored continuously
-        disable_ko_after_ki: If True, disable KO after KI is triggered
+        disable_ko_after_ki: If True, disable KO after KI is triggered. "After" is strict: a
+            knock-out observed at the SAME instant as a discretely observed knock-in wins the tie
+            and is not disabled by it, on every autocallable and every engine. (A continuously
+            monitored level breached at an observation was touched before it, so that knock-in
+            does come first.) One spot breaches both only when the knock-out level is at or
+            below the knock-in level.
     """
 
     # Knock-out barrier (required)

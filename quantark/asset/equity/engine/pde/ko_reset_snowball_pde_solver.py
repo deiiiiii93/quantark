@@ -425,7 +425,14 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                 self._grid_v0, x_vec, s_vec, product, pricing_env
             )
 
-        if self._has_pre_terminal_ko and self._pre_ko_terminal_record is not None:
+        # The first-schedule knock-out wins a tie with a knock-in observed at the same instant. The
+        # knocked-in surface never carries that knock-out (it carries the second schedule's), so the
+        # knock-in copy below would overwrite it wherever both levels are breached: for a discrete
+        # knock-in it is applied last (``_pre_ko_goes_last``; disjoint nodes otherwise, so the order
+        # changes nothing for any other contract).
+        pre_terminal_ko = self._has_pre_terminal_ko and self._pre_ko_terminal_record is not None
+        pre_ko_last = pre_terminal_ko and self._pre_ko_goes_last()
+        if pre_terminal_ko and not pre_ko_last:
             self._apply_terminal_ko_single(
                 self._grid_v0,
                 s_vec,
@@ -456,6 +463,15 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                 self._apply_ki_jump(
                     self._grid_v0, self._grid_v1, s_vec, num_t - 1, product
                 )
+
+        if pre_ko_last:
+            self._apply_terminal_ko_single(
+                self._grid_v0,
+                s_vec,
+                product,
+                pricing_env,
+                self._pre_ko_terminal_record,
+            )
 
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
         A = self._build_operator_matrix(l, c, u, num_x)
@@ -515,7 +531,9 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             grid_v0[:, t_idx] = self._v0_seed_values
 
         pre_record = self._pre_ko_observation_indices.get(t_idx)
-        if pre_record is not None:
+        # the first-schedule knock-out wins a tie with a discrete knock-in (see _pre_ko_goes_last)
+        pre_ko_last = pre_record is not None and self._pre_ko_goes_last()
+        if pre_record is not None and not pre_ko_last:
             self._apply_ko_jump_single(
                 grid_v0,
                 s_vec,
@@ -548,6 +566,27 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             )
             if should_apply_ki:
                 self._apply_ki_jump(grid_v0, grid_v1, s_vec, t_idx, product)
+
+        if pre_ko_last:
+            self._apply_ko_jump_single(
+                grid_v0,
+                s_vec,
+                t_idx,
+                current_time,
+                product,
+                pricing_env,
+                pre_record,
+            )
+
+    def _pre_ko_goes_last(self) -> bool:
+        """Whether a first-schedule knock-out is applied after the knock-in sharing its observation.
+
+        For a DISCRETE knock-in, always: the knocked-in surface does not carry that knock-out, so
+        copying it into the not-knocked-in surface would let the knock-in win the tie. A continuously
+        monitored knock-in breached at a node was touched before the observation, so it did come
+        first and the second schedule is already in force there.
+        """
+        return not (self._ki_continuous or self._bgk_active)
 
     def _apply_ko_jump_single(
         self,

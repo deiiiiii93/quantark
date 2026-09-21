@@ -91,29 +91,37 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         maturity = product.get_maturity(pricing_env)
         validate_positive(spot, "spot")
         validate_positive(maturity, "maturity", allow_zero=True)
-        if is_zero(maturity, tol=Tolerance.ZERO):
-            # The observations still pending at this instant are decided on the known spot, on the
-            # schedule the knock-in state puts in force, as the backward induction decides them when
-            # more of the claim lies ahead (a fresh knock-in reads a knocked-in surface that has already
-            # applied this instant's post-KI knock-out). The shortcut returned the never-knocked-in
-            # payoff whatever was pending, and whatever knock-in the contract carried.
-            decision = product.decide_observations_at_valuation(
-                spot,
-                pricing_env,
-                knocked_in=carried_knock_in,
+        # Observations AT the valuation instant are decided on the known spot, on the schedule the
+        # knock-in state puts in force and with the knock-out winning a tie; the recursion below
+        # starts after them (``_merge_times`` drops time zero). This engine used to skip them, and at
+        # zero time to maturity returned the never-knocked-in payoff whatever was pending and
+        # whatever knock-in the contract carried.
+        decision = product.decide_observations_at_valuation(
+            spot,
+            pricing_env,
+            knocked_in=carried_knock_in,
+        )
+        if decision.knocked_out:
+            record = decision.ko_record
+            settlement = record.settlement_time
+            if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
+                settlement = resolve_terminal_timing(product, pricing_env).payment_time
+            discount = (
+                pricing_env.get_discount_factor(settlement)
+                if settlement is not None and settlement > 0.0
+                else 1.0
             )
-            if decision.knocked_out:
-                record = decision.ko_record
-                settlement = record.settlement_time
-                if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
-                    settlement = resolve_terminal_timing(product, pricing_env).payment_time
-                discount = (
-                    pricing_env.get_discount_factor(settlement)
-                    if settlement is not None and settlement > 0.0
-                    else 1.0
-                )
-                return float(record.payoff) * float(discount)
+            return float(record.payoff) * float(discount)
+        if is_zero(maturity, tol=Tolerance.ZERO):
             return product.get_payoff(spot, pricing_env, knocked_in=decision.knocked_in)
+        discrete_ki = not (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        if discrete_ki:
+            # a knock-in observed now replaces the first schedule from here on; a continuously
+            # monitored level below the spot stays with the surfaces, which already carry it
+            carried_knock_in = decision.knocked_in
 
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
@@ -271,6 +279,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 v_out_seeded = True
 
             pre_ko_weight = None
+            pre_ko_last = False
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
             if pre_ko_record is not None:
                 discount = event_delay_by_record[id(pre_ko_record)]
@@ -291,7 +300,21 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     ko_weight = ko_mask.astype(float)
 
                 pre_ko_weight = ko_weight
-                v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
+                pre_ko_value = ko_value
+                # The first-schedule knock-out wins a tie with a knock-in OBSERVED at the same
+                # instant. The knocked-in surface never carries that knock-out (it carries the second
+                # schedule's), so a knock-in copy made after it would overwrite it wherever both
+                # levels are breached: next to a discrete knock-in it is applied last, below. (A
+                # continuously monitored knock-in breached at a node was touched before the
+                # observation. The two events write disjoint nodes unless the first-schedule level
+                # is at or below the knock-in level.)
+                pre_ko_last = bool(
+                    out_live
+                    and not ki_continuous
+                    and self._match_record(obs_time, ki_records) is not None
+                )
+                if not pre_ko_last:
+                    v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
 
             post_ko_record = self._match_record(obs_time, post_ko_records)
             if post_ko_record is not None and not disable_ko_after_ki:
@@ -336,8 +359,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                         spot,
                         smoothing_width,
                         product.is_reverse,
-                        ko_weight=pre_ko_weight,
+                        ko_weight=None if pre_ko_last else pre_ko_weight,
                     )
+
+            if pre_ko_last:
+                v_out = pre_ko_weight * pre_ko_value + (1.0 - pre_ko_weight) * v_out
 
             # Post-event continuation surfaces at obs_time (v_out = pre-KI/not-yet-KI,
             # v_in = post-KI/knocked-in), before diffusing back to the previous step.

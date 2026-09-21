@@ -919,7 +919,14 @@ class PhoenixMCEngine(BaseEngine):
                         ki_trigger_times = np.full(num_paths, np.inf, dtype=float)
                 else:
                     ki_trigger_times = np.full(num_paths, np.inf, dtype=float)
-                ko_valid = ko_triggered & (ko_trigger_times < ki_trigger_times)
+                # A knock-out and a knock-in observed at the SAME instant: the knock-out wins, so the
+                # knock-in observed with it does not disable it. A continuously monitored knock-in is
+                # different: a touch found inside a step happened BEFORE the observation closing it.
+                ko_valid = ko_triggered & (
+                    (ko_trigger_times < ki_trigger_times)
+                    if ki_continuous
+                    else (ko_trigger_times <= ki_trigger_times + 1e-12)
+                )
         else:
             ko_valid = ko_triggered
 
