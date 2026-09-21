@@ -178,10 +178,72 @@ def decided_price_outcome(ctx) -> EnginePriceOutcome:
     return EnginePriceOutcome(decided_value(ctx), "decided_at_valuation", {"reason": _DECIDED_REASON}, {}, exact=True)
 
 
+def _redemption_piece(product, spot: float, knocked_in: bool, pricing_env) -> tuple:
+    """Which affine piece of the maturity redemption in force ``spot`` lies on.
+
+    The redemption of the snowball, the Phoenix and the knock-out-reset snowball (``product.get_payoff`` in the
+    ``knocked_in`` state) is affine in the spot between finitely many levels, and nothing else in a claim decided at
+    the valuation instant depends on the spot. The label returned must be equal for two spots on one piece and
+    differ across every level where the redemption kinks or jumps, so that a stencil whose three spots do not share
+    a label has reached a point where no classical derivative exists (review 2026-09-21 R2).
+
+    Not knocked in, the rebate is fixed, or a call on the spot that kinks at its strike. Knocked in, the redemption is
+    the principal (no loss), the principal less a partial protection's floor (the floor binds), or principal +
+    participation x (spot - strike) on the branch in force -- an airbag barrier switches the participation and strike
+    below it. The label is that affine function itself, so an airbag barrier with no loss or the floor on both sides
+    changes nothing. Full protection floors the loss at zero: flat. Whether the floor binds is read off the product's
+    own redemption, which returns exactly ``principal - floor`` there: an annualized loss moves that level and the
+    comparison follows it without restating the tenor.
+    """
+    from quantark.util.enum.option_enums import ProtectionType
+
+    payoff = product.payoff_config
+    if not knocked_in:
+        if payoff.call_rebate_enabled and payoff.call_strike is not None and payoff.call_participation_rate != 0.0:
+            return ("rebate", spot > float(payoff.call_strike))
+        return ("rebate",)
+    if payoff.protection_type == ProtectionType.FULL:
+        return ("no_loss",)
+    reverse = bool(product.is_reverse)
+    strike, participation = float(product.strike), float(payoff.participation_rate)
+    airbag = product.airbag_config
+    if airbag.airbag_barrier is not None and ((spot > airbag.airbag_barrier) if reverse else (spot < airbag.airbag_barrier)):
+        participation = float(airbag.airbag_participation_rate)
+        strike = strike if airbag.airbag_strike is None else float(airbag.airbag_strike)
+    if participation == 0.0 or not ((spot > strike) if reverse else (spot < strike)):
+        return ("no_loss",)
+    if payoff.protection_type == ProtectionType.PARTIAL:
+        principal = float(product.initial_price * product.contract_multiplier) if payoff.include_principal else 0.0
+        floor = payoff.protection_rate * product.initial_price * product.contract_multiplier
+        if product.get_maturity_payoff_v1(spot, pricing_env=pricing_env) == principal - floor:
+            return ("floored",)
+    return ("loss", strike, participation)
+
+
+def _decided_state(ctx, spot: float) -> tuple:
+    """What this instant's observations decide at ``spot``, and the piece of the redemption left in force.
+
+    Two spots with equal states are valued by one affine function of the spot: the same events happen at both
+    (knock-out, knock-in -- a continuously monitored level too -- and the Phoenix coupon), and the redemption is
+    on one piece.
+    """
+    product, env = ctx.numerical.product, ctx.pricing_env
+    decision = product.decide_observations_at_valuation(spot, env, knocked_in=bool(ctx.numerical.knocked_in))
+    if decision.knocked_out:
+        return ("knocked_out", decision.ko_index)
+    return ("alive", decision.knocked_in, getattr(decision, "coupon_index", None),
+            _redemption_piece(product, spot, decision.knocked_in, env))
+
+
 def decided_point_greeks(ctx) -> PointGreeks:
-    """Central differences of the exact decided value at h = 1e-6 S; undefined when the stencil reaches the
-    level of an event decided at this instant (one side of it knocks, the other does not). At a payoff kink
-    (the strike of a knocked-in claim) the difference is the average of the one-sided slopes."""
+    """Central differences of the exact decided value at h = 1e-6 S.
+
+    Undefined when the stencil reaches the level of an event decided at this instant (one side of it knocks, the
+    other does not), or any other point where the decided claim is not one affine function across the stencil: a
+    kink of the redemption (the strike of a knocked-in claim, a protection floor, a call-rebate strike) or its airbag
+    jump. There the central difference is the average of two one-sided slopes, and the second difference is
+    O(1/h), not a gamma (review 2026-09-21 R2).
+    """
     from copy import deepcopy
 
     from quantark.intraday.greeks import with_pricing_env
@@ -193,6 +255,10 @@ def decided_point_greeks(ctx) -> PointGreeks:
             return PointGreeks(None, None, "undefined",
                                f"the difference stencil reaches the level {float(event.barrier):g} of "
                                f"{event.event_id}, decided at this instant", "decided_at_valuation")
+    if len({_decided_state(ctx, s) for s in (spot - h, spot, spot + h)}) > 1:
+        return PointGreeks(None, None, "undefined",
+                           "the difference stencil crosses a kink or jump of the claim decided at this instant "
+                           "(a breakpoint of its maturity redemption)", "decided_at_valuation")
 
     def at(s):
         env = deepcopy(ctx.pricing_env)

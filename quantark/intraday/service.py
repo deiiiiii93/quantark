@@ -24,8 +24,9 @@ from quantark.intraday.twin import event_for_cashflow
 from quantark.util.numerical import is_close
 
 _LIFECYCLE_FIELDS = ("alive", "knocked_in", "knocked_out", "matured", "expired", "coupon_memory_count")
-#: Route methods that never call the engine; there is nothing for the kernel to re-dispatch.
-_ENGINE_FREE_METHODS = ("terminated", "deterministic_zero_variance")
+#: Route methods that never call the engine; there is nothing for the kernel to re-dispatch. A claim decided at the
+#: valuation instant is resolved by the runtime's own events, and QUAD V2's compiler has no zero-maturity twin to take.
+_ENGINE_FREE_METHODS = ("terminated", "deterministic_zero_variance", "decided_at_valuation")
 _PARITY_TOL = 1e-12
 
 

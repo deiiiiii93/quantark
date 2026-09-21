@@ -32,7 +32,7 @@ from quantark.util.enum import (
 from quantark.util.exceptions import ValidationError
 
 from .observation_schedule import (
-    AT_VALUATION_TOL,
+    at_valuation_instant,
     ObservationAggregation,
     ObservationsAtValuation,
     knock_in_decided_at_valuation,
@@ -733,6 +733,11 @@ class PhoenixOption(BaseEquityOption):
             raise ValidationError(
                 "KI observation schedule is required to resolve KI observations."
             )
+        if not schedule.records:
+            # Every knock-in observation has passed: an aged contract, or the intraday twin, drops them. A missing
+            # schedule is still an error (above); an emptied one tests no knock-in, and the redemption and last
+            # coupon remain to be valued, as SnowballOption.resolve_ki_observations answers.
+            return []
 
         default_barrier = (
             None
@@ -787,7 +792,7 @@ class PhoenixOption(BaseEquityOption):
         )
         coupon, coupon_index = 0.0, None
         for index, record in enumerate(records):
-            if abs(record.observation_time) > AT_VALUATION_TOL:
+            if not at_valuation_instant(record.observation_time):
                 continue
             own = float(self.get_coupon_payoff(index, year_fraction=fractions[index]))
             if self.is_coupon_triggered(spot, index):

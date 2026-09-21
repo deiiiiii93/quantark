@@ -60,7 +60,7 @@ from quantark.util.enum import (
 )
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_close, is_zero, safe_log
+from quantark.util.numerical import is_close, safe_log
 
 # Optional Dask import
 from quantark.asset.equity.engine.mc.autocallable_dask_batch import (
@@ -94,11 +94,18 @@ def _knock_out_first(ko_times: np.ndarray, ki_times: np.ndarray, ki_continuous: 
 
     The knock-out wins a tie with a DISCRETE knock-in, which is observed at the same instant. A continuously
     monitored one is detected inside the step that the knock-out observation closes, so an equal grid time means
-    the knock-in came first. The tolerance only absorbs two spellings of one observation time.
+    the knock-in came first -- except at time zero, where no step precedes: a level already breached at valuation
+    is observed at that instant with the observations there, and the knock-out wins as the decision at valuation
+    has it. The tolerance only absorbs two spellings of one observation time.
     """
     if ki_continuous:
-        return ko_times < ki_times
+        return (ko_times < ki_times) | ((ko_times == 0.0) & (ki_times == 0.0))
     return ko_times <= ki_times + 1e-12
+
+
+def _ki_level_breached(spots: np.ndarray, ki_barrier: float, is_reverse: bool) -> np.ndarray:
+    """Per spot: whether it is at or beyond a knock-in level (above it for a reverse product)."""
+    return spots >= ki_barrier if is_reverse else spots <= ki_barrier
 
 
 class SnowballMCEngine(BaseEngine):
@@ -264,8 +271,9 @@ class SnowballMCEngine(BaseEngine):
         self._prepare_payment_timings(product, pricing_env)
 
 
-        # Handle near-expiry case
-        if T < 1e-10:
+        # Zero time to maturity. Exactly zero: a positive maturity, however short, still carries variance and is
+        # simulated (a 1e-10-year cut decided an observation 3 ms ahead on the spot, review 2026-09-21 R1).
+        if T <= 0.0:
             knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
             if type(product) is SnowballOption:
                 # The observations still pending at this instant are decided on the known spot, as
@@ -524,7 +532,7 @@ class SnowballMCEngine(BaseEngine):
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
         self._prepare_payment_timings(product, pricing_env)
-        if T < 1e-10:
+        if T <= 0.0:
             return None
         if isinstance(product, KnockOutResetSnowballOption):
             return self._ko_reset_rqmc_spec(
@@ -1072,7 +1080,7 @@ class SnowballMCEngine(BaseEngine):
         # i.e. path column 0 under the "+1" readout of the barrier checks. Grids
         # without such a record are unchanged.
         def at_valuation(t):
-            return t <= 0.0 or is_zero(t)
+            return t <= 0.0
 
         grid_times = [t for t in list(ko_times) + list(ki_times) if not at_valuation(t)]
 
@@ -1209,7 +1217,7 @@ class SnowballMCEngine(BaseEngine):
         # the "+1" readout of the barrier checks. This grid used to keep time zero as a node, so a
         # contract observed now could not be priced at all. Grids without such a record are unchanged.
         def at_valuation(t):
-            return t <= 0.0 or is_zero(t)
+            return t <= 0.0
 
         all_times = np.array(
             sorted(t for t in all_times_set if not at_valuation(t)), dtype=float
@@ -1236,9 +1244,10 @@ class SnowballMCEngine(BaseEngine):
 
         if ki_continuous:
             ki_indices = np.array([], dtype=int)
-            ki_horizon_idx = max(
-                0, int(np.searchsorted(all_times, pre_maturity, side="right") - 1)
-            )
+            # the last node of the first schedule; -1 when it ends at valuation: no future interval is monitored,
+            # only the known spot (path column 0). Clamped to 0, a later hit switched a claim that had already
+            # matured on the first schedule over to the second (review 2026-09-21 R8).
+            ki_horizon_idx = int(np.searchsorted(all_times, pre_maturity, side="right") - 1)
         else:
             ki_indices = indices_for(ki_times)
             ki_horizon_idx = None
@@ -1557,11 +1566,7 @@ class SnowballMCEngine(BaseEngine):
         first_ki_idx = np.full(n_paths, -1, dtype=int)
 
         # Immediate breach at valuation (t=0) counts as KI for continuous monitoring.
-        spot0 = paths[:, 0]
-        if is_reverse:
-            already_breached = spot0 >= ki_barrier
-        else:
-            already_breached = spot0 <= ki_barrier
+        already_breached = _ki_level_breached(paths[:, 0], ki_barrier, is_reverse)
         if already_breached.any():
             ki_triggered[already_breached] = True
             first_ki_idx[already_breached] = 0
@@ -1575,6 +1580,9 @@ class SnowballMCEngine(BaseEngine):
             raise ValidationError(
                 f"all_times length ({all_times.shape[0]}) must match number of steps ({n_steps})"
             )
+        if n_steps == 0:
+            # the monitoring window ends at valuation: the known spot is all there is to observe
+            return ki_triggered, first_ki_idx
 
         dt = np.empty(n_steps, dtype=float)
         dt[0] = float(all_times[0])
@@ -1967,6 +1975,11 @@ class SnowballMCEngine(BaseEngine):
             valid = first_ki_idx >= 0
             if valid.any():
                 ki_time[valid] = all_times[first_ki_idx[valid]]
+            # The bridge reports a level already breached at valuation as index 0, which is also a hit inside
+            # the first step (at its right end). That knock-in happened NOW: at time zero it puts a second-schedule
+            # observation at this instant in force, as the decision at valuation does. Read as the first future
+            # node, it left a path knocked in and out now exposed to later prices (review 2026-09-21 R10).
+            ki_time[ki_triggered & _ki_level_breached(paths[:, 0], ki_barrier_scalar, product.is_reverse)] = 0.0
         else:
             valid = first_ki_idx >= 0
             if valid.any():

@@ -40,7 +40,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_zero, safe_log
+from quantark.util.numerical import safe_log
 
 from quantark.asset.equity.engine.mc.autocallable_dask_batch import (
     run_autocallable_dask_batches,
@@ -171,7 +171,7 @@ class PhoenixMCEngine(BaseEngine):
         self._prepare_payment_timings(product, pricing_env)
 
 
-        if T < 1e-10:
+        if T <= 0.0:
             return self._decided_at_valuation(product, pricing_env, float(S))
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
@@ -278,7 +278,7 @@ class PhoenixMCEngine(BaseEngine):
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
         self._prepare_payment_timings(product, pricing_env)
-        if T < 1e-10:
+        if T <= 0.0:
             return None
         return self._rqmc_spec(product, pricing_env, S, T, r, q, sigma)
 
@@ -523,8 +523,8 @@ class PhoenixMCEngine(BaseEngine):
         # continuously monitored KI barrier will actually run the bridge.
         self._ki_bridge_wanted = bool(product.has_ki_barrier and ki_continuous)
 
-        ko_grid_times = [t for t in ko_times if t > 0 and not is_zero(t)]
-        ki_grid_times = [t for t in ki_times if t > 0 and not is_zero(t)]
+        ko_grid_times = [t for t in ko_times if t > 0.0]
+        ki_grid_times = [t for t in ki_times if t > 0.0]
 
         all_times_set = set(ko_grid_times) | set(ki_grid_times) | {T}
         all_times = np.array(sorted(all_times_set), dtype=float)
@@ -533,7 +533,7 @@ class PhoenixMCEngine(BaseEngine):
         dt_array = np.diff(times_with_zero)
 
         def path_index_for_time(time_val: float) -> int:
-            if time_val <= 0.0 or is_zero(time_val):
+            if time_val <= 0.0:
                 return 0
             return int(np.searchsorted(all_times, time_val)) + 1
 

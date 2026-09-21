@@ -31,7 +31,7 @@ from quantark.util.enum import (
 from quantark.util.exceptions import ValidationError
 
 from .observation_schedule import (
-    AT_VALUATION_TOL,
+    at_valuation_instant,
     ObservationsAtValuation,
     knock_in_decided_at_valuation,
     ObservationRecord,
@@ -1197,7 +1197,7 @@ class SnowballOption(BaseEquityOption):
             knocked_in and config.disable_ko_after_ki
         ):
             for index, record in enumerate(self.resolve_ko_observations(pricing_env)):
-                if abs(record.observation_time) > AT_VALUATION_TOL or record.barrier is None:
+                if not at_valuation_instant(record.observation_time) or record.barrier is None:
                     continue
                 breached = spot <= record.barrier if self.is_reverse else spot >= record.barrier
                 if breached:

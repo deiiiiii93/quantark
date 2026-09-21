@@ -236,8 +236,14 @@ class ResolvedObservationRecord:
     settlement_date: Optional[datetime] = None
 
 
-#: An observation whose resolved time is within this of zero sits AT the valuation instant.
-AT_VALUATION_TOL = 1e-10
+def at_valuation_instant(observation_time: float) -> bool:
+    """Whether a resolved observation sits AT the valuation instant: its time is exactly zero.
+
+    Exact on purpose: a dated schedule resolves its valuation-date records to 0.0, and the intraday twin's times are
+    seconds-exact from the valuation timestamp. A positive time, however small, is an observation still ahead, to be
+    simulated or solved. A 1e-10-year tolerance decided one 3 ms ahead on the known spot (review 2026-09-21 R1).
+    """
+    return observation_time == 0.0
 
 
 @dataclass(frozen=True)
@@ -276,7 +282,7 @@ def knock_in_decided_at_valuation(product, spot: float, pricing_env) -> bool:
         levels = [
             record.barrier
             for record in product.resolve_ki_observations(pricing_env)
-            if abs(record.observation_time) <= AT_VALUATION_TOL and record.barrier is not None
+            if at_valuation_instant(record.observation_time) and record.barrier is not None
         ]
     return any((spot >= level) if product.is_reverse else (spot <= level) for level in levels)
 

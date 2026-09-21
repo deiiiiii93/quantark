@@ -164,7 +164,8 @@ class SnowballQuadEngine(BaseEngine):
         maturity = product.get_maturity(pricing_env)
         validate_positive(spot, "spot")
         validate_positive(maturity, "maturity", allow_zero=True)
-        if is_zero(maturity, tol=Tolerance.ZERO):
+        self._require_resolvable_time(maturity)
+        if maturity <= 0.0:
             knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
             if type(product) is SnowballOption:
                 # The observations still pending at this instant are decided on the known spot, as the
@@ -184,7 +185,11 @@ class SnowballQuadEngine(BaseEngine):
                     )
                     return float(record.payoff) * float(discount)
                 knocked_in = decision.knocked_in
-            return product.get_payoff(spot, pricing_env, knocked_in=knocked_in)
+            from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+
+            # the redemption is cash at its payment time, which a settlement lag puts after this instant
+            redemption = product.get_payoff(spot, pricing_env, knocked_in=knocked_in)
+            return float(redemption) * float(resolve_terminal_timing(product, pricing_env).payment_df)
 
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
@@ -768,7 +773,8 @@ class SnowballQuadEngine(BaseEngine):
         maturity = product.get_maturity(pricing_env)
         validate_positive(spot, "spot")
         validate_positive(maturity, "maturity", allow_zero=True)
-        if is_zero(maturity, tol=Tolerance.ZERO):
+        self._require_resolvable_time(maturity)
+        if maturity <= 0.0:
             return None
 
         rate = pricing_env.get_rate(maturity)
@@ -2390,13 +2396,28 @@ class SnowballQuadEngine(BaseEngine):
                 merged.append(st)
         return sorted(merged)
 
+    @staticmethod
+    def _require_resolvable_time(time: float) -> None:
+        """Refuse a positive time the lattice cannot resolve.
+
+        Zero is the valuation instant, decided on the known spot. A positive time is still ahead and carries
+        variance, but below ``Tolerance.ZERO`` years (about 3 ms) the recursion has no step to put it on: it used to
+        drop such an observation or decide it on the spot (review 2026-09-21 R1).
+        """
+        if 0.0 < time <= Tolerance.ZERO:
+            raise ValidationError(
+                f"a time {time:.3g} years after valuation is below the quadrature lattice's time resolution "
+                f"({Tolerance.ZERO:g} years): it is still ahead of the valuation instant and carries variance"
+            )
+
     def _merge_times(
         self, ko_times: Sequence[float], ki_times: Sequence[float], maturity: float
     ) -> list[float]:
         merged = []
         for t in sorted(list(ko_times) + list(ki_times)):
             t = float(t)
-            if t <= Tolerance.ZERO:
+            self._require_resolvable_time(t)
+            if t <= 0.0:
                 continue
             if is_greater_than(t, maturity, abs_tol=Tolerance.PRECISION):
                 continue

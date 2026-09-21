@@ -286,6 +286,9 @@ class PhoenixPDESolver(SnowballPDESolver):
         coupon, the memory arrears it releases, a knock-out at the last observation and a knock-in carried
         from an earlier day were all dropped. Everywhere else the solver decides an observation at the
         valuation instant on the known spot; this is the same decision.
+
+        The knock-in state is the decision's (a spot-only level test knocked in a claim whose discrete knock-in
+        schedule had already ended), and the redemption is cash at its payment time, as the coupon is.
         """
         carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
         decision = product.decide_observations_at_valuation(spot, pricing_env, knocked_in=carried)
@@ -298,14 +301,13 @@ class PhoenixPDESolver(SnowballPDESolver):
         if decision.knocked_out:
             record = decision.ko_record
             return discounted(float(record.payoff or 0.0) + decision.coupon, record.settlement_time)
-        # the spot-only proxy is kept: it also covers a knock-in level with no record at this instant
-        knocked_in = decision.knocked_in or self._is_already_knocked_in(product, spot)
-        value = product.get_payoff(
+        redemption = product.get_payoff(
             spot,
-            knocked_in=knocked_in,
+            knocked_in=decision.knocked_in,
             accumulated_coupons=0.0,
             pricing_env=pricing_env,
         )
+        value = discounted(redemption, self._terminal_payment_time(product, pricing_env))
         if decision.coupon:
             value += discounted(
                 decision.coupon,

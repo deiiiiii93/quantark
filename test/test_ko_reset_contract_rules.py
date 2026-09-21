@@ -14,6 +14,7 @@ the final maturity.
 from dataclasses import replace
 from datetime import datetime
 
+import numpy as np
 import pytest
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
@@ -184,3 +185,100 @@ def test_the_same_rule_decides_a_contract_at_zero_time_to_maturity(name):
     lost = _second_level_below_the_knock_in_level([0.0], [0.0], [0.0], 0.0, level=70.0)
     assert float(ENGINES[name][0]().price(paid, env(72.0))) == pytest.approx(3.0, abs=1e-12)
     assert float(ENGINES[name][0]().price(lost, env(65.0))) == pytest.approx(-35.0, abs=1e-12)
+
+
+# --- the first schedule ends AT the valuation instant (review 2026-09-21 R8, R9) ---------------------------------------
+def _first_schedule_ends_now(monitoring):
+    """First schedule [0] (knock-out 103), second [0.5, 1] (knock-out 95), knock-in 75. Knocked in now it runs on the
+    second schedule; not knocked in now it has matured here, and pays the 5 rebate now whatever the spot does next."""
+    product = ko_reset([0.0], [0.5, 1.0], [0.0], 1.0, False)
+    if monitoring == "continuous":
+        product.barrier_config = replace(product.barrier_config, ki_observation_type=ObservationType.CONTINUOUS,
+                                         ki_continuous=True, ki_observation_schedule=None)
+    return product
+
+
+@pytest.mark.parametrize("monitoring", ["discrete", "continuous"])
+@pytest.mark.parametrize("name", ["mc", "pde", "quad_v1"])
+def test_r9_r8_a_contract_not_knocked_in_when_its_first_schedule_ends_now_pays_its_rebate(name, monitoring):
+    """QUAD V1 never seeded the not-knocked-in surface (0 for 5): its recursion has no step at time zero. Monte Carlo
+    with a continuous knock-in watched the first FUTURE interval for it (-3.85 +/- 0.09): a later hit switched a claim
+    that had already matured over to the second schedule."""
+    assert float(ENGINES[name][0]().price(_first_schedule_ends_now(monitoring), env(90.0))) == 5.0
+
+
+@pytest.mark.parametrize("monitoring", ["discrete", "continuous"])
+@pytest.mark.parametrize("name", ["mc", "quad_v1"])
+def test_r9_r8_a_knock_in_now_still_puts_the_second_schedule_in_force(name, monitoring):
+    """At 70 the contract knocks in now and is a knocked-in snowball on the second schedule."""
+    engine = ENGINES[name][0]()
+    value = float(engine.price(_first_schedule_ends_now(monitoring), env(70.0)))
+    reference = float(SnowballPDESolver(PDEParams()).price(knocked_in_snowball([0.5, 1.0], 1.0), env(70.0)))
+    tolerance = 4.0 * float(engine.get_last_std_error()) if name == "mc" else 2e-3
+    assert value == pytest.approx(reference, abs=tolerance)
+    assert value < -20.0
+
+
+def test_r8_a_path_after_the_first_schedule_ended_cannot_change_its_cash():
+    """The payoff kernel on one fixed path, no sampling: 90 now, then 60 (below the knock-in level) and 60. The claim
+    matured now at 90, so it pays the rebate now; it paid -40 at time 1."""
+    engine = SnowballMCEngine(params=MCParams(seed=7, num_paths=16))
+    product, market = _first_schedule_ends_now("continuous"), env(90.0)
+    grid = engine._build_time_grid_ko_reset(product, market, 1.0)
+    assert grid["ki_horizon_idx"] == -1 and list(grid["all_times"]) == [0.5, 1.0]
+    cash, settlement, _, _ = engine._compute_payoffs_ko_reset(
+        product, market, np.array([[90.0, 60.0, 60.0]]), grid, r=0.03, T=1.0, sigma=0.25, rng_seed=7)
+    assert cash.tolist() == [5.0] and settlement.tolist() == [0.0]
+
+
+# --- a continuous knock-in AT the valuation instant (review 2026-09-21 R10) ----------------------------------------------
+def _knocked_in_now(monitoring, pre=(0.0,), pre_level=PRE_KO, post=(0.0, 0.5, 1.0), post_level=70.0):
+    """First schedule ``pre`` (knock-out ``pre_level``), second ``post`` (knock-out ``post_level``, paying 3), knock-in
+    75 observed now: discretely, continuously, or already carried in."""
+    product = ko_reset(list(pre), list(post), [0.0], 1.0, monitoring == "carried")
+    product.barrier_config = replace(product.barrier_config, ko_barrier=pre_level,
+                                     ko_observation_schedule=_schedule(list(pre), pre_level))
+    product.post_barrier_config = replace(product.post_barrier_config, ko_barrier=post_level,
+                                          ko_observation_schedule=_schedule(list(post), post_level))
+    if monitoring == "continuous":
+        product.barrier_config = replace(product.barrier_config, ki_observation_type=ObservationType.CONTINUOUS,
+                                         ki_continuous=True, ki_observation_schedule=None)
+    return product
+
+
+@pytest.mark.parametrize("monitoring", ["discrete", "continuous", "carried"])
+@pytest.mark.parametrize("name", ["mc", "pde", "quad_v1"])
+def test_r10_a_knock_in_now_puts_a_second_schedule_observation_now_in_force(name, monitoring):
+    """Spot 72: the first schedule's 103 is not hit, the knock-in level 75 is, and the second schedule's 70 at the
+    same instant is: 3 paid now, whatever the spot does next. Monte Carlo read a continuous knock-in now as the first
+    future node, so the observation now was not in force (-12.32 +/- 0.12)."""
+    assert float(ENGINES[name][0]().price(_knocked_in_now(monitoring), env(72.0))) == 3.0
+
+
+@pytest.mark.parametrize("monitoring", ["discrete", "continuous", "carried"])
+def test_r10_the_payoff_kernel_pays_a_knock_out_now_at_time_zero(monitoring):
+    """One fixed path, no sampling: 72 now, then 60 and 60. It paid -40 at time 1 under a continuous knock-in."""
+    engine = SnowballMCEngine(params=MCParams(seed=7, num_paths=16))
+    product, market = _knocked_in_now(monitoring), env(72.0)
+    grid = engine._build_time_grid_ko_reset(product, market, 1.0)
+    cash, settlement, _, _ = engine._compute_payoffs_ko_reset(
+        product, market, np.array([[72.0, 60.0, 60.0]]), grid, r=0.03, T=1.0, sigma=0.25, rng_seed=7)
+    assert cash.tolist() == [3.0] and settlement.tolist() == [0.0]
+
+
+@pytest.mark.parametrize("name", ["mc", "pde", "quad_v1"])
+def test_r10_a_first_schedule_knock_out_now_still_wins_a_continuous_knock_in_now(name):
+    """First-schedule level 60 under the knock-in level 75: spot 72 breaches both at the valuation instant. The
+    knock-out wins, as the decision at valuation orders them (15 now); a continuous knock-in found INSIDE a step is
+    the one that precedes the observation closing it."""
+    product = _knocked_in_now("continuous", pre=(0.0, 0.5), pre_level=60.0)
+    assert float(ENGINES[name][0]().price(product, env(72.0))) == 15.0
+
+
+def test_r10_a_continuous_knock_in_now_continues_on_the_second_schedule():
+    """Spot 58: knocked in now, no knock-out now; the claim runs on the second schedule on every engine."""
+    product = lambda: _knocked_in_now("continuous", pre=(0.0, 0.5), pre_level=60.0)   # noqa: E731
+    engine = SnowballMCEngine(params=MCParams(seed=7, num_paths=32768))
+    value, error = float(engine.price(product(), env(58.0))), float(engine.get_last_std_error())
+    reference = float(KOResetSnowballPDESolver(PDEParams()).price(product(), env(58.0)))
+    assert reference < -30.0 and value == pytest.approx(reference, abs=4.0 * error)

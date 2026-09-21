@@ -21,12 +21,12 @@ from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadE
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
-from quantark.asset.equity.product.option.observation_schedule import AT_VALUATION_TOL
+from quantark.asset.equity.product.option.observation_schedule import at_valuation_instant
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import Tolerance, is_close, is_zero, safe_log
+from quantark.util.numerical import Tolerance, is_close, safe_log
 
 
 class PhoenixQuadEngine(SnowballQuadEngine):
@@ -78,7 +78,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
-        if is_zero(maturity, tol=Tolerance.ZERO):
+        self._require_resolvable_time(maturity)
+        if maturity <= 0.0:
             return self._decided_at_valuation(product, pricing_env, float(spot))
 
         # An observation AT the valuation instant is decided on the known spot: the recursion below
@@ -634,7 +635,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         # and a discrete knock-in observed now reads the knocked-in regime. A continuously
         # monitored level stays with the surfaces, which already carry it.
         observed_now = any(
-            abs(record.observation_time) <= AT_VALUATION_TOL for record in ko_records
+            at_valuation_instant(record.observation_time) for record in ko_records
         )
         missed_now = observed_now and decision.coupon_index is None
         memory_state = 1 if (use_memory and missed_now) else 0
@@ -680,7 +681,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         if decision.knocked_out:
             record = decision.ko_record
             return discounted(float(record.payoff or 0.0) + decision.coupon, record.settlement_time)
-        value = product.get_payoff(spot, knocked_in=decision.knocked_in, pricing_env=pricing_env)
+        redemption = product.get_payoff(spot, knocked_in=decision.knocked_in, pricing_env=pricing_env)
+        value = discounted(redemption, resolve_terminal_timing(product, pricing_env).payment_time)
         if decision.coupon:
             if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
                 records = product.resolve_ko_observations(pricing_env)

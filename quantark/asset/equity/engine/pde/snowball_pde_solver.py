@@ -64,7 +64,6 @@ from quantark.util.numerical import (
     Tolerance,
     is_close,
     is_greater_than_or_close,
-    is_zero,
     safe_exp,
     safe_sqrt,
 )
@@ -689,7 +688,7 @@ class SnowballPDESolver(BasePDESolver):
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
 
-        if tau <= 0 or is_zero(tau):
+        if tau <= 0:
             # Expired: return terminal payoff
             return self._calculate_terminal_value(product, spot, pricing_env), None
 
@@ -879,7 +878,7 @@ class SnowballPDESolver(BasePDESolver):
         self._product_token_memo.clear()
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
-        if tau <= 0 or is_zero(tau):
+        if tau <= 0:
             return None
 
         # Validate PDE compatibility
@@ -1485,7 +1484,7 @@ class SnowballPDESolver(BasePDESolver):
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
 
-        if tau <= 0 or is_zero(tau):
+        if tau <= 0:
             # Expired: return terminal value with zero Greeks
             return {
                 "price": self._calculate_terminal_value(product, spot, pricing_env),
@@ -1544,7 +1543,7 @@ class SnowballPDESolver(BasePDESolver):
             raise ValidationError(f"PricingEnvironment is required for {self._solver_name}")
         self._validate_product(product)
         tau = product.get_maturity(pricing_env)
-        if tau <= 0 or is_zero(tau):
+        if tau <= 0:
             raise ValidationError("a life surface needs a product with time to maturity")
         if self._is_knocked_out_at_valuation(product, pricing_env.spot, pricing_env):
             raise ValidationError("a life surface needs a product that is alive at valuation")
@@ -1888,6 +1887,10 @@ class SnowballPDESolver(BasePDESolver):
         The shortcut used to go straight to the terminal payoff, so a knock-out decided at the last observation
         was paid as a survival (the rebate instead of the knock-out coupon). Everywhere else the solver already
         decides an observation at the valuation instant on the known spot; this is the same decision.
+
+        The knock-in state is the decision's: the carried one, or a knock-in observed now (a continuously monitored
+        level is observed now by the decision itself). A spot-only level test knocked in a claim whose discrete
+        knock-in schedule had already ended. The redemption is cash at its payment time, not at this instant.
         """
         carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
         if type(product) is SnowballOption:
@@ -1899,9 +1902,8 @@ class SnowballPDESolver(BasePDESolver):
             decided, carried = self._decide_variant_at_valuation(product, spot, pricing_env, carried)
             if decided is not None:
                 return decided
-        # the spot-only proxy is kept: it also covers a knock-in level with no record at this instant
-        knocked_in = carried or self._is_already_knocked_in(product, spot)
-        return product.get_payoff(spot, pricing_env, knocked_in=knocked_in)
+        redemption = product.get_payoff(spot, pricing_env, knocked_in=carried)
+        return float(redemption) * self._terminal_delay_df(product, pricing_env)
 
     def _decide_variant_at_valuation(
         self, product, spot: float, pricing_env: PricingEnvironment, carried: bool

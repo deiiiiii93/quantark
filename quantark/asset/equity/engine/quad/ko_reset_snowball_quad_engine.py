@@ -32,6 +32,7 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.asset.equity.settlement import CashflowKind, SettlementRequest, SettlementResolver
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
 from quantark.util.enum.engine_enums import EngineType
@@ -39,7 +40,6 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
     is_close,
-    is_zero,
     safe_log,
     validate_non_negative,
     validate_positive,
@@ -112,8 +112,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 else 1.0
             )
             return float(record.payoff) * float(discount)
-        if is_zero(maturity, tol=Tolerance.ZERO):
-            return product.get_payoff(spot, pricing_env, knocked_in=decision.knocked_in)
+        self._require_resolvable_time(maturity)
+        if maturity <= 0.0:
+            # the redemption is cash at its payment time, which a settlement lag puts after this instant
+            redemption = product.get_payoff(spot, pricing_env, knocked_in=decision.knocked_in)
+            return float(redemption) * float(resolve_terminal_timing(product, pricing_env).payment_df)
         discrete_ki = not (
             product.barrier_config.ki_continuous
             or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
@@ -436,6 +439,27 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         if record_grids:
             self._backward_grids[0.0] = (spot_grid.copy(), v_in.copy(), v_out.copy())
 
+        if not v_out_seeded and not carried_knock_in:
+            # The first schedule ends at the valuation instant, which has no step of its own (``_merge_times``
+            # drops time zero), so v_out was never seeded and read 0. Its last observation is decided above; a
+            # knock-in now (continuously monitored, the level at the spot) runs on the second schedule, and a
+            # contract not knocked in has matured here on the known spot, its redemption determined now and paid
+            # as Monte Carlo pays it (review 2026-09-21 R9).
+            if decision.knocked_in:
+                carried_knock_in = True
+            else:
+                timing = SettlementResolver.resolve_contingent(
+                    product,
+                    SettlementRequest(
+                        kind=CashflowKind.TERMINAL,
+                        determination_time=pre_maturity,
+                        cashflow_id="ko_reset_v0_terminal",
+                    ),
+                    pricing_env,
+                )
+                redemption = product.get_maturity_payoff_v0(spot, pricing_env=pricing_env)
+                return float(redemption) * float(timing.payment_df)
+
         # This engine always read the not-knocked-in surface, so a knocked-in contract was priced as if
         # its first schedule were still in force.
         value_surface = v_in if carried_knock_in else v_out
@@ -487,7 +511,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         maturity = product.get_maturity(pricing_env)
         validate_positive(spot, "spot")
         validate_positive(maturity, "maturity", allow_zero=True)
-        if is_zero(maturity, tol=Tolerance.ZERO):
+        self._require_resolvable_time(maturity)
+        if maturity <= 0.0:
             return None
 
         rate = pricing_env.get_rate(maturity)

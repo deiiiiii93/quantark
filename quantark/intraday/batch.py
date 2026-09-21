@@ -157,11 +157,19 @@ def _curve(ctx, engine, points, method: str, numerical) -> SpotCurve:
         engine=engine_class_path(engine), method=method, numerical=numerical)
 
 
+def _point_statuses(pg):
+    """(per-output statuses, the worst of them, the reasons of those not ok) of one spot's point greeks."""
+    statuses = {name: pg.status_of(name) for name in ("delta", "gamma")}
+    worst = next((st for st in statuses.values() if st != "ok"), "ok")
+    reason = "; ".join(sorted({pg.reason_of(n) for n in statuses if statuses[n] != "ok"}))
+    return statuses, worst, reason
+
+
 def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]) -> SpotCurve:
     """Price (and, on QUAD V2, point delta/gamma) at each spot of one resolved context, in the given order."""
     from quantark.intraday.capability import require_capability
     from quantark.intraday.engines.quad_v2 import QuadV2Route
-    from quantark.intraday.engines.base import point_greeks_from_estimates
+    from quantark.intraday.engines.base import decided_at_valuation, decided_point_greeks, point_greeks_from_estimates
     from quantark.intraday.greeks import discontinuity_at_spot
     from quantark.intraday.service import _monitoring
 
@@ -172,7 +180,11 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
     route = route_for(ctx, engine)
     jumps = [discontinuity_at_spot(ctx, s) for s in spots]
     num = ctx.numerical
-    if isinstance(route, QuadV2Route) and not num.terminated:
+    quad_v2 = isinstance(route, QuadV2Route)
+    # The maturity close under BEFORE is decided on each spot by the route itself, as a scalar value is: the compiler
+    # has no zero-maturity twin to prepare. Such a curve goes through the per-spot loop below.
+    decided = quad_v2 and not num.terminated and decided_at_valuation(ctx)
+    if quad_v2 and not num.terminated and not decided:
         prepared = engine.prepare(num.product, ctx.pricing_env, spot_levels=spots, event_phase=ctx.phase.value,
                                   lifecycle_state=num.lifecycle_state)
         values = prepared.evaluate(spots)
@@ -185,9 +197,7 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
                                              method="quad_v2_prepared", statuses={"delta": "undefined", "gamma": "undefined"}))
                 continue
             pg = point_greeks_from_estimates(float(values["delta"][i]), float(values["gamma"][i]), "kernel_derivative")
-            statuses = {name: pg.status_of(name) for name in ("delta", "gamma")}
-            worst = next((st for st in statuses.values() if st != "ok"), "ok")
-            reason = "; ".join(sorted({pg.reason_of(n) for n in statuses if statuses[n] != "ok"}))
+            statuses, worst, reason = _point_statuses(pg)
             points.append(SpotCurvePoint(s, price, pg.delta, pg.gamma, worst, reason, assumptions,
                                          method="quad_v2_prepared", statuses=statuses))
         # one prepared operator serves every spot, so its evidence is the curve's, not a point's
@@ -202,6 +212,11 @@ def spot_curve(engine, request: IntradayValuationRequest, spots: Sequence[float]
         elif jump:
             points.append(SpotCurvePoint(s, price, None, None, "undefined", jump,
                                          statuses={"delta": "undefined", "gamma": "undefined"}, **common))
+        elif decided:
+            # a QUAD V2 curve reports each spot's point greeks: here those of the claim decided on that spot
+            pg = decided_point_greeks(_spot_context(ctx, s))
+            statuses, worst, reason = _point_statuses(pg)
+            points.append(SpotCurvePoint(s, price, pg.delta, pg.gamma, worst, reason, statuses=statuses, **common))
         else:
             points.append(SpotCurvePoint(s, price, None, None, "not_requested",
                                          f"{type(route).__name__} curves price each spot; request point greeks per spot",
