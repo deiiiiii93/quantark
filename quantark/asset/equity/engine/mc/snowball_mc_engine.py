@@ -60,7 +60,7 @@ from quantark.util.enum import (
 )
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_zero, safe_log
+from quantark.util.numerical import is_close, is_zero, safe_log
 
 # Optional Dask import
 from quantark.asset.equity.engine.mc.autocallable_dask_batch import (
@@ -278,6 +278,7 @@ class SnowballMCEngine(BaseEngine):
                     ) / self._df(float(T))
                 knocked_in = decision.knocked_in
             elif isinstance(product, KnockOutResetSnowballOption):
+                product.require_alive(pricing_env, knocked_in)
                 # Same decision on the schedule the knock-in state puts in force. The path loop counts a
                 # post-KI observation strictly after the knock-in, so a knock-in decided now does not
                 # also test this instant's post-KI knock-out.
@@ -1102,18 +1103,35 @@ class SnowballMCEngine(BaseEngine):
         if not product.has_ki_barrier:
             raise ValidationError("KO-reset snowball requires KI barrier configuration.")
 
-        ki_continuous = (
+        # The contract's two rules (see KnockOutResetSnowballOption). A knock-in carried from an earlier
+        # day has already replaced the first schedule by the second, for good: nothing is left to test.
+        # Otherwise a knock-in is tested only while the first schedule is live; a record after its end
+        # belongs to a contract that has already matured.
+        carried_knock_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        product.require_alive(pricing_env, carried_knock_in)
+        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+
+        ki_continuous = not carried_knock_in and (
             product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
             or product.barrier_config.ki_continuous
         )
         ki_times: List[float] = []
-        if ki_continuous:
-            ki_horizon = product.get_pre_maturity_time(pricing_env)
+        ki_barriers: List[float] = []
+        if carried_knock_in:
+            pass
+        elif ki_continuous:
+            ki_horizon = pre_maturity
             num_ki_steps = int(pricing_env.bus_days_in_year * ki_horizon) + 1
             ki_times = list(np.linspace(0, ki_horizon, num_ki_steps + 1)[1:])
         else:
             ki_profile = product.get_ki_observation_profile(pricing_env)
-            ki_times = ki_profile["observation_times"]
+            in_horizon = [
+                index
+                for index, time in enumerate(ki_profile["observation_times"])
+                if time <= pre_maturity or is_close(time, pre_maturity)
+            ]
+            ki_times = [ki_profile["observation_times"][index] for index in in_horizon]
+            ki_barriers = [ki_profile["barriers"][index] for index in in_horizon]
 
         all_times_set = set(pre_times) | set(ki_times) | {T}
 
@@ -1156,6 +1174,12 @@ class SnowballMCEngine(BaseEngine):
             all_times_set |= set(post_times)
         else:
             # REBASED: treat post_times as offsets from KI time
+            if carried_knock_in:
+                # TODO: a carried knock-in does not record WHEN it happened, so nothing places the
+                # offsets of a REBASED second schedule on the clock.
+                raise ValidationError(
+                    "A REBASED post-KO schedule needs the knock-in time, which a carried knock-in does not hold."
+                )
             if ki_continuous:
                 raise ValidationError(
                     "Rebased post-KO schedule requires discrete KI monitoring."
@@ -1182,7 +1206,7 @@ class SnowballMCEngine(BaseEngine):
         if ki_continuous:
             ki_indices = np.array([], dtype=int)
             ki_horizon_idx = max(
-                0, int(np.searchsorted(all_times, product.get_pre_maturity_time(pricing_env), side="right") - 1)
+                0, int(np.searchsorted(all_times, pre_maturity, side="right") - 1)
             )
         else:
             ki_indices = np.searchsorted(all_times, np.array(ki_times, dtype=float))
@@ -1193,6 +1217,10 @@ class SnowballMCEngine(BaseEngine):
         self._ki_bridge_wanted = bool(product.has_ki_barrier and ki_continuous)
 
         return {
+            "carried_knock_in": carried_knock_in,
+            "ki_barriers": np.array(ki_barriers, dtype=float),
+            # the not-knocked-in contract matures HERE: its rebate is read off this node
+            "pre_maturity_idx": int(np.searchsorted(all_times, pre_maturity)) if len(pre_times) else None,
             "all_times": all_times,
             "dt_array": dt_array,
             "pre_times": pre_times,
@@ -1855,11 +1883,15 @@ class SnowballMCEngine(BaseEngine):
                 float(post_maturity_abs),
             )
 
-        # KI barriers
+        # KI barriers: the records the grid kept (rule 2), or the contract's level when monitored continuously
+        carried_knock_in = bool(grid["carried_knock_in"])
         ki_barriers_val = None
-        if product.has_ki_barrier:
-            ki_profile = product.get_ki_observation_profile(pricing_env)
-            ki_barriers_val = np.array(ki_profile["barriers"], dtype=float)
+        if product.has_ki_barrier and not carried_knock_in:
+            if ki_continuous:
+                ki_profile = product.get_ki_observation_profile(pricing_env)
+                ki_barriers_val = np.array(ki_profile["barriers"], dtype=float)
+            else:
+                ki_barriers_val = grid["ki_barriers"]
 
         # Check KI triggers
         ki_triggered = np.zeros(num_paths, dtype=bool)
@@ -1892,7 +1924,12 @@ class SnowballMCEngine(BaseEngine):
 
         # Map KI trigger time
         ki_time = np.full(num_paths, np.inf, dtype=float)
-        if ki_continuous:
+        if carried_knock_in:
+            # rule 1: knocked in before today, so the first schedule is gone on every path and every
+            # observation of the second is in force (its time is "after the knock-in" whatever it is)
+            ki_triggered[:] = True
+            ki_time[:] = -np.inf
+        elif ki_continuous:
             valid = first_ki_idx >= 0
             if valid.any():
                 ki_time[valid] = all_times[first_ki_idx[valid]]
@@ -2060,7 +2097,9 @@ class SnowballMCEngine(BaseEngine):
                     )
 
         if is_v0.any():
-            terminal_spots = paths[is_v0, -1]
+            # rule 2: not knocked in at the end of the first schedule means matured THERE, so a rebate
+            # that depends on the spot (call-style) reads the spot of that node, not the grid's last one
+            terminal_spots = paths[is_v0, grid["pre_maturity_idx"] + 1]
             v0_payoffs = np.array(
                 [
                     product.get_maturity_payoff_v0(spot, pricing_env)

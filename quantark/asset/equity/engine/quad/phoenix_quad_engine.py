@@ -269,11 +269,21 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             else None
         )
 
+        # Memory coupons already owed at the pricing date. ``missed == obs_idx`` is the state in which
+        # EVERY period since the pricing date has missed, so nothing has paid yet and those arrears are
+        # still outstanding; in any other state a coupon has paid and released them. No extra memory
+        # dimension is needed (the PDE solver's ``_accumulated_coupon_amount`` reads the same state).
+        # The engine used to price from zero arrears whatever the contract carried.
+        initial_arrears = (
+            float(product.coupon_config.initial_coupon_arrears) if use_memory else 0.0
+        )
+
         def accumulated_before(obs_idx: int, missed: int) -> float:
+            carried = initial_arrears if missed == obs_idx else 0.0
             if missed <= 0 or obs_idx <= 0:
-                return 0.0
+                return carried
             start = max(obs_idx - missed, 0)
-            return float(coupon_cumulative[obs_idx] - coupon_cumulative[start])
+            return float(coupon_cumulative[obs_idx] - coupon_cumulative[start] + carried)
 
         # Terminal condition for each memory state (base payoff; coupons added via jumps)
         for k in range(num_obs + 1):

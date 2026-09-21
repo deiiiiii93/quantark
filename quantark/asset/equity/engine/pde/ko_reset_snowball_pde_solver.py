@@ -230,6 +230,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         value across, so a fresh knock-in sees the post-KI observation (``post_ko_at_knock_in``). The
         inherited shortcut went straight to the carried state's terminal payoff.
         """
+        product.require_alive(pricing_env, carried)
         decision = product.decide_observations_at_valuation(
             spot, pricing_env, knocked_in=carried, post_ko_at_knock_in=True
         )
@@ -363,6 +364,13 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     ) -> PDESolutionResult:
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
+
+        # A contract past its first schedule and not knocked in has matured (rule 2 of
+        # KnockOutResetSnowballOption). The knock-in that keeps it alive is one carried from an
+        # earlier day: a level breached today is not tested once the first schedule has ended.
+        product.require_alive(
+            pricing_env, bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        )
 
         # State preamble shared with session preparation (see
         # SnowballPDESolver._prepare_solve_state).

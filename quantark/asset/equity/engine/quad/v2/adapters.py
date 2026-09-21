@@ -141,6 +141,18 @@ def compile_contract(
     if not math.isfinite(maturity) or maturity < 0:
         raise ValidationError("maturity must be finite and nonnegative")
     if reset:
+        # A contract past its first schedule and not knocked in has matured (rule 2 of
+        # KnockOutResetSnowballOption); only a knock-in carried into the valuation keeps it alive.
+        product.require_alive(
+            env,
+            bool(
+                getattr(
+                    lifecycle_state,
+                    "knocked_in",
+                    getattr(product, "_otc_lifecycle_knocked_in", False),
+                )
+            ),
+        )
         pre = _reset_records(product, env, product.barrier_config)
         post = _reset_records(product, env, product.post_barrier_config)
         pre_maturity = float(product.get_pre_maturity_time(env))

@@ -201,6 +201,9 @@ def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime,
     twin.settlement_convention = _settlement(calendar_year_fraction(ts, terminal.payment_timestamp) - twin.maturity)
     setattr(twin, "_otc_lifecycle_knocked_in", bool(state.knocked_in))
     env = _cash_env(ts, twin)
+    # Past its first schedule only a knocked-in contract is alive (it runs on the second schedule to the end);
+    # one that is not knocked in matured when that schedule ended, and a checkpoint calling it alive is wrong.
+    twin.require_alive(env, bool(state.knocked_in))
     for config, events in ((pre_config, pre_events), (post_config, post_events)):
         records = ko_reset_records(twin, config, env)
         if len(records) != len(events):
@@ -209,7 +212,11 @@ def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime,
             if not is_close(cash, e.cash, rel_tol=_CASH_REL_TOL, abs_tol=_CASH_ABS_TOL):
                 raise CapabilityError(f"KO-reset twin {e.event_id} pays {cash!r}, the contract pays {e.cash!r}: fixings at "
                                       "different times of day cannot share one accrued offset")
-    for name in ("_resolve_pre_contract_tenor", "_resolve_post_contract_tenor"):
+    # The pre-KI tenor scales the not-knocked-in rebate alone. Once the first schedule has ended nothing reads it,
+    # and an emptied schedule cannot reproduce it, so it is verified only while that schedule is live.
+    tenors = ("_resolve_post_contract_tenor",) if not pre_events else (
+        "_resolve_pre_contract_tenor", "_resolve_post_contract_tenor")
+    for name in tenors:
         got, want = float(getattr(twin, name)(env)), float(getattr(product, name)(schedule_env))
         if not is_close(got, want, rel_tol=_CASH_REL_TOL, abs_tol=_CASH_ABS_TOL):
             raise CapabilityError(f"KO-reset twin {name} = {got!r}, contract {want!r}")

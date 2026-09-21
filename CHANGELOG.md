@@ -67,6 +67,23 @@ A certificate constrains the release, never the code.
   intraday routes resolve the maturity close for all three autocallables; the knock-out-reset
   snowball, which the runtime cannot replay, is decided from its float-time twin, and its QUAD
   V2 route no longer raises there.
+- The knock-out-reset snowball's two contract rules, on every engine: a knock-in REPLACES the
+  first knock-out schedule by the second and stays to the end, and the second schedule only
+  becomes effective through a knock-in DURING the first, so a contract not knocked in when the
+  first schedule ends has matured there (`KnockOutResetSnowballOption.first_schedule_ended`,
+  `require_alive`). `SnowballMCEngine` kept testing discrete knock-in records after the first
+  schedule had ended (3.41 against 5.94 from PDE and QUAD on a contract with monthly knock-in
+  records for a year and a six-month first schedule), read a spot-dependent rebate off the end
+  of the time grid instead of the end of the first schedule, and ignored a knock-in carried
+  into the valuation. `KOResetSnowballQuadEngine` always priced the not-knocked-in state and
+  refused a contract whose first schedule had ended; it now reads the knocked-in surface, on
+  a lattice pinned to the second schedule's level. Every engine, and the intraday twin, priced
+  or refused the wrong way round past the first schedule: a knocked-in contract is now valued
+  there on all of them, and one not knocked in is refused as matured instead of being priced
+  with the first schedule extended to the final maturity.
+- `PhoenixQuadEngine` never read `CouponBarrierConfig.initial_coupon_arrears`: memory coupons
+  owed at the pricing date were worth nothing. They are released by the first period that pays,
+  as the Monte Carlo and PDE engines release them.
 - `AutocallableLifecycleTracker.settle_maturity_if_due` raised `TypeError` for every Phoenix
   alive at maturity: it called `get_payoff` with the snowball's signature. This reached the
   portfolio lifecycle manager and the backtest replay, not only intraday valuation.

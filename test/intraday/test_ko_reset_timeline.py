@@ -12,7 +12,7 @@ from quantark.intraday.events import EventKind, resolve_timeline
 from quantark.intraday.profile import VarianceProfile
 from quantark.intraday.request import IntradayValuationRequest
 from quantark.util.enum.option_enums import PostKOScheduleMode
-from intraday.conftest import SHANGHAI, _assert_unchanged, dated_ko_reset, flat_env, snapshot
+from intraday.conftest import SHANGHAI, _assert_unchanged, dated_ko_reset, dated_snowball, flat_env, snapshot
 
 T0 = datetime(2026, 3, 16)
 TS = datetime(2026, 9, 15, 14, 0, tzinfo=SHANGHAI)
@@ -87,3 +87,45 @@ def test_same_time_of_day_is_required_for_one_accrued_offset(sse_calendar, sse_s
                                          10, 0, tzinfo=SHANGHAI)
     with pytest.raises(CapabilityError, match="accrued offset"):
         resolve_context(_req(sse_sessions, desk, prod, lifecycle_state=_checkpoint(True)))
+
+
+# --- the contract's two rules (KnockOutResetSnowballOption), past the first schedule ---------------------------------
+LATE = datetime(2026, 10, 15, 14, 0, tzinfo=SHANGHAI)      # the six-month first schedule ended on 16 September
+
+
+def _late_checkpoint(knocked_in):
+    return AutocallableLifecycleState(knocked_in=knocked_in, valuation_point=ValuationPoint(date=datetime(2026, 10, 14)))
+
+
+def test_a_knocked_in_contract_past_its_first_schedule_is_a_knocked_in_snowball_on_the_second(sse_calendar, sse_sessions, desk):
+    """Rule 1: the knock-in replaced the first schedule by the second and stays to the end, so the contract is still
+    alive in October and worth what a knocked-in snowball with the second schedule's dates, level and rate is worth.
+    The twin used to fail closed here (its emptied first schedule cannot reproduce the pre-KI tenor, which nothing
+    reads any more)."""
+    from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
+    from quantark.asset.equity.engine.quad.v2 import SnowballQuadEngineV2
+    from quantark.asset.equity.param import PDEParams
+
+    ctx = resolve_context(_req(sse_sessions, desk, dated_ko_reset(sse_calendar, T0), ts=LATE, spot=90.0,
+                               lifecycle_state=_late_checkpoint(True)))
+    twin = ctx.numerical.product
+    assert not twin.barrier_config.ko_observation_schedule.records                  # the first schedule is behind us
+    assert len(twin.post_barrier_config.ko_observation_schedule.records) == 6      # Oct..Mar of the second
+    value = route_for(ctx, ENGINE).price(ctx, ENGINE).contingent_pv
+
+    plain = dated_snowball(sse_calendar, T0, months=12, ko=95.0, ki=75.0, ko_rate=0.03)
+    plain_ctx = resolve_context(_req(sse_sessions, desk, plain, ts=LATE, spot=90.0, lifecycle_state=_late_checkpoint(True)))
+    plain_engine = SnowballQuadEngineV2()
+    assert value == pytest.approx(route_for(plain_ctx, plain_engine).price(plain_ctx, plain_engine).contingent_pv, abs=1e-9)
+
+    pde = KOResetSnowballPDESolver(PDEParams())
+    assert route_for(ctx, pde).price(ctx, pde).contingent_pv == pytest.approx(value, abs=2e-2)
+
+
+def test_a_contract_called_alive_past_its_first_schedule_without_a_knock_in_is_refused(sse_calendar, sse_sessions, desk):
+    """Rule 2: it matured when the first schedule ended. The checkpoint is wrong, and pricing it would extend the first
+    schedule to the final maturity."""
+    from quantark.util.exceptions import ValidationError
+
+    with pytest.raises(ValidationError, match="matured"):
+        resolve_context(_req(sse_sessions, desk, dated_ko_reset(sse_calendar, T0), ts=LATE, lifecycle_state=_late_checkpoint(False)))

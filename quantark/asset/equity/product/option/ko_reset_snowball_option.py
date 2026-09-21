@@ -58,6 +58,15 @@ class KnockOutResetSnowballOption(SnowballOption):
 
     The pre-KI KO schedule is defined by `barrier_config` (same as SnowballOption).
     The post-KI KO schedule is defined by `post_barrier_config` (KO-only).
+
+    Two rules fix the contract's life:
+
+    1. A knock-in REPLACES the first knock-out schedule by the second (usually more dates at lower
+       rates), and the knocked-in state stays to the end. A knocked-in contract is a knocked-in
+       snowball on the second schedule, alive until that schedule ends.
+    2. The second schedule only becomes effective through a knock-in DURING the first one. A
+       contract not knocked in when the first schedule ends matures there, so a knock-in is never
+       tested after that (``first_schedule_ended``, ``require_alive``).
     """
 
     post_barrier_config: BarrierConfig = field(
@@ -319,7 +328,30 @@ class KnockOutResetSnowballOption(SnowballOption):
         times = profile["observation_times"]
         if times:
             return max(times)
+        # No pre-KI observation is left, so the first schedule has ended (``first_schedule_ended``) and
+        # only a knocked-in contract is still alive; it never reads this time. Callers that price the
+        # not-knocked-in state must go through ``require_alive`` first.
         return super().get_maturity(pricing_env)
+
+    def first_schedule_ended(self, pricing_env: PricingEnv) -> bool:
+        """Whether every pre-KI knock-out observation is behind the valuation date.
+
+        An aged contract drops the observations it has passed, so an ended first schedule is one with
+        no observation left. An observation AT the valuation date is still pending.
+        """
+        return not self.get_pre_ko_observation_profile(pricing_env)["observation_times"]
+
+    def require_alive(self, pricing_env: PricingEnv, knocked_in: bool) -> None:
+        """Refuse the one state the contract cannot be in: past its first schedule and not knocked in.
+
+        Such a contract matured when the first schedule ended (rule 2). Pricing it anyway would extend
+        the first schedule to the final maturity and go on testing knock-ins, which every engine did.
+        """
+        if not knocked_in and self.first_schedule_ended(pricing_env):
+            raise ValidationError(
+                "KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it "
+                "matured at the end of that schedule; only a knocked-in contract runs on the post-KI schedule."
+            )
 
     def _resolve_schedule_end_date(
         self, schedule: Optional[ObservationSchedule]
@@ -553,7 +585,13 @@ class KnockOutResetSnowballOption(SnowballOption):
             decided = breached(self.barrier_config, "pre", False)
             if decided is not None:
                 return decided
-            fresh = self.has_ki_barrier and knock_in_decided_at_valuation(self, spot, pricing_env)
+            # rule 2: a knock-in is only tested while the first schedule is live (its last observation
+            # included); past it, a contract not knocked in has matured
+            fresh = (
+                self.has_ki_barrier
+                and not self.first_schedule_ended(pricing_env)
+                and knock_in_decided_at_valuation(self, spot, pricing_env)
+            )
         state = bool(knocked_in or fresh)
         # TODO: a REBASED post-KI schedule holds offsets from the knock-in time, which a carried state does
         # not record, so nothing places its records at this instant; they are left undecided here.

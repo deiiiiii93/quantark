@@ -81,6 +81,12 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         if record_grids:
             self._backward_grids = {}
 
+        # The contract's two rules (see KnockOutResetSnowballOption): a knock-in carried from an earlier
+        # day has replaced the first schedule by the second for good, so the price is read off the
+        # knocked-in surface; and a contract past its first schedule without one has matured.
+        carried_knock_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        product.require_alive(pricing_env, carried_knock_in)
+
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
         validate_positive(spot, "spot")
@@ -94,7 +100,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             decision = product.decide_observations_at_valuation(
                 spot,
                 pricing_env,
-                knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
+                knocked_in=carried_knock_in,
                 post_ko_at_knock_in=True,
             )
             if decision.knocked_out:
@@ -126,7 +132,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if rec.observation_time <= maturity
             or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
         ]
-        if not pre_ko_records:
+        if not pre_ko_records and not carried_knock_in:
             raise PricingError("Pre-KO observation schedule is empty for KOResetSnowballQuadEngine.")
 
         post_ko_records = self._resolve_ko_records(
@@ -159,7 +165,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
         )
         ki_records: Sequence = []
-        if product.has_ki_barrier and not ki_continuous:
+        if product.has_ki_barrier and not ki_continuous and not carried_knock_in:
             ki_records = product.resolve_ki_observations(pricing_env)
             if not ki_records:
                 raise PricingError("KI observation schedule is empty for KOResetSnowballQuadEngine.")
@@ -179,7 +185,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             times = self._insert_settlement_times(
                 times, list(pre_ko_records) + list(post_ko_records), maturity)
 
-        align_log = self._select_alignment_log(spot, product)
+        align_log = self._align_to_the_level_in_force(spot, product, carried_knock_in)
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
@@ -405,8 +411,26 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         if record_grids:
             self._backward_grids[0.0] = (spot_grid.copy(), v_in.copy(), v_out.copy())
 
-        self._last_spot_greeks_grid = (spot_grid.copy(), v_out.copy())
-        return math_utils.interpolate(v_out, x=0.0)
+        # This engine always read the not-knocked-in surface, so a knocked-in contract was priced as if
+        # its first schedule were still in force.
+        value_surface = v_in if carried_knock_in else v_out
+        self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
+        return math_utils.interpolate(value_surface, x=0.0)
+
+    def _align_to_the_level_in_force(self, spot, product, carried_knock_in: bool):
+        """The lattice is pinned to the knock-out level in force: the second schedule's once knocked in.
+
+        Pinned to the first schedule's level, a knocked-in contract converged at first order in the
+        spacing (5e-3 at 2001 nodes, against 1e-4 for the same claim written as a knocked-in snowball).
+        """
+        if not carried_knock_in:
+            return self._select_alignment_log(spot, product)
+        levels = product.post_barrier_config.ko_barrier
+        return self._select_alignment_log(
+            spot,
+            product,
+            ko_candidates_override=levels if isinstance(levels, list) else [levels],
+        )
 
     def calculate_event_stats(
         self,
@@ -431,6 +455,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         pricing_env: PricingEnvironment,
     ) -> Optional[KOResetEventStats]:
         self._validate_product(product)
+        carried_knock_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        product.require_alive(pricing_env, carried_knock_in)
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
@@ -489,7 +515,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         if not times:
             return None
 
-        align_log = self._select_alignment_log(spot, product)
+        align_log = self._align_to_the_level_in_force(spot, product, carried_knock_in)
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(

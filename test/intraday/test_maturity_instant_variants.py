@@ -228,8 +228,8 @@ KR_DAY_LEVEL = {"mc": lambda: SnowballMCEngine(params=MCParams(seed=7, num_paths
                 "quad_v1": lambda: KOResetSnowballQuadEngine(params=QuadParams(grid_points=1001))}
 
 
-def _kr_ctx(cal, sessions, profile, spot, knocked_in, before=timedelta(0)):
-    product = dated_ko_reset(cal, T0, **KR)
+def _kr_ctx(cal, sessions, profile, spot, knocked_in, before=timedelta(0), **kw):
+    product = dated_ko_reset(cal, T0, **{**KR, **kw})
     last = resolve_timeline(product, sessions, flat_env(PROBE)).terminal().timestamp
     checkpoint = AutocallableLifecycleState(
         knocked_in=knocked_in, valuation_point=ValuationPoint(date=(last - timedelta(days=1)).replace(tzinfo=None)))
@@ -248,6 +248,19 @@ def test_every_ko_reset_route_decides_the_maturity_close_on_the_known_spot(sse_c
     out = route_for(ctx, engine).price(ctx, engine)
     assert out.contingent_pv == pytest.approx(expected, abs=1e-9)
     assert out.method == "decided_at_valuation" and out.exact
+
+
+@pytest.mark.parametrize("name", sorted(KR_ROUTED))
+@pytest.mark.parametrize("spot, expected", KR_KNOCKED)
+def test_the_usual_contract_reaches_its_final_close_knocked_in(sse_calendar, sse_sessions, desk, name, spot, expected):
+    """A six-month first schedule and a twelve-month second: only a knocked-in contract is alive at the final close
+    (one not knocked in matured in September), and it is decided on the second schedule. The twin could not be built
+    here before the contract's rules were applied to it."""
+    ctx = _kr_ctx(sse_calendar, sse_sessions, desk, spot, True, pre_months=6)
+    assert ctx.numerical.maturity_tau == 0.0 and not ctx.numerical.product.barrier_config.ko_observation_schedule.records
+    engine = KR_ROUTED[name]()
+    out = route_for(ctx, engine).price(ctx, engine)
+    assert out.contingent_pv == pytest.approx(expected, abs=1e-9) and out.method == "decided_at_valuation"
 
 
 @pytest.mark.parametrize("name", sorted(KR_DAY_LEVEL))
@@ -320,6 +333,9 @@ def test_the_ko_reset_decision_uses_the_schedule_the_knock_in_state_puts_in_forc
     late = _float_ko_reset([-0.5], [0.0], [0.0])
     assert late.decide_observations_at_valuation(96.0, env, knocked_in=True).ko_regime == "post"
     assert not late.decide_observations_at_valuation(80.0, env, knocked_in=True).knocked_out
+    # ... and a knock-in is never tested there: a contract not knocked in by the end of the first schedule matured
+    assert late.first_schedule_ended(env) and not both.first_schedule_ended(env)
+    assert not late.decide_observations_at_valuation(70.0, env).knocked_in
 
 
 def test_a_post_ki_knock_out_at_the_knock_in_instant_follows_the_calling_engine_s_rule():

@@ -332,3 +332,45 @@ def test_phoenix_quad_auto_convergence_fails_closed_at_cap():
 
     with pytest.raises(NumericalError, match="convergence was not reached"):
         engine.price(phoenix, env)
+
+
+# --- memory coupons owed at the pricing date (``CouponBarrierConfig.initial_coupon_arrears``) ---------------------------
+def _with_arrears(product: PhoenixOption, arrears: float) -> PhoenixOption:
+    from dataclasses import replace
+
+    product.coupon_config = replace(product.coupon_config, initial_coupon_arrears=arrears)
+    return product
+
+
+@pytest.mark.parametrize("pay_type, paid_at", [(CouponPayType.INSTANT, 0.5), (CouponPayType.EXPIRY, 1.0)])
+def test_phoenix_quad_releases_the_arrears_owed_at_the_pricing_date(pay_type, paid_at):
+    """A coupon level of 1 is met at the first observation whatever the path, so arrears of 7 owed at the pricing
+    date are released there for certain and are worth 7 x DF(their payment). The engine priced from zero arrears: it
+    never read ``initial_coupon_arrears``, which the Monte Carlo and PDE engines honour."""
+    env = create_pricing_env()
+    engine = lambda: PhoenixQuadEngine(params=QuadParams(grid_points=801))                    # noqa: E731
+    owed = engine().price(_with_arrears(create_phoenix(1.0, pay_type, True), 7.0), env)
+    clean = engine().price(create_phoenix(1.0, pay_type, True), env)
+    assert owed - clean == pytest.approx(7.0 * math.exp(-0.03 * paid_at), abs=1e-9)
+
+
+def test_phoenix_quad_arrears_wait_for_the_first_coupon_that_pays_and_agree_with_the_pde():
+    """With a real coupon level the arrears wait in the memory until a period pays, and lapse if none does. Their
+    value is 7 x E[DF x 1{some period pays}], which the PDE solver computes on its own state recursion."""
+    from quantark.asset.equity.engine.pde import PhoenixPDESolver
+    from quantark.asset.equity.param import PDEParams
+
+    env = create_pricing_env(vol=0.3)
+
+    def contract(arrears):
+        product = create_phoenix_schedule(ko_dates=[0.25, 0.5, 0.75, 1.0], ko_barrier=105.0, coupon_barrier=95.0,
+                                          coupon_rate=0.02, coupon_pay_type=CouponPayType.INSTANT, memory_coupon=True,
+                                          include_principal=True)
+        return _with_arrears(product, arrears)
+
+    quad = PhoenixQuadEngine(params=QuadParams(grid_points=2001))
+    pde = PhoenixPDESolver(PDEParams())
+    quad_worth = quad.price(contract(7.0), env) - quad.price(contract(0.0), env)
+    pde_worth = pde.price(contract(7.0), env) - pde.price(contract(0.0), env)
+    assert 0.5 * 7.0 < quad_worth < 7.0                      # released with high probability, never with certainty
+    assert quad_worth == pytest.approx(pde_worth, abs=5e-3)

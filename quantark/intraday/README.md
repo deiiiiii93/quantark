@@ -228,9 +228,11 @@ Every limit below raises rather than approximating. None of them is a silent fal
   its maturity close under `BEFORE` is decided from the float-time twin
   (`KnockOutResetSnowballOption.decide_observations_at_valuation`), not through the
   `BEFORE` / `AFTER` lifecycle identity the snowball and the Phoenix resolve it with.
-- **A knocked-in KO-reset snowball after its pre-KI schedule has ended.** The twin fails
-  closed there, and so does every day-level engine; the contract can be valued up to the
-  last pre-KI observation, and at a final maturity both schedules share.
+- **A KO-reset snowball past its pre-KI schedule.** A knock-in replaces the first knock-out
+  schedule by the second and stays to the end, so a knocked-in contract is valued on the
+  second schedule up to its final maturity. A contract NOT knocked in when the first schedule
+  ends matured there: a checkpoint that still calls it alive is refused (`ValidationError`),
+  and a knock-in is never tested after that schedule's last observation.
 - Dated autocallables without `initial_date` (their accrual would move with the valuation
   timestamp), time-based checkpoints, checkpoints that report the future, and two due
   fixings on one local date (the daily lifecycle tracker cannot separate them) fail closed.
