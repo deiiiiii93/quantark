@@ -1,10 +1,16 @@
 """SnowballMCEngine: an observation exactly at valuation is decided on the known spot (path column 0)."""
 import pytest
 
+from golden_compare import GOLDEN_REL_TOL
 from quantark.asset.equity.engine.mc import SnowballMCEngine
 from quantark.asset.equity.param import MCParams
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from test_snowball_mc_engine import create_basic_barrier_config, create_pricing_env, create_standard_snowball
+
+
+def _frozen(bits):
+    """A price frozen on the banking machine; libm and RNG kernels differ by ULPs elsewhere."""
+    return pytest.approx(float.fromhex(bits), rel=GOLDEN_REL_TOL)
 
 
 def _price(config, spot=100.0, maturity=1.0):
@@ -14,12 +20,12 @@ def _price(config, spot=100.0, maturity=1.0):
     return engine.price(product, env), product, env
 
 
-def test_legacy_grids_are_bitwise_unchanged():
+def test_legacy_grids_are_unchanged():
     # pinned before the t=0 fix: no legacy schedule has an observation at t=0
-    assert _price(create_basic_barrier_config())[0].hex() == "0x1.df1b3ddedad2fp+19"
+    assert _price(create_basic_barrier_config())[0] == _frozen("0x1.df1b3ddedad2fp+19")
     discrete = dict(ki_continuous=False, ki_observation_dates=[0.25, 0.5, 0.75, 1.0])
-    assert _price(create_basic_barrier_config(**discrete))[0].hex() == "0x1.e334b9c910f9ap+19"
-    assert _price(create_basic_barrier_config(disable_ko_after_ki=True, **discrete))[0].hex() == "0x1.e331289aec461p+19"
+    assert _price(create_basic_barrier_config(**discrete))[0] == _frozen("0x1.e334b9c910f9ap+19")
+    assert _price(create_basic_barrier_config(disable_ko_after_ki=True, **discrete))[0] == _frozen("0x1.e331289aec461p+19")
 
 
 def test_todays_ko_fixing_above_the_barrier_pays_the_ko_cash_without_simulation_steps():
