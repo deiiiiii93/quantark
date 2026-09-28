@@ -5,14 +5,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
-## [Unreleased]
+## [0.5.0] - 2026-09-28
 
-Intraday certification moves out of the runtime and into `quantark.modelvalidation`
+Intraday pricing: `quantark.intraday` values a contract at a timezone-aware timestamp
+instead of a date (spec: `docs/superpowers/specs/2026-09-15-intraday-pricing-design.md`),
+and its certification lives in `quantark.modelvalidation`, not in the runtime
 (spec: `docs/superpowers/specs/2026-09-18-intraday-modelvalidation-certification-design.md`,
 reference revision: `docs/superpowers/specs/2026-09-18-intraday-deterministic-reference-revision.md`).
-A certificate constrains the release, never the code.
+A certificate constrains the release, never the code. The autocallable engines agree on
+the maturity close, on an observation at the valuation instant, on the knock-out-reset
+snowball's contract rules and on a knock-out and knock-in at one instant (see Fixed).
+
+The release also carries what `main` gained since 0.4.7: the simulated-path backtest,
+futures bucket hedging in the replay engine, the opt-in QUAD V2 engines, PnL explain,
+vol-model calibration and the Greeks facade (see "Also in this release").
 
 ### Added
+- `quantark.intraday`: `value_intraday(request)` and `PricingSession.value_intraday`
+  return an `IntradayValuationResult` with PV components, cashflows, a status per
+  requested output and the provenance of every assumption. Three clocks: seconds-exact
+  calendar time for carry and discounting, a versioned `VarianceProfile` (`desk`,
+  `uniform`, `sessions_only`) mapped by `IntradayTimeMap` into `TradingClockVolSurface`
+  for variance, and the contract's own day count for accruals. `TradingSessionCalendar`
+  declares sessions, breaks, early closes and the payment time; a DST gap or fold is an
+  error, never a guess.
+- Fixings: confirmed `Fixing`s replay through the lifecycle trackers; a fixing that is due
+  but not published is replaced by the latest spot and recorded as an `AssumedFixing`,
+  and the flows it can change carry that dependency. `ObservationRecord.observation_timestamp`
+  gives a timed observation (intraday only).
+- Routes: QUAD V2 (snowball, Phoenix, knock-out-reset snowball), PDE (with an
+  `under_resolved` diagnostic when the diffusion layer is not resolved), Monte Carlo,
+  analytical digital (exact zero-variance limit) and analytical barrier/one-touch (gated
+  by an exact admissibility test), behind an explicit capability matrix with fail-closed
+  lookup (`docs/execution/intraday-capability-matrix.md`).
+- Greeks: desk-bump Greeks on the frozen float-time twin, point Greeks per route
+  (`undefined` at a payoff kink), local theta with a declared step and unit,
+  `roll_context` and `roll_through_events`.
+- Batch: `value_intraday_many`, prepared `spot_curve`s and provenance-preserving
+  `aggregate_intraday`.
+- Lifecycle: trackers declare coupon arrears and a settled terminal claim.
 - `quantark.modelvalidation` schema 2: a quantity catalogue with per-quantity budgets,
   a `context` block with per-case overrides, semantic `expect:` cells, per-case random
   substreams, convergence axes with at least three levels, three-way verdicts on cells
@@ -32,7 +63,31 @@ A certificate constrains the release, never the code.
   (`docs/modelvalidation/certificates/snowball-intraday-daily-ki-bsm/2026-09-19`, digest
   `a0569e97687cc01c...`): `SnowballQuadEngineV2` ADMITTED, `SnowballPDESolver` REJECTED.
 
+### Removed (breaking)
+The import shims deprecated in 0.4.x are removed, as announced:
+- `quantark.backtest.otc` and its twelve modules. Import from `quantark.backtest.replay`
+  (`config`, `single`, `market`, `engine_factory`, `strategy_state`, `results`,
+  `product_replay`, `dashboard`), `quantark.param.vol.surface_history` (was
+  `otc.vol_history`) and `quantark.volcalibration.calibrate` (was `otc.vol_calibrators`).
+- `quantark.volmodels.calibration`: use `quantark.volcalibration.calibrate` (the same module;
+  a monkeypatch on its kernels reaches the calibrator as before).
+- `VolModelCalibrationConfig` and `HESTON_PRESETS` are no longer re-exported from
+  `quantark.backtest.replay` or `quantark.backtest.replay.config`: import them from
+  `quantark.volcalibration.config`.
+
 ### Changed
+- PDE delta and gamma are read off a local cubic through the four log-spot nodes around
+  the spot (`BasePDESolver._calculate_delta_gamma`; a three-node grid keeps the quadratic).
+  The nearest-node quadratic carried that node's constant curvature to the spot: an O(dx)
+  gamma error whose sign flipped as refinement moved the nearest node across the spot.
+  Every PDE engine's delta and gamma move; PV does not. The replay goldens moved by at most
+  1.2e-4 of scale in delta and 3.6% in gamma. The four studies that anchor PDE Greeks were
+  re-certified and banked 2026-09-28 with every decision unchanged (ADMITTED):
+  `snowball-flat-bsm` (`ccba1c32d4055333...`), `phoenix-flat-bsm` (`8cd5584888009924...`),
+  `ko-reset-flat-bsm` (`722b7726fadc4d41...`) and `snowball-localvol-1d`
+  (`c0d62f9f4c0986a9...`); their predecessors are retired with `superseded_by`. On those
+  cells the readout is accuracy-neutral (worst cells move by at most 0.004 of a
+  0.5-contract bound).
 - `quantark.intraday` returns what it computes. Every requested output carries its own
   status (`ok`, `undefined`, `failed`, `not_requested`) with diagnostics; the `unqualified`
   status, the `certify=` flags, `GreekValue.error_budget` and the packaged Gate C evidence
@@ -129,6 +184,46 @@ A certificate constrains the release, never the code.
   that need no second engine: a coupon observed now raises the price by exactly the coupon, a
   memory coupon missed now equals the contract carrying it as arrears, and a knock-in observed
   now equals the contract carrying the knock-in (to 1e-8, on all four engines).
+- A Phoenix coupon pays principal x rate x the period's own fraction. The daily lifecycle
+  tracker passed no fraction to `get_coupon_payoff` and got a silent 1.0, so a monthly
+  product paid about 12x more through the tracker than through any engine. The quotation
+  is now declared, `AccrualConfig.is_annualized_coupon` (default annualized, as every engine
+  already priced: engine PVs are unchanged), and `get_coupon_payoff` resolves the contract's
+  own fraction or fails closed. The tracker also kept missed memory coupons only as a count
+  and returned before the coupon loop on a knock-out; both now match the engines.
+
+### Also in this release (merged to `main` since 0.4.7)
+- `quantark.backtest.simulation`: simulated-path ensemble backtest for autocallable books.
+  `MarketPath` batches from a stationary block bootstrap of the joint spot/vol/carry
+  history, GBM or designed stress paths; the CFFEX IM chain read off each path's carry
+  curve; a vectorised lifecycle and futures ledger; exact, spot-ladder and PDE
+  life-surface repricing providers with in-memory and on-disk state caches; a sampling
+  accuracy gate; spawn-pool path batching; a conformance oracle against the replay
+  engine; distributions with expected shortfall, paired comparisons on matched paths and
+  run persistence. Worked study: `example/snowball_simulated_paths`.
+- Replay engine, futures carry buckets: immutable carry scenarios, signed bucket
+  aggregation, joint delta and parallel carry hedge strategies, a multi-leg futures ledger
+  with atomic execution, carry audits by independent repricing, stress of unquoted carry,
+  and an opt-in term-structure dividend source.
+- QUAD: opt-in QUAD V2 Gaussian autocallable engines (`quantark.asset.equity.engine.quad.v2`:
+  `SnowballQuadEngineV2`, `PhoenixQuadEngineV2`, `KOResetSnowballQuadEngineV2`,
+  `AutocallableQuadEngineV2`). `QuadParams.readout` selects `"legacy_linear"` (default) or
+  `"transition"`, which evaluates the final transition at the spot instead of interpolating
+  between nodes (no delta staircase); `QuadParams.align_cell_stretch` (opt-in, `None` by
+  default) puts every barrier on a node at once. Defaults leave every price unchanged.
+- `quantark.pnlexplain`: waterfall and Taylor attribution of PV changes, lifecycle
+  transitions, bucketed factor coordinates, trading-clock theta, and portfolio, position
+  and quoted-leg explain with a replay recorder.
+- `quantark.volcalibration`: market quotes to IV surface to LV/Heston/SLV calibration,
+  with quote normalization, admission checks, a run store and a CLI
+  (`python -m quantark.volcalibration`).
+- Risk measures: the `GreeksCalculator` facade over a `GreekDef` registry, higher-order
+  Greeks (speed, zomma, dividend volga, analytical closed forms) and a dual-clock theta
+  suite (charm, color, vega/gamma theta, 1D/1TD, exact mode).
+- Changed: scalar rho parallel-shifts the rate curve instead of replacing it with
+  `FlatRateCurve(r(T) + bump)`, which measured a curve reshaping on any term structure
+  (98x the parallel-shift rho on a 1%/3%/5% curve); flat curves are bitwise unchanged. On
+  a trading clock the vol bump unit is one point of the trading-quoted sigma.
 
 
 ## [0.4.7] - 2026-08-25
