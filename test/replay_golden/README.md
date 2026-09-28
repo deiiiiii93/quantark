@@ -97,3 +97,27 @@ Row counts: `scalar_bsm_event_probabilities.csv` and
 `localvol_event_probabilities.csv` went from 7 data rows to 6 (the two dated
 KI rows collapsed into one); `daily_event_summary.csv` frames kept their row
 count (one row per alive day) with only the per-row values changing.
+
+## 2026-09-28 — the PDE reads delta and gamma off a local cubic
+
+**What changed in the library.** `BasePDESolver._calculate_delta_gamma`
+(e0ba6ba7) fits a cubic through the four log-spot nodes around the query and
+evaluates both derivatives at the query. The nearest-node quadratic it replaced
+has a constant curvature, so it carried the node's gamma to the query: an
+O(dx) gamma error whose sign flipped as refinement moved the nearest node from
+one side to the other. A three-node grid keeps the quadratic. The change is a
+readout repair in code, so the banked PDE certificates that anchor delta and
+gamma were re-certified alongside it (release procedure, section 1).
+
+**Which goldens moved and why.** Both PDE-priced goldens report PDE Greeks:
+
+- `scalar_bsm_greeks.csv`, `localvol_greeks.csv`: the delta and gamma columns
+  and every column derived from them (product/position, pre/post hedge, cash
+  1%). Delta moved by at most 2.6e-5 of its column scale, gamma by 1.2%.
+- `scalar_bsm_surfaces.csv`: `delta`, `gamma` and their cash columns; delta by
+  1.2e-4 of scale, gamma by up to 3.6% on the surface's off-spot nodes, where the
+  query sits farthest from a grid node.
+
+No other frame moved. PV, states, trades, rebalances, actions, event statistics
+and all three summaries are byte-identical: the hedge rounds the new delta to
+the same futures quantity on every day, and `book` prices on QUAD.
