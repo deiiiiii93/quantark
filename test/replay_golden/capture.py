@@ -25,10 +25,7 @@ def _json_safe(value):
 
 
 def _run_all():
-    from quantark.backtest.otc import (
-        AutocallableBacktestEngine,
-        BookAutocallableBacktestEngine,
-    )
+    from quantark.backtest.replay import AutocallableBacktestEngine, BookAutocallableBacktestEngine
 
     scalar = AutocallableBacktestEngine(fixtures.make_scalar_bsm_config()).run()
     book = BookAutocallableBacktestEngine(fixtures.make_book_config()).run()

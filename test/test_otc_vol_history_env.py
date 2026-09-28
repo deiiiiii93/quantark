@@ -24,16 +24,16 @@ import pytest
 
 from quantark.asset.equity.param import MCParams, QuadParams
 from quantark.asset.equity.product.option import create_standard_snowball
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
     AutocallableEngineConfig,
     AutocallableMarketDataSet,
 )
-from quantark.backtest.otc._replay import ProductReplay
-from quantark.backtest.otc.market import SignedDividendYield
-from quantark.backtest.otc.state import AutocallableLifecycleState
-from quantark.backtest.otc.vol_history import IvSurfaceArtifact, VolSurfaceHistory
+from quantark.backtest.replay.product_replay import ProductReplay
+from quantark.backtest.replay.market import SignedDividendYield
+from quantark.backtest.replay.strategy_state import AutocallableLifecycleState
+from quantark.param.vol.surface_history import IvSurfaceArtifact, VolSurfaceHistory
 from quantark.param import (
     FlatVolSurface,
     GridVolSurface,

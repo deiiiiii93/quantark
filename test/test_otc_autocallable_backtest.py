@@ -28,7 +28,7 @@ from quantark.asset.equity.settlement import (
     SettlementConvention,
     SettlementLagUnit,
 )
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AKShareAutocallableDataAdapter,
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
@@ -40,7 +40,7 @@ from quantark.backtest.otc import (
     SurfaceGridConfig,
     derive_implied_dividend_yield,
 )
-from quantark.backtest.otc.engine_factory import create_pricing_engine, create_surface_engine
+from quantark.backtest.replay.engine_factory import create_pricing_engine, create_surface_engine
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType

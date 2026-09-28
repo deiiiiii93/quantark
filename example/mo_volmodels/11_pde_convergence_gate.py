@@ -85,8 +85,8 @@ from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.asset.equity.product.option.snowball_helpers import (
     create_standard_snowball,
 )
-from quantark.backtest.replay.config import VolModelCalibrationConfig
-from quantark.volmodels.calibration import (
+from quantark.volcalibration.config import VolModelCalibrationConfig
+from quantark.volcalibration.calibrate import (
     VOL_MODEL_HESTON,
     VOL_MODEL_HESTON_SLV,
     VOL_MODEL_LOCALVOL,
@@ -2052,7 +2052,7 @@ def _attach_feller_ratio(case: Dict[str, Any], models: Dict[str, Any]) -> None:
     delta row (spec §7A.4/§7A.11), keyed off the SAME record
     ``_calibration_record`` reports -- no separate computation, so no
     separate safe_divide (the ratio is already produced by safe_divide in
-    quantark.volmodels.calibration).  heston_slv shares the ratio because it
+    quantark.volcalibration.calibrate).  heston_slv shares the ratio because it
     is built ON TOP OF the calibrated Heston params, never refit on its own;
     every other variant, and a missing/uncalibrated Heston model, is
     explicitly None ("unknown" once bucketed) -- never silently omitted.

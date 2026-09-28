@@ -1,9 +1,8 @@
 """
 Lifecycle state objects for equity structured products.
 
-``AutocallableLifecycleState`` was extracted from
-``quantark/backtest/otc/state.py`` (which re-exports it for backward
-compatibility). ``BarrierLifecycleState`` is the simpler analogue for the
+``AutocallableLifecycleState`` was extracted from the historical replay's
+strategy state (now ``quantark.backtest.replay.strategy_state``). ``BarrierLifecycleState`` is the simpler analogue for the
 vanilla barrier product family.
 """
 

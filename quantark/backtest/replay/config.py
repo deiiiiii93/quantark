@@ -21,13 +21,9 @@ from .strategy_state import AutocallableDeltaHedgeStrategy
 from quantark.backtest.futures_ledger import FuturesRollPolicy  # noqa: F401,E402
 
 
-# VolModelCalibrationConfig and HESTON_PRESETS moved to
-# quantark.volcalibration.config in 0.4.0: the vol-calibration engine must not
-# depend on the backtest package config shape.  Re-exported here until 0.5.0.
-from quantark.volcalibration.config import (  # noqa: F401,E402
-    HESTON_PRESETS,
-    VolModelCalibrationConfig,
-)
+# VolModelCalibrationConfig lives in quantark.volcalibration.config: the
+# vol-calibration engine must not depend on the backtest package config shape.
+from quantark.volcalibration.config import VolModelCalibrationConfig  # noqa: E402
 
 @dataclass
 class AutocallableEngineConfig:

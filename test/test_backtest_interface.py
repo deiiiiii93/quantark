@@ -20,7 +20,7 @@ from quantark.backtest import (
     ZeroCostModel,
     get_backtest_engine,
 )
-from quantark.backtest.otc.results import AutocallableBacktestResults
+from quantark.backtest.replay.results import AutocallableBacktestResults
 from quantark.backtest.strategy import DeltaNeutralStrategy
 from quantark.util.marketdata.adapter.mock_adapter import MockMarketDataAdapter
 

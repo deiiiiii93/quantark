@@ -6,7 +6,7 @@ import pandas as pd
 
 from quantark.asset.equity.param import MCParams, QuadParams
 from quantark.asset.equity.product.option import create_standard_snowball
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AutocallableBacktestConfig,
     AutocallableBacktestDashboard,
     AutocallableBacktestEngine,
@@ -16,7 +16,7 @@ from quantark.backtest.otc import (
     AutocallableMarketDataSet,
     SurfaceGridConfig,
 )
-from quantark.backtest.otc.results import AutocallableBacktestResults
+from quantark.backtest.replay.results import AutocallableBacktestResults
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import EngineType
 

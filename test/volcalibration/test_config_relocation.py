@@ -12,17 +12,6 @@ def test_config_is_importable_from_the_new_home():
     assert cfg.slv_n_x == 161
 
 
-def test_all_legacy_import_paths_are_the_same_class():
-    from quantark.backtest.otc import VolModelCalibrationConfig as FromOtc
-    from quantark.backtest.replay import VolModelCalibrationConfig as FromReplay
-    from quantark.backtest.replay.config import VolModelCalibrationConfig as FromModule
-    from quantark.volcalibration.config import VolModelCalibrationConfig as Canonical
-
-    assert FromOtc is Canonical
-    assert FromReplay is Canonical
-    assert FromModule is Canonical
-
-
 def test_validation_still_fails_closed():
     from quantark.volcalibration.config import VolModelCalibrationConfig
 

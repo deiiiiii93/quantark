@@ -100,10 +100,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def all_results():
-    from quantark.backtest.otc import (
-        AutocallableBacktestEngine,
-        BookAutocallableBacktestEngine,
-    )
+    from quantark.backtest.replay import AutocallableBacktestEngine, BookAutocallableBacktestEngine
 
     return {
         "scalar_bsm": AutocallableBacktestEngine(

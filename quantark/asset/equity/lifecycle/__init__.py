@@ -1,7 +1,7 @@
 """
 Shared lifecycle core for equity structured products.
 
-Consumed by ``quantark.backtest.otc`` (single-product historical replay),
+Consumed by ``quantark.backtest.replay`` (historical product replay),
 ``quantark.backtest.equity`` (portfolio backtests) and
 ``quantark.dynamicscenario`` (hypothetical path simulation). The
 portfolio-driving ``PortfolioLifecycleManager`` is shared by the latter two.

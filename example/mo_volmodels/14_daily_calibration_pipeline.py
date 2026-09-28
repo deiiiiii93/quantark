@@ -639,9 +639,9 @@ def calibrate_one_surface(
     calibration_records: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Calibrate all governed variants for one admitted surface."""
-    from quantark.backtest.replay.config import VolModelCalibrationConfig
+    from quantark.volcalibration.config import VolModelCalibrationConfig
     from quantark.param.vol.surface_history import IvSurfaceArtifact
-    from quantark.volmodels.calibration import VolModelCalibrator
+    from quantark.volcalibration.calibrate import VolModelCalibrator
 
     artifact = IvSurfaceArtifact.from_file(surface_artifact_path(paths, trade_date))
     base_config_kwargs = dict(

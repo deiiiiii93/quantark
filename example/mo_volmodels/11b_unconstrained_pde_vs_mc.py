@@ -22,8 +22,9 @@ spec.loader.exec_module(gate)
 
 from quantark.asset.equity.param import PDEParams
 from quantark.param.vol.surface_history import IvSurfaceArtifact
-from quantark.volmodels.calibration import HESTON_PRESETS, VolModelCalibrator
-from quantark.backtest.replay.config import VolModelCalibrationConfig
+from quantark.volcalibration.config import HESTON_PRESETS
+from quantark.volcalibration.calibrate import VolModelCalibrator
+from quantark.volcalibration.config import VolModelCalibrationConfig
 
 HIST = REPO / "example" / "mo_volmodels" / "data" / "history"
 IV = HIST / "iv_surface"

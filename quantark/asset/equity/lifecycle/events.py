@@ -1,5 +1,5 @@
 """
-Lifecycle event primitives shared by historical replay (quantark.backtest.otc)
+Lifecycle event primitives shared by historical replay (quantark.backtest.replay)
 and dynamic scenario simulation (quantark.dynamicscenario).
 
 A ``LifecycleEvent`` is an immutable record of one realized contract event

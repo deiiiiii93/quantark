@@ -104,7 +104,7 @@ from quantark.backtest.replay import (
     SurfaceGridConfig,
     create_pricing_engine,
 )
-from quantark.backtest.replay.config import VolModelCalibrationConfig
+from quantark.volcalibration.config import VolModelCalibrationConfig
 from quantark.backtest.replay.market import derive_implied_dividend_yield
 from quantark.backtest.replay.strategy_state import AutocallableDeltaHedgeStrategy
 from quantark.param.vol.surface_history import VolSurfaceHistory

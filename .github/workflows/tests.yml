@@ -47,7 +47,7 @@ jobs:
           /tmp/smoke/bin/python - <<'EOF'
           from datetime import datetime
 
-          from quantark.backtest.otc import AutocallableBacktestDashboard
+          from quantark.backtest.replay import AutocallableBacktestDashboard
           from quantark.asset.equity.product.option import EuropeanVanillaOption
           from quantark.asset.equity.engine.analytical import BlackScholesEngine
           from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield

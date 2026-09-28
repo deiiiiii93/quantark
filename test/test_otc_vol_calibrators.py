@@ -40,19 +40,16 @@ from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
 )
 from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.asset.equity.product.option import create_standard_snowball
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
     AutocallableEngineConfig,
     AutocallableMarketDataSet,
 )
-from quantark.backtest.otc.config import VolModelCalibrationConfig
-from quantark.backtest.otc.engine_factory import create_vol_model_engine
-from quantark.backtest.otc.vol_calibrators import (
-    CalibratedVolModel,
-    VolModelCalibrator,
-)
-from quantark.backtest.otc.vol_history import VolSurfaceHistory
+from quantark.volcalibration.config import VolModelCalibrationConfig
+from quantark.backtest.replay.engine_factory import create_vol_model_engine
+from quantark.volcalibration.calibrate import CalibratedVolModel, VolModelCalibrator
+from quantark.param.vol.surface_history import VolSurfaceHistory
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
@@ -62,7 +59,7 @@ from quantark.volmodels.slv.leverage import LeverageSurface
 
 # Kernel spies must patch the CANONICAL module — the otc path is a
 # re-export shim since the relocation and patching it intercepts nothing.
-import quantark.volmodels.calibration as vol_calibrators
+import quantark.volcalibration.calibrate as vol_calibrators
 
 
 REAL_ARTIFACT = (
@@ -877,7 +874,7 @@ class TestVolModelMcMethodSlot:
 
     def test_pde_reporting_engines_stay_constructible(self):
         """The regression: an RQMC vol-model route + PDE reporting engines."""
-        from quantark.backtest.otc.engine_factory import (
+        from quantark.backtest.replay.engine_factory import (
             create_event_stats_engine,
             create_pricing_engine,
             create_surface_engine,
@@ -906,7 +903,7 @@ class TestVolModelMcMethodSlot:
 
     def test_putting_the_mc_method_in_method_still_breaks_pde(self):
         """Guards the reason the slot exists - don't 'simplify' it away."""
-        from quantark.backtest.otc.engine_factory import create_pricing_engine
+        from quantark.backtest.replay.engine_factory import create_pricing_engine
         from quantark.util.enum.engine_enums import MonteCarloMethod
 
         product = create_standard_snowball(

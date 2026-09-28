@@ -1,7 +1,8 @@
 """
 Lifecycle tracking for autocallable products (Snowball, Phoenix).
 
-Extracted from ``quantark/backtest/otc/_replay.py`` (``ProductReplay``); the
+Extracted from the replay's ``ProductReplay`` (now
+``quantark/backtest/replay/product_replay.py``); the
 event-detection logic is unchanged. Differences from the original:
 
 - Methods return ``LifecycleEvent`` objects instead of appending dict rows to

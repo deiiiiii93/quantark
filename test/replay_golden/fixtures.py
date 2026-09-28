@@ -8,9 +8,8 @@ Three configurations freeze pre-consolidation behavior (spec §9.1):
                                  (the only golden that exercises
                                  ``VolModelCalibrator`` / ``create_vol_model_engine``)
 
-Imports go through ``quantark.backtest.otc`` deliberately: after the
-consolidation these same fixtures exercise the deprecation shims, so the
-goldens double as behavioral compat coverage.
+Imports use the canonical ``quantark.backtest.replay`` paths; the
+``quantark.backtest.otc`` shims these fixtures once exercised were removed in 0.5.0.
 
 The localvol surface history is written into the golden data directory (not a
 tmp dir) so artifact SHAs — and therefore calibration cache keys and recorded
@@ -31,16 +30,16 @@ from quantark.asset.equity.product.option import (
     create_standard_phoenix,
     create_standard_snowball,
 )
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AutocallableBacktestConfig,
     AutocallableEngineConfig,
     AutocallableMarketDataSet,
     BookAutocallableBacktestConfig,
     BookProduct,
     HedgeSpec,
-    VolModelCalibrationConfig,
 )
-from quantark.backtest.otc.vol_history import VolSurfaceHistory
+from quantark.volcalibration.config import VolModelCalibrationConfig
+from quantark.param.vol.surface_history import VolSurfaceHistory
 from quantark.backtest.transaction_costs import ZeroCostModel
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import EngineType

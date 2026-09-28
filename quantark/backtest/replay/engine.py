@@ -32,7 +32,7 @@ from .engine_factory import (
     create_surface_engine,
     create_vol_model_engine,
 )
-from quantark.volmodels.calibration import VolModelCalibrator
+from quantark.volcalibration.calibrate import VolModelCalibrator
 from .product_replay import ProductReplay, _env_with
 from .results import BookBacktestResults
 

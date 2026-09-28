@@ -14,7 +14,6 @@ from .config import (
     BookProduct,
     HedgeSpec,
     SurfaceGridConfig,
-    VolModelCalibrationConfig,
 )
 from .dashboard import AutocallableBacktestDashboard, AutocallableDashboardConfig
 from .engine import BookAutocallableBacktestEngine, ReplayBacktestEngine
@@ -93,7 +92,6 @@ __all__ = [
     "ReplayProduct",
     "SignedDividendYield",
     "SurfaceGridConfig",
-    "VolModelCalibrationConfig",
     "calculate_basis_yield",
     "create_autocallable_engine",
     "create_event_stats_engine",
