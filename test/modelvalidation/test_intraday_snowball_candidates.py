@@ -110,3 +110,31 @@ def test_terminated_claim_reports_zero_spot_greeks_ok():
                     context_params={"fixings": [{"date": "2026-08-17", "level": 104.0}]})
     result = _candidate("equity.snowball.intraday.quad_v2").evaluate(case)
     assert result.values["pv"] > 0.0 and result.values["point_delta"] == 0.0 and result.values["desk_gamma"] == 0.0
+
+
+@pytest.mark.parametrize("name", ["equity.snowball.intraday.quad_v2", "equity.snowball.intraday.pde"])
+def test_declared_anchor_weights_are_the_stencils_the_runtime_disclosed(name):
+    """Each weight is the L1 norm of the desk stencil the runtime reports it applied (GreekValue.bump)."""
+    from quantark.intraday.service import value_intraday
+    from quantark.modelvalidation.builders.intraday_common import build_request
+
+    candidate = _candidate(name)
+    case = CaseSpec(name="near_ki_10s", context_params={"valuation": "2026-09-10T14:59:50+08:00"},
+                    environment_params={"spot": 75.2})
+    weights = candidate.anchor_noise_weights(case)
+    result = value_intraday(candidate._target_engine(), build_request(*candidate.specs(case), greeks=("delta", "gamma", "theta"),
+                                                                   greek_convention="desk_bump"))
+    move_delta, move_gamma = result.greek("delta").bump, result.greek("gamma").bump
+    step_hours = result.greek("theta").bump / 3600.0
+    assert weights["pv"] == 1.0
+    assert weights["desk_delta"] == pytest.approx(1.0 / move_delta, rel=1e-12)          # (V+ - V-) / 2m
+    assert weights["desk_gamma"] == pytest.approx(4.0 / move_gamma ** 2, rel=1e-12)     # (V+ - 2V + V-) / m^2
+    assert weights["desk_theta"] == pytest.approx(2.0 / step_hours, rel=1e-12)          # (V_roll - V) / step
+    # Point stencils live inside each engine; the desk stencil is their floor (a point stencil is never
+    # coarser than a 1% bump), so the declared weight errs tight, never loose.
+    assert weights["point_delta"] == weights["desk_delta"] and weights["point_gamma"] == weights["desk_gamma"]
+
+
+def test_no_theta_weight_where_no_roll_exists():
+    weights = _candidate("equity.snowball.intraday.quad_v2").anchor_noise_weights(ON_BARRIER)
+    assert "desk_theta" not in weights and weights["desk_gamma"] > 0.0

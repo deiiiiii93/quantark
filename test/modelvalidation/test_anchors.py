@@ -188,3 +188,96 @@ def test_anchor_file_round_trips(tmp_path, certified):
     anchors = extract_anchors(payload, study)
     atomic_write_json(path, anchors)
     assert read_json(path) == anchors
+
+
+# --- finite-difference quantities off the banking machine ------------------
+#
+# A quantity formed by differencing prices, Q = sum_i w_i V_i, carries the
+# prices' cross-architecture noise amplified by the stencil: about
+# eps * |V| * sum_i |w_i|. Measured on the first CI run of the intraday
+# certificate: a one-second desk theta moved 2.2e-8 relative while every PV it
+# differences agreed to 7.5e-12 -- architecture noise divided by a one-second
+# step, not a behaviour change.
+
+
+class StencilCandidate(OffsetCandidate):
+    """A candidate that declares how its quantities difference prices."""
+
+    def __init__(self, weights, **kwargs):
+        super().__init__(**kwargs)
+        self.weights = dict(weights)
+
+    def anchor_noise_weights(self, case):
+        return dict(self.weights)
+
+
+def _stencil_study(weights):
+    return make_study(candidates=(StencilCandidate(weights, name="fake.candidate", means_c=CASE_MEANS_C),))
+
+
+def test_a_declared_stencil_weight_scales_the_cross_arch_tolerance_with_the_price(tmp_path, monkeypatch):
+    weight = 1.0e4
+    study = _stencil_study({"gamma": weight})
+    anchors = extract_anchors(certify(study, out_dir=tmp_path).payload, study)
+    anchors["fingerprint"] = _a_different_machine()
+    for entry in anchors["anchors"]:
+        values = entry["values"]
+        price_noise = DEFAULT_REL_TOL * abs(values["pv"]) * weight
+        assert price_noise > 10 * DEFAULT_REL_TOL * abs(values["gamma"])  # the undeclared rule would reject it
+        values["gamma"] += 0.5 * price_noise
+    path = tmp_path / "anchors.json"
+    atomic_write_json(path, anchors)
+
+    _patch_loader(monkeypatch, study)
+    assert_anchors(path)  # half the propagated price noise: architecture, not a change
+
+
+def test_a_stencil_weight_still_rejects_what_the_prices_would_reject(tmp_path, monkeypatch):
+    weight = 1.0e4
+    study = _stencil_study({"gamma": weight})
+    anchors = extract_anchors(certify(study, out_dir=tmp_path).payload, study)
+    anchors["fingerprint"] = _a_different_machine()
+    for entry in anchors["anchors"]:
+        entry["values"]["gamma"] += 2.0 * DEFAULT_REL_TOL * abs(entry["values"]["pv"]) * weight
+    path = tmp_path / "anchors.json"
+    atomic_write_json(path, anchors)
+
+    _patch_loader(monkeypatch, study)
+    with pytest.raises(AssertionError, match="gamma"):
+        assert_anchors(path)
+
+
+def test_a_stencil_weight_never_loosens_the_same_machine_comparison(tmp_path, monkeypatch):
+    study = _stencil_study({"gamma": 1.0e12})
+    anchors = extract_anchors(certify(study, out_dir=tmp_path).payload, study)
+    anchors["anchors"][0]["values"]["gamma"] *= 1 + 1e-15
+    path = tmp_path / "anchors.json"
+    atomic_write_json(path, anchors)
+
+    _patch_loader(monkeypatch, study)
+    with pytest.raises(AssertionError):
+        assert_anchors(path)
+
+
+def test_an_undeclared_quantity_keeps_the_relative_tolerance(tmp_path, monkeypatch):
+    """Weights are per quantity: declaring gamma's stencil says nothing about delta."""
+    study = _stencil_study({"gamma": 1.0e12})
+    anchors = extract_anchors(certify(study, out_dir=tmp_path).payload, study)
+    anchors["fingerprint"] = _a_different_machine()
+    for entry in anchors["anchors"]:
+        entry["values"]["delta"] *= 1 + 1e-6
+    path = tmp_path / "anchors.json"
+    atomic_write_json(path, anchors)
+
+    _patch_loader(monkeypatch, study)
+    with pytest.raises(AssertionError, match="delta"):
+        assert_anchors(path)
+
+
+def test_anchor_tolerance_is_the_larger_of_the_value_and_the_propagated_price_noise():
+    tol = anchors_module.anchor_tolerance
+    assert tol(2.0, pv=None, weight=None, rel_tol=1e-9, abs_tol=1e-12) == pytest.approx(2e-9 + 1e-12)
+    assert tol(2.0, pv=10.0, weight=1.0e3, rel_tol=1e-9, abs_tol=1e-12) == pytest.approx(1e-5 + 1e-12)
+    assert tol(2.0, pv=10.0, weight=1.0e-3, rel_tol=1e-9, abs_tol=1e-12) == pytest.approx(2e-9 + 1e-12)
+    with pytest.raises(ValidationError):
+        tol(2.0, pv=10.0, weight=-1.0, rel_tol=1e-9, abs_tol=1e-12)

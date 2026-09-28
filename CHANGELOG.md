@@ -55,6 +55,14 @@ vol-model calibration and the Greeks facade (see "Also in this release").
   added linearly in the aggregate. `reference_qualification` names a stochastic arm that
   must agree with it case by case; an unqualified case is not decision-eligible, and the
   arm's sampling is frozen in the contract.
+- Anchors of quantities that difference prices: a candidate may declare
+  `anchor_noise_weights(case)`, the L1 weight of each quantity's price stencil, and off the
+  banking machine such an anchor is compared at the prices' tolerance carried through that
+  stencil (`modelvalidation.anchors.anchor_tolerance`). The intraday snowball candidates
+  declare the runtime's desk bump and theta step. A one-second desk theta had moved 2.2e-8
+  relative on x86_64 while the prices it differences agreed within 1e-9; the new tolerance is
+  at most 4e-8 of a spot Greek's column scale and 2e-6 of desk theta's. Same-machine
+  comparison stays exact.
 - `python -m quantark.modelvalidation bank <run dir>`: validates, refuses quick runs,
   extracts anchors and never overwrites a banked directory.
 - Study `snowball_intraday_daily_ki_bsm.yaml`: the daily-KI snowball on the intraday

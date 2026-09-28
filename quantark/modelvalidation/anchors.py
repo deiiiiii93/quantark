@@ -15,10 +15,16 @@ is exact -- any drift there is a real change. On a different architecture the
 comparison uses a relative tolerance, because IEEE results legitimately differ
 in the last ULP or two across instruction sets (this repo's CI is x86_64 Linux
 while evidence is typically banked on ARM64 macOS).
+
+A quantity that differences prices inherits their noise amplified by its stencil,
+so a candidate may declare, per quantity, the L1 weight of that stencil; off the
+banking machine such a quantity is compared at the prices' tolerance propagated
+through it (``anchor_tolerance``).
 """
 
 from __future__ import annotations
 
+import math
 import platform
 from pathlib import Path
 from typing import Any, Dict, List, Mapping
@@ -122,19 +128,38 @@ def _candidates_by_name(study: CertificationStudy) -> Dict[str, CandidateEvaluat
     return {candidate.name(): candidate for candidate in study.candidates}
 
 
-def _matches(
-    expected: float, actual: float, exact: bool, rel_tol: float, abs_tol: float
-) -> bool:
-    """Compare one anchored value.
+def anchor_tolerance(
+    expected: float,
+    *,
+    pv: float | None,
+    weight: float | None,
+    rel_tol: float,
+    abs_tol: float,
+) -> float:
+    """Cross-architecture tolerance of one anchored value.
 
-    The tolerance is genuinely relative to the anchored magnitude, with a tiny
-    absolute floor so a value of exactly zero is still comparable. A fixed
-    absolute floor of order 1 would be far too generous for the small
-    magnitudes engine outputs often carry (a delta quantum is ~1e-4).
+    Relative to the anchored magnitude, with a tiny absolute floor so a value of
+    exactly zero is still comparable (a fixed floor of order 1 would be far too
+    generous: a delta quantum is ~1e-4).
+
+    A quantity formed by differencing prices, ``Q = sum_i w_i V_i``, carries the
+    prices' noise amplified by the stencil: about ``rel_tol * |V| * sum_i |w_i|``,
+    which near an event dwarfs ``rel_tol * |Q|`` (a one-second theta divides a
+    price difference by 1/3600 of an hour). When the candidate declares that L1
+    ``weight`` and the case's anchored ``pv`` is known, the tolerance is the
+    larger of the two. It never exceeds what the prices themselves would admit,
+    carried through the same stencil.
+
+    Raises:
+        ValidationError: a declared weight is negative or not finite.
     """
-    if exact:
-        return actual == expected
-    return abs(actual - expected) <= rel_tol * abs(expected) + abs_tol
+    tolerance = rel_tol * abs(expected) + abs_tol
+    if weight is None or pv is None:
+        return tolerance
+    weight = float(weight)
+    if not math.isfinite(weight) or weight < 0.0:
+        raise ValidationError(f"an anchor noise weight must be finite and nonnegative, got {weight!r}")
+    return max(tolerance, rel_tol * abs(float(pv)) * weight + abs_tol)
 
 
 #: Key a retired anchor file sets to name the certification that replaces it.
@@ -270,6 +295,11 @@ def assert_anchors(anchor_path: str | Path) -> None:
         candidate = candidates[name]
         # An anchor pins the shipped target output; a candidate may offer it without its convergence ladders.
         result = getattr(candidate, "evaluate_target", candidate.evaluate)(cases[case_name])
+        weights: Mapping[str, float] = {}
+        declare = getattr(candidate, "anchor_noise_weights", None)
+        if not exact and declare is not None:
+            weights = declare(cases[case_name])
+        pv = entry["values"].get("pv")
         for quantity, expected in sorted(entry["values"].items()):
             actual = result.values.get(quantity)
             if actual is None:
@@ -277,7 +307,13 @@ def assert_anchors(anchor_path: str | Path) -> None:
                     f"{name}/{case_name}/{quantity}: engine no longer produces this quantity"
                 )
                 continue
-            if not _matches(expected, actual, exact, rel_tol, abs_tol):
+            if exact:
+                matched = actual == expected
+            else:
+                tolerance = anchor_tolerance(expected, pv=pv, weight=weights.get(quantity),
+                                             rel_tol=rel_tol, abs_tol=abs_tol)
+                matched = abs(actual - expected) <= tolerance
+            if not matched:
                 failures.append(
                     f"{name}/{case_name}/{quantity}: expected {expected!r}, got "
                     f"{actual!r} (delta {actual - expected:.3e})"
@@ -287,7 +323,7 @@ def assert_anchors(anchor_path: str | Path) -> None:
         mode = (
             "exact (same machine)"
             if exact
-            else f"rel_tol={rel_tol:g}, abs_tol={abs_tol:g} (cross-arch)"
+            else f"rel_tol={rel_tol:g}, abs_tol={abs_tol:g}, stencil-propagated where declared (cross-arch)"
         )
         raise AssertionError(
             f"{len(failures)} anchor(s) no longer reproduce, comparison {mode}:\n  "

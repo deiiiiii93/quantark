@@ -190,6 +190,22 @@ Linux while evidence is typically banked on ARM64 macOS, and IEEE results
 legitimately differ in the last ULP or two across instruction sets. The same
 constraint governs `test/golden_compare.py`.
 
+**Quantities that difference prices.** A desk Greek or a roll theta is a finite
+difference of prices, `Q = sum_i w_i V_i`, so it carries the prices' cross-arch
+noise amplified by its stencil: about `rel_tol * |V| * sum_i |w_i|`. Near an event
+that dwarfs `rel_tol * |Q|` -- a one-second theta divides a price difference by
+1/3600 of an hour, and on the first CI run of the intraday certificate it moved
+2.2e-8 relative while every PV it differences agreed within 1e-9. A candidate may
+declare `anchor_noise_weights(case)`: per quantity, the L1 weight of the stencil
+it is formed from (the intraday snowball candidates declare the runtime's own desk
+bump and theta step, and those as a floor for the engines' point stencils). Off the
+banking machine such a quantity is compared at
+`max(rel_tol * |Q|, rel_tol * |anchored PV| * weight) + abs_tol`
+(`anchors.anchor_tolerance`): exactly what the prices would admit, carried through
+the stencil, and no more. On the intraday certificate that is at most 4e-8 of a
+spot Greek's column scale and 2e-6 of desk theta's. Same-machine comparison stays
+exact, and a candidate that declares nothing keeps the relative tolerance.
+
 When an anchor test fails, the banked certificate no longer describes the
 engine. Re-certify or amend — do not update the anchor file to match the new
 numbers, which would silently relabel a numerics change as a no-op. Once the

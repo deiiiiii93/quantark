@@ -225,6 +225,29 @@ class _IntradayCandidate(IntradayArm):
     def fingerprint(self) -> str:
         return implementation_fingerprint(*COMMON_TREES, *self.trees)
 
+    def _target_engine(self):
+        raise NotImplementedError
+
+    def anchor_noise_weights(self, case) -> Mapping[str, float]:
+        """Per quantity, the L1 weight of the price stencil it is formed from (per unit of the case's PV).
+
+        Off the banking machine an anchor inherits the prices' cross-architecture noise through its stencil
+        (``modelvalidation.anchors.anchor_tolerance``). The desk stencils are the runtime's own: the central
+        spot difference at the engine's bump and the frozen-market roll over the default theta step. The point
+        Greeks come from each engine's internal stencil, never coarser than the desk bump, so the desk weight
+        is their floor: it errs tight, never loose.
+        """
+        ctx = resolve_context(build_request(*self.specs(case)))
+        bump = bump_config_for(self._target_engine())
+        move_delta = ctx.spot * bump.spot_bump
+        move_gamma = ctx.spot * (getattr(bump, "gamma_spot_bump", None) or bump.spot_bump)
+        weights = {"pv": 1.0, "desk_delta": 1.0 / move_delta, "desk_gamma": 4.0 / move_gamma ** 2,
+                   "point_delta": 1.0 / move_delta, "point_gamma": 4.0 / move_gamma ** 2}
+        step = resolve_theta_step(ctx, None, "hour")
+        if step.actual is not None:
+            weights["desk_theta"] = 2.0 / abs(step.divisor)
+        return {q: w for q, w in weights.items() if q in self.quantities}
+
     def _level(self, label, resolution, engine, specs, settings, *, target=None) -> ConvergenceLevel:
         """One level with the settings it was asked for and the geometry the route actually solved on."""
         if target is not None:
@@ -251,6 +274,9 @@ class IntradaySnowballQuadV2Candidate(_IntradayCandidate):
     def _engine(settings: Mapping[str, Any]) -> SnowballQuadEngineV2:
         return SnowballQuadEngineV2(QuadV2Params(**settings))
 
+    def _target_engine(self) -> SnowballQuadEngineV2:
+        return self._engine(self._settings())
+
     def _axis_levels(self) -> dict:
         s = self._settings()
         return {"cells_per_sd": [s["cells_per_sd"] * m for m in (1.0, 2.0, 4.0)],
@@ -265,7 +291,7 @@ class IntradaySnowballQuadV2Candidate(_IntradayCandidate):
                 "convergence_axes": self._axis_levels()}
 
     def evaluate_target(self, case) -> CandidateResult:
-        values, statuses, reasons, _ = _measure(self._engine(self._settings()), *self.specs(case), self.quantities)
+        values, statuses, reasons, _ = _measure(self._target_engine(), *self.specs(case), self.quantities)
         return CandidateResult(values=values, statuses=statuses, reasons=reasons)
 
     def evaluate(self, case) -> CandidateResult:
