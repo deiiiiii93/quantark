@@ -109,6 +109,62 @@ CALIBRATION_RECORD_KEYS: tuple[str, ...] = (
     "date", "variant", "surface_date", "surface_sha", "cache_hit",
 )
 
+# --------------------------------------------------------------------------
+# Carry risk frames (revised bucket-futures-hedge design, section 9)
+#
+# These three tuples are ADDITIONS; every tuple above keeps its exact fields
+# and order.  A row is written for every eligible curve node plus every held
+# or retired leg, INCLUDING nodes the book holds nothing at -- otherwise a
+# single-contract control would hide the rhoq it is not hedging.  Unmeasured
+# direct fields are NaN with a status, never a zero that reads as "checked
+# and neutral".
+# --------------------------------------------------------------------------
+
+HEDGE_LEG_COLUMNS: tuple[str, ...] = (
+    "date", "contract", "maturity", "tenor_years", "price", "multiplier",
+    "is_curve_node", "is_correction_leg", "is_last_curve_node",
+    "has_product_tail",
+    "bucket_currency", "bucket_contract_equivalent",
+    "ideal_contracts", "scaled_contracts", "rounded_contracts",
+    "held_before", "held_after", "trade_contracts",
+    "rounding_error_contracts", "no_trade_error_contracts", "retired",
+    "unrealized_pnl",
+    "product_rhoq_bp", "hedge_rhoq_bp", "net_rhoq_bp", "ideal_net_rhoq_bp",
+    "direct_net_rhoq_bp", "rhoq_audit_error_bp", "audit_status",
+)
+
+HEDGE_ATTRIBUTION_COLUMNS: tuple[str, ...] = (
+    "date", "carry_family", "objective",
+    "correction_contract_a", "correction_contract_b",
+    "reference_notional", "reference_multiplier",
+    "product_delta_hands", "hedge_delta_hands", "net_delta_hands",
+    "delta_f_derived_hands", "delta_f_direct_hands", "identity_residual_hands",
+    "finite_bump_identity_residual_hands", "pricing_delta_local_gap_hands",
+    "pricing_delta_hedge_gap_hands", "hedge_gap_status",
+    "finite_bump_identity_status", "finite_bump_identity_reason",
+    "identity_spot_refinement_error_hands", "identity_status", "identity_ladder",
+    "direct_net_delta_hands", "net_delta_audit_error_hands",
+    "product_rhoq_bp", "hedge_rhoq_bp", "net_rhoq_bp",
+    "direct_net_parallel_rhoq_bp", "parallel_rhoq_audit_error_bp",
+    "product_rhoq_gross_bp", "net_rhoq_gross_bp",
+    "ideal_net_delta_hands", "ideal_net_parallel_rhoq_bp",
+    "ideal_net_rhoq_gross_bp",
+    "gross_contracts", "gross_futures_notional", "turnover_contracts",
+    "flat_fit_rmse_bp", "audit_status", "attribution_status",
+    "product_dv", "hedge_price_pnl", "transaction_costs", "financing_pnl",
+    "book_dv",
+    "linear_spot_pinned", "linear_listed_forwards",
+    "linear_product_spot_flat", "linear_product_carry_flat",
+    "remainder_after_linear", "spot_gamma_frozen_q_diagnostic",
+)
+
+HEDGE_STRESS_COLUMNS: tuple[str, ...] = (
+    "date", "objective", "holdings_kind", "scenario_id", "scenario_family",
+    "shock_definition", "bump_metadata", "product_pnl", "hedge_pnl",
+    "book_pnl", "linear_prediction", "repricing_error",
+    "source_basis_assumption",
+)
+
 
 class StateRow(TypedDict):
     date: Any

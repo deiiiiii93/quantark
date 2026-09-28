@@ -102,7 +102,13 @@ STATE_CACHE_BYTES = 500_000_000
 GATE_SURFACE = dict(sample_states=64, pv_tolerance_bp=25.0, delta_tolerance_hands=2.0,
                     delta_tolerance_rel=0.01)
 GATE_LADDER = dict(sample_states=64, pv_tolerance_bp=10.0, delta_tolerance_hands=2.0)
-CHECK_PATHS = 200
+#: The QUAD spot-ladder check is off by default: its 2026-09-09 failures were
+#: the flat-node carry gap, structural, and Design B replaced the provider it
+#: was checking.  Pass --check-paths to run it.
+CHECK_PATHS = 0
+#: Exact QUAD repricing on each cell's first paths, paired with the cell's
+#: own provider on the same paths: the engine check (reported, not gated).
+EXACT_CHECK_PATHS = 40
 ORACLE_PATHS = 3
 #: The life surface's spot domain as fractions of the initial spot.  A
 #: surface is solved once at the start spot and read along the whole path,
@@ -164,13 +170,21 @@ def cell_name(model: str, hedge: str) -> str:
 
 def engine_config(
     model: str, engine: str, *, quad_grid: int, s0: Optional[float] = None,
-    spot_range: Optional[Tuple[float, float]] = None,
+    spot_range: Optional[Tuple[float, float]] = None, quad_align: str = "auto",
 ) -> AutocallableEngineConfig:
     """The replay engine config of one carry model on the PDE (life surface) or QUAD (repricing) engine.
 
     With ``s0`` the PDE grid spans ``spot_range`` (default
     ``SURFACE_SPOT_RANGE``) times it, so one surface covers every spot a
     bootstrap or stress path can read.
+
+    ``quad_align`` is ``QuadParams.align_priority``.  Under the default
+    ``"auto"`` the lattice pins whichever barrier is nearest spot in log
+    space, so the target changes at ``sqrt(KI*KO)`` and a bumped delta
+    within one bump of that level differences two differently aligned
+    lattices; ``"ki"`` or ``"ko"`` pins one barrier for every evaluation.
+    It reaches only the QUAD branch, so a PDE cell's fingerprint does not
+    move with it.
     """
     if model not in Q.Q_MODELS:
         raise ValidationError(f"unknown carry model {model!r}; one of {tuple(Q.Q_MODELS)}")
@@ -196,7 +210,8 @@ def engine_config(
                           max_points=SURFACE_MAX_POINTS)
         kwargs: Dict[str, Any] = dict(pricing_engine_type=EngineType.PDE, pde_params=PDEParams(grid=grid))
     elif engine == "quad":
-        kwargs = dict(pricing_engine_type=EngineType.QUADRATURE, quad_params=QuadParams(grid_points=int(quad_grid)))
+        kwargs = dict(pricing_engine_type=EngineType.QUADRATURE,
+                      quad_params=QuadParams(grid_points=int(quad_grid), align_priority=str(quad_align)))
     else:
         raise ValidationError("engine must be 'pde' or 'quad'")
     return AutocallableEngineConfig(

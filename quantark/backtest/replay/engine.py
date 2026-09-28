@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
+import math
 import time
 
 import pandas as pd
@@ -17,6 +18,13 @@ from .config import (
 )
 from .market import AutocallableMarketDataSet, ImpliedBasisYield, SignedDividendYield
 from .strategy_state import AutocallableDeltaHedgeStrategy, AutocallableLifecycleState, FuturesHedgePosition
+from quantark.backtest.futures_ledger import FuturesHedgeBook
+from quantark.backtest.strategy.futures_bucket_strategy import (
+    FuturesBucketHedgeStrategy,
+)
+from quantark.backtest.strategy.futures_delta_strategy import (
+    ProportionalFuturesDeltaHedgeStrategy,
+)
 from quantark.backtest.transaction_costs import TransactionCostModel, ZeroCostModel
 from .engine_factory import (
     create_event_stats_engine,
@@ -25,8 +33,64 @@ from .engine_factory import (
     create_vol_model_engine,
 )
 from quantark.volmodels.calibration import VolModelCalibrator
-from .product_replay import ProductReplay
+from .product_replay import ProductReplay, _env_with
 from .results import BookBacktestResults
+
+
+def _book_price_callback(alive_specs, env):
+    """``price_at(spot, dividend)`` for the whole SIGNED product book.
+
+    Each product is priced by its own resolved engine and weighted by its own
+    quantity, exactly once, so the audit's scenario value is the same book
+    the risk was aggregated from.
+    """
+
+    def price_at(spot: float, dividend) -> float:
+        total = 0.0
+        for quantity, replay, engine, product, _delta, _price in alive_specs:
+            total += quantity * float(
+                engine.price(
+                    product,
+                    _env_with(
+                        env,
+                        spot=float(spot),
+                        div_yield=dividend,
+                        underlying=replay.underlying,
+                    ),
+                )
+            )
+        return total
+
+    return price_at
+
+
+@dataclass(frozen=True)
+class _PlannedTrade:
+    """One validated leg trade, priced and costed BEFORE the ledger moves."""
+
+    date: Any
+    contract: str
+    quantity_delta: float
+    price: float
+    multiplier: float
+    notional: float
+    cost: float
+    trade_type: str
+    reason: str
+
+    def to_row(self) -> dict:
+        return {
+            "date": self.date,
+            "trade_type": self.trade_type,
+            "instrument_type": "futures",
+            "contract": self.contract,
+            "quantity": self.quantity_delta,
+            "price": self.price,
+            "multiplier": self.multiplier,
+            "notional": self.notional,
+            "transaction_cost": self.cost,
+            "reason": self.reason,
+        }
 
 
 class ReplayBacktestEngine:
@@ -48,7 +112,30 @@ class ReplayBacktestEngine:
         self.config = config
         self.strategy = config.strategy
         self.hedge = config.hedge
-        self.hedge_position = FuturesHedgePosition()
+        # One book holds every leg.  Single-contract strategies keep at most
+        # one open leg in it, so their arithmetic and goldens are unchanged.
+        self.hedge_book = FuturesHedgeBook()
+        self._is_bucket = isinstance(config.strategy, FuturesBucketHedgeStrategy)
+        self._carry_recording = getattr(config, "carry_recording", None)
+        self._hedge_infeasibility: Optional[dict[str, Any]] = None
+        self._carry_recorder = None
+        if self._carry_recording is not None and self._carry_recording.record:
+            from .carry_recorder import CarryExposureRecorder
+            from .carry_stress import shape_scenario, tail_scenario
+
+            settings = self._carry_recording.settings
+            scenarios = tuple(
+                tail_scenario(shift) for shift in settings.tail_shifts
+            )
+            self._carry_recorder = CarryExposureRecorder(
+                settings=settings,
+                record=True,
+                audit_mode=self._carry_recording.audit_mode,
+                audit_dates=self._carry_recording.audit_dates,
+                scenarios=scenarios,
+                stress_dates=settings.stress_dates,
+            )
+            self._shape_shifts = tuple(settings.shape_shifts)
 
         self._states: list[dict[str, Any]] = []
         self._greeks: list[dict[str, Any]] = []
@@ -58,6 +145,10 @@ class ReplayBacktestEngine:
         self._surfaces: list[dict[str, Any]] = []
         self._daily_event_summary: list[dict[str, Any]] = []
         self._event_probabilities: list[dict[str, Any]] = []
+        # Carry risk rows: empty unless the run resolved recording on.
+        self._hedge_legs: list[dict[str, Any]] = []
+        self._hedge_attribution: list[dict[str, Any]] = []
+        self._hedge_stresses: list[dict[str, Any]] = []
 
         self._initial_book_value: Optional[float] = None
         self._transaction_costs: float = 0.0
@@ -135,6 +226,55 @@ class ReplayBacktestEngine:
             for replay in self._replays:
                 replay.record_events = True
 
+    @property
+    def hedge_position(self) -> FuturesHedgePosition:
+        """The legacy one-leg VIEW of the hedge book.
+
+        It raises for a multi-leg book on purpose: a bucket path that reached
+        for this would silently report one contract as if it were the hedge.
+        Bucket code uses ``hedge_book`` and selected-leg quantities directly.
+        """
+        return self.hedge_book.single_leg
+
+    def _selected_contracts(self, selected) -> float:
+        """Quantity held in the SELECTED reference contract.
+
+        This is what the legacy scalar columns have always meant.  Under a
+        bucket strategy it stays the selected leg, not the whole hedge, and
+        the new risk frame is the authoritative joint measurement.
+        """
+        if selected is None:
+            return 0.0
+        return self.hedge_book.quantity(str(selected["contract"]))
+
+    def _chain_rows(self, futures_slice) -> dict:
+        """Today's whole chain as ``contract -> row``."""
+        return {
+            str(row["contract"]): row for _, row in futures_slice.iterrows()
+        }
+
+    def _hedge_marks(self, selected, chain_rows) -> dict:
+        """Marks for every OPEN leg.
+
+        Bucket mode requires each leg's own quote.  The single-leg path keeps
+        the historical behaviour of marking the open leg at the selected
+        contract's price, which is the same number because the roll has
+        already moved the position onto that contract.
+        """
+        open_legs = self.hedge_book.contracts()
+        if not open_legs:
+            return {}
+        if self._is_bucket:
+            missing = [c for c in open_legs if c not in chain_rows]
+            if missing:
+                raise ValidationError(
+                    f"missing futures mark for held leg(s) {missing}; a stale "
+                    "price is never substituted"
+                )
+            return {c: float(chain_rows[c]["futures_price"]) for c in open_legs}
+        price = float(selected["futures_price"])
+        return {c: price for c in open_legs}
+
     def run(self) -> "BookBacktestResults":
         dates = self._backtest_dates()
         if len(dates) == 0:
@@ -161,9 +301,15 @@ class ReplayBacktestEngine:
                     futures_slice, date, current_contract
                 )
                 if current_contract != str(selected["contract"]):
-                    self._roll_contract(
-                        date, selected, futures_slice, current_contract
-                    )
+                    # A bucket hedge holds several legs and closes a retired
+                    # one through the validated rebalance plan.  The legacy
+                    # roll trades BEFORE pricing and has a missing-old-quote
+                    # fallback, so selecting a reference contract must not
+                    # drag a multi-leg book through it.
+                    if not self._is_bucket:
+                        self._roll_contract(
+                            date, selected, futures_slice, current_contract
+                        )
                     current_contract = str(selected["contract"])
                 if self._dividend_roll_policy is not None:
                     dividend_row = self._dividend_roll_policy.select_contract(
@@ -179,8 +325,25 @@ class ReplayBacktestEngine:
             multiplier = float(selected["multiplier"])
 
             # env is product-independent: build it once from any replay.
+            #
+            # A bucket run whose whole book is already dead still has to
+            # settle known cash and discount a pending receivable, and that
+            # needs spot, rates and the date -- not live carry quotes.  On
+            # such a day, and only then, a chain with no eligible contract
+            # falls back to the flat carry channel.  A day with a live
+            # product always requires the proper curve; substituting a zero
+            # initial PV to evade missing data is never acceptable.
+            already_dead = (
+                self._is_bucket
+                and self._initial_book_value is not None
+                and not any(r.lifecycle.alive for r in self._replays)
+            )
             env, basis_yield, implied_q, futures_ttm = self._replays[0].build_env(
-                date, market, selected, dividend_row
+                date,
+                market,
+                selected,
+                dividend_row,
+                allow_flat_carry_fallback=already_dead,
             )
             if self.hedge.kind == "spot":
                 # For spot hedges, build_env synthesises a 100-year future
@@ -237,6 +400,10 @@ class ReplayBacktestEngine:
             net_position_gamma = 0.0
             book_product_mtm = 0.0
             book_cashflows = 0.0
+            # Each surviving product's own resolved engine, priced product and
+            # unit delta, so the carry measurement uses the SAME calibrated
+            # engine as the day's pricing rather than the factory default.
+            alive_specs: list[tuple] = []
 
             for bp, quantity, replay, engine in zip(
                 self.config.products, self._quantities, self._replays,
@@ -270,6 +437,16 @@ class ReplayBacktestEngine:
                     net_position_delta += float(greeks.get("delta", 0.0)) * quantity
                     net_position_gamma += float(greeks.get("gamma", 0.0)) * quantity
                     book_product_mtm += quantity * price
+                    alive_specs.append(
+                        (
+                            quantity,
+                            replay,
+                            engine,
+                            product,
+                            float(greeks.get("delta", 0.0)),
+                            price,
+                        )
+                    )
 
                 provenance = getattr(replay, "last_surface_provenance", None)
                 self._product_daily.append(
@@ -300,13 +477,51 @@ class ReplayBacktestEngine:
                 )
                 self._calibration_records.append(day_calibration_record)
 
-            pre_hedge_contracts = self.hedge_position.quantity
-            self._rebalance(
-                date, selected, net_position_delta, multiplier, any_alive
+            chain_rows = (
+                self._chain_rows(futures_slice)
+                if self.hedge.kind == "futures"
+                else {}
             )
+            # Carried holdings, captured BEFORE any rebalance: the day's P&L
+            # belongs to what the book actually held overnight.
+            carried_holdings = dict(self.hedge_book.holdings())
+            pre_hedge_contracts = self._selected_contracts(selected)
+            day_risk = None
+            hedge_targets = None
+            context = self._replays[0].last_carry_context
+            if any_alive and context is not None and (
+                self._is_bucket or self._carry_recorder is not None
+            ):
+                # With recording on, a single-contract control is measured by
+                # exactly the same daily risk call as a bucket run, so their
+                # exposure columns are comparable rather than differently
+                # derived.
+                day_risk = self._measure_book_carry_risk(
+                    date, env, context, alive_specs
+                )
+            if self._is_bucket:
+                hedge_targets = self._rebalance_buckets(
+                    date=date,
+                    selected=selected,
+                    chain_rows=chain_rows,
+                    risk=day_risk,
+                    any_alive=any_alive,
+                    carried=carried_holdings,
+                )
+            else:
+                self._rebalance(
+                    date,
+                    selected,
+                    net_position_delta,
+                    multiplier,
+                    any_alive,
+                    spot=float(market["spot"]),
+                )
             self._record_day(
                 date=date,
                 selected=selected,
+                chain_rows=chain_rows,
+                carried_holdings=carried_holdings,
                 dividend_row=dividend_row,
                 market=market,
                 basis_yield=basis_yield,
@@ -322,6 +537,19 @@ class ReplayBacktestEngine:
                 any_alive=any_alive,
                 receivable_pv=book_receivable_pv,
             )
+            if self._carry_recorder is not None:
+                self._record_carry_day(
+                    date=date,
+                    env=env,
+                    risk=day_risk,
+                    context=context,
+                    targets=hedge_targets,
+                    carried=carried_holdings,
+                    chain_rows=chain_rows,
+                    alive_specs=alive_specs,
+                    net_position_gamma=net_position_gamma,
+                    state_row=self._states[-1],
+                )
             # PnL explain: close the day against the recorded state
             if self._explain_recorder is not None:
                 self._explain_recorder.end_day(
@@ -352,6 +580,9 @@ class ReplayBacktestEngine:
             daily_event_summary=self._daily_event_summary,
             event_probabilities=self._event_probabilities,
             surfaces=self._surfaces,
+            hedge_legs=self._hedge_legs,
+            hedge_attribution=self._hedge_attribution,
+            hedge_stresses=self._hedge_stresses,
             products_meta=[
                 {
                     "position_id": bp.position_id,
@@ -362,6 +593,12 @@ class ReplayBacktestEngine:
                 for bp in self.config.products
             ],
         )
+
+    def carry_cost(self) -> dict:
+        """Measured wall clock and price counts by stage, or an empty dict."""
+        if self._carry_recorder is None:
+            return {}
+        return dict(self._carry_recorder.cost)
 
     def _run_info(self) -> dict[str, Any]:
         """Termination provenance for the summary (study spec §6).
@@ -450,8 +687,11 @@ class ReplayBacktestEngine:
         net_position_delta: float,
         multiplier: float,
         any_alive: bool,
+        spot: float = 0.0,
     ) -> None:
         is_spot = self.hedge.kind == "spot"
+        # Guarded single-contract path: at most one leg is ever open here.
+        current_contracts = self.hedge_position.quantity
         target = 0.0
         reason = "inside_band"
         trade_type = "hedge_rebalance"
@@ -460,6 +700,16 @@ class ReplayBacktestEngine:
                 # Spot mode: always target full delta-neutral; strategy.hedge_ratio
                 # and target_delta are not applied — only delta_threshold (band) is.
                 target = -float(net_position_delta)
+            elif isinstance(self.strategy, ProportionalFuturesDeltaHedgeStrategy):
+                # The S/F control needs both prices; the legacy strategy's
+                # call signature below is deliberately left alone.
+                target = self.strategy.target_contracts(
+                    product_delta=float(net_position_delta),
+                    product_quantity=1.0,
+                    futures_multiplier=multiplier,
+                    spot=float(spot),
+                    futures_price=float(selected["futures_price"]),
+                )
             else:
                 target = self.strategy.target_contracts(
                     product_delta=float(net_position_delta),
@@ -467,17 +717,17 @@ class ReplayBacktestEngine:
                     futures_multiplier=multiplier,
                 )
             should_rebalance = self.strategy.should_rebalance(
-                self.hedge_position.quantity, target
+                current_contracts, target
             )
             if should_rebalance:
                 reason = "delta_rebalance"
         else:
-            should_rebalance = abs(self.hedge_position.quantity) > 1e-12
+            should_rebalance = abs(current_contracts) > 1e-12
             if should_rebalance:
                 reason = "product_terminated"
                 trade_type = "hedge_close"
 
-        trade_contracts = target - self.hedge_position.quantity
+        trade_contracts = target - current_contracts
         if should_rebalance and abs(trade_contracts) > 1e-12:
             self._execute_hedge_trade(
                 date=date,
@@ -492,6 +742,9 @@ class ReplayBacktestEngine:
             {
                 "date": date,
                 "active_contract": str(selected["contract"]),
+                # Historical quirk, preserved: the decision above uses the
+                # PRE-trade quantity, but this column has always recorded the
+                # POST-trade one, because the row was built after the trade.
                 "current_contracts": self.hedge_position.quantity,
                 "target_contracts": target,
                 "trade_contracts": trade_contracts if should_rebalance else 0.0,
@@ -504,6 +757,265 @@ class ReplayBacktestEngine:
             }
         )
 
+    # ------------------------------------------------------------------
+    # Multi-leg bucket path
+    # ------------------------------------------------------------------
+
+    def _measure_book_carry_risk(self, date, env, context, alive_specs):
+        """Aggregate the book's signed carry risk on today's coordinates.
+
+        The context is passed EXPLICITLY to every product.  The shared
+        environment is built through replay zero alone, so reading
+        ``last_carry_context`` off each replay would leave every product but
+        the first without buckets.
+        """
+        from .carry_risk import aggregate_book_risk
+
+        if context is None:
+            raise ValidationError(
+                f"bucket hedge needs a futures carry context on {date.date()}; "
+                "the day's dividend source produced none"
+            )
+        if not alive_specs:
+            raise ValidationError("no live product to measure carry risk for")
+        settings = self._carry_recording.settings
+        points = float(settings.futures_bump_points)
+        started = time.perf_counter()
+        entries = []
+        for quantity, replay, engine, product, unit_delta, price in alive_specs:
+            entries.append(
+                (
+                    quantity,
+                    replay.measure_carry_risk(
+                        product,
+                        env,
+                        context=context,
+                        engine=engine,
+                        delta_q=unit_delta,
+                        points=points,
+                        base_price=price,
+                    ),
+                )
+            )
+        if self._carry_recorder is not None:
+            self._carry_recorder.cost["bucket_seconds"] = (
+                self._carry_recorder.cost.get("bucket_seconds", 0.0)
+                + time.perf_counter()
+                - started
+            )
+            self._carry_recorder.cost["bucket_price_calls"] = (
+                self._carry_recorder.cost.get("bucket_price_calls", 0.0)
+                + sum(float(risk.price_calls) for _, risk in entries)
+            )
+            self._carry_recorder.cost["bucket_dates"] = (
+                self._carry_recorder.cost.get("bucket_dates", 0.0) + 1.0
+            )
+        return aggregate_book_risk(entries)
+
+    def _bucket_targets(self, date, risk, carried, any_alive):
+        """Today's leg plan, or all-zero targets once the book is dead."""
+        if not any_alive or risk is None:
+            # No feasibility question to ask and no pricer to invoke: a dead
+            # book closes whatever it holds, even with one eligible node.
+            return None, {c: 0.0 for c in carried}
+        try:
+            targets = self.strategy.target_legs(
+                buckets=risk.buckets,
+                delta_q=risk.delta_q,
+                spot=risk.spot,
+                held_contracts=carried,
+            )
+        except ValidationError as error:
+            self._hedge_infeasibility = {
+                "date": str(date),
+                "objective": getattr(self.strategy, "objective", None),
+                "correction_pair": getattr(self.strategy, "correction_pair", None),
+                "eligible_contracts": list(risk.contracts),
+                "cause": str(error),
+            }
+            raise ValidationError(
+                f"bucket hedge infeasible on {date.date()}: "
+                f"objective={getattr(self.strategy, 'objective', None)!r}, "
+                f"eligible={list(risk.contracts)}: {error}"
+            ) from error
+        return targets, dict(targets.rounded)
+
+    def _rebalance_buckets(
+        self, *, date, selected, chain_rows, risk, any_alive, carried
+    ):
+        """Plan the WHOLE rebalance, validate it, then commit it at once.
+
+        Nothing touches the ledger, the cost accumulator or the trade log
+        until every mark, multiplier and transaction cost for every leg has
+        been produced.  A cost model that raises on the second leg leaves no
+        first-leg trade behind.
+        """
+        targets, planned = self._bucket_targets(date, risk, carried, any_alive)
+        eligible = set(risk.contracts) if risk is not None else set()
+        contracts = sorted(set(planned) | set(carried))
+
+        def order_key(contract):
+            row = chain_rows.get(contract)
+            expiry = row["expiry_date"] if row is not None else pd.Timestamp.max
+            # Retired closes first, then eligible rebalances; both by expiry.
+            return (0 if contract not in eligible else 1, expiry, contract)
+
+        plan: list[_PlannedTrade] = []
+        decisions: list[dict[str, Any]] = []
+        for contract in sorted(contracts, key=order_key):
+            current = float(carried.get(contract, 0.0))
+            target = float(planned.get(contract, 0.0))
+            delta = target - current
+            retired = contract not in eligible
+            reason = "delta_rebalance"
+            trade_type = "hedge_rebalance"
+            if not any_alive:
+                # A dead book has no eligible universe at all, so this test
+                # comes FIRST: every leg closes because the product ended,
+                # not because it left a curve nobody is looking at.
+                reason = "product_terminated"
+                trade_type = "hedge_close"
+            elif retired:
+                reason = "bucket_leg_retired"
+                trade_type = "hedge_close"
+            should = abs(delta) > 1e-12
+            if should and not retired and any_alive:
+                # A retired close and a terminated book both bypass the band.
+                should = self.strategy.should_rebalance(current, target)
+            if should and abs(delta) > 1e-12:
+                row = chain_rows.get(contract)
+                if row is None:
+                    raise ValidationError(
+                        f"no tradable mark for {contract!r} on {date.date()}; "
+                        "a bucket rebalance never substitutes a stale price"
+                    )
+                price = float(row["futures_price"])
+                multiplier = float(row["multiplier"])
+                if not (price > 0.0 and multiplier > 0.0):
+                    raise ValidationError(
+                        f"invalid mark for {contract!r} on {date.date()}: "
+                        f"price={price}, multiplier={multiplier}"
+                    )
+                notional = abs(delta * price * multiplier)
+                cost = float(
+                    self.config.transaction_cost_model.calculate_cost(
+                        quantity=delta,
+                        price=price,
+                        notional=notional,
+                        instrument_type="futures",
+                        trade_type=trade_type,
+                    )
+                )
+                if not math.isfinite(cost):
+                    raise ValidationError(
+                        f"transaction cost for {contract!r} is not finite: {cost}"
+                    )
+                plan.append(
+                    _PlannedTrade(
+                        date=date,
+                        contract=contract,
+                        quantity_delta=delta,
+                        price=price,
+                        multiplier=multiplier,
+                        notional=notional,
+                        cost=cost,
+                        trade_type=trade_type,
+                        reason=reason,
+                    )
+                )
+            decisions.append(
+                {
+                    "date": date,
+                    "active_contract": contract,
+                    "current_contracts": current,
+                    "target_contracts": target,
+                    "trade_contracts": delta if should else 0.0,
+                    "should_rebalance": bool(should),
+                    "threshold_status": (
+                        "outside_band" if should else "inside_band"
+                    ),
+                    "no_trade_reason": None if should else "inside_band",
+                    "reason": reason,
+                }
+            )
+        self._commit_bucket_trades(plan)
+        # A skipped trade still leaves a decision row, so the no-trade error
+        # stays measurable against the target the policy actually planned.
+        self._rebalances.extend(decisions)
+        return targets
+
+    def _record_carry_day(
+        self,
+        *,
+        date,
+        env,
+        risk,
+        context,
+        targets,
+        carried,
+        chain_rows,
+        alive_specs,
+        net_position_gamma,
+        state_row,
+    ) -> None:
+        """Hand the recorder explicit day data, then drain its rows.
+
+        The pricing closure is built for TODAY only and released with the
+        day: it is never serialised into a CSV and never retained across the
+        fleet.  With no live product there is no closure at all, and the
+        recorder writes a holdings-only row.
+        """
+        price_at = None
+        if alive_specs and context is not None:
+            price_at = _book_price_callback(alive_specs, env)
+        self._carry_recorder.record_day(
+            date=date,
+            risk=risk,
+            context=context,
+            targets=targets,
+            carried=carried,
+            held=self.hedge_book.holdings(),
+            chain_prices={
+                c: float(row["futures_price"]) for c, row in chain_rows.items()
+            },
+            chain_multipliers={
+                c: float(row["multiplier"]) for c, row in chain_rows.items()
+            },
+            chain_expiries={
+                c: row["expiry_date"] for c, row in chain_rows.items()
+            },
+            # Daily product P&L is the DIFFERENCE of this cumulative field,
+            # which already carries paid cash and the pending receivable; it
+            # is not merely the change in product_mtm.
+            product_pnl=float(state_row.get("product_pnl", float("nan"))),
+            transaction_costs=float(self._transaction_costs),
+            gamma=float(net_position_gamma),
+            objective=getattr(self.strategy, "objective", ""),
+            carry_family=(
+                getattr(self.config.engine_config, "futures_curve_extrapolation", "")
+                if context is not None
+                else "none"
+            ),
+            price_at=price_at,
+        )
+        self._hedge_legs = self._carry_recorder.legs
+        self._hedge_attribution = self._carry_recorder.attribution
+        self._hedge_stresses = self._carry_recorder.stresses
+
+    def _commit_bucket_trades(self, planned_trades) -> None:
+        trial = self.hedge_book.copy()
+        next_costs = self._transaction_costs
+        rows = []
+        for trade in planned_trades:
+            trial.trade(
+                trade.contract, trade.quantity_delta, trade.price, trade.multiplier
+            )
+            next_costs += trade.cost
+            rows.append(trade.to_row())
+        self.hedge_book = trial
+        self._transaction_costs = next_costs
+        self._trades.extend(rows)
+
     def _roll_contract(
         self,
         date: pd.Timestamp,
@@ -513,9 +1025,10 @@ class ReplayBacktestEngine:
     ) -> None:
         if self.hedge.kind == "spot":
             return
-        if abs(self.hedge_position.quantity) < 1e-12:
+        position = self.hedge_position
+        if abs(position.quantity) < 1e-12:
             return
-        old_contract = self.hedge_position.contract or current_contract
+        old_contract = position.contract or current_contract
         if old_contract is None:
             return
         old_rows = futures_slice[futures_slice["contract"] == old_contract]
@@ -526,7 +1039,7 @@ class ReplayBacktestEngine:
             close_reason = "futures_roll_missing_old_contract"
         else:
             old = old_rows.iloc[0]
-        qty = self.hedge_position.quantity
+        qty = position.quantity
         self._execute_hedge_trade(
             date=date,
             selected=old,
@@ -565,7 +1078,7 @@ class ReplayBacktestEngine:
             instrument_type=instrument_type,
             trade_type=trade_type,
         )
-        self.hedge_position.trade(quantity_delta, price, contract, multiplier)
+        self.hedge_book.trade(contract, quantity_delta, price, multiplier)
         self._transaction_costs += float(cost)
         self._trades.append(
             {
@@ -588,6 +1101,8 @@ class ReplayBacktestEngine:
         date: pd.Timestamp,
         selected,
         market: dict[str, float],
+        chain_rows: Optional[dict] = None,
+        carried_holdings: Optional[dict] = None,
         dividend_row=None,
         basis_yield: float,
         implied_q: float,
@@ -604,7 +1119,13 @@ class ReplayBacktestEngine:
     ) -> None:
         futures_price = float(selected["futures_price"])
         spot = float(market["spot"])
-        hedge_mtm = self.hedge_position.mark_to_market(futures_price)
+        chain_rows = chain_rows or {}
+        # Bucket mode marks every open leg at its OWN quote; one selected
+        # price must never be used to mark several contracts.
+        hedge_mtm = self.hedge_book.mark_to_market(
+            self._hedge_marks(selected, chain_rows)
+        )
+        selected_contracts = self._selected_contracts(selected)
         # book_product_mtm already only sums alive products.
         product_mtm = book_product_mtm
         # A pending terminal receivable (delayed KO settlement) is carried at
@@ -623,8 +1144,28 @@ class ReplayBacktestEngine:
         portfolio_value = product_mtm + hedge_mtm + cash + receivable_pv
         product_position_delta = float(net_position_delta)
         product_position_gamma = float(net_position_gamma)
-        pre_hedge_futures_delta = float(pre_hedge_contracts) * multiplier
-        post_hedge_futures_delta = self.hedge_position.quantity * multiplier
+        if self._is_bucket:
+            carried = carried_holdings or {}
+            pre_hedge_futures_delta = sum(
+                float(carried.get(c, 0.0))
+                * float(chain_rows[c]["multiplier"])
+                * float(chain_rows[c]["futures_price"])
+                / spot
+                for c in carried
+                if c in chain_rows
+            )
+        else:
+            pre_hedge_futures_delta = float(pre_hedge_contracts) * multiplier
+        if self._is_bucket:
+            # The complete book's currency spot sensitivity, sum h_i m_i F_i/S.
+            # It cannot be reconstructed from one selected multiplier and
+            # count; the hedge_legs frame is the authoritative measurement.
+            post_hedge_futures_delta = self.hedge_book.spot_delta(
+                self._hedge_marks(selected, chain_rows), spot
+            )
+        else:
+            # Unchanged single-contract approximation for the legacy rows.
+            post_hedge_futures_delta = selected_contracts * multiplier
         pre_hedge_delta = product_position_delta + pre_hedge_futures_delta
         post_hedge_delta = product_position_delta + post_hedge_futures_delta
         pre_hedge_gamma = product_position_gamma
@@ -664,7 +1205,7 @@ class ReplayBacktestEngine:
                 "futures_price": futures_price,
                 "futures_ttm": futures_ttm,
                 "futures_multiplier": multiplier,
-                "futures_contracts": self.hedge_position.quantity,
+                "futures_contracts": selected_contracts,
                 "alive": any_alive,
                 "knocked_in": knocked_in,
                 "knocked_out": knocked_out,
@@ -690,7 +1231,7 @@ class ReplayBacktestEngine:
                 "product_position_delta": product_position_delta,
                 "product_position_gamma": product_position_gamma,
                 "pre_hedge_contracts": float(pre_hedge_contracts),
-                "post_hedge_contracts": self.hedge_position.quantity,
+                "post_hedge_contracts": selected_contracts,
                 "futures_multiplier": multiplier,
                 "pre_hedge_futures_delta": pre_hedge_futures_delta,
                 "post_hedge_futures_delta": post_hedge_futures_delta,

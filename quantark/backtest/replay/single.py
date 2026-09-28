@@ -68,6 +68,10 @@ class AutocallableBacktestEngine:
             pnl_explain=config.pnl_explain,
             dividend_roll_policy=config.dividend_roll_policy,
             metadata=config.metadata,
+            record_carry_exposure=config.record_carry_exposure,
+            carry_audit_mode=config.carry_audit_mode,
+            carry_audit_dates=config.carry_audit_dates,
+            carry_risk_settings=config.carry_risk_settings,
         )
         # Honor the single config's explicit futures roll policy.
         self._book_config.hedge.roll_policy = config.roll_policy
@@ -136,6 +140,12 @@ class AutocallableBacktestEngine:
             calibration_records=inner._calibration_records,
             run_info=inner._run_info(),
             explain_frames=inner._explain_frames,
+            # The wrapper deliberately reconstructs legacy rows rather than
+            # returning inner.run(), so every new frame has to be forwarded
+            # here explicitly or it would silently vanish for single runs.
+            hedge_legs=getattr(inner, "_hedge_legs", None),
+            hedge_attribution=getattr(inner, "_hedge_attribution", None),
+            hedge_stresses=getattr(inner, "_hedge_stresses", None),
         )
         records_path = getattr(
             self.config.engine_config.vol_model_calibration, "records_path", None

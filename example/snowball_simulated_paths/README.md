@@ -64,7 +64,62 @@ front-month IM contract and with the longest listed one; 1 bp per side.
 A q-study model whose carry comes from a contract other than the hedge's
 is refused: the simulation inverts the active contract only.
 
-## What a cell measures under each provider
+## How a cell is priced
+
+Every cell is priced by one provider, `per_date`: exact repricing on the PDE
+engine.  Each state is one backward solve from maturity to that state's date,
+on the tracker's aged contract, with that date's own term dividend object.
+Nothing is collapsed to a scalar yield, so the carry models under test reach
+the engine intact.  One provider for all six cells is deliberate: a flat-arm
+provider different from the term-arm provider would make the provider choice
+move with the treatment the study measures.
+
+**Why not the whole-life surface.**  The surface solved one PDE over the
+product's life per `(vol, q, rate)` bucket and read a column per day.  A term
+curve has to be flattened to `q_T` to fit that key, and on 2026-09-14 that
+flattening was 107.34 of the 108.73 bp worst gate gap on `term_flat_q`.  A key
+that holds the curve does not rescue it: the surface's reuse comes from a flat
+market being the same market on every day, while a term curve is
+re-snapshotted each day relative to that day.  Counted on the 2,000 × 275
+batch, the flat key shares 22.7 states per solve and a (day, vol, rate, carry)
+key 1.05.  So the per-date solve costs about what exact repricing costs, and it
+is exact.
+
+**One solve per state.**  Exact repricing used to call `price()` and then
+`calculate_greeks()`, and each ran the full solve.  Phase 0
+(`phase0_single_solve.py`) compared removing the second solve with a solver
+memo or in the provider; the decision and its evidence are in the design note
+`docs/superpowers/specs/2026-09-15-per-date-pde-provider-design.md`.
+
+The mesh is pinned (1601 points, 16 steps a day, step cap 8000, bounds
+0.40–1.60 of the initial spot); the day-zero convergence evidence for it is
+in "Earlier provider" below.
+
+**Engine check.**  Each cell's first 40 bootstrap paths are also repriced on
+exact QUAD and paired with the cell on the same paths.  It is reported, not
+gated.  The fair coupon is solved under `term_flat_q` on QUAD, so a cell's
+day-0 mark is its own carry model's price of that contract on the PDE: the
+carry-model gap (zero only for `term_flat_q`) plus the engine gap.  The
+report's day-0 table separates them against the exact-QUAD check, which
+starts from the same state.
+
+## Checks
+
+- `per_date` is exact: its gate report is zero by construction.
+- The oracle spot check: 3 single paths per bootstrap run through the replay
+  engine at zero tolerance, and the first of them on each exact-QUAD check.
+- The engine check: exact QUAD on each cell's first 40 paths, paired with the
+  cell (reported, not gated).
+
+## Earlier provider: the whole-life surface (2026-09-09 to 2026-09-15)
+
+The study's first fleet provider, kept in the library for flat-carry books.
+It ran the flat arm within its 25 bp gate after the readout fix and the
+pinned mesh below, and could not run the term arms (see "How a cell is
+priced").  The measurements that shaped it stay here because the mesh they
+pinned is the one `per_date` uses.
+
+### What a cell measured under the surface
 
 The bootstrap and stress batches run on the PDE life surface: one solve per
 (vol, q, rate) bucket, read along the path.  A surface is solved at a flat
@@ -144,7 +199,7 @@ mesh is built per distinct spot, and the gate's exact leg and the oracle pay
 it once per state — measured on the 1Y product, 1.07 s on the default
 domain, 0.15 s on 0.6–1.6, 1.08 s on 0.4–2.5.
 
-## Bucket steps
+### Bucket steps
 
 A surface, or a ladder node, is solved at its vol and q bucket centres, so
 half a bucket times the sensitivity is a PV gap the gate sees.  Measured on
@@ -158,16 +213,13 @@ sampled states was 12.7 bp and 0.40 hands.  On real paths vol and carry
 both move daily, so nearly every state is its own bucket until the path
 count is in the thousands: 8 paths needed 942 surface solves.
 
-## Gates and checks
+### Surface checks
 
-- The surface gate: 64 reservoir-sampled states repriced exactly, 25 bp of
-  notional and 2 hands of the hedge.  The ladder gate: 64 states, 10 bp,
-  2 hands.  A cell that misses its budget produces nothing.
-- The oracle spot check: 3 single paths per run through the replay engine
-  with the gate's tolerances; the lifecycle columns and the hedge contract
-  must match exactly, trades within the tolerance are netted per day.
-- The engine check: the first 200 bootstrap paths of every cell on the QUAD
-  spot ladder (0.25% nodes), paired against the same paths on the surface.
+The surface gate repriced 64 reservoir-sampled states exactly against 25 bp
+of notional and 2 hands of the hedge; the ladder gate 64 states, 10 bp,
+2 hands.  A cell that missed its budget produced nothing, and the engine
+check paired each surface cell's first 200 paths with the QUAD spot ladder.
+
 - A near-barrier readout defect, since fixed.  A discrete knock-in
   observation writes a value JUMP onto the grid, and the surface used to read
   and differentiate the event-projected column, which within a cell of the
@@ -203,38 +255,164 @@ count is in the thousands: 8 paths needed 942 surface solves.
 ## Running it
 
 ```bash
-.venv/bin/python example/snowball_simulated_paths/01_build_paths.py            # 2,000 x 275 (--quick: 40 paths)
-.venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py --quick  # two cells, 8 check paths, 1 oracle path
+# stage 1: the banked 40-path batch of 2026-09-09, all six cells, in its own directory
+.venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py \
+    --out-dir output/snowball_simulated_paths/per_date_40 \
+    --paths-dir output/snowball_simulated_paths/paths --workers 6 --batch-paths 7 --resume
+.venv/bin/python example/snowball_simulated_paths/03_report.py \
+    --out-dir output/snowball_simulated_paths/per_date_40 \
+    --data-dir output/snowball_simulated_paths/per_date_40/data
+
+# stage 2: 2,000 paths from the same history cut
+.venv/bin/python example/snowball_simulated_paths/01_build_paths.py \
+    --history-end 2026-09-09 --out-dir output/snowball_simulated_paths/per_date_2000
 nohup caffeinate -i -m -s .venv/bin/python example/snowball_simulated_paths/02_ensemble_fleet.py \
-    --workers 4 --batch-paths 250 --disk-cache --resume > output/snowball_simulated_paths/fleet.log 2>&1 &
-.venv/bin/python example/snowball_simulated_paths/03_report.py
+    --out-dir output/snowball_simulated_paths/per_date_2000 \
+    --workers 12 --batch-paths 50 --resume \
+    > output/snowball_simulated_paths/per_date_2000/fleet.log 2>&1 &
+.venv/bin/python example/snowball_simulated_paths/03_report.py \
+    --out-dir output/snowball_simulated_paths/per_date_2000
 ```
 
-Measured on the quick run: an exact 40-path cell is 40–50 minutes (6,472
-engine calls, one per state), a 5-path stress set 6–7 minutes, an 8-path
-ladder check 15–18 minutes, one oracle path 3–4 minutes.  The 2,000-path
-fleet on exact QUAD would be about 35 hours per cell on one worker; the
-life surface is the provider meant for it, and as of 2026-09-11 it passes
-its gate.
-
-Paths, cells (`cells/<cell>[__stress|__ladder_quad|__exact_quad]/` written
-by `EnsembleResults.to_dir`, with `config.json` and `run.json`),
-`coupon.json` and `fleet_manifest.json` go to
-`output/snowball_simulated_paths/`; the tables and the HTML report go to
-this directory's `data/`.  `--resume` skips a run whose `config.json`
-fingerprint matches, a recorded failure included, and a run interrupted in
-its oracle (results on disk, no `run.json`) reuses its results and runs
-only the oracle.  A run that misses its gate produces no results; it is
-recorded in its `run.json` with `failed` set, the fleet carries on, and the
-report lists it as a failed gate.  `--provider exact` runs the bootstrap
-and stress batches on exact QUAD repricing instead of the surface: no gate
-question, one engine call per state, the term dividend object handed to
-the engine on every call.
+Paths, cells (`cells/<cell>[__stress|__exact_quad|__ladder_quad]/`, each with
+`config.json` and `run.json`), `coupon.json` and `fleet_manifest.json` go to
+the `--out-dir`; `--paths-dir` reads a batch from elsewhere without copying.
+`--resume` skips a run whose `config.json` fingerprint matches, a recorded
+failure included, and a run interrupted in its oracle reuses its results.
+`--history-end` cuts the history at a day: at 2026-09-09 it reproduces the
+banked batch's history, bootstrap and stress fingerprints from the longer
+cache.  `--batch-paths` must be set for `--workers` to take effect; each run
+is batched for its own path count.  Keep it well below `n_paths / workers`:
+`batch_for` caps the batch at one per worker, and at that size a single slow
+batch idles every other worker for the rest of the run — at 2,000 paths and
+12 workers, 170 left 11 workers idle for 80 minutes while 50 held them
+within 4% of each other.  `--disk-cache` is omitted above because the
+committed run predates the key fix in `3eb2157f`; it is safe to pass now,
+and buys little here since cells that differ in carry model, engine or
+hedge contract share no states.  `--provider exact|life_surface|ladder`
+remain available.
 
 ## Results
 
-**The 2,000-path fleet has not been run yet; its numbers will replace this
-section.**  What follows is the quick run of 2026-09-09: 40 bootstrap
+Six cells on 2,000 bootstrap paths and the five stresses, from the
+2026-09-09 start state (history 2023-05-04 to 2026-09-09, 816 days),
+every cell priced by **per-date PDE repricing** — one backward solve from
+maturity to each state's own date, carrying that date's real term
+dividend object.  Fair coupon 37.8254% under `term_flat_q`.  All 18 runs
+passed their gate at 0.00 bp and 0.00 hands, and all 24 replay oracles
+matched at zero tolerance.  Run 2026-09-16 to 2026-09-17.
+
+**Lifecycle** (path-determined, so identical across cells): KO 69.1%,
+KI 25.2%, reaching maturity 30.9%.
+
+**Hedge-cost distributions, 2,000 paths** (bp of notional; ES = mean of
+the 5% loss tail for P&L, of the 5% upper tail for cost-like measures):
+
+| measure | cell | mean | q05 | q50 | q95 | ES |
+|---|---|---|---|---|---|---|
+| terminal P&L | flat_from_hedge front | −324 | −1576 | −252 | 789 | −2332 |
+| | flat_from_hedge far | −66 | −1414 | −45 | 1142 | −2165 |
+| | term_flat_q front | −202 | −1400 | −170 | 884 | −2103 |
+| | term_flat_q far | −41 | −1325 | −25 | 1133 | −2108 |
+| | term_opt_tail front | −190 | −1394 | −166 | 929 | −2095 |
+| | term_opt_tail far | −30 | −1336 | −20 | 1151 | −2104 |
+| daily P&L std | flat_from_hedge front | 218 | 93 | 197 | 428 | 548 |
+| | flat_from_hedge far | 89 | 31 | 84 | 164 | 215 |
+| | term_flat_q front | 91 | 40 | 89 | 146 | 178 |
+| | term_flat_q far | 71 | 32 | 68 | 124 | 154 |
+| | term_opt_tail front | 87 | 37 | 85 | 140 | 171 |
+| | term_opt_tail far | 70 | 31 | 66 | 123 | 153 |
+| variance reduction R² | flat_from_hedge front | 0.40 | 0.08 | 0.41 | 0.68 | |
+| | term_flat_q front | 0.69 | 0.28 | 0.75 | 0.90 | |
+| | term_opt_tail far | 0.80 | 0.56 | 0.83 | 0.95 | |
+| cost | flat_from_hedge front | 30 | 7 | 24 | 75 | 91 |
+| | term_opt_tail far | 15 | 3 | 10 | 42 | 54 |
+
+At 1 bp per side, cost in bp equals turnover by construction.
+
+**Paired against the baseline `flat_from_hedge__front`, same 2,000 paths:**
+
+| variant | terminal mean bp | share > 0 | t | daily std mean bp | share > 0 | t |
+|---|---|---|---|---|---|---|
+| flat_from_hedge far | +258 | 79% | 28.7 | −129 | 0.1% | −65.6 |
+| term_flat_q front | +122 | 66% | 17.2 | −127 | 0.1% | −63.9 |
+| term_flat_q far | +283 | 80% | 29.7 | −146 | 0.1% | −70.7 |
+| term_opt_tail front | +134 | 67% | 17.7 | −131 | 0.1% | −61.8 |
+| term_opt_tail far | +294 | 79% | 29.4 | −148 | 0.2% | −68.5 |
+
+**Two levers, and they compose.**  Holding the carry model fixed, moving
+the hedge from the front contract to the far one is worth +161 bp of
+terminal P&L and −19.6 bp of daily hedge error under `term_flat_q`
+(t 26.5 and −64.6), +160 and −17.0 under `term_opt_tail`.  Holding the
+hedge fixed, the term models cut daily hedge error by 127–131 bp against
+the flat baseline.  Doing both is the best cell in the grid: `term_opt_tail`
+on the far contract cuts daily hedge error from 218 bp to 70 and lifts
+terminal P&L by 294 bp on 79% of paths.  The daily-std improvement is
+near-universal — on 1,998 of 2,000 paths — while the terminal-P&L gain,
+though large in the mean, fails on a fifth to a third of paths.
+
+**A cell's day-0 mark** is its carry model's price of a contract whose
+coupon is fair under `term_flat_q` on QUAD, plus the engine gap:
+`flat_from_hedge` +69.18 bp (front) and −28.43 (far), `term_flat_q`
+−0.29 both, `term_opt_tail` −6.05 both.  The engine gap alone is −0.29 bp
+in all six cells.
+
+**Engine check** (per-date PDE minus exact QUAD on each cell's first 40
+paths; `data/engine_check.csv`):
+
+| cell | terminal P&L bp mean / t | daily std bp mean / t |
+|---|---|---|
+| flat_from_hedge front | +0.14 / 0.08 | −0.01 / −0.36 |
+| flat_from_hedge far | +1.08 / 0.52 | +0.04 / 1.52 |
+| term_flat_q front | −1.74 / −0.80 | +0.00 / 0.03 |
+| term_flat_q far | −8.33 / −2.76 | +0.23 / 2.77 |
+| term_opt_tail front | −1.53 / −0.89 | −0.01 / −0.49 |
+| term_opt_tail far | −0.40 / −0.22 | −0.01 / −0.40 |
+
+Every entry is small against the 122–294 bp effects the study measures —
+at most 8.3 bp, and under 2 bp in five of six cells.  The QUAD reference
+is not itself clean, but re-running it with a forced lattice alignment
+moves these numbers by less than 0.71 bp: see the alignment caveat below.
+
+**Stress** (terminal P&L bp / daily std bp; the designed paths move the
+product, not the hedge choice, so cells agree within tens of bp):
+
+| scenario | flat front | flat far | term_flat_q far | termination |
+|---|---|---|---|---|
+| crash 30% over 20 days into KI | +381 / 2.5 | +486 / 4.2 | +486 / 2.9 | maturity, knocked in |
+| V shape 28% down, back over 40 days | +2382 / 27.6 | +2231 / 28.3 | +2226 / 27.9 | maturity, knocked in |
+| vol spike +15 pts decaying over 40 days | −3225 / 12.4 | −3301 / 12.4 | −3302 / 12.0 | maturity |
+| basis blow-out −5 pts over 10 days | −2763 / 13.6 | −3057 / 12.4 | — | maturity |
+| grind +0.2%/day into KO | −296 / 5.3 | −386 / 4.1 | — | knock out, day 66 |
+
+**Historical runs inside the simulated distribution** (29 inceptions per
+cell, 2023-05 to 2025-09; `data/historical_location.csv`):
+
+| cell | realised terminal bp | pct | realised daily std bp | pct |
+|---|---|---|---|---|
+| flat_from_hedge front | 489 | 84 | 384 | 84 |
+| flat_from_hedge far | 426 | 70 | 86 | 46 |
+| term_flat_q front | 546 | 80 | 57 | 20 |
+| term_flat_q far | 442 | 69 | 53 | 31 |
+| term_opt_tail front | 567 | 78 | 56 | 21 |
+
+Realised inceptions earned more than most simulated paths from this one
+38%-coupon start state, so read the terminal percentile as indicative.
+The hedge-error percentiles carry more: on realised history the flat
+front-contract model was worse than the bootstrap suggests (84th
+percentile of its own distribution) and every term model better (20th to
+31st).
+
+Tables: `data/fleet_cells.json`, `data/fleet_paired.csv`,
+`data/engine_check.csv`, `data/stress_table.csv`,
+`data/historical_location.csv`, `data/fleet_summary.json` (gates and
+oracles).  Report: `data/simulated_paths_report.html`.
+
+### Superseded: the 2026-09-09 quick run
+
+**Recorded before Design B, on exact QUAD, before the ageing fixes of
+2026-09-15 (`8cb0ec67`, `f8987344`).  The section above replaces it.**
+What follows is the quick run of 2026-09-09: 40 bootstrap
 paths and the five stresses from the 2026-09-09 start state (history
 2023-05-04 to 2026-09-09, 816 days; spot 7659.6, ATM vol 26.1%, front IM
 carry 14.0%), two cells (`flat_from_hedge__front`, `term_flat_q__front`),
@@ -357,10 +535,73 @@ gates.  Report: `data/simulated_paths_report.html`.
 
 - One start state, the history's last day, for every simulated path; a
   historical inception's percentile is indicative.
-- Under the surface and the ladder the term models enter through `q_T`
-  only; `--exact-paths` is where the engine receives the term object.
+- The fair coupon is fair under `term_flat_q` on QUAD while cells price
+  their own carry model on the PDE, so a cell's day-0 mark holds a
+  carry-model gap and an engine gap (report, day-0 table).
 - Paired t-statistics treat the simulated paths as independent draws,
   unlike the historical study's overlapping inceptions.
+- **The exact-QUAD reference in the engine check is not clean, though it
+  costs the study at most 0.71 bp.**  With
+  `QuadParams.align_priority="auto"` the lattice pins whichever barrier is
+  nearest spot in log space, so the alignment target changes at
+  `sqrt(KI·KO)` = 0.8789 of the inception spot.  A bumped delta evaluates
+  the base, up and down states separately, so within one 1% bump of that
+  level the three evaluations do not share an alignment and the delta
+  carries the grid change as well as the market change.  Measured on this
+  product by forcing the priority.  Swept across moneyness at one
+  valuation date, outside the window `auto` reproduces a forced branch
+  exactly and inside 0.8709–0.8869 it differs from both by 17.5–20.3
+  index-delta units; those are point values at that date, not a worst
+  case.  Over every in-window state the six check cells actually price,
+  `auto` minus forced `ko` has median 14.7 units, p90 80.5 and maximum
+  137.1 — 0.07, 0.40 and 0.69 of an IM contract (200 index units to a
+  contract).  **Mind the sample.**  The six cells run the same 40 spot
+  paths, so those are 335 distinct states repeated six times, not 2,010
+  independent ones, and consecutive days of one path are near-duplicates
+  besides.  5.85% of the check cells' priced states sit within 1% of that
+  level.  The error looks strongly time-dependent — near zero close to
+  expiry, largest 100–150 days out — but the near-expiry buckets rest on
+  6 states from 2 paths and the peak on 57 from 8, so it is an
+  observation, not a result.  Two mechanisms were tested against it and
+  neither survived: a knocked-in state has only the knock-out left to
+  align to, yet within the 0–20-day bucket knocked-in and live states are
+  both at zero; and the reachability filter runs a 10-standard-deviation
+  envelope (`num_std_devs`), far too wide to drop a knock-out 17% away.  The two forced branches differ by only about 2 units here, so
+  the damage does not come from the branches
+  disagreeing — it comes from mixing them inside one finite difference,
+  which means a product whose branches nearly coincide is no safer.
+  Re-running all six check cells with `--quad-align ko`, which makes every
+  evaluation share one alignment, moves the engine check by −0.71 to
+  +0.65 bp of terminal P&L and at most 0.09 bp of daily std
+  (`data/engine_check_align_ko.csv`).  Two things attenuate it, and the
+  second matters more.  The error is a fraction of a contract — 0.07 at
+  the median, 0.40 at p90 — against a book averaging 35, but that does
+  *not* mean it rounds away: comparing the forced and default runs state
+  by state, the rounded hedge differs on 15.3% of the states inside the
+  window (307 of 2,010 cell-states, so about 51 of 335 distinct ones) and
+  on 1.2% of all states, which is about what those two fractions
+  straddling a rounding boundary would give.
+  What keeps those from mattering is that the hedge rebalances daily, so
+  each one is a one-contract difference for one day that the next
+  rebalance corrects; the error appears and disappears as a path crosses
+  the window and never compounds.  Note the largest engine gap,
+  `term_flat_q__far` at −8.33 bp,
+  **survives** forcing (−8.81 bp, t −3.14): that cell's PDE-QUAD
+  difference is something else, not the alignment.  `align_cell_stretch`
+  (unmerged elsewhere) is the better fix than forcing, since it puts both
+  barriers on nodes instead of pinning around the inconsistency.  The
+  per-date PDE cells the study reports are unaffected either way: they are
+  compared against each other, same engine both sides.
+- `--disk-cache` was unsafe across cells that differ in hedge until
+  `3eb2157f`, and the committed results were produced without it.  The
+  hedge selects the active futures contract and therefore the priced
+  dividend, while `env_key` was built from `(rate, spot, carry row)`
+  only, so a `far` cell read a `front` cell's prices — all three far runs
+  returned the front cell's day-0 marks and finished 3–35× too fast.  The
+  gate could not see it, because it re-prices through the same provider
+  and a poisoned cache satisfies it; the oracle failed on exactly the
+  three corrupt cells.  The contract is now in the key.  Shards written
+  before that commit are stale rather than wrong: they miss.
 - The stress paths are designed, not sampled.
 - The bootstrap's vol is a random walk of daily changes; its dispersion
   over a year exceeds the history's.

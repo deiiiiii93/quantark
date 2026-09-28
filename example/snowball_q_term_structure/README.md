@@ -180,6 +180,150 @@ Per-run frames go under `output/snowball_q_term_structure/` (locally
 excluded from git). Tests: `test/test_snowball_q_term_structure_study.py`
 and `test/test_replay_dividend_source.py`.
 
+## The bucket futures hedge (revised study)
+
+Everything above hedges with ONE futures contract. The revised study adds a
+second question: does holding a position in *every* listed contract, sized
+from the book's sensitivity to each one, hedge the carry curve better than a
+single leg — and does it pay for itself?
+
+Design: [`docs/superpowers/specs/2026-09-09-bucket-futures-hedge-design-revised.md`]
+
+### The 14-cell primary grid
+
+Both supported term models crossed with seven hedge policies:
+
+| Hedge | What it does |
+|---|---|
+| `front` | existing single-contract control, `-D/m`, unchanged |
+| `far` | the same sizing on the longest listed contract |
+| `front_scaled` | front month at `-D S/(m F)`, i.e. spot neutral |
+| `far_scaled` | longest listed at `-D S/(m F)` |
+| `buckets_nodes` | every modelled node neutral; residual spot delta `D_F` |
+| `buckets_far` | spot neutral; the far node keeps `D_F S T_n` |
+| `buckets_spot_parallel` | spot AND parallel rhoq neutral; `(+K, -K)` shape risk |
+
+The two scaled controls exist to separate two effects that a naive
+comparison conflates: correcting the `S/F` scaling, and holding a calendar
+spread. Only the four models with actual futures coordinates
+(`term_flat_q`, `term_flat_fwd`) can carry a bucket policy; the flat and
+option-forward models have no nodes to hedge and are refused at config time.
+
+### Running it
+
+```bash
+# 0) numerical validation, offline, no vendor history needed (≈ 2 s)
+.venv/bin/python example/snowball_q_term_structure/05_bucket_hedge_validation.py \
+    --synthetic --out-dir output/bucket_hedge_v2/validation
+
+# 1) one historical date, serialised so it can be replayed exactly
+.venv/bin/python example/snowball_q_term_structure/05_bucket_hedge_validation.py \
+    --historical-dates 2025-03-03 \
+    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/validation
+
+# 2) a one-inception subset of the primary grid, with daily audits
+.venv/bin/python example/snowball_q_term_structure/02_backtest_fleet.py \
+    --study-grid buckets --max-inceptions 1 --workers 2 \
+    --carry-audit-mode daily --record-carry-exposure \
+    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/subset --resume
+
+# 3) the full primary grid (14 cells per eligible inception)
+nohup caffeinate -i -m -s .venv/bin/python \
+    example/snowball_q_term_structure/02_backtest_fleet.py \
+    --study-grid buckets --workers 4 --record-carry-exposure \
+    --carry-audit-mode daily \
+    --out-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full \
+    --resume > bucket_fleet.log 2>&1 &
+
+# 4) aggregate — stage 06, NOT stage 03
+.venv/bin/python example/snowball_q_term_structure/06_bucket_hedge_report.py \
+    --run-dir example/snowball_q_term_structure/data/bucket_hedge_v2/full/runs \
+    --out-dir example/snowball_q_term_structure/data
+```
+
+Two things that are easy to get wrong here. Stage 03 aggregates the SIX-MODEL
+study and writes `fleet_*`; stage 06 aggregates this one and writes `bucket_*`.
+Pointing stage 03 at a bucket run overwrites the other study's published
+results with cells it never ran, because `--data-dir` defaults to `data/`.
+And `--run-dir` for stage 06 is the `runs/` subdirectory, not the fleet
+directory above it.
+
+Add `--align-cell-stretch 0.02` to step 3 to price on the barrier-aligned
+engine. Without it the grid pins whichever barrier is nearest spot, the
+alignment target flips at `sqrt(KI*KO)`, and delta is discontinuous there;
+see `docs/bucket-futures-hedge/gates.md`.
+
+`--study-grid` defaults to `legacy`, so every command in the section above
+runs exactly the cells it always did. An explicit `--cells` overrides the
+grid and labels the output a subset.
+
+### Artifacts
+
+A revised run writes eight frames per cell instead of five:
+`states`, `greeks`, `trades`, `rebalances`, `actions`, plus `hedge_legs`,
+`hedge_attribution` and `hedge_stresses`; and two JSON files,
+`run_config.json` (fully resolved strategy, numerical, source, notional,
+schedule and stress settings, plus a content digest of the pricing modules)
+and `audit_summary.json` (measured / pass / fail / inconclusive counts).
+
+They land under a **new** versioned directory, `data/bucket_hedge_v2/`. The
+original study's artifacts are never overwritten and remain readable: a
+legacy run loads with `audit_coverage="not_available"`, which is a distinct
+state from "audits ran and failed".
+
+The validation stage writes `validation_manifest.json`,
+`input_snapshots.json`, `price_ladder.csv`, `greek_ladder.csv`,
+`policy_holdings.csv`, `direct_audits.csv`, `stress_results.csv` and
+`validation_summary.md`.
+
+### Resume and failure
+
+Resume needs a matching fingerprint, `status="completed"`, the right format
+version, every required file, and measured audit coverage when the task
+asked for audits. A legacy artifact therefore cannot stand in for an
+audited cell, and a run that completed with a failed audit stays available
+for diagnosis but can never be reused as a passing result.
+
+A worker failure writes `failure.json` *beside* the completed run, never
+over it, with the date, objective, input fingerprint, an error category and
+the traceback. The categories are distinct on purpose:
+
+| Category | Retry? |
+|---|---|
+| `missing_price` | only after fixing the data |
+| `infeasible_hedge` | no — investigate the objective |
+| `numeric_audit` | no — convergence analysis |
+
+### Reading the output
+
+Four questions are answered separately, and none is inferred from another:
+
+1. **Numerical validity** — did the independent repricing agree, and over
+   how much of the run? A sampled run cannot report daily coverage.
+2. **Objective achieved** — were the policy's own targets met, ideally and
+   then actually after rounding and skipped trades?
+3. **Joint mitigation** — did RMS spot-shock *and* RMS parallel-rhoq
+   exposure both fall?
+4. **Broader carry mitigation** — does gross nodal exposure support it too,
+   and do the unquoted tail and shape scenarios?
+5. **Economic comparison** — paired realised P&L variability, tail loss and
+   costs against the controls, with an interval.
+
+Zero parallel rhoq alone never earns the fourth. A policy can achieve its
+two-factor objective and still lose on shape risk or turnover; that is a
+valid study conclusion, not a failure of the implementation.
+
+### Limitations
+
+- The primary policy needs two distinct eligible tenors, always.
+- Every risk coordinate must be a contract the hedge can actually trade;
+  option-implied forwards are a different instrument.
+- Tail and interpolation-shape risk is *unhedgeable* with listed futures
+  and is reported separately, unchanged, however neutral the nodes are.
+- Uncertainty uses paired calendar-block resampling over overlapping
+  inceptions. Do not read the old per-run t-statistic as independent
+  evidence.
+
 ## Engine hook
 
 `AutocallableEngineConfig.dividend_source` (default `None` = the historical
@@ -526,7 +670,54 @@ daily far-basis change and see whether the residual is basis-driven at
 all; if it is, the replay engine needs one hedge position per contract
 (out of scope, see the caveats).
 
-### 6. Caveats
+### 6. Does the bucket hedge pay for itself? (stages 02, 05-06)
+
+406 cells: 29 inceptions x 14 cells, priced on the barrier-aligned engine
+(`--align-cell-stretch 0.02`) with a daily carry audit, 26.8 hours. Paired by
+inception, because every cell of one inception sells the SAME contract on the
+same spot path with the same vol channel, rate and cost model.
+
+Terminal P&L difference, bucket policy minus its single-contract control, in
+bp of notional (t in brackets):
+
+| Model | Bucket policy | vs `front` | vs `far` |
+|---|---|---:|---:|
+| `term_flat_q` | `buckets_nodes` | -186.9 (-1.30) | -83.4 (-0.62) |
+| `term_flat_q` | `buckets_far` | -137.0 (-4.69) | -33.6 (-1.76) |
+| `term_flat_q` | `buckets_spot_parallel` | -238.5 (-4.90) | -135.1 (-3.75) |
+| `term_flat_fwd` | `buckets_nodes` | -214.1 (-3.82) | -113.6 (-2.23) |
+| `term_flat_fwd` | `buckets_far` | -194.4 (-4.77) | -93.9 (-3.26) |
+| `term_flat_fwd` | `buckets_spot_parallel` | -197.4 (-4.80) | -96.9 (-3.30) |
+
+**All twelve are negative and nine reach significance.** The bucket hedge cost
+between 34 and 239 bp against simply holding one contract, and the extra
+turnover bought nothing: daily tracking error moves by -5.6 to +1.6 bp on
+every cell except `buckets_nodes`, which is WORSE by 21 to 25 bp.
+
+Read it as "the extra exposure and turnover were not rewarded over this
+history", not as "the decomposition is wrong about the risk it names". These
+books deliberately hold different risk: a `nodes` book is MEANT to retain the
+`D_F` spot delta, as Gate A established. Terminal P&L standard deviation is
+541 to 631 bp across every policy, so a 34-to-239 bp mean difference is a
+consistent drag well inside one path's noise; the pairing is what makes it
+visible.
+
+**The audit over the full grid**: 52,892 pass, 0 fail, 14 inconclusive, 406
+not measured (terminal dates). Worst `abs(R)+E` 0.019866 against the 0.01-hand
+tolerance, on 2025-06-30; worst net-delta audit error 3.2e-12 hands. The 14
+inconclusive rows are two market states times seven cells, and they are the
+matched spot ladder stopping before its refinement allowance fits the budget
+rather than the identity breaking — extending the ladder converges them. The
+cause is the readout staircase, a separate defect.
+
+An earlier run of this grid on the unaligned engine reported 14 identity
+FAILURES, all one market state, and that is what found the barrier-alignment
+defect. Re-run with the fix the failures are gone and the economics are
+unchanged: every paired gap above moves by at most 1.35 bp. The verdict never
+depended on the defect, which is worth knowing precisely because it was not
+obvious in advance.
+
+### 7. Caveats
 
 - One product, one underlying, one 3.3-year window of one regime (a deep,
   volatile IM discount); inception windows overlap, so the paired samples

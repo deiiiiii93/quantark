@@ -1,0 +1,25 @@
+model,bucket,regime,mean,count
+term_flat_fwd,buckets_far,q gap < 0 (premium),21.85772287272738,264
+term_flat_fwd,buckets_far,0..5%,5.392233103797511,395
+term_flat_fwd,buckets_far,5..10%,1.508141635068527,730
+term_flat_fwd,buckets_far,> 10% (deep discount),-3.15544663426128,1868
+term_flat_fwd,buckets_nodes,q gap < 0 (premium),14.468884766666774,264
+term_flat_fwd,buckets_nodes,0..5%,4.6341355037975065,395
+term_flat_fwd,buckets_nodes,5..10%,0.7636852032877077,730
+term_flat_fwd,buckets_nodes,> 10% (deep discount),-2.7229922248394374,1868
+term_flat_fwd,buckets_spot_parallel,q gap < 0 (premium),21.192582260606162,264
+term_flat_fwd,buckets_spot_parallel,0..5%,5.277666612658268,395
+term_flat_fwd,buckets_spot_parallel,5..10%,1.4527939747945549,730
+term_flat_fwd,buckets_spot_parallel,> 10% (deep discount),-3.1352498989293722,1868
+term_flat_q,buckets_far,q gap < 0 (premium),18.93865760606067,264
+term_flat_q,buckets_far,0..5%,4.295501863291126,395
+term_flat_q,buckets_far,5..10%,1.3570847232877077,730
+term_flat_q,buckets_far,> 10% (deep discount),-2.323236574304099,1868
+term_flat_q,buckets_nodes,q gap < 0 (premium),40.074453209091,264
+term_flat_q,buckets_nodes,0..5%,12.42285428455697,395
+term_flat_q,buckets_nodes,5..10%,4.86235148602743,730
+term_flat_q,buckets_nodes,> 10% (deep discount),-5.514465614132798,1868
+term_flat_q,buckets_spot_parallel,q gap < 0 (premium),23.946062993939485,264
+term_flat_q,buckets_spot_parallel,0..5%,5.495439461265823,395
+term_flat_q,buckets_spot_parallel,5..10%,1.6174877972603108,730
+term_flat_q,buckets_spot_parallel,> 10% (deep discount),-3.2488560278372964,1868

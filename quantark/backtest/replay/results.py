@@ -13,6 +13,28 @@ import pandas as pd
 
 from quantark.util.io import atomic_write_json
 
+from .schema import (
+    HEDGE_ATTRIBUTION_COLUMNS,
+    HEDGE_LEG_COLUMNS,
+    HEDGE_STRESS_COLUMNS,
+)
+
+
+def _risk_frame(rows, columns, *, indexed: bool) -> "pd.DataFrame":
+    """A carry risk frame with FIXED columns, even when it has no rows.
+
+    ``_frame`` above derives its columns from the rows, which is right for
+    the legacy frames but would make an empty risk frame column-less: a
+    reader could not then tell "no exposure" from "never measured".  This
+    helper is separate so the legacy behaviour is untouched.
+
+    ``indexed`` follows each result class's own convention: the single
+    result indexes by date, the book result keeps ``date`` as a column.
+    """
+    frame = pd.DataFrame(rows, columns=list(columns))
+    frame["date"] = pd.to_datetime(frame["date"])
+    return frame.set_index("date") if indexed else frame
+
 
 class AutocallableBacktestResults:
     """DataFrame-oriented backtest result container."""
@@ -32,8 +54,17 @@ class AutocallableBacktestResults:
         calibration_records: Optional[list[dict[str, Any]]] = None,
         run_info: Optional[dict[str, Any]] = None,
         explain_frames=None,
+        hedge_legs=None,
+        hedge_attribution=None,
+        hedge_stresses=None,
     ) -> None:
         self.config = config
+        # Carry risk frames: empty with fixed columns when recording is off,
+        # so a reader never has to guess whether a missing column means "no
+        # exposure" or "never measured".
+        self._hedge_legs = [dict(r) for r in (hedge_legs or [])]
+        self._hedge_attribution = [dict(r) for r in (hedge_attribution or [])]
+        self._hedge_stresses = [dict(r) for r in (hedge_stresses or [])]
         self._run_info = dict(run_info or {})
         self._states = states
         self._greeks = greeks
@@ -55,6 +86,23 @@ class AutocallableBacktestResults:
             df[index] = pd.to_datetime(df[index])
             df = df.set_index(index)
         return df
+
+    @property
+    def hedge_legs_df(self) -> pd.DataFrame:
+        """One row per date and futures coordinate, held or not."""
+        return _risk_frame(self._hedge_legs, HEDGE_LEG_COLUMNS, indexed=True)
+
+    @property
+    def hedge_attribution_df(self) -> pd.DataFrame:
+        """One daily exposure and P&L-attribution row."""
+        return _risk_frame(
+            self._hedge_attribution, HEDGE_ATTRIBUTION_COLUMNS, indexed=True
+        )
+
+    @property
+    def hedge_stresses_df(self) -> pd.DataFrame:
+        """One row per scheduled finite scenario."""
+        return _risk_frame(self._hedge_stresses, HEDGE_STRESS_COLUMNS, indexed=True)
 
     @property
     def explain_df(self) -> pd.DataFrame:
@@ -221,8 +269,12 @@ class AutocallableBacktestResults:
 class BookBacktestResults:
     def __init__(self, *, config, states, greeks, rebalances, trades, actions,
                  daily_event_summary, event_probabilities, surfaces, products_meta,
-                 calibration_records=None, run_info=None, explain_frames=None):
+                 calibration_records=None, run_info=None, explain_frames=None,
+                 hedge_legs=None, hedge_attribution=None, hedge_stresses=None):
         self.config = config
+        self._hedge_legs = [dict(r) for r in (hedge_legs or [])]
+        self._hedge_attribution = [dict(r) for r in (hedge_attribution or [])]
+        self._hedge_stresses = [dict(r) for r in (hedge_stresses or [])]
         self._states = states
         self._greeks = greeks
         self._rebalances = rebalances
@@ -264,6 +316,20 @@ class BookBacktestResults:
     def trades_df(self): return self._frame(self._trades)
     def actions_df(self): return self._frame(self._actions)
     def daily_event_summary_df(self): return self._frame(self._daily_event_summary)
+
+    def hedge_legs_df(self):
+        """One row per date and futures coordinate, held or not."""
+        return _risk_frame(self._hedge_legs, HEDGE_LEG_COLUMNS, indexed=False)
+
+    def hedge_attribution_df(self):
+        """One daily exposure and P&L-attribution row."""
+        return _risk_frame(
+            self._hedge_attribution, HEDGE_ATTRIBUTION_COLUMNS, indexed=False
+        )
+
+    def hedge_stresses_df(self):
+        """One row per scheduled finite scenario."""
+        return _risk_frame(self._hedge_stresses, HEDGE_STRESS_COLUMNS, indexed=False)
     def event_probability_df(self): return self._frame(self._event_probabilities)
     def surfaces_df(self): return self._frame(self._surfaces)
 

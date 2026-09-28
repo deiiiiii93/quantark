@@ -38,6 +38,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _common as C  # noqa: E402
+import _bucket_analysis as BA  # noqa: E402
 
 MEASURES: Tuple[Tuple[str, str, str], ...] = (
     # key, label, unit
@@ -58,6 +59,73 @@ PAIRED_KEYS = tuple(k for k, _, _ in MEASURES)
 # ---------------------------------------------------------------------------
 # Load
 # ---------------------------------------------------------------------------
+
+
+def carry_rows(run: Dict[str, Any], summary: Dict[str, Any]) -> Dict[str, Any]:
+    """The carry columns of one run, or an explicit unavailable marker.
+
+    A run without the frames reports that its risk audit is UNAVAILABLE.  It
+    must never contribute zeros, which would read as "measured and neutral".
+    """
+    coverage = run.get("audit_summary") or {"audit_coverage": "not_available"}
+    if run.get("run_format") != C.RUN_FORMAT_CARRY:
+        return {
+            "audit_coverage": "not_available",
+            "audits_passed": None,
+            "net_spot_1pct_bp_rms": float("nan"),
+            "product_spot_1pct_bp_rms": float("nan"),
+            "net_parallel_rhoq_bp_rms": float("nan"),
+            "product_parallel_rhoq_bp_rms": float("nan"),
+            "net_gross_rhoq_bp_rms": float("nan"),
+            "product_gross_rhoq_bp_rms": float("nan"),
+            "gross_contracts_mean": float("nan"),
+            "turnover_contracts_total": float("nan"),
+        }
+    attribution = run["hedge_attribution"]
+    notional = float(summary["notional"])
+    spot = attribution.get("net_delta_hands")
+    product_spot = attribution.get("product_delta_hands")
+    multiplier = float(
+        attribution.get("reference_multiplier", pd.Series([200.0])).iloc[0]
+    )
+    spot_level = run["states"]["spot"] if "spot" in run["states"] else None
+
+    def spot_bp(hands):
+        if hands is None or spot_level is None:
+            return [float("nan")]
+        currency = hands.astype(float) * multiplier
+        return (100.0 * currency * spot_level.astype(float) / notional).tolist()
+
+    return {
+        "audit_coverage": coverage.get("audit_coverage", "not_available"),
+        "audits_passed": coverage.get("all_measured_passed"),
+        "audit_by_status": coverage.get("by_status", {}),
+        "net_spot_1pct_bp_rms": BA.rms(spot_bp(spot)),
+        "product_spot_1pct_bp_rms": BA.rms(spot_bp(product_spot)),
+        "net_parallel_rhoq_bp_rms": BA.rms(
+            attribution.get("net_rhoq_bp", pd.Series(dtype=float)).tolist()
+        ),
+        "product_parallel_rhoq_bp_rms": BA.rms(
+            attribution.get("product_rhoq_bp", pd.Series(dtype=float)).tolist()
+        ),
+        "net_gross_rhoq_bp_rms": BA.rms(
+            attribution.get("net_rhoq_gross_bp", pd.Series(dtype=float)).tolist()
+        ),
+        "product_gross_rhoq_bp_rms": BA.rms(
+            attribution.get("product_rhoq_gross_bp", pd.Series(dtype=float)).tolist()
+        ),
+        "gross_contracts_mean": float(
+            attribution.get("gross_contracts", pd.Series(dtype=float)).mean()
+        ),
+        "turnover_contracts_total": float(
+            attribution.get("turnover_contracts", pd.Series(dtype=float)).sum()
+        ),
+        "unquoted_stress_max_loss": (
+            float(run["hedge_stresses"]["book_pnl"].min())
+            if len(run.get("hedge_stresses", []))
+            else float("nan")
+        ),
+    }
 
 
 def load_fleet(run_dir: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
@@ -91,6 +159,7 @@ def load_fleet(run_dir: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
                 "final_hedge_pnl_bp": summary["final_hedge_pnl"] / summary["notional"] * 1e4,
                 "elapsed_seconds": summary.get("elapsed_seconds"),
                 **measures,
+                **carry_rows(run, summary),
             }
         )
     if not rows:
@@ -208,7 +277,60 @@ def aggregate(run_dir: Path, data_dir: Path) -> Dict[str, Any]:
         "per_run": rows,
         "paired": paired,
         "static": static,
+        "carry_audit": carry_audit_summary(rows),
     }
+
+
+def carry_audit_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Per-cell audit coverage and the risk ratios, or "unavailable".
+
+    Cells whose runs carry no risk frames are listed by name rather than
+    dropped, so a report never looks complete because the missing half was
+    quietly excluded.
+    """
+    by_cell: Dict[str, Any] = {}
+    unavailable = []
+    for cell in sorted({r["cell"] for r in rows}):
+        cell_rows = [r for r in rows if r["cell"] == cell]
+        if all(r.get("audit_coverage") == "not_available" for r in cell_rows):
+            unavailable.append(cell)
+            continue
+        spot = BA.rms_ratio(
+            [r["net_spot_1pct_bp_rms"] for r in cell_rows],
+            [r["product_spot_1pct_bp_rms"] for r in cell_rows],
+            budget=1e-6,
+        )
+        parallel = BA.rms_ratio(
+            [r["net_parallel_rhoq_bp_rms"] for r in cell_rows],
+            [r["product_parallel_rhoq_bp_rms"] for r in cell_rows],
+            budget=1e-6,
+        )
+        gross = BA.rms_ratio(
+            [r["net_gross_rhoq_bp_rms"] for r in cell_rows],
+            [r["product_gross_rhoq_bp_rms"] for r in cell_rows],
+            budget=1e-6,
+        )
+        joint = BA.joint_mitigation(spot, parallel)
+        broader = BA.broader_carry_mitigation(joint, gross, scenario_losses={})
+        by_cell[cell] = {
+            "runs": len(cell_rows),
+            "coverage": sorted({str(r.get("audit_coverage")) for r in cell_rows}),
+            "all_audits_passed": all(
+                bool(r.get("audits_passed")) for r in cell_rows
+            ),
+            "spot_ratio": spot.ratio,
+            "parallel_ratio": parallel.ratio,
+            "gross_ratio": gross.ratio,
+            "joint_mitigation": joint.status,
+            "broader_carry_mitigation": broader.status,
+            "gross_contracts_mean": float(
+                np.nanmean([r["gross_contracts_mean"] for r in cell_rows])
+            ),
+            "turnover_contracts_total": float(
+                np.nansum([r["turnover_contracts_total"] for r in cell_rows])
+            ),
+        }
+    return {"by_cell": by_cell, "risk_audit_unavailable": unavailable}
 
 
 def write_tables(agg: Dict[str, Any], data_dir: Path) -> None:

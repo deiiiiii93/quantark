@@ -299,6 +299,13 @@ class SnowballQuadEngine(BaseEngine):
                 if active and record.barrier is not None
             ],
         )
+        barrier_logs = self._barrier_logs(
+            spot,
+            [record.barrier for record in ko_records],
+            ki_barrier_continuous
+            if ki_barrier_continuous is not None
+            else [record.barrier for record in ki_records],
+        )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
@@ -311,6 +318,8 @@ class SnowballQuadEngine(BaseEngine):
             vol_max=vol_max_val,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
+            barrier_logs=barrier_logs,
+            cell_stretch=self._resolve_align_cell_stretch(),
             integration_rule=self.params.integration_rule,
             fft_padding_factor=fft_padding_factor,
             fft_filter_alpha=fft_filter_alpha,
@@ -863,6 +872,13 @@ class SnowballQuadEngine(BaseEngine):
                 if active and record.barrier is not None
             ],
         )
+        barrier_logs = self._barrier_logs(
+            spot,
+            [record.barrier for record in ko_records],
+            ki_barrier_continuous
+            if ki_barrier_continuous is not None
+            else [record.barrier for record in ki_records],
+        )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
@@ -875,6 +891,8 @@ class SnowballQuadEngine(BaseEngine):
             vol_max=vol_max_val,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
+            barrier_logs=barrier_logs,
+            cell_stretch=self._resolve_align_cell_stretch(),
             integration_rule=self.params.integration_rule,
             fft_padding_factor=fft_padding_factor,
             fft_filter_alpha=fft_filter_alpha,
@@ -2643,6 +2661,44 @@ class SnowballQuadEngine(BaseEngine):
         if priority is None:
             return "auto"
         return str(priority).lower()
+
+    def _resolve_align_cell_stretch(self) -> Optional[float]:
+        stretch = getattr(self.params, "align_cell_stretch", None)
+        return None if stretch is None else float(stretch)
+
+    @staticmethod
+    def _barrier_logs(spot: float, *barrier_groups) -> tuple[float, ...]:
+        """Every barrier level the lattice should resolve, in log-moneyness.
+
+        Deliberately the CONTRACTUAL set, not the reachability-filtered one
+        that picks the alignment target. The cell width derived from these
+        must not move when a remote knock-out flips reachable across a spot
+        bump, or the cure would reintroduce the discontinuity it is for.
+        Separations are differences of these logs, so the spot they are
+        quoted against cancels and the result is spot-independent.
+        """
+        logs: list[float] = []
+        for group in barrier_groups:
+            if group is None:
+                continue
+            if isinstance(group, (list, tuple, np.ndarray)):
+                values = list(group)
+            else:
+                values = [group]
+            for barrier in values:
+                if barrier is None:
+                    continue
+                try:
+                    level = float(barrier)
+                except (TypeError, ValueError):
+                    continue
+                if level <= 0.0:
+                    continue
+                try:
+                    logs.append(safe_log(level / spot))
+                except Exception:
+                    continue
+        return tuple(sorted(set(logs)))
 
     def _select_alignment_log(
         self,

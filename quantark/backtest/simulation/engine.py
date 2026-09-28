@@ -254,7 +254,12 @@ class EnsembleBacktestEngine:
         day 0; each on its own afterwards), never a path with another spot.
         """
         n_paths = paths.n_paths
-        env_key = row_keys(np.column_stack([rate, paths.spot[:, d], paths.carry[:, d, :]]))
+        # The active contract is in the key because ``dividend_yield_for_day``
+        # inverts THAT contract: two cells whose roll policies differ price
+        # different dividends off one market row, and a shared disk cache
+        # would otherwise serve one cell's states to the other.
+        env_key = row_keys(np.column_stack([rate, paths.spot[:, d], paths.carry[:, d, :]]),
+                           salt=str(code).encode())
         div_yield: List[Any] = [None] * n_paths
         basis = np.zeros(n_paths)
         implied_q = np.zeros(n_paths)

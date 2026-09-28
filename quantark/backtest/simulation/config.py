@@ -195,6 +195,18 @@ class EnsembleConfig:
             )
         if self.strategy is None:
             raise ValidationError("EnsembleConfig.strategy is required")
+        from quantark.backtest.strategy.futures_bucket_strategy import (
+            FuturesBucketHedgeStrategy,
+        )
+
+        if isinstance(self.strategy, FuturesBucketHedgeStrategy):
+            # Rejected BEFORE the scalar sizing path below, which would call
+            # a multi-leg strategy through the single-contract protocol.
+            raise ValidationError(
+                "the simulated-path engine sizes one contract per day; a "
+                "multi-leg bucket hedge needs the historical replay, whose "
+                "actual futures chain supplies its risk coordinates"
+            )
         source = getattr(self.engine_config, "dividend_source", None)
         if source not in (None, "active_contract", "futures_curve"):
             raise ValidationError(

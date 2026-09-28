@@ -64,18 +64,26 @@ def bucket_centre(values: np.ndarray, step: Optional[float]) -> np.ndarray:
     return np.round(np.asarray(values, dtype=np.float64) / float(step)) * float(step)
 
 
-def row_keys(rows: np.ndarray) -> np.ndarray:
+def row_keys(rows: np.ndarray, *, salt: bytes = b"") -> np.ndarray:
     """A stable int64 identity per row of a 2-D float64 array.
 
     Used for state channels that are defined by several numbers at once --
     a whole dividend curve, say -- where one float cannot stand for the
     state.  Equal bytes give equal keys, on any machine and in any process.
+
+    ``salt`` carries a non-numeric input that the same row would otherwise
+    hide: the day's active futures contract, whose inversion fixes the
+    dividend, is a code rather than a number.  It is mixed into every row,
+    so it separates two runs without regrouping the rows within either.
     """
     data = _normalised(np.atleast_2d(np.asarray(rows, dtype=np.float64)))
     out = np.empty(data.shape[0], dtype=np.int64)
     for i in range(data.shape[0]):
-        digest = hashlib.blake2b(data[i].tobytes(), digest_size=8).digest()
-        out[i] = int.from_bytes(digest, "big", signed=True)
+        h = hashlib.blake2b(digest_size=8)
+        h.update(salt)
+        h.update(b"\x00")
+        h.update(data[i].tobytes())
+        out[i] = int.from_bytes(h.digest(), "big", signed=True)
     return out
 
 
@@ -90,11 +98,14 @@ class DayStates(NamedTuple):
     records.
 
     ``env_key`` identifies everything the pricing environment holds beyond
-    vol: the rate, the spot and the day's carry curve, which between them
-    fix the dividend object AND the basis yield (spot is in it because the
-    replay's basis arithmetic is not spot-free at the last ulp).  Keying on
-    those inputs rather than on the objects keeps the cache exact without
-    asking a dividend curve to hash itself.
+    vol: the rate, the spot, the day's carry curve AND the active futures
+    contract, which between them fix the dividend object and the basis
+    yield (spot is in it because the replay's basis arithmetic is not
+    spot-free at the last ulp; the contract is in it because the dividend
+    comes from inverting that contract, so two hedge policies price
+    different dividends off one market row).  Keying on those inputs
+    rather than on the objects keeps the cache exact without asking a
+    dividend curve to hash itself.
     """
 
     day_index: int
@@ -132,8 +143,15 @@ def state_row(states: DayStates, n: int) -> DayStates:
 class StateKey:
     """What a priced state is identified by (spec 7.4).
 
-    Nothing about the hedge, the cost model or the strategy is in the key,
-    so cells that differ only there share cache entries.
+    Nothing about the cost model or the strategy is in the key, so cells
+    that differ only there share cache entries.  The hedge is not in it
+    either, but its choice of futures contract reaches ``env_key``: the
+    dividend is implied by inverting the ACTIVE contract, so two roll
+    policies price different states off one market row and must not share
+    an entry.  A key blind to that served a far-contract cell the
+    front-contract cell's prices through a shared disk cache, which the
+    provider gate cannot see (it re-prices through the same provider) and
+    the replay oracle can.
     """
 
     product_fingerprint: str

@@ -34,6 +34,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close
 
+from .carry_context import SUPPORTED_EXTRAPOLATIONS, CarryCurveContext
 from .dividend_source import term_dividend_yield
 from .engine_factory import create_mc_event_stats_engine
 from .market import (
@@ -165,6 +166,13 @@ class ProductReplay:
         # folds this into the per-day state row when present.
         self.last_surface_provenance: Optional[dict[str, Any]] = None
 
+        # The carry scenario source of the most recent build_env call, for the
+        # two supported actual-futures conventions only (None otherwise).  The
+        # engine passes ONE day context explicitly to every product's risk
+        # call; it must not read this attribute off another replay, because a
+        # shared environment is built through the first replay alone.
+        self.last_carry_context: Optional[CarryCurveContext] = None
+
         # date_resolver captures self; do not replace self.market_data
         # post-construction or the resolver will keep using the old one.
         self._tracker = AutocallableLifecycleTracker(
@@ -196,6 +204,7 @@ class ProductReplay:
         market: dict[str, float],
         selected,
         dividend_row=None,
+        allow_flat_carry_fallback: bool = False,
     ):
         """The day's pricing environment.
 
@@ -206,6 +215,9 @@ class ProductReplay:
         historical behaviour.  When the two differ the day costs a second
         inversion, and the returned ``implied_q`` is the dividend row's.
         """
+        # Yesterday's carry source must not survive into a day that has no
+        # eligible chain or a different dividend source.
+        self.last_carry_context = None
         expiry = pd.Timestamp(selected["expiry_date"]).normalize()
         futures_ttm = (expiry - date).days / 365.0
         basis_yield, hedge_implied_q = derive_implied_dividend_yield(
@@ -228,7 +240,15 @@ class ProductReplay:
         vol_surface, div_yield = self._vol_and_dividend(date, market, pricing_q)
         rate_curve = FlatRateCurve(rate=market["rate"])
         if self._dividend_source() in ("futures_curve", "surface_forwards"):
-            div_yield = self._term_dividend(date, market, rate_curve)
+            try:
+                div_yield = self._term_dividend(date, market, rate_curve)
+            except ValidationError:
+                # Only a caller that knows the whole book is already dead may
+                # ask for this: settling known cash and discounting a pending
+                # receivable need spot, rates and the date, not live carry.
+                if not allow_flat_carry_fallback:
+                    raise
+                self.last_carry_context = None
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=market["spot"], asset_name=self.underlying),
             vol_surface=vol_surface,
@@ -288,6 +308,19 @@ class ProductReplay:
             extrapolation = getattr(
                 self.engine_config, "futures_curve_extrapolation", "flat_q"
             )
+            if extrapolation in SUPPORTED_EXTRAPOLATIONS:
+                # Every risk scenario for the day is a transformation of this
+                # context, so the sampler and the pricer share one builder.
+                context = CarryCurveContext(
+                    quotes=tuple(quotes),
+                    spot=float(market["spot"]),
+                    rate_curve=rate_curve,
+                    extrapolation=extrapolation,
+                    underlying=self.underlying or "index",
+                    valuation_date=date,
+                )
+                self.last_carry_context = context
+                return context.dividend()
             artifact = (
                 self._surface_artifact(date, "surface_forward_carry")
                 if extrapolation == "surface_forward_carry"
@@ -468,6 +501,68 @@ class ProductReplay:
         from a failed price manufactured phantom unwind trades.
         """
         return dict(engine.calculate_greeks(product, env))
+
+    # ------------------------------------------------------------------
+    # Carry risk adapter
+    # ------------------------------------------------------------------
+
+    def carry_price_callback(
+        self, product: Any, env: PricingEnvironment, *, engine: BaseEngine
+    ):
+        """``price_at(spot, dividend)`` over one fixed product/engine state.
+
+        Every carry scenario prices through this one closure, so the vol
+        surface, rate curve, basis yield, valuation date, product barriers and
+        lifecycle snapshot are shared by object identity across the whole bump
+        set.  It deliberately does not touch the engine factory, the daily
+        calibration or the lifecycle tracker: a bump that re-derived any of
+        those would measure the rebuild, not the risk.
+        """
+
+        def price_at(spot: float, dividend: Any) -> float:
+            return float(
+                engine.price(
+                    product,
+                    _env_with(
+                        env,
+                        spot=float(spot),
+                        div_yield=dividend,
+                        underlying=self.underlying,
+                    ),
+                )
+            )
+
+        return price_at
+
+    def measure_carry_risk(
+        self,
+        product: Any,
+        env: PricingEnvironment,
+        *,
+        context,
+        engine: BaseEngine,
+        delta_q: float,
+        points: float,
+        base_price: Optional[float] = None,
+    ):
+        """This product's UNIT-position carry buckets on ``context``.
+
+        ``context`` is passed in explicitly: a shared environment is built
+        through the first replay alone, so reading ``last_carry_context`` off
+        another replay would leave every later product without buckets.  The
+        engine aggregates the returned unit Greeks by position quantity.
+        """
+        # Local import: keeps ``carry_risk`` free to grow a dependency on this
+        # module's env helpers without closing a cycle.
+        from .carry_risk import measure_product_carry_risk
+
+        return measure_product_carry_risk(
+            self.carry_price_callback(product, env, engine=engine),
+            context,
+            delta_q=delta_q,
+            points=points,
+            base_price=base_price,
+        )
 
     def record_surfaces(
         self,

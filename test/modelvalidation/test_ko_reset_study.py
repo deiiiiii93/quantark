@@ -18,7 +18,12 @@ from quantark.modelvalidation.yaml_loader import load_study
 
 STUDY_PATH = Path("example/modelvalidation/ko_reset_flat_bsm.yaml")
 
-CANDIDATES = ("equity.ko_reset_snowball.pde", "equity.ko_reset_snowball.quad")
+#: The quadrature engine appears twice: once on its own lattice, and
+#: once on one widened until the separations between barriers are whole
+#: numbers of cells, so that every barrier lands on a node and the
+#: alignment target stops changing the price. Two lattices are two
+#: configurations, and a certificate covers only what it prices.
+CANDIDATES = ("equity.ko_reset_snowball.pde", "equity.ko_reset_snowball.quad", "equity.ko_reset_snowball.quad.stretch_0.02")
 
 
 @pytest.fixture(scope="module")

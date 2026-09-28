@@ -15,6 +15,13 @@ from quantark.backtest.strategy.base_strategy import (
 )
 from quantark.backtest.strategy.futures_delta_strategy import (
     AutocallableDeltaHedgeStrategy,
+    ProportionalFuturesDeltaHedgeStrategy,
+)
+from quantark.backtest.strategy.futures_bucket_strategy import (
+    HEDGE_OBJECTIVES,
+    FuturesBucketHedgeStrategy,
+    FuturesHedgeTargets,
+    ideal_targets,
 )
 from quantark.backtest.strategy.delta_neutral_strategy import DeltaNeutralStrategy
 from quantark.backtest.strategy.dv01_neutral_strategy import DV01NeutralStrategy
@@ -56,6 +63,12 @@ from quantark.backtest.strategy.triggered_hedge_strategy import (
 
 __all__ = [
     'AutocallableDeltaHedgeStrategy',
+    'ProportionalFuturesDeltaHedgeStrategy',
+    # Multi-leg futures carry hedging
+    'FuturesBucketHedgeStrategy',
+    'FuturesHedgeTargets',
+    'HEDGE_OBJECTIVES',
+    'ideal_targets',
     # Base
     'BaseStrategy',
     'AssetClass',

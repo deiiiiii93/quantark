@@ -45,6 +45,28 @@ def test_only_snowballs_and_only_a_futures_hedge_are_accepted():
         ensemble_config(products=[])
 
 
+def test_a_multi_leg_bucket_hedge_is_rejected_before_the_scalar_sizing_path():
+    """The simulated path sizes ONE contract per day.
+
+    A bucket strategy answers ``target_legs``, not a scalar contract count,
+    and its risk coordinates come from an actual futures chain the simulated
+    path does not carry.  Refusing it here beats reaching the sizing call.
+    """
+    from quantark.backtest.strategy import FuturesBucketHedgeStrategy
+
+    with pytest.raises(ValidationError, match="multi-leg bucket hedge"):
+        ensemble_config(strategy=FuturesBucketHedgeStrategy())
+    with pytest.raises(ValidationError, match="multi-leg bucket hedge"):
+        ensemble_config(strategy=FuturesBucketHedgeStrategy(objective="nodes"))
+
+
+def test_the_proportional_single_contract_control_is_still_accepted():
+    from quantark.backtest.strategy import ProportionalFuturesDeltaHedgeStrategy
+
+    config = ensemble_config(strategy=ProportionalFuturesDeltaHedgeStrategy())
+    assert isinstance(config.strategy, ProportionalFuturesDeltaHedgeStrategy)
+
+
 def test_unsupported_dividend_sources_and_surface_vol_fail_closed():
     with pytest.raises(ValidationError):
         ensemble_config(engine_config=AutocallableEngineConfig(dividend_source="surface_forwards"))

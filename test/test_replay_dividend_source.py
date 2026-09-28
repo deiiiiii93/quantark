@@ -608,3 +608,83 @@ class TestSharedDividendRule:
                                 extrapolation="surface_forward_carry")
         with pytest.raises(ValidationError):
             term_dividend_yield(quotes, spot=SPOT, rate_curve=FlatRateCurve(rate=RATE), extrapolation="cubic")
+
+
+class TestCarryContextAttachment:
+    """``last_carry_context`` is the day's scenario source, or nothing."""
+
+    def _supported_replay(self, dataset, extrapolation):
+        return _replay(
+            dataset,
+            AutocallableEngineConfig(
+                dividend_source="futures_curve",
+                futures_curve_extrapolation=extrapolation,
+                futures_curve_min_tenor_days=1,
+            ),
+        )
+
+    @pytest.mark.parametrize("extrapolation", ("flat_q", "flat_forward_carry"))
+    def test_supported_conventions_keep_the_day_context(self, extrapolation):
+        dataset = _market_data()
+        replay = self._supported_replay(dataset, extrapolation)
+        assert replay.last_carry_context is None
+        env, *_ = _build_env(replay, dataset, DATES[0])
+        context = replay.last_carry_context
+        assert context is not None
+        assert context.extrapolation == extrapolation
+        assert context.spot == pytest.approx(SPOT)
+        assert context.underlying == "CSI1000"
+        assert context.contracts == tuple(c for c, _, _ in CHAIN)
+        # The pricing dividend IS the context's dividend, not a second build.
+        for t in (0.05, 0.1, 0.2, 0.5, 1.0, 2.0):
+            assert context.dividend().get_yield(t) == pytest.approx(
+                env.div_yield.get_yield(t), abs=1e-15
+            )
+
+    def test_the_context_carries_the_eligible_quotes_only(self):
+        dataset = _market_data()
+        replay = _replay(
+            dataset,
+            AutocallableEngineConfig(
+                dividend_source="futures_curve",
+                futures_curve_extrapolation="flat_q",
+                futures_curve_min_tenor_days=40,
+            ),
+        )
+        _build_env(replay, dataset, DATES[0])
+        # IM2401 expires in 17 calendar days on 2024-01-02 and drops out;
+        # the other two (52 and 73 days) stay.
+        assert replay.last_carry_context.contracts == ("IM2402", "IM2403")
+
+    def test_the_surface_tail_convention_keeps_no_context(self, history_dir):
+        dataset = _market_data(surface_history=VolSurfaceHistory(history_dir))
+        replay = self._supported_replay(dataset, "surface_forward_carry")
+        env, *_ = _build_env(replay, dataset, DATES[0])
+        assert env.div_yield is not None
+        assert replay.last_carry_context is None
+
+    def test_a_flat_carry_source_keeps_no_context(self):
+        dataset = _market_data()
+        replay = _replay(dataset, AutocallableEngineConfig())
+        _build_env(replay, dataset, DATES[0])
+        assert replay.last_carry_context is None
+
+    def test_yesterdays_context_never_leaks_into_a_new_build(self):
+        dataset = _market_data()
+        replay = _replay(dataset, AutocallableEngineConfig())
+        stale = self._supported_replay(dataset, "flat_q")
+        _build_env(stale, dataset, DATES[0])
+        replay.last_carry_context = stale.last_carry_context
+        _build_env(replay, dataset, DATES[1])
+        assert replay.last_carry_context is None
+
+    def test_each_day_rebuilds_its_own_coordinates(self):
+        dataset = _market_data()
+        replay = self._supported_replay(dataset, "flat_q")
+        _build_env(replay, dataset, DATES[0])
+        first = replay.last_carry_context
+        _build_env(replay, dataset, DATES[3])
+        second = replay.last_carry_context
+        assert second is not first
+        assert second.coordinates() != first.coordinates()
+        assert second.valuation_date == pd.Timestamp(DATES[3])

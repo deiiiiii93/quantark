@@ -49,6 +49,7 @@ from quantark.backtest.replay import (
     AutocallableEngineConfig,
     AutocallableMarketDataSet,
 )
+from quantark.backtest.strategy import AutocallableDeltaHedgeStrategy
 from quantark.backtest.replay.dividend_source import term_dividend_yield
 from quantark.backtest.replay.market import (
     SignedDividendYield,
@@ -93,6 +94,10 @@ PRODUCT_QUANTITY = -1.0  # SELLER: short one unit sized to the notional
 FIRST_INCEPTION_MONTH = (2023, 5)
 ATM_VOL_TENOR_YEARS = 1.0  # scalar vol channel: ATM IV at the product tenor
 DEFAULT_QUAD_GRID = 401
+# The shipped engine default. "transition" evaluates the final backward
+# transition at spot instead of interpolating between nodes; it removes the
+# delta staircase but moves prices, so it is opt-in here as in the engine.
+DEFAULT_QUAD_READOUT = "legacy_linear"
 ROLL_DAYS_BEFORE_EXPIRY = 5
 # Contracts inside their delivery week carry no measurable annualised carry
 # (a 1% basis two days out reads as a 180% yield); the curve skips them.
@@ -222,12 +227,31 @@ REFERENCE_MODEL = "term_flat_q"  # the fair coupon is solved under this model
 
 
 def engine_config_for(
-    model: QModel, *, quad_grid_points: int = DEFAULT_QUAD_GRID
+    model: QModel,
+    *,
+    quad_grid_points: int = DEFAULT_QUAD_GRID,
+    quad_readout: str = DEFAULT_QUAD_READOUT,
+    align_cell_stretch: Optional[float] = None,
 ) -> AutocallableEngineConfig:
-    """QUAD-engine replay config for one q model (scalar vol channel)."""
+    """QUAD-engine replay config for one q model (scalar vol channel).
+
+    ``quad_readout`` selects how the engine recovers the price from its nodal
+    surface; see docs/bucket-futures-hedge/quad-readout/. It changes prices,
+    so it belongs in the run fingerprint.
+
+    ``align_cell_stretch`` widens the cell by at most that fraction so every
+    barrier lands on a node, which stops the alignment target moving with
+    spot; see docs/bucket-futures-hedge/gates.md. It changes prices too, so
+    it belongs in the fingerprint for the same reason.
+    """
     return AutocallableEngineConfig(
         pricing_engine_type=EngineType.QUADRATURE,
-        quad_params=QuadParams(grid_points=int(quad_grid_points)),
+        quad_params=QuadParams(
+            grid_points=int(quad_grid_points), readout=str(quad_readout),
+            align_cell_stretch=(
+                None if align_cell_stretch is None else float(align_cell_stretch)
+            ),
+        ),
         dividend_source=model.dividend_source,
         futures_curve_extrapolation=model.extrapolation,
         futures_curve_min_tenor_days=int(model.min_tenor_days),
@@ -427,6 +451,156 @@ HEDGE_POLICY_LABELS = {
     "front": "front-month IM (5-day roll)",
     "far": "longest listed IM (5-day roll)",
 }
+
+# ---------------------------------------------------------------------------
+# Hedge STRATEGIES, separate from the roll policy above
+#
+# HEDGE_POLICIES answers "which contract does the reference leg follow"; the
+# factory below answers "how is the hedge sized".  The two were the same
+# question while every cell held one contract; a bucket cell holds several,
+# and still needs a reference contract for the legacy scalar columns.
+# ---------------------------------------------------------------------------
+
+#: Study policy name -> the design's objective.  No label calls any of these
+#: "bucket-neutral": each neutralises a DIFFERENT thing, and the primary one
+#: is not neutral to every node.
+BUCKET_OBJECTIVES: Dict[str, str] = {
+    "buckets_nodes": "nodes",
+    "buckets_far": "spot_far",
+    "buckets_spot_parallel": "spot_parallel",
+}
+
+#: The single-contract policies that apply the S/F scaling correction.
+SCALED_POLICIES: Tuple[str, ...] = ("front_scaled", "far_scaled")
+
+#: Which contract each policy's REFERENCE leg follows.  Bucket policies use
+#: the front selector for their scalar reference columns only; the hedge
+#: itself spans the whole curve.
+HEDGE_ROLL_SELECTOR: Dict[str, str] = {
+    "front": "front",
+    "far": "far",
+    "front_scaled": "front",
+    "far_scaled": "far",
+    "buckets_nodes": "front",
+    "buckets_far": "front",
+    "buckets_spot_parallel": "front",
+}
+
+HEDGE_STRATEGY_LABELS: Dict[str, str] = {
+    "front": "front-month, -D/m",
+    "far": "longest listed, -D/m",
+    "front_scaled": "front-month, -D S/(m F)",
+    "far_scaled": "longest listed, -D S/(m F)",
+    "buckets_nodes": "buckets: every modelled node neutral",
+    "buckets_far": "buckets + far fold: spot neutral",
+    "buckets_spot_parallel": "buckets + two-tenor fold: spot and parallel neutral",
+}
+
+
+def hedge_strategy_for(
+    name: str,
+    *,
+    delta_threshold: float,
+    round_contracts: bool,
+    hedge_ratio: float = 1.0,
+):
+    """The sizing strategy for one study hedge policy."""
+    from quantark.backtest.strategy import (
+        FuturesBucketHedgeStrategy,
+        ProportionalFuturesDeltaHedgeStrategy,
+    )
+
+    options = dict(
+        delta_threshold=delta_threshold,
+        round_contracts=round_contracts,
+        hedge_ratio=hedge_ratio,
+    )
+    if name in BUCKET_OBJECTIVES:
+        return FuturesBucketHedgeStrategy(
+            objective=BUCKET_OBJECTIVES[name], **options
+        )
+    if name in SCALED_POLICIES:
+        return ProportionalFuturesDeltaHedgeStrategy(**options)
+    if name in HEDGE_POLICIES:
+        return AutocallableDeltaHedgeStrategy(**options)
+    raise StudyDataError(f"unknown hedge policy: {name}")
+
+
+def hedge_roll_policy_for(name: str) -> FuturesRollPolicy:
+    """The reference-contract roll policy for one study hedge policy."""
+    selector = HEDGE_ROLL_SELECTOR.get(name)
+    if selector is None:
+        raise StudyDataError(f"unknown hedge policy: {name}")
+    return HEDGE_POLICIES[selector]()
+
+
+def uses_buckets(name: str) -> bool:
+    return name in BUCKET_OBJECTIVES
+
+
+#: The revised study's primary comparison: both supported term models crossed
+#: with seven hedge policies.  Fourteen cells, all on ACTUAL futures quotes,
+#: because every bucket coordinate must be a contract the hedge can trade.
+BUCKET_TERM_MODELS: Tuple[str, ...] = ("term_flat_q", "term_flat_fwd")
+BUCKET_HEDGES: Tuple[str, ...] = (
+    "front",
+    "far",
+    "front_scaled",
+    "far_scaled",
+    "buckets_nodes",
+    "buckets_far",
+    "buckets_spot_parallel",
+)
+PRIMARY_BUCKET_CELLS: Tuple[Tuple[str, str], ...] = tuple(
+    (model, hedge) for model in BUCKET_TERM_MODELS for hedge in BUCKET_HEDGES
+)
+
+
+def carry_context_for(
+    model: QModel,
+    *,
+    valuation: pd.Timestamp,
+    spot: float,
+    rate: float,
+    chain_slice: pd.DataFrame,
+):
+    """The day's ``CarryCurveContext`` for a supported term model.
+
+    Static analysis and the replay share this one builder, so a stage-01
+    bucket and a replay bucket cannot drift apart.  Flat and external-tail
+    controls have no futures-node coordinates and are rejected here rather
+    than served a curve they do not use.
+    """
+    from quantark.backtest.replay.carry_context import (
+        SUPPORTED_EXTRAPOLATIONS,
+        CarryCurveContext,
+    )
+
+    if model.dividend_source != "futures_curve":
+        raise StudyDataError(
+            f"{model.name} has no futures-node coordinates: bucket risk needs "
+            "dividend_source='futures_curve'"
+        )
+    if model.extrapolation not in SUPPORTED_EXTRAPOLATIONS:
+        raise StudyDataError(
+            f"{model.name} uses {model.extrapolation!r}, which is not a "
+            f"tradable futures tail; supported: {SUPPORTED_EXTRAPOLATIONS}"
+        )
+    valuation = pd.Timestamp(valuation).normalize()
+    quotes = curve_quotes(chain_slice, valuation, int(model.min_tenor_days))
+    if not quotes:
+        raise StudyDataError(
+            f"no contract with at least {model.min_tenor_days} days to expiry "
+            f"on {valuation.date()}"
+        )
+    return CarryCurveContext(
+        quotes=tuple(quotes),
+        spot=float(spot),
+        rate_curve=FlatRateCurve(rate=float(rate)),
+        extrapolation=model.extrapolation,
+        underlying=UNDERLYING_NAME,
+        valuation_date=valuation,
+    )
 
 
 def dividend_roll_policy_for(model: QModel) -> Optional[FuturesRollPolicy]:
@@ -849,7 +1023,55 @@ def solve_fair_coupon(
 # Run I/O
 # ---------------------------------------------------------------------------
 
-RUN_FRAMES = ("states", "greeks", "trades", "rebalances", "actions")
+#: The five frames every run has ever written.  A historical run has only
+#: these, and must stay readable.
+LEGACY_RUN_FRAMES = ("states", "greeks", "trades", "rebalances", "actions")
+
+#: The three carry frames a revised (audited) run adds.
+CARRY_RUN_FRAMES = ("hedge_legs", "hedge_attribution", "hedge_stresses")
+
+RUN_FRAMES = LEGACY_RUN_FRAMES  # the historical name, unchanged
+
+#: Format versions.  ``legacy`` runs predate carry recording; ``carry_v2``
+#: runs carry all eight frames plus the resolved configuration.
+RUN_FORMAT_LEGACY = "legacy"
+RUN_FORMAT_CARRY = "carry_v2"
+
+#: The revised study writes here, so historical artifacts are never touched.
+BUCKET_RUN_VERSION = "bucket_hedge_v2"
+
+
+def required_frames(run_format: str) -> Tuple[str, ...]:
+    if run_format == RUN_FORMAT_CARRY:
+        return LEGACY_RUN_FRAMES + CARRY_RUN_FRAMES
+    return LEGACY_RUN_FRAMES
+
+
+def result_frame(results: Any, name: str):
+    """One frame from EITHER result API.
+
+    The single result exposes properties; the book result exposes methods.
+    The attribute is inspected for callability rather than the frame being
+    tested for truth: an empty DataFrame is falsy, and a truth test would
+    silently turn "no rows" into "wrong API".
+    """
+    accessors = {
+        "states": ("states_df",),
+        "greeks": ("greeks_df",),
+        "trades": ("trades_df",),
+        "rebalances": ("rebalance_df", "rebalances_df"),
+        "actions": ("actions_df",),
+        "hedge_legs": ("hedge_legs_df",),
+        "hedge_attribution": ("hedge_attribution_df",),
+        "hedge_stresses": ("hedge_stresses_df",),
+    }[name]
+    for accessor in accessors:
+        attribute = getattr(type(results), accessor, None)
+        if attribute is None:
+            continue
+        value = getattr(results, accessor)
+        return value() if callable(value) else value
+    raise StudyDataError(f"results expose no frame named {name!r}")
 
 
 def cell_name(model: str, hedge: str) -> str:
@@ -860,29 +1082,91 @@ def run_dir_for(out_dir: Path, inception_tag: str, model: str, hedge: str) -> Pa
     return Path(out_dir) / "runs" / inception_tag / cell_name(model, hedge)
 
 
-def write_run(run_dir: Path, results: Any, summary: Dict[str, Any]) -> None:
+def write_run(
+    run_dir: Path,
+    results: Any,
+    summary: Dict[str, Any],
+    *,
+    run_format: str = RUN_FORMAT_LEGACY,
+    run_config: Optional[Dict[str, Any]] = None,
+    audit_summary: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Write the run's frames, then its configuration, then its summary.
+
+    The completed summary is published LAST and atomically, so a reader that
+    finds one can rely on every frame beside it already being there.
+    """
     run_dir.mkdir(parents=True, exist_ok=True)
-    frames = {
-        "states": results.states_df,
-        "greeks": results.greeks_df,
-        "trades": results.trades_df,
-        "rebalances": results.rebalance_df,
-        "actions": results.actions_df,
-    }
-    # every replay frame is date-indexed (trades and actions included)
-    for name, frame in frames.items():
-        frame.to_csv(run_dir / f"{name}.csv", index=True)
+    for name in required_frames(run_format):
+        # every replay frame is date-indexed (trades and actions included)
+        result_frame(results, name).to_csv(run_dir / f"{name}.csv", index=True)
+    if run_format == RUN_FORMAT_CARRY:
+        atomic_write_json(run_dir / "run_config.json", _jsonable(run_config or {}))
+        atomic_write_json(
+            run_dir / "audit_summary.json", _jsonable(audit_summary or {})
+        )
+    summary = dict(summary)
+    summary.setdefault("run_format", run_format)
     atomic_write_json(run_dir / "run_summary.json", _jsonable(summary))
+
+
+def audit_coverage(legs: Any, attribution: Any) -> Dict[str, Any]:
+    """Measured/pass/fail/inconclusive counts, not one boolean.
+
+    ``not_available`` is reserved for a run that predates carry recording:
+    it is NOT the same as a run whose audits were scheduled and failed.
+    """
+    if attribution is None or len(attribution) == 0:
+        return {"audit_coverage": "not_available"}
+    statuses = list(attribution["audit_status"])
+    counts = {
+        status: int(statuses.count(status))
+        for status in ("pass", "fail", "not_measured", "inconclusive")
+    }
+    measured = len(statuses) - counts["not_measured"]
+    by_scenario: Dict[str, int] = {}
+    if legs is not None and len(legs):
+        for family in sorted(set(legs.get("audit_status", []))):
+            by_scenario[str(family)] = int(
+                (legs["audit_status"] == family).sum()
+            )
+    return {
+        "audit_coverage": "measured" if measured else "not_measured",
+        "dates": len(statuses),
+        "measured": measured,
+        "by_status": counts,
+        "leg_rows_by_status": by_scenario,
+        # A completed run with a failed audit stays available for diagnosis
+        # and can never be reused as a passing gate result.
+        "all_measured_passed": bool(
+            measured and counts["fail"] == 0 and counts["inconclusive"] == 0
+        ),
+    }
 
 
 def load_run(run_dir: Path) -> Dict[str, Any]:
     run_dir = Path(run_dir)
     out: Dict[str, Any] = {}
-    for name in RUN_FRAMES:
+    summary_path = run_dir / "run_summary.json"
+    run_format = RUN_FORMAT_LEGACY
+    if summary_path.exists():
+        run_format = json.loads(summary_path.read_text()).get(
+            "run_format", RUN_FORMAT_LEGACY
+        )
+    out["run_format"] = run_format
+    for name in required_frames(run_format):
         path = run_dir / f"{name}.csv"
         if not path.exists():
             raise StudyDataError(f"run frame missing: {path}")
         out[name] = pd.read_csv(path, index_col=0, parse_dates=True)
+    if run_format == RUN_FORMAT_CARRY:
+        for name in ("run_config", "audit_summary"):
+            path = run_dir / f"{name}.json"
+            if not path.exists():
+                raise StudyDataError(f"run artifact missing: {path}")
+            out[name] = json.loads(path.read_text())
+    else:
+        out["audit_summary"] = {"audit_coverage": "not_available"}
     summary_path = run_dir / "run_summary.json"
     if not summary_path.exists():
         raise StudyDataError(f"run summary missing: {summary_path}")

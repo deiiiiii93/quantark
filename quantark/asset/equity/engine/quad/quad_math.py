@@ -5,11 +5,93 @@ Shared quadrature math utilities for grid setup and convolution.
 from __future__ import annotations
 
 import math
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
 from quantark.util.exceptions import NumericalError, ValidationError
+
+
+def snap_cell_width(
+    h_base: float,
+    barrier_logs: Sequence[float],
+    max_stretch: float,
+) -> float:
+    """Widen the cell so that barrier separations are whole numbers of cells.
+
+    A uniform lattice can pin exactly one level; every other barrier then
+    falls wherever the spacing puts it. But if each separation is an integer
+    number of cells, EVERY barrier sits on a node at once, and which one the
+    caller chooses to pin stops mattering -- the lattice is the same set of
+    points either way.
+
+    Only widening is considered, and ``grid_x`` is never changed, so the
+    grid can never grow: the domain half-width ``(grid_x - 1) * h / 2``
+    widens by the same fraction as the cell, which makes the truncation
+    bound safer rather than weaker. ``max_stretch`` is therefore both the
+    resolution the caller is willing to give up and the amount the domain
+    is allowed to grow.
+
+    Exact for two distinct levels. Three or more cannot generally be placed
+    on one lattice, so the choice minimises the WORST off-node distance and
+    the caller should read back how much it achieved.
+
+    Returns ``h_base`` unchanged when nothing improves on it.
+    """
+    if not (h_base > 0.0) or not math.isfinite(h_base):
+        return h_base
+    if not (max_stretch > 0.0) or not math.isfinite(max_stretch):
+        return h_base
+
+    separations = _distinct_separations(barrier_logs, h_base)
+    if not separations:
+        return h_base
+
+    h_limit = h_base * (1.0 + max_stretch)
+    candidates = [h_base]
+    for gap in separations:
+        cells = int(math.floor(gap / h_base))
+        while cells >= 1:
+            # h = gap / cells is >= h_base for the largest such cells, and
+            # grows as cells falls, so stop at the first one over budget.
+            candidate = gap / cells
+            if candidate > h_limit:
+                break
+            candidates.append(candidate)
+            cells -= 1
+
+    def worst_offset(h: float) -> float:
+        return max(abs(gap / h - round(gap / h)) * h for gap in separations)
+
+    best = min(candidates, key=lambda h: (worst_offset(h), h))
+    return float(best) if best > h_base else float(h_base)
+
+
+def _distinct_separations(
+    barrier_logs: Sequence[float], h_base: float
+) -> list[float]:
+    """Pairwise gaps between distinct barrier levels, in log space.
+
+    Gaps rather than levels: the lattice is translation-invariant, so only
+    the distances between barriers constrain the spacing. That also makes
+    the result independent of spot, since log(A/S) - log(B/S) = log(A/B).
+    """
+    levels = sorted(
+        {
+            float(value)
+            for value in barrier_logs or ()
+            if value is not None and math.isfinite(float(value))
+        }
+    )
+    if len(levels) < 2:
+        return []
+    floor = h_base * 1e-9
+    gaps = {
+        round(levels[j] - levels[i], 12)
+        for i in range(len(levels))
+        for j in range(i + 1, len(levels))
+    }
+    return sorted(gap for gap in gaps if gap > floor)
 
 
 class QuadratureMath:
@@ -24,6 +106,8 @@ class QuadratureMath:
         num_std_devs: float = 10.0,
         *,
         align_log: Optional[float] = None,
+        barrier_logs: Optional[Sequence[float]] = None,
+        cell_stretch: Optional[float] = None,
         integration_rule: str = "simpson",
         fft_padding_factor: int = 1,
         fft_filter_alpha: float = 0.0,
@@ -35,6 +119,12 @@ class QuadratureMath:
         self.vol_max = float(vol_max)
         self.num_std_devs = float(num_std_devs)
         self.align_log = float(align_log) if align_log is not None else None
+        self.barrier_logs = tuple(
+            float(value) for value in (barrier_logs or ())
+        )
+        self.cell_stretch = (
+            float(cell_stretch) if cell_stretch is not None else None
+        )
         self.integration_rule = str(integration_rule).lower()
         self.fft_padding_factor = int(fft_padding_factor)
         self.fft_filter_alpha = float(fft_filter_alpha)
@@ -74,25 +164,70 @@ class QuadratureMath:
             raise ValidationError(
                 f"fft_filter_power must be >= 1, got {self.fft_filter_power}."
             )
+        if self.cell_stretch is not None and not 0.0 < self.cell_stretch <= 1.0:
+            raise ValidationError(
+                "cell_stretch must be in (0, 1], got "
+                f"{self.cell_stretch}."
+            )
 
         self.constant_c = math.exp(self._factor_c())
         log_c = math.log(self.constant_c)
         self.h = 2.0 * log_c / (self.grid_x - 1)
+        half_width = log_c
+        self.cell_snap_ratio = 1.0
+        if self.cell_stretch is not None:
+            snapped = snap_cell_width(self.h, self.barrier_logs, self.cell_stretch)
+            if snapped > self.h:
+                # grid_x is deliberately untouched: the cell only ever
+                # widens, so the node count is fixed and the domain grows
+                # with it rather than the grid growing to keep the domain.
+                self.cell_snap_ratio = snapped / self.h
+                self.h = snapped
+                half_width = 0.5 * (self.grid_x - 1) * self.h
+                self.constant_c = math.exp(half_width)
+        self._barrier_cell_offset: Optional[float] = None
+
         grid_shift = 0.0
         if (
             self.align_log is not None
             and math.isfinite(self.align_log)
-            and -log_c <= self.align_log <= log_c
+            and -half_width <= self.align_log <= half_width
         ):
-            idx = int(round((self.align_log + log_c) / self.h))
+            idx = int(round((self.align_log + half_width) / self.h))
             idx = max(0, min(idx, self.grid_x - 1))
-            grid_shift = self.align_log - (-log_c + idx * self.h)
+            grid_shift = self.align_log - (-half_width + idx * self.h)
 
-        self.grid = np.linspace(-log_c, log_c, self.grid_x) + grid_shift
-        self.z_grid = -2.0 * log_c + np.arange(2 * self.grid_x - 1) * self.h
+        if self.cell_snap_ratio == 1.0:
+            # untouched arithmetic on the default path, so a grid that was
+            # not snapped stays bit-identical to the one built before this
+            # option existed
+            self.grid = np.linspace(-log_c, log_c, self.grid_x) + grid_shift
+        else:
+            self.grid = (
+                -half_width + np.arange(self.grid_x) * self.h + grid_shift
+            )
+        self.z_grid = -2.0 * half_width + np.arange(2 * self.grid_x - 1) * self.h
         self._weights: np.ndarray | None = None
         self._fft_filter_cache: dict[int, np.ndarray] = {}
         self._omega_fft_cache: dict[tuple[int, bytes], np.ndarray] = {}
+
+    @property
+    def barrier_cell_offset(self) -> float:
+        """Worst distance from a barrier to its nearest node, in log space.
+
+        Zero once every separation is a whole number of cells. Computed on
+        demand: the default path passes barriers in but never snaps, and
+        this is a diagnostic, not an input to the grid.
+        """
+        if self._barrier_cell_offset is None:
+            self._barrier_cell_offset = max(
+                (
+                    abs(gap / self.h - round(gap / self.h)) * self.h
+                    for gap in _distinct_separations(self.barrier_logs, self.h)
+                ),
+                default=0.0,
+            )
+        return self._barrier_cell_offset
 
     def _factor_c(self) -> float:
         return (
