@@ -5,8 +5,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "coupon_at_expiry",
       "values": {
-        "delta": 0.48844516361046303,
-        "gamma": -0.0355464506169928,
+        "delta": 0.48846340310749375,
+        "gamma": -0.03534754364436802,
         "pv": -3.430676944388196
       }
     },
@@ -14,8 +14,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "coupon_at_expiry_memory",
       "values": {
-        "delta": 0.47783212623796667,
-        "gamma": -0.03466490613764667,
+        "delta": 0.4778502427379066,
+        "gamma": -0.034467340483755965,
         "pv": -3.354643545434896
       }
     },
@@ -23,8 +23,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "disable_ko_after_ki",
       "values": {
-        "delta": 0.4883593085902173,
-        "gamma": -0.03563571073062405,
+        "delta": 0.4883773755233188,
+        "gamma": -0.03543868561737995,
         "pv": -3.4275442414317125
       }
     },
@@ -32,8 +32,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "discrete_ki",
       "values": {
-        "delta": 0.42704494684249616,
-        "gamma": -0.03394045598168876,
+        "delta": 0.42705640798528066,
+        "gamma": -0.03381546891598624,
         "pv": -2.899231133426693
       }
     },
@@ -41,8 +41,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "ki_stepdown",
       "values": {
-        "delta": 0.31293787102236625,
-        "gamma": -0.031236610078278302,
+        "delta": 0.3129366660097941,
+        "gamma": -0.031204370491482343,
         "pv": -1.9076813531968941
       }
     },
@@ -50,8 +50,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "low_vol",
       "values": {
-        "delta": 0.004636424071341869,
-        "gamma": -0.031866975620598356,
+        "delta": 0.00461739756348055,
+        "gamma": -0.03279221119501304,
         "pv": 0.5268300106232131
       }
     },
@@ -59,8 +59,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "memory",
       "values": {
-        "delta": 0.4771726084103399,
-        "gamma": -0.034669130649462865,
+        "delta": 0.47719062437435156,
+        "gamma": -0.034472661368860125,
         "pv": -3.3482862645050324
       }
     },
@@ -68,8 +68,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "near_coupon",
       "values": {
-        "delta": 0.9475475710072868,
-        "gamma": -0.02942364208114765,
+        "delta": 0.9475584556244869,
+        "gamma": -0.02960666545446017,
         "pv": -13.871454707817344
       }
     },
@@ -77,8 +77,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "near_expiry",
       "values": {
-        "delta": 0.054782102711485016,
-        "gamma": -0.017781467399638286,
+        "delta": 0.05477468956255586,
+        "gamma": -0.018178153351679723,
         "pv": 0.09107553016214766
       }
     },
@@ -86,8 +86,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "near_ki",
       "values": {
-        "delta": 1.127002493735547,
-        "gamma": 0.0175586614449505,
+        "delta": 1.1275459896900017,
+        "gamma": 0.016306207974748608,
         "pv": -23.91990650428209
       }
     },
@@ -95,8 +95,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "near_ko",
       "values": {
-        "delta": 0.3957264178359063,
-        "gamma": -0.03810125731141217,
+        "delta": 0.39574161374037486,
+        "gamma": -0.03803209799753475,
         "pv": -2.318724337606669
       }
     },
@@ -104,8 +104,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "ordinary",
       "values": {
-        "delta": 0.4878656923666827,
-        "gamma": -0.0355594146241208,
+        "delta": 0.4878838281117591,
+        "gamma": -0.03536163909647007,
         "pv": -3.424842262262186
       }
     },
@@ -113,8 +113,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "reverse",
       "values": {
-        "delta": -0.5916216076411708,
-        "gamma": -0.03517132395553456,
+        "delta": -0.5916554227059875,
+        "gamma": -0.0352051185945052,
         "pv": -4.006042708622695
       }
     },
@@ -122,8 +122,8 @@
       "candidate": "equity.phoenix.pde",
       "case": "stepdown",
       "values": {
-        "delta": 0.47281876253466754,
-        "gamma": -0.03593113111579811,
+        "delta": 0.4728433825218471,
+        "gamma": -0.035993428038861235,
         "pv": -3.2570330668938428
       }
     },
@@ -380,14 +380,12 @@
       }
     }
   ],
-  "certificate_sha256": "2d35741043195f9a73fd2c6b9f5581a564f20e13c13b605922190771c5e2c699",
+  "certificate_sha256": "8cd5584888009924b928892350f199b34eeec0456603883127ab82ed1449e140",
   "fingerprint": {
     "machine": "arm64",
     "system": "Darwin"
   },
   "rel_tol": 1e-09,
   "schema": 1,
-  "study_source_text": "# Phoenix under flat Black-Scholes.\n#\n# The same three arms as the snowball study -- two-surface PDE, quadrature, and\n# one paired-RQMC benchmark -- over a payoff with one extra hard feature: a\n# coupon barrier. A phoenix pays a coupon at every observation where spot sits\n# above 85, knock-out or not, so every observation date carries a digital. That\n# is where a deterministic grid and Monte Carlo tend to part company first,\n# which is why near_coupon parks spot right on the barrier.\n#\n# Economic scale, environment and bounds are identical to snowball_flat_bsm, on\n# purpose: with multiplier 200, inception spot 100 and notional 20,000 the delta\n# quantum and the reference move are both exactly 1.0, so a raw error IS a\n# contract error -- and the two certifications sit on the same axis.\n#\n# Bound calibration (release procedure section 7, step 4). The cell gate needs\n# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this\n# sampling budget (4 batches x 65,536 paths, paired bumps): pv 0.0033, delta\n# 0.0035, gamma 0.0052 -- a 24-38x margin. Desk tolerance and benchmark\n# resolution are compatible, so the bound is not one the sampling cannot cash.\n#\n# Offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/phoenix_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: phoenix-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260818\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.phoenix\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ko_rate: 0.0\n    ki_barrier: 75.0\n    coupon_barrier: 85.0\n    coupon_rate: 0.02\n    num_observations: 12\n    memory_coupon: false\n    maturity: 1.0\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.phoenix.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.phoenix.pde\n    params: {accuracy: standard}\n  - builder: equity.phoenix.quad\n    params: {grid_points: 1001}\n  # The same engine with whole-cell barrier alignment. A uniform lattice can\n  # pin only ONE barrier onto a node, and the engine picks the one nearest to\n  # spot -- so the choice flips at the geometric mean of two barriers and\n  # delta is discontinuous there. Widening the cell until the barrier\n  # separations are whole numbers of cells puts every barrier on a node at\n  # once and the choice stops mattering. 0.02 is the budget it may widen by;\n  # the grid keeps its node count. Certified as its own arm because it is a\n  # different lattice, and a certificate covers only what it prices.\n  - builder: equity.phoenix.quad\n    params: {grid_points: 1001, align_cell_stretch: 0.02}\n\ncases:\n  # At inception, clear of all three barriers.\n  - {name: ordinary}\n  # Just under the knock-out barrier: the KO discontinuity sits inside the bump\n  # stencil, which is where deterministic gamma usually breaks first.\n  - {name: near_ko, environment: {spot: 102.5}}\n  # Sitting ON the coupon barrier. A phoenix coupon is a digital at 85, so its\n  # sensitivity is maximal here and the whole coupon stream is in play.\n  - {name: near_coupon, environment: {spot: 85.5}}\n  # Just above the knock-in barrier: the terminal payoff turns over here.\n  - {name: near_ki, environment: {spot: 76.0}}\n  # Low vol: barriers are rarely reached, so the grid resolves a much narrower\n  # region of interest and the coupon stream is nearly certain.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Three months with a quarterly schedule: few observations left, and time\n  # discretization error has nowhere to average out.\n  - {name: near_expiry, product: {num_observations: 3, maturity: 0.25}}\n  # Memory coupons: missed coupons accumulate and pay later. A prior audit found\n  # the PDE paying accrued memory coupons at KO regardless of the coupon-barrier\n  # condition, so this path carries history and must be certified explicitly.\n  - {name: memory, product: {memory_coupon: true}}\n  # Step-down barriers: KO and coupon barriers both decline 0.5% of initial\n  # price per observation. Twenty-four distinct levels now compete for grid\n  # alignment where every case above had two, and the coupon digital moves to a\n  # new strike at every observation instead of sitting still.\n  - {name: stepdown, product: {ko_stepdown: 0.005, coupon_stepdown: 0.005}}\n  # Discretely monitored KI. Unreachable until 2026-08-19: PhoenixOption built\n  # only its KO observation schedule, so a discrete KI phoenix raised rather\n  # than priced, and no certified cell used anything but continuous KI.\n  - {name: discrete_ki, product: {ki_monitoring: discrete}}\n  # A KI barrier declining 0.5% of initial price per observation, 75 -> 69.5.\n  - {name: ki_stepdown, product: {ki_monitoring: discrete, ki_stepdown: 0.005}}\n  # Once knocked in the KO stops applying, so the knocked-in surface carries the\n  # coupon stream on to maturity unbarriered.\n  - {name: disable_ko_after_ki, product: {disable_ko_after_ki: true}}\n  # Reverse phoenix: call payoff, DOWN knock-out, UP knock-in and coupon\n  # barriers. Every barrier mask in the vector-surface solver inverts.\n  - {name: reverse, product: {is_reverse: true, ko_barrier: 97.0, ki_barrier: 125.0,\n                              coupon_barrier: 115.0}}\n  # Coupons rolled up and paid when the note ENDS -- at the knock-out settlement\n  # if it knocks out, at maturity otherwise. The payment date is path-dependent,\n  # so a fixed discount cannot express it: the deterministic engines carry a\n  # termination-value surface and the benchmark pays the roll-up at knock-out.\n  - {name: coupon_at_expiry, product: {coupon_pay_type: expiry}}\n  # The roll-up meeting the memory ladder: accrued coupons are released on a\n  # later coupon date and then still wait for termination to be paid.\n  - {name: coupon_at_expiry_memory, product: {coupon_pay_type: expiry,\n                                              memory_coupon: true}}\n",
-  "superseded_by": "phoenix-flat-bsm/2026-09-28",
-  "superseded_reason": "Retired by e0ba6ba7, which reads PDE delta and gamma off a local cubic through the four log-spot nodes around the spot instead of the nearest node's quadratic (an O(dx) gamma error whose sign flipped with refinement). PV anchors are unchanged; every PDE delta and gamma anchor moved. The successor re-certifies all three candidates on the same study and keeps every decision ADMITTED; on these cells the readout is accuracy-neutral (PDE Greek |error| median 0.0045 before and after, worst 0.0247 -> 0.0235 of a 0.5-contract bound)."
+  "study_source_text": "# Phoenix under flat Black-Scholes.\n#\n# The same three arms as the snowball study -- two-surface PDE, quadrature, and\n# one paired-RQMC benchmark -- over a payoff with one extra hard feature: a\n# coupon barrier. A phoenix pays a coupon at every observation where spot sits\n# above 85, knock-out or not, so every observation date carries a digital. That\n# is where a deterministic grid and Monte Carlo tend to part company first,\n# which is why near_coupon parks spot right on the barrier.\n#\n# Economic scale, environment and bounds are identical to snowball_flat_bsm, on\n# purpose: with multiplier 200, inception spot 100 and notional 20,000 the delta\n# quantum and the reference move are both exactly 1.0, so a raw error IS a\n# contract error -- and the two certifications sit on the same axis.\n#\n# Bound calibration (release procedure section 7, step 4). The cell gate needs\n# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this\n# sampling budget (4 batches x 65,536 paths, paired bumps): pv 0.0033, delta\n# 0.0035, gamma 0.0052 -- a 24-38x margin. Desk tolerance and benchmark\n# resolution are compatible, so the bound is not one the sampling cannot cash.\n#\n# Offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/phoenix_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: phoenix-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260818\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.phoenix\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ko_rate: 0.0\n    ki_barrier: 75.0\n    coupon_barrier: 85.0\n    coupon_rate: 0.02\n    num_observations: 12\n    memory_coupon: false\n    maturity: 1.0\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.phoenix.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.phoenix.pde\n    params: {accuracy: standard}\n  - builder: equity.phoenix.quad\n    params: {grid_points: 1001}\n  # The same engine with whole-cell barrier alignment. A uniform lattice can\n  # pin only ONE barrier onto a node, and the engine picks the one nearest to\n  # spot -- so the choice flips at the geometric mean of two barriers and\n  # delta is discontinuous there. Widening the cell until the barrier\n  # separations are whole numbers of cells puts every barrier on a node at\n  # once and the choice stops mattering. 0.02 is the budget it may widen by;\n  # the grid keeps its node count. Certified as its own arm because it is a\n  # different lattice, and a certificate covers only what it prices.\n  - builder: equity.phoenix.quad\n    params: {grid_points: 1001, align_cell_stretch: 0.02}\n\ncases:\n  # At inception, clear of all three barriers.\n  - {name: ordinary}\n  # Just under the knock-out barrier: the KO discontinuity sits inside the bump\n  # stencil, which is where deterministic gamma usually breaks first.\n  - {name: near_ko, environment: {spot: 102.5}}\n  # Sitting ON the coupon barrier. A phoenix coupon is a digital at 85, so its\n  # sensitivity is maximal here and the whole coupon stream is in play.\n  - {name: near_coupon, environment: {spot: 85.5}}\n  # Just above the knock-in barrier: the terminal payoff turns over here.\n  - {name: near_ki, environment: {spot: 76.0}}\n  # Low vol: barriers are rarely reached, so the grid resolves a much narrower\n  # region of interest and the coupon stream is nearly certain.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Three months with a quarterly schedule: few observations left, and time\n  # discretization error has nowhere to average out.\n  - {name: near_expiry, product: {num_observations: 3, maturity: 0.25}}\n  # Memory coupons: missed coupons accumulate and pay later. A prior audit found\n  # the PDE paying accrued memory coupons at KO regardless of the coupon-barrier\n  # condition, so this path carries history and must be certified explicitly.\n  - {name: memory, product: {memory_coupon: true}}\n  # Step-down barriers: KO and coupon barriers both decline 0.5% of initial\n  # price per observation. Twenty-four distinct levels now compete for grid\n  # alignment where every case above had two, and the coupon digital moves to a\n  # new strike at every observation instead of sitting still.\n  - {name: stepdown, product: {ko_stepdown: 0.005, coupon_stepdown: 0.005}}\n  # Discretely monitored KI. Unreachable until 2026-08-19: PhoenixOption built\n  # only its KO observation schedule, so a discrete KI phoenix raised rather\n  # than priced, and no certified cell used anything but continuous KI.\n  - {name: discrete_ki, product: {ki_monitoring: discrete}}\n  # A KI barrier declining 0.5% of initial price per observation, 75 -> 69.5.\n  - {name: ki_stepdown, product: {ki_monitoring: discrete, ki_stepdown: 0.005}}\n  # Once knocked in the KO stops applying, so the knocked-in surface carries the\n  # coupon stream on to maturity unbarriered.\n  - {name: disable_ko_after_ki, product: {disable_ko_after_ki: true}}\n  # Reverse phoenix: call payoff, DOWN knock-out, UP knock-in and coupon\n  # barriers. Every barrier mask in the vector-surface solver inverts.\n  - {name: reverse, product: {is_reverse: true, ko_barrier: 97.0, ki_barrier: 125.0,\n                              coupon_barrier: 115.0}}\n  # Coupons rolled up and paid when the note ENDS -- at the knock-out settlement\n  # if it knocks out, at maturity otherwise. The payment date is path-dependent,\n  # so a fixed discount cannot express it: the deterministic engines carry a\n  # termination-value surface and the benchmark pays the roll-up at knock-out.\n  - {name: coupon_at_expiry, product: {coupon_pay_type: expiry}}\n  # The roll-up meeting the memory ladder: accrued coupons are released on a\n  # later coupon date and then still wait for termination to be paid.\n  - {name: coupon_at_expiry_memory, product: {coupon_pay_type: expiry,\n                                              memory_coupon: true}}\n"
 }
