@@ -6,6 +6,7 @@ below; barriers inert elsewhere.
 """
 import numpy as np
 import pytest
+from golden_compare import GOLDEN_REL_TOL
 
 from quantark.asset.equity.engine.quad.quad_core import QuadCoreInputs, QuadratureCore
 
@@ -50,13 +51,15 @@ def test_zero_vol_first_interval_equals_collapsed_grid():
     assert p_split == pytest.approx(p_ctrl, rel=5e-5)
 
 
-def test_all_positive_vols_bitwise_unchanged():
-    """Regression: with no zero step the refactor must not change a single bit.
+def test_all_positive_vols_unchanged():
+    """Regression: with no zero step the refactor must not change the price.
 
     The frozen value was produced by this exact call on the pre-change tree
-    (commit with Tasks 1-3 only; quad_core untouched)."""
+    (commit with Tasks 1-3 only; quad_core untouched), on the banking machine:
+    it is bitwise there and within GOLDEN_REL_TOL on x86_64 CI, where the
+    convolution lands 2 ULP away."""
     a = _price(times=(0.3, 0.7), vols=(0.2, 0.21))
-    assert a == FROZEN_ALL_POSITIVE
+    assert a == pytest.approx(FROZEN_ALL_POSITIVE, rel=GOLDEN_REL_TOL)
 
 
 FROZEN_ALL_POSITIVE = 7.140157199617561  # pre-change tree (Tasks 1-3 HEAD)

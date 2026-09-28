@@ -111,7 +111,10 @@ def test_resolved_inputs_carry_the_merged_specs_and_the_quantities():
 
 def test_the_fingerprint_covers_the_delegated_numerics_the_calendar_data_and_the_builders():
     """Review R1: the gamma readout lives in base_pde_solver.py, not in the solver class's own module."""
-    rel = lambda trees: {p.as_posix().split("quantark/", 1)[1] for p in ic.fingerprint_inputs(*trees)}     # noqa: E731
+    # Relative to the package, not split at the first "quantark/": CI checks the repository out into
+    # .../quantark/quantark, so the first match is the checkout directory itself.
+    package = ic._repo_root() / "quantark"
+    rel = lambda trees: {p.relative_to(package).as_posix() for p in ic.fingerprint_inputs(*trees)}     # noqa: E731
     pde, common = rel(ic.PDE_TREES), rel(ic.COMMON_TREES)
     assert "asset/equity/engine/pde/base_pde_solver.py" in pde and "asset/equity/engine/pde/snowball_pde_solver.py" in pde
     assert "util/calendar/holidayfile/china_sse.csv" in common
