@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **RETIRED 2026-09-18 from Task 3 onward.** Certification moved to `quantark.modelvalidation` under
+> [the unified spec](../specs/2026-09-18-intraday-modelvalidation-certification-design.md): the pilot, sweep, evidence
+> packaging, matrix regeneration and certificate documentation below build artifacts that migration deletes, and the
+> Gate C records lack the schema-2 fields. Launch no further Gate C run. Tasks 1 and 2 landed (1831fe73, 5bd9671d);
+> the daily-KI contract, fixture and near-KI example carry into the unified study.
+
 **Goal:** Certify QUAD V2 intraday Greeks for a daily-observed-KI snowball on one trading day, then show, with an
 example and an HTML report artifact, how its PV and Greeks move while the spot streams around the KI level.
 
@@ -572,7 +578,7 @@ sys.exit(0 if set(counts) == {"pass"} else 1)
 - [ ] **Step 3: Run the pilot (background, guarded)**
 
 ```bash
-cd $WT && nohup caffeinate -i -m -s $PY tmp/rss_guard.py 30 tmp/near_ki/pilot_guard.log -- \
+cd $WT && PYTHONPATH=$WT:$WT/test nohup caffeinate -i -m -s $PY tmp/rss_guard.py 30 tmp/near_ki/pilot_guard.log -- \
   $PY tmp/near_ki/run_greeks.py --pilot --workers=4 > tmp/near_ki/pilot.log 2>&1
 ```
 
@@ -600,7 +606,7 @@ Run: `$PY tmp/near_ki/pilot_report.py tmp/near_ki/pilot.log; echo "gate=$?"; sor
 - [ ] **Step 1: Launch (background, guarded, unattended)**
 
 ```bash
-cd $WT && nohup caffeinate -i -m -s $PY tmp/rss_guard.py 30 tmp/near_ki/sweep_guard.log -- \
+cd $WT && PYTHONPATH=$WT:$WT/test nohup caffeinate -i -m -s $PY tmp/rss_guard.py 30 tmp/near_ki/sweep_guard.log -- \
   $PY tmp/near_ki/run_greeks.py --workers=4 > tmp/near_ki/sweep.log 2>&1
 ```
 

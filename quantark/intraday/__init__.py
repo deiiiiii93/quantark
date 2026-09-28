@@ -1,6 +1,6 @@
 """Intraday pricing: timezone-aware valuation timestamps, sub-day variance
 profiles, provisional fixings and a structured result (design
-docs/superpowers/plans/2026-09-15-intraday-pricing-design.md)."""
+docs/superpowers/specs/2026-09-15-intraday-pricing-design.md)."""
 from quantark.intraday.batch import (
     IntradayFailure,
     IntradayPortfolioResult,

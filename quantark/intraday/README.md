@@ -5,7 +5,7 @@ Values a contract at a **timezone-aware timestamp** instead of a date: 14:59:59,
 Variance accrues on a desk-declared intraday profile, carry and discounting run on
 seconds-exact calendar time, today's fixing is an explicit before/after phase, and
 fixings that are due but missing are replaced by the latest spot and **flagged**.
-Design: `docs/superpowers/plans/2026-09-15-intraday-pricing-design.md`.
+Design: `docs/superpowers/specs/2026-09-15-intraday-pricing-design.md`.
 
 ## The three clocks
 
