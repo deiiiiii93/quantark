@@ -62,9 +62,13 @@ understand what will result in changing them."
   instead of scale, DCN or local-vol vanilla/barrier onto the shared grid, native
   KO-reset event statistics).
 - Expert extension protocols (operator factory, time stepper, readout).
-- Renaming `steps_per_day` to `steps_per_year` (see decision 6).
-- `EngineParams.bump_size` (deprecated) and `bus_days_in_year`: shared with MC and
-  Quad, out of scope. The PDE path simply stops reading `bus_days_in_year`.
+- Renaming `steps_per_day` to `steps_per_year`: dropped, not deferred (decision 6 and
+  the note at the end of section 10).
+- `EngineParams.bump_size` (deprecated) and `EngineParams.bus_days_in_year`: shared
+  with MC, Quad, and the analytical engines, out of scope. The PDE path stops reading
+  the params field; the grid's day convention comes from the pricing environment
+  (decision 6). That two objects carry a `bus_days_in_year` is a cross-engine
+  inconsistency to resolve in its own change, not here.
 
 ## 3. Decision log (settled with the user)
 
@@ -75,7 +79,7 @@ understand what will result in changing them."
 | 3 | **Keep** `event_projection` (CELL_AVERAGE default, NODAL expert choice). | Reverses an earlier "delete" decision: the pasted core plan lists nodal projection as a supported expert alternative, and it is cheap to keep once the checks are consolidated. |
 | 4 | Remove `theta`, `event_theta`, and the damping counts from the public surface; they become fixed built-in policy in one module. | The core plan answers expert customisation with pluggable components (sub-project 2), not scalar scheme knobs. Between sub-projects 1 and 2 the damping schedule is not user-configurable; accepted. |
 | 5 | Keep exactly one cache control, `cache_enabled`. | Same numbers either way; the other controls were keying heuristics and sizes. |
-| 6 | Keep the name `steps_per_day`; remove `day_count`; define a day as 1/252 year of the pricing time axis. | Certification study YAMLs name `steps_per_day`, and the anchor test rebuilds studies from the YAML text embedded in each anchor file. A rename would fail every PDE anchor test until anchors are re-banked, which sub-project 3 does anyway. |
+| 6 | Keep the name `steps_per_day`; remove `GridConfig.day_count`; a "day" is one business day of the **pricing environment's** convention (`PricingEnvironment.bus_days_in_year`: 244 on the SSE/CFFEX desks, 252 on CFETS, per `docs/trading-clock.md`). No constant anywhere. | The desk convention is market state and is already declared once on the environment, where it also drives the vol clock and per-trading-day theta; the grid follows it. A second field or a hardcoded 252 would be a second source of truth. The name survives because certification study YAMLs name `steps_per_day` (the anchor test rebuilds studies from the YAML text embedded in each anchor file) and because, with the day defined this way, the name is exact. |
 | 7 | Migrate the two 1D local-vol solvers to `GridConfig` now by field mapping, kernel unchanged. | Deletes the four legacy knobs from the surface today. These two solvers have no goldens or certificates; their tests compare against Black-Scholes and analytic barriers. Sub-project 3 moves them fully onto the shared grid. |
 | 8 | `DCNPDEEngine` keeps a bespoke two-argument constructor. | One step per observation day is part of its certified event semantics, so `accuracy` cannot apply to it until it joins the core in sub-project 3. |
 | 9 | `PDEParams.from_config` stays; the PDE profile tier goes. | Batch/YAML users keep a loader over the real field names; the profile names were aliases. |
@@ -116,7 +120,7 @@ Enum coercion from lower-case strings stays for `event_projection` and
 @dataclass(frozen=True)
 class GridConfig:
     points: Optional[int] = None          # spatial nodes
-    steps_per_day: Optional[float] = None # fill density; a day is 1/252 year of the time axis
+    steps_per_day: Optional[float] = None # fill per business day of the environment's convention (bus_days_in_year)
     eps_crit: Optional[float] = None      # target log-spacing at critical prices
     num_std: Optional[float] = None       # half-width of the auto domain in vol·sqrt(T) units
     bounds: Optional[Tuple[Optional[float], Optional[float]]] = None  # per-side hard override
@@ -129,6 +133,22 @@ lose `day_count`, `terminal_damping_steps`, `event_damping_steps`. `GridConfig.k
 therefore has seven entries. `resolve_config(accuracy, override)` is unchanged in
 semantics.
 
+The day convention travels with the market, not the config:
+
+- `MarketSnapshot` gains `bus_days_in_year: int` (required, positive), set by each
+  solver's `market_snapshot(product, env)` from `pricing_env.bus_days_in_year`.
+- `GridRequest` gains `day_count: int` (required, positive), set by the three library
+  request builders (`_generic_grid_request`, the snowball family's, DCN's) from
+  `market.bus_days_in_year`. It is part of the frozen geometry, so it is in the
+  layout cache key and survives `rebind_time` on calendar bumps.
+- `build_time(request, config)` reads `request.day_count`. Callers that already hold
+  a request (`quantark/intraday/engines/pde.py`) need no change.
+
+Under `DayCountConvention.BUSINESS_DAYS` the product `Δt · day_count` is the exact
+number of business days in an interval, so `steps_per_day` is literally steps per
+business day. Under `CALENDAR_DAYS` it is the trading-day equivalent at the desk's
+convention, the same D the desk quotes vol in.
+
 ### 4.3 Fixed numerical policy — `quantark/asset/equity/engine/pde/policy.py`
 
 One module holds every constant the built-in scheme uses, so "what is the scheme"
@@ -139,12 +159,13 @@ THETA = 0.5                    # Crank-Nicolson away from discontinuities
 EVENT_THETA = 1.0              # backward Euler on event-damped steps
 TERMINAL_DAMPING_STEPS = 1     # full backward-Euler steps off the terminal payoff
 EVENT_DAMPING_STEPS = 2        # full backward-Euler steps after each interior event
-TRADING_DAYS_PER_YEAR = 252    # what "day" means in steps_per_day
 GRID_CACHE_MAX_ENTRIES = 128
 BANDED_CACHE_MAX_ENTRIES = 512
 ```
 
-These values equal today's defaults, which is what makes the change bitwise.
+These values equal today's defaults, which is what makes the change bitwise. There
+is deliberately no day-length constant here: the day is the environment's
+(section 4.2).
 
 ### 4.4 Loud failure on removed names
 
@@ -165,7 +186,7 @@ into the docs and the changelog) supplies the replacement text:
 | `continuous_ki_correction` | removed; the first-passage correction always applies to continuously monitored KI |
 | `cache_strategy`, `grid_cache_max_entries`, `banded_cache_max_entries` | `cache_enabled=True/False` is the only cache control |
 | `use_banded_solver` | removed; the linear solver is chosen by the solver family |
-| `GridConfig.day_count` | fixed `TRADING_DAYS_PER_YEAR = 252` |
+| `GridConfig.day_count` | removed; the day is the pricing environment's `bus_days_in_year` |
 | `GridConfig.terminal_damping_steps`, `event_damping_steps` | fixed policy |
 
 Names not in the map raise the same `ValidationError` without a replacement line.
@@ -222,14 +243,21 @@ byte-compare gate (section 8) is the proof.
 - `_pack_uses_banded` stays a per-family class decision (base: sparse LU; the
   two-surface family: banded when the interior has more than two nodes).
 - Grid cache and critical-points cache sizes read `policy.GRID_CACHE_MAX_ENTRIES`.
-- `bus_days_in_year` is no longer read.
+- `params.bus_days_in_year` is no longer read. `market_snapshot` passes
+  `pricing_env.bus_days_in_year` into the snapshot (section 4.2); the two existing
+  reads of `pricing_env.bus_days_in_year` in cache keys stay.
 
 ### 5.3 Time builder
 
-`build_time` reads `policy.TRADING_DAYS_PER_YEAR`, `policy.TERMINAL_DAMPING_STEPS`,
-`policy.EVENT_DAMPING_STEPS` instead of config fields. The fill formula is unchanged:
-`fill = max(1, round(max(1, Δt·252) · steps_per_day))`. `max_steps` keeps today's
-scale-with-warning behaviour in this release (changing it is a sub-project 3 item).
+`build_time` reads `request.day_count`, `policy.TERMINAL_DAMPING_STEPS`, and
+`policy.EVENT_DAMPING_STEPS` instead of config fields. The fill formula is otherwise
+unchanged: `fill = max(1, round(max(1, Δt · day_count) · steps_per_day))`. On a
+252 environment this is bit-identical to today. On a 244 environment the fill
+follows the desk's own business days, about 3% fewer steps than today's fixed
+252; no golden or certificate uses a non-252 environment (checked: all seventeen
+244 sites are tests and one demo), so this is a behaviour change only where the
+old behaviour was wrong. `max_steps` keeps today's scale-with-warning behaviour in
+this release (changing it is a sub-project 3 item).
 
 ### 5.4 Snowball, Phoenix, KO-reset
 
@@ -281,7 +309,7 @@ local-vol solver shares them). The two equity solvers derive kernel arguments fr
 | Kernel argument | Source |
 |---|---|
 | `n_s` | `points` |
-| `step_dt`, `t_grid` | `build_time(GridRequest(tau=T, bound_anchors=(spot,), critical_prices=(spot, strike), hard_lower=None, hard_upper=None, event_times=<interior observation dates>), config)`; `dt = layout.dt`, `t = layout.t` |
+| `step_dt`, `t_grid` | `build_time(GridRequest(tau=T, bound_anchors=(spot,), critical_prices=(spot, strike), hard_lower=None, hard_upper=None, event_times=<interior observation dates>, day_count=env.bus_days_in_year), config)`; `dt = layout.dt`, `t = layout.t` |
 | `observe_steps` (barrier, discrete) | `layout.step_at(d)` for interior dates; valuation-date and maturity observations keep today's index-0 / last-index handling |
 | `s_max` | `bounds[1]` if set, else `0.0` (kernel default: 4 × max(spot, strike)) |
 | `theta`, `rannacher` (vanilla kernel only) | `policy.THETA`, `policy.TERMINAL_DAMPING_STEPS > 0` |
@@ -345,6 +373,9 @@ Book (all at `accuracy` fast, standard, and high unless noted):
 - `DCNPDEEngine` and `LocalVolDCNPDEEngine` at defaults.
 - One snowball through a prepared `PricingSession` (execution adapters) and one
   through the intraday PDE route.
+- One snowball and one European on a `bus_days_in_year=244`, `BUSINESS_DAYS`
+  environment with a calendar. These rows are **expected to change** (section 5.3)
+  and are reported as deltas, not required to match.
 
 ### 8.2 Anchors
 
@@ -363,7 +394,9 @@ study YAML is edited; none names a removed field.
 | `test/pde_grid/test_snowball_transform_oracle.py` | Deleted (self-described scaffolding for the legacy jump code). |
 | `test_backward_operator.py` | Deleted with the module. |
 | `test/pde_grid/test_solver_seam.py`, `test_pde_quad_audit_regressions.py`, `test_pde_term_structure_solvers.py`, `test_pde_fixed_bump_grid.py` | Replace `use_rannacher`/`rannacher_steps`/`rannacher_at_events`/`use_banded_solver`/`cache_strategy` arguments; where a test exercised the "no damping" schedule, monkeypatch `policy` constants. |
-| `test/pde_grid/test_grid_config.py`, `test_time_builder.py` | Drop `day_count` and damping-count fields; damping assertions read `policy`. Replace the `make_pde_params` test with a `from_config` test. |
+| `test/pde_grid/test_grid_config.py`, `test_time_builder.py` | Drop `day_count` and damping-count fields from `GridConfig`; damping assertions read `policy`. Replace the `make_pde_params` test with a `from_config` test. Add a time-builder case showing a 244-day request fills fewer steps than a 252-day request over the same interval. |
+| `test/pde_grid/*` direct `GridRequest(...)` constructions (twelve sites) and direct `MarketSnapshot(...)` constructions | Add `day_count=252` / `bus_days_in_year=252` explicitly; the fields are required, so a test states its convention. |
+| `test_snowball_pde_date_schedule.py`, `test_greeks_theta_schedule.py`, `test/intraday/test_context.py` | Run on 244 environments with PDE solvers; their numbers move by the fill change. Assertions are on schedules and structure and are expected to hold; any that pin a value is re-derived and the delta reported. |
 | `test_engine_param_profiles.py` | Quad-only for profiles; PDE `from_config` round-trip; `make_engine_params("pde")` raises. |
 | `test_local_vol_equity_engines.py`, `test_barrier_vol_pde_engines.py`, `test_vol_model_term_structure_compatibility.py` | `grid_size`/`time_steps` become `grid=GridConfig(points=..., steps_per_day=...)`. |
 | `test_dcn_pde_solver.py`, `test_dcn_vol_pde_solvers.py` | `num_space_nodes` becomes `points`. |
@@ -440,7 +473,10 @@ then one golden regeneration and one full re-certification pass.
 | `DCNPDEEngine` onto the common core (Dirichlet boundaries, shared damping). | DCN moves; re-certify against DCN MC. |
 | Local-vol vanilla and barrier onto the shared concentrated grid. | Oracle-tested only. |
 | KO-reset native PDE event statistics; the QUAD delegation and residual adjustment go. | Event stats move; PV unchanged. |
-| Rename `steps_per_day` to `steps_per_year` (presets 1008/1008/2016) and re-bank anchors. | Bitwise; anchors re-banked with the rest. |
+
+A `steps_per_year` rename was considered and dropped: with the day defined as the
+environment's business day (decision 6), `steps_per_day` is the exact name, and a
+per-year density would have to be re-expressed per desk convention anyway.
 
 Gate: full certification per the release procedure.
 
@@ -454,3 +490,4 @@ Gate: full certification per the release procedure.
 | Local-vol vanilla/barrier default resolution changes surprise a user. | Reported deltas against Black-Scholes and analytic barriers in the merge message; documented under "Changed". |
 | Removing damping counts leaves no damping control until sub-project 2. | Accepted in decision 4; the policy module is one place to patch for a study. |
 | Anchor tests fail because a study YAML names a removed field. | Verified: study YAMLs name only `accuracy`, `points`, `steps_per_day`, `cache_enabled`. |
+| A 244-convention desk sees its PDE numbers move. | Intended: the fill now follows the desk's business days. Called out under "Changed" in the changelog with the ~3% fill figure; no golden or certificate is on a 244 environment. |
