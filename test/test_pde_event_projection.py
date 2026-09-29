@@ -509,9 +509,12 @@ class TestProjectPiecewiseEvent:
 
 class TestEventProjectionParam:
     def test_default_is_cell_average(self):
-        """Corrected event semantics are the default; "nodal" stays available
-        as the explicit legacy opt-out (repricing reviewed 2026-07-23)."""
-        assert PDEParams().event_projection is EventProjectionMode.CELL_AVERAGE
+        """Corrected event semantics are the default -- None, which the
+        shared-grid autocallable route reads as the dual-cell projection;
+        "nodal" stays available as the explicit opt-out (repricing reviewed
+        2026-07-23)."""
+        assert PDEParams().event_projection is None
+        assert SnowballPDESolver(PDEParams())._use_cell_average_events()
 
     def test_default_event_damping_steps_is_two(self):
         """Two implicit solves per event is the field-tested minimum
@@ -1380,3 +1383,18 @@ class TestDefaultCertification:
         unif_400 = self._greeks("cell_average", False, 400, "engine")
         assert abs(unif_400["gamma"] - eng_400["gamma"]) < 2e-3
         assert abs(unif_400["price"] - eng_400["price"]) < 5e-3
+
+
+def test_default_event_projection_is_the_route_treatment():
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+    from quantark.util.enum.engine_enums import EventProjectionMode
+
+    assert PDEParams().event_projection is None
+    assert SnowballPDESolver(PDEParams())._use_cell_average_events()
+    assert SnowballPDESolver(
+        PDEParams(event_projection="cell_average")
+    )._use_cell_average_events()
+    assert not SnowballPDESolver(
+        PDEParams(event_projection="nodal")
+    )._use_cell_average_events()
+    assert PDEParams(event_projection="NODAL").event_projection is EventProjectionMode.NODAL

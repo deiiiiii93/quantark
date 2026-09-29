@@ -1626,11 +1626,13 @@ class SnowballPDESolver(BasePDESolver):
                 return s_vec <= barrier  # DOWN for standard
 
     def _use_cell_average_events(self) -> bool:
-        """True when discrete event jumps use the dual-cell projection."""
-        return (
-            getattr(self.params, "event_projection", EventProjectionMode.NODAL)
-            is EventProjectionMode.CELL_AVERAGE
-        )
+        """True when discrete event jumps use the dual-cell projection.
+
+        ``None`` is this route's own treatment: the dual-cell projection.
+        """
+        return getattr(
+            self.params, "event_projection", EventProjectionMode.NODAL
+        ) in (None, EventProjectionMode.CELL_AVERAGE)
 
     def _event_uses_projection(self, t_idx: int) -> bool:
         """True when the discrete event at ``t_idx`` uses the projection.

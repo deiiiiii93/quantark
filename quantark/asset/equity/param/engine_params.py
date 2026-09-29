@@ -438,9 +438,10 @@ class PDEParams(EngineParams):
             solvers (0 = auto); grid-layer solvers use GridConfig.bounds
         bus_days_in_year: Days per year for day-based grid heuristics (from EngineParams, default: 252)
         event_projection: Spatial representation of discrete coupon/KO/KI event
-            jumps — "cell_average" (default; conservative dual-cell projection
-            that removes the half-cell trigger-phase bias, see
-            pde_auto_grid_investigation.md) or "nodal" (legacy Boolean masks)
+            jumps — None (default: the route's own treatment), "cell_average"
+            (conservative dual-cell projection that removes the half-cell
+            trigger-phase bias, see pde_auto_grid_investigation.md) or
+            "nodal" (Boolean masks)
         event_theta: Theta value applied immediately before event times (default: 1.0)
         theta: Finite difference scheme parameter (0.5 = Crank-Nicolson, 1.0 = Backward Euler)
     """
@@ -466,16 +467,16 @@ class PDEParams(EngineParams):
     s_min: float = 0.0  # Auto-calculate if 0
     s_max: float = 0.0  # Auto-calculate if 0
 
-    # Spatial representation of discrete event operators (coupon/KO/KI jumps)
-    # in the autocallable solvers (1D BSM/LV and 2D Heston/SLV slice-wise).
-    # CELL_AVERAGE (default) applies the conservative dual-cell projection
-    # that removes the half-cell trigger-phase bias documented in
-    # pde_auto_grid_investigation.md; NODAL is the explicit legacy opt-out
-    # (Boolean-mask application). Continuously monitored barriers keep nodal
+    # Spatial representation of discrete event operators (coupon/KO/KI jumps).
+    # None = the route's own treatment (decision 15): CELL_AVERAGE on the
+    # shared-grid autocallable solvers (1D BSM/LV and 2D Heston/SLV
+    # slice-wise; the conservative dual-cell projection that removes the
+    # half-cell trigger-phase bias documented in pde_auto_grid_investigation.md),
+    # NODAL on DCN, a mid-cell-aligned nodal mask on the local-vol barrier.
+    # An explicit value is honoured where the route implements it and
+    # rejected where it does not. Continuously monitored barriers keep nodal
     # treatment either way.
-    event_projection: Union[EventProjectionMode, str] = (
-        EventProjectionMode.CELL_AVERAGE
-    )
+    event_projection: Optional[Union[EventProjectionMode, str]] = None
     event_theta: float = 1.0
 
     # Numerical scheme configuration
@@ -519,21 +520,23 @@ class PDEParams(EngineParams):
             raise ValidationError(
                 f"event_theta must be in (0, 1], got {self.event_theta}"
             )
-        # Coerce event_projection to the enum (same contract as above).
-        if isinstance(self.event_projection, str):
+        # Coerce event_projection to the enum; None is the route's treatment.
+        if self.event_projection is None:
+            pass
+        elif isinstance(self.event_projection, str):
             try:
                 self.event_projection = EventProjectionMode(
                     self.event_projection.lower()
                 )
             except ValueError:
                 raise ValidationError(
-                    "event_projection must be one of "
+                    "event_projection must be None or one of "
                     f"{[mode.value for mode in EventProjectionMode]}, "
                     f"got {self.event_projection!r}"
                 )
         elif not isinstance(self.event_projection, EventProjectionMode):
             raise ValidationError(
-                "event_projection must be an EventProjectionMode or its "
+                "event_projection must be None, an EventProjectionMode or its "
                 f"string value, got {type(self.event_projection).__name__}"
             )
 
