@@ -13,6 +13,7 @@ from quantark.asset.equity.product.option import AmericanOption, EuropeanVanilla
 from quantark.asset.equity.engine.pde import AmericanPDESolver
 from quantark.asset.equity.engine.analytical import BlackScholesEngine
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
@@ -74,7 +75,7 @@ def create_pricing_env(spot=100.0, rate=0.05, vol=0.20, div=0.0):
 
 
 def create_solver():
-    params = PDEParams(grid_size=200, time_steps=200)
+    params = PDEParams(grid=GridConfig(points=200, time_steps=200))
     return AmericanPDESolver(params=params)
 
 

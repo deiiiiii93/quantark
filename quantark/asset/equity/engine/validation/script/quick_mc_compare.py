@@ -4,6 +4,7 @@ from quantark.asset.equity.engine.pde import BarrierPDESolver
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
 from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
 from quantark.asset.equity.param import PDEParams, MCParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.param.quote.spot_quote import SpotQuote
 from quantark.param.rrf.rate_curve import FlatRateCurve
@@ -20,7 +21,7 @@ def make_env(spot=100, rate=0.05, vol=0.20):
         valuation_date=datetime(2024, 1, 1)
     )
 
-pde = BarrierPDESolver(PDEParams(grid_size=400, time_steps=200))
+pde = BarrierPDESolver(PDEParams(grid=GridConfig(points=400, time_steps=200)))
 analytical = BarrierAnalyticalEngine()
 mc = BarrierOptionMCEngine(params=MCParams(num_paths=50000, seed=42),
                           method=EngineType.MONTE_CARLO(MonteCarloMethod.QUASI))

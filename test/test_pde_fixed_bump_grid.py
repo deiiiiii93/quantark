@@ -175,8 +175,6 @@ def test_pde_bump_context_freezes_effective_spatial_bounds(
             fixed_solver.price(product, bumped_env)
             assert fixed_solver._active_layout is frozen
     else:
-        assert fixed_solver.params.s_min == pytest.approx(base_bounds[0])
-        assert fixed_solver.params.s_max == pytest.approx(base_bounds[1])
         assert _effective_spatial_bounds(
             fixed_solver, product, _rate_bumped_env(env, bump)
         ) == pytest.approx(base_bounds)

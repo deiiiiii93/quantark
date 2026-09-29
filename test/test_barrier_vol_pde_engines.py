@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from datetime import datetime
 
 from quantark.param import GridVolSurface, FlatRateCurve, SpotQuote
@@ -13,7 +14,8 @@ from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.slv.leverage import LeverageSurface
 from quantark.util.enum import OptionType, BarrierType, ObservationType
-from quantark.util.exceptions import PricingError
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 
 
 def _env(vol=0.20, s0=100., r=0.03, q=0.01):
@@ -34,7 +36,7 @@ def _unit_lev(s0=100.):
 
 
 def test_lv_barrier_pde_matches_analytical():
-    px = LocalVolBarrierPDESolver(PDEParams(grid_size=500, time_steps=150)).price(_uo_call(), _env())
+    px = LocalVolBarrierPDESolver(PDEParams(grid=GridConfig(points=500, time_steps=150))).price(_uo_call(), _env())
     ana = BarrierAnalyticalEngine().price(_uo_call(), _env())
     assert abs(px - ana) < 0.3
 
@@ -43,7 +45,7 @@ def test_participation_scales():
     prod2 = BarrierOption(strike=100., maturity=1.0, option_type=OptionType.CALL, barrier=130.,
                           barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.CONTINUOUS,
                           participation_rate=3.0)
-    eng = LocalVolBarrierPDESolver(PDEParams(grid_size=300, time_steps=100))
+    eng = LocalVolBarrierPDESolver(PDEParams(grid=GridConfig(points=300, time_steps=100)))
     assert eng.price(prod2, _env()) == abs(3.0 * eng.price(_uo_call(), _env()))
 
 
@@ -56,3 +58,33 @@ def test_heston_slv_barrier_pde_run_and_reject():
     import pytest
     with pytest.raises(PricingError):
         HestonBarrierPDESolver(hp).price(EuropeanVanillaOption(strike=100., option_type=OptionType.CALL, maturity=1.0), _env())
+
+
+@pytest.mark.parametrize("params", [
+    PDEParams(grid=GridConfig(terminal_damping_steps=2)),
+    PDEParams(grid=GridConfig(event_damping_steps=1)),
+    PDEParams(event_theta=0.7),
+    PDEParams(event_projection="nodal"),
+    PDEParams(event_projection="cell_average"),
+    PDEParams(grid=GridConfig(eps_crit=0.001)),
+    PDEParams(grid=GridConfig(bounds=(None, 500.0))),
+])
+def test_lv_barrier_rejects_inapplicable_and_rejected_fields(params):
+    with pytest.raises(ValidationError, match="local-vol barrier"):
+        LocalVolBarrierPDESolver(params).price(_uo_call(), _env())
+
+
+def test_lv_barrier_points_budget_and_theta_reach_the_kernel(monkeypatch):
+    import quantark.asset.equity.engine.pde.barrier_vol_pde_solvers as mod
+    seen = {}
+    real = mod.price_barrier_lv_pde
+
+    def spy(*a, **kw):
+        seen.update(kw, step_dt=a[5])
+        return real(*a, **kw)
+
+    monkeypatch.setattr(mod, "price_barrier_lv_pde", spy)
+    LocalVolBarrierPDESolver(PDEParams(
+        theta=0.6, cache_enabled=False, grid=GridConfig(points=300, time_steps=120)
+    )).price(_uo_call(), _env())
+    assert seen["n_s"] == 300 and len(seen["step_dt"]) == 120 and seen["theta"] == 0.6

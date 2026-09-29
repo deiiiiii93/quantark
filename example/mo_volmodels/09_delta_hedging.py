@@ -34,6 +34,7 @@ from quantark.asset.equity.engine.pde import (  # noqa: E402
     LocalVolPDESolver,
 )
 from quantark.asset.equity.param import PDEParams  # noqa: E402
+from quantark.asset.equity.engine.pde.grid.config import GridConfig  # noqa: E402
 from quantark.asset.equity.product.option import EuropeanVanillaOption  # noqa: E402
 from quantark.param import FlatVolSurface  # noqa: E402
 from quantark.util.enum import OptionType  # noqa: E402
@@ -244,7 +245,7 @@ def main() -> None:
     engines = {
         "BSM (flat vol)": BlackScholesEngine(),
         "Local Vol": LocalVolPDESolver(
-            PDEParams(grid_size=grid_size, time_steps=time_steps),
+            PDEParams(grid=GridConfig(points=grid_size, time_steps=time_steps)),
             local_vol_surface=lv,
         ),
         "Heston": HestonPDESolver(hp, n_x=adi_x, n_v=adi_v, n_t=time_steps),

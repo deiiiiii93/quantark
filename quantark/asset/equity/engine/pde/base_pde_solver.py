@@ -31,7 +31,6 @@ from quantark.asset.equity.engine.pde.grid import (
     GridRequest,
     Layout,
     MarketSnapshot,
-    reject_legacy_resolution_knobs,
     resolve_bound_layout,
     validate_external_layout,
 )
@@ -489,9 +488,6 @@ class BasePDESolver(BaseEngine):
         """Engine-owned binder; cache behavior follows the engine's cache
         strategy (``disable`` -> no layout cache)."""
         if self._grid_binder is None:
-            # Every BasePDESolver rides the grid layer (0.4.0): legacy
-            # resolution knobs would be silently inert here — reject loudly.
-            reject_legacy_resolution_knobs(self.params)
             self._grid_binder = GridBinder(
                 getattr(self.params, "accuracy", "standard"),
                 getattr(self.params, "grid", None),

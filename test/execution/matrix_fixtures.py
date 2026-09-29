@@ -614,8 +614,14 @@ def _build_equity_pde():
         def build():
             import quantark.asset.equity.engine.pde as pde_mod
 
+            from quantark.asset.equity.param import PDEParams
+
             cls = getattr(pde_mod, cls_name)
-            engine = cls(_pdep())
+            # The local-vol barrier route rejects the legacy event pins (its
+            # kernel never read them: same numbers with the route defaults).
+            engine = cls(
+                PDEParams() if cls_name == "LocalVolBarrierPDESolver" else _pdep()
+            )
             env = _eq_grid_env() if grid_env else _eq_flat_env()
             return engine, product_fn(), env, "product_env"
 

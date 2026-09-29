@@ -39,6 +39,7 @@ from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
     LocalVolSnowballPDESolver,
 )
 from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.product.option import create_standard_snowball
 from quantark.backtest.replay import (
     AutocallableBacktestConfig,
@@ -498,7 +499,7 @@ class TestCreateVolModelEngine:
             vol_model="localvol",
             solver="pde",
             calibrated=calibrated,
-            pde_params=PDEParams(grid_size=60, time_steps=30),
+            pde_params=PDEParams(grid=GridConfig(points=60, time_steps=30)),
         )
         assert isinstance(engine, LocalVolSnowballPDESolver)
         assert engine._prebuilt is calibrated.local_vol_surface

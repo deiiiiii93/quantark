@@ -70,10 +70,9 @@ def test_key_fingerprint():
     )
 
 
-def test_legacy_resolution_knobs_rejected_on_grid_layer():
-    """Non-default legacy knobs must fail LOUDLY on grid-layer solvers
-    (silently-inert resolution controls are a mispricing hazard), while the
-    standalone vol-model solvers keep consuming them."""
+def test_removed_resolution_knobs_name_their_replacement():
+    """0.6.0: the four legacy resolution knobs are gone from PDEParams;
+    passing one raises with its GridConfig replacement named (spec §4.4)."""
     from quantark.asset.equity.engine.pde import EuropeanPDESolver, SnowballPDESolver
     from quantark.asset.equity.param import PDEParams
 
@@ -83,11 +82,10 @@ def test_legacy_resolution_knobs_rejected_on_grid_layer():
         {"s_min": 50.0},
         {"s_max": 200.0},
     ):
-        solver = EuropeanPDESolver(params=PDEParams(**kwargs))
-        with pytest.raises(ValidationError, match="legacy resolution control"):
-            _ = solver.grid_binder
+        with pytest.raises(ValidationError, match="removed in 0.6.0"):
+            PDEParams(**kwargs)
 
-    # default values pass, and the replacement path works
+    # the replacement path
     assert SnowballPDESolver(params=PDEParams()).grid_binder.config.points == 400
     assert (
         EuropeanPDESolver(

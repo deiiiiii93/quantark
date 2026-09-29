@@ -15,6 +15,7 @@ from quantark.asset.equity.engine.quad.quad_adapters import (
     BarrierQuadInputAdapter,
 )
 from quantark.asset.equity.param import PDEParams, QuadParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.product.option import (
     BarrierOption,
     ObservationRecord,
@@ -92,7 +93,7 @@ def _discrete_barrier(convention):
 
 def test_barrier_pde_event_node_uses_payment_delay_ratio(env):
     product = _discrete_barrier(_lagged())
-    solver = BarrierPDESolver(PDEParams(grid_size=51, time_steps=4))
+    solver = BarrierPDESolver(PDEParams(grid=GridConfig(points=51, time_steps=4)))
     t_vec = np.array([0.0, 0.5, 1.0])
     solver._setup_observation_indices(
         product,
@@ -137,7 +138,7 @@ def test_barrier_pde_expiry_paid_boundary_uses_terminal_delay(env):
         observation_type=ObservationType.CONTINUOUS,
         settlement_convention=_lagged(),
     )
-    solver = BarrierPDESolver(PDEParams(grid_size=51, time_steps=4))
+    solver = BarrierPDESolver(PDEParams(grid=GridConfig(points=51, time_steps=4)))
     solver._total_tau = MATURITY
     grid = np.zeros((3, 3))
     s_vec = np.array([90.0, 100.0, 110.0])
@@ -162,7 +163,7 @@ def test_barrier_pde_expiry_paid_boundary_uses_terminal_delay(env):
 def test_barrier_pde_expiry_paid_discrete_node_uses_terminal_delay(env):
     product = _discrete_barrier(_lagged())
     product.pay_at_hit = False
-    solver = BarrierPDESolver(PDEParams(grid_size=51, time_steps=4))
+    solver = BarrierPDESolver(PDEParams(grid=GridConfig(points=51, time_steps=4)))
     t_vec = np.array([0.0, 0.5, 1.0])
     solver._setup_observation_indices(
         product,
@@ -255,7 +256,7 @@ def test_vol_model_barrier_pde_scales_terminal_kernel_value(
         lambda *_args, **_kwargs: 8.0,
     )
     engine = LocalVolBarrierPDESolver(
-        params=PDEParams(grid_size=51, time_steps=4),
+        params=PDEParams(grid=GridConfig(points=51, time_steps=4)),
         local_vol_surface=object(),
     )
 

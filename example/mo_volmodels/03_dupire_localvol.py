@@ -22,6 +22,7 @@ from quantark.volmodels.black_scholes import implied_vol_call
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.engine.pde import LocalVolPDESolver
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import NumericalError
 
@@ -74,7 +75,7 @@ def main() -> None:
 
     # Pass the surface we just built (floored or exact) as the solver's prebuilt surface,
     # so it prices against exactly that lv and does not re-derive one per option.
-    solver = LocalVolPDESolver(PDEParams(grid_size=300, time_steps=150), local_vol_surface=lv)
+    solver = LocalVolPDESolver(PDEParams(grid=GridConfig(points=300, time_steps=150)), local_vol_surface=lv)
     per_expiry, sq_err, raw_sq_err = [], [], []
     for pe in surface["per_expiry"]:
         T, r, q = pe["T"], pe["r"], pe["q"]

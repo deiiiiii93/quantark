@@ -8,6 +8,7 @@ from quantark.param import GridVolSurface, FlatRateCurve, SpotQuote
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.product.option import BarrierOption
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
 from quantark.asset.equity.engine.mc import LocalVolBarrierMCEngine
@@ -29,7 +30,7 @@ def test_participation_scales_option_leg_only():
                          barrier_type=BarrierType.UP_OUT, rebate=5.0, participation_rate=2.0,
                          observation_type=ObservationType.CONTINUOUS)
     ana = BarrierAnalyticalEngine().price(prod, _env())
-    pde = LocalVolBarrierPDESolver(PDEParams(grid_size=600, time_steps=200)).price(prod, _env())
+    pde = LocalVolBarrierPDESolver(PDEParams(grid=GridConfig(points=600, time_steps=200))).price(prod, _env())
     mc = LocalVolBarrierMCEngine(MCParams(num_paths=200_000, time_steps=150, seed=9)).price(prod, _env())
     assert abs(pde - ana) < 0.6
     assert abs(mc - ana) < 0.8
@@ -46,7 +47,7 @@ def test_expiry_monitoring_supported():
     prod = BarrierOption(strike=100., maturity=1.0, option_type=OptionType.CALL, barrier=120.,
                          barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.EXPIRY)
     ana = BarrierAnalyticalEngine().price(prod, _env())
-    pde = LocalVolBarrierPDESolver(PDEParams(grid_size=600, time_steps=150)).price(prod, _env())
+    pde = LocalVolBarrierPDESolver(PDEParams(grid=GridConfig(points=600, time_steps=150))).price(prod, _env())
     mc = LocalVolBarrierMCEngine(MCParams(num_paths=200_000, time_steps=100, seed=4)).price(prod, _env())
     assert abs(pde - ana) < 0.5
     assert abs(mc - ana) < 0.6

@@ -426,16 +426,7 @@ class PDEParams(EngineParams):
         accuracy: Grid accuracy profile: fast, standard, high (default: standard)
         grid: Optional GridConfig expert overlay (field-by-field override of
             the accuracy profile: points, steps_per_day, bounds, ...)
-        grid_size: LEGACY - spatial grid points for the standalone vol-model
-            solvers only (LocalVolPDESolver, LV/Heston/SLV barrier solvers);
-            solvers on the declarative grid layer reject non-default values
-        time_steps: LEGACY - time steps for the standalone vol-model solvers
-            only; solvers on the declarative grid layer reject non-default values
         cache_enabled: Enable PDE cache usage (default: True)
-        s_min: LEGACY - lower spatial bound for the standalone vol-model
-            solvers (0 = auto); grid-layer solvers use GridConfig.bounds
-        s_max: LEGACY - upper spatial bound for the standalone vol-model
-            solvers (0 = auto); grid-layer solvers use GridConfig.bounds
         bus_days_in_year: Days per year for day-based grid heuristics (from EngineParams, default: 252)
         event_projection: Spatial representation of discrete coupon/KO/KI event
             jumps — None (default: the route's own treatment), "cell_average"
@@ -453,19 +444,7 @@ class PDEParams(EngineParams):
     accuracy: str = "standard"
     grid: Optional[object] = None
 
-    # LEGACY resolution knobs — consumed ONLY by the standalone vol-model
-    # solvers (bespoke kernels, deferred migration). Solvers on the
-    # declarative grid layer REJECT non-default values (loud, with the
-    # GridConfig replacement named) instead of silently ignoring them.
-    grid_size: int = 400
-    time_steps: int = 200
     cache_enabled: bool = True
-
-    # Feature-aware default grids
-
-    # Spatial grid configuration
-    s_min: float = 0.0  # Auto-calculate if 0
-    s_max: float = 0.0  # Auto-calculate if 0
 
     # Spatial representation of discrete event operators (coupon/KO/KI jumps).
     # None = the route's own treatment (decision 15): CELL_AVERAGE on the
@@ -502,18 +481,6 @@ class PDEParams(EngineParams):
                 f"grid must be a GridConfig, got {type(self.grid).__name__}"
             )
 
-        if self.grid_size <= 0:
-            raise ValidationError(f"Grid size must be positive, got {self.grid_size}")
-        if self.time_steps <= 0:
-            raise ValidationError(f"Time steps must be positive, got {self.time_steps}")
-        if self.s_min < 0:
-            raise ValidationError(f"s_min must be non-negative, got {self.s_min}")
-        if self.s_max < 0:
-            raise ValidationError(f"s_max must be non-negative, got {self.s_max}")
-        if self.s_min > 0 and self.s_max > 0 and self.s_min >= self.s_max:
-            raise ValidationError(
-                f"s_min ({self.s_min}) must be less than s_max ({self.s_max})"
-            )
         if not 0.0 <= self.theta <= 1.0:
             raise ValidationError(f"theta must be in [0, 1], got {self.theta}")
         if not 0.0 < self.event_theta <= 1.0:

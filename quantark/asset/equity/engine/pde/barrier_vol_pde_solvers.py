@@ -14,10 +14,21 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.pde.grid.config import (
+    LV_UNIFORM_ACCURACY_PROFILES,
+    GridConfig,
+    resolve_config,
+)
+from quantark.asset.equity.engine.pde.grid.request import GridRequest
+from quantark.asset.equity.engine.pde.grid.time import build_time
+from quantark.asset.equity.engine.pde.route_applicability import (
+    check_route_applicability,
+)
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.param.pde_removed_names import reject_removed_kwargs
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
 from quantark.execution.errors import CapabilityError
@@ -32,6 +43,8 @@ from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.heston.pde_kernel import price_barrier_heston_pde
 from quantark.volmodels.slv.leverage import LeverageSurface
 from quantark.volmodels.slv.slv_pde_kernel import price_barrier_slv_pde
+
+ROUTE_B = "local-vol barrier"
 
 
 def _check(name, product):
@@ -117,16 +130,33 @@ class LocalVolBarrierPDESolver(BaseEngine):
     engine_type = EngineType.PDE
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
-    def __init__(self, params: Optional[PDEParams] = None, local_vol_surface: Optional[LocalVolSurface] = None):
+    def __init__(self, params: Optional[PDEParams] = None,
+                 local_vol_surface: Optional[LocalVolSurface] = None, **removed):
+        reject_removed_kwargs(type(self).__name__, removed)
         super().__init__(params or PDEParams())
         self._prebuilt = local_vol_surface
+
+    def _route_config(self) -> GridConfig:
+        """PDEParams over the local-vol route table (spec §6.1)."""
+        check_route_applicability(self.params, ROUTE_B)
+        return resolve_config(
+            self.params.accuracy, self.params.grid,
+            profiles=LV_UNIFORM_ACCURACY_PROFILES,
+        )
 
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("LocalVolBarrierPDESolver", product)
         settlement_scale = _settlement_scale(self, product, env)
-        T = float(product.get_maturity(env)); n = int(self.params.time_steps)
-        t_grid = np.linspace(0.0, T, n + 1)
-        market = TermMarketContext.from_env(env, t_grid, ref_strike=float(product.strike))
+        T = float(product.get_maturity(env))
+        config = self._route_config()
+        spot, strike = float(env.spot), float(product.strike)
+        # Uniform time grid (no interior nodes): linspace(0, T, time_steps + 1)
+        # to the bit. Discrete observations take the nearest node below.
+        t_grid = build_time(GridRequest(
+            tau=T, bound_anchors=(spot,), critical_prices=(spot, strike),
+            hard_lower=None, hard_upper=None, event_times=(),
+        ), config).t
+        market = TermMarketContext.from_env(env, t_grid, ref_strike=strike)
         r_fwd = market.fwd_rates
         carry_fwd = market.fwd_carry
         lv = self._prebuilt
@@ -143,7 +173,8 @@ class LocalVolBarrierPDESolver(BaseEngine):
             return price_barrier_lv_pde(float(env.spot), float(product.strike), is_call, T, lv,
                                         np.diff(t_grid), r_fwd, carry_fwd, rebate=reb,
                                         continuous=continuous, observe_steps=observe_steps,
-                                        n_s=int(self.params.grid_size), **_bkw(product))
+                                        n_s=int(config.points), theta=float(self.params.theta),
+                                        **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)
         return (

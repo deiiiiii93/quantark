@@ -23,6 +23,7 @@ from quantark.asset.equity.engine.pde import (
     LocalVolPDESolver,
 )
 from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.settlement import (
     SettlementConvention,
@@ -136,7 +137,7 @@ def _engine(engine_name, local_vol, leverage):
         return HestonPDESolver(HESTON, n_x=48, n_v=18, n_t=16)
     if engine_name == "local_vol_pde":
         return LocalVolPDESolver(
-            params=PDEParams(grid_size=101, time_steps=32),
+            params=PDEParams(grid=GridConfig(points=101, time_steps=32)),
             local_vol_surface=local_vol,
         )
     if engine_name == "slv_pde":

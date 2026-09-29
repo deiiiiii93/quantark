@@ -42,6 +42,7 @@ from quantark.asset.equity.engine import (
 
 # Import parameters
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 
 # Import market data
 from quantark.priceenv import PricingEnvironment
@@ -100,8 +101,6 @@ class TestPDEParams:
         """Test default parameter values."""
         params = PDEParams()
 
-        assert params.grid_size == 400
-        assert params.time_steps == 200
         assert params.accuracy == "standard"
         assert params.grid is None
         assert params.bus_days_in_year == 252
@@ -109,23 +108,11 @@ class TestPDEParams:
 
     def test_custom_values(self):
         """Test custom parameter values."""
-        params = PDEParams(
-            grid_size=100,
-            time_steps=50,
-            theta=1.0,
-        )
+        params = PDEParams(grid=GridConfig(points=100, time_steps=50), theta=1.0)
 
-        assert params.grid_size == 100
-        assert params.time_steps == 50
+        assert params.grid.points == 100
+        assert params.grid.time_steps == 50
         assert params.theta == 1.0
-
-    def test_invalid_grid_size(self):
-        """Test that invalid grid size raises error."""
-        with pytest.raises(ValidationError):
-            PDEParams(grid_size=0)
-
-        with pytest.raises(ValidationError):
-            PDEParams(grid_size=-10)
 
     def test_invalid_theta(self):
         """Test that invalid theta raises error."""

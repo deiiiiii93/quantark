@@ -14,6 +14,7 @@ from quantark.asset.equity.product.option import AmericanOption
 from quantark.asset.equity.engine.pde import AmericanPDESolver
 from quantark.asset.equity.engine.mc import AmericanOptionMCEngine
 from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
@@ -81,7 +82,7 @@ def run_benchmark_tests(results: BenchmarkResults):
     mc_params = MCParams(num_paths=MC_PATHS, time_steps=MC_STEPS, seed=42)
     mc_engine = AmericanOptionMCEngine(params=mc_params, method=MonteCarloMethod.QUASI)
 
-    pde_params = PDEParams(grid_size=250, time_steps=250)
+    pde_params = PDEParams(grid=GridConfig(points=250, time_steps=250))
     pde_engine = AmericanPDESolver(params=pde_params)
 
     test_cases = [

@@ -9,6 +9,16 @@ import numpy as np
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.localvol_greeks import local_vol_model_greeks
+from quantark.asset.equity.engine.pde.grid.config import (
+    LV_UNIFORM_ACCURACY_PROFILES,
+    GridConfig,
+    resolve_config,
+)
+from quantark.asset.equity.engine.pde.grid.request import GridRequest
+from quantark.asset.equity.engine.pde.grid.time import build_time
+from quantark.asset.equity.engine.pde.route_applicability import (
+    check_route_applicability,
+)
 from quantark.asset.equity.engine.settlement_support import (
     pending_receivable_pv,
     resolve_terminal_timing,
@@ -16,6 +26,7 @@ from quantark.asset.equity.engine.settlement_support import (
     validate_settlement_capability,
 )
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.param.pde_removed_names import reject_removed_kwargs
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment
@@ -25,6 +36,8 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.curves import forward_carry_on_grid, forward_rates_on_grid
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.localvol.pde_kernel import price_european_lv_pde
+
+ROUTE = "local-vol vanilla"
 
 
 class LocalVolPDESolver(BaseEngine):
@@ -40,10 +53,20 @@ class LocalVolPDESolver(BaseEngine):
     supports_lifecycle_state = True
 
     def __init__(self, params: Optional[PDEParams] = None,
-                 local_vol_surface: Optional[LocalVolSurface] = None):
+                 local_vol_surface: Optional[LocalVolSurface] = None, **removed):
+        reject_removed_kwargs(type(self).__name__, removed)
         super().__init__(params if params is not None else PDEParams())
         self._prebuilt = local_vol_surface
         self._greeks_smax = 0.0  # >0 pins the spatial grid across Greek bumps
+
+    def _route_config(self) -> GridConfig:
+        """PDEParams over the local-vol route table (spec §6.1): the time axis
+        is the shared one; the space axis is the kernel's uniform grid."""
+        check_route_applicability(self.params, ROUTE)
+        return resolve_config(
+            self.params.accuracy, self.params.grid,
+            profiles=LV_UNIFORM_ACCURACY_PROFILES,
+        )
 
     def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
         if self._prebuilt is not None:
@@ -65,18 +88,24 @@ class LocalVolPDESolver(BaseEngine):
         T = float(product.get_maturity(env))
         if T <= 0:
             raise ValidationError("maturity must be positive")
-        n = int(self.params.time_steps)
-        t_grid = np.linspace(0.0, T, n + 1)
+        config = self._route_config()
+        spot, strike = float(env.spot), float(product.strike)
+        # No interior nodes: build_time lays out linspace(0, T, time_steps + 1),
+        # today's construction to the bit; the kernel keeps np.diff for step
+        # sizes. The helpers below only read t_grid (the layout array).
+        t_grid = build_time(GridRequest(
+            tau=T, bound_anchors=(spot,), critical_prices=(spot, strike),
+            hard_lower=None, hard_upper=None, event_times=(),
+        ), config).t
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
         is_call = product.option_type == OptionType.CALL
-        s_max = self._greeks_smax if self._greeks_smax > 0 else (
-            float(self.params.s_max) if self.params.s_max > 0 else 0.0
-        )
         unit = price_european_lv_pde(
-            s0=float(env.spot), strike=float(product.strike), is_call=is_call, T=T,
+            s0=spot, strike=strike, is_call=is_call, T=T,
             lv_surface=lv, step_dt=np.diff(t_grid), r_fwd=r_fwd, carry_fwd=carry_fwd,
-            n_s=int(self.params.grid_size), s_max=s_max, theta=float(self.params.theta),
+            n_s=int(config.points), s_max=self._greeks_smax,
+            theta=float(self.params.theta),
+            rannacher=config.terminal_damping_steps > 0,
         )
         return unit * float(getattr(product, "contract_multiplier", 1.0))
 
@@ -127,8 +156,8 @@ class LocalVolPDESolver(BaseEngine):
         bump = self.params.get_effective_bump_config()
         # Pin the spatial grid (s_max) across spot bumps so finite differences are not
         # contaminated by grid movement.
-        base_smax = float(self.params.s_max) if self.params.s_max > 0 else (
-            4.0 * max(float(pricing_env.spot), float(getattr(product, "strike", pricing_env.spot)))
+        base_smax = 4.0 * max(
+            float(pricing_env.spot), float(getattr(product, "strike", pricing_env.spot))
         )
         self._greeks_smax = base_smax
         try:

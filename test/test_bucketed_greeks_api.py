@@ -9,6 +9,7 @@ from quantark.asset.equity.engine.analytical.black_scholes_engine import (
 from quantark.asset.equity.engine.pde import LocalVolPDESolver
 from quantark.asset.equity.market import IndexFuturesCurve, IndexFuturesQuote
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.riskmeasures import (
     BucketedGreekCoordinate,
@@ -359,7 +360,7 @@ def _grid_env():
 def test_facade_market_iv_vega_delegates_to_vol_model_calculator():
     env = _grid_env()
     env.vol_surface = _grid_surface()
-    engine = LocalVolPDESolver(params=PDEParams(grid_size=80, time_steps=40))
+    engine = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=80, time_steps=40)))
     request = BucketedGreeksRequest(
         coordinates=(BucketedGreekCoordinate.MARKET_IV_VEGA,),
         market_vega_request=MarketVegaRequest(
@@ -387,7 +388,7 @@ def test_facade_market_iv_vega_delegates_to_vol_model_calculator():
 def test_facade_market_iv_vega_rejects_one_sided_override():
     env = _grid_env()
     env.vol_surface = _grid_surface()
-    engine = LocalVolPDESolver(params=PDEParams(grid_size=80, time_steps=40))
+    engine = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=80, time_steps=40)))
     with pytest.raises(
         ValidationError, match="market_iv_vega does not support one_sided_up"
     ):
@@ -407,7 +408,7 @@ def test_facade_market_iv_vega_rejects_one_sided_override():
 def test_facade_model_artifact_delegates_to_vol_model_calculator():
     env = _grid_env()
     env.vol_surface = _grid_surface()
-    engine = LocalVolPDESolver(params=PDEParams(grid_size=80, time_steps=40))
+    engine = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=80, time_steps=40)))
     request = BucketedGreeksRequest(
         coordinates=(BucketedGreekCoordinate.MODEL_ARTIFACT,),
         model_risk_request=ModelRiskRequest(

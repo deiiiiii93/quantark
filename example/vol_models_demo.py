@@ -27,6 +27,7 @@ from quantark.asset.equity.engine.pde import (
     LocalVolPDESolver, HestonPDESolver, HestonSLVPDESolver,
 )
 from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.riskmeasures import VolModelRiskCalculator
 
 from quantark.asset.fx.product.option.fx_vanilla_option import FxVanillaOption
@@ -55,7 +56,7 @@ def equity_demo():
     opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
 
     print(f"  Black-Scholes (flat 20%) : {BlackScholesEngine().price(opt, env):.4f}")
-    print(f"  Local Vol  PDE           : {LocalVolPDESolver(PDEParams(grid_size=300, time_steps=150)).price(opt, env):.4f}")
+    print(f"  Local Vol  PDE           : {LocalVolPDESolver(PDEParams(grid=GridConfig(points=300, time_steps=150))).price(opt, env):.4f}")
     print(f"  Local Vol  MC            : {LocalVolMCEngine(MCParams(num_paths=100_000, time_steps=100, seed=1, use_antithetic=True)).price(opt, env):.4f}")
     he = HestonAnalyticalEngine(HESTON, method=EngineType.ANALYTICAL(HestonAnalyticalMethod.GATHERAL))
     print(f"  Heston analytical        : {he.price(opt, env):.4f}")
@@ -90,7 +91,7 @@ def equity_demo():
         f"{point.name}={point.derivative:.4f}" for point in heston_risk.successful_points
     ))
     local_market = risk.calculate_market_vega(
-        opt, env, LocalVolPDESolver(PDEParams(grid_size=180, time_steps=90)),
+        opt, env, LocalVolPDESolver(PDEParams(grid=GridConfig(points=180, time_steps=90))),
     )
     print(f"  Dupire market-IV vega     : {local_market.points[0].derivative:.4f}")
     leverage_risk = risk.calculate_model_risk(

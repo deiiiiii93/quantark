@@ -7,6 +7,7 @@ from quantark.asset.equity.engine.analytical import HestonAnalyticalEngine
 from quantark.asset.equity.engine.mc import HestonSLVMCEngine, LocalVolMCEngine
 from quantark.asset.equity.engine.pde import HestonPDESolver, HestonSLVPDESolver, LocalVolPDESolver
 from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.riskmeasures import VolModelRiskCalculator
 from quantark.asset.fx.engine.analytical import FxHestonAnalyticalEngine
@@ -87,7 +88,7 @@ def test_heston_boundary_failure_is_reported_and_one_sided_is_opt_in():
 
 def test_dupire_market_vega_rebuilds_surface_and_reports_invalid_bucket():
     calc = VolModelRiskCalculator()
-    engine = LocalVolPDESolver(params=PDEParams(grid_size=100, time_steps=50))
+    engine = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=100, time_steps=50)))
     ok = calc.calculate_market_vega(_call(), _eq_env(), engine)
     assert ok.points[0].name == "market_iv.parallel"
     assert ok.points[0].status == "ok"
@@ -109,7 +110,7 @@ def test_dupire_model_risk_bumps_resolved_local_vol_directly():
     result = VolModelRiskCalculator().calculate_model_risk(
         _call(),
         _eq_env(),
-        LocalVolPDESolver(params=PDEParams(grid_size=100, time_steps=50)),
+        LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=100, time_steps=50))),
         ModelRiskRequest(parameter_names=(), surface_bumps=(SurfaceBump.parallel(),)),
     )
     assert result.points[0].name == "local_vol.parallel"

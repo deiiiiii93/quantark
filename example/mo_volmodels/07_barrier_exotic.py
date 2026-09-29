@@ -131,7 +131,7 @@ def main():
     # Local Vol: MC + PDE on the same SABR-smoothed Dupire target. This is now a real
     # cross-check rather than the old floored-raw-surface diagnostic.
     record("Local Vol", LocalVolBarrierMCEngine(mcp, local_vol_surface=lv),
-           LocalVolBarrierPDESolver(PDEParams(grid_size=500, time_steps=N_STEPS), local_vol_surface=lv), prod, env)
+           LocalVolBarrierPDESolver(PDEParams(grid=GridConfig(points=500, time_steps=N_STEPS)), local_vol_surface=lv), prod, env)
     # Heston: MC + 2D ADI PDE. The vanilla Heston PDE converges to the analytical Heston price,
     # but the discrete barrier surface remains sensitive to the finite (spot, variance) grid; MC
     # is therefore the reference for the divergence story.

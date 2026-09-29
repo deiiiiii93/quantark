@@ -49,6 +49,7 @@ from quantark.asset.equity.market import (  # noqa: E402
     bump_term_yield_node,
 )
 from quantark.asset.equity.param import PDEParams  # noqa: E402
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.product.option import EuropeanVanillaOption  # noqa: E402
 from quantark.asset.equity.product.option.snowball_helpers import (  # noqa: E402
     create_standard_snowball,
@@ -660,7 +661,7 @@ def stage_localvol_market_vega(calc, product):
         "of directly bumping pricing_env.vol_surface.",
     )
     env = make_grid_env()
-    engine = LocalVolPDESolver(params=PDEParams(grid_size=100, time_steps=50))
+    engine = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=100, time_steps=50)))
     request = BucketedGreeksRequest(
         coordinates=(BucketedGreekCoordinate.MARKET_IV_VEGA,),
         market_vega_request=MarketVegaRequest(
@@ -1599,7 +1600,7 @@ def render_market_snowball_html_report(
                 maturity=float(model_surface["maturities"][-1]),
                 contract_multiplier=notional / s0,
             )
-            lv_engine = LocalVolPDESolver(params=PDEParams(grid_size=90, time_steps=45))
+            lv_engine = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=90, time_steps=45)))
             lv_result = calc.calculate_bucketed_greeks(
                 vanilla,
                 model_env,
@@ -2361,7 +2362,7 @@ def render_html_report(
     localvol_section = ""
     if include_localvol:
         lv_env = make_grid_env()
-        lv_engine = LocalVolPDESolver(params=PDEParams(grid_size=100, time_steps=50))
+        lv_engine = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=100, time_steps=50)))
         lv_result = calc.calculate_bucketed_greeks(
             product,
             lv_env,

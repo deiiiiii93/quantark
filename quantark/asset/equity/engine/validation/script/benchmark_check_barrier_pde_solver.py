@@ -22,6 +22,7 @@ from quantark.asset.equity.engine.pde import BarrierPDESolver
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
 from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
 from quantark.asset.equity.param import PDEParams, MCParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.param.quote.spot_quote import SpotQuote
 from quantark.param.rrf.rate_curve import FlatRateCurve
@@ -163,11 +164,9 @@ def create_pde_params(auto_grid: bool = True) -> PDEParams:
         return PDEParams()
     else:
         return PDEParams(
-            grid_size=252 * 2,
-            time_steps=252 * 4,
-                        theta=0.5,
-            use_rannacher=True,
-                    )
+            grid=GridConfig(points=252 * 2, time_steps=252 * 4),
+            theta=0.5,
+        )
 
 
 def create_mc_params() -> MCParams:

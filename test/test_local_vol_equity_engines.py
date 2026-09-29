@@ -10,7 +10,9 @@ from quantark.asset.equity.engine.mc.local_vol_mc_engine import LocalVolMCEngine
 from quantark.asset.equity.engine.pde.local_vol_pde_solver import LocalVolPDESolver
 from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.util.enum import OptionType
-from quantark.util.exceptions import PricingError
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
+import quantark.asset.equity.engine.pde.local_vol_pde_solver as lv_mod
 
 
 def _env(vol=0.2, r=0.03, q=0.01):
@@ -31,7 +33,7 @@ def _call(strike=100.0, T=1.0):
 def test_equity_lv_pde_matches_bs_flat_surface():
     env = _env(0.2, 0.03, 0.01)
     bs = BlackScholesEngine().price(_call(), env)
-    pde = LocalVolPDESolver(params=PDEParams(grid_size=400, time_steps=200)).price(_call(), env)
+    pde = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=400, time_steps=200))).price(_call(), env)
     assert pde == pytest.approx(bs, abs=3e-2)
 
 
@@ -52,7 +54,7 @@ def test_equity_lv_requires_grid_vol_surface():
 
 def test_equity_lv_greeks_delta_gamma_theta_rho_no_vega():
     env = _env()
-    g = LocalVolPDESolver(params=PDEParams(grid_size=300, time_steps=150)).calculate_greeks(_call(), env)
+    g = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=300, time_steps=150))).calculate_greeks(_call(), env)
     assert set(["price", "delta", "gamma", "theta", "rho"]).issubset(g.keys())
     assert "vega" not in g
     assert g["delta"] > 0  # call delta positive
@@ -67,7 +69,7 @@ def test_equity_lv_pde_does_not_invoke_mc(monkeypatch):
 
     monkeypatch.setattr(mck, "price_european_lv_mc", _boom)
     env = _env()
-    LocalVolPDESolver(params=PDEParams(grid_size=200, time_steps=100)).price(_call(), env)
+    LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=200, time_steps=100))).price(_call(), env)
 
 
 def test_equity_lv_prebuilt_surface_used(monkeypatch):
@@ -80,7 +82,7 @@ def test_equity_lv_prebuilt_surface_used(monkeypatch):
     # build once via the real builder, then ensure construction-supplied surface skips rebuild
     lv = LocalVolPDESolver()._build_surface(env)
     monkeypatch.setattr(mod, "build_dupire_local_vol", _boom)
-    price = LocalVolPDESolver(params=PDEParams(grid_size=200, time_steps=100),
+    price = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=200, time_steps=100)),
                               local_vol_surface=lv).price(_call(), env)
     assert price > 0
 
@@ -89,10 +91,65 @@ def test_equity_lv_rho_matches_analytic_magnitude():
     import math
     from scipy.stats import norm
     env = _env(0.2, 0.03, 0.01)
-    g = LocalVolPDESolver(params=PDEParams(grid_size=600, time_steps=300)).calculate_greeks(_call(), env)
+    g = LocalVolPDESolver(params=PDEParams(grid=GridConfig(points=600, time_steps=300))).calculate_greeks(_call(), env)
     # BS call rho (per 1%): K T e^{-rT} N(d2) / 100
     S, K, T, r, q, vol = 100.0, 100.0, 1.0, 0.03, 0.01, 0.2
     d2 = (math.log(S / K) + (r - q - 0.5 * vol * vol) * T) / (vol * math.sqrt(T))
     rho_bs = K * T * math.exp(-r * T) * norm.cdf(d2) / 100.0
     assert g["rho"] == pytest.approx(rho_bs, abs=0.03)
     assert g["theta"] < 0  # long call decays
+
+
+def _capture(monkeypatch):
+    seen = {}
+    real = lv_mod.price_european_lv_pde
+
+    def spy(**kw):
+        seen.update(kw)
+        return real(**kw)
+
+    monkeypatch.setattr(lv_mod, "price_european_lv_pde", spy)
+    return seen
+
+
+@pytest.mark.parametrize("grid,points,steps", [
+    (None, 400, 200),                                        # route default = today's plan
+    (GridConfig(points=300, time_steps=150), 300, 150),
+    (GridConfig(steps_per_day=1.0), 400, 252),               # explicit density clears the budget
+])
+def test_lv_vanilla_time_and_space_reach_the_kernel(monkeypatch, grid, points, steps):
+    seen = _capture(monkeypatch)
+    LocalVolPDESolver(params=PDEParams(grid=grid)).price(_call(), _env())
+    assert seen["n_s"] == points and len(seen["step_dt"]) == steps
+
+
+def test_lv_vanilla_theta_and_damping(monkeypatch):
+    seen = _capture(monkeypatch)
+    LocalVolPDESolver(params=PDEParams(theta=1.0)).price(_call(), _env())
+    assert seen["theta"] == 1.0 and seen["rannacher"] is True
+    LocalVolPDESolver(
+        params=PDEParams(grid=GridConfig(terminal_damping_steps=0))
+    ).price(_call(), _env())
+    assert seen["rannacher"] is False
+    with pytest.raises(ValidationError, match="terminal_damping_steps"):
+        LocalVolPDESolver(
+            params=PDEParams(grid=GridConfig(terminal_damping_steps=2))
+        ).price(_call(), _env())
+
+
+@pytest.mark.parametrize("grid", [GridConfig(eps_crit=0.001), GridConfig(num_std=6.0),
+                                  GridConfig(bounds=(None, 400.0))])
+def test_lv_vanilla_rejects_explicit_domain_fields(grid):
+    with pytest.raises(ValidationError, match="sub-project 3"):
+        LocalVolPDESolver(params=PDEParams(grid=grid)).price(_call(), _env())
+
+
+def test_lv_vanilla_vacuous_and_noop_fields_accepted():
+    p = PDEParams(event_theta=0.7, event_projection="nodal", cache_enabled=False,
+                  grid=GridConfig(event_damping_steps=3))
+    assert LocalVolPDESolver(params=p).price(_call(), _env()) > 0
+
+
+def test_lv_vanilla_removed_constructor_name():
+    with pytest.raises(ValidationError, match="GridConfig"):
+        LocalVolPDESolver(grid_size=400)

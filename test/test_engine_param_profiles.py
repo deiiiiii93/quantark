@@ -48,15 +48,15 @@ def test_json_config_loader(tmp_path):
     data = {
         "engine": "pde",
         "profile": "balanced",
-        "overrides": {"grid_size": 300, "time_steps": 150},
+        "overrides": {"accuracy": "fast", "theta": 1.0},
     }
     path = tmp_path / "params.json"
     with path.open("w", encoding="utf-8") as handle:
         json.dump(data, handle)
 
     params = PDEParams.from_config(path)
-    assert params.grid_size == 300
-    assert params.time_steps == 150
+    assert params.accuracy == "fast"
+    assert params.theta == 1.0
 
 
 def test_unknown_profile_raises():

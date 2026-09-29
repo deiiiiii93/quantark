@@ -18,7 +18,6 @@ from typing import List, Optional, Sequence
 from quantark.asset.equity.engine.pde.grid.config import (
     ACCURACY_PROFILES,
     GridConfig,
-    reject_legacy_resolution_knobs,
     resolve_config,
 )
 from quantark.asset.equity.engine.pde.grid.request import GridRequest, MarketSnapshot
@@ -137,7 +136,6 @@ class GridLayerMixin:
     def _grid_layer_binder(self, params=None) -> "GridBinder":
         binder = getattr(self, "_grid_binder", None)
         if binder is None:
-            reject_legacy_resolution_knobs(params)
             accuracy = getattr(params, "accuracy", None) or self._default_grid_accuracy()
             override = getattr(params, "grid", None)
             if override is None:

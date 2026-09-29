@@ -21,6 +21,7 @@ from quantark.asset.equity.engine.pde import BarrierPDESolver
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
 from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
 from quantark.asset.equity.param import PDEParams, MCParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.param.quote.spot_quote import SpotQuote
 from quantark.param.rrf.rate_curve import FlatRateCurve
@@ -60,7 +61,7 @@ def run_continuous_monitoring_comparison():
     print("CONTINUOUS MONITORING: PDE vs MC vs Analytical")
     print("="*90)
 
-    pde = BarrierPDESolver(PDEParams(grid_size=400, time_steps=200))
+    pde = BarrierPDESolver(PDEParams(grid=GridConfig(points=400, time_steps=200)))
     analytical = BarrierAnalyticalEngine()
     mc = BarrierOptionMCEngine(
         params=MCParams(num_paths=100000, seed=42),
@@ -119,7 +120,7 @@ def run_discrete_monitoring_comparison():
     print("DISCRETE MONITORING (Daily): PDE vs MC")
     print("="*90)
 
-    pde = BarrierPDESolver(PDEParams(grid_size=400, time_steps=252))  # Match daily steps
+    pde = BarrierPDESolver(PDEParams(grid=GridConfig(points=400, time_steps=252)))  # Match daily steps
     mc = BarrierOptionMCEngine(
         params=MCParams(num_paths=100000, seed=42),
         method=EngineType.MONTE_CARLO(MonteCarloMethod.QUASI),
@@ -208,7 +209,7 @@ def run_convergence_study():
 
     results = []
     for grid_size, time_steps, name in grid_configs:
-        pde = BarrierPDESolver(PDEParams(grid_size=grid_size, time_steps=time_steps))
+        pde = BarrierPDESolver(PDEParams(grid=GridConfig(points=grid_size, time_steps=time_steps)))
         pde_price = pde.price(option, env)
 
         err_mc = abs(pde_price - mc_price) / mc_price * 100

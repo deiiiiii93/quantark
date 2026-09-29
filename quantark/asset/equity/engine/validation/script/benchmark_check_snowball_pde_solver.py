@@ -33,6 +33,7 @@ from quantark.asset.equity.product.option.snowball_helpers import (
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.param import PDEParams, MCParams
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.priceenv import PricingEnvironment
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.util.enum.engine_enums import MonteCarloMethod
@@ -144,11 +145,10 @@ def create_snowball(
 def create_pde_solver(grid_size: int = 250, time_steps: int = 250) -> SnowballPDESolver:
     """Create PDE solver with good resolution."""
     params = PDEParams(
-        grid_size=grid_size,
-        time_steps=time_steps,
+        grid=GridConfig(
+            points=grid_size, time_steps=time_steps, terminal_damping_steps=2
+        ),
         theta=0.5,
-        use_rannacher=True,
-        rannacher_steps=2,
     )
     return SnowballPDESolver(params=params)
 
@@ -578,13 +578,10 @@ def create_pde_solver_nonuniform(
 ) -> SnowballPDESolver:
     """Create PDE solver with non-uniform (adaptive) grid."""
     params = PDEParams(
-        grid_size=grid_size,
-        time_steps=time_steps,
+        grid=GridConfig(
+            points=grid_size, time_steps=time_steps, terminal_damping_steps=2
+        ),
         theta=0.5,
-        use_rannacher=True,
-        rannacher_steps=2,
-        # Enable Tavella-Randall non-uniform grid
-        # Target spacing near critical points
     )
     return SnowballPDESolver(params=params)
 
