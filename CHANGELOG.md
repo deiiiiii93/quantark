@@ -5,6 +5,136 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.6.0] - 2026-09-29
+
+PDE 1D surface cleanup (spec: `docs/superpowers/specs/2026-09-28-pde-1d-surface-cleanup-design.md`).
+Every 1D PDE route — the shared-grid solvers behind `PDEEngine`, the local-vol vanilla
+and barrier solvers, and DCN — is configured by one `PDEParams` and nothing else, and
+nothing is silently ignored: a field a route cannot honour raises. This is a clean break:
+the removed names raise `ValidationError` naming their replacement. Numbers are unchanged
+on every route except the local-vol discretely monitored barrier (see Changed), proven by
+a 112-row `float.hex` byte compare of the whole 1D book against 0.5.0.
+
+### Added
+- `GridConfig.time_steps`: a total time-step budget over the horizon, spread over the
+  mandatory intervals by length (at least one step each), and the alternative to
+  `steps_per_day`. Exactly one time basis is in force after resolution; an overlay that
+  sets one basis clears the other, and setting both raises.
+- `GridConfig.evidence()` (the certificate serialization: unset optionals omitted, so no
+  banked identity moves), `GridConfig.with_steps_per_day()` and
+  `GridConfig.with_time_steps()`.
+- `PDEParams.resolved_grid()`: the requested grid (the `accuracy` preset under the `grid`
+  overlay), before the `max_steps` cap that binds once a maturity is known.
+- The route applicability table (`quantark.asset.equity.engine.pde.route_applicability`,
+  `ROUTE_RULES`): per route, the fields it cannot honour. An inapplicable field accepts its
+  preset default and rejects an explicit override; a rejected field rejects any explicit
+  value. The error names the field, the route, and sub-project 3.
+- `PDEParams.from_config(config_or_path, **overrides)` over field names, with `grid` a
+  nested `GridConfig` mapping (a `bounds` list becomes a tuple).
+
+### Removed
+`PDEParams`, `PDEEngine` and the DCN constructors take keyword arguments only; each
+removed name raises `ValidationError` with its replacement:
+
+| Removed | Replacement |
+|---|---|
+| `PDEParams(grid_size=...)` | grid=GridConfig(points=...) on every route. |
+| `PDEParams(time_steps=...)` | grid=GridConfig(time_steps=N): the same meaning, a total step budget over the horizon. steps_per_day= is the per-day alternative. |
+| `PDEParams(s_max=...)` | grid=GridConfig(bounds=(None, hi)) on the shared-grid solvers. On the two local-vol solvers an explicit bound is rejected until sub-project 3: the kernel sets its own domain and aligns the top, so there is no hard edge to honour. |
+| `PDEParams(s_min=...)` | removed; it was read by nothing. |
+| `PDEParams(use_rannacher=...)` | grid=GridConfig(terminal_damping_steps=N); 0 disables |
+| `PDEParams(rannacher_steps=...)` | grid=GridConfig(terminal_damping_steps=N); 0 disables |
+| `PDEParams(rannacher_at_events=...)` | grid=GridConfig(event_damping_steps=N); 0 disables |
+| `PDEParams(event_rannacher_steps=...)` | grid=GridConfig(event_damping_steps=N); 0 disables |
+| `PDEParams(boundary_mode=...)` | removed; asymptotic boundaries are the only treatment |
+| `PDEParams(continuous_ki_correction=...)` | removed; the first-passage correction always applies to continuously monitored KI |
+| `PDEParams(ki_monitoring_mode=...)` | removed from the PDE; each barrier is monitored as the product declares it (discrete dates, continuous, or maturity-only). To price a dense discrete KI as continuous, declare it continuous on the product. QuadParams.ki_monitoring_mode is unchanged. |
+| `PDEParams(cache_strategy=...)` | cache_enabled=True/False is the only cache control |
+| `PDEParams(grid_cache_max_entries=...)` | cache_enabled=True/False is the only cache control |
+| `PDEParams(banded_cache_max_entries=...)` | cache_enabled=True/False is the only cache control |
+| `PDEParams(use_banded_solver=...)` | removed; the linear solver is chosen by the solver family |
+
+| Removed | Replacement |
+|---|---|
+| `PDEEngine(method=...)` | Crank-Nicolson is the only built-in scheme; PDEEngine(params=PDEParams(...)). theta=1.0 gives backward Euler. |
+
+| Removed | Replacement |
+|---|---|
+| `DCNPDEEngine / LocalVolDCNPDEEngine(num_space_nodes=...)` | DCNPDEEngine(params=PDEParams(grid=GridConfig(points=...))) |
+| `DCNPDEEngine / LocalVolDCNPDEEngine(rannacher_steps=...)` | grid=GridConfig(terminal_damping_steps=N, event_damping_steps=N) (DCN applies both in its half-step form) |
+| `DCNPDEEngine / LocalVolDCNPDEEngine(s_min_mult=...)` | removed; never read |
+| `DCNPDEEngine / LocalVolDCNPDEEngine(s_max_mult=...)` | removed; never read |
+| `DCNPDEEngine / LocalVolDCNPDEEngine(concentration=...)` | removed; never read |
+
+Also removed: `BackwardOperator` (`backward_operator.py`), `ContinuousKICorrection`,
+`make_pde_params`, `PDE_PARAM_PRESETS`, the `"pde"` branch of `make_engine_params` /
+`list_param_profiles` (PDE has no profile tier: use `PDEParams(accuracy=...)`), the
+class-level cache setters (`set_cache_enabled`, `set_cache_strategy`,
+`set_grid_cache_max_entries`, `clear_grid_cache`), and `reject_legacy_resolution_knobs`.
+
+### Changed
+- **Local-vol vanilla and barrier solvers are configured by `PDEParams`.** Previously
+  `accuracy` and `grid` were ignored there; they are now honoured or rejected per the
+  route table. Their own preset table keeps today's plan at `standard` (400 points, a
+  200-step budget); `fast`/`high` are new resolution choices. `theta` reaches both
+  kernels; the vanilla's terminal damping is 0 or 1 (an explicit count of 2 or more is
+  rejected). Bitwise at the defaults and for continuous and maturity-only monitoring.
+- **The local-vol discretely monitored barrier observes on exact event nodes** (the
+  declared number change). Each interior observation date is a node of the time layout,
+  the step budget spread over the intervals between them, instead of the nearest node of
+  a uniform grid. Byte gate: the two `lv_barrier_discrete` rows move by -7.9e-4 and
+  -1.0e-3. Against a 1600 x 2400 reference PDE (every date on a node), flat 20% vol:
+
+  | product | grid | base PDE | branch PDE | abs(base-ref) | abs(branch-ref) |
+  |---|---|---|---|---|---|
+  | UO call B130 monthly | 400x200 | 3.92225 | 3.92154 | 2.47e-03 | 1.75e-03 |
+  | UO call B130 monthly | 600x240 | 3.92049 | 3.92049 | 7.03e-04 | 7.03e-04 |
+  | UO call B130 monthly | 200x200 | 3.92822 | 3.92752 | 8.44e-03 | 7.74e-03 |
+  | UO call B130 monthly | 800x400 | 3.91984 | 3.92013 | 5.49e-05 | 3.44e-04 |
+  | UO call B130 monthly | 400x150 | 3.92460 | 3.92149 | 4.81e-03 | 1.70e-03 |
+  | UO call B120 monthly | 400x200 | 1.76249 | 1.76185 | 3.05e-03 | 2.41e-03 |
+  | UO call B120 monthly | 600x240 | 1.76040 | 1.76040 | 9.57e-04 | 9.57e-04 |
+  | UO call B120 monthly | 200x200 | 1.77063 | 1.77001 | 1.12e-02 | 1.06e-02 |
+  | UO call B120 monthly | 800x400 | 1.75965 | 1.75991 | 2.13e-04 | 4.74e-04 |
+  | UO call B120 monthly | 400x150 | 1.76428 | 1.76179 | 4.84e-03 | 2.35e-03 |
+  | UO call B120 quarterly | 400x200 | 2.16190 | 2.16190 | 1.04e-03 | 1.04e-03 |
+  | UO call B120 quarterly | 600x240 | 2.16128 | 2.16128 | 4.18e-04 | 4.18e-04 |
+  | UO call B120 quarterly | 200x200 | 2.16532 | 2.16532 | 4.46e-03 | 4.46e-03 |
+  | UO call B120 quarterly | 800x400 | 2.16107 | 2.16107 | 2.06e-04 | 2.06e-04 |
+  | UO call B120 quarterly | 400x150 | 2.16442 | 2.16189 | 3.55e-03 | 1.03e-03 |
+  | DO put B85 monthly | 400x200 | 1.20049 | 1.20002 | 4.22e-03 | 3.75e-03 |
+  | DO put B85 monthly | 600x240 | 1.19755 | 1.19755 | 1.27e-03 | 1.27e-03 |
+  | DO put B85 monthly | 200x200 | 1.21140 | 1.21096 | 1.51e-02 | 1.47e-02 |
+  | DO put B85 monthly | 800x400 | 1.19682 | 1.19701 | 5.46e-04 | 7.37e-04 |
+  | DO put B85 monthly | 400x150 | 1.20189 | 1.19997 | 5.61e-03 | 3.69e-03 |
+  | UI call B130 monthly | 400x200 | 4.90751 | 4.90822 | 1.83e-04 | 5.31e-04 |
+  | UI call B130 monthly | 600x240 | 4.90791 | 4.90791 | 2.23e-04 | 2.23e-04 |
+  | UI call B130 monthly | 200x200 | 4.90897 | 4.90967 | 1.28e-03 | 1.98e-03 |
+  | UI call B130 monthly | 800x400 | 4.90809 | 4.90780 | 4.00e-04 | 1.11e-04 |
+  | UI call B130 monthly | 400x150 | 4.90516 | 4.90827 | 2.53e-03 | 5.81e-04 |
+
+  Closer to the reference in 16 of 25 cells; where the old grid misplaced a date by up to
+  half a step (400x150) the error falls 2-3x, and elsewhere both placements sit inside
+  the grid's own error band (every cell moves by <= 7e-4).
+- **DCN is configured by `PDEParams`** with its own `accuracy` presets, which scale
+  spatial resolution only (401 / 801 / 1601 points; `fast` and `high` have no banked
+  evidence). The observation schedule is the time resolution: an explicit
+  `steps_per_day` or `time_steps` is rejected, as is an explicit CELL_AVERAGE. The damping
+  counts drive DCN's half-step form; `theta` and `event_theta` reach the loop. Bitwise at
+  the defaults.
+- **`ki_monitoring_mode` is removed from the PDE.** Each barrier is monitored as the
+  product declares it. The two honest alternatives: `QuadParams.ki_monitoring_mode`
+  (BGK stays in QUAD), or declare the KI continuous on the product.
+- **`event_projection` defaults to `None`**, the route's own treatment (CELL_AVERAGE on
+  the shared-grid autocallable solvers, as before).
+- **`PDEEngine(params)` is the whole constructor**; Crank-Nicolson is the only built-in
+  scheme. `theta=1.0` is backward Euler: first order in time and more diffusive, not
+  "monotone" (monotonicity also needs the spatial operator's sign condition).
+- The first-passage continuous-KI correction and the asymptotic boundaries are
+  unconditional (their opt-outs are removed).
+- The grid "day" remains 1/252 of a solver year (`GridConfig.day_count`); it becomes the
+  environment's business day in sub-project 3.
+
 ## [0.5.0] - 2026-09-28
 
 Intraday pricing: `quantark.intraday` values a contract at a timezone-aware timestamp

@@ -209,17 +209,48 @@ with risk-factor attribution), see the runnable demos:
 
 ## Batch-Friendly Engine Params
 
-For QUAD/PDE batch pricing, you can use named presets, factory helpers, or YAML/JSON
-configs instead of tuning many individual parameters.
+For QUAD batch pricing, you can use named presets, factory helpers, or YAML/JSON
+configs instead of tuning many individual parameters. PDE has no profile tier:
+`PDEParams` is small enough to write out, and `PDEParams.from_config` reads the
+same field names from a mapping, YAML, or JSON.
 
 ```python
-from quantark.asset.equity.param import make_quad_params, make_pde_params
+from quantark.asset.equity.engine.pde import GridConfig
+from quantark.asset.equity.param import PDEParams, make_quad_params
 
 quad_params = make_quad_params(profile="barrier_sensitive")
-pde_params = make_pde_params(profile="balanced")
+pde_params = PDEParams(accuracy="standard")
+pde_barrier = PDEParams(grid=GridConfig(points=600, steps_per_day=6.0))
+pde_loaded = PDEParams.from_config({"accuracy": "high", "grid": {"time_steps": 800}})
 ```
 
-Engine parameter presets accept either preset names or explicit config objects; see the docstrings in `quantark/asset/equity/param/` for the full schema.
+Quad presets accept either preset names or explicit config objects; see the docstrings in `quantark/asset/equity/param/` for the full schema.
+
+### PDE parameters (0.6.0)
+
+Every 1D PDE route (`PDEEngine` and its solvers, the local-vol vanilla and barrier
+solvers, DCN) is configured by one `PDEParams`, keyword arguments only:
+
+| Field | When to change it | What happens |
+|---|---|---|
+| `accuracy` | A faster preview or a finer answer. | Selects the `GridConfig` preset: fast (200 pts, 4/day), standard (400, 4/day), high (800, 8/day). |
+| `grid` | Override one preset field. | Each non-`None` `GridConfig` field replaces that preset value; the rest inherit. |
+| `theta` | A more diffusive scheme. | 0.5 is Crank-Nicolson (second order), 1.0 backward Euler (first order, more diffusive). |
+| `event_theta` | Studying damping strength after events. | The weight on the event-damped steps after each interior event. |
+| `event_projection` | Validating the event treatment. | `None` is the route's own treatment (cell-average on the shared-grid autocallables); explicit `"cell_average"` or `"nodal"`. |
+| `cache_enabled` | Memory pressure, or a fresh solve every call. | Same numbers either way. |
+
+`GridConfig` fields: `points`, `steps_per_day` (a density; a "day" is 1/252 of a solver
+year) or `time_steps` (a total budget over the horizon; exactly one time basis is in
+force), `eps_crit`, `num_std`, `bounds`, `max_points`, `max_steps`, `day_count`,
+`terminal_damping_steps`, `event_damping_steps`.
+
+Routes other than the shared-grid solvers honour a subset and reject the rest loudly
+(`quantark.asset.equity.engine.pde.route_applicability.ROUTE_RULES`): the local-vol
+solvers have a uniform spatial grid of their own (no `eps_crit`, `num_std`, or `bounds`;
+the barrier kernel has no damping schedule), and DCN's observation schedule is its time
+resolution (no `steps_per_day` or `time_steps`). The names removed in 0.6.0, each with its
+replacement, are listed in `CHANGELOG.md` under 0.6.0.
 
 ## RQMC Target Std Scaling (MC Benchmarking)
 
