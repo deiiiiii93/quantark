@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from quantark.asset.equity.param import PDEParams, QuadParams, make_pde_params, make_quad_params
+from quantark.asset.equity.param import PDEParams, QuadParams, make_quad_params
+from quantark.asset.equity.param.engine_param_profiles import make_engine_params
 from quantark.util.exceptions import ValidationError
 
 
@@ -10,18 +11,6 @@ def test_make_quad_params_profile_fast():
     params = make_quad_params(profile="fast")
     assert params.grid_points == 401
     assert params.num_std_devs == 8.0
-
-
-def test_make_pde_params_profile_accurate():
-    params = make_pde_params(profile="accurate")
-    assert params.accuracy == "high"
-    assert params.grid is None
-
-
-def test_make_pde_params_profile_barrier_sensitive():
-    params = make_pde_params(profile="barrier_sensitive")
-    assert params.grid.points == 600
-    assert params.grid.steps_per_day == 6.0
 
 
 def test_override_wins():
@@ -45,23 +34,24 @@ def test_yaml_config_loader(tmp_path):
 
 
 def test_json_config_loader(tmp_path):
-    data = {
-        "engine": "pde",
-        "profile": "balanced",
-        "overrides": {"accuracy": "fast", "theta": 1.0},
-    }
+    data = {"engine": "pde", "accuracy": "fast", "grid": {"points": 300, "time_steps": 150}}
     path = tmp_path / "params.json"
     with path.open("w", encoding="utf-8") as handle:
         json.dump(data, handle)
 
     params = PDEParams.from_config(path)
     assert params.accuracy == "fast"
-    assert params.theta == 1.0
+    assert params.grid.points == 300 and params.grid.time_steps == 150
 
 
 def test_unknown_profile_raises():
     with pytest.raises(ValidationError):
-        make_pde_params(profile="ultra_fast")
+        make_quad_params(profile="ultra_fast")
+
+
+def test_pde_engine_params_has_no_profile_tier():
+    with pytest.raises(ValidationError, match="no profile tier"):
+        make_engine_params("pde")
 
 
 def test_unknown_key_raises():

@@ -34,7 +34,6 @@ from quantark.asset.equity.param import (
     MCParams,
     PDEParams,
     QuadParams,
-    make_pde_params,
     make_quad_params,
 )
 from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
@@ -452,35 +451,31 @@ def main() -> None:
         quad_params = QuadParams(grid_points=args.grid)
         pde_params = PDEParams(grid=GridConfig(points=args.pde_grid))
 
+        # Barrier-sensitive cases: a finer space grid and 6 steps per day.
+        barrier_sensitive = PDEParams(grid=GridConfig(points=600, steps_per_day=6.0))
         if label == "Standard (daily KI, monthly KO)":
-            pde_params = make_pde_params(
-                profile="barrier_sensitive",
-                time_steps=max(args.pde_steps, 300),
-                event_steps_per_day=6,
-            )
+            pde_params = barrier_sensitive
         elif label == "Standard (high vol 35%)":
-            pde_params = make_pde_params(profile="accurate")
+            pde_params = PDEParams(accuracy="high")
         elif label == "Standard (spot near KO)":
-            pde_params = make_pde_params(
-                profile="barrier_sensitive",
-            )
+            pde_params = barrier_sensitive
         elif label == "Reverse (cont KI, monthly KO)":
             quad_params = make_quad_params(
                 profile="reverse_sensitive",
                 num_std_devs=12.0,
             )
-            pde_params = make_pde_params(
-                profile="reverse_sensitive",
-            )
+            pde_params = barrier_sensitive
         elif label == "Standard (2Y maturity, monthly KO)":
             quad_params = make_quad_params(
                 profile="accurate",
                 grid_points=max(args.grid, 1601),
             )
-            pde_params = make_pde_params(
-                profile="accurate",
-                grid_size=max(args.pde_grid, 800),
-                time_steps=max(args.pde_steps, 400) * 2,
+            pde_params = PDEParams(
+                accuracy="high",
+                grid=GridConfig(
+                    points=max(args.pde_grid, 800),
+                    time_steps=max(args.pde_steps, 400) * 2,
+                ),
             )
 
         return quad_params, pde_params

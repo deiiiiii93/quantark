@@ -4,7 +4,7 @@ Demo: engine parameter presets and config loaders.
 
 from pathlib import Path
 
-from quantark.asset.equity.param import PDEParams, QuadParams, make_pde_params, make_quad_params
+from quantark.asset.equity.param import PDEParams, QuadParams, make_quad_params
 
 
 def main() -> None:
@@ -19,7 +19,8 @@ def main() -> None:
     print("PDE params (config):", pde_params)
 
     fast_quad = make_quad_params(profile="fast")
-    accurate_pde = make_pde_params(profile="accurate")
+    # PDE has no profile tier (0.6.0): accuracy is a PDEParams field.
+    accurate_pde = PDEParams(accuracy="high")
 
     print("Quad params (fast):", fast_quad)
     print("PDE params (accurate):", accurate_pde)

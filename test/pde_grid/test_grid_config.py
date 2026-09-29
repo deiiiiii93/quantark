@@ -95,19 +95,16 @@ def test_removed_resolution_knobs_name_their_replacement():
     )
 
 
-def test_pde_param_profiles_target_grid_layer():
-    """make_pde_params presets must configure accuracy/grid (the declarative
-    layer), not the legacy inert knobs."""
-    from quantark.asset.equity.param import make_pde_params
-
-    assert make_pde_params("fast").accuracy == "fast"
-    assert make_pde_params("accurate").accuracy == "high"
-    bs = make_pde_params("barrier_sensitive")
-    assert bs.grid.points == 600 and bs.grid.steps_per_day == 6.0
-    # presets compose with the grid layer without rejection
+def test_from_config_targets_grid_layer():
+    """0.6.0: PDEParams.from_config reads field names, with ``grid`` a nested
+    GridConfig mapping that composes with the grid layer."""
     from quantark.asset.equity.engine.pde import EuropeanPDESolver
+    from quantark.asset.equity.param import PDEParams
 
-    assert EuropeanPDESolver(params=bs).grid_binder.config.points == 600
+    p = PDEParams.from_config({"accuracy": "fast", "grid": {"points": 600, "steps_per_day": 6.0}})
+    assert p.accuracy == "fast"
+    assert p.grid.points == 600 and p.grid.steps_per_day == 6.0
+    assert EuropeanPDESolver(params=p).grid_binder.config.points == 600
 
 
 # ---- 0.6.0: time_steps budget, one-basis rule, route tables, evidence rule ----

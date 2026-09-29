@@ -7,7 +7,6 @@ from .engine_param_profiles import (
     ENGINE_PARAM_PRESETS,
     list_param_profiles,
     make_engine_params,
-    make_pde_params,
     make_quad_params,
 )
 
@@ -21,6 +20,5 @@ __all__ = [
     'ENGINE_PARAM_PRESETS',
     'list_param_profiles',
     'make_engine_params',
-    'make_pde_params',
     'make_quad_params',
 ]

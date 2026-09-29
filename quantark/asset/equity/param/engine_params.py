@@ -4,7 +4,7 @@ Engine configuration parameters.
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import Any, Mapping, Optional, Union
 from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode
 from quantark.util.exceptions import ValidationError
 
@@ -419,47 +419,57 @@ def _next_power_of_two(n: int) -> int:
 @keyword_only_init(REMOVED_PDE_NAMES)
 @dataclass(kw_only=True)
 class PDEParams(EngineParams):
-    """
-    PDE engine configuration.
+    """1D PDE configuration: the one surface every 1D PDE route reads (0.6.0).
 
-    Attributes:
-        accuracy: Grid accuracy profile: fast, standard, high (default: standard)
-        grid: Optional GridConfig expert overlay (field-by-field override of
-            the accuracy profile: points, steps_per_day, bounds, ...)
-        cache_enabled: Enable PDE cache usage (default: True)
-        bus_days_in_year: Days per year for day-based grid heuristics (from EngineParams, default: 252)
-        event_projection: Spatial representation of discrete coupon/KO/KI event
-            jumps — None (default: the route's own treatment), "cell_average"
-            (conservative dual-cell projection that removes the half-cell
-            trigger-phase bias, see pde_auto_grid_investigation.md) or
-            "nodal" (Boolean masks)
-        event_theta: Theta value applied immediately before event times (default: 1.0)
-        theta: Finite difference scheme parameter (0.5 = Crank-Nicolson, 1.0 = Backward Euler)
+    Keyword arguments only; a removed 0.5 name raises ``ValidationError``
+    naming its replacement (``pde_removed_names.REMOVED_PDE_NAMES``).
+
+    Field contract (when to change it / what happens):
+
+    - ``accuracy`` -- a faster preview or a finer answer. Selects the
+      ``GridConfig`` preset: fast (200 pts, 4/day), standard (400, 4/day),
+      high (800, 8/day). Resolution settings, not accuracy guarantees; a
+      "day" is 1/252 of a solver year in this release.
+    - ``grid`` -- override one preset field. Each non-``None`` ``GridConfig``
+      field replaces that preset value; the rest inherit. Exactly one time
+      basis (``steps_per_day`` or ``time_steps``) is in force after
+      resolution; setting one clears the other.
+    - ``theta`` -- ringing a damping step does not cure, or a more diffusive
+      scheme. 0.5 is Crank-Nicolson (second order in time), 1.0 backward
+      Euler (first order). Validated to [0, 1].
+    - ``event_theta`` -- studying damping strength after events. The weight
+      on the ``event_damping_steps`` after each interior event; terminal
+      damping steps always use 1.0.
+    - ``event_projection`` -- validating the event treatment. ``None`` is the
+      route's own treatment (CELL_AVERAGE on the shared-grid autocallable
+      solvers); explicit CELL_AVERAGE splits the trigger cell by its exact
+      overlap, explicit NODAL assigns whole nodes. Lower-case strings coerce.
+    - ``cache_enabled`` -- memory pressure, or a fresh solve every call. Same
+      numbers either way.
+    - ``bump_config`` (inherited) -- bump sizes for numerical Greeks.
+
+    Routes other than the shared-grid solvers (local-vol vanilla and barrier,
+    DCN) honour a subset; ``route_applicability.ROUTE_RULES`` lists what each
+    rejects, and the error names the field, the route, and sub-project 3.
     """
 
-    # Declarative grid layer (grid redesign spec §4.7): the tiered front door.
-    # accuracy selects a GridConfig preset (fast/standard/high); grid is the
-    # optional expert overlay (field-by-field override). Typed loosely to
-    # avoid a param -> engine.pde import cycle; validated in __post_init__.
+    # Grid: ``accuracy`` selects a GridConfig preset; ``grid`` is the
+    # field-by-field overlay (typed loosely: param must not import engine.pde
+    # at module load; validated in __post_init__).
     accuracy: str = "standard"
     grid: Optional[object] = None
-
-    cache_enabled: bool = True
-
-    # Spatial representation of discrete event operators (coupon/KO/KI jumps).
-    # None = the route's own treatment (decision 15): CELL_AVERAGE on the
-    # shared-grid autocallable solvers (1D BSM/LV and 2D Heston/SLV
-    # slice-wise; the conservative dual-cell projection that removes the
-    # half-cell trigger-phase bias documented in pde_auto_grid_investigation.md),
-    # NODAL on DCN, a mid-cell-aligned nodal mask on the local-vol barrier.
-    # An explicit value is honoured where the route implements it and
-    # rejected where it does not. Continuously monitored barriers keep nodal
-    # treatment either way.
-    event_projection: Optional[Union[EventProjectionMode, str]] = None
+    # Scheme: 0.5 = Crank-Nicolson, 1.0 = backward Euler.
+    theta: float = 0.5
     event_theta: float = 1.0
-
-    # Numerical scheme configuration
-    theta: float = 0.5  # 0.5 = Crank-Nicolson, 1.0 = Backward Euler
+    # Discrete event operators (coupon/KO/KI jumps). None = the route's own
+    # treatment (decision 15): CELL_AVERAGE on the shared-grid autocallable
+    # solvers (1D BSM/LV and 2D Heston/SLV slice-wise; the dual-cell
+    # projection that removes the half-cell trigger-phase bias documented in
+    # pde_auto_grid_investigation.md), NODAL on DCN, a mid-cell-aligned nodal
+    # mask on the local-vol barrier. Continuously monitored barriers keep
+    # nodal treatment either way.
+    event_projection: Optional[Union[EventProjectionMode, str]] = None
+    cache_enabled: bool = True
 
     def __post_init__(self):
         """Validate PDE parameters."""
@@ -508,40 +518,36 @@ class PDEParams(EngineParams):
             )
 
     @classmethod
-    def from_config(
-        cls,
-        config_or_path: Any,
-        profile: Optional[str] = None,
-        product: Optional[Any] = None,
-        reverse: Optional[bool] = None,
-        **overrides: Any,
-    ) -> "PDEParams":
+    def from_config(cls, config_or_path: Any, **overrides: Any) -> "PDEParams":
+        """Load PDEParams from a dict, YAML, or JSON whose keys are field names.
+
+        ``grid`` is a nested mapping of GridConfig fields (a ``bounds`` list
+        becomes a tuple). ``engine``, when present, must be ``"pde"``;
+        ``profile`` and ``reverse`` are rejected (PDE has no profile tier since
+        0.6.0). Unknown keys go through the removal map. ``overrides`` win.
         """
-        Create PDEParams from a dict/YAML/JSON config and optional overrides.
+        from quantark.asset.equity.engine.pde.grid.config import GridConfig
 
-        Args:
-            config_or_path: Mapping or path to YAML/JSON file.
-            profile: Optional preset profile to use.
-            product: Optional product object for light auto-tuning.
-            reverse: Optional reverse flag (overrides config if provided).
-            **overrides: Explicit parameter overrides.
+        from .engine_param_profiles import load_param_config
 
-        Returns:
-            PDEParams instance.
-        """
-        from .engine_param_profiles import make_pde_params, parse_profile_config
-
-        resolved_profile, config_overrides, reverse_flag = parse_profile_config(
-            config_or_path, engine="pde", profile=profile, reverse=reverse
-        )
-        if overrides:
-            config_overrides.update(overrides)
-        return make_pde_params(
-            profile=resolved_profile,
-            product=product,
-            reverse=reverse_flag,
-            **config_overrides,
-        )
+        data = dict(load_param_config(config_or_path))
+        for key in ("profile", "reverse"):
+            if key in data:
+                raise ValidationError(
+                    f"PDEParams.from_config: {key!r} is not accepted; PDE has no "
+                    "profile tier since 0.6.0. Use accuracy= and grid= field names."
+                )
+        engine = data.pop("engine", None)
+        if engine is not None and str(engine).lower() != "pde":
+            raise ValidationError(f"config engine {engine!r} is not 'pde'")
+        data.update(overrides)
+        grid = data.get("grid")
+        if isinstance(grid, Mapping):
+            grid = dict(grid)
+            if isinstance(grid.get("bounds"), list):
+                grid["bounds"] = tuple(grid["bounds"])
+            data["grid"] = GridConfig(**grid)
+        return cls(**data)
 
     def resolved_grid(self):
         """The REQUESTED grid: ``accuracy``'s shared preset under the ``grid`` overlay.

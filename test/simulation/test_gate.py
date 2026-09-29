@@ -54,7 +54,10 @@ def test_the_reservoir_is_a_deterministic_sample_of_visited_states():
         b.price_day(_states(day, spots))
     sa, sb = a.sample_visited(), b.sample_visited()
     assert len(sa) == 3 and [(s.day_index, float(s.spot[0])) for s in sa] == [(s.day_index, float(s.spot[0])) for s in sb]
-    assert len({float(s.spot[0]) for s in sa}) == 3
+    # Three distinct visited STATES. Days 3 and 4 visit the same ten spots, so
+    # distinct spots alone was seed luck: the seed hashes the engine config's
+    # repr, and 0.6.0's PDEParams draws (3, s), (4, s) for one spot s.
+    assert len({(s.day_index, float(s.spot[0])) for s in sa}) == 3
 
 
 def test_a_coarse_ladder_fails_a_tight_gate_and_passes_a_loose_one():
