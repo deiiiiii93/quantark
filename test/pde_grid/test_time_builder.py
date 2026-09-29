@@ -197,3 +197,49 @@ def test_mandatory_overflow_is_also_a_scaled_fill():
     events = tuple(np.linspace(0.001, 0.999, 400))
     tl = build_time(req(events=events), CFG(max_steps=100))
     assert tl.cap_exceeded and tl.fill_scaled
+
+
+# ---- 0.6.0: the time_steps budget basis (spec §4.2, §5.3, decision 16) ----
+
+import dataclasses  # noqa: E402
+
+
+def test_budget_no_events_is_linspace_bitwise():
+    tl = build_time(req(tau=1.3, events=()), CFG(time_steps=200))
+    assert np.array_equal(tl.t, np.linspace(0.0, 1.3, 201))
+    assert tl.requested_steps == 200 and tl.actual_steps == 200
+
+
+def test_budget_spread_proportionally_with_floor_one():
+    tl = build_time(req(events=(0.25, 0.5, 0.75)), CFG(time_steps=400))
+    assert tl.actual_steps == 400
+    assert [tl.step_of[e] for e in (0.25, 0.5, 0.75)] == [100, 200, 300]
+
+
+def test_budget_below_interval_count_floors_to_one_each():
+    events = tuple(k / 10 for k in range(1, 10))  # 10 intervals
+    tl = build_time(req(events=events), CFG(time_steps=4))
+    assert tl.actual_steps == 10 and tl.requested_steps == 4
+    assert tl.actual_steps > tl.requested_steps and not tl.fill_scaled
+
+
+def test_budget_capped_by_max_steps():
+    events = tuple(k / 10 for k in range(1, 10))
+    # a built config (not re-resolved): the cap scales the extras only
+    cfg = dataclasses.replace(CFG(time_steps=100), max_steps=50)
+    tl = build_time(req(events=events), cfg)
+    assert tl.actual_steps <= 50 and tl.fill_scaled
+
+
+def test_budget_equal_to_density_fill_is_bit_identical():
+    dens = build_time(req(), CFG())
+    bud = build_time(req(), CFG(time_steps=dens.actual_steps))
+    assert np.array_equal(dens.t, bud.t) and np.array_equal(dens.dt, bud.dt)
+    assert dict(dens.step_of) == dict(bud.step_of)
+    assert dens.event_damping_steps == bud.event_damping_steps
+    assert dens.terminal_damping_steps == bud.terminal_damping_steps
+
+
+def test_density_branch_unchanged():
+    tl = build_time(req(), CFG())
+    assert tl.actual_steps == tl.requested_steps == 4 * 252

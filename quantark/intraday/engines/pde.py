@@ -106,20 +106,36 @@ def _release_solution_grids(solver) -> None:
             setattr(solver, name, None)
 
 
+def _with_time_factor(grid, factor: float, max_steps: int):
+    """``grid`` with the time basis in force scaled by ``factor`` (spec §5.6): a budget stays a budget and a
+    density stays a density, so a budget-configured request is never converted and never fails the one-basis rule."""
+    if grid.time_steps is not None:
+        scaled = grid.with_time_steps(int(round(grid.time_steps * factor)))
+    else:
+        scaled = grid.with_steps_per_day(float(grid.steps_per_day) * factor)
+    return replace(scaled, max_steps=max_steps)
+
+
+def _basis_label(grid, factor: float) -> str:
+    if grid.time_steps is not None:
+        return f"{int(round(grid.time_steps * factor))} time steps"
+    return f"{float(grid.steps_per_day) * factor:g} steps per day"
+
+
 def _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps):
-    """(steps_per_day, requested steps) of the smallest power-of-two multiple of the current fill whose time
+    """(time factor, requested steps) of the smallest power-of-two multiple of the current fill whose time
     layout meets the time floors on the given space grid, or the last multiple within ``max_steps``."""
     from quantark.asset.equity.engine.pde.grid.time import build_time
 
     layout = solver._active_layout
-    spd = float(grid.steps_per_day)
-    best = (spd, int(layout.time.requested_steps))
+    factor = 1.0
+    best = (factor, int(layout.time.requested_steps))
     while True:
-        spd *= 2.0
-        candidate = build_time(layout.request, replace(grid, steps_per_day=spd, max_steps=max(max_steps, 1)))
+        factor *= 2.0
+        candidate = build_time(layout.request, _with_time_factor(grid, factor, max(max_steps, 1)))
         if candidate.requested_steps > max_steps:
             return best
-        best = (spd, int(candidate.requested_steps))
+        best = (factor, int(candidate.requested_steps))
         if time_resolved(_time_status(ctx, solver, SimpleNamespace(time=candidate), numbers, dx_min)):
             return best
 
@@ -183,24 +199,25 @@ class PDERoute:
                 points, budget_bound = max(int(grid.points), max_cells // (steps_now + 1)), True
             # the time floors are judged on the refined space grid: its smallest cell shrinks with the point count
             dx_min *= numbers["points"] / max(points, numbers["points"])
-            spd, requested = float(grid.steps_per_day), steps_now
+            factor, requested = 1.0, steps_now
             space_resolvable = status.required_points <= max(points, numbers["points"])
             # a layer the point or memory cap cannot resolve stays under-resolved: more steps would buy cost, not accuracy
             if space_resolvable and not time_resolved(_time_status(ctx, solver, solver._active_layout, numbers, dx_min)):
                 max_steps = min(INTRADAY_PDE_MAX_STEPS, max_cells // points - 1)
-                spd, requested = _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps)
+                factor, requested = _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps)
                 budget_bound = budget_bound or max_steps < INTRADAY_PDE_MAX_STEPS
-            if points > numbers["points"] or spd > float(grid.steps_per_day):
+            if points > numbers["points"] or factor > 1.0:
                 refined = deepcopy(engine)
-                refined.params.grid = replace(grid, points=points, max_points=max(int(grid.max_points or 0), points),
-                                              steps_per_day=spd, max_steps=max(int(grid.max_steps), requested))
+                refined.params.grid = replace(_with_time_factor(grid, factor, max(int(grid.max_steps), requested)),
+                                              points=points, max_points=max(int(grid.max_points or 0), points))
                 refined._grid_binder = None
                 refined._active_layout = None
                 pv = float(refined.price(twin, env))
                 _release_solution_grids(refined)
                 numbers = _layout_numbers(refined, ctx.spot)
                 status = _time_status(ctx, refined, refined._active_layout, numbers, _dx_min(refined))
-                records = (f"grid refined to {numbers['points']} points and {spd:g} steps per day for the diffusion layer",)
+                records = (f"grid refined to {numbers['points']} points and {_basis_label(grid, factor)} "
+                           "for the diffusion layer",)
                 solver, grid = refined, refined.grid_binder.config
             if status.status == UNDER_RESOLVED and budget_bound:
                 status = replace(status, reason=f"{status.reason}; refinement capped by the grid memory budget "
@@ -212,7 +229,7 @@ class PDERoute:
         numerical = dict(numbers, resolution=status.status, resolution_reason=status.reason,
                          cells_per_layer=status.cells_per_layer, layer_log_width=status.layer_log_width,
                          steps_per_layer=status.steps_per_layer, grid_mode_damping=status.grid_mode_damping,
-                         steps_per_day=float(grid.steps_per_day))
+                         steps_per_day=None if grid.steps_per_day is None else float(grid.steps_per_day))
         return EnginePriceOutcome(pv, self._method(engine), numerical, {}, records, engine_used=solver)
 
     def point_greeks(self, ctx, engine) -> PointGreeks:

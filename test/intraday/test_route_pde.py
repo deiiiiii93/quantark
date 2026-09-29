@@ -51,6 +51,19 @@ def test_far_from_the_fixing_prices_the_twin_unrefined_and_resolved(sse_calendar
     assert out.contingent_pv == pytest.approx(quad, rel=CROSS_CHECK_REL), "cross-check with QUAD V2, not a qualification"
 
 
+def test_a_budget_configured_request_is_refined_as_a_budget(sse_calendar, sse_sessions, desk):
+    # spec §5.6: the route refines the time basis in force; a budget is never converted to a density
+    from quantark.asset.equity.engine.pde.grid import GridConfig
+
+    ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1))
+    engine = SnowballPDESolver(PDEParams(grid=GridConfig(time_steps=400)))
+    out = route_for(ctx, engine).price(ctx, engine)
+    refined = out.engine_used.grid_binder.config
+    assert refined.steps_per_day is None and refined.time_steps > 400
+    assert out.numerical["steps_per_day"] is None
+    assert any("time steps" in r for r in out.records)
+
+
 def test_one_day_out_refines_the_time_fill_so_no_step_jumps_the_layer(sse_calendar, sse_sessions, desk):
     # 4 steps per day on the desk profile put a whole session's variance into one Crank-Nicolson step
     ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(days=1))

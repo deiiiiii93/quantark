@@ -3,7 +3,8 @@
 Every ``event_times`` entry becomes a grid node exactly (indexed and damped),
 and every ``extra_times`` entry a node only (indexed, never damped, no event
 keyed on it); fill between nodes is
-sized solely by ``steps_per_day`` (no per-interval floor beyond 1 — the ≥10
+sized by the time basis in force — the ``steps_per_day`` density or the
+``time_steps`` budget (no per-interval floor beyond 1 — the ≥10
 floor caused the historical ~10x grid inflation); ``max_steps`` caps fill via
 extras-scaling and can never move or drop a node. Damping schedules for the
 θ-loop and the 2D ADI stepper are derived here, once.
@@ -74,9 +75,20 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
     nodes = tuple(sorted(set(events) | set(request.extra_times)))
     boundaries = np.array([0.0, *nodes, tau], dtype=float)
     lengths = np.diff(boundaries)
-    days = np.maximum(1.0, lengths * float(config.day_count))
-    fill = np.maximum(1, np.round(days * float(config.steps_per_day)).astype(int))
-    requested = int(fill.sum())
+    if config.time_steps is not None:
+        # Budget basis (spec §4.2, decision 16): the total spread over the
+        # mandatory intervals by length, at least one step each. One
+        # interval gives exactly linspace(0, tau, time_steps + 1).
+        fill = np.maximum(
+            1, np.round(float(config.time_steps) * lengths / float(tau)).astype(int)
+        )
+        requested = int(config.time_steps)
+    else:
+        days = np.maximum(1.0, lengths * float(config.day_count))
+        fill = np.maximum(1, np.round(days * float(config.steps_per_day)).astype(int))
+        requested = int(fill.sum())
+    # The fill before the cap: "scaled" means the cap cut it, never rounding.
+    unscaled = int(fill.sum())
 
     n_int, cap = len(lengths), int(config.max_steps)
     cap_exceeded = False
@@ -91,7 +103,7 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
             n_int,
             cap,
         )
-    elif requested > cap:
+    elif unscaled > cap:
         # Scale only the extras into the remaining budget: baselines (1 per
         # interval) + scaled extras <= baselines + budget = cap.
         extras = fill - 1
@@ -104,7 +116,7 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
         logger.warning(
             "time grid: %d requested steps scaled to %d by max_steps=%d; "
             "raise GridConfig(max_steps=...) for the requested fill",
-            requested,
+            unscaled,
             int(fill.sum()),
             cap,
         )
@@ -159,5 +171,5 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
         requested_steps=requested,
         actual_steps=n_steps,
         cap_exceeded=cap_exceeded,
-        fill_scaled=n_steps < requested,
+        fill_scaled=n_steps < unscaled,
     )
