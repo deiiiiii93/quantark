@@ -43,7 +43,7 @@ class TestArtifactStates:
 
     def test_disable_strategy_builds_fresh_without_descriptor(self):
         engine, product, env = _case("SnowballPDESolver")
-        engine._cache_strategy = "disable"
+        engine._cache_enabled = False
         with PricingSession() as session:
             state = grid_state(engine, product, env, session.context)
             assert state.descriptor is None and state.handle is None
@@ -168,7 +168,6 @@ class TestBuildCountGates:
 
         engine, product, env = _case("SnowballPDESolver")
         direct = engine.price(product, env)
-        SnowballPDESolver.clear_grid_cache()  # cold class-level cache
 
         import quantark.asset.equity.engine.pde.grid.space as grid_space
 

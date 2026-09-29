@@ -120,24 +120,6 @@ def test_snowball_pde_flat_identity_golden():
     assert px == pytest.approx(GOLDEN_PDE_PRE, rel=GOLDEN_REL_TOL)
 
 
-def test_snowball_pde_sparse_fallback_sees_term_structure():
-    """use_banded_solver=False path (codex plan-review finding): the sparse
-    branch must consume per-step coefficients too, and agree with banded."""
-    from quantark.asset.equity.engine.pde import SnowballPDESolver
-    from quantark.asset.equity.param import PDEParams
-
-    params = PDEParams(use_banded_solver=False)
-    env_term = make_term_env("kinked")
-    px_term = SnowballPDESolver(params=params).price(_standard_snowball(), env_term)
-    px_collapsed = SnowballPDESolver(params=params).price(
-        _standard_snowball(), _collapsed_flat_env(env_term, 1.0)
-    )
-    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
-
-    px_banded = SnowballPDESolver().price(_standard_snowball(), env_term)
-    assert px_term == pytest.approx(px_banded, rel=1e-6)
-
-
 def _standard_phoenix():
     """Discrete monthly-KI Phoenix (the PDE path supports discrete KI)."""
     from quantark.asset.equity.product.option import create_standard_phoenix
@@ -171,22 +153,6 @@ def test_phoenix_pde_sees_term_structure():
         _standard_phoenix(), _collapsed_flat_env(env_term, 1.0)
     )
     assert px_term != pytest.approx(px_collapsed, rel=1e-5)
-
-
-def test_phoenix_pde_sparse_fallback_sees_term_structure():
-    from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
-    from quantark.asset.equity.param import PDEParams
-
-    params = PDEParams(use_banded_solver=False)
-    env_term = make_term_env("kinked")
-    px_term = PhoenixPDESolver(params=params).price(_standard_phoenix(), env_term)
-    px_collapsed = PhoenixPDESolver(params=params).price(
-        _standard_phoenix(), _collapsed_flat_env(env_term, 1.0)
-    )
-    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
-
-    px_banded = PhoenixPDESolver().price(_standard_phoenix(), env_term)
-    assert px_term == pytest.approx(px_banded, rel=1e-6)
 
 
 def test_ko_reset_pde_sees_term_structure():

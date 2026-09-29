@@ -149,14 +149,13 @@ class TestInjectionSeams:
         from execution.matrix_fixtures import _pdep, _snowball, _eq_flat_env
 
         engine = SnowballPDESolver(
-            _pdep(
-                  use_banded_solver=True)
+            _pdep()
         )
         product, env = _snowball(), _eq_flat_env()
         baseline = engine.price(product, env)
         clone = type(engine)(params=engine.params)
         artifacts = self._artifacts(clone, product, env)
-        assert artifacts[3], "banded pack expected under use_banded_solver"
+        assert artifacts[3], "banded pack expected for the two-surface family"
         self._inject(clone, *artifacts)
         assert clone.price(product, env) == baseline
         assert len(clone._banded_cache) == 0

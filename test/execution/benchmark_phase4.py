@@ -57,7 +57,6 @@ def bench_crn_lv_snowball():
         # The spec gate-4 baseline: UNCACHED serial execution — a fresh
         # engine per repricing with cold class-level caches, as a service
         # without cross-request reuse would run.
-        LocalVolSnowballPDESolver.clear_grid_cache()
         out = []
         for _ in range(CRN_CALLS):
             fresh = LocalVolSnowballPDESolver(params=engine.params)
@@ -105,13 +104,11 @@ def bench_overhead_european():
     request = PricingRequest(product=product, pricing_env=env)
 
     def direct_once():
-        EuropeanPDESolver.clear_grid_cache()
         return engine.price(product, env)
 
     session = PricingSession()  # dispatch overhead, not construction cost
 
     def session_once():
-        EuropeanPDESolver.clear_grid_cache()
         return session.execute(engine, request).value
 
     direct_once(); session_once()  # warm-up (imports, registry, leases)

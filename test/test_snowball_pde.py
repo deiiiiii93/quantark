@@ -429,7 +429,6 @@ class TestSnowballPDEKOScheduleCaching:
 
         env = create_pricing_env()
         params = PDEParams()
-        SnowballPDESolver.clear_grid_cache()
 
         product = make_product()
         resolve_calls = 0

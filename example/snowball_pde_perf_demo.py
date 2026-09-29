@@ -195,7 +195,6 @@ def main() -> None:
     print(warm_fmt.format(*[h[0] for h in warm_headers]))
     print("| " + " | ".join("-" * h[1] for h in warm_headers) + " |")
     for grid_size, time_steps in grids:
-        SnowballPDESolver.clear_grid_cache()
         solver = SnowballPDESolver(
             params=PDEParams(grid=GridConfig(points=grid_size))
         )

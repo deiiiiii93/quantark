@@ -11,7 +11,6 @@ from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, field
 import math
-import threading
 from typing import Dict, Optional, Tuple, List, NamedTuple, Sequence
 import numpy as np
 import scipy.sparse as sp
@@ -63,6 +62,12 @@ _ENV_DF_MEMO: dict = {}
 _ENV_STEP_COEFF_MEMO: dict = {}
 _DF_MEMO_MAX_ENTRIES = 200_000
 _STEP_COEFF_MEMO_MAX_ENTRIES = 64
+
+#: Operational cache sizes (spec §4.3): implementation details, not knobs.
+GRID_CACHE_MAX_ENTRIES = 128
+BANDED_CACHE_MAX_ENTRIES = 512
+#: Product cache tokens always use the former "standard" keying.
+_CACHE_KEYING = "standard"
 
 
 def _per_object_memo(market_obj, store: dict) -> Optional[dict]:
@@ -203,20 +208,11 @@ class BasePDESolver(BaseEngine):
 
     engine_type = EngineType.PDE
 
-    _grid_cache_max_entries: int = 128
-    _global_cache_enabled: bool = True
-    _global_cache_strategy: Optional[str] = None
-    _cache_lock = threading.Lock()
-
     def __init__(self, params: Optional[PDEParams] = None):
         """Initialize the PDE solver with configuration parameters."""
         super().__init__(params if params is not None else PDEParams())
         self._matrix_cache: Dict[Tuple[float, float], Tuple] = {}
         self._cache_enabled = bool(getattr(self.params, "cache_enabled", True))
-        self._cache_strategy = getattr(self.params, "cache_strategy", "standard")
-        cache_size = getattr(self.params, "grid_cache_max_entries", None)
-        if cache_size is not None:
-            self.set_grid_cache_max_entries(cache_size)
         self._critical_points_cache: "OrderedDict[Tuple, Tuple[float, ...]]" = (
             OrderedDict()
         )
@@ -365,50 +361,9 @@ class BasePDESolver(BaseEngine):
             out.append((rec, payoff))
         return out
 
-    @classmethod
-    def clear_grid_cache(cls) -> None:
-        """No-op since 0.4.0: layouts are cached per engine instance by the
-        GridBinder (kept for source compatibility with older call sites)."""
-
-    @classmethod
-    def set_cache_enabled(cls, enabled: bool, clear: bool = False) -> None:
-        """Enable or disable cache usage for this solver class."""
-        cls._global_cache_enabled = bool(enabled)
-        if clear:
-            cls.clear_grid_cache()
-
-    @classmethod
-    def set_cache_strategy(cls, strategy: str, clear: bool = False) -> None:
-        """Set the cache strategy for this solver class."""
-        if strategy not in ("disable", "strict", "standard", "aggressive"):
-            raise PricingError(
-                "cache_strategy must be one of disable, strict, standard, aggressive, got "
-                f"{strategy}"
-            )
-        cls._global_cache_strategy = strategy
-        if clear:
-            cls.clear_grid_cache()
-
-    @classmethod
-    def set_grid_cache_max_entries(cls, max_entries: int) -> None:
-        """Set maximum number of grid entries to keep in cache."""
-        if max_entries <= 0:
-            raise PricingError(
-                f"Grid cache size must be positive, got {max_entries}"
-            )
-        with cls._cache_lock:
-            cls._grid_cache_max_entries = max_entries
-
     def _is_cache_enabled(self) -> bool:
-        return self._resolve_cache_strategy() != "disable"
-
-    def _resolve_cache_strategy(self) -> str:
-        if not self.__class__._global_cache_enabled or not self._cache_enabled:
-            return "disable"
-        strategy = self.__class__._global_cache_strategy
-        if strategy is None:
-            strategy = self._cache_strategy
-        return strategy
+        """``PDEParams.cache_enabled`` -- the one cache control (spec §5.2)."""
+        return self._cache_enabled
 
     def create_bump_context(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -543,9 +498,7 @@ class BasePDESolver(BaseEngine):
                 getattr(self.params, "accuracy", "standard"),
                 scheme_config_overlay(self.params),
                 cache_enabled=self._is_cache_enabled(),
-                cache_max_entries=int(
-                    getattr(self.params, "grid_cache_max_entries", 128) or 128
-                ),
+                cache_max_entries=GRID_CACHE_MAX_ENTRIES,
             )
         return self._grid_binder
 
@@ -814,8 +767,6 @@ class BasePDESolver(BaseEngine):
         # non-default values, so they are constant on this hierarchy.)
         return (
             self.grid_binder.config.key,
-            params.cache_strategy,
-            params.use_banded_solver,
             params.event_projection,
             params.theta,
             params.event_theta,
@@ -1794,7 +1745,7 @@ class BasePDESolver(BaseEngine):
         pricing_env: PricingEnvironment,
         spot: float,
     ) -> Tuple:
-        strategy = self._resolve_cache_strategy()
+        strategy = _CACHE_KEYING
         return (
             strategy,
             f"{product.__class__.__module__}.{product.__class__.__qualname__}",
@@ -1837,7 +1788,7 @@ class BasePDESolver(BaseEngine):
         )
         self._critical_points_cache[key] = points
         self._critical_points_cache.move_to_end(key)
-        max_entries = max(1, self._grid_cache_max_entries)
+        max_entries = GRID_CACHE_MAX_ENTRIES
         if len(self._critical_points_cache) > max_entries:
             self._critical_points_cache.popitem(last=False)
         return points

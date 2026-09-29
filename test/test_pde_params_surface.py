@@ -43,3 +43,27 @@ def test_params_clone_round_trips():
     assert q.theta == 0.5 and q.grid == p.grid
     g = pickle.loads(pickle.dumps(p.grid))
     assert g == p.grid and dataclasses.replace(g, points=301).points == 301
+
+
+@pytest.mark.parametrize("name", ["cache_strategy", "grid_cache_max_entries",
+                                  "banded_cache_max_entries", "use_banded_solver"])
+def test_cache_knobs_removed(name):
+    with pytest.raises(ValidationError, match="cache_enabled|solver family"):
+        PDEParams(**{name: 1})
+
+
+def test_cache_off_is_the_instance_flag_and_changes_no_number():
+    from term_structure_benchmarks import make_term_env
+
+    from quantark.asset.equity.engine.pde import BasePDESolver, EuropeanPDESolver
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    from quantark.util.enum import OptionType
+
+    for gone in ("set_cache_enabled", "set_cache_strategy", "clear_grid_cache",
+                 "set_grid_cache_max_entries", "_resolve_cache_strategy"):
+        assert not hasattr(BasePDESolver, gone)
+    p = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    env = make_term_env("flat")
+    on, off = EuropeanPDESolver(PDEParams()), EuropeanPDESolver(PDEParams(cache_enabled=False))
+    assert on._is_cache_enabled() and not off._is_cache_enabled()
+    assert on.price(p, env) == off.price(p, env)

@@ -80,14 +80,14 @@ def test_market_snapshot_fields():
     assert m.r_ref == pytest.approx(0.04) and m.q_ref == pytest.approx(0.01)
 
 
-def test_binder_cache_follows_cache_strategy():
+def test_binder_cache_follows_cache_enabled():
     env = create_pricing_env()
     on = _MigratedProbe(params=PDEParams())
     m = on.market_snapshot(OPTION, env)
     r = on.grid_request(OPTION, m, 1.0)
     assert on.grid_binder.bind(r, m) is on.grid_binder.bind(r, m)
 
-    off = _MigratedProbe(params=PDEParams(cache_strategy="disable"))
+    off = _MigratedProbe(params=PDEParams(cache_enabled=False))
     assert off.grid_binder.bind(r, m) is not off.grid_binder.bind(r, m)
 
 

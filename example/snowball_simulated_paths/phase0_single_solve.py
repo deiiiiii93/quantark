@@ -161,7 +161,7 @@ def structural_key(obj: Any, seen: Optional[set] = None, depth: int = 0) -> str:
 
 def memo_key(solver, product, pricing_env) -> str:
     return repr((type(solver).__qualname__, structural_key(product), structural_key(pricing_env),
-                 structural_key(solver._params_cache_key()), solver._resolve_cache_strategy(),
+                 structural_key(solver._params_cache_key()), solver._is_cache_enabled(),
                  tuple(getattr(solver, "_extra_time_nodes", ()))))
 
 

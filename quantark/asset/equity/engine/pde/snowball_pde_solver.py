@@ -26,6 +26,9 @@ from scipy.special import ndtr
 _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
 from quantark.asset.equity.engine.pde.base_pde_solver import (
+    BANDED_CACHE_MAX_ENTRIES,
+    GRID_CACHE_MAX_ENTRIES,
+    _CACHE_KEYING,
     BasePDESolver,
     LifeSurfaceSolution,
     PDESessionOutputs,
@@ -337,7 +340,7 @@ class SnowballPDESolver(BasePDESolver):
         self._total_tau: float = 0.0
         self._structured_terminal_delay_df: float = 1.0
         self._banded_cache: "OrderedDict[Tuple[float, float], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]" = OrderedDict()
-        self._banded_cache_max_entries = self.params.banded_cache_max_entries
+        self._banded_cache_max_entries = BANDED_CACHE_MAX_ENTRIES
         # Session-injected banded factorization pack (read-only; see
         # BasePDESolver._session_matrix_pack for the contract).
         self._session_banded_pack = None
@@ -1057,7 +1060,7 @@ class SnowballPDESolver(BasePDESolver):
         self._prepare_continuous_ki_correction(product, pricing_env, t_vec)
         sc_ev = self._flat_exact_step_coefficients(sc_ev, r, q, sigma, dx_vec, num_x)
         ev_step_coeffs = None if sc_ev.n_unique == 1 else sc_ev
-        use_banded = params.use_banded_solver and (num_x - 2) > 2
+        use_banded = (num_x - 2) > 2
         if not use_banded:
             raise ValidationError("Event stats PDE currently requires banded solver path.")
 
@@ -2681,7 +2684,7 @@ class SnowballPDESolver(BasePDESolver):
         self._prepare_continuous_ki_correction(product, pricing_env, t_vec)
         profile = self._profile_enabled
         timings = self._profile_stats
-        use_banded = params.use_banded_solver
+        use_banded = (num_x - 2) > 2
         n_int = num_x - 2
         I_int = sp.eye(n_int, format="csc")
         self._matrix_cache.clear()
@@ -2890,9 +2893,9 @@ class SnowballPDESolver(BasePDESolver):
         return banded, lower1, main1, upper1
 
     def _pack_uses_banded(self, num_x: int) -> bool:
-        # Mirrors _time_stepping_two_surface: banded branch engages when the
-        # params request it and the interior system is non-trivial.
-        return bool(self.params.use_banded_solver) and (num_x - 2) > 2
+        # The two-surface family: banded whenever the interior system is
+        # non-trivial (mirrors _time_stepping_two_surface).
+        return (num_x - 2) > 2
 
     def _pack_banded_entry(
         self, banded: dict, step_coeffs, l, c, u, dt, theta, coeff_key
@@ -3363,7 +3366,7 @@ class SnowballPDESolver(BasePDESolver):
     def _observation_cache_key(
         self, pricing_env: PricingEnvironment, product: SnowballOption, kind: str
     ) -> Tuple:
-        strategy = self._resolve_cache_strategy()
+        strategy = _CACHE_KEYING
         return (
             kind,
             strategy,
@@ -3387,7 +3390,7 @@ class SnowballPDESolver(BasePDESolver):
         records = product.resolve_ko_observations(pricing_env)
         self._ko_records_cache[key] = records
         self._ko_records_cache.move_to_end(key)
-        if len(self._ko_records_cache) > self.params.grid_cache_max_entries:
+        if len(self._ko_records_cache) > GRID_CACHE_MAX_ENTRIES:
             self._ko_records_cache.popitem(last=False)
         return records
 
@@ -3404,6 +3407,6 @@ class SnowballPDESolver(BasePDESolver):
         profile = product.get_ki_observation_profile(pricing_env)
         self._ki_profile_cache[key] = profile
         self._ki_profile_cache.move_to_end(key)
-        if len(self._ki_profile_cache) > self.params.grid_cache_max_entries:
+        if len(self._ki_profile_cache) > GRID_CACHE_MAX_ENTRIES:
             self._ki_profile_cache.popitem(last=False)
         return profile

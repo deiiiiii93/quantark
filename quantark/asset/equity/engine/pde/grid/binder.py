@@ -146,16 +146,11 @@ class GridLayerMixin:
                 or hasattr(params, "use_rannacher")
                 else self._default_grid_config()
             )
-            cache_enabled = bool(getattr(params, "cache_enabled", True)) and (
-                getattr(params, "cache_strategy", "standard") != "disable"
-            )
+            cache_enabled = bool(getattr(params, "cache_enabled", True))
             binder = GridBinder(
                 accuracy,
                 override,
                 cache_enabled=cache_enabled,
-                cache_max_entries=int(
-                    getattr(params, "grid_cache_max_entries", 128) or 128
-                ),
             )
             self._grid_binder = binder
         return binder

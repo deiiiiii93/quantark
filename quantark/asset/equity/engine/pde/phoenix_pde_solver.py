@@ -671,7 +671,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._prepare_continuous_ki_correction(product, pricing_env, t_vec)
         term = self._prepare_termination_surfaces(product, pricing_env, t_vec, num_x)
         I_int = sp.eye(num_x - 2, format="csc")
-        use_banded = params.use_banded_solver
+        use_banded = (num_x - 2) > 2
         n_int = num_x - 2
         
         # Reuse caches

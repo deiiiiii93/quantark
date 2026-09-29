@@ -17,7 +17,10 @@ import numpy as np
 from quantark.asset.equity.engine.event_stats import (
     payment_aware_cashflow_fields,
 )
-from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
+from quantark.asset.equity.engine.pde.base_pde_solver import (
+    GRID_CACHE_MAX_ENTRIES,
+    PDESolutionResult,
+)
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
@@ -192,7 +195,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         )
         self._pre_ko_records_cache[key] = records
         self._pre_ko_records_cache.move_to_end(key)
-        if len(self._pre_ko_records_cache) > self.params.grid_cache_max_entries:
+        if len(self._pre_ko_records_cache) > GRID_CACHE_MAX_ENTRIES:
             self._pre_ko_records_cache.popitem(last=False)
         return records
 
@@ -213,7 +216,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         )
         self._post_ko_records_cache[key] = records
         self._post_ko_records_cache.move_to_end(key)
-        if len(self._post_ko_records_cache) > self.params.grid_cache_max_entries:
+        if len(self._post_ko_records_cache) > GRID_CACHE_MAX_ENTRIES:
             self._post_ko_records_cache.popitem(last=False)
         return records
 

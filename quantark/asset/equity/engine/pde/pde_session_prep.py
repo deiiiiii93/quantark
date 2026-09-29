@@ -125,7 +125,7 @@ def grid_state(engine, product, pricing_env, context) -> ArtifactState:
         return engine._build_grids(product, pricing_env, spot, sigma, tau, r, q)
 
     cache = getattr(context, "artifact_cache", None)
-    if engine._resolve_cache_strategy() == "disable" or cache is None:
+    if not engine._is_cache_enabled() or cache is None:
         return ArtifactState(build(), None, None, None)
 
     capture = _env_capture(pricing_env)
@@ -191,7 +191,7 @@ def step_coefficients_state(
 
     cache = getattr(context, "artifact_cache", None)
     if (
-        engine._resolve_cache_strategy() == "disable"
+        not engine._is_cache_enabled()
         or cache is None
         or grid_fp is None
         or extra_fp is None
@@ -282,7 +282,7 @@ def factorization_state(
 
     cache = getattr(context, "artifact_cache", None)
     if (
-        engine._resolve_cache_strategy() == "disable"
+        not engine._is_cache_enabled()
         or cache is None
         or coeff_fp is None
     ):
@@ -298,7 +298,7 @@ def factorization_state(
     )
     if market_fp is None:
         return ArtifactState(build(), None, None, None)
-    banded_policy = bool(getattr(engine.params, "use_banded_solver", False))
+    banded_policy = engine._pack_uses_banded(len(x_vec))
     fp = try_fingerprint(
         ("pde-fact", _class_path(engine), coeff_fp, banded_policy)
     )

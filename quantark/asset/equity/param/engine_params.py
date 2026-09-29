@@ -432,10 +432,6 @@ class PDEParams(EngineParams):
         time_steps: LEGACY - time steps for the standalone vol-model solvers
             only; solvers on the declarative grid layer reject non-default values
         cache_enabled: Enable PDE cache usage (default: True)
-        cache_strategy: Cache strategy: disable, strict, standard, aggressive (default: standard)
-        grid_cache_max_entries: Max cached grids for PDE solvers (default: 128)
-        use_banded_solver: Use banded solve for tridiagonal systems (default: True)
-        banded_cache_max_entries: Max cached banded systems per solve (default: 512)
         s_min: LEGACY - lower spatial bound for the standalone vol-model
             solvers (0 = auto); grid-layer solvers use GridConfig.bounds
         s_max: LEGACY - upper spatial bound for the standalone vol-model
@@ -470,10 +466,6 @@ class PDEParams(EngineParams):
     grid_size: int = 400
     time_steps: int = 200
     cache_enabled: bool = True
-    cache_strategy: str = "standard"
-    grid_cache_max_entries: int = 128
-    use_banded_solver: bool = True
-    banded_cache_max_entries: int = 512
 
     # Feature-aware default grids
 
@@ -551,20 +543,6 @@ class PDEParams(EngineParams):
             raise ValidationError(f"Grid size must be positive, got {self.grid_size}")
         if self.time_steps <= 0:
             raise ValidationError(f"Time steps must be positive, got {self.time_steps}")
-        if self.grid_cache_max_entries <= 0:
-            raise ValidationError(
-                f"grid_cache_max_entries must be positive, got {self.grid_cache_max_entries}"
-            )
-        if self.banded_cache_max_entries <= 0:
-            raise ValidationError(
-                "banded_cache_max_entries must be positive, got "
-                f"{self.banded_cache_max_entries}"
-            )
-        if self.cache_strategy not in ("disable", "strict", "standard", "aggressive"):
-            raise ValidationError(
-                "cache_strategy must be one of disable, strict, standard, aggressive, got "
-                f"{self.cache_strategy}"
-            )
         if self.s_min < 0:
             raise ValidationError(f"s_min must be non-negative, got {self.s_min}")
         if self.s_max < 0:
