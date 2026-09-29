@@ -58,8 +58,8 @@ class AutocallableEngineConfig:
       full_grid keeps the recorded provenance consistent).
       ``pricing_engine_type`` still drives the surface/event-stats engines.
 
-    ``method`` belongs to ``pricing_engine_type`` (a ``PDEMethod`` for PDE, a
-    ``MonteCarloMethod`` for MC, ...) and is also what the surface and
+    ``method`` belongs to ``pricing_engine_type`` (a ``MonteCarloMethod`` for
+    MC, ...; PDE takes no method since 0.6.0) and is also what the surface and
     event-stats engines receive.  A vol-model MC route needs its OWN method
     (e.g. ``MonteCarloMethod.RANDOMIZED_QUASI``) which is generally NOT valid
     for ``pricing_engine_type``: a run that prices Heston on RQMC while

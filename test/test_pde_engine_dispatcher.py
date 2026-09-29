@@ -51,7 +51,6 @@ class TestPDEEngineBasics:
     def test_default_initialization(self):
         """Test PDEEngine with default parameters."""
         engine = PDEEngine()
-        assert engine.method == PDEMethod.CRANK_NICOLSON
         assert engine.params is not None
         assert isinstance(engine.params, PDEParams)
 
@@ -64,37 +63,14 @@ class TestPDEEngineBasics:
         assert engine.params.accuracy == "high"
         assert engine.params.grid.points == 500
 
-    def test_method_selection_enum(self):
-        """Test method selection via PDEMethod enum."""
-        engine = PDEEngine(method=PDEMethod.EXPLICIT_EULER)
-        assert engine.method == PDEMethod.EXPLICIT_EULER
-        assert engine.params.scheme == "explicit_euler"
+    def test_method_removed_with_replacement(self):
+        with pytest.raises(ValidationError, match="Crank-Nicolson is the only built-in scheme"):
+            PDEEngine(method=PDEMethod.CRANK_NICOLSON)
 
-    def test_method_selection_two_level_enum(self):
-        """Test method selection via EngineType.PDE(PDEMethod) pattern."""
-        engine = PDEEngine(method=EngineType.PDE(PDEMethod.IMPLICIT_EULER))
-        assert engine.method == PDEMethod.IMPLICIT_EULER
-        assert engine.params.scheme == "implicit_euler"
-
-    def test_method_selection_string(self):
-        """Test backward-compatible string method selection."""
-        engine = PDEEngine(method="crank_nicolson")
-        assert engine.method == PDEMethod.CRANK_NICOLSON
-
-    def test_invalid_method_string(self):
-        """Test error handling for invalid method string."""
-        with pytest.raises(ValidationError, match="Invalid PDE method"):
-            PDEEngine(method="invalid_method")
-
-    def test_invalid_method_type(self):
-        """Test error handling for invalid method type."""
-        with pytest.raises(ValidationError, match="Invalid method type"):
-            PDEEngine(method=123)
-
-    def test_invalid_engine_type_in_tuple(self):
-        """Test error handling when wrong EngineType used in tuple."""
-        with pytest.raises(ValidationError, match="Expected EngineType.PDE"):
-            PDEEngine(method=EngineType.ANALYTICAL(PDEMethod.CRANK_NICOLSON))
+    def test_repr_and_bump_clone(self):
+        e = PDEEngine(params=PDEParams(accuracy="high"))
+        assert repr(e) == "PDEEngine(accuracy='high')"
+        assert not hasattr(e, "method") and not hasattr(e.params, "scheme")
 
 
 class TestPDEEngineDispatch:

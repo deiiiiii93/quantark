@@ -6,11 +6,12 @@ and automatically routes pricing requests to the appropriate PDE solver based on
 the product type.
 """
 
-from typing import Dict, Optional, Type, Union, Sequence
+from typing import Dict, Optional, Type, Sequence
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.param.pde_removed_names import reject_removed_kwargs
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import (
     AmericanOption,
@@ -24,7 +25,7 @@ from quantark.asset.equity.product.option import (
     PhoenixOption,
 )
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum.engine_enums import EngineType, PDEMethod
+from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 
 from .pde import (
@@ -70,11 +71,8 @@ class PDEEngine(BaseEngine):
         # Expert grid control (field-by-field GridConfig overlay)
         engine = PDEEngine(PDEParams(grid=GridConfig(points=500)))
 
-        # With method selection (two-level enum pattern)
-        engine = PDEEngine(
-            params=PDEParams(),
-            method=EngineType.PDE(PDEMethod.CRANK_NICOLSON)
-        )
+        # Scheme weight: 0.5 is Crank-Nicolson (default), 1.0 backward Euler
+        engine = PDEEngine(PDEParams(theta=1.0))
 
         # Integration with GreeksCalculator
         greeks = calculator.calculate_numerical_greeks(
@@ -98,67 +96,16 @@ class PDEEngine(BaseEngine):
         PhoenixOption: PhoenixPDESolver,
     }
 
-    DEFAULT_METHOD = PDEMethod.CRANK_NICOLSON
-
-    def __init__(
-        self,
-        params: Optional[PDEParams] = None,
-        method: Optional[Union[str, PDEMethod, tuple]] = None,
-    ):
-        """
-        Initialize unified PDE engine.
+    def __init__(self, params: Optional[PDEParams] = None, **removed):
+        """Initialize the unified PDE engine.
 
         Args:
-            params: PDE configuration parameters (grid size, scheme, smoothing)
-            method: PDE method selection, can be:
-                - PDEMethod enum (e.g., PDEMethod.CRANK_NICOLSON)
-                - String "crank_nicolson"/"explicit_euler"/"implicit_euler"
-                - Tuple from EngineType.PDE(PDEMethod.CRANK_NICOLSON)
-                - None (defaults to Crank-Nicolson)
-
-        Raises:
-            ValidationError: If invalid method is specified
+            params: PDE configuration (accuracy, grid overlay, scheme settings).
         """
+        reject_removed_kwargs("PDEEngine", removed)
         self.params = params if params is not None else PDEParams()
         super().__init__(self.params)
-
-        if method is None:
-            self.method = self.DEFAULT_METHOD
-        elif isinstance(method, tuple):
-            engine_type, pde_method = method
-            if engine_type != EngineType.PDE:
-                raise ValidationError(f"Expected EngineType.PDE, got {engine_type}")
-            if not isinstance(pde_method, PDEMethod):
-                raise ValidationError(
-                    f"Expected PDEMethod, got {type(pde_method).__name__}"
-                )
-            self.method = pde_method
-        elif isinstance(method, PDEMethod):
-            self.method = method
-        elif isinstance(method, str):
-            try:
-                self.method = PDEMethod[method.upper()]
-            except KeyError:
-                raise ValidationError(
-                    f"Invalid PDE method: {method}. "
-                    f"Valid methods: {[m.value for m in PDEMethod]}"
-                )
-        else:
-            raise ValidationError(
-                f"Invalid method type: {type(method).__name__}. "
-                f"Expected PDEMethod, str, or tuple."
-            )
-
-        self._apply_method_to_params()
         self._solver_cache: Dict[Type[BaseEquityProduct], BasePDESolver] = {}
-
-    def _apply_method_to_params(self) -> None:
-        """
-        Apply the selected method to PDEParams scheme.
-
-        Maps PDEMethod enum to the scheme string expected by PDE solvers.
-        """
-        self.params.scheme = self.method.value
 
     def _get_solver(self, product: BaseEquityProduct) -> BasePDESolver:
         """
@@ -233,7 +180,7 @@ class PDEEngine(BaseEngine):
         fixed_solver = solver.create_bump_context(product, pricing_env)
         if fixed_solver is solver:
             return self
-        clone = type(self)(params=self.params, method=self.method)
+        clone = type(self)(params=self.params)
         clone._solver_cache[type(product)] = fixed_solver
         return clone
 
@@ -309,4 +256,4 @@ class PDEEngine(BaseEngine):
         return seam(product, pricing_env, extra_times=extra_times)
 
     def __repr__(self):
-        return f"PDEEngine(method={self.method.value})"
+        return f"PDEEngine(accuracy={self.params.accuracy!r})"

@@ -178,7 +178,6 @@ def test_engine_factory_selects_snowball_and_phoenix_engines():
 
     pde_config = AutocallableEngineConfig(
         pricing_engine_type=EngineType.PDE,
-        method=EngineType.PDE(PDEMethod.CRANK_NICOLSON),
         pde_params=PDEParams(grid=GridConfig(points=80)),
     )
     mc_config = AutocallableEngineConfig(
@@ -484,3 +483,10 @@ def test_dividend_roll_policy_is_rejected_with_a_term_dividend_source():
                 dividend_source="futures_curve",
             ),
         )
+
+
+def test_engine_factory_pde_rejects_method():
+    cfg = AutocallableEngineConfig(pricing_engine_type=EngineType.PDE,
+                                   method=EngineType.PDE(PDEMethod.CRANK_NICOLSON))
+    with pytest.raises(ValidationError, match="Crank-Nicolson"):
+        create_pricing_engine(_snowball_product(), cfg)

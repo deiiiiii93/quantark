@@ -26,7 +26,7 @@ from quantark.asset.equity.param import PDEParams
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType, BarrierType
-from quantark.util.enum.engine_enums import PDEMethod, EngineType, AmericanAnalyticalMethod
+from quantark.util.enum.engine_enums import EngineType, AmericanAnalyticalMethod
 from quantark.asset.equity.engine.pde import GridConfig
 
 
@@ -104,8 +104,8 @@ def demo_pde_engine_basics():
 
 
 def demo_method_selection():
-    """Demonstrate different PDE method selection patterns."""
-    print_section("PART 2: Method Selection Patterns")
+    """Demonstrate the scheme weight: Crank-Nicolson is the only built-in scheme."""
+    print_section("PART 2: Scheme Weight (theta)")
 
     pricing_env = PricingEnvironment(
         spot_quote=SpotQuote(spot=100.0),
@@ -118,31 +118,19 @@ def demo_method_selection():
     euro_option = EuropeanVanillaOption(
         strike=100.0, option_type=OptionType.CALL, maturity=1.0
     )
-    params = PDEParams(grid=GridConfig(points=300))
+    grid = GridConfig(points=300)
 
-    print("\n1. Two-Level Enum Pattern (Recommended)")
+    print("\n1. theta = 0.5: Crank-Nicolson (default, second order in time)")
     print("-" * 40)
-    engine1 = PDEEngine(params=params, method=EngineType.PDE(PDEMethod.CRANK_NICOLSON))
-    price1 = engine1.price(euro_option, pricing_env)
-    print(f"EngineType.PDE(PDEMethod.CRANK_NICOLSON): ${price1:.6f}")
+    engine_cn = PDEEngine(params=PDEParams(grid=grid, theta=0.5))
+    price_cn = engine_cn.price(euro_option, pricing_env)
+    print(f"PDEParams(theta=0.5): ${price_cn:.6f}")
 
-    print("\n2. Direct Enum Pattern")
+    print("\n2. theta = 1.0: backward Euler (first order, more diffusive)")
     print("-" * 40)
-    engine2 = PDEEngine(params=params, method=PDEMethod.IMPLICIT_EULER)
-    price2 = engine2.price(euro_option, pricing_env)
-    print(f"PDEMethod.IMPLICIT_EULER: ${price2:.6f}")
-
-    print("\n3. String Pattern (Backward Compatible)")
-    print("-" * 40)
-    engine3 = PDEEngine(params=params, method="explicit_euler")
-    price3 = engine3.price(euro_option, pricing_env)
-    print(f"String 'explicit_euler': ${price3:.6f}")
-
-    print("\n4. Default (No method specified = Crank-Nicolson)")
-    print("-" * 40)
-    engine4 = PDEEngine(params=params)
-    price4 = engine4.price(euro_option, pricing_env)
-    print(f"Default method: ${price4:.6f}")
+    engine_be = PDEEngine(params=PDEParams(grid=grid, theta=1.0))
+    price_be = engine_be.price(euro_option, pricing_env)
+    print(f"PDEParams(theta=1.0): ${price_be:.6f}")
 
 
 def demo_greeks_calculation():
@@ -306,7 +294,7 @@ PDEEngine Key Features:
 
 ✓ Unified Interface: Single engine for all PDE pricing (European, American, Barrier, etc.)
 ✓ Automatic Dispatch: Routes to correct solver based on product type
-✓ Method Selection: Supports two-level enum, direct enum, and string patterns
+✓ Scheme: Crank-Nicolson, with PDEParams(theta=...) as the one scheme weight
 ✓ Greeks Integration: Seamlessly works with GreeksCalculator
 ✓ Solver Caching: Reuses solver instances for performance
 ✓ Consistent API: Follows same pattern as BlackScholesEngine, AmericanOptionAnalyticalEngine

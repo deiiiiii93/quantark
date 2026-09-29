@@ -32,6 +32,7 @@ from quantark.asset.equity.engine.quad.european_quad_engine import EuropeanQuadE
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
+from quantark.asset.equity.param.pde_removed_names import removed_name_error
 from quantark.asset.equity.product.option import (
     AsianOption,
     BarrierOption,
@@ -108,10 +109,10 @@ def create_autocallable_engine(
         return _create_analytical_engine(product, config)
 
     if engine_type == EngineType.PDE:
-        return PDEEngine(
-            params=config.pde_params or PDEParams(),
-            method=method if method is not None else config.method,
-        )
+        selected = method if method is not None else config.method
+        if selected is not None:
+            raise removed_name_error("PDEEngine", "method")
+        return PDEEngine(params=config.pde_params or PDEParams())
 
     if engine_type == EngineType.MONTE_CARLO:
         mc_params = config.mc_params or MCParams()
