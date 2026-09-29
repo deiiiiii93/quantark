@@ -206,3 +206,18 @@ def test_no_removed_name_is_read_in_the_library():
                         hits += [f"{p}:{n.lineno} {fname}({k.arg}=)"
                                  for k in n.keywords if k.arg in names]
     assert hits == []
+
+
+def test_dcn_positional_legacy_node_count_names_its_replacement():
+    """0.5's first positional DCN argument was num_space_nodes."""
+    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+
+    with pytest.raises(ValidationError, match=r"GridConfig\(points"):
+        DCNPDEEngine(801)
+
+
+def test_use_rannacher_replacement_covers_the_2d_event_damping():
+    """0.5's use_rannacher=False also switched off 2D event damping, so the
+    migration text must say how to keep that."""
+    removed = _removed_maps()[0]
+    assert "event_damping_steps=0" in removed["use_rannacher"]

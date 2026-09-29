@@ -153,15 +153,25 @@ def resolve_config(
                 "the time basis in force is time_steps. Set steps_per_day too, or "
                 "drop day_count"
             )
+    if merged.get("time_steps") is not None:
+        # The day basis belongs to the density: on the budget basis it is not
+        # in force, so it resolves to None (like with_time_steps). Otherwise a
+        # resolved budget config fed back as an overlay would trip the check
+        # above on a day_count the user never set.
+        merged["day_count"] = None
     cfg = GridConfig(**merged)  # type: ignore[arg-type]  # merged is per-field typed
     _validate_resolved(cfg)
     return cfg
 
 
 def _validate_resolved(cfg: GridConfig) -> None:
-    for name in ("points", "max_points", "max_steps", "day_count"):
+    for name in ("points", "max_points", "max_steps"):
         if getattr(cfg, name) <= 0:
             raise ValidationError(f"{name} must be positive, got {getattr(cfg, name)}")
+    if cfg.steps_per_day is not None and (cfg.day_count is None or cfg.day_count <= 0):
+        raise ValidationError(
+            f"day_count must be positive on the steps_per_day basis, got {cfg.day_count}"
+        )
     if (cfg.steps_per_day is None) == (cfg.time_steps is None):
         raise ValidationError(
             "exactly one time basis must be in force after resolution "

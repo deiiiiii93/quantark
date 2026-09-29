@@ -34,7 +34,10 @@ REMOVED_PDE_NAMES: Mapping[str, str] = {
         "to honour."
     ),
     "s_min": "removed; it was read by nothing.",
-    "use_rannacher": _TERMINAL,
+    "use_rannacher": (
+        _TERMINAL + ". use_rannacher=False also switched off event damping on the "
+        "2D Heston/SLV solvers; add event_damping_steps=0 to keep that"
+    ),
     "rannacher_steps": _TERMINAL,
     "rannacher_at_events": _EVENT,
     "event_rannacher_steps": _EVENT,

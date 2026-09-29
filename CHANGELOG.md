@@ -42,7 +42,7 @@ removed name raises `ValidationError` with its replacement:
 | `PDEParams(time_steps=...)` | grid=GridConfig(time_steps=N): the same meaning, a total step budget over the horizon. steps_per_day= is the per-day alternative. |
 | `PDEParams(s_max=...)` | grid=GridConfig(bounds=(None, hi)) on the shared-grid solvers. On the two local-vol solvers an explicit bound is rejected until sub-project 3: the kernel sets its own domain and aligns the top, so there is no hard edge to honour. |
 | `PDEParams(s_min=...)` | removed; it was read by nothing. |
-| `PDEParams(use_rannacher=...)` | grid=GridConfig(terminal_damping_steps=N); 0 disables |
+| `PDEParams(use_rannacher=...)` | grid=GridConfig(terminal_damping_steps=N); 0 disables. use_rannacher=False also switched off event damping on the 2D Heston/SLV solvers; add event_damping_steps=0 to keep that |
 | `PDEParams(rannacher_steps=...)` | grid=GridConfig(terminal_damping_steps=N); 0 disables |
 | `PDEParams(rannacher_at_events=...)` | grid=GridConfig(event_damping_steps=N); 0 disables |
 | `PDEParams(event_rannacher_steps=...)` | grid=GridConfig(event_damping_steps=N); 0 disables |
@@ -132,6 +132,11 @@ class-level cache setters (`set_cache_enabled`, `set_cache_strategy`,
   "monotone" (monotonicity also needs the spatial operator's sign condition).
 - The first-passage continuous-KI correction and the asymptotic boundaries are
   unconditional (their opt-outs are removed).
+- **2D Heston/SLV damping:** event damping no longer follows the terminal switch
+  (0.5's `use_rannacher=False` turned both off; set `event_damping_steps=0` too to keep
+  that), and the 2D solvers read `terminal_damping_steps` as on/off (`> 0`).
+- A budget-basis `GridConfig` resolves `day_count` to `None` (the day basis is not in
+  force), so a resolved grid (`PDEParams.resolved_grid()`) can be fed back as an overlay.
 - The grid "day" remains 1/252 of a solver year (`GridConfig.day_count`); it becomes the
   environment's business day in sub-project 3.
 

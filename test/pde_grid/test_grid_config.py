@@ -226,9 +226,44 @@ def test_with_time_steps_on_resolved_config_resolves():
     cfg = resolve_config("standard", None).with_time_steps(1234)
     assert cfg.day_count is None and cfg.steps_per_day is None
     again = resolve_config("standard", cfg)
-    assert again.time_steps == 1234 and again.day_count == 252
+    # the day basis is not in force on the budget basis: it stays None
+    assert again.time_steps == 1234 and again.day_count is None
+    assert resolve_config("standard", again) == again
 
 
 def test_with_steps_per_day_clears_budget():
     cfg = resolve_config("standard", GridConfig(time_steps=300)).with_steps_per_day(6.0)
     assert cfg.time_steps is None and cfg.steps_per_day == 6.0
+
+
+# ---- final review fixes ----
+
+@pytest.mark.parametrize("table,overlay", [
+    ("shared", GridConfig(time_steps=500)),
+    ("shared", None),
+    ("shared", GridConfig(points=300, steps_per_day=2.0)),
+    ("lv", None),
+    ("lv", GridConfig(points=300, time_steps=150)),
+    ("dcn", None),
+])
+def test_resolving_twice_equals_resolving_once(table, overlay):
+    """A resolved config fed back as an overlay re-resolves to itself on every
+    preset table (Review Focus 3), including the budget basis."""
+    from quantark.asset.equity.engine.pde.grid.config import (
+        ACCURACY_PROFILES,
+        DCN_ACCURACY_PROFILES,
+        LV_UNIFORM_ACCURACY_PROFILES,
+    )
+
+    profiles = {"shared": ACCURACY_PROFILES, "lv": LV_UNIFORM_ACCURACY_PROFILES,
+                "dcn": DCN_ACCURACY_PROFILES}[table]
+    once = resolve_config("standard", overlay, profiles=profiles)
+    assert resolve_config("standard", once, profiles=profiles) == once
+
+
+def test_pinned_resolved_budget_grid_round_trips_through_pdeparams():
+    from quantark.asset.equity.param import PDEParams
+
+    pinned = PDEParams(grid=GridConfig(time_steps=500)).resolved_grid()
+    assert pinned.day_count is None  # the day basis is not in force
+    assert PDEParams(grid=pinned).resolved_grid() == pinned

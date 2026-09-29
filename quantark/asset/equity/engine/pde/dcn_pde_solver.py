@@ -150,6 +150,13 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
 
     def __init__(self, params: Optional[PDEParams] = None, **removed):
         reject_removed_kwargs(type(self).__name__, removed, REMOVED_DCN_NAMES)
+        if params is not None and not isinstance(params, PDEParams):
+            # 0.5's first positional argument was num_space_nodes.
+            raise ValidationError(
+                f"{type(self).__name__}(params=...) takes a PDEParams, got "
+                f"{type(params).__name__} {params!r}; the positional node count "
+                f"was removed in 0.6.0: {REMOVED_DCN_NAMES['num_space_nodes']}"
+            )
         super().__init__(params if params is not None else PDEParams())
         self._grid_binder = None
         points = self._grid_layer_binder().config.points  # resolve + check eagerly
