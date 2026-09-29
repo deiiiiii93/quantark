@@ -12,7 +12,7 @@ lives in the neutral product-side module ``dcn_grid``).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 import numpy as np
@@ -22,6 +22,12 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.pde.grid import GridConfig, GridRequest
 from quantark.asset.equity.engine.pde.grid.binder import GridLayerMixin
+from quantark.asset.equity.engine.pde.grid.config import DCN_ACCURACY_PROFILES
+from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.param.pde_removed_names import (
+    REMOVED_DCN_NAMES,
+    reject_removed_kwargs,
+)
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.priceenv.term_sampling import TermCoefficients, make_df_fn
@@ -129,49 +135,36 @@ def apply_dcn_events(
 class DCNPDEEngine(GridLayerMixin, BaseEngine):
     """Two-surface Crank-Nicolson (Rannacher-restarted) DCN engine.
 
-    Grid geometry (spatial nodes + daily time nodes) comes from the
-    declarative grid layer; the certified stepping loop and the nodal event
-    semantics validated against the DCN MC engine are unchanged. The
-    engine's daily cadence is expressed as an explicit
-    ``GridConfig(steps_per_day=1.0)`` default: every interior observation /
-    monitoring date is an event node and each daily interval carries exactly
-    one step, reproducing the legacy time grid bit-for-bit.
+    Configured by ``PDEParams`` through the grid layer (spec §6.2) over the
+    DCN route table: one fill step per observation interval (the schedule is
+    the time resolution; an explicit time basis is rejected), ``accuracy``
+    scales spatial resolution only (401 / 801 / 1601), and the damping counts
+    apply in DCN's half-step form. Standard reproduces the pre-0.6 plan. The
+    certified stepping loop and the nodal event semantics validated against
+    the DCN MC engine are unchanged.
     """
 
     engine_type = EngineType.PDE
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    _route = "DCN"
 
-    def __init__(
-        self,
-        num_space_nodes: int = 801,
-        s_min_mult: float = 0.05,
-        s_max_mult: float = 4.0,
-        rannacher_steps: int = 2,
-        concentration: float = 0.15,
-    ):
-        super().__init__()
-        if num_space_nodes < 201:
-            raise ValidationError("num_space_nodes must be >= 201")
-        self.n = int(num_space_nodes)
-        self.s_min_mult = float(s_min_mult)
-        self.s_max_mult = float(s_max_mult)
-        self.rannacher_steps = int(rannacher_steps)
-        self.concentration = float(concentration)
+    def __init__(self, params: Optional[PDEParams] = None, **removed):
+        reject_removed_kwargs(type(self).__name__, removed, REMOVED_DCN_NAMES)
+        super().__init__(params if params is not None else PDEParams())
         self._grid_binder = None
+        points = self._grid_layer_binder().config.points  # resolve + check eagerly
+        if points < 201:
+            raise ValidationError(f"DCN needs grid points >= 201, got {points}")
 
-    def _default_grid_config(self) -> GridConfig:
-        # One step per monitoring interval: DCN's daily observation schedule
-        # IS the time resolution (its certified scheme has no sub-stepping).
-        # steps_per_day=0.1 makes every realistic calendar gap (incl. long
-        # holiday weekends) round to a single fill step under the layer's
-        # max(1, round(interval_days x spd)) rule. Spatial density follows
-        # the engine's legacy knob; max_points tracks it so legacy explicit
-        # densities (e.g. 2401 in the MC gate tests) stay constructible.
-        return GridConfig(
-            points=self.n,
-            steps_per_day=0.1,
-            max_points=max(2000, self.n),
-        )
+    def _route_profiles(self):
+        return DCN_ACCURACY_PROFILES
+
+    def _route_overlay(self, grid: Optional[GridConfig]) -> Optional[GridConfig]:
+        # max_points tracks an explicit points (max(2000, points), spec §4.2),
+        # so explicit densities (e.g. 2401 in the MC gate tests) resolve.
+        if grid is not None and grid.points is not None and grid.max_points is None:
+            return replace(grid, max_points=max(2000, int(grid.points)))
+        return grid
 
     def grid_request(self, product, market, tau) -> GridRequest:
         # The DCN PDE horizon is the final observation date from the grid
@@ -267,7 +260,10 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
             v0, v1, cpn_mask, ko_mask, ki_mask, cpn_amt, ko_amt
         )
 
-        rann = self.rannacher_steps  # damp the terminal kink too
+        config = self._grid_layer_binder().config
+        theta, event_theta = float(self.params.theta), float(self.params.event_theta)
+        rann = int(config.terminal_damping_steps)  # damp the terminal kink too
+        rann_theta = 1.0  # terminal damping is always backward Euler
         for i in range(times.size - 2, -1, -1):  # step [t_i, t_{i+1}] backward
             dt = float(times[i + 1] - times[i])
             r_i = float(tc.fwd_rates[i])
@@ -275,14 +271,14 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
             sig_i = self._step_vol(s_grid, float(times[i]), tc, i)
             lo, mid, hi = _operator_coeffs(x, r_i, q_i, sig_i)
             if rann > 0:
-                v0 = _theta_step(v0, lo, mid, hi, dt / 2.0, 1.0)
-                v0 = _theta_step(v0, lo, mid, hi, dt / 2.0, 1.0)
-                v1 = _theta_step(v1, lo, mid, hi, dt / 2.0, 1.0)
-                v1 = _theta_step(v1, lo, mid, hi, dt / 2.0, 1.0)
+                v0 = _theta_step(v0, lo, mid, hi, dt / 2.0, rann_theta)
+                v0 = _theta_step(v0, lo, mid, hi, dt / 2.0, rann_theta)
+                v1 = _theta_step(v1, lo, mid, hi, dt / 2.0, rann_theta)
+                v1 = _theta_step(v1, lo, mid, hi, dt / 2.0, rann_theta)
                 rann -= 1
             else:
-                v0 = _theta_step(v0, lo, mid, hi, dt, 0.5)
-                v1 = _theta_step(v1, lo, mid, hi, dt, 0.5)
+                v0 = _theta_step(v0, lo, mid, hi, dt, theta)
+                v1 = _theta_step(v1, lo, mid, hi, dt, theta)
             if i > 0:
                 t_i = float(times[i])
                 j = obs_at_col.get(i)
@@ -291,7 +287,8 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
                     v0, v1 = apply_dcn_events(
                         v0, v1, cpn_mask, ko_mask, ki_mask, cpn_amt, ko_amt
                     )
-                    rann = self.rannacher_steps
+                    rann = int(config.event_damping_steps)
+                    rann_theta = event_theta
                 else:
                     # every daily node is a KI monitoring date (strictly
                     # after t=0): discrete KI projection, consistent with MC
@@ -307,6 +304,6 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
         return DCNPDEResult(
             pv=pv,
             direction_sign=product.direction_sign,
-            num_space_nodes=self.n,
+            num_space_nodes=int(config.points),
             num_time_steps=times.size - 1,
         )

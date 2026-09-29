@@ -13,6 +13,13 @@ from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     apply_dcn_events,
 )
 from quantark.asset.equity.product.option.dcn_option import DCNDirection
+from quantark.asset.equity.engine.pde.grid.config import (
+    DCN_ACCURACY_PROFILES,
+    GridConfig,
+    resolve_config,
+)
+from quantark.asset.equity.param import PDEParams
+from quantark.util.exceptions import ValidationError
 
 from dcn_fixtures import (
     DCN_A,
@@ -90,7 +97,7 @@ def test_mc_pde_cross_validation_gate(contract, ident, direction):
     mc = DCNMCEngine(
         num_paths=paths, num_batches=batches, seed=42
     ).price_detailed(p, env)
-    pde = DCNPDEEngine(num_space_nodes=2401).price(p, env)
+    pde = DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401))).price(p, env)
     notional = contract["notional"]
     assert mc.std_error < 2e-4 * notional, "stderr gate: raise paths, not tolerance"
     gate = max(3.0 * mc.std_error, 5e-4 * notional)
@@ -127,3 +134,55 @@ def test_pde_deterministic():
     env = flat_env(**FLAT)
     p = make_dcn(DCN_A)
     assert DCNPDEEngine().price(p, env) == DCNPDEEngine().price(p, env)
+
+
+def _cfg(engine):
+    return engine._grid_layer_binder().config
+
+
+def test_dcn_defaults_equal_todays_plan():
+    assert _cfg(DCNPDEEngine()) == resolve_config(
+        "standard", None, profiles=DCN_ACCURACY_PROFILES
+    )
+    assert _cfg(DCNPDEEngine()).points == 801
+
+
+def test_dcn_accuracy_scales_space_only():
+    assert _cfg(DCNPDEEngine(params=PDEParams(accuracy="high"))).points == 1601
+    assert _cfg(DCNPDEEngine(params=PDEParams(accuracy="high"))).steps_per_day == 0.1
+
+
+def test_dcn_explicit_points_above_2000_resolve():
+    # Review Focus 5: the MC gate uses 2401 with no max_points
+    assert _cfg(
+        DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401)))
+    ).max_points == 2401
+    with pytest.raises(ValidationError, match="max_points"):
+        DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401, max_points=2100)))
+
+
+@pytest.mark.parametrize("params", [PDEParams(grid=GridConfig(steps_per_day=1.0)),
+                                    PDEParams(grid=GridConfig(time_steps=100)),
+                                    PDEParams(event_projection="cell_average")])
+def test_dcn_rejects_time_basis_and_cell_average(params):
+    with pytest.raises(ValidationError, match="DCN"):
+        DCNPDEEngine(params=params)
+
+
+def test_dcn_accepts_nodal_and_honours_counts_and_theta():
+    env = flat_env(**FLAT, spot=DCN_A["initial_price"])
+    p = make_dcn(DCN_A)
+    base = DCNPDEEngine().price(p, env)
+    assert DCNPDEEngine(params=PDEParams(event_projection="nodal")).price(p, env) == base
+    one = DCNPDEEngine(params=PDEParams(grid=GridConfig(
+        terminal_damping_steps=1, event_damping_steps=1
+    ))).price(p, env)
+    assert one != base                                     # counts applied, not "> 0"
+    assert DCNPDEEngine(params=PDEParams(theta=1.0)).price(p, env) != base
+
+
+def test_dcn_points_floor_and_removed_names():
+    with pytest.raises(ValidationError, match="201"):
+        DCNPDEEngine(params=PDEParams(grid=GridConfig(points=150)))
+    with pytest.raises(ValidationError, match="GridConfig\\(points"):
+        DCNPDEEngine(num_space_nodes=801)

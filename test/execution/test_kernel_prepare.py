@@ -192,13 +192,15 @@ class TestDCNLocalVolAdapter:
 
     def test_pde_adapter_parity(self, dcn_case):
         from quantark.asset.equity.engine.pde import LocalVolDCNPDEEngine
+        from quantark.asset.equity.engine.pde.grid import GridConfig
+        from quantark.asset.equity.param import PDEParams
 
         product, grid_env = dcn_case
-        engine = LocalVolDCNPDEEngine(num_space_nodes=301)
+        engine = LocalVolDCNPDEEngine(params=PDEParams(grid=GridConfig(points=301)))
         direct = engine.price(product, grid_env())
         with PricingSession() as session:
             assert session.price(
-                LocalVolDCNPDEEngine(num_space_nodes=301), product, grid_env()
+                LocalVolDCNPDEEngine(params=PDEParams(grid=GridConfig(points=301))), product, grid_env()
             ) == direct
 
     def test_mutation_during_prepare_raises_determinism_violation(

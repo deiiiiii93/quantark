@@ -120,31 +120,40 @@ class GridLayerMixin:
     ``DCNPDEEngine`` and the Phase-3 LV/Heston/SLV engines derive from
     ``BaseEngine`` and inherit none of the BasePDESolver seam; this mixin
     supplies the same contract: binder ownership, market snapshot, external
-    -layout validation, and a frozen-layout bump context. Adopters implement
-    ``grid_request(product, market, tau)`` / ``representative_vol`` and may
-    override ``_default_grid_config`` for engine-specific geometry defaults.
+    -layout validation, and a frozen-layout bump context. Adopters carry a
+    ``PDEParams`` as ``self.params``, implement
+    ``grid_request(product, market, tau)`` / ``representative_vol``, and may
+    name a route (``_route``) with its own preset table and derived overlay.
     """
 
+    #: Applicability contract name (route_applicability.ROUTE_RULES); None =
+    #: shared-grid route, every field honoured.
+    _route: Optional[str] = None
     _frozen_base_layout = None  # set on create_bump_context clones
 
-    def _default_grid_accuracy(self) -> str:
-        return "standard"
+    def _route_profiles(self):
+        """The route's accuracy preset table (default: the shared one)."""
+        return ACCURACY_PROFILES
 
-    def _default_grid_config(self):
-        return None
+    def _route_overlay(self, grid: Optional[GridConfig]) -> Optional[GridConfig]:
+        """Route-derived overlay fields (default: the user's overlay as is)."""
+        return grid
 
-    def _grid_layer_binder(self, params=None) -> "GridBinder":
+    def _grid_layer_binder(self) -> "GridBinder":
         binder = getattr(self, "_grid_binder", None)
         if binder is None:
-            accuracy = getattr(params, "accuracy", None) or self._default_grid_accuracy()
-            override = getattr(params, "grid", None)
-            if override is None:
-                override = self._default_grid_config()
-            cache_enabled = bool(getattr(params, "cache_enabled", True))
+            params = self.params
+            if self._route is not None:
+                from quantark.asset.equity.engine.pde.route_applicability import (
+                    check_route_applicability,
+                )
+
+                check_route_applicability(params, self._route)
             binder = GridBinder(
-                accuracy,
-                override,
-                cache_enabled=cache_enabled,
+                params.accuracy,
+                self._route_overlay(params.grid),
+                profiles=self._route_profiles(),
+                cache_enabled=bool(params.cache_enabled),
             )
             self._grid_binder = binder
         return binder
@@ -195,15 +204,13 @@ class GridLayerMixin:
         market = clone.market_snapshot(product, pricing_env)
         self._prepare_grid_request(clone, product, pricing_env)
         request = clone.grid_request(product, market, tau)
-        clone._frozen_base_layout = clone._grid_layer_binder(
-            getattr(clone, "params", None)
-        ).bind(request, market)
+        clone._frozen_base_layout = clone._grid_layer_binder().bind(request, market)
         return clone
 
     def _bound_layout_for_solve(self, request, market):
         """Frozen (bump clone) > time-rebind (calendar roll) > plain bind."""
         return resolve_bound_layout(
-            self._grid_layer_binder(getattr(self, "params", None)),
+            self._grid_layer_binder(),
             getattr(self, "_frozen_base_layout", None),
             request,
             market,

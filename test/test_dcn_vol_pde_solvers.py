@@ -7,10 +7,12 @@ from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import (
     LocalVolDCNMCEngine,
 )
 from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import (
     HestonDCNPDESolver,
     LocalVolDCNPDEEngine,
 )
+from quantark.asset.equity.param import PDEParams
 from quantark.param import GridVolSurface
 from quantark.util.enum.engine_enums import HestonMCScheme
 from quantark.util.exceptions import ValidationError
@@ -41,8 +43,8 @@ def test_lv_pde_flat_surface_matches_flat_pde():
     # reproduce the flat two-surface PDE almost exactly (same solver path).
     p = make_dcn(DCN_A)
     env = _grid_env(skew=0.0)
-    flat = DCNPDEEngine(num_space_nodes=601).price_detailed(p, env)
-    lv = LocalVolDCNPDEEngine(num_space_nodes=601).price_detailed(p, env)
+    flat = DCNPDEEngine(params=PDEParams(grid=GridConfig(points=601))).price_detailed(p, env)
+    lv = LocalVolDCNPDEEngine(params=PDEParams(grid=GridConfig(points=601))).price_detailed(p, env)
     assert abs(lv.pv - flat.pv) < 5e-4 * p.notional
 
 
@@ -52,7 +54,7 @@ def test_lv_pde_matches_lv_mc_on_skewed_surface():
     mc = LocalVolDCNMCEngine(
         num_paths=PATHS, seed=42, use_sobol=True, num_batches=8
     ).price_detailed(p, env)
-    pde = LocalVolDCNPDEEngine(num_space_nodes=1201).price_detailed(p, env)
+    pde = LocalVolDCNPDEEngine(params=PDEParams(grid=GridConfig(points=1201))).price_detailed(p, env)
     tol = max(4.0 * mc.std_error, 5e-4 * p.notional)
     assert abs(pde.pv - mc.pv) < tol
 
@@ -85,7 +87,7 @@ def test_heston_pde_degenerate_params_match_flat_pde():
         v0=FLAT["sigma"] ** 2, kappa=1.0, theta=FLAT["sigma"] ** 2,
         sigma=1e-6, rho=0.0,
     )
-    flat = DCNPDEEngine(num_space_nodes=2401).price_detailed(p, env)
+    flat = DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401))).price_detailed(p, env)
     heston = HestonDCNPDESolver(
         params, n_x=501, n_v=201
     ).price_detailed(p, env)

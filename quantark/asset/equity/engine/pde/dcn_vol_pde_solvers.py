@@ -32,6 +32,7 @@ from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     DCNPDEResult,
     apply_dcn_events,
 )
+from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.param import GridVolSurface
@@ -55,9 +56,12 @@ class LocalVolDCNPDEEngine(DCNPDEEngine):
     """
 
     def __init__(
-        self, local_vol_surface: Optional[LocalVolSurface] = None, **kwargs
+        self,
+        local_vol_surface: Optional[LocalVolSurface] = None,
+        params: Optional[PDEParams] = None,
+        **removed,
     ):
-        super().__init__(**kwargs)
+        super().__init__(params=params, **removed)
         if local_vol_surface is not None and not isinstance(
             local_vol_surface, LocalVolSurface
         ):

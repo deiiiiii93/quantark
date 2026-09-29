@@ -660,13 +660,7 @@ class DCNLocalVolMCAdapter(_DCNBatchMixin, _DCNLocalVolAdapterBase):
 
 class DCNLocalVolPDEAdapter(_DCNLocalVolAdapterBase):
     def _clone_with_surface(self, engine, surface):
-        return type(engine)(
-            local_vol_surface=surface,
-            num_space_nodes=engine.n,
-            s_min_mult=engine.s_min_mult, s_max_mult=engine.s_max_mult,
-            rannacher_steps=engine.rannacher_steps,
-            concentration=engine.concentration,
-        )
+        return type(engine)(local_vol_surface=surface, params=engine.params)
 
 
 # ---------------------------------------------------------------------------

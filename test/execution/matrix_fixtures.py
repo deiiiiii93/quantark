@@ -780,16 +780,20 @@ def _build_equity_pde():
 
     def dcn_pde():
         from quantark.asset.equity.engine.pde import DCNPDEEngine
+        from quantark.asset.equity.engine.pde.grid import GridConfig
+        from quantark.asset.equity.param import PDEParams
 
-        return (DCNPDEEngine(num_space_nodes=301), _dcn(),
+        return (DCNPDEEngine(params=PDEParams(grid=GridConfig(points=301))), _dcn(),
                 _dcn_flat_env(), "product_env")
 
     out["DCNPDEEngine"] = dcn_pde
 
     def dcn_lv_pde():
         from quantark.asset.equity.engine.pde import LocalVolDCNPDEEngine
+        from quantark.asset.equity.engine.pde.grid import GridConfig
+        from quantark.asset.equity.param import PDEParams
 
-        return (LocalVolDCNPDEEngine(num_space_nodes=301), _dcn(),
+        return (LocalVolDCNPDEEngine(params=PDEParams(grid=GridConfig(points=301))), _dcn(),
                 _dcn_grid_env(), "product_env")
 
     out["LocalVolDCNPDEEngine"] = dcn_lv_pde
