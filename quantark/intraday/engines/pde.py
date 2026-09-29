@@ -264,5 +264,6 @@ class PDERoute:
     @staticmethod
     def _method(engine) -> str:
         params = engine.params
-        rannacher = bool(getattr(params, "use_rannacher", False))
+        resolved = getattr(params, "resolved_grid", None)
+        rannacher = bool(resolved is not None and resolved().terminal_damping_steps > 0)
         return f"pde_{'rannacher' if rannacher else 'cn'}_theta{getattr(params, 'theta', 0.5)}"

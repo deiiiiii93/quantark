@@ -522,7 +522,7 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
         self._prepare_2d_continuous_ki_correction(core, product)
 
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
-        damped_keys = event_damped_step_keys(self.params, event_maps, core.N_T)
+        damped_keys = event_damped_step_keys(self.grid_binder.config, event_maps, core.N_T)
         v1_snapshots: dict[float, np.ndarray] = {}
 
         terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
@@ -530,7 +530,7 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
             is_call=True,
             scheme=self.scheme,
             theta=float(self.params.theta),
-            rannacher=bool(self.params.use_rannacher),
+            rannacher=self.grid_binder.config.terminal_damping_steps > 0,
             terminal_override=terminal_v1,
             boundary_hook=self._boundary_hook(
                 core, product, pricing_env, knocked_in=True
@@ -552,7 +552,7 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
                 is_call=True,
                 scheme=self.scheme,
                 theta=float(self.params.theta),
-                rannacher=bool(self.params.use_rannacher),
+                rannacher=self.grid_binder.config.terminal_damping_steps > 0,
                 terminal_override=terminal_v0,
                 boundary_hook=self._boundary_hook(
                     core, product, pricing_env, knocked_in=False

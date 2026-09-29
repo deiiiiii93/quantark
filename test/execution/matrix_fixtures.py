@@ -78,19 +78,22 @@ def _mcp(**kw):
     return MCParams(**kw)
 
 
-def _pdep(**kw):
+def _pdep(event_damping_steps=1, **kw):
+    import dataclasses
+
+    from quantark.asset.equity.engine.pde.grid import GridConfig
     from quantark.asset.equity.param import PDEParams
 
     # Pinned to the legacy event discretization the phase0/phase4 frozen
     # goldens were captured with (pre event-projection default flip,
     # 2026-07-23): these fixtures feed exact-equality oracles whose purpose is
     # characterizing the execution-seam refactor, not the event semantics.
-    # rannacher_at_events mirrors the pre-decouple gate (event damping only
-    # when auto_grid was on).
+    # One event damping step is the pre-decouple 1D legacy.
     kw.setdefault("event_projection", "nodal")
-    kw.setdefault("event_rannacher_steps", 1)
-    kw.setdefault("rannacher_at_events", bool(kw.get("auto_grid", True)))
-    return PDEParams(**kw)
+    grid = kw.pop("grid", None) or GridConfig()
+    if grid.event_damping_steps is None:
+        grid = dataclasses.replace(grid, event_damping_steps=event_damping_steps)
+    return PDEParams(grid=grid, **kw)
 
 
 def _pdep_refined(**kw):
@@ -725,7 +728,7 @@ def _build_equity_pde():
             # Autocallable 2D solvers consume event_projection: pin the legacy
             # event discretization these frozen goldens were captured with
             # (see _pdep note). 2D legacy additionally means NO per-event ADI
-            # damping (event_rannacher_steps was inert in the ADI loop until
+            # damping (event damping was inert in the ADI loop until
             # 2026-07-23), so pin ers=0 here — _pdep's ers=1 is the 1D legacy.
             # Vanilla/barrier Heston engines have no discrete events (and
             # take engine_params, not params).
@@ -738,7 +741,7 @@ def _build_equity_pde():
             # police, so pin the frozen value rather than re-baseline it.
             acgrid = dict(
                 grid,
-                params=_pdep(event_rannacher_steps=0),
+                params=_pdep(event_damping_steps=0),
                 v0_boundary="neumann",
             )
             # Snowball Heston/SLV moved their concentrated variance-grid

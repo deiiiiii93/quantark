@@ -20,7 +20,6 @@ from quantark.asset.equity.engine.pde.grid.config import (
     GridConfig,
     reject_legacy_resolution_knobs,
     resolve_config,
-    scheme_config_overlay,
 )
 from quantark.asset.equity.engine.pde.grid.request import GridRequest, MarketSnapshot
 from quantark.asset.equity.engine.pde.grid.space import SpatialLayout, build_space
@@ -140,12 +139,9 @@ class GridLayerMixin:
         if binder is None:
             reject_legacy_resolution_knobs(params)
             accuracy = getattr(params, "accuracy", None) or self._default_grid_accuracy()
-            override = (
-                scheme_config_overlay(params)
-                if getattr(params, "grid", None) is not None
-                or hasattr(params, "use_rannacher")
-                else self._default_grid_config()
-            )
+            override = getattr(params, "grid", None)
+            if override is None:
+                override = self._default_grid_config()
             cache_enabled = bool(getattr(params, "cache_enabled", True))
             binder = GridBinder(
                 accuracy,

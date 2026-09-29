@@ -34,7 +34,6 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     PDESessionOutputs,
     PDESolutionResult,
 )
-from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
 from quantark.asset.equity.engine.pde.grid.events import project_event_values
 from quantark.asset.equity.engine.pde.grid import (
     EventSchedule,

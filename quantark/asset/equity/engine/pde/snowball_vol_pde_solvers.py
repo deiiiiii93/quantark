@@ -31,24 +31,19 @@ from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
-def event_damped_step_keys(params, event_maps, n_t: int):
+def event_damped_step_keys(config, event_maps, n_t: int):
     """Integer step keys that run as damped Douglas ADI restarts.
 
-    After each discrete event key the next ``params.event_rannacher_steps``
-    steps run at ``params.event_theta`` — the 2D counterpart of the 1D
-    ``BackwardOperator.theta_by_step`` event schedule, mirroring its gating
-    exactly: ``use_rannacher=False`` is the master off-switch, and events at
-    the maturity node (tau key 0) are excluded because the terminal Rannacher
-    start-up owns the payoff discontinuity (1D: ``0 < idx < num_t - 1``; the
-    valuation-date key ``n_t`` is excluded by the ``<= n_t`` clip below).
-    Continuous KI has no discrete keys, so it never triggers damping
-    (continuous-barrier treatment). Returns ``None`` when damping is disabled.
+    After each discrete event key the next ``config.event_damping_steps``
+    steps run at ``params.event_theta`` -- the 2D counterpart of the 1D
+    layout-derived schedule. ``config`` is the solver's resolved GridConfig;
+    the event count is independent of the terminal count, as in 1D. Events at
+    the maturity node (tau key 0) are excluded because the terminal start-up
+    owns the payoff discontinuity; the valuation-date key ``n_t`` is excluded
+    by the ``<= n_t`` clip below. Continuous KI has no discrete keys, so it
+    never triggers damping. Returns ``None`` when event damping is off (0).
     """
-    if not bool(getattr(params, "use_rannacher", True)):
-        return None
-    if not bool(getattr(params, "rannacher_at_events", True)):
-        return None
-    ers = int(getattr(params, "event_rannacher_steps", 0) or 0)
+    ers = int(config.event_damping_steps)
     if ers <= 0:
         return None
     event_keys: set[int] = set()
@@ -995,14 +990,14 @@ class _Heston2DSnowballPDEBase(Heston2DBarrierCrossingMixin, SnowballPDESolver):
 
         v1_snapshots: dict[float, np.ndarray] = {}
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
-        damped_keys = event_damped_step_keys(self.params, event_maps, core.N_T)
+        damped_keys = event_damped_step_keys(self.grid_binder.config, event_maps, core.N_T)
 
         terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
         U1 = core.solve(
             is_call=True,
             scheme=self.scheme,
             theta=float(self.params.theta),
-            rannacher=bool(self.params.use_rannacher),
+            rannacher=self.grid_binder.config.terminal_damping_steps > 0,
             terminal_override=terminal_v1,
             boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=True),
             step_hook=self._v1_hook(core, product, pricing_env, T, event_maps, v1_snapshots),
@@ -1018,7 +1013,7 @@ class _Heston2DSnowballPDEBase(Heston2DBarrierCrossingMixin, SnowballPDESolver):
                 is_call=True,
                 scheme=self.scheme,
                 theta=float(self.params.theta),
-                rannacher=bool(self.params.use_rannacher),
+                rannacher=self.grid_binder.config.terminal_damping_steps > 0,
                 terminal_override=terminal_v0,
                 boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=False),
                 step_hook=self._v0_hook(

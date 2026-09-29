@@ -131,10 +131,8 @@ def create_solver(grid_size: int = 200, time_steps: int = 200) -> SnowballPDESol
 
     del time_steps  # time density comes from the event-aligned builder
     params = PDEParams(
-        grid=GridConfig(points=grid_size),
+        grid=GridConfig(points=grid_size, terminal_damping_steps=2),
         theta=0.5,  # Crank-Nicolson
-        use_rannacher=True,
-        rannacher_steps=2,
     )
     return SnowballPDESolver(params=params)
 

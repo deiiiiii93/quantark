@@ -8,7 +8,7 @@ quantark/asset/equity/engine/docs/pde_auto_grid_investigation.md).
 The fix projects the event jump onto the grid by exact dual-cell averaging of
 the piecewise-linear jump function. ``event_projection="cell_average"`` is the
 default since the 2026-07-23 repricing review; ``"nodal"`` (with
-``event_rannacher_steps=1``) is the explicit legacy opt-out used below to
+``GridConfig(event_damping_steps=1)``) is the explicit legacy opt-out used below to
 characterize the bias the projection removes.
 
 Reference values in the integration gates come from the 2026-07-23
@@ -43,6 +43,7 @@ from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
 )
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.engine.pde.grid import GridConfig
 from quantark.asset.equity.param import PDEParams, QuadParams
 from quantark.asset.equity.product.option import (
     SnowballOption,
@@ -512,10 +513,10 @@ class TestEventProjectionParam:
         as the explicit legacy opt-out (repricing reviewed 2026-07-23)."""
         assert PDEParams().event_projection is EventProjectionMode.CELL_AVERAGE
 
-    def test_default_event_rannacher_steps_is_two(self):
+    def test_default_event_damping_steps_is_two(self):
         """Two implicit solves per event is the field-tested minimum
         (Pooley/d'Halluin); one full BE step has no literature support."""
-        assert PDEParams().event_rannacher_steps == 2
+        assert PDEParams().resolved_grid().event_damping_steps == 2
 
     def test_string_coercion(self):
         p = PDEParams(event_projection="nodal")
@@ -605,7 +606,7 @@ class TestPhoenixCellAverage:
         )
         px_nodal = _pde_price(
             phoenix_product, phoenix_env, event_projection=EventProjectionMode.NODAL,
-            event_rannacher_steps=1,
+            grid=GridConfig(event_damping_steps=1),
         )
         assert px_default == px_proj
         assert px_default != px_nodal
@@ -614,7 +615,7 @@ class TestPhoenixCellAverage:
         px_proj = _pde_price(phoenix_product, phoenix_env, event_projection="cell_average")
         px_nodal = _pde_price(
             phoenix_product, phoenix_env,
-            event_projection="nodal", event_rannacher_steps=1,
+            event_projection="nodal", grid=GridConfig(event_damping_steps=1),
         )
         err_proj = abs(px_proj - quad_ref) / quad_ref
         err_nodal = abs(px_nodal - quad_ref) / quad_ref
@@ -634,13 +635,13 @@ class TestPhoenixCellAverage:
         )
         nodal_auto = _pde_price(
             phoenix_product, phoenix_env,
-            event_projection="nodal", event_rannacher_steps=1,
+            event_projection="nodal", grid=GridConfig(event_damping_steps=1),
         )
         nodal_unif = _pde_price(
             phoenix_product,
             phoenix_env,
             event_projection="nodal",
-            event_rannacher_steps=1,
+            grid=GridConfig(event_damping_steps=1),
         )
         assert abs(proj_auto - proj_unif) / quad_ref < 2e-4
         # (nodal auto-vs-uniform phase sensitivity dropped: auto_grid is
@@ -759,7 +760,7 @@ class TestSnowballCellAverage:
         )
         nodal = float(
             KOResetSnowballPDESolver(
-                PDEParams(event_projection="nodal", event_rannacher_steps=1)
+                PDEParams(event_projection="nodal", grid=GridConfig(event_damping_steps=1))
             ).price(product, env)
         )
         proj = float(
@@ -1032,48 +1033,30 @@ class TestValuationDateEvents:
 
 
 class TestEventDampingPolicy:
+    @staticmethod
+    def _schedule(event_damping_steps, terminal_damping_steps=1):
+        """The layout-derived per-step theta: 10 steps, one event on node 5."""
+        from quantark.asset.equity.engine.pde.grid import GridRequest, resolve_config
+        from quantark.asset.equity.engine.pde.grid.time import build_time
+
+        cfg = resolve_config("standard", GridConfig(
+            time_steps=10, event_damping_steps=event_damping_steps,
+            terminal_damping_steps=terminal_damping_steps))
+        tl = build_time(GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
+                                    hard_lower=None, hard_upper=None, event_times=(0.5,)), cfg)
+        solver = SnowballPDESolver(params=PDEParams(theta=0.5, event_theta=1.0))
+        return solver._theta_schedule_from_layout(types.SimpleNamespace(time=tl))
+
     def test_event_damping_decoupled_from_auto_grid(self):
-        """Damping depends on event regularity, not on the mesh-selection
-        mode: an event-aligned grid built with  must damp
-        after each discrete event exactly like the auto grid does."""
-        from quantark.asset.equity.engine.pde.backward_operator import (
-            BackwardOperator,
-        )
-
-        t_vec = np.linspace(0.0, 1.0, 11)  # event at t=0.5 sits on node 5
-        dt_vec = np.diff(t_vec)
-        params = PDEParams(
-            use_rannacher=True,
-            rannacher_at_events=True,
-            rannacher_steps=1,
-            event_rannacher_steps=2,
-            event_theta=1.0,
-            theta=0.5,
-        )
-        th = BackwardOperator.theta_by_step(t_vec, dt_vec, params, [0.5])
+        """Two backward-Euler steps follow the event node (node 5 of 10)."""
+        th = self._schedule(event_damping_steps=2)
         # backward steps j=4 (0.5 -> 0.4) and j=3 (0.4 -> 0.3) follow the event
-        assert th[4] == 1.0
-        assert th[3] == 1.0
-        assert th[2] == 0.5
+        assert th[4] == 1.0 and th[3] == 1.0 and th[2] == 0.5
+        assert th[9] == 1.0  # terminal damping
 
-    def test_event_damping_respects_rannacher_at_events_off(self):
-        from quantark.asset.equity.engine.pde.backward_operator import (
-            BackwardOperator,
-        )
-
-        t_vec = np.linspace(0.0, 1.0, 11)
-        dt_vec = np.diff(t_vec)
-        params = PDEParams(
-            use_rannacher=True,
-            rannacher_at_events=False,
-            rannacher_steps=1,
-            event_rannacher_steps=2,
-            event_theta=1.0,
-            theta=0.5,
-        )
-        th = BackwardOperator.theta_by_step(t_vec, dt_vec, params, [0.5])
-        assert th[4] == 0.5
-        assert th[3] == 0.5
+    def test_event_damping_zero_disables(self):
+        th = self._schedule(event_damping_steps=0)
+        assert th[4] == 0.5 and th[3] == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -1124,7 +1107,7 @@ class TestVolSolverCellAverage:
         )
         nodal = float(
             HestonSnowballPDESolver(
-                _hp(), params=PDEParams(event_projection="nodal", event_rannacher_steps=1),
+                _hp(), params=PDEParams(event_projection="nodal", grid=GridConfig(event_damping_steps=1)),
                 n_x=60, n_v=20, n_t=24
             ).price(product, env)
         )
@@ -1166,7 +1149,7 @@ class TestVolSolverCellAverage:
         )
         nodal = float(
             HestonPhoenixPDESolver(
-                _hp(), params=PDEParams(event_projection="nodal", event_rannacher_steps=1),
+                _hp(), params=PDEParams(event_projection="nodal", grid=GridConfig(event_damping_steps=1)),
                 n_x=60, n_v=20, n_t=24
             ).price(product, env)
         )
@@ -1188,9 +1171,9 @@ class TestVolSolverCellAverage:
         # sanity bound only; accuracy gates live in the 1D suites.
         assert abs(proj - nodal) / abs(nodal) < 0.10
 
-    def test_heston_snowball_consumes_event_rannacher_steps(self):
+    def test_heston_snowball_consumes_event_damping_steps(self):
         """Review 2026-07-23 finding 4: the 2D ADI path must consume
-        event_rannacher_steps — before this, Heston prices were bit-identical
+        the event damping count — before this, Heston prices were bit-identical
         for ers = 0/1/2/5 while the global default (ers=2) claimed otherwise."""
         env = _heston_env()
         product = SnowballOption(
@@ -1214,7 +1197,7 @@ class TestVolSolverCellAverage:
             return float(
                 HestonSnowballPDESolver(
                     _hp(),
-                    params=PDEParams(event_rannacher_steps=ers),
+                    params=PDEParams(grid=GridConfig(event_damping_steps=ers)),
                     n_x=60,
                     n_v=20,
                     n_t=24,
@@ -1222,20 +1205,9 @@ class TestVolSolverCellAverage:
             )
 
         p0, p2 = _p(0), _p(2)
-        assert p0 != p2, "event_rannacher_steps must engage in the 2D ADI loop"
+        assert p0 != p2, "event_damping_steps must engage in the 2D ADI loop"
         # damping is a small local perturbation, not a price change
         assert abs(p2 - p0) / abs(p0) < 5e-3
-        # rannacher_at_events=False must disable it (decoupled damping gate)
-        p_off = float(
-            HestonSnowballPDESolver(
-                _hp(),
-                params=PDEParams(event_rannacher_steps=2, rannacher_at_events=False),
-                n_x=60,
-                n_v=20,
-                n_t=24,
-            ).price(product, env)
-        )
-        assert p_off == p0
 
     @staticmethod
     def _damping_snowball(obs_dates):
@@ -1264,30 +1236,16 @@ class TestVolSolverCellAverage:
             ).price(product, env)
         )
 
-    def test_vol_event_damping_respects_use_rannacher_master(self):
-        """Review 2026-07-24 finding 2: use_rannacher=False is the 1D master
-        switch (BackwardOperator.theta_by_step returns early before any event
-        damping) — the 2D ADI event damping must honor it identically."""
-        env = _heston_env()
-        product = self._damping_snowball(QUARTERS)
-        p0 = self._damping_price(
-            product, env, use_rannacher=False, event_rannacher_steps=0
-        )
-        p2 = self._damping_price(
-            product, env, use_rannacher=False, event_rannacher_steps=2
-        )
-        assert p2 == p0, "use_rannacher=False must disable 2D event damping"
-
     def test_vol_event_damping_consumes_event_theta(self):
         """The damped restart steps must run at params.event_theta (mirror of
         the 1D theta_by_step schedule), not a hard-coded theta=1."""
         env = _heston_env()
         product = self._damping_snowball(QUARTERS)
         p_full = self._damping_price(
-            product, env, event_rannacher_steps=2, event_theta=1.0
+            product, env, grid=GridConfig(event_damping_steps=2), event_theta=1.0
         )
         p_half = self._damping_price(
-            product, env, event_rannacher_steps=2, event_theta=0.5
+            product, env, grid=GridConfig(event_damping_steps=2), event_theta=0.5
         )
         assert p_half != p_full, "event_theta must reach the damped ADI steps"
 
@@ -1295,11 +1253,11 @@ class TestVolSolverCellAverage:
         """The 1D schedule excludes the maturity observation from event
         damping (0 < idx < num_t - 1 in theta_by_step): terminal Rannacher
         owns the payoff discontinuity. A product whose only discrete events
-        sit AT maturity must therefore be inert under event_rannacher_steps."""
+        sit AT maturity must therefore be inert under event_damping_steps."""
         env = _heston_env()
         product = self._damping_snowball([1.0])
-        p0 = self._damping_price(product, env, event_rannacher_steps=0)
-        p2 = self._damping_price(product, env, event_rannacher_steps=2)
+        p0 = self._damping_price(product, env, grid=GridConfig(event_damping_steps=0))
+        p2 = self._damping_price(product, env, grid=GridConfig(event_damping_steps=2))
         assert p2 == p0, "maturity-only events must not add event damping"
 
     def test_phoenix_vol_ki_dispatch(self):

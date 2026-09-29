@@ -2275,7 +2275,7 @@ def _production_params_block(pair: GatePair, medium_grid: Optional[Dict[str, Any
             **ADI_2D_PRODUCTION_ENGINE_CONTROLS,
             "grid_focus": "auto",
             "event_projection": "cell_average",
-            "event_rannacher_steps": 2,
+            "event_damping_steps": 2,
             "theta": 0.5,
             "note": "maps to AutocallableEngineConfig.vol_model_engine_options "
             "(PV n_x/n_v/n_t plus explicit operator and Greek-grid floors) + "

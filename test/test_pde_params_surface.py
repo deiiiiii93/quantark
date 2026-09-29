@@ -52,6 +52,22 @@ def test_cache_knobs_removed(name):
         PDEParams(**{name: 1})
 
 
+@pytest.mark.parametrize("name", ["use_rannacher", "rannacher_steps",
+                                  "rannacher_at_events", "event_rannacher_steps"])
+def test_damping_knobs_removed(name):
+    with pytest.raises(ValidationError, match="damping_steps"):
+        PDEParams(**{name: 1})
+
+
+def test_intraday_method_label_unchanged():
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+    from quantark.intraday.engines.pde import PDERoute
+
+    assert PDERoute._method(SnowballPDESolver(PDEParams())) == "pde_rannacher_theta0.5"
+    no_term = SnowballPDESolver(PDEParams(grid=GridConfig(terminal_damping_steps=0)))
+    assert PDERoute._method(no_term) == "pde_cn_theta0.5"
+
+
 def test_cache_off_is_the_instance_flag_and_changes_no_number():
     from term_structure_benchmarks import make_term_env
 

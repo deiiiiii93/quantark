@@ -61,3 +61,19 @@ def test_equity_heston_pde_gamma_positive_and_reasonable():
     # ATM call gamma must be clearly positive (the bilinear-bump bug produced ~0/garbage).
     assert g["gamma"] > 0.005
     assert g["theta"] < 0
+
+
+def test_2d_event_damping_keys_follow_resolved_grid_counts():
+    from quantark.asset.equity.engine.pde.grid.config import GridConfig, resolve_config
+    from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import event_damped_step_keys
+
+    maps = {"ko": {10: None, 20: None}, "ki": {0: None}}
+    default = resolve_config("standard", None)  # event_damping_steps = 2
+    assert event_damped_step_keys(default, maps, 100) == {11, 12, 21, 22}
+    off = resolve_config("standard", GridConfig(event_damping_steps=0))
+    assert event_damped_step_keys(off, maps, 100) is None
+    one = resolve_config("standard", GridConfig(event_damping_steps=1))
+    assert event_damped_step_keys(one, maps, 100) == {11, 21}
+    # the two counts are independent (the old use_rannacher master switch is gone)
+    no_terminal = resolve_config("standard", GridConfig(terminal_damping_steps=0))
+    assert event_damped_step_keys(no_terminal, maps, 100) == {11, 12, 21, 22}

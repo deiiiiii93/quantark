@@ -82,13 +82,13 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     # and this gate certifies the decoupled grid at fixed event semantics.
     # (Under the corrected default the converged value reprices to ~97.976 —
     # covered by test_pde_event_projection.py.)
-    legacy = dict(event_projection="nodal", event_rannacher_steps=1)
-    coarse = KOResetSnowballPDESolver(
-        PDEParams(grid=GridConfig(points=120), **legacy)
-    )
-    fine = KOResetSnowballPDESolver(
-        PDEParams(grid=GridConfig(points=240, steps_per_day=8.0), **legacy)
-    )
+    coarse = KOResetSnowballPDESolver(PDEParams(
+        grid=GridConfig(points=120, event_damping_steps=1), event_projection="nodal"
+    ))
+    fine = KOResetSnowballPDESolver(PDEParams(
+        grid=GridConfig(points=240, steps_per_day=8.0, event_damping_steps=1),
+        event_projection="nodal",
+    ))
     pv_coarse = float(coarse.price(ko_reset_product, pricing_env))
     pv_fine = float(fine.price(ko_reset_product, pricing_env))
 

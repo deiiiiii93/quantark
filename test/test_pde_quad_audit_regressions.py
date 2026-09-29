@@ -4,7 +4,7 @@ Regression tests for the 2026-07 PDE/QUAD audit findings.
 Each test is keyed to an audit finding and is written to FAIL on the
 pre-fix code for the exact defect described, and pass once fixed:
 
-- Rannacher off-by-one (base_pde_solver / backward_operator)
+- Rannacher off-by-one (base_pde_solver; the layout-derived schedule)
 - QUAD pay_at_hit leaking into knock-in / no-touch parity decomposition
 - QUAD boundary-point evaluation using the wrong barrier index
 - Double-barrier / one-touch PDE applying continuous-monitoring boundary
@@ -30,7 +30,7 @@ from quantark.asset.equity.engine.pde import (
     DoubleBarrierPDESolver,
     OneTouchPDESolver,
 )
-from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
+from quantark.asset.equity.engine.pde.grid import GridConfig
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.quad import BarrierQuadEngine, OneTouchQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
@@ -97,22 +97,32 @@ def build_schedule(times, barrier, payoff=0.0) -> ObservationSchedule:
 
 
 class TestRannacherTerminalSmoothing:
+    @staticmethod
+    def _schedule(params, terminal_damping_steps):
+        """The layout-derived per-step theta of a 10-step, event-free grid."""
+        import types
+
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.engine.pde.grid import GridConfig, GridRequest, resolve_config
+        from quantark.asset.equity.engine.pde.grid.time import build_time
+
+        cfg = resolve_config("standard", GridConfig(
+            time_steps=10, terminal_damping_steps=terminal_damping_steps))
+        tl = build_time(GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
+                                    hard_lower=None, hard_upper=None, event_times=()), cfg)
+        return SnowballPDESolver(params=params)._theta_schedule_from_layout(
+            types.SimpleNamespace(time=tl))
+
     def test_default_rannacher_smooths_first_backward_step(self):
-        t_vec = np.linspace(0.0, 1.0, 11)
-        params = PDEParams()  # use_rannacher=True, rannacher_steps=1
-        theta = BackwardOperator.theta_by_step(
-            t_vec, np.diff(t_vec), params, discontinuity_times=None
-        )
-        # rannacher_steps=1 => exactly ONE implicit-Euler step at the terminal.
+        params = PDEParams()  # terminal_damping_steps=1 by default
+        theta = self._schedule(params, params.resolved_grid().terminal_damping_steps)
+        # one terminal damping step => exactly ONE implicit-Euler step at the terminal.
         assert theta[-1] == 1.0
         assert np.allclose(theta[:-1], params.theta)
 
     def test_rannacher_steps_two_smooths_two_steps(self):
-        t_vec = np.linspace(0.0, 1.0, 11)
-        params = PDEParams(rannacher_steps=2)
-        theta = BackwardOperator.theta_by_step(
-            t_vec, np.diff(t_vec), params, discontinuity_times=None
-        )
+        params = PDEParams()
+        theta = self._schedule(params, 2)
         assert theta[-1] == 1.0
         assert theta[-2] == 1.0
         assert np.allclose(theta[:-2], params.theta)
@@ -372,10 +382,8 @@ class TestEventStatsThetaConsistency:
         def ko_prob(event_theta: float, event_steps: int) -> np.ndarray:
             solver = SnowballPDESolver(
                 PDEParams(
-                    
-                    
                     event_theta=event_theta,
-                    event_rannacher_steps=event_steps,
+                    grid=GridConfig(event_damping_steps=event_steps),
                 )
             )
             return np.asarray(

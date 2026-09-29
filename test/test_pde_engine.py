@@ -105,10 +105,7 @@ class TestPDEParams:
         assert params.accuracy == "standard"
         assert params.grid is None
         assert params.bus_days_in_year == 252
-        assert params.rannacher_at_events == True
         assert params.theta == 0.5
-        assert params.use_rannacher == True
-        assert params.rannacher_steps == 1
 
     def test_custom_values(self):
         """Test custom parameter values."""
@@ -116,13 +113,11 @@ class TestPDEParams:
             grid_size=100,
             time_steps=50,
             theta=1.0,
-            use_rannacher=False,
         )
 
         assert params.grid_size == 100
         assert params.time_steps == 50
         assert params.theta == 1.0
-        assert params.use_rannacher == False
 
     def test_invalid_grid_size(self):
         """Test that invalid grid size raises error."""

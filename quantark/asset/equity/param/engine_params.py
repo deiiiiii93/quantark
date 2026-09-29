@@ -441,15 +441,9 @@ class PDEParams(EngineParams):
             jumps — "cell_average" (default; conservative dual-cell projection
             that removes the half-cell trigger-phase bias, see
             pde_auto_grid_investigation.md) or "nodal" (legacy Boolean masks)
-        rannacher_at_events: Apply implicit (Rannacher-style) damping steps
-            after each discrete event whose time lands on a grid node,
-            regardless of auto_grid (default: True)
         event_theta: Theta value applied immediately before event times (default: 1.0)
-        event_rannacher_steps: Number of event-adjacent steps using event_theta (default: 2)
         boundary_mode: Boundary condition mode (asymptotic, default)
         theta: Finite difference scheme parameter (0.5 = Crank-Nicolson, 1.0 = Backward Euler)
-        use_rannacher: Apply Rannacher smoothing for first steps (default: True)
-        rannacher_steps: Number of backward Euler steps for smoothing (default: 1)
     """
 
     # Declarative grid layer (grid redesign spec §4.7): the tiered front door.
@@ -505,19 +499,11 @@ class PDEParams(EngineParams):
     event_projection: Union[EventProjectionMode, str] = (
         EventProjectionMode.CELL_AVERAGE
     )
-    rannacher_at_events: bool = True
     event_theta: float = 1.0
-    # Two implicit solves after each event is the field-tested minimum for
-    # smooth convergence with projected event data (Pooley-Vetzal-Forsyth 2003
-    # SS2.5; d'Halluin-Forsyth-Vetzal 2005); a single full backward-Euler step
-    # has no literature support (Giles-Carter 2006 SS4.3).
-    event_rannacher_steps: int = 2
     boundary_mode: str = "asymptotic"
 
     # Numerical scheme configuration
     theta: float = 0.5  # 0.5 = Crank-Nicolson, 1.0 = Backward Euler
-    use_rannacher: bool = True
-    rannacher_steps: int = 1
 
     def __post_init__(self):
         """Validate PDE parameters."""
@@ -553,17 +539,9 @@ class PDEParams(EngineParams):
             )
         if not 0.0 <= self.theta <= 1.0:
             raise ValidationError(f"theta must be in [0, 1], got {self.theta}")
-        if self.rannacher_steps < 0:
-            raise ValidationError(
-                f"rannacher_steps must be non-negative, got {self.rannacher_steps}"
-            )
         if not 0.0 < self.event_theta <= 1.0:
             raise ValidationError(
                 f"event_theta must be in (0, 1], got {self.event_theta}"
-            )
-        if self.event_rannacher_steps < 0:
-            raise ValidationError(
-                f"event_rannacher_steps must be non-negative, got {self.event_rannacher_steps}"
             )
         if self.boundary_mode not in ("default", "asymptotic"):
             raise ValidationError(

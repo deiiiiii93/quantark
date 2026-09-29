@@ -33,7 +33,6 @@ from quantark.asset.equity.engine.pde.grid import (
     MarketSnapshot,
     reject_legacy_resolution_knobs,
     resolve_bound_layout,
-    scheme_config_overlay,
     validate_external_layout,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -45,7 +44,6 @@ from quantark.util.enum.option_enums import ExerciseType, ObservationType
 from quantark.util.enum import ObservationAggregation
 from quantark.util.enum.engine_enums import EngineType
 
-from .backward_operator import BackwardOperator
 
 
 # Per-market-object memoization for curve lookups and step coefficients.
@@ -496,7 +494,7 @@ class BasePDESolver(BaseEngine):
             reject_legacy_resolution_knobs(self.params)
             self._grid_binder = GridBinder(
                 getattr(self.params, "accuracy", "standard"),
-                scheme_config_overlay(self.params),
+                getattr(self.params, "grid", None),
                 cache_enabled=self._is_cache_enabled(),
                 cache_max_entries=GRID_CACHE_MAX_ENTRIES,
             )
@@ -770,10 +768,6 @@ class BasePDESolver(BaseEngine):
             params.event_projection,
             params.theta,
             params.event_theta,
-            params.use_rannacher,
-            params.rannacher_steps,
-            params.rannacher_at_events,
-            params.event_rannacher_steps,
             params.boundary_mode,
             params.bus_days_in_year,
         )
@@ -1274,7 +1268,7 @@ class BasePDESolver(BaseEngine):
         self._term_A_cache: dict = {}
 
         # Canonical damping schedule (terminal Rannacher + event smoothing),
-        # shared with all other sweeps via BackwardOperator.theta_by_step.
+        # derived once from the bound layout (_theta_schedule_from_layout).
         theta_by_step = self._theta_schedule_from_layout(self._active_layout)
 
         for j in range(num_t - 2, -1, -1):
