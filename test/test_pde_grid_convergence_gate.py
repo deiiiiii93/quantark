@@ -4,9 +4,9 @@ Two oracles (self-review #1):
 
   (a) self-convergence — for discrete-KI rows the decoupled grid at the default
       steps_per_day agrees with a finer grid to <=1e-4 on price (and first-order
-      greeks). Continuously-monitored KI is intentionally excluded: its exact
-      PDE price converges only O(1/N), so {4,8,16} cannot self-agree to 1e-4 —
-      that is the motivation for the opt-in BGK mode (Phase 4), not a regression.
+      greeks). The continuously-monitored KI row self-converges too since the
+      first-passage correction (2026-08-18) removed its O(sqrt(dt)) bias; it
+      has its own gate below.
 
   (b) production parity — the decoupled grid at the default steps_per_day
       reproduces the PRE-CHANGE production price (captured on commit 7d82465,
@@ -38,11 +38,13 @@ FIRST_ORDER = ["delta", "vega", "rho", "dividend_rho"]
 # test/pde_grid/test_anchor_certification.py): the layer's bounds formula and
 # unsnapped concentration intentionally reprice vs the 7d82465 capture
 # (euro_ki 1.1e-4, monthly_ko 2.2e-4 rel). Ongoing value: pins spd=4
-# production prices against accidental drift.
+# production prices against accidental drift. monthly_ko re-frozen 2026-09-29
+# (0.6.0) at the first-passage continuous-KI value, captured on base 6631dfba:
+# the NONE opt-out that pinned the old 988235.887668 is removed.
 MAIN_GOLDEN_PRICE = {
     "daily_ki": 988829.544454,
     "euro_ki": 997465.482236,
-    "monthly_ko": 988235.887668,
+    "monthly_ko": 987731.063894,
 }
 
 
@@ -64,12 +66,6 @@ def _solver(spd: int) -> SnowballPDESolver:
         PDEParams(
             grid=GridConfig(points=300, steps_per_day=float(spd), event_damping_steps=1),
             event_projection="nodal",
-            # Pinned alongside nodal events: the FIRST_PASSAGE continuous-KI
-            # correction (default since 2026-08-18) intentionally reprices
-            # monthly_ko and restores its self-convergence; this oracle
-            # characterizes the PRE-change discretization. The corrected
-            # default's gates live in test_pde_continuous_ki_first_passage.py.
-            continuous_ki_correction="none",
         )
     )
 
@@ -109,13 +105,14 @@ def test_price_self_convergence_discrete(row, spd, autocallable_case):
     assert _rel(coarse, fine) <= 1e-4, f"{row} price at spd={spd} not converged"
 
 
-def test_continuous_ki_is_o_sqrt_n_not_gated_to_1e4(autocallable_case):
-    # Document (and lock) that monthly-KO continuous-KI does NOT self-converge to
-    # 1e-4 between spd 4 and 8 — the exact-PDE O(1/N) barrier behavior that Phase
-    # 4 BGK targets. If this ever tightens below 1e-4, revisit the gate design.
+def test_continuous_ki_self_converges_under_first_passage(autocallable_case):
+    # Until 0.6.0 this locked the OPPOSITE (drift > 1e-4 under the bare
+    # per-step KI jump, the removed NONE opt-out). With the first-passage
+    # correction the spd 4 -> 8 drift measured 5.3e-6 (2026-09-29, base
+    # 6631dfba): continuous KI now meets the discrete rows' 1e-4 gate.
     product, env = autocallable_case("monthly_ko")
     drift = _rel(_price(product, env, 4), _price(product, env, 8))
-    assert drift > 1e-4
+    assert drift <= 1e-4
 
 
 # ---------------------------------------------------------------------------

@@ -115,28 +115,8 @@ class TestAgainstBankedBenchmark:
 
 
 class TestSchemeControl:
-    def test_legacy_none_scheme_reproduces_step_nodal_pricing(self):
-        # The opt-out must preserve the pinned characterization discretization
-        # bit-for-bit (value captured on the stock engine, this machine).
-        pv = pde_pv(
-            SnowballPDESolver,
-            make_snowball(SNOWBALL),
-            continuous_ki_correction="none",
-        )
-        assert pv == pytest.approx(96.496112523484, abs=1e-9)
-
-    def test_correction_is_inert_for_discrete_ki(self):
-        # A discrete-KI product monitors only at observation dates and has no
-        # intra-step crossing to restore: both schemes must agree bitwise.
-        # (The ko-reset builder is the one that exposes the monitoring flag;
-        # this is the certified discrete_ki construction.)
-        product = make_ko_reset(dict(KO_RESET, ki_continuous=False))
-        on = pde_pv(KOResetSnowballPDESolver, product)
-        off = pde_pv(
-            KOResetSnowballPDESolver, product, continuous_ki_correction="none"
-        )
-        assert on == off
-
-    def test_invalid_scheme_rejected(self):
-        with pytest.raises(ValidationError):
+    def test_correction_switch_removed(self):
+        # 0.6.0: the first-passage correction is the only treatment of a
+        # continuously monitored KI; the opt-out names what replaced it.
+        with pytest.raises(ValidationError, match="first-passage"):
             PDEParams(accuracy="standard", continuous_ki_correction="sideways")

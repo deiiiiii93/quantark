@@ -23,7 +23,6 @@ from .option_enums import (
 from .engine_enums import (
     EngineType,
     GreeksCalculationMode,
-    ContinuousKICorrection,
     KnockInMonitoringMode,
     PDEMethod,
     MonteCarloMethod,
@@ -77,7 +76,6 @@ __all__ = [
     # Engine enums
     "EngineType",
     "GreeksCalculationMode",
-    "ContinuousKICorrection",
     "KnockInMonitoringMode",
     "PDEMethod",
     "MonteCarloMethod",

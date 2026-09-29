@@ -5,7 +5,7 @@ Engine configuration parameters.
 import math
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
-from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode, ContinuousKICorrection
+from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode
 from quantark.util.exceptions import ValidationError
 
 from .pde_removed_names import REMOVED_PDE_NAMES, keyword_only_init
@@ -442,7 +442,6 @@ class PDEParams(EngineParams):
             that removes the half-cell trigger-phase bias, see
             pde_auto_grid_investigation.md) or "nodal" (legacy Boolean masks)
         event_theta: Theta value applied immediately before event times (default: 1.0)
-        boundary_mode: Boundary condition mode (asymptotic, default)
         theta: Finite difference scheme parameter (0.5 = Crank-Nicolson, 1.0 = Backward Euler)
     """
 
@@ -478,17 +477,6 @@ class PDEParams(EngineParams):
     ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
         KnockInMonitoringMode.EXACT_DISCRETE
     )
-    # Temporal treatment of CONTINUOUSLY monitored KI in the autocallable
-    # solvers. FIRST_PASSAGE (default) supplements the per-step nodal jump
-    # with the exact intra-step barrier-crossing probability (reflection
-    # principle, per-step-constant GBM coefficients read AT THE BARRIER),
-    # removing the O(sqrt(dt)) under-monitoring bias of pure per-step
-    # application. Applies to the local-vol and Heston/SLV solvers too, which
-    # report their own barrier-local (and, in 2-D, per-variance-column)
-    # coefficients. NONE is the explicit legacy opt-out (bare per-step jump).
-    continuous_ki_correction: Union[ContinuousKICorrection, str] = (
-        ContinuousKICorrection.FIRST_PASSAGE
-    )
     # Spatial representation of discrete event operators (coupon/KO/KI jumps)
     # in the autocallable solvers (1D BSM/LV and 2D Heston/SLV slice-wise).
     # CELL_AVERAGE (default) applies the conservative dual-cell projection
@@ -500,7 +488,6 @@ class PDEParams(EngineParams):
         EventProjectionMode.CELL_AVERAGE
     )
     event_theta: float = 1.0
-    boundary_mode: str = "asymptotic"
 
     # Numerical scheme configuration
     theta: float = 0.5  # 0.5 = Crank-Nicolson, 1.0 = Backward Euler
@@ -543,10 +530,6 @@ class PDEParams(EngineParams):
             raise ValidationError(
                 f"event_theta must be in (0, 1], got {self.event_theta}"
             )
-        if self.boundary_mode not in ("default", "asymptotic"):
-            raise ValidationError(
-                f"boundary_mode must be one of default, asymptotic, got {self.boundary_mode}"
-            )
         # Coerce ki_monitoring_mode to the enum (same contract as QuadParams).
         if isinstance(self.ki_monitoring_mode, str):
             try:
@@ -563,23 +546,6 @@ class PDEParams(EngineParams):
             raise ValidationError(
                 "ki_monitoring_mode must be a KnockInMonitoringMode or its "
                 f"string value, got {type(self.ki_monitoring_mode).__name__}"
-            )
-        # Coerce continuous_ki_correction to the enum (same contract as above).
-        if isinstance(self.continuous_ki_correction, str):
-            try:
-                self.continuous_ki_correction = ContinuousKICorrection(
-                    self.continuous_ki_correction.lower()
-                )
-            except ValueError:
-                raise ValidationError(
-                    "continuous_ki_correction must be one of "
-                    f"{[mode.value for mode in ContinuousKICorrection]}, "
-                    f"got {self.continuous_ki_correction!r}"
-                )
-        elif not isinstance(self.continuous_ki_correction, ContinuousKICorrection):
-            raise ValidationError(
-                "continuous_ki_correction must be a ContinuousKICorrection or "
-                f"its string value, got {type(self.continuous_ki_correction).__name__}"
             )
         # Coerce event_projection to the enum (same contract as above).
         if isinstance(self.event_projection, str):

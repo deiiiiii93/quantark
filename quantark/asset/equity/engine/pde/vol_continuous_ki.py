@@ -22,7 +22,6 @@ import numpy as np
 from quantark.asset.equity.engine.pde.snowball_pde_solver import (
     _ContinuousKIFirstPassage,
 )
-from quantark.util.enum.engine_enums import ContinuousKICorrection
 from quantark.util.exceptions import PricingError, ValidationError
 
 
@@ -91,10 +90,6 @@ class Heston2DBarrierCrossingMixin:
         if not self._first_passage_ki_supported:
             return
         if not product.has_ki_barrier or not self._ki_continuous:
-            return
-        if self.params.continuous_ki_correction is not (
-            ContinuousKICorrection.FIRST_PASSAGE
-        ):
             return
         barrier = float(self._ki_barrier)
         if barrier <= 0.0:

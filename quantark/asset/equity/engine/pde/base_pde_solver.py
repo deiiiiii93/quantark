@@ -768,7 +768,6 @@ class BasePDESolver(BaseEngine):
             params.event_projection,
             params.theta,
             params.event_theta,
-            params.boundary_mode,
             params.bus_days_in_year,
         )
 

@@ -108,33 +108,6 @@ def test_local_vol_continuous_ki_matches_the_corrected_flat_bsm_solver():
     assert lv == pytest.approx(bsm, rel=1e-9)
 
 
-def test_local_vol_continuous_ki_correction_can_be_disabled():
-    """NONE is the legacy opt-out on the vol solvers too, and it must agree
-    with the uncorrected flat-BSM solver for the same reason."""
-    product, env = _continuous_ki_snowball(), _flat_env()
-    off = PDEParams(continuous_ki_correction="none")
-
-    bsm = SnowballPDESolver(off).price(product, env)
-    lv = LocalVolSnowballPDESolver(off).price(product, env)
-
-    assert lv == pytest.approx(bsm, rel=1e-9)
-
-
-def test_local_vol_continuous_ki_correction_moves_the_price_down():
-    """Sanity on the sign and scale: monitoring the barrier continuously can
-    only knock in MORE often than monitoring it at step boundaries, so the
-    live surface -- and the snowball built on it -- must be worth less."""
-    product, env = _continuous_ki_snowball(), _flat_env()
-
-    corrected = LocalVolSnowballPDESolver(PDEParams()).price(product, env)
-    uncorrected = LocalVolSnowballPDESolver(
-        PDEParams(continuous_ki_correction="none")
-    ).price(product, env)
-
-    assert corrected < uncorrected
-    assert (uncorrected - corrected) / uncorrected == pytest.approx(1e-3, rel=0.5)
-
-
 def test_degenerate_heston_continuous_ki_stops_scaling_like_sqrt_dt():
     """A sqrt(dt) term halves under a 4x refinement; an O(dt) term quarters.
     Uncorrected, refining 100 -> 400 steps moves this price by ~908 (0.09% of
@@ -253,21 +226,15 @@ def test_local_vol_crossing_coefficients_are_read_at_the_barrier():
 def test_local_vol_continuous_ki_is_grid_invariant_under_a_skew():
     """The correction exists to remove an O(sqrt(dt)) bias, so once it is in
     place the price must stop depending on how fine the grid is.  Uncorrected,
-    this payoff moves ~255 across the accuracy profiles."""
+    this payoff moved 254.6 across the accuracy profiles (the 0.6.0-removed
+    NONE opt-out, measured 2026-09-29 at ecc7aebc); corrected it moves 14.5."""
     product, env = _continuous_ki_snowball(), _skewed_env()
 
-    def spread(mode):
-        prices = [
-            LocalVolSnowballPDESolver(
-                PDEParams(accuracy=acc, continuous_ki_correction=mode)
-            ).price(product, env)
-            for acc in ("fast", "standard", "high")
-        ]
-        return max(prices) - min(prices)
-
-    corrected, uncorrected = spread("first_passage"), spread("none")
-    assert corrected < 50.0
-    assert corrected < uncorrected / 4.0
+    prices = [
+        LocalVolSnowballPDESolver(PDEParams(accuracy=acc)).price(product, env)
+        for acc in ("fast", "standard", "high")
+    ]
+    assert max(prices) - min(prices) < 50.0
 
 
 def test_the_two_dimensional_correction_reads_leverage_at_the_barrier():
@@ -336,22 +303,19 @@ def _continuous_ki_phoenix():
 def test_local_vol_phoenix_continuous_ki_is_grid_invariant_under_a_skew():
     """Same property as the snowball: with the crossing read at the barrier
     the price stops depending on the grid.  Sampling the term vol at the
-    strike -- which is what this solver did -- leaves most of the bias."""
+    strike -- which is what this solver did -- leaves most of the bias.
+    Uncorrected (the 0.6.0-removed NONE opt-out) the spread was 121.8,
+    measured 2026-09-29 at ecc7aebc; the bound is the old "a quarter of the
+    uncorrected spread" gate as an absolute (corrected measured 14.1)."""
     from quantark.asset.equity.engine.pde import LocalVolPhoenixPDESolver
 
     product, env = _continuous_ki_phoenix(), _skewed_env()
 
-    def spread(mode):
-        prices = [
-            LocalVolPhoenixPDESolver(
-                PDEParams(accuracy=acc, continuous_ki_correction=mode)
-            ).price(product, env)
-            for acc in ("fast", "standard", "high")
-        ]
-        return max(prices) - min(prices)
-
-    corrected, uncorrected = spread("first_passage"), spread("none")
-    assert corrected < uncorrected / 4.0
+    prices = [
+        LocalVolPhoenixPDESolver(PDEParams(accuracy=acc)).price(product, env)
+        for acc in ("fast", "standard", "high")
+    ]
+    assert max(prices) - min(prices) < 30.0
 
 
 def test_heston_phoenix_continuous_ki_stops_scaling_like_sqrt_dt():

@@ -83,3 +83,16 @@ def test_cache_off_is_the_instance_flag_and_changes_no_number():
     on, off = EuropeanPDESolver(PDEParams()), EuropeanPDESolver(PDEParams(cache_enabled=False))
     assert on._is_cache_enabled() and not off._is_cache_enabled()
     assert on.price(p, env) == off.price(p, env)
+
+
+@pytest.mark.parametrize("name,value", [("continuous_ki_correction", "none"),
+                                        ("boundary_mode", "default")])
+def test_legacy_modes_removed(name, value):
+    with pytest.raises(ValidationError, match="removed"):
+        PDEParams(**{name: value})
+
+
+def test_continuous_ki_correction_enum_gone():
+    import quantark.util.enum as e
+
+    assert not hasattr(e, "ContinuousKICorrection")

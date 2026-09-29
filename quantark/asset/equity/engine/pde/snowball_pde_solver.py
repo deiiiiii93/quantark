@@ -57,7 +57,6 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, ProtectionType
 from quantark.util.enum.engine_enums import (
-    ContinuousKICorrection,
     EventProjectionMode,
     KnockInMonitoringMode,
 )
@@ -267,7 +266,7 @@ class SnowballPDESolver(BasePDESolver):
         4. At KI observation times (or every step for continuous): V0 <- V1
            in the breached region; for continuous monitoring the live region
            additionally receives the closed-form intra-step crossing
-           correction (ContinuousKICorrection.FIRST_PASSAGE, default) so the
+           correction (first passage, always on) so the
            scheme prices the continuously monitored barrier rather than
            step-width discrete monitoring
         5. Interpolate final price from V0 (or V1 if already knocked-in)
@@ -591,10 +590,6 @@ class SnowballPDESolver(BasePDESolver):
         if not product.has_ki_barrier:
             return
         if not (self._ki_continuous or self._bgk_active):
-            return
-        if self.params.continuous_ki_correction is not (
-            ContinuousKICorrection.FIRST_PASSAGE
-        ):
             return
         t = np.asarray(t_vec, dtype=float)
         if t.size < 3:
@@ -2958,8 +2953,7 @@ class SnowballPDESolver(BasePDESolver):
             grid[-1, t_idx] = ko_payoff
         else:
             if (
-                self.params.boundary_mode == "asymptotic"
-                and product.payoff_config.call_rebate_enabled
+                product.payoff_config.call_rebate_enabled
                 and product.payoff_config.call_strike is not None
             ):
                 df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
@@ -3013,8 +3007,7 @@ class SnowballPDESolver(BasePDESolver):
             grid[0, t_idx] = principal * df_to_maturity
         else:
             if (
-                self.params.boundary_mode == "asymptotic"
-                and product.payoff_config.protection_type == ProtectionType.NONE
+                product.payoff_config.protection_type == ProtectionType.NONE
             ):
                 df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
                 effective_strike = strike
