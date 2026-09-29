@@ -8,6 +8,8 @@ from typing import Any, Optional, Union
 from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode, ContinuousKICorrection
 from quantark.util.exceptions import ValidationError
 
+from .pde_removed_names import REMOVED_PDE_NAMES, keyword_only_init
+
 
 def _infer_target_scale(product: Optional[Any], pricing_env: Optional[Any]) -> float:
     """
@@ -414,7 +416,8 @@ def _next_power_of_two(n: int) -> int:
     return 1 << (n - 1).bit_length()
 
 
-@dataclass
+@keyword_only_init(REMOVED_PDE_NAMES)
+@dataclass(kw_only=True)
 class PDEParams(EngineParams):
     """
     PDE engine configuration.
@@ -675,6 +678,21 @@ class PDEParams(EngineParams):
             reverse=reverse_flag,
             **config_overrides,
         )
+
+    def resolved_grid(self):
+        """The REQUESTED grid: ``accuracy``'s shared preset under the ``grid`` overlay.
+
+        This is the configuration before the ``max_steps`` cap, which binds
+        only once a maturity is known (``build_time``): a five-year
+        ``standard`` request asks 5,040 steps and gets 5,000; a three-year
+        ``high`` request asks 6,048 and gets 5,000. The delivered count is on
+        the solve's ``TimeLayout`` (``requested_steps``, ``actual_steps``,
+        ``fill_scaled``). Routes with their own preset table (local-vol
+        vanilla/barrier, DCN) resolve over that table instead.
+        """
+        from quantark.asset.equity.engine.pde.grid.config import resolve_config
+
+        return resolve_config(self.accuracy, self.grid)
 
 
 #: How the scalar price is recovered from the nodal value surface.

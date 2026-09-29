@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields, replace
 from typing import Optional, Tuple
 
+from quantark.asset.equity.param.pde_removed_names import keyword_only_init
 from quantark.util.exceptions import ValidationError
 
 #: Preset values per accuracy profile. steps_per_day never sits below 4 in any
@@ -60,6 +61,7 @@ DCN_ACCURACY_PROFILES = {
 }
 
 
+@keyword_only_init(removal_map={})
 @dataclass(frozen=True, kw_only=True)
 class GridConfig:
     """Expert grid configuration; ``None`` fields inherit from the profile.
