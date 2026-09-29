@@ -1630,9 +1630,7 @@ class SnowballPDESolver(BasePDESolver):
 
         ``None`` is this route's own treatment: the dual-cell projection.
         """
-        return getattr(
-            self.params, "event_projection", EventProjectionMode.NODAL
-        ) in (None, EventProjectionMode.CELL_AVERAGE)
+        return self.params.event_projection in (None, EventProjectionMode.CELL_AVERAGE)
 
     def _event_uses_projection(self, t_idx: int) -> bool:
         """True when the discrete event at ``t_idx`` uses the projection.
