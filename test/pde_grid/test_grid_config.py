@@ -110,3 +110,130 @@ def test_pde_param_profiles_target_grid_layer():
     from quantark.asset.equity.engine.pde import EuropeanPDESolver
 
     assert EuropeanPDESolver(params=bs).grid_binder.config.points == 600
+
+
+# ---- 0.6.0: time_steps budget, one-basis rule, route tables, evidence rule ----
+
+import dataclasses  # noqa: E402
+
+from quantark.asset.equity.engine.pde.grid.config import (  # noqa: E402
+    ACCURACY_PROFILES,
+    DCN_ACCURACY_PROFILES,
+    LV_UNIFORM_ACCURACY_PROFILES,
+)
+from quantark.modelvalidation.engine_config import engine_config  # noqa: E402
+
+
+def test_positional_construction_raises_type_error():
+    with pytest.raises(TypeError):
+        GridConfig(400)
+
+
+def test_key_has_eleven_entries():
+    assert len(resolve_config("standard", None).key) == 11
+
+
+def test_shared_tables_unchanged():
+    assert ACCURACY_PROFILES == {
+        "fast": dict(points=200, steps_per_day=4.0, eps_crit=0.003),
+        "standard": dict(points=400, steps_per_day=4.0, eps_crit=0.003),
+        "high": dict(points=800, steps_per_day=8.0, eps_crit=0.002),
+    }
+
+
+def test_resolved_shared_config_has_density_basis_only():
+    cfg = resolve_config("standard", None)
+    assert cfg.steps_per_day == 4.0 and cfg.time_steps is None
+
+
+def test_evidence_omits_unset_basis_and_nothing_else():
+    cfg = resolve_config("standard", None)
+    ev = cfg.evidence()
+    assert "time_steps" not in ev
+    assert list(ev) == [
+        f.name for f in dataclasses.fields(GridConfig) if f.name != "time_steps"
+    ]
+    budget = resolve_config("standard", GridConfig(time_steps=300))
+    ev_b = budget.evidence()
+    assert ev_b["time_steps"] == 300 and "steps_per_day" not in ev_b
+
+
+def test_engine_config_of_banked_grid_equals_legacy_asdict():
+    # decision 14: a banked (density) resolved grid serializes exactly as before
+    cfg = resolve_config("standard", None)
+    legacy = {
+        k: (list(v) if isinstance(v, tuple) else v)
+        for k, v in dataclasses.asdict(cfg).items()
+        if k != "time_steps"
+    }
+    assert engine_config(cfg) == legacy
+    assert list(engine_config(cfg)) == list(legacy)
+
+
+def test_overlay_time_steps_clears_preset_density():
+    cfg = resolve_config("standard", GridConfig(time_steps=500))
+    assert cfg.time_steps == 500 and cfg.steps_per_day is None
+
+
+def test_overlay_density_clears_route_budget():
+    cfg = resolve_config(
+        "standard", GridConfig(steps_per_day=2.0), profiles=LV_UNIFORM_ACCURACY_PROFILES
+    )
+    assert cfg.steps_per_day == 2.0 and cfg.time_steps is None
+
+
+def test_overlay_with_both_bases_raises():
+    with pytest.raises(ValidationError, match="both"):
+        resolve_config("standard", GridConfig(steps_per_day=4.0, time_steps=100))
+
+
+def test_overlay_day_count_with_budget_raises():
+    with pytest.raises(ValidationError, match="day_count"):
+        resolve_config("standard", GridConfig(day_count=244, time_steps=100))
+    with pytest.raises(ValidationError, match="day_count"):
+        # the route's basis is the budget: a day basis has nothing to act on
+        resolve_config(
+            "standard", GridConfig(day_count=244), profiles=LV_UNIFORM_ACCURACY_PROFILES
+        )
+
+
+def test_explicit_budget_over_cap_raises():
+    with pytest.raises(ValidationError, match="max_steps"):
+        resolve_config("standard", GridConfig(time_steps=6000))
+
+
+def test_lv_table():
+    expected = {"fast": (200, 200), "standard": (400, 200), "high": (800, 400)}
+    for acc, (pts, n) in expected.items():
+        cfg = resolve_config(acc, None, profiles=LV_UNIFORM_ACCURACY_PROFILES)
+        assert (cfg.points, cfg.time_steps, cfg.steps_per_day) == (pts, n, None)
+
+
+def test_dcn_table_standard_is_todays_plan():
+    cfg = resolve_config("standard", None, profiles=DCN_ACCURACY_PROFILES)
+    assert (cfg.points, cfg.steps_per_day, cfg.max_points) == (801, 0.1, 2000)
+    assert (cfg.terminal_damping_steps, cfg.event_damping_steps) == (2, 2)
+    assert (cfg.eps_crit, cfg.num_std, cfg.max_steps, cfg.day_count) == (0.003, 4.0, 5000, 252)
+    assert [
+        resolve_config(a, None, profiles=DCN_ACCURACY_PROFILES).points
+        for a in ("fast", "standard", "high")
+    ] == [401, 801, 1601]
+
+
+def test_resolved_density_config_reresolves_to_itself():
+    # Review Focus 3: the intraday route and the builders feed a resolved config back
+    cfg = resolve_config("high", GridConfig(points=900, max_points=2000))
+    assert resolve_config("standard", cfg) == cfg
+
+
+def test_with_time_steps_on_resolved_config_resolves():
+    # Review Focus 3: day_count cleared with the density, so no conflict
+    cfg = resolve_config("standard", None).with_time_steps(1234)
+    assert cfg.day_count is None and cfg.steps_per_day is None
+    again = resolve_config("standard", cfg)
+    assert again.time_steps == 1234 and again.day_count == 252
+
+
+def test_with_steps_per_day_clears_budget():
+    cfg = resolve_config("standard", GridConfig(time_steps=300)).with_steps_per_day(6.0)
+    assert cfg.time_steps is None and cfg.steps_per_day == 6.0

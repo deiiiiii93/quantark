@@ -211,9 +211,11 @@ def lv_params(points=None, steps=None):
 
 
 def dcn_engine(cls, points=None):
+    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
     if points is None:
         return cls()
-    if "num_space_nodes" in inspect.signature(cls.__init__).parameters:
+    # detect on the base class: LocalVolDCNPDEEngine forwards **kwargs
+    if "num_space_nodes" in inspect.signature(DCNPDEEngine.__init__).parameters:
         return cls(num_space_nodes=points)
     return cls(params=PDEParams(grid=GridConfig(points=points)))
 
@@ -331,7 +333,8 @@ def book():
             "lv_phoenix": lambda: solver_price(LocalVolPhoenixPDESolver(params=PDEParams()), make_phoenix(PHOENIX), env_grid_vol()),
             "heston_snowball": lambda: solver_price(HestonSnowballPDESolver(hp, params=PDEParams(), n_x=80, n_v=32, n_t=40), snowball(), env_flat()),
             "slv_snowball": lambda: solver_price(HestonSLVSnowballPDESolver(hp, lev, params=PDEParams(), n_x=80, n_v=32, n_t=40), snowball(), env_flat()),
-            "heston_phoenix": lambda: solver_price(HestonPhoenixPDESolver(hp, params=PDEParams(), n_x=80, n_v=32, n_t=40), make_phoenix(PHOENIX), env_flat()),
+            # the 2-D phoenix supports non-memory coupons only
+            "heston_phoenix": lambda: solver_price(HestonPhoenixPDESolver(hp, params=PDEParams(), n_x=80, n_v=32, n_t=40), make_phoenix(dict(PHOENIX, memory_coupon=False)), env_flat()),
         }
 
     for key in ("lv_snowball", "lv_phoenix", "heston_snowball", "slv_snowball", "heston_phoenix"):

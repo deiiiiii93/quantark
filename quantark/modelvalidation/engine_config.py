@@ -24,12 +24,22 @@ from enum import Enum
 from typing import Any, Dict, Mapping
 
 
+def _fields_of(value: Any) -> Dict[str, Any]:
+    """A dataclass's serialized fields: ``evidence()`` when it defines one
+    (unset optionals omitted -- the grid layer's evidence rule, so adding an
+    optional field never moves a banked identity), else every field."""
+    evidence = getattr(value, "evidence", None)
+    if callable(evidence):
+        return dict(evidence())
+    return {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
+
+
 def _plain(value: Any) -> Any:
     """Coerce a config value into something JSON- and hash-stable."""
     if isinstance(value, Enum):
         return value.value
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {k: _plain(v) for k, v in dataclasses.asdict(value).items()}
+        return {k: _plain(v) for k, v in _fields_of(value).items()}
     if isinstance(value, Mapping):
         return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -52,9 +62,9 @@ def engine_config(params: Any, *, exclude: tuple[str, ...] = ()) -> Dict[str, An
     if not dataclasses.is_dataclass(params):
         raise TypeError(f"engine_config expects a dataclass, got {type(params).__name__}")
     return {
-        field.name: _plain(getattr(params, field.name))
-        for field in dataclasses.fields(params)
-        if field.name not in exclude
+        name: _plain(value)
+        for name, value in _fields_of(params).items()
+        if name not in exclude
     }
 
 
