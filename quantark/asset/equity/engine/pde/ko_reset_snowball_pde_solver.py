@@ -458,7 +458,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             )
 
         if product.has_ki_barrier and not staged_v0:
-            is_terminal_ki = self._ki_continuous or self._bgk_active
+            is_terminal_ki = self._ki_continuous
             if not is_terminal_ki:
                 if (num_t - 1) in self._ki_observation_indices:
                     is_terminal_ki = True
@@ -589,7 +589,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         monitored knock-in breached at a node was touched before the observation, so it did come
         first and the second schedule is already in force there.
         """
-        return not (self._ki_continuous or self._bgk_active)
+        return not self._ki_continuous
 
     def _apply_ko_jump_single(
         self,

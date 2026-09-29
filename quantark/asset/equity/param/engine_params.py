@@ -466,17 +466,6 @@ class PDEParams(EngineParams):
     s_min: float = 0.0  # Auto-calculate if 0
     s_max: float = 0.0  # Auto-calculate if 0
 
-    # Treatment of discretely-monitored knock-in schedules [§11.6]. EXACT_DISCRETE
-    # (default) applies the KI regime jump on every observation date exactly, with
-    # an event-aligned grid. BGK_APPROXIMATION is an opt-in performance/robustness
-    # mode that replaces a dense daily KI schedule with continuous monitoring at a
-    # Broadie-Glasserman-Kou (1997) shifted barrier; it engages only for discretely
-    # monitored KI (European / continuous / no-KI / already-knocked-in are inert
-    # with a logged note). Same enum, beta, and shift as SnowballQuadEngine so PDE
-    # and quad BGK prices are directly comparable.
-    ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
-        KnockInMonitoringMode.EXACT_DISCRETE
-    )
     # Spatial representation of discrete event operators (coupon/KO/KI jumps)
     # in the autocallable solvers (1D BSM/LV and 2D Heston/SLV slice-wise).
     # CELL_AVERAGE (default) applies the conservative dual-cell projection
@@ -529,23 +518,6 @@ class PDEParams(EngineParams):
         if not 0.0 < self.event_theta <= 1.0:
             raise ValidationError(
                 f"event_theta must be in (0, 1], got {self.event_theta}"
-            )
-        # Coerce ki_monitoring_mode to the enum (same contract as QuadParams).
-        if isinstance(self.ki_monitoring_mode, str):
-            try:
-                self.ki_monitoring_mode = KnockInMonitoringMode(
-                    self.ki_monitoring_mode.lower()
-                )
-            except ValueError:
-                raise ValidationError(
-                    "ki_monitoring_mode must be one of "
-                    f"{[mode.value for mode in KnockInMonitoringMode]}, "
-                    f"got {self.ki_monitoring_mode!r}"
-                )
-        elif not isinstance(self.ki_monitoring_mode, KnockInMonitoringMode):
-            raise ValidationError(
-                "ki_monitoring_mode must be a KnockInMonitoringMode or its "
-                f"string value, got {type(self.ki_monitoring_mode).__name__}"
             )
         # Coerce event_projection to the enum (same contract as above).
         if isinstance(self.event_projection, str):

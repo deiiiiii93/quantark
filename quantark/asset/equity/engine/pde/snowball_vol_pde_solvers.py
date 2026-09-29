@@ -1053,7 +1053,6 @@ class _Heston2DSnowballPDEBase(Heston2DBarrierCrossingMixin, SnowballPDESolver):
         )
         self._is_reverse = product.is_reverse
         self._ki_continuous = bool(ki_continuous)
-        self._bgk_active = False
         self._ki_barrier = 0.0
         self._ki_barrier_by_tidx.clear()
         self._ki_fp = None  # rebuilt once the ADI core (and its V grid) exists
@@ -1200,7 +1199,7 @@ class _Heston2DSnowballPDEBase(Heston2DBarrierCrossingMixin, SnowballPDESolver):
                     # treatment); only discretely observed KI events project —
                     # and a valuation-date observation is deterministic, so it
                     # is applied with the exact inclusive trigger.
-                    ki_discrete = not (self._ki_continuous or self._bgk_active)
+                    ki_discrete = not self._ki_continuous
                     # tau vs T, not current_time vs 0: see _apply_ko.
                     at_valuation = is_close(float(tau), float(T))
                     if (

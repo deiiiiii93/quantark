@@ -335,9 +335,6 @@ class PhoenixPDESolver(SnowballPDESolver):
         q = pricing_env.get_div_yield(tau)
         sigma = pricing_env.get_vol(strike, tau)
 
-        # BGK state is resolved at the top of _build_grids (see
-        # SnowballPDESolver._build_grids) so subclasses cannot skip it.
-
         if self._profile_enabled:
             self._reset_profile_stats()
 
@@ -397,7 +394,6 @@ class PhoenixPDESolver(SnowballPDESolver):
         if product.has_ki_barrier:
             should_apply_ki = (
                 self._ki_continuous
-                or self._bgk_active
                 or terminal_tidx in self._ki_observation_indices
             )
             if should_apply_ki:
@@ -817,7 +813,6 @@ class PhoenixPDESolver(SnowballPDESolver):
         if product.has_ki_barrier:
             should_apply_ki = (
                 self._ki_continuous
-                or self._bgk_active
                 or t_idx in self._ki_observation_indices
             )
             if should_apply_ki:

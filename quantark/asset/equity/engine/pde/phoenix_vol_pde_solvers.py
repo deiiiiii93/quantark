@@ -600,7 +600,6 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
         )
         self._is_reverse = product.is_reverse
         self._ki_continuous = bool(ki_continuous)
-        self._bgk_active = False
         self._ki_barrier = 0.0
         self._ki_barrier_by_tidx.clear()
         self._ki_fp = None  # rebuilt once the ADI core (and its V grid) exists
@@ -955,7 +954,7 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
         # Continuous KI stays a nodal mask (continuous-barrier treatment);
         # only discretely observed KI events project — and a valuation-date
         # observation is deterministic, so it uses the exact inclusive trigger.
-        ki_discrete = not (self._ki_continuous or self._bgk_active)
+        ki_discrete = not self._ki_continuous
         if self._use_cell_average_events() and ki_discrete and not at_valuation:
             return self._project_event_values(
                 core.S_grid, barrier, product.is_reverse, False, U, v1

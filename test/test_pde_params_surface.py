@@ -96,3 +96,12 @@ def test_continuous_ki_correction_enum_gone():
     import quantark.util.enum as e
 
     assert not hasattr(e, "ContinuousKICorrection")
+
+
+def test_ki_monitoring_mode_removed_from_pde_only():
+    from quantark.asset.equity.param import QuadParams
+
+    with pytest.raises(ValidationError, match="QuadParams.ki_monitoring_mode is unchanged"):
+        PDEParams(ki_monitoring_mode="bgk_approximation")
+    quad = QuadParams(ki_monitoring_mode="bgk_approximation")
+    assert quad.ki_monitoring_mode.value == "bgk_approximation"

@@ -12,10 +12,8 @@ holds is structural -- the machinery is never even built -- so that is what
 these tests assert, together with the positive controls that prove the
 assertion has teeth.
 
-The one deliberate exception is ``BGK_APPROXIMATION``, whose entire purpose
-is to replace a dense discrete schedule with continuous monitoring at a
-shifted barrier.  It is a continuous treatment by choice, and is pinned here
-as such so the exception stays visible.
+There is no exception: since 0.6.0 the PDE monitors every barrier exactly as
+the product declares it (BGK_APPROXIMATION is QUAD-only).
 """
 
 from datetime import datetime
@@ -141,14 +139,3 @@ def test_the_mc_bridge_is_armed_for_continuous_monitoring():
         engine.price(product, env)
         assert engine._ki_bridge_wanted is True, type(engine).__name__
 
-
-def test_bgk_treats_a_discrete_schedule_as_continuous_on_purpose():
-    """BGK_APPROXIMATION replaces a dense discrete schedule with continuous
-    Brownian-bridge monitoring at a shifted barrier, so it DOES arm the
-    correction -- the one discrete-schedule price this work moves."""
-    product, env = _snowball(**DISCRETE_KI), _env()
-    solver = LocalVolSnowballPDESolver(
-        PDEParams(ki_monitoring_mode="bgk_approximation")
-    )
-    solver.price(product, env)
-    assert solver._ki_fp is not None

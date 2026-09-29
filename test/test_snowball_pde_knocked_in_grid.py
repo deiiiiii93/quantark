@@ -114,7 +114,7 @@ def test_grid_and_alignment_agree_on_ki_nodes():
         product = _daily_ki_snowball()
         setattr(product, "_otc_lifecycle_knocked_in", knocked_in)
         tau = float(product.get_maturity(env))
-        solver._configure_bgk(product, env, 0.22, tau)
+        solver._stash_grid_request_env(env)
         monitor_times = solver._ki_monitor_times(product, tau)
         nodes_in_grid = solver._ki_nodes_in_grid(product)
         assert bool(monitor_times) == nodes_in_grid, (
@@ -129,7 +129,7 @@ def test_knocked_in_drops_ki_monitor_nodes():
     env = _env()
     product = _daily_ki_snowball()
     tau = float(product.get_maturity(env))
-    solver._configure_bgk(product, env, 0.22, tau)
+    solver._stash_grid_request_env(env)
     assert solver._ki_nodes_in_grid(product)
     assert solver._ki_monitor_times(product, tau)
 

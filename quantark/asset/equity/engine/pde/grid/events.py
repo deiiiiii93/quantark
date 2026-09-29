@@ -14,7 +14,7 @@ straddling cell; FP-scale threshold continuity; second-order convergence.
 ``EventSchedule`` carries per-solve event semantics as PURE transforms over
 named state blocks (S always axis 0; trailing axes broadcast). Stages:
 ``terminal`` (t = tau, once, after terminal-payoff construction), ``apply``
-(interior event nodes), ``continuous`` (every step — continuous/BGK KI
+(interior event nodes), ``continuous`` (every step — continuous KI
 coupling, 2D KO injection), ``valuation_readout`` (t = 0 pointwise inclusive
 trigger semantics at spot).
 """

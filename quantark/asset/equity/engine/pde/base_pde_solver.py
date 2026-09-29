@@ -594,9 +594,9 @@ class BasePDESolver(BaseEngine):
         q: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Bind (or reuse the frozen) layout and expose it as the 5-tuple."""
-        configure_bgk = getattr(self, "_configure_bgk", None)
-        if configure_bgk is not None:
-            configure_bgk(product, pricing_env, sigma, tau)
+        stash_env = getattr(self, "_stash_grid_request_env", None)
+        if stash_env is not None:
+            stash_env(pricing_env)
         market = self.market_snapshot(product, pricing_env)
         request = self.grid_request(product, market, tau)
         if self._session_grids is not None:

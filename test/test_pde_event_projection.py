@@ -731,7 +731,6 @@ class TestSnowballCellAverage:
             params=PDEParams(event_projection="cell_average")
         )
         solver._ki_continuous = True
-        solver._bgk_active = False
         solver._resolve_ki_barrier_at_tidx = types.MethodType(
             lambda self, t_idx: 80.0, solver
         )
@@ -786,7 +785,6 @@ class TestSnowballCellAverage:
     @staticmethod
     def _run_discrete_ki_projection_check(solver):
         solver._ki_continuous = False
-        solver._bgk_active = False
         solver._ki_observation_indices = {1}
         solver._resolve_ki_barrier_at_tidx = types.MethodType(
             lambda self, t_idx: 80.0, solver
@@ -1270,7 +1268,6 @@ class TestVolSolverCellAverage:
         v1 = np.ones((61, 3))
 
         solver._ki_continuous = True
-        solver._bgk_active = False
         out = solver._apply_ki(np.zeros((61, 3)), core, product, 80.0, v1)
         assert set(np.unique(out)) <= {0.0, 1.0}, "continuous KI must stay nodal"
 
