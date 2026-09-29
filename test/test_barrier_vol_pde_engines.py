@@ -88,3 +88,56 @@ def test_lv_barrier_points_budget_and_theta_reach_the_kernel(monkeypatch):
         theta=0.6, cache_enabled=False, grid=GridConfig(points=300, time_steps=120)
     )).price(_uo_call(), _env())
     assert seen["n_s"] == 300 and len(seen["step_dt"]) == 120 and seen["theta"] == 0.6
+
+
+def _disc_call(dates):
+    return BarrierOption(strike=100., maturity=1.0, option_type=OptionType.CALL, barrier=130.,
+                         barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.DISCRETE,
+                         observation_dates=dates)
+
+
+def test_lv_discrete_observation_dates_are_exact_nodes(monkeypatch):
+    import quantark.asset.equity.engine.pde.barrier_vol_pde_solvers as mod
+    seen = {}
+    real = mod.price_barrier_lv_pde
+
+    def spy(*a, **kw):
+        seen["t"] = np.concatenate([[0.0], np.cumsum(a[5])])
+        seen["obs"] = kw["observe_steps"]
+        return real(*a, **kw)
+
+    monkeypatch.setattr(mod, "price_barrier_lv_pde", spy)
+    dates = [0.1234, 0.5, 0.7771]
+    LocalVolBarrierPDESolver(PDEParams()).price(_disc_call(dates), _env())
+    for d, k in zip(dates, seen["obs"]):
+        assert seen["t"][k] == pytest.approx(d, abs=1e-12)
+
+
+def test_lv_discrete_endpoint_dates_keep_todays_indices(monkeypatch):
+    # Review Focus 4: valuation-date and maturity observations are not interior events
+    import quantark.asset.equity.engine.pde.barrier_vol_pde_solvers as mod
+    seen = {}
+    real = mod.price_barrier_lv_pde
+
+    def spy(*a, **kw):
+        seen["n"] = len(a[5])
+        seen["obs"] = kw["observe_steps"]
+        return real(*a, **kw)
+
+    monkeypatch.setattr(mod, "price_barrier_lv_pde", spy)
+    LocalVolBarrierPDESolver(PDEParams()).price(_disc_call([0.0, 0.5, 1.0]), _env())
+    assert seen["obs"][0] == 0 and seen["obs"][-1] == seen["n"]
+
+
+def test_lv_discrete_barrier_matches_analytic_oracle():
+    from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
+    p = _disc_call([k / 12.0 for k in range(1, 13)])
+    px = LocalVolBarrierPDESolver(
+        PDEParams(grid=GridConfig(points=600, time_steps=240))
+    ).price(p, _env())
+    ana = BarrierAnalyticalEngine().price(p, _env())
+    # Measured 2026-09-29 (exact event nodes): |PDE - BGK| = 0.1303. The gap is
+    # the BGK approximation itself at monthly monitoring, not PDE error: a
+    # 1600 x 2400 PDE (every date on a node) sits 0.1310 from BGK and 7.0e-4
+    # from this price. Bound = measured gap + margin.
+    assert abs(px - ana) < 0.15

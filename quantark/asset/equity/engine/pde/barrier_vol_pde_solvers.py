@@ -37,6 +37,7 @@ from quantark.priceenv import PricingEnvironment, TermMarketContext
 from quantark.util.enum import OptionType, ObservationType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import is_close
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde
 from quantark.volmodels.heston import HestonParams
@@ -150,12 +151,21 @@ class LocalVolBarrierPDESolver(BaseEngine):
         T = float(product.get_maturity(env))
         config = self._route_config()
         spot, strike = float(env.spot), float(product.strike)
-        # Uniform time grid (no interior nodes): linspace(0, T, time_steps + 1)
-        # to the bit. Discrete observations take the nearest node below.
-        t_grid = build_time(GridRequest(
+        continuous, dates = _obs_dates(product, T)
+        # Every interior observation date is an exact node, the budget spread
+        # over the intervals between them (spec §6.1). Continuous and EXPIRY
+        # monitoring have no interior dates: linspace(0, T, time_steps + 1).
+        interior = () if continuous else tuple(
+            float(d) for d in dates
+            if 0.0 < float(d) < T
+            and not is_close(float(d), 0.0)
+            and not is_close(float(d), T)
+        )
+        layout = build_time(GridRequest(
             tau=T, bound_anchors=(spot,), critical_prices=(spot, strike),
-            hard_lower=None, hard_upper=None, event_times=(),
-        ), config).t
+            hard_lower=None, hard_upper=None, event_times=interior,
+        ), config)
+        t_grid = layout.t
         market = TermMarketContext.from_env(env, t_grid, ref_strike=strike)
         r_fwd = market.fwd_rates
         carry_fwd = market.fwd_carry
@@ -165,8 +175,18 @@ class LocalVolBarrierPDESolver(BaseEngine):
                 raise PricingError("LocalVolBarrierPDESolver needs a GridVolSurface or a prebuilt LocalVolSurface")
             lv = build_dupire_local_vol(env.vol_surface, spot=env.spot, rate_curve=env.rate_curve,
                                         div_yield=env.get_div_yield)
-        continuous, dates = _obs_dates(product, T)
-        observe_steps = None if continuous else [int(np.argmin(np.abs(t_grid - d))) for d in dates]
+        n_last = len(t_grid) - 1
+
+        def _obs_index(d: float) -> int:
+            # Valuation-date and maturity observations keep today's index
+            # handling; every interior date is an exact node.
+            if d <= 0.0 or is_close(d, 0.0):
+                return 0
+            if d >= T or is_close(d, T):
+                return n_last
+            return layout.step_at(d)
+
+        observe_steps = None if continuous else [_obs_index(float(d)) for d in dates]
         is_call = product.option_type == OptionType.CALL
 
         def price_of_rebate(reb):
