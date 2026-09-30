@@ -141,11 +141,12 @@ def _basis_label(grid, factor: float) -> str:
 def _time_fill_for(ctx, solver, plan, grid, numbers, dx_min, max_steps):
     """(time factor, requested steps) of the smallest power-of-two multiple of the current fill whose time
     layout meets the time floors on the given space grid, or the last multiple within ``max_steps``."""
-    from quantark.asset.equity.engine.pde.core.components import scheme_stepper
+    from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+    from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
     from quantark.asset.equity.engine.pde.grid.time import build_time
 
     request = plan["time"]["request"]
-    stepper = scheme_stepper(solver.params, solver.grid_binder.config)
+    stepper = resolve_stepper(solver.params, DAMPING_DEFAULTS["core"])
     factor = 1.0
     best = (factor, int(plan["time"]["requested_steps"]))
     while True:
@@ -267,7 +268,12 @@ class PDERoute:
 
     @staticmethod
     def _method(engine) -> str:
+        from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+        from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
+
         params = engine.params
-        resolved = getattr(params, "resolved_grid", None)
-        rannacher = bool(resolved is not None and resolved().terminal_damping_steps > 0)
-        return f"pde_{'rannacher' if rannacher else 'cn'}_theta{getattr(params, 'theta', 0.5)}"
+        if getattr(params, "stepper", None) is None:
+            return "pde_cn_theta0.5"
+        st = resolve_stepper(params, DAMPING_DEFAULTS["core"])
+        rannacher = int(getattr(st, "terminal_damping_steps", 0) or 0) > 0
+        return f"pde_{'rannacher' if rannacher else 'cn'}_theta{getattr(st, 'theta', 0.5)}"

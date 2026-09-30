@@ -9,6 +9,8 @@ from typing import Dict, Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
 from quantark.asset.equity.engine.pde.core.components import CentralDifference, nodal_stencil
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
@@ -40,19 +42,20 @@ from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
-def event_damped_step_keys(config, event_maps, n_t: int):
+def event_damped_step_keys(stepper, event_maps, n_t: int):
     """Integer step keys that run as damped Douglas ADI restarts.
 
-    After each discrete event key the next ``config.event_damping_steps``
-    steps run at ``params.event_theta`` -- the 2D counterpart of the 1D
-    layout-derived schedule. ``config`` is the solver's resolved GridConfig;
-    the event count is independent of the terminal count, as in 1D. Events at
+    After each discrete event key the next ``stepper.event_damping_steps``
+    steps run at ``stepper.event_theta`` -- the 2D counterpart of the 1D
+    stepper's schedule. ``stepper`` is the resolved built-in
+    ``CrankNicolson`` (``resolve_stepper``); the event count is independent
+    of the terminal count, as in 1D. Events at
     the maturity node (tau key 0) are excluded because the terminal start-up
     owns the payoff discontinuity; the valuation-date key ``n_t`` is excluded
     by the ``<= n_t`` clip below. Continuous KI has no discrete keys, so it
     never triggers damping. Returns ``None`` when event damping is off (0).
     """
-    ers = int(config.event_damping_steps)
+    ers = int(stepper.event_damping_steps)
     if ers <= 0:
         return None
     event_keys: set[int] = set()
@@ -962,19 +965,20 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
 
         v1_snapshots: dict[float, np.ndarray] = {}
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
-        damped_keys = event_damped_step_keys(self.grid_binder.config, event_maps, core.N_T)
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["core"])
+        damped_keys = event_damped_step_keys(st, event_maps, core.N_T)
 
         terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
         U1 = core.solve(
             is_call=True,
             scheme=self.scheme,
-            theta=float(self.params.theta),
-            rannacher=self.grid_binder.config.terminal_damping_steps > 0,
+            theta=float(st.theta),
+            rannacher=st.terminal_damping_steps > 0,
             terminal_override=terminal_v1,
             boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=True),
             step_hook=self._v1_hook(core, product, pricing_env, T, event_maps, v1_snapshots),
             damped_step_keys=damped_keys,
-            damped_step_theta=float(self.params.event_theta),
+            damped_step_theta=float(st.event_theta),
         )
 
         if knocked_in:
@@ -984,15 +988,15 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             surface = core.solve(
                 is_call=True,
                 scheme=self.scheme,
-                theta=float(self.params.theta),
-                rannacher=self.grid_binder.config.terminal_damping_steps > 0,
+                theta=float(st.theta),
+                rannacher=st.terminal_damping_steps > 0,
                 terminal_override=terminal_v0,
                 boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=False),
                 step_hook=self._v0_hook(
                     core, product, pricing_env, T, event_maps, v1_snapshots
                 ),
                 damped_step_keys=damped_keys,
-                damped_step_theta=float(self.params.event_theta),
+                damped_step_theta=float(st.event_theta),
             )
 
         read_surface = self._t0_pre_U if self._t0_pre_U is not None else surface

@@ -19,6 +19,8 @@ import numpy as np
 from scipy.linalg import solve_banded
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.pde.grid import GridConfig, GridRequest
 from quantark.asset.equity.engine.pde.grid.binder import GridLayerMixin
@@ -268,8 +270,9 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
         )
 
         config = self._grid_layer_binder().config
-        theta, event_theta = float(self.params.theta), float(self.params.event_theta)
-        rann = int(config.terminal_damping_steps)  # damp the terminal kink too
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["DCN"])
+        theta, event_theta = float(st.theta), float(st.event_theta)
+        rann = int(st.terminal_damping_steps)  # damp the terminal kink too
         rann_theta = 1.0  # terminal damping is always backward Euler
         for i in range(times.size - 2, -1, -1):  # step [t_i, t_{i+1}] backward
             dt = float(times[i + 1] - times[i])
@@ -294,7 +297,7 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
                     v0, v1 = apply_dcn_events(
                         v0, v1, cpn_mask, ko_mask, ki_mask, cpn_amt, ko_amt
                     )
-                    rann = int(config.event_damping_steps)
+                    rann = int(st.event_damping_steps)
                     rann_theta = event_theta
                 else:
                     # every daily node is a KI monitoring date (strictly

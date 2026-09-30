@@ -95,7 +95,7 @@ def create_pricing_env(
 
 def create_pde_params() -> PDEParams:
     """Create PDE parameters for testing."""
-    return PDEParams(theta=0.5)  # Crank-Nicolson, default terminal damping
+    return PDEParams()  # Crank-Nicolson (theta 0.5), default terminal damping
 
 
 # ============================================================

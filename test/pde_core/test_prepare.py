@@ -74,6 +74,23 @@ def test_explain_reports_the_cap_on_a_five_year_standard_snowball():
     assert plan.time.actual_steps <= plan.settings["grid.max_steps"]["effective"]
 
 
+def test_explain_settings_report_the_components_and_the_resolved_stepper():
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+
+    p = make_snowball(SB)
+    preset = SnowballPDESolver(PDEParams()).explain(p, env_flat()).settings
+    assert preset["stepper"]["source"] == preset["operator"]["source"] == "preset"
+    assert preset["stepper"]["effective"] == "CrankNicolson"
+    # None = the route default, resolved on the plan (the core routes' (1, 2))
+    assert preset["stepper.terminal_damping_steps"]["requested"] is None
+    assert preset["stepper.terminal_damping_steps"]["effective"] == 1
+    assert preset["stepper.event_damping_steps"]["effective"] == 2
+    tuned = SnowballPDESolver(PDEParams(stepper=CrankNicolson(theta=1.0))).explain(p, env_flat()).settings
+    assert tuned["stepper"]["source"] == tuned["stepper.theta"]["source"] == "overlay"
+    assert tuned["stepper.theta"]["effective"] == 1.0
+    assert tuned["stepper.event_theta"]["source"] == "preset"
+
+
 def test_explain_reports_the_cap_on_a_three_year_high_snowball():
     p = make_snowball(dict(SB, months=36, maturity=3.0))
     plan = SnowballPDESolver(PDEParams(accuracy="high")).explain(p, env_flat())

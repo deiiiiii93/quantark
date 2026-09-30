@@ -11,7 +11,7 @@ import numpy as np
 
 from ..backends import FactorizationCache
 from ..coefficients import CoefficientsInForce
-from ..components import CentralDifference, scheme_stepper, validate_coefficients, validate_readout
+from ..components import CentralDifference, resolve_stepper, validate_coefficients, validate_readout
 from ..groups import VALUE, Backend, ColumnGroup
 from ..identity import coefficient_key, component_fingerprint
 from ..prepare import Operation, TerminalOutcome
@@ -83,6 +83,13 @@ class FamilyAdapter:
         if self.route is not None:
             from quantark.asset.equity.engine.pde.route_applicability import check_route_applicability
             check_route_applicability(params, self.route)
+        # the operator must assemble what this route samples (§5.8)
+        if self.sample_kind not in params.operator.supports:
+            from quantark.util.exceptions import ValidationError
+            raise ValidationError(
+                f"PDEParams.operator {type(params.operator).__name__} does not support the "
+                f"{self.sample_kind.value} samples of {type(self.solver).__name__}"
+            )
 
     def market_checks(self, product, env, tau) -> None:
         # _solve: this solver diffuses with a single strike-selected constant vol;
@@ -116,7 +123,11 @@ class FamilyAdapter:
 
     def step_sets(self, product, env, layout, tau):
         """The per-step sets before the flat-exact replacement (the session's
-        step-coefficient artefact): the solver's memoized builder."""
+        step-coefficient artefact): the solver's memoized builder for the
+        built-in operator, else the operator's own assembly (no memo)."""
+        operator = self.solver.params.operator
+        if type(operator) is not CentralDifference:
+            return operator.assemble(self.samples(product, env, layout, tau), layout)
         dx, num_x = layout.spatial.dx, len(layout.spatial.x)
         return self.solver._build_step_coefficients(env, self._strike(product, env), layout.time.t,
                                                     dx, num_x)
@@ -131,6 +142,12 @@ class FamilyAdapter:
             sc = session.coefficients
         else:
             sc = self.step_sets(product, env, layout, tau)
+        operator = solver.params.operator
+        if type(operator) is not CentralDifference:
+            # a custom operator's sets are marched as assembled: never collapsed to the
+            # built-in scalar stencil, never replaced by the built-in flat-exact sets
+            validate_coefficients(sc, len(layout.time.dt), num_x, operator)
+            return CoefficientsInForce(flat=sc.lcu_sets[0], sets=sc, num_x=num_x)
         # The solver's own stencil and flat-exact methods: a subclass override stays in force.
         flat = solver._calculate_coefficients(r, q, sigma, dx, num_x)
         sc = solver._flat_exact_step_coefficients(sc, r, q, sigma, dx, num_x)
@@ -138,11 +155,12 @@ class FamilyAdapter:
         return CoefficientsInForce(flat=flat, sets=None if sc.n_unique == 1 else sc, num_x=num_x)
 
     def stepper(self, params):
-        return scheme_stepper(params, self.solver.grid_binder.config)
+        from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
+        return resolve_stepper(params, DAMPING_DEFAULTS["core"])
 
     def coefficient_key(self, product, env, layout, fps):
         return coefficient_key(layout.fingerprint, fps, self._strike(product, env),
-                               component_fingerprint(CentralDifference()))
+                               component_fingerprint(self.solver.params.operator))
 
     def groups(self, product, layout, request) -> tuple:
         return (ColumnGroup("value", ("value",), Backend.SPARSE_LU, VALUE),)

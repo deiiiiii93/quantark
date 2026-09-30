@@ -6,6 +6,7 @@ independent pre-refactor goldens (test_pde_pre_refactor_goldens) pin the
 public outputs themselves.
 """
 import numpy as np
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 
 from execution.matrix_fixtures import FIXTURE_BUILDERS
 
@@ -194,7 +195,7 @@ class TestSessionPreparation:
 
         product, env = _snowball(), _eq_flat_env()
         fps = []
-        for params in (PDEParams(), PDEParams(theta=1.0)):
+        for params in (PDEParams(), PDEParams(stepper=CrankNicolson(theta=1.0))):
             engine = SnowballPDESolver(params)
             with PricingSession() as session:
                 state = EquityPDEAutocallableSessionAdapter().prepare(

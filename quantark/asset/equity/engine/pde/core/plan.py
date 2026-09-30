@@ -128,11 +128,32 @@ def _settings(solver) -> Section:
     if route is not None:
         from quantark.asset.equity.engine.pde.route_applicability import ROUTE_RULES
         rules = {r.field: r.status for r in ROUTE_RULES[route]}
+    from .components import CentralDifference, CrankNicolson, StandardReadout
+
+    builtins = {"stepper": CrankNicolson(), "operator": CentralDifference(), "readout": StandardReadout()}
     out = {}
     for f in dataclasses.fields(params):
         if f.name == "grid":
             continue
         value = getattr(params, f.name)
+        if f.name in builtins:
+            # a component slot: preset is the built-in; a custom class is judged by the
+            # route's component rule, the built-in stepper's settings one by one below
+            builtin = builtins[f.name]
+            custom = type(value) is not type(builtin)
+            key = "component.stepper_class" if f.name == "stepper" else f"component.{f.name}"
+            out[f.name] = {"requested": type(value).__name__, "effective": type(value).__name__,
+                           "source": "preset" if value == builtin else "overlay",
+                           "applicability": rules.get(key, "honoured") if custom else "honoured"}
+            if f.name == "stepper" and not custom:
+                resolved = solver.adapter.stepper(params)
+                for s in dataclasses.fields(value):
+                    requested = getattr(value, s.name)
+                    out[f"stepper.{s.name}"] = {
+                        "requested": plain(requested), "effective": plain(getattr(resolved, s.name)),
+                        "source": "preset" if requested == getattr(builtin, s.name) else "overlay",
+                        "applicability": rules.get(f"stepper.{s.name}", "honoured")}
+            continue
         default = f.default if f.default is not dataclasses.MISSING else None
         out[f.name] = {"requested": plain(value), "effective": plain(value),
                        "source": "preset" if value == default else "overlay",

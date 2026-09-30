@@ -8,7 +8,7 @@ quantark/asset/equity/engine/docs/pde_auto_grid_investigation.md).
 The fix projects the event jump onto the grid by exact dual-cell averaging of
 the piecewise-linear jump function. ``event_projection="cell_average"`` is the
 default since the 2026-07-23 repricing review; ``"nodal"`` (with
-``GridConfig(event_damping_steps=1)``) is the explicit legacy opt-out used below to
+``stepper=CrankNicolson(event_damping_steps=1)``) is the explicit legacy opt-out used below to
 characterize the bias the projection removes.
 
 Reference values in the integration gates come from the 2026-07-23
@@ -27,6 +27,8 @@ from quantark.asset.equity.engine.pde.grid.events import (
     breach_fractions,
     project_breach_jump,
 )
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson, resolve_stepper
+from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
     KOResetSnowballPDESolver,
 )
@@ -519,7 +521,7 @@ class TestEventProjectionParam:
     def test_default_event_damping_steps_is_two(self):
         """Two implicit solves per event is the field-tested minimum
         (Pooley/d'Halluin); one full BE step has no literature support."""
-        assert PDEParams().resolved_grid().event_damping_steps == 2
+        assert resolve_stepper(PDEParams(), DAMPING_DEFAULTS["core"]).event_damping_steps == 2
 
     def test_string_coercion(self):
         p = PDEParams(event_projection="nodal")
@@ -609,7 +611,7 @@ class TestPhoenixCellAverage:
         )
         px_nodal = _pde_price(
             phoenix_product, phoenix_env, event_projection=EventProjectionMode.NODAL,
-            grid=GridConfig(event_damping_steps=1),
+            stepper=CrankNicolson(event_damping_steps=1),
         )
         assert px_default == px_proj
         assert px_default != px_nodal
@@ -618,7 +620,7 @@ class TestPhoenixCellAverage:
         px_proj = _pde_price(phoenix_product, phoenix_env, event_projection="cell_average")
         px_nodal = _pde_price(
             phoenix_product, phoenix_env,
-            event_projection="nodal", grid=GridConfig(event_damping_steps=1),
+            event_projection="nodal", stepper=CrankNicolson(event_damping_steps=1),
         )
         err_proj = abs(px_proj - quad_ref) / quad_ref
         err_nodal = abs(px_nodal - quad_ref) / quad_ref
@@ -638,13 +640,13 @@ class TestPhoenixCellAverage:
         )
         nodal_auto = _pde_price(
             phoenix_product, phoenix_env,
-            event_projection="nodal", grid=GridConfig(event_damping_steps=1),
+            event_projection="nodal", stepper=CrankNicolson(event_damping_steps=1),
         )
         nodal_unif = _pde_price(
             phoenix_product,
             phoenix_env,
             event_projection="nodal",
-            grid=GridConfig(event_damping_steps=1),
+            stepper=CrankNicolson(event_damping_steps=1),
         )
         assert abs(proj_auto - proj_unif) / quad_ref < 2e-4
         # (nodal auto-vs-uniform phase sensitivity dropped: auto_grid is
@@ -762,7 +764,7 @@ class TestSnowballCellAverage:
         )
         nodal = float(
             KOResetSnowballPDESolver(
-                PDEParams(event_projection="nodal", grid=GridConfig(event_damping_steps=1))
+                PDEParams(event_projection="nodal", stepper=CrankNicolson(event_damping_steps=1))
             ).price(product, env)
         )
         proj = float(
@@ -1040,17 +1042,15 @@ class TestEventDampingPolicy:
         from quantark.asset.equity.engine.pde.grid import GridRequest, resolve_config
         from quantark.asset.equity.engine.pde.grid.time import build_time
 
-        cfg = resolve_config("standard", GridConfig(
-            time_steps=10, event_damping_steps=event_damping_steps,
-            terminal_damping_steps=terminal_damping_steps))
-        from quantark.asset.equity.engine.pde.core.components import scheme_stepper
+        cfg = resolve_config("standard", GridConfig(time_steps=10))
 
         req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
                           hard_lower=None, hard_upper=None, event_times=(0.5,))
         tl = build_time(req, cfg)
-        # the stepper owns the schedule (spec 2 decision 5); its counts come from the config
-        return scheme_stepper(PDEParams(theta=0.5, event_theta=1.0), cfg).schedule(
-            types.SimpleNamespace(time=tl, request=req))
+        # the stepper owns the schedule and its counts (spec 2 decision 5)
+        stepper = CrankNicolson(theta=0.5, event_theta=1.0, event_damping_steps=event_damping_steps,
+                                terminal_damping_steps=terminal_damping_steps)
+        return stepper.schedule(types.SimpleNamespace(time=tl, request=req))
 
     def test_event_damping_decoupled_from_auto_grid(self):
         """Two backward-Euler steps follow the event node (node 5 of 10)."""
@@ -1112,7 +1112,7 @@ class TestVolSolverCellAverage:
         )
         nodal = float(
             HestonSnowballPDESolver(
-                _hp(), params=PDEParams(event_projection="nodal", grid=GridConfig(event_damping_steps=1)),
+                _hp(), params=PDEParams(event_projection="nodal", stepper=CrankNicolson(event_damping_steps=1)),
                 n_x=60, n_v=20, n_t=24
             ).price(product, env)
         )
@@ -1154,7 +1154,7 @@ class TestVolSolverCellAverage:
         )
         nodal = float(
             HestonPhoenixPDESolver(
-                _hp(), params=PDEParams(event_projection="nodal", grid=GridConfig(event_damping_steps=1)),
+                _hp(), params=PDEParams(event_projection="nodal", stepper=CrankNicolson(event_damping_steps=1)),
                 n_x=60, n_v=20, n_t=24
             ).price(product, env)
         )
@@ -1202,7 +1202,7 @@ class TestVolSolverCellAverage:
             return float(
                 HestonSnowballPDESolver(
                     _hp(),
-                    params=PDEParams(grid=GridConfig(event_damping_steps=ers)),
+                    params=PDEParams(stepper=CrankNicolson(event_damping_steps=ers)),
                     n_x=60,
                     n_v=20,
                     n_t=24,
@@ -1242,15 +1242,15 @@ class TestVolSolverCellAverage:
         )
 
     def test_vol_event_damping_consumes_event_theta(self):
-        """The damped restart steps must run at params.event_theta (mirror of
+        """The damped restart steps must run at stepper.event_theta (mirror of
         the 1D theta_by_step schedule), not a hard-coded theta=1."""
         env = _heston_env()
         product = self._damping_snowball(QUARTERS)
         p_full = self._damping_price(
-            product, env, grid=GridConfig(event_damping_steps=2), event_theta=1.0
+            product, env, stepper=CrankNicolson(event_damping_steps=2, event_theta=1.0)
         )
         p_half = self._damping_price(
-            product, env, grid=GridConfig(event_damping_steps=2), event_theta=0.5
+            product, env, stepper=CrankNicolson(event_damping_steps=2, event_theta=0.5)
         )
         assert p_half != p_full, "event_theta must reach the damped ADI steps"
 
@@ -1261,8 +1261,8 @@ class TestVolSolverCellAverage:
         sit AT maturity must therefore be inert under event_damping_steps."""
         env = _heston_env()
         product = self._damping_snowball([1.0])
-        p0 = self._damping_price(product, env, grid=GridConfig(event_damping_steps=0))
-        p2 = self._damping_price(product, env, grid=GridConfig(event_damping_steps=2))
+        p0 = self._damping_price(product, env, stepper=CrankNicolson(event_damping_steps=0))
+        p2 = self._damping_price(product, env, stepper=CrankNicolson(event_damping_steps=2))
         assert p2 == p0, "maturity-only events must not add event damping"
 
     def test_phoenix_vol_ki_dispatch(self):

@@ -21,7 +21,6 @@ from typing import NamedTuple, Optional
 
 import numpy as np
 
-from quantark.asset.equity.engine.pde.core.components import CentralDifference
 from quantark.asset.equity.engine.pde.core.groups import Backend
 from quantark.asset.equity.engine.pde.core.identity import (
     coefficient_key,
@@ -190,7 +189,7 @@ def step_coefficients_state(
 
     capture = _env_capture(pricing_env)
     strike = engine.adapter._strike(product, pricing_env)
-    operator_fp = component_fingerprint(CentralDifference())
+    operator_fp = component_fingerprint(engine.params.operator)
 
     def key_fp():
         key = coefficient_key(layout.fingerprint, market_fingerprints(pricing_env), strike,

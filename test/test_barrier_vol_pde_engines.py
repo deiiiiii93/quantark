@@ -3,6 +3,7 @@ import pytest
 from datetime import datetime
 
 from quantark.param import GridVolSurface, FlatRateCurve, SpotQuote
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.param import PDEParams
@@ -61,9 +62,9 @@ def test_heston_slv_barrier_pde_run_and_reject():
 
 
 @pytest.mark.parametrize("params", [
-    PDEParams(grid=GridConfig(terminal_damping_steps=2)),
-    PDEParams(grid=GridConfig(event_damping_steps=1)),
-    PDEParams(event_theta=0.7),
+    PDEParams(stepper=CrankNicolson(terminal_damping_steps=2)),
+    PDEParams(stepper=CrankNicolson(event_damping_steps=1)),
+    PDEParams(stepper=CrankNicolson(event_theta=0.7)),
     PDEParams(event_projection="nodal"),
     PDEParams(event_projection="cell_average"),
     PDEParams(grid=GridConfig(eps_crit=0.001)),
@@ -85,7 +86,8 @@ def test_lv_barrier_points_budget_and_theta_reach_the_kernel(monkeypatch):
 
     monkeypatch.setattr(mod, "price_barrier_lv_pde", spy)
     LocalVolBarrierPDESolver(PDEParams(
-        theta=0.6, cache_enabled=False, grid=GridConfig(points=300, time_steps=120)
+        stepper=CrankNicolson(theta=0.6), cache_enabled=False,
+        grid=GridConfig(points=300, time_steps=120)
     )).price(_uo_call(), _env())
     assert seen["n_s"] == 300 and len(seen["step_dt"]) == 120 and seen["theta"] == 0.6
 

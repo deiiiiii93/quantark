@@ -14,7 +14,7 @@ from typing import Any, Mapping, Optional, Sequence, Tuple
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.engine.pde import base_pde_solver
-from quantark.asset.equity.engine.pde.grid.config import GridConfig, resolve_config
+from quantark.asset.equity.engine.pde.grid.config import GridConfig, resolve_config, resolved_grid_evidence
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.quad.v2.engine import SnowballQuadEngineV2
 from quantark.asset.equity.param import MCParams, PDEParams
@@ -328,7 +328,7 @@ class IntradaySnowballPDECandidate(_IntradayCandidate):
     def params(self) -> Mapping[str, Any]:
         return {**self._declared(), "engine": "SnowballPDESolver",
                 "desk_bump": float(bump_config_for(self._target_engine()).spot_bump),
-                "grid": engine_config(resolve_config(self._accuracy(), None)),
+                "grid": resolved_grid_evidence(PDEParams(accuracy=self._accuracy())),
                 "convergence_axes": {"space": "achieved points x (1, 2, 4)", "time": "achieved steps per day x (1, 2, 4)",
                                      "placement": f"achieved points + {list(_PLACEMENT_SHIFTS)}"}}
 

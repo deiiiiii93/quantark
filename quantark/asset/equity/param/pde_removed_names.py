@@ -1,4 +1,4 @@
-"""Names removed from the 1D PDE parameter surface in 0.6.0 (spec §4.4).
+"""Names removed from the 1D PDE parameter surface in 0.6.0 and 0.7.0 (spec §4.4; spec 2 §4.4).
 
 One map supplies the replacement text for every removed name; it is also
 rendered into docs/engine_param_guide.md and the CHANGELOG. Removed names
@@ -13,14 +13,14 @@ from typing import Mapping
 
 from quantark.util.exceptions import ValidationError
 
-_TERMINAL = "grid=GridConfig(terminal_damping_steps=N); 0 disables"
-_EVENT = "grid=GridConfig(event_damping_steps=N); 0 disables"
+_TERMINAL = "PDEParams(stepper=CrankNicolson(terminal_damping_steps=N)); 0 disables"
+_EVENT = "PDEParams(stepper=CrankNicolson(event_damping_steps=N)); 0 disables"
 _CACHE = "cache_enabled=True/False is the only cache control"
 
 REMOVED_PDE_NAMES: Mapping[str, str] = {
     "method": (
         "Crank-Nicolson is the only built-in scheme; "
-        "PDEEngine(params=PDEParams(...)). theta=1.0 gives backward Euler."
+        "PDEEngine(params=PDEParams(...)). stepper=CrankNicolson(theta=1.0) gives backward Euler."
     ),
     "grid_size": "grid=GridConfig(points=...) on every route.",
     "time_steps": (
@@ -56,12 +56,27 @@ REMOVED_PDE_NAMES: Mapping[str, str] = {
     "grid_cache_max_entries": _CACHE,
     "banded_cache_max_entries": _CACHE,
     "use_banded_solver": "removed; the linear solver is chosen by the solver family",
+    "theta": "stepper=CrankNicolson(theta=...); 0.5 is Crank-Nicolson, 1.0 backward Euler",
+    "event_theta": "stepper=CrankNicolson(event_theta=...)",
+}
+
+REMOVED_GRID_NAMES: Mapping[str, str] = {
+    "terminal_damping_steps": _TERMINAL,
+    "event_damping_steps": _EVENT,
+}
+
+#: The release each name left in; every name not listed left in 0.6.0.
+REMOVED_IN: Mapping[str, str] = {
+    "theta": "0.7.0",
+    "event_theta": "0.7.0",
+    "terminal_damping_steps": "0.7.0",
+    "event_damping_steps": "0.7.0",
 }
 
 REMOVED_DCN_NAMES: Mapping[str, str] = {
     "num_space_nodes": "DCNPDEEngine(params=PDEParams(grid=GridConfig(points=...)))",
     "rannacher_steps": (
-        "grid=GridConfig(terminal_damping_steps=N, event_damping_steps=N) "
+        "PDEParams(stepper=CrankNicolson(terminal_damping_steps=N, event_damping_steps=N)) "
         "(DCN applies both in its half-step form)"
     ),
     "s_min_mult": "removed; never read",
@@ -77,7 +92,7 @@ def removed_name_error(
     text = removal_map.get(name)
     if text is None:
         return ValidationError(f"{owner} got an unexpected keyword argument {name!r}")
-    return ValidationError(f"{owner}({name}=...) was removed in 0.6.0: {text}")
+    return ValidationError(f"{owner}({name}=...) was removed in {REMOVED_IN.get(name, '0.6.0')}: {text}")
 
 
 def reject_removed_kwargs(

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields, replace
 from typing import Optional, Tuple
 
-from quantark.asset.equity.param.pde_removed_names import keyword_only_init
+from quantark.asset.equity.param.pde_removed_names import REMOVED_GRID_NAMES, keyword_only_init
 from quantark.util.exceptions import ValidationError
 
 #: Preset values per accuracy profile. steps_per_day never sits below 4 in any
@@ -29,9 +29,11 @@ _SHARED_DEFAULTS = dict(
     max_points=2000,
     max_steps=5000,
     day_count=252,
-    terminal_damping_steps=1,
-    event_damping_steps=2,
 )
+
+#: The built-in stepper's route defaults; a ``None`` count on ``CrankNicolson``
+#: resolves to these.
+DAMPING_DEFAULTS = {"core": (1, 2), "DCN": (2, 2)}
 
 #: Local-vol vanilla/barrier routes (spec §4.2, decision 16): today's plan at
 #: standard (400 points, a 200-step budget); fast/high are new resolution
@@ -54,14 +56,12 @@ DCN_ACCURACY_PROFILES = {
         steps_per_day=0.1,
         eps_crit=ACCURACY_PROFILES[name]["eps_crit"],
         max_points=max(2000, pts),
-        terminal_damping_steps=2,
-        event_damping_steps=2,
     )
     for name, pts in (("fast", 401), ("standard", 801), ("high", 1601))
 }
 
 
-@keyword_only_init(removal_map={})
+@keyword_only_init(REMOVED_GRID_NAMES)
 @dataclass(frozen=True, kw_only=True)
 class GridConfig:
     """Expert grid configuration; ``None`` fields inherit from the profile.
@@ -86,8 +86,6 @@ class GridConfig:
     max_points: Optional[int] = None
     max_steps: Optional[int] = None
     day_count: Optional[int] = None
-    terminal_damping_steps: Optional[int] = None
-    event_damping_steps: Optional[int] = None
 
     @property
     def key(self) -> tuple:
@@ -97,9 +95,9 @@ class GridConfig:
     def evidence(self) -> dict:
         """The certificate serialization: every SET field, in field order.
 
-        An unset optional is omitted, so every banked resolved configuration
-        (all ten pre-0.6 fields set, ``time_steps`` unset) serializes exactly
-        as ``dataclasses.asdict`` did and keeps its identity (decision 14).
+        An unset optional is omitted. The certificates' historical ten-key
+        ``grid`` record adds the stepper's two damping counts
+        (``resolved_grid_evidence``).
         """
         return {
             f.name: getattr(self, f.name)
@@ -193,11 +191,7 @@ def _validate_resolved(cfg: GridConfig) -> None:
     for name in ("eps_crit", "num_std"):
         if getattr(cfg, name) <= 0.0:
             raise ValidationError(f"{name} must be positive, got {getattr(cfg, name)}")
-    for name in ("terminal_damping_steps", "event_damping_steps"):
-        if getattr(cfg, name) < 0:
-            raise ValidationError(
-                f"{name} must be non-negative, got {getattr(cfg, name)}"
-            )
+
     if cfg.points > cfg.max_points:
         raise ValidationError(
             f"points ({cfg.points}) exceeds max_points ({cfg.max_points})"
@@ -208,3 +202,18 @@ def _validate_resolved(cfg: GridConfig) -> None:
             raise ValidationError(f"bounds {side} side must be positive, got {v}")
     if lo is not None and hi is not None and lo >= hi:
         raise ValidationError(f"bounds must be ordered, got ({lo}, {hi})")
+
+
+def resolved_grid_evidence(params) -> dict:
+    """The historical ten-key ``grid`` record certificates hash (spec 2 §4.6): the nine
+    resolved GridConfig fields plus the built-in stepper's two resolved damping counts,
+    under their 0.6.0 keys. It is the numerical fact, not a serialization of GridConfig."""
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson, resolve_stepper
+
+    record = dict(resolve_config(params.accuracy, params.grid).evidence())
+    st = resolve_stepper(params, DAMPING_DEFAULTS["core"])
+    if type(st) is not CrankNicolson:
+        raise ValidationError("resolved_grid_evidence: only the built-in stepper is certifiable")
+    record["terminal_damping_steps"] = int(st.terminal_damping_steps)
+    record["event_damping_steps"] = int(st.event_damping_steps)
+    return record

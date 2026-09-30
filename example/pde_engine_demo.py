@@ -23,6 +23,7 @@ from quantark.asset.equity.engine import PDEEngine, BlackScholesEngine
 from quantark.asset.equity.engine.analytical import AmericanOptionAnalyticalEngine
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType, BarrierType
@@ -122,15 +123,15 @@ def demo_method_selection():
 
     print("\n1. theta = 0.5: Crank-Nicolson (default, second order in time)")
     print("-" * 40)
-    engine_cn = PDEEngine(params=PDEParams(grid=grid, theta=0.5))
+    engine_cn = PDEEngine(params=PDEParams(grid=grid, stepper=CrankNicolson(theta=0.5)))
     price_cn = engine_cn.price(euro_option, pricing_env)
-    print(f"PDEParams(theta=0.5): ${price_cn:.6f}")
+    print(f"PDEParams(stepper=CrankNicolson(theta=0.5)): ${price_cn:.6f}")
 
     print("\n2. theta = 1.0: backward Euler (first order, more diffusive)")
     print("-" * 40)
-    engine_be = PDEEngine(params=PDEParams(grid=grid, theta=1.0))
+    engine_be = PDEEngine(params=PDEParams(grid=grid, stepper=CrankNicolson(theta=1.0)))
     price_be = engine_be.price(euro_option, pricing_env)
-    print(f"PDEParams(theta=1.0): ${price_be:.6f}")
+    print(f"PDEParams(stepper=CrankNicolson(theta=1.0)): ${price_be:.6f}")
 
 
 def demo_greeks_calculation():
@@ -294,7 +295,7 @@ PDEEngine Key Features:
 
 ✓ Unified Interface: Single engine for all PDE pricing (European, American, Barrier, etc.)
 ✓ Automatic Dispatch: Routes to correct solver based on product type
-✓ Scheme: Crank-Nicolson, with PDEParams(theta=...) as the one scheme weight
+✓ Scheme: Crank-Nicolson, with PDEParams(stepper=CrankNicolson(theta=...)) as the one scheme weight
 ✓ Greeks Integration: Seamlessly works with GreeksCalculator
 ✓ Solver Caching: Reuses solver instances for performance
 ✓ Consistent API: Follows same pattern as BlackScholesEngine, AmericanOptionAnalyticalEngine

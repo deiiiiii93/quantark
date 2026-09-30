@@ -33,6 +33,7 @@ from quantark.asset.equity.product.option.snowball_helpers import (
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.param import PDEParams, MCParams
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.priceenv import PricingEnvironment
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
@@ -145,10 +146,8 @@ def create_snowball(
 def create_pde_solver(grid_size: int = 250, time_steps: int = 250) -> SnowballPDESolver:
     """Create PDE solver with good resolution."""
     params = PDEParams(
-        grid=GridConfig(
-            points=grid_size, time_steps=time_steps, terminal_damping_steps=2
-        ),
-        theta=0.5,
+        grid=GridConfig(points=grid_size, time_steps=time_steps),
+        stepper=CrankNicolson(theta=0.5, terminal_damping_steps=2),
     )
     return SnowballPDESolver(params=params)
 
@@ -578,10 +577,8 @@ def create_pde_solver_nonuniform(
 ) -> SnowballPDESolver:
     """Create PDE solver with non-uniform (adaptive) grid."""
     params = PDEParams(
-        grid=GridConfig(
-            points=grid_size, time_steps=time_steps, terminal_damping_steps=2
-        ),
-        theta=0.5,
+        grid=GridConfig(points=grid_size, time_steps=time_steps),
+        stepper=CrankNicolson(theta=0.5, terminal_damping_steps=2),
     )
     return SnowballPDESolver(params=params)
 

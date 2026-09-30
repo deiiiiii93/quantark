@@ -79,9 +79,7 @@ def _mcp(**kw):
 
 
 def _pdep(event_damping_steps=1, **kw):
-    import dataclasses
-
-    from quantark.asset.equity.engine.pde.grid import GridConfig
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
     from quantark.asset.equity.param import PDEParams
 
     # Pinned to the legacy event discretization the phase0/phase4 frozen
@@ -90,10 +88,8 @@ def _pdep(event_damping_steps=1, **kw):
     # characterizing the execution-seam refactor, not the event semantics.
     # One event damping step is the pre-decouple 1D legacy.
     kw.setdefault("event_projection", "nodal")
-    grid = kw.pop("grid", None) or GridConfig()
-    if grid.event_damping_steps is None:
-        grid = dataclasses.replace(grid, event_damping_steps=event_damping_steps)
-    return PDEParams(grid=grid, **kw)
+    kw.setdefault("stepper", CrankNicolson(event_damping_steps=event_damping_steps))
+    return PDEParams(**kw)
 
 
 def _pdep_refined(**kw):

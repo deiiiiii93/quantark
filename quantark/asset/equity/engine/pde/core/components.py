@@ -350,19 +350,14 @@ class CrankNicolson:
         return out
 
 
-def scheme_stepper(params, config) -> CrankNicolson:
-    """The four scheme settings from their 0.6.0 homes (``PDEParams.theta`` /
-    ``event_theta``, ``GridConfig`` damping counts).
-
-    0.6.0 home of the four settings; Task 12 replaces it with
-    ``params.stepper.resolved(route.damping_defaults)``.
-    """
-    return CrankNicolson(
-        theta=float(params.theta),
-        event_theta=float(getattr(params, "event_theta", 1.0)),
-        terminal_damping_steps=int(config.terminal_damping_steps),
-        event_damping_steps=int(config.event_damping_steps),
-    )
+def resolve_stepper(params, damping_defaults):
+    """The stepper a route marches with: the built-in with ``None`` damping counts
+    resolved to the route's defaults (``grid.config.DAMPING_DEFAULTS``); any
+    other stepper as given."""
+    stepper = params.stepper
+    if type(stepper) is CrankNicolson:
+        return stepper.resolved(damping_defaults)
+    return stepper
 
 
 # --- the readout ---------------------------------------------------------------

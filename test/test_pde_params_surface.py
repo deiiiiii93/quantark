@@ -36,11 +36,12 @@ def test_resolved_grid_is_the_requested_preset_expansion():
 def test_params_clone_round_trips():
     # Review Focus 2: adapters deep-copy, pools pickle, callers replace().
     # pickle round-trips objects this test just built -- no untrusted input.
-    p = PDEParams(accuracy="fast", grid=GridConfig(points=300, bounds=(50.0, None)), theta=1.0)
+    p = PDEParams(accuracy="fast", grid=GridConfig(points=300, bounds=(50.0, None)),
+                  stepper=CrankNicolson(theta=1.0))
     assert copy.deepcopy(p) == p
     assert pickle.loads(pickle.dumps(p)) == p
-    q = dataclasses.replace(p, theta=0.5)
-    assert q.theta == 0.5 and q.grid == p.grid
+    q = dataclasses.replace(p, stepper=CrankNicolson(theta=0.5))
+    assert q.stepper.theta == 0.5 and q.grid == p.grid
     g = pickle.loads(pickle.dumps(p.grid))
     assert g == p.grid and dataclasses.replace(g, points=301).points == 301
 
@@ -64,7 +65,7 @@ def test_intraday_method_label_unchanged():
     from quantark.intraday.engines.pde import PDERoute
 
     assert PDERoute._method(SnowballPDESolver(PDEParams())) == "pde_rannacher_theta0.5"
-    no_term = SnowballPDESolver(PDEParams(grid=GridConfig(terminal_damping_steps=0)))
+    no_term = SnowballPDESolver(PDEParams(stepper=CrankNicolson(terminal_damping_steps=0)))
     assert PDERoute._method(no_term) == "pde_cn_theta0.5"
 
 
@@ -110,15 +111,14 @@ def test_ki_monitoring_mode_removed_from_pde_only():
 def test_pdeparams_field_list_is_final():
     own = [f.name for f in dataclasses.fields(PDEParams)
            if f.name not in ("bump_size", "bump_config", "bus_days_in_year")]
-    assert own == ["accuracy", "grid", "theta", "event_theta", "event_projection",
+    assert own == ["accuracy", "grid", "stepper", "operator", "readout", "event_projection",
                    "cache_enabled"]
 
 
 def test_gridconfig_field_list_is_final():
     assert [f.name for f in dataclasses.fields(GridConfig)] == [
         "points", "steps_per_day", "time_steps", "eps_crit", "num_std", "bounds",
-        "max_points", "max_steps", "day_count", "terminal_damping_steps",
-        "event_damping_steps"]
+        "max_points", "max_steps", "day_count"]
 
 
 def _removed_maps():
@@ -151,12 +151,12 @@ def test_every_removed_dcn_name_names_its_replacement(name):
 def test_from_config_round_trip_and_yaml_bounds_become_a_tuple(tmp_path):
     import json
 
-    cfg = {"engine": "pde", "accuracy": "high", "theta": 1.0,
+    cfg = {"engine": "pde", "accuracy": "high", "stepper": {"theta": 1.0},
            "grid": {"points": 900, "bounds": [None, 400.0], "time_steps": 800}}
     path = tmp_path / "pde.json"
     path.write_text(json.dumps(cfg))
     p = PDEParams.from_config(path, cache_enabled=False)
-    assert p.accuracy == "high" and p.theta == 1.0 and p.cache_enabled is False
+    assert p.accuracy == "high" and p.stepper == CrankNicolson(theta=1.0) and p.cache_enabled is False
     assert p.grid.bounds == (None, 400.0) and hash(p.grid.key)   # Review Focus 1
     assert p.resolved_grid().time_steps == 800
 
@@ -221,3 +221,82 @@ def test_use_rannacher_replacement_covers_the_2d_event_damping():
     migration text must say how to keep that."""
     removed = _removed_maps()[0]
     assert "event_damping_steps=0" in removed["use_rannacher"]
+
+
+# --- the scheme relocation (0.7.0; spec 2 §4.1-§4.5) --------------------------------
+import re
+
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+
+
+@pytest.mark.parametrize("kw,fragment", [
+    ({"theta": 1.0}, "stepper=CrankNicolson(theta=...)"),
+    ({"event_theta": 0.7}, "stepper=CrankNicolson(event_theta=...)"),
+])
+def test_removed_scheme_names_on_pdeparams_name_the_stepper(kw, fragment):
+    with pytest.raises(ValidationError, match=re.escape(fragment)):
+        PDEParams(**kw)
+
+
+@pytest.mark.parametrize("name", ["terminal_damping_steps", "event_damping_steps"])
+def test_removed_damping_counts_on_gridconfig_name_the_stepper(name):
+    with pytest.raises(ValidationError, match=re.escape(f"PDEParams(stepper=CrankNicolson({name}=N))")):
+        GridConfig(**{name: 1})
+
+
+def test_removed_in_070_names_say_070():
+    with pytest.raises(ValidationError, match="removed in 0.7.0"):
+        PDEParams(theta=1.0)
+
+
+def test_default_stepper_is_crank_nicolson_and_round_trips_from_config():
+    assert PDEParams().stepper == CrankNicolson()
+    p = PDEParams.from_config({"stepper": {"theta": 1.0, "terminal_damping_steps": 0}})
+    assert p.stepper == CrankNicolson(theta=1.0, terminal_damping_steps=0)
+
+
+@pytest.mark.parametrize("key", ["operator", "readout"])
+def test_components_cannot_be_named_from_a_config_file(key):
+    with pytest.raises(ValidationError, match=key):
+        PDEParams.from_config({key: {}})
+
+
+def test_gridconfig_key_has_nine_entries():
+    assert [f.name for f in dataclasses.fields(GridConfig)] == [
+        "points", "steps_per_day", "time_steps", "eps_crit", "num_std", "bounds",
+        "max_points", "max_steps", "day_count"]
+    assert len(GridConfig().key) == 9
+
+
+def test_crank_nicolson_validates_its_four_settings():
+    for bad in ({"theta": 1.5}, {"event_theta": 0.0}, {"terminal_damping_steps": -1},
+                {"event_damping_steps": 1.5}, {"event_damping_steps": True}):
+        with pytest.raises(ValidationError):
+            CrankNicolson(**bad)
+
+
+def test_stepper_is_honoured_on_dcn_as_counts_and_rejected_as_a_class():
+    from quantark.asset.equity.engine.pde import LocalVolPDESolver
+    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+
+    from pde_core.components_fixtures import ShiftedOperatorStub
+
+    DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=3)))   # honoured
+
+    class Custom(CrankNicolson):
+        pass
+
+    with pytest.raises(ValidationError, match="sub-project 3"):
+        DCNPDEEngine(params=PDEParams(stepper=Custom()))
+    with pytest.raises(ValidationError, match="sub-project 3"):
+        LocalVolPDESolver(params=PDEParams(operator=ShiftedOperatorStub()))
+
+
+def test_a_component_missing_its_methods_is_rejected():
+    class NoStep:
+        def schedule(self, layout): ...
+
+        def evidence(self): return {}
+
+    with pytest.raises(ValidationError, match="step"):
+        PDEParams(stepper=NoStep())

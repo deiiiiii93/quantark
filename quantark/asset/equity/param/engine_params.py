@@ -434,18 +434,25 @@ class PDEParams(EngineParams):
       field replaces that preset value; the rest inherit. Exactly one time
       basis (``steps_per_day`` or ``time_steps``) is in force after
       resolution; setting one clears the other.
-    - ``theta`` -- ringing a damping step does not cure, or a more diffusive
-      scheme. 0.5 is Crank-Nicolson (second order in time), 1.0 backward
-      Euler (first order). Validated to [0, 1].
-    - ``event_theta`` -- studying damping strength after events. The weight
-      on the ``event_damping_steps`` after each interior event; terminal
-      damping steps always use 1.0.
+    - ``stepper`` -- the time stepper. ``None`` is the built-in
+      ``CrankNicolson()``; its four settings are the scheme's: ``theta`` (0.5
+      Crank-Nicolson, 1.0 backward Euler; change it for ringing damping does
+      not cure), ``event_theta`` (the weight on the damped steps after each
+      interior event), ``terminal_damping_steps`` and ``event_damping_steps``
+      (``None`` = the route's defaults, 0 disables). A custom stepper runs on
+      the shared-grid routes only.
+    - ``operator`` -- the spatial operator. ``None`` is the built-in
+      ``CentralDifference()``; a custom operator must support the route's
+      samples. Constructed in code only (not from a config file).
+    - ``readout`` -- how price and delta/gamma are read off the solution.
+      ``None`` is the built-in ``StandardReadout()``. Constructed in code only.
     - ``event_projection`` -- validating the event treatment. ``None`` is the
       route's own treatment (CELL_AVERAGE on the shared-grid autocallable
       solvers); explicit CELL_AVERAGE splits the trigger cell by its exact
       overlap, explicit NODAL assigns whole nodes. Lower-case strings coerce.
     - ``cache_enabled`` -- memory pressure, or a fresh solve every call. Same
-      numbers either way.
+      numbers to round-off: a cached run shares one factorization across
+      intervals whose dt differ by an ULP (Review Focus 5).
     - ``bump_config`` (inherited) -- bump sizes for numerical Greeks.
 
     Routes other than the shared-grid solvers (local-vol vanilla and barrier,
@@ -458,9 +465,11 @@ class PDEParams(EngineParams):
     # at module load; validated in __post_init__).
     accuracy: str = "standard"
     grid: Optional[object] = None
-    # Scheme: 0.5 = Crank-Nicolson, 1.0 = backward Euler.
-    theta: float = 0.5
-    event_theta: float = 1.0
+    # Components (spec 2 §4.1). None = the built-in, normalised in __post_init__
+    # (param must not import engine.pde at module load: typed loosely here).
+    stepper: Optional[object] = None
+    operator: Optional[object] = None
+    readout: Optional[object] = None
     # Discrete event operators (coupon/KO/KI jumps). None = the route's own
     # treatment (decision 15): CELL_AVERAGE on the shared-grid autocallable
     # solvers (1D BSM/LV and 2D Heston/SLV slice-wise; the dual-cell
@@ -491,12 +500,25 @@ class PDEParams(EngineParams):
                 f"grid must be a GridConfig, got {type(self.grid).__name__}"
             )
 
-        if not 0.0 <= self.theta <= 1.0:
-            raise ValidationError(f"theta must be in [0, 1], got {self.theta}")
-        if not 0.0 < self.event_theta <= 1.0:
-            raise ValidationError(
-                f"event_theta must be in (0, 1], got {self.event_theta}"
-            )
+        from quantark.asset.equity.engine.pde.core.components import (
+            CentralDifference,
+            CrankNicolson,
+            StandardReadout,
+        )
+
+        for name, builtin, methods in (
+            ("stepper", CrankNicolson, ("schedule", "step", "evidence")),
+            ("operator", CentralDifference, ("assemble", "evidence", "supports")),
+            ("readout", StandardReadout, ("price", "delta_gamma", "evidence")),
+        ):
+            if getattr(self, name) is None:
+                setattr(self, name, builtin())
+            missing = [m for m in methods if not hasattr(getattr(self, name), m)]
+            if missing:
+                raise ValidationError(
+                    f"PDEParams.{name} must provide {', '.join(methods)}; "
+                    f"{type(getattr(self, name)).__name__} lacks {', '.join(missing)}"
+                )
         # Coerce event_projection to the enum; None is the route's treatment.
         if self.event_projection is None:
             pass
@@ -541,6 +563,18 @@ class PDEParams(EngineParams):
         if engine is not None and str(engine).lower() != "pde":
             raise ValidationError(f"config engine {engine!r} is not 'pde'")
         data.update(overrides)
+        for key in ("operator", "readout"):
+            if key in data:
+                raise ValidationError(
+                    f"PDEParams.from_config: {key!r} cannot be named in a config file "
+                    "(custom components are constructed in code; the built-ins have no "
+                    "settings in this release)"
+                )
+        stepper = data.get("stepper")
+        if isinstance(stepper, Mapping):
+            from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+
+            data["stepper"] = CrankNicolson(**stepper)
         grid = data.get("grid")
         if isinstance(grid, Mapping):
             grid = dict(grid)
@@ -553,9 +587,10 @@ class PDEParams(EngineParams):
         """The REQUESTED grid: ``accuracy``'s shared preset under the ``grid`` overlay.
 
         This is the configuration before the ``max_steps`` cap, which binds
-        only once a maturity is known (``build_time``): a five-year
-        ``standard`` request asks 5,040 steps and gets 5,000; a three-year
-        ``high`` request asks 6,048 and gets 5,000. The delivered count is on
+        only once a maturity is known (``build_time``): a five-year monthly
+        ``standard`` snowball asks 5,040 steps and gets 4,980; a three-year
+        ``high`` one asks 6,048 and gets 4,968 (the cap bounds the count;
+        event alignment lands it below). The delivered count is on
         the solve's ``TimeLayout`` (``requested_steps``, ``actual_steps``,
         ``fill_scaled``). Routes with their own preset table (local-vol
         vanilla/barrier, DCN) resolve over that table instead.

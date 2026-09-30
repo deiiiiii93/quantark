@@ -23,6 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.engine.mc.barrier_option_mc_engine import BarrierOptionMCEngine
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.engine.pde import (
@@ -100,34 +101,37 @@ class TestRannacherTerminalSmoothing:
     @staticmethod
     def _schedule(params, terminal_damping_steps):
         """The layout-derived per-step theta of a 10-step, event-free grid."""
+        import dataclasses
         import types
 
         from quantark.asset.equity.engine.pde.grid import GridConfig, GridRequest, resolve_config
         from quantark.asset.equity.engine.pde.grid.time import build_time
 
-        cfg = resolve_config("standard", GridConfig(
-            time_steps=10, terminal_damping_steps=terminal_damping_steps))
-        from quantark.asset.equity.engine.pde.core.components import scheme_stepper
+        cfg = resolve_config("standard", GridConfig(time_steps=10))
+        from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+        from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 
         req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
                           hard_lower=None, hard_upper=None, event_times=())
         tl = build_time(req, cfg)
-        # the stepper owns the schedule (spec 2 decision 5); its counts come from the config
-        return scheme_stepper(params, cfg).schedule(types.SimpleNamespace(time=tl, request=req))
+        # the stepper owns the schedule and its counts (spec 2 decision 5)
+        stepper = dataclasses.replace(params.stepper, terminal_damping_steps=terminal_damping_steps)
+        stepper = resolve_stepper(dataclasses.replace(params, stepper=stepper), DAMPING_DEFAULTS["core"])
+        return stepper.schedule(types.SimpleNamespace(time=tl, request=req))
 
     def test_default_rannacher_smooths_first_backward_step(self):
-        params = PDEParams()  # terminal_damping_steps=1 by default
-        theta = self._schedule(params, params.resolved_grid().terminal_damping_steps)
+        params = PDEParams()  # terminal_damping_steps=None -> the route default 1
+        theta = self._schedule(params, None)
         # one terminal damping step => exactly ONE implicit-Euler step at the terminal.
         assert theta[-1] == 1.0
-        assert np.allclose(theta[:-1], params.theta)
+        assert np.allclose(theta[:-1], params.stepper.theta)
 
     def test_rannacher_steps_two_smooths_two_steps(self):
         params = PDEParams()
         theta = self._schedule(params, 2)
         assert theta[-1] == 1.0
         assert theta[-2] == 1.0
-        assert np.allclose(theta[:-2], params.theta)
+        assert np.allclose(theta[:-2], params.stepper.theta)
 
 
 # ============================================================================
@@ -383,10 +387,9 @@ class TestEventStatsThetaConsistency:
 
         def ko_prob(event_theta: float, event_steps: int) -> np.ndarray:
             solver = SnowballPDESolver(
-                PDEParams(
-                    event_theta=event_theta,
-                    grid=GridConfig(event_damping_steps=event_steps),
-                )
+                PDEParams(stepper=CrankNicolson(
+                    event_theta=event_theta, event_damping_steps=event_steps,
+                ))
             )
             return np.asarray(
                 solver.calculate_event_stats(snowball, env).ko_probability

@@ -13,6 +13,15 @@ def CFG(**kw):
     return resolve_config("standard", GridConfig(**kw) if kw else None)
 
 
+def schedule(tl, request, term=1, event=2):
+    """The stepper's θ schedule on a built time layout: 0.5 plain, 0.7 event-damped,
+    1.0 terminal-damped (damping left TimeLayout for the stepper, spec 2 §4.2)."""
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+
+    return CrankNicolson(theta=0.5, event_theta=0.7, terminal_damping_steps=term,
+                         event_damping_steps=event).schedule(types.SimpleNamespace(time=tl, request=request))
+
+
 def req(tau=1.0, events=(0.25, 0.5, 0.75)):
     return GridRequest(
         tau=tau,
@@ -87,34 +96,29 @@ def test_mandatory_overflow_keeps_nodes_sets_flag():
 
 def test_damping_steps_after_each_event_node_and_terminal():
     tl = build_time(req(), CFG())
+    theta = schedule(tl, req())
     for e in (0.25, 0.5, 0.75):
         k = tl.step_of[e]
-        assert {k - 1, k - 2} <= tl.event_damping_steps  # 2 after, backward time
+        assert theta[k - 1] == theta[k - 2] == 0.7  # 2 after, backward time
     n = tl.actual_steps
-    assert {n - 1} <= tl.terminal_damping_steps  # first backward step
+    assert theta[n - 1] == 1.0  # first backward step
 
 
 def test_damping_overlap_event_near_maturity():
-    # event node 1 fill-step from maturity: overlapping step in BOTH sets
-    tl = build_time(
-        req(tau=2.0 / 252, events=(1.0 / 252,)),
-        CFG(steps_per_day=1.0, terminal_damping_steps=1, event_damping_steps=2),
-    )
+    # event node 1 fill-step from maturity: a step both damped kinds claim
+    r = req(tau=2.0 / 252, events=(1.0 / 252,))
+    tl = build_time(r, CFG(steps_per_day=1.0))
+    theta = schedule(tl, r, term=1, event=2)
     n = tl.actual_steps
     k = tl.step_of[1.0 / 252]
-    overlap = {n - 1} & {k - 1, k - 2} if k >= 1 else set()
-    # both memberships visible; θ-precedence is the consumer's job
-    assert (n - 1) in tl.terminal_damping_steps
-    assert tl.event_damping_steps >= {s for s in (k - 1, k - 2) if s >= 0}
-    assert overlap <= tl.terminal_damping_steps
+    # the terminal damping takes precedence on the shared step
+    assert theta[n - 1] == 1.0
+    assert all(theta[s] == 0.7 for s in (k - 1, k - 2) if 0 <= s != n - 1)
 
 
 def test_zero_damping_counts_disable():
-    tl = build_time(
-        req(), CFG(terminal_damping_steps=0, event_damping_steps=0)
-    )
-    assert tl.event_damping_steps == frozenset()
-    assert tl.terminal_damping_steps == frozenset()
+    tl = build_time(req(), CFG())
+    assert (schedule(tl, req(), term=0, event=0) == 0.5).all()
 
 
 def test_immutability_and_identity():
@@ -136,7 +140,7 @@ def test_the_default_request_is_unchanged_by_the_new_field():
     assert plain == explicit and hash(plain) == hash(explicit)
     a, b = build_time(plain, CFG()), build_time(explicit, CFG())
     assert np.array_equal(a.t, b.t) and np.array_equal(a.dt, b.dt)
-    assert a.event_damping_steps == b.event_damping_steps
+    assert np.array_equal(schedule(a, plain), schedule(b, explicit))
 
 
 def test_extra_times_are_exact_nodes_without_damping():
@@ -147,9 +151,9 @@ def test_extra_times_are_exact_nodes_without_damping():
     for t in extras:
         assert tl.t[tl.step_at(t)] == pytest.approx(t, abs=1e-15)
     plain = build_time(req(), CFG())
-    assert tl.event_damping_steps.issubset(set(range(tl.actual_steps)))
-    assert len(tl.event_damping_steps) == len(plain.event_damping_steps)    # three events, damped alike
-    assert tl.terminal_damping_steps == {tl.actual_steps - 1}
+    theta, theta_plain = schedule(tl, request), schedule(plain, req())
+    assert (theta == 0.7).sum() == (theta_plain == 0.7).sum()    # three events, damped alike
+    assert np.flatnonzero(theta == 1.0).tolist() == [tl.actual_steps - 1]
 
 
 def test_an_extra_time_on_an_event_is_folded_into_it():
@@ -236,8 +240,6 @@ def test_budget_equal_to_density_fill_is_bit_identical():
     bud = build_time(req(), CFG(time_steps=dens.actual_steps))
     assert np.array_equal(dens.t, bud.t) and np.array_equal(dens.dt, bud.dt)
     assert dict(dens.step_of) == dict(bud.step_of)
-    assert dens.event_damping_steps == bud.event_damping_steps
-    assert dens.terminal_damping_steps == bud.terminal_damping_steps
 
 
 def test_density_branch_unchanged():
@@ -245,18 +247,24 @@ def test_density_branch_unchanged():
     assert tl.actual_steps == tl.requested_steps == 4 * 252
 
 
+#: The 0.6.0 TimeLayout's damping sets for these four requests, rendered as a
+#: θ schedule (0.5 plain, 0.7 event-damped, 1.0 terminal-damped); captured once
+#: at the Task 11 commit, before the sets left TimeLayout.
+_FROZEN_SCHEDULES = {
+    (1, 2): [0.5, 0.5, 0.5, 0.7, 0.7, 0.5, 0.5, 0.5, 0.7, 0.7, 0.5, 0.5, 0.5, 0.7, 0.7, 0.5, 0.5, 0.5, 0.5, 1.0],
+    (0, 1): [0.5, 0.5, 0.5, 0.5, 0.7, 0.5, 0.5, 0.5, 0.5, 0.7, 0.5, 0.5, 0.5, 0.5, 0.7, 0.5, 0.5, 0.5, 0.5, 0.5],
+    (3, 0): [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0],
+    (40, 40): [1.0] * 20,
+}
+
+
 @pytest.mark.parametrize("term,event", [(1, 2), (0, 1), (3, 0), (40, 40)])
-def test_stepper_schedule_equals_the_time_layout_schedule(term, event):
+def test_stepper_schedule_equals_the_0_6_time_layout_schedule(term, event):
     from quantark.asset.equity.engine.pde.core.components import CrankNicolson
     req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
                       hard_lower=None, hard_upper=None, event_times=(0.25, 0.5, 0.75), extra_times=(0.6,))
-    cfg = resolve_config("standard", GridConfig(time_steps=20, terminal_damping_steps=term, event_damping_steps=event))
-    time = build_time(req, cfg)
+    time = build_time(req, resolve_config("standard", GridConfig(time_steps=20)))
+    assert not hasattr(time, "event_damping_steps") and not hasattr(time, "terminal_damping_steps")
     layout = types.SimpleNamespace(time=time, request=req)
     got = CrankNicolson(theta=0.5, event_theta=0.7, terminal_damping_steps=term, event_damping_steps=event).schedule(layout)
-    want = np.full(time.actual_steps, 0.5)
-    for k in time.event_damping_steps:
-        want[k] = 0.7
-    for k in time.terminal_damping_steps:
-        want[k] = 1.0
-    assert np.array_equal(got, want)
+    assert got.tolist() == _FROZEN_SCHEDULES[(term, event)]

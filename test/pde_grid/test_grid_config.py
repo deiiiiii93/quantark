@@ -3,13 +3,16 @@
 import pytest
 
 from quantark.asset.equity.engine.pde.grid import GridConfig, resolve_config
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.util.exceptions import ValidationError
 
 
 def test_resolve_standard_fully_populated():
     c = resolve_config("standard", None)
     assert c.points == 400 and c.steps_per_day == 4.0 and c.day_count == 252
-    assert c.terminal_damping_steps == 1 and c.event_damping_steps == 2
+    assert not hasattr(c, "terminal_damping_steps") and not hasattr(c, "event_damping_steps")
+    assert DAMPING_DEFAULTS["core"] == (1, 2)   # the stepper's defaults on the core routes
     assert c.eps_crit == 0.003 and c.num_std == 4.0
     assert c.max_points == 2000 and c.max_steps == 5000
     assert c.bounds == (None, None)
@@ -38,7 +41,7 @@ def test_points_over_max_rejected():
 
 def test_negative_counts_rejected():
     with pytest.raises(ValidationError):
-        resolve_config("standard", GridConfig(event_damping_steps=-1))
+        CrankNicolson(event_damping_steps=-1)
     with pytest.raises(ValidationError):
         resolve_config("standard", GridConfig(points=0))
 
@@ -124,8 +127,9 @@ def test_positional_construction_raises_type_error():
         GridConfig(400)
 
 
-def test_key_has_eleven_entries():
-    assert len(resolve_config("standard", None).key) == 11
+def test_key_has_nine_entries():
+    # the damping counts left GridConfig for the stepper (spec 2 §4.2)
+    assert len(resolve_config("standard", None).key) == 9
 
 
 def test_shared_tables_unchanged():
@@ -207,7 +211,7 @@ def test_lv_table():
 def test_dcn_table_standard_is_todays_plan():
     cfg = resolve_config("standard", None, profiles=DCN_ACCURACY_PROFILES)
     assert (cfg.points, cfg.steps_per_day, cfg.max_points) == (801, 0.1, 2000)
-    assert (cfg.terminal_damping_steps, cfg.event_damping_steps) == (2, 2)
+    assert DAMPING_DEFAULTS["DCN"] == (2, 2)
     assert (cfg.eps_crit, cfg.num_std, cfg.max_steps, cfg.day_count) == (0.003, 4.0, 5000, 252)
     assert [
         resolve_config(a, None, profiles=DCN_ACCURACY_PROFILES).points

@@ -121,40 +121,40 @@ def test_external_layout_check_accepts_and_rejects():
 
 
 def test_damping_counts_drive_layout_damping():
-    """The damping schedule is GridConfig's two counts (spec §4.3): the
-    profile defaults (1, 2), 0 disables, explicit counts flow through."""
-    from quantark.asset.equity.engine.pde.grid import GridConfig
+    """The damping schedule is the stepper's two counts (spec 2 §4.2): the
+    route defaults (1, 2), 0 disables, explicit counts flow through."""
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson, resolve_stepper
+    from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 
-    def cfg(**kw):
-        return _MigratedProbe(params=PDEParams(grid=GridConfig(**kw))).grid_binder.config
+    def st(**kw):
+        return resolve_stepper(_MigratedProbe(params=PDEParams(stepper=CrankNicolson(**kw))).params,
+                               DAMPING_DEFAULTS["core"])
 
-    # defaults mirror the profile exactly (no repricing at defaults)
-    assert (cfg().terminal_damping_steps, cfg().event_damping_steps) == (1, 2)
-    off = cfg(terminal_damping_steps=0, event_damping_steps=0)
+    # defaults mirror the 0.6.0 profile exactly (no repricing at defaults)
+    assert (st().terminal_damping_steps, st().event_damping_steps) == (1, 2)
+    off = st(terminal_damping_steps=0, event_damping_steps=0)
     assert (off.terminal_damping_steps, off.event_damping_steps) == (0, 0)
-    multi = cfg(terminal_damping_steps=3, event_damping_steps=1)
+    multi = st(terminal_damping_steps=3, event_damping_steps=1)
     assert (multi.terminal_damping_steps, multi.event_damping_steps) == (3, 1)
 
 
 def test_damping_counts_reach_the_time_layout():
-    """End-to-end: disabled damping produces empty frozensets on the bound
-    layout; multi-step terminal damping produces that many steps."""
+    """End-to-end: disabled damping schedules no damped step on the bound
+    layout; multi-step terminal damping schedules that many steps."""
     env = create_pricing_env()
 
-    from quantark.asset.equity.engine.pde.grid import GridConfig
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson, resolve_stepper
+    from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 
     off = _MigratedProbe(
-        params=PDEParams(grid=GridConfig(terminal_damping_steps=0, event_damping_steps=0))
+        params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=0, event_damping_steps=0))
     )
     m = off.market_snapshot(OPTION, env)
     layout = off.grid_binder.bind(off.grid_request(OPTION, m, 1.0), m)
-    assert layout.time.terminal_damping_steps == frozenset()
-    assert layout.time.event_damping_steps == frozenset()
+    theta_off = resolve_stepper(off.params, DAMPING_DEFAULTS["core"]).schedule(layout)
+    assert (theta_off == 0.5).all()
 
-    multi = _MigratedProbe(params=PDEParams(grid=GridConfig(terminal_damping_steps=3)))
+    multi = _MigratedProbe(params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=3)))
     layout3 = multi.grid_binder.bind(multi.grid_request(OPTION, m, 1.0), m)
-    assert len(layout3.time.terminal_damping_steps) == 3
-    from quantark.asset.equity.engine.pde.core.components import scheme_stepper
-
-    theta = scheme_stepper(multi.params, multi.grid_binder.config).schedule(layout3)
-    assert (theta == 1.0).sum() >= 3  # damped steps are backward Euler
+    theta = resolve_stepper(multi.params, DAMPING_DEFAULTS["core"]).schedule(layout3)
+    assert (theta[-3:] == 1.0).all()  # damped steps are backward Euler

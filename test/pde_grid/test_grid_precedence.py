@@ -4,6 +4,8 @@ Rows marked "existing" pin what the builders already do; rows marked "new"
 are the resolution-time errors the 0.6.0 surface adds for combinations that
 were silent before.
 """
+import types
+
 import numpy as np
 import pytest
 
@@ -14,6 +16,7 @@ from quantark.asset.equity.engine.pde.grid import (
     MarketSnapshot,
     resolve_config,
 )
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.engine.pde.grid.space import build_space
 from quantark.asset.equity.engine.pde.grid.time import build_time
 from quantark.util.exceptions import PricingError, ValidationError
@@ -53,20 +56,24 @@ def test_t3_budget_below_interval_count_floors_to_one_per_interval():
 
 
 def test_t4_damping_never_changes_fill_and_spills_backward():  # existing
-    base = build_time(req(events=(0.5,)), cfg(time_steps=10))
-    heavy = build_time(req(events=(0.5,)),
-                       cfg(time_steps=10, event_damping_steps=7, terminal_damping_steps=3))
-    assert np.array_equal(base.t, heavy.t)
-    k = heavy.step_of[0.5]  # node 5
-    assert heavy.event_damping_steps == frozenset(range(k - 5, k))  # 7 asked, clipped at 0
-    assert heavy.terminal_damping_steps == frozenset({7, 8, 9})
+    # damping lives on the stepper (spec 2 §4.2): the time layout cannot see it,
+    # and the schedule spills backward from the event, clipped at step 0
+    r = req(events=(0.5,))
+    tl = build_time(r, cfg(time_steps=10))
+    theta = CrankNicolson(theta=0.5, event_theta=0.7, event_damping_steps=7,
+                          terminal_damping_steps=3).schedule(types.SimpleNamespace(time=tl, request=r))
+    k = tl.step_of[0.5]  # node 5
+    assert [i for i, th in enumerate(theta) if th == 0.7] == list(range(k - 5, k))  # 7 asked
+    assert [i for i, th in enumerate(theta) if th == 1.0] == [7, 8, 9]
 
 
 def test_t4_extra_times_are_not_damped():  # existing
     r = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
                     hard_lower=None, hard_upper=None, event_times=(), extra_times=(0.5,))
     tl = build_time(r, cfg(time_steps=10))
-    assert tl.event_damping_steps == frozenset()
+    theta = CrankNicolson(event_theta=0.7, terminal_damping_steps=0, event_damping_steps=2).schedule(
+        types.SimpleNamespace(time=tl, request=r))
+    assert (theta == 0.5).all()
     assert tl.t[tl.step_of[0.5]] == 0.5
 
 

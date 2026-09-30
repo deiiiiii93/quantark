@@ -18,7 +18,7 @@ import numpy as np
 from quantark.asset.equity.engine.pde.grid import resolve_bound_layout
 
 from .backends import FactorizationCache
-from .components import StandardReadout, validate_schedule
+from .components import validate_schedule
 from .identity import factorization_key, market_fingerprints, problem_identity
 from .march import march          # run resolves it here: a spy on core.prepare.march sees every entry
 from .readout import read
@@ -268,7 +268,7 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
                                   solve_state=solve_state, market=market, grid_request=grid_request,
                                   layout=layout, samples=samples, coefficients=coefficients, stepper=stepper,
                                   theta_schedule=schedule, groups=groups, factorizations=factorizations,
-                                  readout=StandardReadout(), events=events, identity=identity, market_fps=fps)
+                                  readout=solver.params.readout, events=events, identity=identity, market_fps=fps)
         if request.event_stats and adapter.supports_statistics_group:     # the statistics group (§5.4)
             statistics = StatisticsLegacy.create(problem, request.streams)
             if statistics is not None:

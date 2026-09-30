@@ -7,6 +7,8 @@ from typing import Dict, Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.localvol_greeks import local_vol_model_greeks
 from quantark.asset.equity.engine.pde.grid.config import (
@@ -56,6 +58,7 @@ class LocalVolPDESolver(BaseEngine):
                  local_vol_surface: Optional[LocalVolSurface] = None, **removed):
         reject_removed_kwargs(type(self).__name__, removed)
         super().__init__(params if params is not None else PDEParams())
+        check_route_applicability(self.params, ROUTE)  # eagerly, as DCN (spec §4.1)
         self._prebuilt = local_vol_surface
         self._greeks_smax = 0.0  # >0 pins the spatial grid across Greek bumps
 
@@ -100,12 +103,13 @@ class LocalVolPDESolver(BaseEngine):
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
         is_call = product.option_type == OptionType.CALL
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["core"])
         unit = price_european_lv_pde(
             s0=spot, strike=strike, is_call=is_call, T=T,
             lv_surface=lv, step_dt=np.diff(t_grid), r_fwd=r_fwd, carry_fwd=carry_fwd,
             n_s=int(config.points), s_max=self._greeks_smax,
-            theta=float(self.params.theta),
-            rannacher=config.terminal_damping_steps > 0,
+            theta=float(st.theta),
+            rannacher=st.terminal_damping_steps > 0,
         )
         return unit * float(getattr(product, "contract_multiplier", 1.0))
 

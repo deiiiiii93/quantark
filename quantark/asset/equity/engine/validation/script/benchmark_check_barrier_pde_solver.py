@@ -165,7 +165,6 @@ def create_pde_params(auto_grid: bool = True) -> PDEParams:
     else:
         return PDEParams(
             grid=GridConfig(points=252 * 2, time_steps=252 * 4),
-            theta=0.5,
         )
 
 

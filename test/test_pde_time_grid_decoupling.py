@@ -71,6 +71,7 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     * ``calculate_event_stats`` still reconciles its reported ``pv`` to the PDE
       price exactly (so the residual/distribution stay consistent).
     """
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
     from quantark.asset.equity.engine.pde.grid import GridConfig
     from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
         KOResetSnowballPDESolver,
@@ -83,10 +84,12 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     # (Under the corrected default the converged value reprices to ~97.976 —
     # covered by test_pde_event_projection.py.)
     coarse = KOResetSnowballPDESolver(PDEParams(
-        grid=GridConfig(points=120, event_damping_steps=1), event_projection="nodal"
+        grid=GridConfig(points=120), stepper=CrankNicolson(event_damping_steps=1),
+        event_projection="nodal",
     ))
     fine = KOResetSnowballPDESolver(PDEParams(
-        grid=GridConfig(points=240, steps_per_day=8.0, event_damping_steps=1),
+        grid=GridConfig(points=240, steps_per_day=8.0),
+        stepper=CrankNicolson(event_damping_steps=1),
         event_projection="nodal",
     ))
     pv_coarse = float(coarse.price(ko_reset_product, pricing_env))

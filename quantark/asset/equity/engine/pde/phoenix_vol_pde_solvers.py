@@ -8,6 +8,8 @@ from typing import Dict, Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
 from quantark.asset.equity.engine.pde.core.components import CentralDifference, nodal_stencil
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
@@ -489,15 +491,16 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         self._prepare_2d_continuous_ki_correction(core, product)
 
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
-        damped_keys = event_damped_step_keys(self.grid_binder.config, event_maps, core.N_T)
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["core"])
+        damped_keys = event_damped_step_keys(st, event_maps, core.N_T)
         v1_snapshots: dict[float, np.ndarray] = {}
 
         terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
         U1 = core.solve(
             is_call=True,
             scheme=self.scheme,
-            theta=float(self.params.theta),
-            rannacher=self.grid_binder.config.terminal_damping_steps > 0,
+            theta=float(st.theta),
+            rannacher=st.terminal_damping_steps > 0,
             terminal_override=terminal_v1,
             boundary_hook=self._boundary_hook(
                 core, product, pricing_env, knocked_in=True
@@ -506,7 +509,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
                 core, product, pricing_env, T, event_maps, v1_snapshots
             ),
             damped_step_keys=damped_keys,
-            damped_step_theta=float(self.params.event_theta),
+            damped_step_theta=float(st.event_theta),
         )
 
         if knocked_in:
@@ -518,8 +521,8 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             surface = core.solve(
                 is_call=True,
                 scheme=self.scheme,
-                theta=float(self.params.theta),
-                rannacher=self.grid_binder.config.terminal_damping_steps > 0,
+                theta=float(st.theta),
+                rannacher=st.terminal_damping_steps > 0,
                 terminal_override=terminal_v0,
                 boundary_hook=self._boundary_hook(
                     core, product, pricing_env, knocked_in=False
@@ -528,7 +531,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
                     core, product, pricing_env, T, event_maps, v1_snapshots
                 ),
                 damped_step_keys=damped_keys,
-                damped_step_theta=float(self.params.event_theta),
+                damped_step_theta=float(st.event_theta),
             )
 
         if self._t0_readout_override is not None:

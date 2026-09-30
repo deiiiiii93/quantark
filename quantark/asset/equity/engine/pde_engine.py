@@ -72,7 +72,7 @@ class PDEEngine(BaseEngine):
         engine = PDEEngine(PDEParams(grid=GridConfig(points=500)))
 
         # Scheme weight: 0.5 is Crank-Nicolson (default), 1.0 backward Euler
-        engine = PDEEngine(PDEParams(theta=1.0))
+        engine = PDEEngine(PDEParams(stepper=CrankNicolson(theta=1.0)))
 
         # Integration with GreeksCalculator
         greeks = calculator.calculate_numerical_greeks(

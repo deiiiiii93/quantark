@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any, Mapping, Optional, Sequence
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from quantark.asset.equity.engine.pde.grid.config import resolve_config
+from quantark.asset.equity.engine.pde.grid.config import resolved_grid_evidence
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
@@ -467,7 +467,7 @@ class SnowballPDECandidate(_SnowballArm):
         return {
             **self._params,
             "engine": "SnowballPDESolver",
-            "grid": engine_config(resolve_config(accuracy, None)),
+            "grid": resolved_grid_evidence(PDEParams(accuracy=accuracy)),
         }
 
     def _greeks(self, case, accuracy: str) -> dict:

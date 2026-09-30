@@ -13,6 +13,8 @@ from typing import Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.pde.grid.config import (
     LV_UNIFORM_ACCURACY_PROFILES,
@@ -188,12 +190,13 @@ class LocalVolBarrierPDESolver(BaseEngine):
 
         observe_steps = None if continuous else [_obs_index(float(d)) for d in dates]
         is_call = product.option_type == OptionType.CALL
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["core"])
 
         def price_of_rebate(reb):
             return price_barrier_lv_pde(float(env.spot), float(product.strike), is_call, T, lv,
                                         np.diff(t_grid), r_fwd, carry_fwd, rebate=reb,
                                         continuous=continuous, observe_steps=observe_steps,
-                                        n_s=int(config.points), theta=float(self.params.theta),
+                                        n_s=int(config.points), theta=float(st.theta),
                                         **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)

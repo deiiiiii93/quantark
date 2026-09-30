@@ -5,6 +5,7 @@ import pytest
 from scipy.stats import norm
 
 from quantark.asset.equity.engine.mc.dcn_mc_engine import DCNMCEngine
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     DCNPDEEngine,
     _operator_coeffs,
@@ -174,11 +175,11 @@ def test_dcn_accepts_nodal_and_honours_counts_and_theta():
     p = make_dcn(DCN_A)
     base = DCNPDEEngine().price(p, env)
     assert DCNPDEEngine(params=PDEParams(event_projection="nodal")).price(p, env) == base
-    one = DCNPDEEngine(params=PDEParams(grid=GridConfig(
+    one = DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(
         terminal_damping_steps=1, event_damping_steps=1
     ))).price(p, env)
     assert one != base                                     # counts applied, not "> 0"
-    assert DCNPDEEngine(params=PDEParams(theta=1.0)).price(p, env) != base
+    assert DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(theta=1.0))).price(p, env) != base
 
 
 def test_dcn_points_floor_and_removed_names():

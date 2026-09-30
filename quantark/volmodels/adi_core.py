@@ -1266,7 +1266,7 @@ class HestonSLVADICore:
         damped_step_keys (optional set of int): integer step indices
         (round(tau/dt) of the step's landing node) that run as damped
         Douglas steps at theta = damped_step_theta (the wrappers pass
-        params.event_theta; 1.0 = fully implicit) — a per-event Rannacher
+        stepper.event_theta; 1.0 = fully implicit) — a per-event Rannacher
         restart damping the modes a discrete event jump excites
         (Pooley-Vetzal-Forsyth; Giles-Carter). Craig-Sneyd also restarts as
         damped Douglas on these steps.
@@ -1305,7 +1305,7 @@ class HestonSLVADICore:
                     and int(round(tau / self.dt)) in damped_step_keys
                 ):
                     # Per-event Rannacher restart: damped Douglas step at
-                    # the caller's event theta (params.event_theta).
+                    # the caller's event theta (stepper.event_theta).
                     U = self._douglas_step(
                         U, self.dt, tau, float(damped_step_theta), t_mid
                     )

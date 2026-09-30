@@ -1,6 +1,7 @@
 import pytest
 from datetime import datetime
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment, FxPricingEnvironment
 from quantark.asset.equity.product.option import EuropeanVanillaOption
@@ -63,17 +64,18 @@ def test_equity_heston_pde_gamma_positive_and_reasonable():
     assert g["theta"] < 0
 
 
-def test_2d_event_damping_keys_follow_resolved_grid_counts():
-    from quantark.asset.equity.engine.pde.grid.config import GridConfig, resolve_config
+def test_2d_event_damping_keys_follow_resolved_stepper_counts():
+    from quantark.asset.equity.engine.pde.core.components import resolve_stepper
+    from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
     from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import event_damped_step_keys
+    from quantark.asset.equity.param import PDEParams
+
+    def st(**kw):
+        return resolve_stepper(PDEParams(stepper=CrankNicolson(**kw)), DAMPING_DEFAULTS["core"])
 
     maps = {"ko": {10: None, 20: None}, "ki": {0: None}}
-    default = resolve_config("standard", None)  # event_damping_steps = 2
-    assert event_damped_step_keys(default, maps, 100) == {11, 12, 21, 22}
-    off = resolve_config("standard", GridConfig(event_damping_steps=0))
-    assert event_damped_step_keys(off, maps, 100) is None
-    one = resolve_config("standard", GridConfig(event_damping_steps=1))
-    assert event_damped_step_keys(one, maps, 100) == {11, 21}
+    assert event_damped_step_keys(st(), maps, 100) == {11, 12, 21, 22}  # default 2
+    assert event_damped_step_keys(st(event_damping_steps=0), maps, 100) is None
+    assert event_damped_step_keys(st(event_damping_steps=1), maps, 100) == {11, 21}
     # the two counts are independent (the old use_rannacher master switch is gone)
-    no_terminal = resolve_config("standard", GridConfig(terminal_damping_steps=0))
-    assert event_damped_step_keys(no_terminal, maps, 100) == {11, 12, 21, 22}
+    assert event_damped_step_keys(st(terminal_damping_steps=0), maps, 100) == {11, 12, 21, 22}

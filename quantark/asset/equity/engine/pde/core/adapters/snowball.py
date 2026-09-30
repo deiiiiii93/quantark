@@ -462,17 +462,24 @@ class LocalVolAdapterMixin:
         self.solver._active_s_vec = layout.spatial.s   # a session builds them before any solve
         return super().step_sets(product, env, layout, tau)
 
+    def samples(self, product, env, layout, tau):
+        # a local-vol row per step on the solve's S grid (the route's _build_step_coefficients)
+        from ..samples import sample_local_vol
+
+        solver = self.solver
+        return sample_local_vol(env, layout.time.t, layout.spatial.s, solver._active_lv_surface,
+                                ref_strike=self._strike(product, env))
+
     def coefficient_key(self, product, env, layout, fps):
         # the surface the local vol is sampled from is a sampler input (decision 18):
         # no fingerprint for it, no key
-        from ..components import CentralDifference
         from ..identity import coefficient_key, component_fingerprint
 
         surface_fp = component_fingerprint(self.solver._active_lv_surface)
         if surface_fp is None:
             return None
         return coefficient_key(layout.fingerprint, fps, self._strike(product, env),
-                               component_fingerprint(CentralDifference()), surface_fp)
+                               component_fingerprint(self.solver.params.operator), surface_fp)
 
 
 class LocalVolSnowballAdapter(LocalVolAdapterMixin, SnowballAdapter):

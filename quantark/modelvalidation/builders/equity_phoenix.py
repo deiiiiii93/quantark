@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
-from quantark.asset.equity.engine.pde.grid.config import resolve_config
+from quantark.asset.equity.engine.pde.grid.config import resolved_grid_evidence
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
@@ -335,7 +335,7 @@ class PhoenixPDECandidate(_PhoenixArm):
         return {
             **self._params,
             "engine": "PhoenixPDESolver",
-            "grid": engine_config(resolve_config(accuracy, None)),
+            "grid": resolved_grid_evidence(PDEParams(accuracy=accuracy)),
         }
 
     def _greeks(self, case, accuracy: str) -> dict:

@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import products
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.product.option import (
     EuropeanVanillaOption,
     AmericanOption,
@@ -104,23 +105,25 @@ class TestPDEParams:
         assert params.accuracy == "standard"
         assert params.grid is None
         assert params.bus_days_in_year == 252
-        assert params.theta == 0.5
+        assert params.stepper == CrankNicolson()
+        assert params.stepper.theta == 0.5
 
     def test_custom_values(self):
         """Test custom parameter values."""
-        params = PDEParams(grid=GridConfig(points=100, time_steps=50), theta=1.0)
+        params = PDEParams(grid=GridConfig(points=100, time_steps=50),
+                           stepper=CrankNicolson(theta=1.0))
 
         assert params.grid.points == 100
         assert params.grid.time_steps == 50
-        assert params.theta == 1.0
+        assert params.stepper.theta == 1.0
 
     def test_invalid_theta(self):
         """Test that invalid theta raises error."""
         with pytest.raises(ValidationError):
-            PDEParams(theta=-0.1)
+            PDEParams(stepper=CrankNicolson(theta=-0.1))
 
         with pytest.raises(ValidationError):
-            PDEParams(theta=1.5)
+            PDEParams(stepper=CrankNicolson(theta=1.5))
 
     # time_grid_type tests retired with the knob (0.4.0): the grid layer
     # has ONE time algorithm; accuracy/GridConfig validation is covered in

@@ -6,8 +6,8 @@ keyed on it); fill between nodes is
 sized by the time basis in force — the ``steps_per_day`` density or the
 ``time_steps`` budget (no per-interval floor beyond 1 — the ≥10
 floor caused the historical ~10x grid inflation); ``max_steps`` caps fill via
-extras-scaling and can never move or drop a node. Damping schedules for the
-θ-loop and the 2D ADI stepper are derived here, once.
+extras-scaling and can never move or drop a node. The damping schedule is the
+stepper's (``CrankNicolson.schedule``).
 """
 
 from __future__ import annotations
@@ -33,8 +33,6 @@ class TimeLayout:
     t: np.ndarray
     dt: np.ndarray
     step_of: Mapping[float, int]
-    event_damping_steps: frozenset
-    terminal_damping_steps: frozenset
     requested_steps: int
     actual_steps: int
     cap_exceeded: bool
@@ -163,20 +161,7 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
         assert t[k] == e
         step_of[e] = k
 
-    # Damping restarts follow EVENT nodes only; an extra node is a readout
-    # point and must not degrade the scheme around it.
-    event_damp = frozenset(
-        step_of[e] - j
-        for e in events
-        for j in range(1, int(config.event_damping_steps) + 1)
-        if step_of[e] - j >= 0
-    )
     n_steps = len(dt)
-    term_damp = frozenset(
-        n_steps - j
-        for j in range(1, int(config.terminal_damping_steps) + 1)
-        if n_steps - j >= 0
-    )
 
     t.setflags(write=False)
     dt.setflags(write=False)
@@ -184,8 +169,6 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
         t=t,
         dt=dt,
         step_of=MappingProxyType(dict(step_of)),
-        event_damping_steps=event_damp,
-        terminal_damping_steps=term_damp,
         requested_steps=requested,
         actual_steps=n_steps,
         cap_exceeded=cap_exceeded,

@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from datetime import datetime
 from quantark.param import GridVolSurface, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.product.option import EuropeanVanillaOption
@@ -125,15 +126,15 @@ def test_lv_vanilla_time_and_space_reach_the_kernel(monkeypatch, grid, points, s
 
 def test_lv_vanilla_theta_and_damping(monkeypatch):
     seen = _capture(monkeypatch)
-    LocalVolPDESolver(params=PDEParams(theta=1.0)).price(_call(), _env())
+    LocalVolPDESolver(params=PDEParams(stepper=CrankNicolson(theta=1.0))).price(_call(), _env())
     assert seen["theta"] == 1.0 and seen["rannacher"] is True
     LocalVolPDESolver(
-        params=PDEParams(grid=GridConfig(terminal_damping_steps=0))
+        params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=0))
     ).price(_call(), _env())
     assert seen["rannacher"] is False
     with pytest.raises(ValidationError, match="terminal_damping_steps"):
         LocalVolPDESolver(
-            params=PDEParams(grid=GridConfig(terminal_damping_steps=2))
+            params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=2))
         ).price(_call(), _env())
 
 
@@ -145,8 +146,8 @@ def test_lv_vanilla_rejects_explicit_domain_fields(grid):
 
 
 def test_lv_vanilla_vacuous_and_noop_fields_accepted():
-    p = PDEParams(event_theta=0.7, event_projection="nodal", cache_enabled=False,
-                  grid=GridConfig(event_damping_steps=3))
+    p = PDEParams(stepper=CrankNicolson(event_theta=0.7, event_damping_steps=3),
+                  event_projection="nodal", cache_enabled=False)
     assert LocalVolPDESolver(params=p).price(_call(), _env()) > 0
 
 

@@ -24,6 +24,7 @@ import math
 import pytest
 
 from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 
@@ -64,7 +65,8 @@ def _solver(spd: int) -> SnowballPDESolver:
 
     return SnowballPDESolver(
         PDEParams(
-            grid=GridConfig(points=300, steps_per_day=float(spd), event_damping_steps=1),
+            grid=GridConfig(points=300, steps_per_day=float(spd)),
+            stepper=CrankNicolson(event_damping_steps=1),
             event_projection="nodal",
         )
     )

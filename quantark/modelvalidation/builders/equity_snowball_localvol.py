@@ -35,7 +35,7 @@ from typing import Any, Mapping, Sequence
 from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
     LocalVolSnowballMCEngine,
 )
-from quantark.asset.equity.engine.pde.grid.config import resolve_config
+from quantark.asset.equity.engine.pde.grid.config import resolved_grid_evidence
 from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
     LocalVolSnowballPDESolver,
 )
@@ -54,7 +54,6 @@ from quantark.modelvalidation.builders.equity_snowball import (
     make_snowball,
 )
 from quantark.modelvalidation.candidate import CandidateResult, LadderRung
-from quantark.modelvalidation.engine_config import engine_config
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
 from quantark.modelvalidation.study import SamplingPolicy
@@ -296,7 +295,7 @@ class LocalVolPDECandidate(_LocalVolArm):
         return {
             **self._params,
             "engine": "LocalVolSnowballPDESolver",
-            "grid": engine_config(resolve_config(accuracy, None)),
+            "grid": resolved_grid_evidence(PDEParams(accuracy=accuracy)),
         }
 
     def _greeks(self, case, accuracy: str) -> dict:
