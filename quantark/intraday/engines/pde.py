@@ -136,7 +136,9 @@ def _time_fill_for(ctx, solver, grid, numbers, dx_min, max_steps):
         if candidate.requested_steps > max_steps:
             return best
         best = (factor, int(candidate.requested_steps))
-        if time_resolved(_time_status(ctx, solver, SimpleNamespace(time=candidate), numbers, dx_min)):
+        # the stepper's schedule reads the event times from the request the candidate was built from
+        if time_resolved(_time_status(ctx, solver, SimpleNamespace(time=candidate, request=layout.request),
+                                      numbers, dx_min)):
             return best
 
 

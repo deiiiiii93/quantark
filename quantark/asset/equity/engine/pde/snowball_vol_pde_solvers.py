@@ -9,6 +9,11 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
+from quantark.asset.equity.engine.pde.core.components import CentralDifference, nodal_stencil
+from quantark.asset.equity.engine.pde.core.samples import (
+    _validated_local_vol_row,
+    sample_local_vol,
+)
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.pde.vol_continuous_ki import (
     Heston2DBarrierCrossingMixin,
@@ -144,68 +149,20 @@ class LocalVolSnowballPDESolver(LocalVolBarrierCrossingMixin, SnowballPDESolver)
         dx_vec: np.ndarray,
         num_x: int,
     ) -> StepCoefficients:
-        if self._active_lv_surface is None or self._active_s_vec is None:
-            raise PricingError("Local-vol surface is not initialized for this solve")
-
-        tc = TermCoefficients.from_env(
-            pricing_env, np.asarray(t_vec, dtype=float), ref_strike=float(ref_strike)
+        # The route's model samples (a local-vol row per step at the interval
+        # midpoint); the built-in operator builds the stencil (spec 2 §5.2 step 8).
+        samples = sample_local_vol(
+            pricing_env, t_vec, self._active_s_vec, self._active_lv_surface,
+            ref_strike=ref_strike,
         )
-        s_vec = np.asarray(self._active_s_vec, dtype=float)
-        dt = np.diff(np.asarray(t_vec, dtype=float))
-        lcu_sets = []
-        for j, dt_j in enumerate(dt):
-            t_mid = float(t_vec[j] + 0.5 * dt_j)
-            sigma_vec = np.asarray(self._active_lv_surface.local_vol(s_vec, t_mid), dtype=float)
-            lcu_sets.append(
-                self._local_vol_coefficients(
-                    float(tc.fwd_rates[j]),
-                    float(tc.fwd_carry[j]),
-                    sigma_vec,
-                    dx_vec,
-                    num_x,
-                )
-            )
-        return StepCoefficients(
-            lcu_sets=lcu_sets,
-            set_index=np.arange(len(lcu_sets), dtype=int),
-            n_unique=len(lcu_sets),
-        )
+        return CentralDifference().assemble_sets(samples, dx_vec, num_x)
 
     def _flat_exact_step_coefficients(self, sc, r, q, sigma, dx_vec, num_x):
         return sc
 
     @staticmethod
     def _local_vol_coefficients(r, q, sigma_vec, dx_vec, num_x):
-        sigma_vec = np.asarray(sigma_vec, dtype=float)
-        if sigma_vec.shape[0] != num_x:
-            raise ValidationError("local-vol vector length must match PDE spatial grid")
-        if not np.all(np.isfinite(sigma_vec)) or np.any(sigma_vec <= 0.0):
-            raise ValidationError("local-vol surface returned non-positive or non-finite vols")
-
-        diff = 0.5 * sigma_vec * sigma_vec
-        drift = float(r) - float(q) - diff
-        dx_vec = np.asarray(dx_vec, dtype=float)
-
-        if is_close(float(np.max(dx_vec)), float(np.min(dx_vec))):
-            dx = float(dx_vec[0])
-            l = diff / (dx * dx) - drift / (2.0 * dx)
-            c = -2.0 * diff / (dx * dx) - float(r)
-            u = diff / (dx * dx) + drift / (2.0 * dx)
-            return l, c, u
-
-        h_m, h_p = dx_vec[:-1], dx_vec[1:]
-        h_sum, h_prod = h_m + h_p, h_m * h_p
-        d_i = diff[1:-1]
-        mu_i = drift[1:-1]
-        l = np.zeros(num_x)
-        c = np.zeros(num_x)
-        u = np.zeros(num_x)
-        l[1:-1] = 2.0 * d_i / (h_m * h_sum) - mu_i * h_p / (h_m * h_sum)
-        c[1:-1] = -2.0 * d_i / h_prod + mu_i * (h_p - h_m) / h_prod - float(r)
-        u[1:-1] = 2.0 * d_i / (h_p * h_sum) + mu_i * h_m / (h_p * h_sum)
-        l[0], c[0], u[0] = l[1], c[1], u[1]
-        l[-1], c[-1], u[-1] = l[-2], c[-2], u[-2]
-        return l, c, u
+        return nodal_stencil(r, q, _validated_local_vol_row(sigma_vec, num_x), dx_vec, num_x)
 
 
 

@@ -24,8 +24,9 @@ from scipy.special import ndtr
 
 _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
+from quantark.asset.equity.engine.pde.core.backends import FactorizationCache, banded_factor
+from quantark.asset.equity.engine.pde.core.groups import Backend
 from quantark.asset.equity.engine.pde.base_pde_solver import (
-    BANDED_CACHE_MAX_ENTRIES,
     GRID_CACHE_MAX_ENTRIES,
     _CACHE_KEYING,
     _market_scoped,
@@ -321,8 +322,8 @@ class SnowballPDESolver(BasePDESolver):
         # Time tracking
         self._total_tau: float = 0.0
         self._structured_terminal_delay_df: float = 1.0
-        self._banded_cache: "OrderedDict[Tuple[float, float], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]" = OrderedDict()
-        self._banded_cache_max_entries = BANDED_CACHE_MAX_ENTRIES
+        # The banded store is BasePDESolver._factorizations (``_banded_cache``
+        # is its read-only view), LRU-bounded at BANDED_CACHE_MAX_ENTRIES.
         # Session-injected banded factorization pack (read-only; see
         # BasePDESolver._session_matrix_pack for the contract).
         self._session_banded_pack = None
@@ -2699,52 +2700,15 @@ class SnowballPDESolver(BasePDESolver):
         theta: float,
         coeff_key: int = 0,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        # A prepared session's pack first, then the per-solver LRU store.
         pack = self._session_banded_pack
         if pack is not None:
-            # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.
-            hit = pack.get((coeff_key, round(dt, 12), float(theta)))
+            hit = pack.get(FactorizationCache.key(coeff_key, dt, theta))
             if hit is not None:
                 return hit
-        if not self._is_cache_enabled():
-            lower = -theta * dt * l[2:-1]
-            main = 1.0 - theta * dt * c[1:-1]
-            upper = -theta * dt * u[1:-2]
-
-            banded = np.zeros((3, len(main)))
-            banded[0, 1:] = upper
-            banded[1, :] = main
-            banded[2, :-1] = lower
-
-            lower1 = (1.0 - theta) * dt * l[2:-1]
-            main1 = 1.0 + (1.0 - theta) * dt * c[1:-1]
-            upper1 = (1.0 - theta) * dt * u[1:-2]
-            return banded, lower1, main1, upper1
-
-        # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.
-        key = (coeff_key, round(dt, 12), float(theta))
-        cached = self._banded_cache.get(key)
-        if cached is not None:
-            self._banded_cache.move_to_end(key)
-            return cached
-
-        lower = -theta * dt * l[2:-1]
-        main = 1.0 - theta * dt * c[1:-1]
-        upper = -theta * dt * u[1:-2]
-
-        banded = np.zeros((3, len(main)))
-        banded[0, 1:] = upper
-        banded[1, :] = main
-        banded[2, :-1] = lower
-
-        lower1 = (1.0 - theta) * dt * l[2:-1]
-        main1 = 1.0 + (1.0 - theta) * dt * c[1:-1]
-        upper1 = (1.0 - theta) * dt * u[1:-2]
-
-        self._banded_cache[key] = (banded, lower1, main1, upper1)
-        self._banded_cache.move_to_end(key)
-        if len(self._banded_cache) > self._banded_cache_max_entries:
-            self._banded_cache.popitem(last=False)
-        return banded, lower1, main1, upper1
+        return self._factorizations.get(
+            Backend.BANDED, coeff_key, dt, theta, lambda: banded_factor(l, c, u, dt, theta)
+        )
 
     def _pack_uses_banded(self, num_x: int) -> bool:
         # The two-surface family: banded whenever the interior system is
@@ -2759,16 +2723,16 @@ class SnowballPDESolver(BasePDESolver):
         # mirroring the engine's own cache: distinct dt floats can round to
         # one 12-digit key, and the march reuses the first-built entry for
         # all of them — the pack must hold that same entry bitwise.
-        # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.
-        key = (coeff_key, round(dt, 12), float(theta))
+        key = FactorizationCache.key(coeff_key, dt, theta)
         if key in banded:
             return
-        saved, self._banded_cache = self._banded_cache, OrderedDict()
+        saved = self._factorizations
+        self._factorizations = FactorizationCache(enabled=self._cache_enabled)
         try:
             entry = self._get_banded_system(l, c, u, dt, theta, coeff_key=coeff_key)
             banded[key] = entry
         finally:
-            self._banded_cache = saved
+            self._factorizations = saved
 
     def _set_boundary_conditions_v0(
         self,

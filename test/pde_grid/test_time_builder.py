@@ -243,3 +243,20 @@ def test_budget_equal_to_density_fill_is_bit_identical():
 def test_density_branch_unchanged():
     tl = build_time(req(), CFG())
     assert tl.actual_steps == tl.requested_steps == 4 * 252
+
+
+@pytest.mark.parametrize("term,event", [(1, 2), (0, 1), (3, 0), (40, 40)])
+def test_stepper_schedule_equals_the_time_layout_schedule(term, event):
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+    req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
+                      hard_lower=None, hard_upper=None, event_times=(0.25, 0.5, 0.75), extra_times=(0.6,))
+    cfg = resolve_config("standard", GridConfig(time_steps=20, terminal_damping_steps=term, event_damping_steps=event))
+    time = build_time(req, cfg)
+    layout = types.SimpleNamespace(time=time, request=req)
+    got = CrankNicolson(theta=0.5, event_theta=0.7, terminal_damping_steps=term, event_damping_steps=event).schedule(layout)
+    want = np.full(time.actual_steps, 0.5)
+    for k in time.event_damping_steps:
+        want[k] = 0.7
+    for k in time.terminal_damping_steps:
+        want[k] = 1.0
+    assert np.array_equal(got, want)

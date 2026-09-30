@@ -26,6 +26,24 @@ from quantark.asset.equity.settlement import (
     SettlementRequest,
     SettlementResolver,
 )
+from quantark.asset.equity.engine.pde.core.backends import (
+    BANDED_CACHE_MAX_ENTRIES,
+    FactorizationCache,
+    operator_matrix,
+    sparse_lu_factor,
+)
+from quantark.asset.equity.engine.pde.core.coefficients import StepCoefficients
+from quantark.asset.equity.engine.pde.core.components import (
+    CentralDifference,
+    delta_gamma,
+    flat_exact,
+    interpolate_price,
+    scalar_stencil,
+    scheme_stepper,
+)
+from quantark.asset.equity.engine.pde.core.groups import Backend
+from quantark.asset.equity.engine.pde.core.identity import market_fingerprints
+from quantark.asset.equity.engine.pde.core.samples import sample_bsm
 from quantark.asset.equity.engine.pde.grid import (
     EventSchedule,
     GridBinder,
@@ -81,24 +99,10 @@ def _per_object_memo(market_obj, store: dict) -> Optional[dict]:
     return memo
 
 #: Operational cache sizes (spec §4.3): implementation details, not knobs.
+#: (BANDED_CACHE_MAX_ENTRIES lives with the factorization cache, core.backends.)
 GRID_CACHE_MAX_ENTRIES = 128
-BANDED_CACHE_MAX_ENTRIES = 512
 #: Product cache tokens always use the former "standard" keying.
 _CACHE_KEYING = "standard"
-
-
-def market_fingerprints(env, *, spot: bool = True) -> Dict[str, Optional[str]]:
-    """Value fingerprints of the environment's market inputs; ``None`` = none exists."""
-    from quantark.execution.cache.fingerprint import try_fingerprint
-
-    fps = {
-        "rate": try_fingerprint(env.rate_curve),
-        "div": try_fingerprint(env.div_yield),
-        "vol": try_fingerprint(env.vol_surface),
-    }
-    if spot:
-        fps["spot"] = float(env.spot).hex()
-    return fps
 
 
 def _market_scoped(method):
@@ -120,26 +124,6 @@ def _market_scoped(method):
             self._market_fp = outer
 
     return scoped
-
-
-class StepCoefficients(NamedTuple):
-    """Per-step (l, c, u) operator coefficient sets, deduped by unique triple.
-
-    ``lcu_sets[set_index[j]]`` is the operator for backward step ``j`` (the
-    interval [t_vec[j], t_vec[j+1]]). Flat market inputs produce exactly one
-    set, preserving single-operator factorization reuse; term inputs pay the
-    designed per-step rebuild (spec Component 4).
-
-    ``zero_diffusion_sets`` marks unique sets whose step vol is exactly 0.0
-    (holiday intervals under a trading-clock surface): their operator is
-    first-order upwind and the sweep forces theta = 1.0 on those steps
-    (spec 2026-09-01 trading-clock-vol §4.5).
-    """
-
-    lcu_sets: list
-    set_index: np.ndarray
-    n_unique: int
-    zero_diffusion_sets: frozenset = frozenset()
 
 
 class PDESolutionResult(NamedTuple):
@@ -246,8 +230,10 @@ class BasePDESolver(BaseEngine):
     def __init__(self, params: Optional[PDEParams] = None):
         """Initialize the PDE solver with configuration parameters."""
         super().__init__(params if params is not None else PDEParams())
-        self._matrix_cache: Dict[Tuple[float, float], Tuple] = {}
         self._cache_enabled = bool(getattr(self.params, "cache_enabled", True))
+        # Both factorization stores (sparse LU and banded), per solver as
+        # before; the legacy loops read them through the delegates below.
+        self._factorizations = FactorizationCache(enabled=self._cache_enabled)
         self._critical_points_cache: "OrderedDict[Tuple, Tuple[float, ...]]" = (
             OrderedDict()
         )
@@ -400,6 +386,16 @@ class BasePDESolver(BaseEngine):
         """``PDEParams.cache_enabled`` -- the one cache control (spec §5.2)."""
         return self._cache_enabled
 
+    @property
+    def _matrix_cache(self):
+        """The sparse-LU factorization store (read-only view of ``_factorizations``)."""
+        return self._factorizations.store(Backend.SPARSE_LU)
+
+    @property
+    def _banded_cache(self):
+        """The banded factorization store (read-only view of ``_factorizations``)."""
+        return self._factorizations.store(Backend.BANDED)
+
     def create_bump_context(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> "BasePDESolver":
@@ -447,7 +443,10 @@ class BasePDESolver(BaseEngine):
         finally:
             for name, value in saved.items():
                 setattr(self, name, value)
-        clone._matrix_cache = {}
+        # As before: the LU store starts empty (SuperLU does not deep-copy);
+        # the banded store was never transient, so the clone keeps a copy.
+        clone._factorizations = FactorizationCache(enabled=clone._cache_enabled)
+        clone._banded_cache.update(deepcopy(self._banded_cache))
         clone._critical_points_cache = OrderedDict()
         return clone
 
@@ -463,7 +462,7 @@ class BasePDESolver(BaseEngine):
             "_session_grids",
             "_session_step_coefficients",
             "_session_matrix_pack",
-            "_matrix_cache",
+            "_factorizations",
             "_critical_points_cache",
         )
 
@@ -687,19 +686,12 @@ class BasePDESolver(BaseEngine):
         )
 
     def _theta_schedule_from_layout(self, layout: Layout) -> np.ndarray:
-        """Per-step theta from the layout's damping frozensets (spec §4.5).
+        """Per-step theta: the built-in stepper's schedule (spec 2 §4.2, decision 5).
 
         theta = 1.0 on terminal-damped steps (wins on overlap),
         event_theta on event-damped steps, params.theta elsewhere.
         """
-        params = self.params
-        n = layout.time.actual_steps
-        theta = np.full(n, float(params.theta))
-        for k in layout.time.event_damping_steps:
-            theta[k] = float(getattr(params, "event_theta", 1.0))
-        for k in layout.time.terminal_damping_steps:
-            theta[k] = 1.0
-        return theta
+        return scheme_stepper(self.params, self.grid_binder.config).schedule(layout)
 
 
     def _bound_layout_for_solve(
@@ -1108,9 +1100,12 @@ class BasePDESolver(BaseEngine):
         dx_vec: np.ndarray,
         num_x: int,
     ) -> StepCoefficients:
-        """Sample forward (r, q, sigma) per time step and build operator sets."""
-        from quantark.priceenv.term_sampling import TermCoefficients
+        """Sample forward (r, q, sigma) per time step and build operator sets.
 
+        The per-step sets BEFORE the flat-exact replacement, which callers apply
+        (``_flat_exact_step_coefficients``): ``sample_bsm`` then
+        ``CentralDifference.assemble_sets``.
+        """
         # Keyed on every input the sampler reads: the three market objects by
         # value, the spot (TermCoefficients.from_env passes it to every
         # get_vol), the reference strike and the grid. No fingerprint, no memo.
@@ -1128,78 +1123,8 @@ class BasePDESolver(BaseEngine):
             if cached is not None:
                 return cached
 
-        tc = TermCoefficients.from_env(
-            pricing_env, np.asarray(t_vec, dtype=float), ref_strike=float(ref_strike)
-        )
-        n_steps = len(t_vec) - 1
-        # 12 decimals (same precision as the dt cache keys) absorbs DF
-        # round-trip ulp noise so flat curves dedupe to ONE set
-        triples = np.column_stack(
-            (
-                np.round(tc.fwd_rates, 12),
-                np.round(tc.fwd_carry, 12),
-                np.round(tc.step_vols, 12),
-            )
-        )
-        uniq, set_index = np.unique(triples, axis=0, return_inverse=True)
-        n_unique = uniq.shape[0]
-
-        # Vectorized _calculate_coefficients over all unique triples at once
-        r_u, q_u, sig_u = uniq[:, 0:1], uniq[:, 1:2], uniq[:, 2:3]  # (n_unique, 1)
-        mu = r_u - q_u - 0.5 * sig_u * sig_u
-        D = 0.5 * sig_u * sig_u
-        dx_vec = np.asarray(dx_vec, dtype=float)
-        l = np.zeros((n_unique, num_x))
-        c = np.zeros((n_unique, num_x))
-        u = np.zeros((n_unique, num_x))
-        if is_close(float(np.max(dx_vec)), float(np.min(dx_vec))):
-            dx = dx_vec[0]
-            l[:, :] = D / (dx * dx) - mu / (2.0 * dx)
-            c[:, :] = -2.0 * D / (dx * dx) - r_u
-            u[:, :] = D / (dx * dx) + mu / (2.0 * dx)
-        else:
-            h_m, h_p = dx_vec[:-1], dx_vec[1:]
-            h_sum, h_prod = h_m + h_p, h_m * h_p
-            l[:, 1:-1] = 2.0 * D / (h_m * h_sum) - mu * h_p / (h_m * h_sum)
-            c[:, 1:-1] = -2.0 * D / h_prod + mu * (h_p - h_m) / h_prod - r_u
-            u[:, 1:-1] = 2.0 * D / (h_p * h_sum) + mu * h_m / (h_p * h_sum)
-            l[:, 0], c[:, 0], u[:, 0] = l[:, 1], c[:, 1], u[:, 1]
-            l[:, -1], c[:, -1], u[:, -1] = l[:, -2], c[:, -2], u[:, -2]
-
-        # Zero-diffusion sets (sigma_step exactly 0.0 — holiday intervals of a
-        # trading-clock surface, spec 2026-09-01 trading-clock-vol §4.5):
-        # centered advection has a wrong-sign off-diagonal at D = 0, so those
-        # rows are overwritten with first-order upwind selected by sign(mu);
-        # the -0.5*sigma^2 drift term vanishes, so mu = r - q exactly.
-        sig_zero = uniq[:, 2] == 0.0
-        if np.any(sig_zero):
-            uniform_dx = is_close(float(np.max(dx_vec)), float(np.min(dx_vec)))
-            if uniform_dx:
-                h_minus = np.full(num_x - 2, dx_vec[0])
-                h_plus = h_minus
-            else:
-                h_minus, h_plus = dx_vec[:-1], dx_vec[1:]
-            for k in np.nonzero(sig_zero)[0]:
-                r_k = float(uniq[k, 0])
-                mu_k = r_k - float(uniq[k, 1])
-                if mu_k >= 0.0:
-                    l[k, 1:-1] = 0.0
-                    u[k, 1:-1] = mu_k / h_plus
-                    c[k, 1:-1] = -mu_k / h_plus - r_k
-                else:
-                    l[k, 1:-1] = -mu_k / h_minus
-                    u[k, 1:-1] = 0.0
-                    c[k, 1:-1] = mu_k / h_minus - r_k
-                l[k, 0], c[k, 0], u[k, 0] = l[k, 1], c[k, 1], u[k, 1]
-                l[k, -1], c[k, -1], u[k, -1] = l[k, -2], c[k, -2], u[k, -2]
-
-        lcu_sets = [(l[k], c[k], u[k]) for k in range(n_unique)]
-        result = StepCoefficients(
-            lcu_sets=lcu_sets,
-            set_index=np.asarray(set_index, dtype=int).reshape(n_steps),
-            n_unique=n_unique,
-            zero_diffusion_sets=frozenset(np.nonzero(sig_zero)[0].tolist()),
-        )
+        samples = sample_bsm(pricing_env, t_vec, ref_strike=ref_strike, provenance=fps)
+        result = CentralDifference().assemble_sets(samples, dx_vec, num_x)
         if mkey is not None:
             if len(_ENV_STEP_COEFF_MEMO) >= _STEP_COEFF_MEMO_MAX_ENTRIES:
                 _ENV_STEP_COEFF_MEMO.popitem(last=False)  # FIFO eviction
@@ -1224,57 +1149,19 @@ class BasePDESolver(BaseEngine):
         """
         if sc.n_unique != 1:
             return sc
-        lcu = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
-        return StepCoefficients(
-            lcu_sets=[lcu], set_index=sc.set_index, n_unique=1
-        )
+        return flat_exact(sc, self._calculate_coefficients(r, q, sigma, dx_vec, num_x))
 
     def _calculate_coefficients(
         self, r: float, q: float, sigma: float, dx_vec: np.ndarray, num_x: int
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Calculate coefficients (l, c, u) for the tridiagonal FD system."""
-        mu = r - q - 0.5 * sigma * sigma
-        D = 0.5 * sigma * sigma
-
-        if is_close(float(np.max(dx_vec)), float(np.min(dx_vec))):
-            dx = dx_vec[0]
-            l = np.full(num_x, D / (dx * dx) - mu / (2.0 * dx))
-            c = np.full(num_x, -2.0 * D / (dx * dx) - r)
-            u = np.full(num_x, D / (dx * dx) + mu / (2.0 * dx))
-        else:
-            h_m, h_p = dx_vec[:-1], dx_vec[1:]
-            h_sum, h_prod = h_m + h_p, h_m * h_p
-
-            l_diff, c_diff, u_diff = (
-                2.0 * D / (h_m * h_sum),
-                -2.0 * D / h_prod,
-                2.0 * D / (h_p * h_sum),
-            )
-            l_drift, c_drift, u_drift = (
-                -mu * h_p / (h_m * h_sum),
-                mu * (h_p - h_m) / h_prod,
-                mu * h_m / (h_p * h_sum),
-            )
-
-            l, c, u = np.zeros(num_x), np.zeros(num_x), np.zeros(num_x)
-            l[1:-1], c[1:-1], u[1:-1] = (
-                l_diff + l_drift,
-                c_diff + c_drift - r,
-                u_diff + u_drift,
-            )
-            l[0], c[0], u[0] = l[1], c[1], u[1]
-            l[-1], c[-1], u[-1] = l[-2], c[-2], u[-2]
-
-        return l, c, u
+        return scalar_stencil(r, q, sigma, dx_vec, num_x)
 
     def _build_operator_matrix(
         self, l: np.ndarray, c: np.ndarray, u: np.ndarray, num_x: int
     ) -> sp.csc_matrix:
         """Construct the sparse spatial operator matrix A."""
-        diagonals = [l[2:-1], c[1:-1], u[1:-2]]
-        return sp.diags(
-            diagonals, offsets=[-1, 0, 1], shape=(num_x - 2, num_x - 2), format="csc"
-        )
+        return operator_matrix(l, c, u, num_x)
 
     def _time_stepping(
         self,
@@ -1376,31 +1263,16 @@ class BasePDESolver(BaseEngine):
                 M1 = I + (1-theta)*dt*A (for RHS)
                 M2_lu = LU factorization of I - theta*dt*A (for LHS)
         """
-        # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.
-        key = (coeff_key, round(dt, 12), float(theta))
-
+        # A prepared session's pack first, then the per-solver store; ``I`` is
+        # the interior identity, which ``sparse_lu_factor`` rebuilds from ``A``.
         pack = self._session_matrix_pack
         if pack is not None:
-            hit = pack.get(key)
+            hit = pack.get(FactorizationCache.key(coeff_key, dt, theta))
             if hit is not None:
                 return hit
-
-        if self._is_cache_enabled() and key in self._matrix_cache:
-            return self._matrix_cache[key]
-
-        # Build matrices
-        M1 = I + (1.0 - theta) * dt * A
-        M2 = I - theta * dt * A
-
-        # LU factorization of M2
-        try:
-            M2_lu = spla.splu(M2)
-        except Exception as e:
-            raise NumericalError(f"Failed to factorize matrix: {e}")
-
-        if self._is_cache_enabled():
-            self._matrix_cache[key] = (M1, M2_lu)
-        return M1, M2_lu
+        return self._factorizations.get(
+            Backend.SPARSE_LU, coeff_key, dt, theta, lambda: sparse_lu_factor(A, dt, theta)
+        )
 
     def _apply_step_modifications(
         self,
@@ -1445,7 +1317,7 @@ class BasePDESolver(BaseEngine):
         Returns:
             Interpolated option value
         """
-        return float(np.interp(x_target, x_vec, v_vec))
+        return interpolate_price(v_vec, x_vec, x_target)
 
     def _calculate_delta_gamma(
         self, v_vec: np.ndarray, x_vec: np.ndarray, x_target: float, spot: float
@@ -1466,59 +1338,7 @@ class BasePDESolver(BaseEngine):
         Returns:
             Tuple of (delta, gamma)
         """
-        # A quadratic's curvature is constant: carrying its first derivative
-        # to the query cannot carry its second derivative there. On refinement
-        # the nearest node changes sides, producing O(dx) gamma oscillations.
-        # Interpolate a local cubic around the QUERY, so both derivatives are
-        # evaluated there (second-order curvature on a non-uniform grid).
-        if len(x_vec) >= 4:
-            start = int(np.clip(np.searchsorted(x_vec, x_target) - 2, 0, len(x_vec) - 4))
-            offsets = x_vec[start:start + 4] - float(x_target)
-            scale = float(np.max(np.abs(offsets)))
-            z = offsets / scale
-            values = v_vec[start:start + 4]
-            coefficients = np.linalg.solve(np.vander(z, 4, increasing=True), values - values[1])
-            dv_dx = float(coefficients[1]) / scale
-            d2v_dx2 = 2.0 * float(coefficients[2]) / (scale * scale)
-            return dv_dx / spot, (d2v_dx2 - dv_dx) / (spot * spot)
-
-        # A minimal three-node grid has only a quadratic interpolant.
-        idx = int(np.searchsorted(x_vec, x_target))
-        idx = max(1, min(idx, len(x_vec) - 2))
-        if idx > 1 and abs(x_vec[idx - 1] - x_target) < abs(x_vec[idx] - x_target):
-            idx -= 1
-
-        # Non-uniform three-point stencil (exact for quadratics on ANY local
-        # spacing). The symmetric formulas are only valid when h_m == h_p; on
-        # the adaptive grid the asymmetry error is proportional to gamma.
-        h_m = x_vec[idx] - x_vec[idx - 1]
-        h_p = x_vec[idx + 1] - x_vec[idx]
-        h_sum = h_m + h_p
-
-        v_m, v_0, v_p = v_vec[idx - 1], v_vec[idx], v_vec[idx + 1]
-        dv_dx = (
-            -h_p / (h_m * h_sum) * v_m
-            + (h_p - h_m) / (h_m * h_p) * v_0
-            + h_m / (h_p * h_sum) * v_p
-        )
-        d2v_dx2 = 2.0 * (
-            v_m / (h_m * h_sum) - v_0 / (h_m * h_p) + v_p / (h_p * h_sum)
-        )
-
-        # The stencil's quadratic has a LINEAR first derivative, so carrying
-        # dV/dx from the stencil node to x_target is exact for that quadratic
-        # (d2V/dx2 is constant on it). Reporting the node's derivative instead
-        # makes delta piecewise constant in spot and moves it whenever the
-        # mesh moves -- changing a domain bound is enough.
-        offset = float(x_target) - float(x_vec[idx])
-        if offset != 0.0:
-            dv_dx = dv_dx + offset * d2v_dx2
-
-        # Convert to price-space derivatives at the query spot itself.
-        delta = dv_dx / spot
-        gamma = (d2v_dx2 - dv_dx) / (spot * spot)
-
-        return delta, gamma
+        return delta_gamma(v_vec, x_vec, x_target, spot)
 
     @staticmethod
     def _current_time(total_tau: float, tau_remaining: float) -> float:
@@ -1764,7 +1584,9 @@ class BasePDESolver(BaseEngine):
         theta_by_step = self._theta_schedule_from_layout(self._active_layout)
         use_banded = self._pack_uses_banded(num_x)
         banded: dict = {}
-        saved_matrix, self._matrix_cache = self._matrix_cache, {}
+        # Build into a fresh cache (as the legacy fresh _matrix_cache), restored after.
+        saved_factorizations = self._factorizations
+        self._factorizations = FactorizationCache(enabled=self._cache_enabled)
         saved_term_A = getattr(self, "_term_A_cache", {})
         self._term_A_cache = {}
         try:
@@ -1796,7 +1618,7 @@ class BasePDESolver(BaseEngine):
                     self._get_matrices(I_int, A_j, dt, theta, coeff_key=k)
             matrix_pack = dict(self._matrix_cache)
         finally:
-            self._matrix_cache = saved_matrix
+            self._factorizations = saved_factorizations
             self._term_A_cache = saved_term_A
         return matrix_pack, banded
 

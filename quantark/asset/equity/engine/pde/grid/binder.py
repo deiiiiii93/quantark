@@ -11,6 +11,7 @@ identity.
 
 from __future__ import annotations
 
+import functools
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
@@ -35,6 +36,18 @@ class Layout:
     time: TimeLayout
     request: GridRequest
     config_key: tuple
+
+    @functools.cached_property
+    def fingerprint(self) -> str:
+        """The DELIVERED layout's identity (spec 2 decision 17): what the march consumes.
+
+        Frozen, rebound or fresh, two layouts with this fingerprint march on the
+        same x, dx, t, dt and node classes; the request that asked for a layout
+        does not say what was delivered.
+        """
+        from quantark.asset.equity.engine.pde.core.identity import layout_fingerprint
+
+        return layout_fingerprint(self)
 
 
 def validate_external_layout(
