@@ -13,7 +13,7 @@ import scipy.sparse as sp
 from scipy.linalg import solve_banded
 from time import perf_counter
 
-from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
+from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult, _market_scoped
 from quantark.asset.equity.engine.pde.grid.events import (
     project_piecewise_event,
 )
@@ -314,6 +314,7 @@ class PhoenixPDESolver(SnowballPDESolver):
             )
         return value
 
+    @_market_scoped
     def _solve(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> PDESolutionResult:

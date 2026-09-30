@@ -20,6 +20,7 @@ from quantark.asset.equity.engine.event_stats import (
 from quantark.asset.equity.engine.pde.base_pde_solver import (
     GRID_CACHE_MAX_ENTRIES,
     PDESolutionResult,
+    _market_scoped,
 )
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.param import QuadParams
@@ -362,6 +363,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             barriers.append(post_barrier)
         return barriers
 
+    @_market_scoped
     def _solve(
         self, product: KnockOutResetSnowballOption, pricing_env: PricingEnvironment
     ) -> PDESolutionResult:

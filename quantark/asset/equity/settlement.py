@@ -163,6 +163,23 @@ class ResolvedPaymentTiming:
             )
 
 
+def effective_settlement_calendar(product, pricing_env):
+    """The calendar a product's settlement dates roll on.
+
+    The product's settlement convention's calendar when it names one, else the
+    environment's. The resolver and every cache keyed on resolved settlement
+    dates read this one rule.
+    """
+    convention = getattr(product, "settlement_convention", None)
+    own = convention.calendar if convention is not None else None
+    return own or getattr(pricing_env, "calendar", None)
+
+
+def calendar_identity(calendar) -> Optional[tuple]:
+    """``calendar.identity()``, or ``None`` for no calendar."""
+    return None if calendar is None else calendar.identity()
+
+
 class SettlementResolver:
     """Resolve contractual settlement terms with one fail-closed precedence."""
 
@@ -389,7 +406,7 @@ class SettlementResolver:
                 "authoritative determination date"
             )
 
-        calendar = convention.calendar or getattr(pricing_env, "calendar", None)
+        calendar = effective_settlement_calendar(product, pricing_env)
 
         if convention.lag_unit is SettlementLagUnit.BUSINESS_DAYS:
             if calendar is None:

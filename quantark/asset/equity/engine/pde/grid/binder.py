@@ -49,7 +49,9 @@ def validate_external_layout(
     (critical_prices / bound_anchors moved under a bump) is allowed.
     """
     old = layout.request
-    for field in ("tau", "event_times", "hard_lower", "hard_upper"):
+    # extra_times too: a price layout lacks a life surface's readout nodes
+    # (spec 2 §5.2 step 5), so it must not be reused for that request.
+    for field in ("tau", "event_times", "extra_times", "hard_lower", "hard_upper"):
         if getattr(old, field) != getattr(fresh_request, field):
             raise ValidationError(
                 f"external layout mismatch on {field}: layout has "
@@ -106,7 +108,11 @@ def resolve_bound_layout(
             "cannot be reused across products with different absorbing "
             "barriers — create a new bump context for this product"
         )
-    if request.tau == fr.tau and request.event_times == fr.event_times:
+    if (
+        request.tau == fr.tau
+        and request.event_times == fr.event_times
+        and request.extra_times == fr.extra_times
+    ):
         validate_external_layout(frozen, request, market)
         return frozen
     rebound = binder.rebind_time(frozen, request)

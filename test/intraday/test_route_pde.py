@@ -131,16 +131,13 @@ def test_the_route_does_not_hand_back_full_value_surfaces(sse_calendar, sse_sess
     assert again == out.contingent_pv
 
 
-def test_the_route_leaves_no_coefficient_memo_on_the_request_market(sse_calendar, sse_sessions, desk):
-    # the legacy memo is keyed on the (request-owned) rate curve: a batch holding its requests would keep every
-    # route's coefficient sets alive (a 100-item PDE batch passed 7 GiB)
-    from quantark.asset.equity.engine.pde import base_pde_solver
+def test_repricing_after_point_greeks_reproduces_the_route_price(sse_calendar, sse_sessions, desk):
+    # The memo is keyed on the market's values (spec 2 decision 14), so the
+    # route no longer pops it; a later solve on the same market reprices exactly.
     ctx, _ = _snow_ctx(sse_calendar, sse_sessions, desk, lambda kos: kos[5].timestamp - timedelta(minutes=15), spot=102.5)
     engine = _pde()
     out = route_for(ctx, engine).price(ctx, engine)
-    assert id(ctx.pricing_env.rate_curve) not in base_pde_solver._ENV_STEP_COEFF_MEMO
     route_for(ctx, engine).point_greeks(ctx, engine)
-    assert id(ctx.pricing_env.rate_curve) not in base_pde_solver._ENV_STEP_COEFF_MEMO
     assert route_for(ctx, engine).price(ctx, engine).contingent_pv == out.contingent_pv
 
 

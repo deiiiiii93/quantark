@@ -28,6 +28,7 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     BANDED_CACHE_MAX_ENTRIES,
     GRID_CACHE_MAX_ENTRIES,
     _CACHE_KEYING,
+    _market_scoped,
     BasePDESolver,
     LifeSurfaceSolution,
     PDESessionOutputs,
@@ -360,6 +361,7 @@ class SnowballPDESolver(BasePDESolver):
             "barrier": 0.0,
         }
 
+    @_market_scoped
     def _solve(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> PDESolutionResult:
@@ -821,6 +823,7 @@ class SnowballPDESolver(BasePDESolver):
         (none for Snowball)."""
         return {}
 
+    @_market_scoped
     def _compute_event_stats(
         self,
         product: BaseEquityProduct,
@@ -3213,6 +3216,14 @@ class SnowballPDESolver(BasePDESolver):
     def _observation_cache_key(
         self, pricing_env: PricingEnvironment, product: SnowballOption, kind: str
     ) -> Tuple:
+        # The resolvers roll settlement dates on the effective settlement
+        # calendar, and the product token names a calendar by name alone, so
+        # the key carries that calendar's value identity (spec 2 decision 19).
+        from quantark.asset.equity.settlement import (
+            calendar_identity,
+            effective_settlement_calendar,
+        )
+
         strategy = _CACHE_KEYING
         return (
             kind,
@@ -3222,6 +3233,7 @@ class SnowballPDESolver(BasePDESolver):
             pricing_env.valuation_date,
             pricing_env.day_count_convention,
             pricing_env.bus_days_in_year,
+            calendar_identity(effective_settlement_calendar(product, pricing_env)),
         )
 
     def _get_cached_ko_records(

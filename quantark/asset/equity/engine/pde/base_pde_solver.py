@@ -6,6 +6,7 @@ backward in time, with support for Rannacher smoothing.
 """
 
 from abc import abstractmethod
+import functools
 import weakref
 from collections import OrderedDict
 from copy import deepcopy
@@ -45,30 +46,26 @@ from quantark.util.enum.engine_enums import EngineType
 
 
 
-# Per-market-object memoization for curve lookups and step coefficients.
-# Keyed on the CURVE OBJECTS (rate curve / dividend yield), not the mutable
-# PricingEnvironment: the established market-data update pattern is attribute
-# REPLACEMENT (env.rate_curve = new_curve), which yields a new object and
-# therefore a fresh memo — a bumped or refreshed environment can never reuse
-# stale values (codex code-review finding). Curve/dataclass objects are
-# unhashable (eq=True), so stores key on id() with a weakref eviction
-# callback plus an identity re-check; id reuse cannot alias because the
-# stored weakref must still point at the SAME object. Each memo is size-
-# bounded so long-lived processes cannot grow without bound.
+# Memoization of curve lookups and step coefficients, keyed on the VALUE
+# fingerprints of every market input the memoized function reads (spec 2
+# decisions 14, 18, 19). The market parameter objects are plain mutable
+# dataclasses, so an identity-only key served stale values after an in-place
+# mutation (``env.rate_curve.rate = 0.07``). A market object without a value
+# fingerprint gets no memo: it is sampled fresh on every call.
+# - Step coefficients: one value-keyed store; its key holds the exact grid
+#   bytes, so a hit returns what a fresh build would, from any solve.
+# - Discount factors: scoped per curve OBJECT (weakref-evicted) and keyed by
+#   the curve's value inside that scope. The (t, T) inner keys are rounded,
+#   first build wins, so the sharing domain must stay what it always was.
+# Each memo is size-bounded so long-lived processes cannot grow without bound.
 _ENV_DF_MEMO: dict = {}
-_ENV_STEP_COEFF_MEMO: dict = {}
+_ENV_STEP_COEFF_MEMO: "OrderedDict[tuple, StepCoefficients]" = OrderedDict()
 _DF_MEMO_MAX_ENTRIES = 200_000
 _STEP_COEFF_MEMO_MAX_ENTRIES = 64
 
-#: Operational cache sizes (spec §4.3): implementation details, not knobs.
-GRID_CACHE_MAX_ENTRIES = 128
-BANDED_CACHE_MAX_ENTRIES = 512
-#: Product cache tokens always use the former "standard" keying.
-_CACHE_KEYING = "standard"
-
 
 def _per_object_memo(market_obj, store: dict) -> Optional[dict]:
-    """Return the memo dict for a market object, or None if not weakref-able."""
+    """The memo dict of one market object (id key, weakref-evicted), or None if not weakref-able."""
     if market_obj is None:
         return None
     key = id(market_obj)
@@ -82,6 +79,47 @@ def _per_object_memo(market_obj, store: dict) -> Optional[dict]:
     memo: dict = {}
     store[key] = (ref, memo)
     return memo
+
+#: Operational cache sizes (spec §4.3): implementation details, not knobs.
+GRID_CACHE_MAX_ENTRIES = 128
+BANDED_CACHE_MAX_ENTRIES = 512
+#: Product cache tokens always use the former "standard" keying.
+_CACHE_KEYING = "standard"
+
+
+def market_fingerprints(env, *, spot: bool = True) -> Dict[str, Optional[str]]:
+    """Value fingerprints of the environment's market inputs; ``None`` = none exists."""
+    from quantark.execution.cache.fingerprint import try_fingerprint
+
+    fps = {
+        "rate": try_fingerprint(env.rate_curve),
+        "div": try_fingerprint(env.div_yield),
+        "vol": try_fingerprint(env.vol_surface),
+    }
+    if spot:
+        fps["spot"] = float(env.spot).hex()
+    return fps
+
+
+def _market_scoped(method):
+    """Fingerprint the environment once for the duration of a solve.
+
+    A fingerprint costs a sha256 per market object and the discount memo is
+    read many times per step, so a solve computes them once and every memo
+    lookup inside it reads them (``BasePDESolver._market_fps``). Nested
+    scopes restore the outer one.
+    """
+
+    @functools.wraps(method)
+    def scoped(self, product, pricing_env, *args, **kwargs):
+        outer = getattr(self, "_market_fp", None)
+        self._market_fp = (pricing_env, market_fingerprints(pricing_env))
+        try:
+            return method(self, product, pricing_env, *args, **kwargs)
+        finally:
+            self._market_fp = outer
+
+    return scoped
 
 
 class StepCoefficients(NamedTuple):
@@ -801,6 +839,7 @@ class BasePDESolver(BaseEngine):
             points.append(product.strike)
         return points
 
+    @_market_scoped
     def _solve(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> PDESolutionResult:
@@ -1072,22 +1111,22 @@ class BasePDESolver(BaseEngine):
         """Sample forward (r, q, sigma) per time step and build operator sets."""
         from quantark.priceenv.term_sampling import TermCoefficients
 
-        memo = _per_object_memo(pricing_env.rate_curve, _ENV_STEP_COEFF_MEMO)
-        if memo is not None:
-            mkey = (
+        # Keyed on every input the sampler reads: the three market objects by
+        # value, the spot (TermCoefficients.from_env passes it to every
+        # get_vol), the reference strike and the grid. No fingerprint, no memo.
+        fps = self._market_fps(pricing_env)
+        market_key = (fps["rate"], fps["div"], fps["vol"], fps["spot"])
+        mkey = None
+        if None not in market_key:
+            mkey = market_key + (
                 float(ref_strike),
                 np.asarray(t_vec, dtype=float).tobytes(),
                 np.asarray(dx_vec, dtype=float).tobytes(),
                 int(num_x),
             )
-            cached = memo.get(mkey)
-            # identity re-check: replacing div_yield / vol_surface on the env
-            # must invalidate (the memo key is only the rate curve)
-            if cached is not None and (
-                cached[0] is pricing_env.div_yield
-                and cached[1] is pricing_env.vol_surface
-            ):
-                return cached[2]
+            cached = _ENV_STEP_COEFF_MEMO.get(mkey)
+            if cached is not None:
+                return cached
 
         tc = TermCoefficients.from_env(
             pricing_env, np.asarray(t_vec, dtype=float), ref_strike=float(ref_strike)
@@ -1161,10 +1200,10 @@ class BasePDESolver(BaseEngine):
             n_unique=n_unique,
             zero_diffusion_sets=frozenset(np.nonzero(sig_zero)[0].tolist()),
         )
-        if memo is not None:
-            if len(memo) >= _STEP_COEFF_MEMO_MAX_ENTRIES:
-                memo.pop(next(iter(memo)))  # FIFO eviction
-            memo[mkey] = (pricing_env.div_yield, pricing_env.vol_surface, result)
+        if mkey is not None:
+            if len(_ENV_STEP_COEFF_MEMO) >= _STEP_COEFF_MEMO_MAX_ENTRIES:
+                _ENV_STEP_COEFF_MEMO.popitem(last=False)  # FIFO eviction
+            _ENV_STEP_COEFF_MEMO[mkey] = result
         return result
 
     def _flat_exact_step_coefficients(
@@ -1486,6 +1525,43 @@ class BasePDESolver(BaseEngine):
         """Elapsed time (from valuation) at a backward-induction step."""
         return max(total_tau - tau_remaining, 0.0)
 
+    def _market_fps(self, pricing_env: PricingEnvironment) -> Dict[str, Optional[str]]:
+        """The environment's market fingerprints: the solve's, else computed now."""
+        scope = getattr(self, "_market_fp", None)
+        if scope is not None and scope[0] is pricing_env:
+            return scope[1]
+        return market_fingerprints(pricing_env)
+
+    def _curve_df_memo(self, leg: str, pricing_env: PricingEnvironment) -> dict:
+        """The discount memo of one curve: scoped to the curve object, keyed by its value.
+
+        The inner keys round (t, T) to 12 decimals and the first build wins, so
+        the memo's sharing domain decides the last ULP of every discount factor.
+        That domain stays the curve object's lifetime, as every banked number
+        was computed; a value-keyed global store would let one solve's times
+        seed another's (measured: a vega bump moved in its last digit depending
+        on what the process priced before). The value fingerprint inside the
+        scope is what makes an in-place mutation re-sample (decision 14).
+        """
+        curve = pricing_env.rate_curve if leg == "r" else pricing_env.div_yield
+        scope = getattr(self, "_market_fp", None)
+        if scope is not None and scope[0] is pricing_env:
+            curve_fp = scope[1]["rate" if leg == "r" else "div"]
+        else:
+            from quantark.execution.cache.fingerprint import try_fingerprint
+            curve_fp = try_fingerprint(curve)
+        if curve_fp is None:
+            return {}
+        per_object = _per_object_memo(curve, _ENV_DF_MEMO)
+        if per_object is None:
+            return {}
+        key = (leg, curve_fp)
+        memo = per_object.get(key)
+        if memo is None:
+            per_object.clear()  # the curve's earlier values are unreachable now
+            memo = per_object[key] = {}
+        return memo
+
     def _df_between_times(
         self, pricing_env: PricingEnvironment, start_time: float, end_time: float
     ) -> float:
@@ -1495,7 +1571,7 @@ class BasePDESolver(BaseEngine):
         exp(-r(tau)*tau) with tau = remaining time (they coincide only under
         a flat curve).
 
-        Memoized per pricing environment (identity-checked, strong ref held):
+        Memoized per rate curve VALUE (its fingerprint; spec 2 decision 14):
         the boundary-condition path evaluates the same (t, T) pairs many
         times per step, and term-structure curves make each curve lookup a
         np.interp call — the memo keeps the term/flat cost ratio inside the
@@ -1503,9 +1579,7 @@ class BasePDESolver(BaseEngine):
         """
         if end_time <= start_time:
             return 1.0
-        memo = _per_object_memo(pricing_env.rate_curve, _ENV_DF_MEMO)
-        if memo is None:
-            memo = {}
+        memo = self._curve_df_memo("r", pricing_env)
         key = (round(float(start_time), 12), round(float(end_time), 12))
         v = memo.get(key)
         if v is None:
@@ -1528,9 +1602,7 @@ class BasePDESolver(BaseEngine):
         """
         if end_time <= start_time:
             return 1.0
-        memo = _per_object_memo(pricing_env.div_yield, _ENV_DF_MEMO)
-        if memo is None:
-            memo = {}
+        memo = self._curve_df_memo("q", pricing_env)
         key = ("q", round(float(start_time), 12), round(float(end_time), 12))
         v = memo.get(key)
         if v is None:

@@ -77,6 +77,20 @@ class Calendar:
         # Normalize holiday dates to midnight
         self.holidays = {self._normalize_date(d) for d in self.holidays}
 
+    def identity(self) -> tuple:
+        """The calendar's value identity: name, sorted holidays, sorted weekend days.
+
+        ``repr`` shows only a name and a holiday count, so it is not an identity:
+        two calendars with the same name and count but different holidays share
+        it, and so does one calendar before and after a holiday is added. A cache
+        keyed on a calendar keys on this tuple.
+        """
+        return (
+            self.name,
+            tuple(sorted(d.isoformat() for d in self.holidays)),
+            tuple(sorted(self.weekend_days)),
+        )
+
     @staticmethod
     def _normalize_date(date: datetime) -> datetime:
         """Normalize date to midnight."""
