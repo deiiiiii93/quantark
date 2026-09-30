@@ -9,15 +9,12 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 import numpy as np
-import scipy.sparse as sp
-from scipy.linalg import solve_banded
-from time import perf_counter
 
-from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult, _market_scoped
 from quantark.asset.equity.engine.pde.grid.events import (
     project_piecewise_event,
 )
-from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver, _LegacySnowballFacade
+from quantark.asset.equity.engine.pde.core.adapters.phoenix import PhoenixAdapter
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
@@ -27,13 +24,15 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close, is_zero
 
 
-class PhoenixPDESolver(_LegacySnowballFacade, SnowballPDESolver):
+class PhoenixPDESolver(SnowballPDESolver):
     """
     Two-Surface PDE solver for Phoenix options with coupon jumps.
 
     KO and KI behavior follows SnowballPDESolver. Coupon payoffs are added at
     observation times based on the coupon barrier.
     """
+
+    _adapter_class = PhoenixAdapter
 
     # Override class attributes for product type checking
     _supported_product_type: type = PhoenixOption
@@ -314,161 +313,6 @@ class PhoenixPDESolver(_LegacySnowballFacade, SnowballPDESolver):
             )
         return value
 
-    @_market_scoped
-    def _solve(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> PDESolutionResult:
-        """
-        Core Two-Surface PDE solving logic for Phoenix options.
-        Overrides Snowball logic to handle vector states for memory coupons.
-        """
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        # State preamble shared with session preparation (see
-        # SnowballPDESolver._prepare_solve_state).
-        knocked_in_at_valuation = self._prepare_solve_state(product, pricing_env)
-        self._reset_t0_readout_state()
-
-        # Extract market data
-        strike = product.strike
-        r = pricing_env.get_rate(tau)
-        q = pricing_env.get_div_yield(tau)
-        sigma = pricing_env.get_vol(strike, tau)
-
-        if self._profile_enabled:
-            self._reset_profile_stats()
-
-        # Build grids: declarative layer on the migrated path (grid geometry
-        # + damping data); the certified vector-surface event application
-        # below stays inline — it already flows through the moved projection
-        # primitives, and its coupon-memory dispatch is solver-owned state.
-        if self._profile_enabled:
-            t0 = perf_counter()
-        self._active_layout = None
-        self._active_schedule = None
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
-        if self._profile_enabled:
-            self._profile_stats["grid_build"] += perf_counter() - t0
-
-        # Memory coupon setup
-        use_memory = product.has_memory_coupon
-        num_obs = len(self._coupon_barriers)
-        if use_memory and num_obs > 50:
-             raise ValidationError(
-                f"Too many observations ({num_obs}) for Memory Phoenix PDE engine. "
-                "Limit is 50 to prevent performance degradation. Use MC engine instead."
-            )
-        
-        # Determine number of memory states to track at maturity
-        max_k = num_obs if use_memory else 0
-        
-        # Initialize lists of grids
-        num_x, num_t = len(x_vec), len(t_vec)
-        
-        # grid_v0_list[k] is the V0 surface for k missed coupons
-        grid_v0_list = [np.zeros((num_x, num_t)) for _ in range(max_k + 1)]
-        grid_v1_list = [np.zeros((num_x, num_t)) for _ in range(max_k + 1)]
-
-        # Set terminal conditions for all memory states
-        self._set_terminal_condition_vector(
-            grid_v0_list, grid_v1_list, x_vec, s_vec, product, pricing_env
-        )
-
-        # Apply terminal coupon/KO/KI if maturity is an observation time.
-        terminal_tidx = len(t_vec) - 1
-        coupon_obs_idx = self._coupon_observation_indices.get(terminal_tidx)
-        if coupon_obs_idx is not None:
-            self._apply_coupon_jump_vector(
-                grid_v0_list,
-                grid_v1_list,
-                s_vec,
-                terminal_tidx,
-                current_time=tau,
-                product=product,
-                pricing_env=pricing_env,
-                obs_idx=coupon_obs_idx,
-            )
-
-        if product.has_ki_barrier:
-            should_apply_ki = (
-                self._ki_continuous
-                or terminal_tidx in self._ki_observation_indices
-            )
-            if should_apply_ki:
-                for k in range(len(grid_v0_list)):
-                    self._apply_ki_jump(grid_v0_list[k], grid_v1_list[k], s_vec, terminal_tidx, product)
-
-        # Maturity KO is stored in `_ko_terminal_record` by the inherited
-        # `_build_grids` (it is intentionally kept out of
-        # `_ko_observation_indices`). Apply it here, after the terminal
-        # coupon/KI jumps, mirroring SnowballPDESolver._solve(). Using
-        # `_apply_ko_jump_vector` preserves the same-date coupon-at-KO semantics,
-        # since the terminal coupon index is registered in
-        # `_coupon_observation_indices`.
-        if self._has_terminal_ko and self._ko_terminal_record is not None:
-            self._apply_ko_jump_vector(
-                grid_v0_list,
-                grid_v1_list,
-                s_vec,
-                terminal_tidx,
-                current_time=tau,
-                product=product,
-                pricing_env=pricing_env,
-                ko_record=self._ko_terminal_record,
-            )
-
-        # Build operator matrices
-        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
-        A = self._build_operator_matrix(l, c, u, num_x)
-
-        # Term-structure step coefficients (one set for flat inputs)
-        sc = self._build_step_coefficients(pricing_env, product.strike, t_vec, dx_vec, num_x)
-        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
-        step_coeffs = None if sc.n_unique == 1 else sc
-
-        # Time stepping with vector state
-        self._time_stepping_vector_surface(
-            grid_v0_list,
-            grid_v1_list,
-            A,
-            l,
-            c,
-            u,
-            x_vec,
-            s_vec,
-            t_vec,
-            dt_vec,
-            product,
-            pricing_env,
-            r,
-            q,
-            sigma,
-            tau,
-            step_coeffs=step_coeffs,
-        )
-
-        # Result is from state 0 (no accumulated memory at valuation)
-        spot_log = np.log(spot)
-        if knocked_in_at_valuation:
-            solution_vec = grid_v1_list[0][:, 0]
-        else:
-            solution_vec = grid_v0_list[0][:, 0]
-
-        readout_vec, readout_override = self._compose_t0_readout(
-            1 if knocked_in_at_valuation else 0
-        )
-        return PDESolutionResult(
-            solution_vec=solution_vec,
-            x_vec=x_vec,
-            s_vec=s_vec,
-            spot_log=spot_log,
-            readout_vec=readout_vec,
-            readout_override=readout_override,
-        )
-
     def _set_terminal_condition_vector(
         self,
         grid_v0_list: List[np.ndarray],
@@ -511,24 +355,6 @@ class PhoenixPDESolver(_LegacySnowballFacade, SnowballPDESolver):
         if obs_idx < 0 or obs_idx >= len(records):
             raise ValidationError("coupon observation index is out of range")
         return float(records[obs_idx].settlement_time)
-
-    def _build_grids(
-        self,
-        product: PhoenixOption,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ):
-        result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
-        if self._active_layout is None:
-            # Legacy path only: the layer path registers coupons inside
-            # _populate_observation_maps (single site).
-            _, _, _, t_vec, _ = result
-            self._register_coupon_observations(product, pricing_env, t_vec, tau)
-        return result
 
     def _register_coupon_observations(
         self,
@@ -638,145 +464,6 @@ class PhoenixPDESolver(_LegacySnowballFacade, SnowballPDESolver):
         return float(
             self._coupon_cumulative[obs_idx] - self._coupon_cumulative[start] + carried
         )
-
-    def _time_stepping_vector_surface(
-        self,
-        grid_v0_list: List[np.ndarray],
-        grid_v1_list: List[np.ndarray],
-        A: sp.csc_matrix,
-        l: np.ndarray,
-        c: np.ndarray,
-        u: np.ndarray,
-        x_vec: np.ndarray,
-        s_vec: np.ndarray,
-        t_vec: np.ndarray,
-        dt_vec: np.ndarray,
-        product: PhoenixOption,
-        pricing_env: PricingEnvironment,
-        r: float,
-        q: float,
-        sigma: float,
-        tau: float,
-        step_coeffs=None,
-    ) -> None:
-        """Backward time stepping for vector surfaces."""
-        params = self.params
-        num_t, num_x = len(t_vec), len(x_vec)
-        # FIRST_PASSAGE continuous-KI state for the inherited _apply_ki_jump
-        # (inert unless continuous KI is live).
-        self._prepare_continuous_ki_correction(product, pricing_env, t_vec)
-        term = self._prepare_termination_surfaces(product, pricing_env, t_vec, num_x)
-        I_int = sp.eye(num_x - 2, format="csc")
-        use_banded = (num_x - 2) > 2
-        n_int = num_x - 2
-        
-        # Reuse caches
-        self._matrix_cache.clear()
-        self._banded_cache.clear()
-        self._term_A_cache = {}
-
-        # Temporary buffers for RHS/Sol
-        rhs = None
-        if use_banded and n_int > 2:
-            rhs = np.empty(n_int, dtype=float)
-
-        # Canonical damping schedule (terminal Rannacher + event smoothing):
-        # from the layout's frozensets on the migrated path, else legacy.
-        theta_schedule = self._theta_schedule_from_layout(self._active_layout)
-
-        for j in range(num_t - 2, -1, -1):
-            dt = dt_vec[j]
-            theta = float(theta_schedule[j])
-
-            if step_coeffs is not None:
-                coeff_key = int(step_coeffs.set_index[j])
-                l, c, u = step_coeffs.lcu_sets[coeff_key]
-            else:
-                coeff_key = 0
-
-            banded, lower1, main1, upper1 = (None, None, None, None)
-            M1, M2_lu = (None, None)
-            
-            if use_banded and n_int > 2:
-                banded, lower1, main1, upper1 = self._get_banded_system(
-                    l, c, u, dt, theta, coeff_key=coeff_key
-                )
-            else:
-                if step_coeffs is not None:
-                    A = self._operator_matrix_for_set(step_coeffs, coeff_key, num_x)
-                M1, M2_lu = self._get_matrices(I_int, A, dt, theta, coeff_key=coeff_key)
-
-            tau_remaining = tau - t_vec[j]
-            
-            # Step V0 grids
-            self._step_grids(grid_v0_list, j, dt, theta, x_vec, s_vec, tau_remaining, product, pricing_env, 
-                             use_banded, banded, lower1, main1, upper1, M1, M2_lu, rhs, l, u, is_v1=False)
-            
-            # Step V1 grids
-            self._step_grids(grid_v1_list, j, dt, theta, x_vec, s_vec, tau_remaining, product, pricing_env,
-                             use_banded, banded, lower1, main1, upper1, M1, M2_lu, rhs, l, u, is_v1=True)
-
-            # Step the termination-value surfaces on the same operator. They
-            # carry the discount a rolled-up coupon earns, so they must see the
-            # same events in the same order as the value surfaces.
-            if term is not None:
-                self._step_grids(list(term), j, dt, theta, x_vec, s_vec, tau_remaining,
-                                 product, pricing_env, use_banded, banded, lower1, main1,
-                                 upper1, M1, M2_lu, rhs, l, u, is_v1=False,
-                                 boundary=self._set_termination_boundary)
-
-            # Apply modifications (Coupons, KO, KI). The valuation-date
-            # level-0 columns are captured BEFORE their events: t=0 events
-            # are deterministic at the known spot, so the readout uses this
-            # smooth 0+ branch plus pointwise transitions instead of
-            # interpolating across the nodal t=0 jump.
-            if j == 0 and self._t0_has_events(product):
-                self._t0_pre_event_cols = (
-                    grid_v0_list[0][:, 0].copy(),
-                    grid_v1_list[0][:, 0].copy(),
-                )
-            self._apply_step_modifications_vector_surface(
-                grid_v0_list, grid_v1_list, x_vec, s_vec, j, tau_remaining, product, pricing_env
-            )
-
-    def _step_grids(self, grid_list, j, dt, theta, x_vec, s_vec, tau_remaining, product, pricing_env,
-                    use_banded, banded, lower1, main1, upper1, M1, M2_lu, rhs, l, u, is_v1,
-                    boundary=None):
-        """Helper to diffuse a list of grids.
-
-        ``boundary`` overrides the payoff boundary conditions, which is what the
-        termination-value surface needs: it is not a payoff and its limits are
-        pure discount factors.
-        """
-        for grid in grid_list:
-            # Set boundary
-            if boundary is not None:
-                boundary(grid, j)
-            elif is_v1:
-                self._set_boundary_conditions_v1(grid, x_vec, s_vec, j, tau_remaining, product, pricing_env)
-            else:
-                self._set_boundary_conditions_v0(grid, x_vec, s_vec, j, tau_remaining, product, pricing_env)
-            
-            v_next = grid[1:-1, j + 1]
-            
-            if use_banded and banded is not None:
-                np.multiply(main1, v_next, out=rhs)
-                rhs[1:] += lower1 * v_next[:-1]
-                rhs[:-1] += upper1 * v_next[1:]
-                
-                if len(grid) > 2:
-                    rhs[0] += dt * ((1.0 - theta) * l[1] * grid[0, j + 1] + theta * l[1] * grid[0, j])
-                    rhs[-1] += dt * ((1.0 - theta) * u[-2] * grid[-1, j + 1] + theta * u[-2] * grid[-1, j])
-                
-                sol = solve_banded((1, 1), banded, rhs, overwrite_b=True, check_finite=False)
-                grid[1:-1, j] = sol
-            else:
-                rhs_val = M1 @ v_next
-                if len(grid) > 2:
-                    rhs_val[0] += dt * ((1.0 - theta) * l[1] * grid[0, j + 1] + theta * l[1] * grid[0, j])
-                    rhs_val[-1] += dt * ((1.0 - theta) * u[-2] * grid[-1, j + 1] + theta * u[-2] * grid[-1, j])
-                
-                grid[1:-1, j] = M2_lu.solve(rhs_val)
 
     def _apply_step_modifications_vector_surface(
         self,

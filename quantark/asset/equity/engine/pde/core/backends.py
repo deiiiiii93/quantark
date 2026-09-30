@@ -152,7 +152,7 @@ def banded_advance(state: GroupState, s, dt, theta, boundaries):
     v = state.v_next
     lo, up = boundaries
     if state.group.one_dimensional_rhs:
-        # phoenix_pde_solver.py (_step_grids banded branch)
+        # phoenix_pde_solver.py (the legacy vector-surface march, banded branch)
         vn = v[1:-1, 0]
         rhs = np.empty(len(vn))
         np.multiply(main1, vn, out=rhs)

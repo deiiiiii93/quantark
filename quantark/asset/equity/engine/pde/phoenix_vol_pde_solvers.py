@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Dict, Optional
 
 import numpy as np
@@ -16,6 +17,7 @@ from quantark.asset.equity.engine.pde.core.samples import (
 from quantark.asset.equity.engine.pde.grid.events import (
     project_piecewise_event,
 )
+from quantark.asset.equity.engine.pde.core.adapters.phoenix import LocalVolPhoenixAdapter
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -47,6 +49,7 @@ class LocalVolPhoenixPDESolver(LocalVolBarrierCrossingMixin, PhoenixPDESolver):
 
     engine_type = EngineType.PDE
     _solver_name = "LocalVolPhoenixPDESolver"
+    _adapter_class = LocalVolPhoenixAdapter
 
     def __init__(
         self,
@@ -56,6 +59,8 @@ class LocalVolPhoenixPDESolver(LocalVolBarrierCrossingMixin, PhoenixPDESolver):
         super().__init__(params=params)
         self._prebuilt = local_vol_surface
         self._active_lv_surface: Optional[LocalVolSurface] = None
+        # The environment the active surface was built for (see LocalVolAdapterMixin.scope).
+        self._active_lv_env: Optional[PricingEnvironment] = None
         self._active_s_vec: Optional[np.ndarray] = None
 
     def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
@@ -72,13 +77,19 @@ class LocalVolPhoenixPDESolver(LocalVolBarrierCrossingMixin, PhoenixPDESolver):
             div_yield=env.get_div_yield,
         )
 
-    def _with_surface(self, env: PricingEnvironment, fn):
-        previous = self._active_lv_surface
+    @contextmanager
+    def _surface_scope(self, env: PricingEnvironment):
+        previous = (self._active_lv_surface, self._active_lv_env)
         self._active_lv_surface = self._build_surface(env)
+        self._active_lv_env = env
         try:
-            return fn()
+            yield
         finally:
-            self._active_lv_surface = previous
+            self._active_lv_surface, self._active_lv_env = previous
+
+    def _with_surface(self, env: PricingEnvironment, fn):
+        with self._surface_scope(env):
+            return fn()
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

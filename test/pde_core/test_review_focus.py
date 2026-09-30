@@ -73,3 +73,19 @@ def test_snowball_solver_deep_copies_and_pickles_after_pricing(cls, make, env):
     a = s.price(p, e)
     assert copy.deepcopy(s).price(p, e) == a
     assert pickle.loads(pickle.dumps(s)).price(p, e) == a
+
+
+# --- Review Focus 1 for Phoenix (Task 8) ---------------------------------------------
+from quantark.asset.equity.engine.pde import PhoenixPDESolver
+from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import LocalVolPhoenixPDESolver
+from quantark.modelvalidation.builders.equity_phoenix import make_phoenix
+
+from pde_bitwise.capture_book import PHOENIX
+
+
+@pytest.mark.parametrize("cls,env", [(PhoenixPDESolver, env_flat), (LocalVolPhoenixPDESolver, env_grid_vol)])
+def test_phoenix_solver_deep_copies_and_pickles_after_pricing(cls, env):
+    s = cls(PDEParams()); p = make_phoenix(PHOENIX); e = env()
+    a = s.price(p, e)
+    assert copy.deepcopy(s).price(p, e) == a
+    assert pickle.loads(pickle.dumps(s)).price(p, e) == a   # the solver's own state, round-tripped

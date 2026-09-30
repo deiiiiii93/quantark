@@ -62,8 +62,9 @@ def test_the_solver_is_left_as_it_was_found():
     before = engine.price(product, _env(spot=97.0))
     engine.solve_life_surface(product, _env(), extra_times=_daily())
     solver = engine._get_solver(product)
-    assert solver._extra_time_nodes == ()
     assert engine.price(product, _env(spot=97.0)) == before
+    # the extra nodes travelled in the life-surface request, not on the solver
+    assert solver._active_layout.request.extra_times == ()
     assert PDEEngine(params=PDEParams()).price(product, _env(spot=97.0)) == before
 
 

@@ -69,3 +69,38 @@ def test_ko_reset_group_declaration_equals_the_historical_solve_calls():
     assert type(p.adapter) is KOResetAdapter
     assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == [
         ("value", ("alive", "ki"), Backend.BANDED, VALUE)]
+
+
+# --- Phoenix (Task 8) ----------------------------------------------------------------
+from quantark.asset.equity.engine.pde import PhoenixPDESolver
+from quantark.asset.equity.engine.pde.core.groups import VALUE_NO_ZERO_DIFFUSION_OVERRIDE
+from quantark.modelvalidation.builders.equity_phoenix import make_phoenix
+
+from pde_bitwise.capture_book import PHOENIX, phoenix_plain
+
+
+def _phoenix_groups(max_k, termination, banded=True):
+    b = Backend.BANDED if banded else Backend.SPARSE_LU
+    g = [(f"v0[{k}]", (f"v0[{k}]",), b, VALUE_NO_ZERO_DIFFUSION_OVERRIDE) for k in range(max_k + 1)]
+    g += [(f"v1[{k}]", (f"v1[{k}]",), b, VALUE_NO_ZERO_DIFFUSION_OVERRIDE) for k in range(max_k + 1)]
+    if termination:
+        g += [("w0", ("w0",), b, VALUE_NO_ZERO_DIFFUSION_OVERRIDE), ("w1", ("w1",), b, VALUE_NO_ZERO_DIFFUSION_OVERRIDE)]
+    return g
+
+
+def test_phoenix_memory_groups():
+    # max_k = num_obs with memory coupons (_solve): the book's PHOENIX has 12 observations
+    p = prepare(PhoenixPDESolver(PDEParams()), make_phoenix(PHOENIX), env_flat(), OutputRequest(Operation.PRICE))
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == _phoenix_groups(12, False)
+    assert all(g.one_dimensional_rhs for g in p.groups)
+
+
+def test_phoenix_non_memory_groups():
+    p = prepare(PhoenixPDESolver(PDEParams()), phoenix_plain(), env_flat(), OutputRequest(Operation.PRICE))
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == _phoenix_groups(0, False)
+
+
+def test_phoenix_expiry_coupons_add_the_termination_surfaces():
+    p = prepare(PhoenixPDESolver(PDEParams()), make_phoenix(dict(PHOENIX, memory_coupon=False, coupon_pay_type="expiry")),
+                env_flat(), OutputRequest(Operation.PRICE))
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == _phoenix_groups(0, True)

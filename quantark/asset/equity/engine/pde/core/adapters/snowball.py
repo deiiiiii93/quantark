@@ -21,7 +21,7 @@ from ..groups import VALUE, Backend, ColumnGroup
 from ..prepare import Operation, TerminalOutcome
 from .base import FamilyAdapter
 
-__all__ = ["SnowballAdapter", "LocalVolSnowballAdapter"]
+__all__ = ["SnowballAdapter", "LocalVolAdapterMixin", "LocalVolSnowballAdapter"]
 
 
 class SnowballAdapter(FamilyAdapter):
@@ -332,6 +332,10 @@ class SnowballAdapter(FamilyAdapter):
 
     # --- read ---------------------------------------------------------------------
 
+    def _value_surface(self, sel):
+        """The state whose final column is read (0 = not knocked in, 1 = knocked in)."""
+        return "ki" if sel else "alive"
+
     def _t0_readout(self, prepared, result, sel):
         """(readout_vec, readout_override) for the selected surface (_compose_t0_readout)."""
         pre = result.captures.get("t0_pre_event")
@@ -342,7 +346,7 @@ class SnowballAdapter(FamilyAdapter):
         spot = prepared.env.spot
         readout = prepared.readout
         sel = 1 if prepared.solve_state["knocked_in"] else 0
-        solution_vec = result.states["ki" if sel else "alive"][:, 0]
+        solution_vec = result.states[self._value_surface(sel)][:, 0]
         readout_vec, readout_override = self._t0_readout(prepared, result, sel)
         column = readout_vec if readout_vec is not None else solution_vec
         op = prepared.request.operation
@@ -388,8 +392,8 @@ class SnowballAdapter(FamilyAdapter):
         return price
 
 
-class LocalVolSnowballAdapter(SnowballAdapter):
-    """``LocalVolSnowballPDESolver``: a local-vol row per step; the surface is the solve's."""
+class LocalVolAdapterMixin:
+    """The local-vol routes: a local-vol row per step; the surface is the solve's."""
 
     def scope(self, product, env):
         # The facades build the surface around the whole run (_with_surface); a
@@ -402,3 +406,7 @@ class LocalVolSnowballAdapter(SnowballAdapter):
     def observation_maps(self, product, env, layout, tau) -> None:
         super().observation_maps(product, env, layout, tau)
         self.solver._active_s_vec = layout.spatial.s   # the LV _build_grids override
+
+
+class LocalVolSnowballAdapter(LocalVolAdapterMixin, SnowballAdapter):
+    """``LocalVolSnowballPDESolver``."""
