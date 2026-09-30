@@ -33,31 +33,31 @@ def _sessions_only_lunch_context(sse_calendar, sse_sessions):
 
 
 def test_zero_diffusion_steps_march_fully_implicit(sse_calendar, sse_sessions, monkeypatch):
+    # The value group takes θ = 1 on every zero-diffusion coefficient set of the two-surface march.
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+
     ctx = _sessions_only_lunch_context(sse_calendar, sse_sessions)
     solver = SnowballPDESolver(PDEParams())
-    captured, zero_sets = [], {}
-    march = solver._time_stepping_two_surface
-    banded, matrices = solver._get_banded_system, solver._get_matrices
+    captured = []
+    step = CrankNicolson.step
 
-    def spy_march(*args, **kwargs):
-        zero_sets["sets"] = kwargs["step_coeffs"].zero_diffusion_sets
-        return march(*args, **kwargs)
+    def spy(self, state, s, dt, theta, boundaries):
+        captured.append((state.group.name, s.index, theta))
+        return step(self, state, s, dt, theta, boundaries)
 
-    def spy_banded(l, c, u, dt, theta, coeff_key=0):
-        captured.append((coeff_key, theta))
-        return banded(l, c, u, dt, theta, coeff_key=coeff_key)
-
-    def spy_matrices(I_int, A, dt, theta, coeff_key=0):
-        captured.append((coeff_key, theta))
-        return matrices(I_int, A, dt, theta, coeff_key=coeff_key)
-
-    monkeypatch.setattr(solver, "_time_stepping_two_surface", spy_march)
-    monkeypatch.setattr(solver, "_get_banded_system", spy_banded)
-    monkeypatch.setattr(solver, "_get_matrices", spy_matrices)
+    monkeypatch.setattr(CrankNicolson, "step", spy)
     price = solver.price(ctx.numerical.product, ctx.pricing_env)
-    zero = zero_sets["sets"]
-    on_zero = [theta for key, theta in captured if key in zero]
+    prepared = _prepared(solver, ctx)
+    zero = prepared.coefficients.sets.zero_diffusion_sets
+    on_zero = [theta for name, key, theta in captured if key in zero]
     assert zero and on_zero, "the sessions-only profile must produce zero-diffusion steps"
+    assert {name for name, _, _ in captured} == {"value"}
     assert all(theta == 1.0 for theta in on_zero), sorted(set(on_zero))
-    assert any(theta != 1.0 for key, theta in captured if key not in zero)       # diffusive steps keep their schedule
+    assert any(theta != 1.0 for _, key, theta in captured if key not in zero)   # diffusive steps keep their schedule
     assert 0.0 < price < 20.0
+
+
+def _prepared(solver, ctx):
+    from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare
+
+    return prepare(solver, ctx.numerical.product, ctx.pricing_env, OutputRequest(Operation.PRICE))

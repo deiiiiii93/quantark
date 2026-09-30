@@ -129,16 +129,17 @@ def test_the_product_fingerprint_sees_every_contract_term():
 
 
 def test_exact_pde_repricing_solves_each_state_once(monkeypatch):
-    from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+    from quantark.asset.equity.engine.pde.core import march as march_module
 
     count = {"n": 0}
-    original = SnowballPDESolver._solve
+    original = march_module.march
 
-    def counting(self, product, pricing_env):
-        count["n"] += 1
-        return original(self, product, pricing_env)
+    def counting(prepared):
+        if type(prepared.solver).__name__ == "SnowballPDESolver":
+            count["n"] += 1
+        return original(prepared)
 
-    monkeypatch.setattr(SnowballPDESolver, "_solve", counting)
+    monkeypatch.setattr(march_module, "march", counting)   # one value march per state
     pricer = _pricer()
     pricer.price_day(_states(3, [SPOT * 0.9, SPOT, SPOT * 1.02]))
     assert count["n"] == 3 and pricer.stats()["engine_calls"] == 3

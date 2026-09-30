@@ -28,6 +28,9 @@ class AmericanAdapter(FamilyAdapter):
             )
 
     def terminal_outcome(self, product, env, request, lifecycle_state):
+        # price() resolved the exercise dates before reading maturity; every
+        # operation does now (Review Focus 2), so solve_state does not repeat it
+        self.solver._prepare_solve_state(product, env)
         if request.operation is not Operation.PRICE:
             # calculate_greeks and the session seam: the base intrinsic, no delay factor
             return super().terminal_outcome(product, env, request, lifecycle_state)
@@ -45,6 +48,9 @@ class AmericanAdapter(FamilyAdapter):
         )
         solver._exercise_timings = timings
         return TerminalOutcome("expired", product.get_payoff(env.spot) * timings.delay_dfs[0])
+
+    def solve_state(self, product, env, request):
+        return {}   # resolved in terminal_outcome, before maturity was read
 
     def prepare_events(self, product, env, layout, tau, request) -> tuple:
         # The deleted _time_stepping override: resolve exercise payment timing once

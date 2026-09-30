@@ -26,6 +26,8 @@ _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
 from quantark.asset.equity.engine.pde.core.backends import FactorizationCache, banded_factor
 from quantark.asset.equity.engine.pde.core.groups import Backend
+from quantark.asset.equity.engine.pde.core.adapters.snowball import SnowballAdapter
+from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
 from quantark.asset.equity.engine.pde.base_pde_solver import (
     GRID_CACHE_MAX_ENTRIES,
     _CACHE_KEYING,
@@ -47,6 +49,7 @@ from quantark.asset.equity.engine.event_stats import (
     AutocallableEventStats,
     payment_aware_cashflow_fields,
 )
+from quantark.asset.equity.engine.base_engine import _install_lifecycle_keyword
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
@@ -273,6 +276,7 @@ class SnowballPDESolver(BasePDESolver):
     #: Kept as a hook for solvers whose barrier treatment must stay pinned.
     _first_passage_ki_supported: bool = True
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    _adapter_class = SnowballAdapter
     #: Interior times that must be grid nodes for a life-surface readout
     #: (no event, no damping).  Empty for every ordinary solve.
     _extra_time_nodes: Tuple[float, ...] = ()
@@ -361,164 +365,6 @@ class SnowballPDESolver(BasePDESolver):
             "solve": 0.0,
             "barrier": 0.0,
         }
-
-    @_market_scoped
-    def _solve(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> PDESolutionResult:
-        """
-        Core Two-Surface PDE solving logic for Snowball options.
-
-        This method contains the common solving logic shared by price() and
-        calculate_greeks(). It handles the two-surface approach with V0/V1
-        state transitions.
-
-        Args:
-            product: SnowballOption to price (already validated)
-            pricing_env: Pricing environment with market data
-
-        Returns:
-            PDESolutionResult with appropriate surface (V0 or V1) at t=0
-
-        Note:
-            This method assumes the product has been validated and is not
-            expired or knocked out at valuation. Callers should check these
-            conditions before calling _solve().
-        """
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        # State preamble (KI regime, valuation flags, barrier level) shared
-        # with session preparation via the _prepare_solve_state seam.
-        knocked_in_at_valuation = self._prepare_solve_state(product, pricing_env)
-        self._reset_t0_readout_state()
-
-        # Extract market data
-        strike = product.strike
-        r = pricing_env.get_rate(tau)
-        q = pricing_env.get_div_yield(tau)
-        sigma = pricing_env.get_vol(strike, tau)
-
-        if self._profile_enabled:
-            self._reset_profile_stats()
-
-        # Build grids. The declarative layer serves migrated solvers unless
-        # a prepared session injected grids (adapter clones keep the legacy
-        # path until the execution seams re-point at Phase 4). Phoenix/KO-
-        # reset inherit this _solve and take the legacy branch until their
-        # own migration flips _uses_grid_layer.
-        if self._profile_enabled:
-            t0 = perf_counter()
-        self._active_layout = None
-        self._active_schedule = None
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
-        if self._active_layout is not None:
-            self._active_schedule = self.event_schedule(
-                product, pricing_env, self._active_layout
-            )
-        if self._profile_enabled:
-            self._profile_stats["grid_build"] += perf_counter() - t0
-
-        # Initialize both grids
-        num_x, num_t = len(x_vec), len(t_vec)
-        self._grid_v0 = np.zeros((num_x, num_t))
-        self._grid_v1 = np.zeros((num_x, num_t))
-
-        # Set terminal conditions
-        self._set_terminal_condition_v0(
-            self._grid_v0, x_vec, s_vec, product, pricing_env
-        )
-        self._set_terminal_condition_v1(
-            self._grid_v1, x_vec, s_vec, product, pricing_env
-        )
-
-        is_terminal_ki = product.has_ki_barrier and (
-            self._ki_continuous
-            or (num_t - 1) in self._ki_observation_indices
-        )
-        terminal_ko = self._has_terminal_ko and self._ko_terminal_record is not None
-        # the knock-out wins a tie with a knock-in observed with it (see _ko_jump_goes_last)
-        ko_last = terminal_ko and is_terminal_ki and self._ko_jump_goes_last(product)
-
-        # Apply terminal KO if at maturity observation
-        if terminal_ko and not ko_last:
-            self._apply_terminal_ko(
-                self._grid_v0,
-                self._grid_v1,
-                s_vec,
-                product,
-                pricing_env,
-                self._ko_terminal_record,
-            )
-
-        # Apply terminal KI if at maturity observation (European KI fix)
-        if is_terminal_ki:
-            self._apply_ki_jump(
-                self._grid_v0, self._grid_v1, s_vec, num_t - 1, product
-            )
-
-        if ko_last:
-            self._apply_terminal_ko(
-                self._grid_v0,
-                self._grid_v1,
-                s_vec,
-                product,
-                pricing_env,
-                self._ko_terminal_record,
-            )
-
-        # Build operator matrices
-        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
-        A = self._build_operator_matrix(l, c, u, num_x)
-
-        # Term-structure step coefficients (one set for flat inputs)
-        sc = self._step_coefficients_for_solve(
-            pricing_env, product.strike, t_vec, dx_vec, num_x
-        )
-        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
-        step_coeffs = None if sc.n_unique == 1 else sc
-
-        # Time stepping for both surfaces
-        self._time_stepping_two_surface(
-            self._grid_v0,
-            self._grid_v1,
-            A,
-            l,
-            c,
-            u,
-            x_vec,
-            s_vec,
-            t_vec,
-            dt_vec,
-            product,
-            pricing_env,
-            r,
-            q,
-            sigma,
-            tau,
-            step_coeffs=step_coeffs,
-        )
-
-        # Return appropriate surface based on knocked-in state
-        spot_log = np.log(spot)
-        if knocked_in_at_valuation:
-            solution_vec = self._grid_v1[:, 0]
-        else:
-            solution_vec = self._grid_v0[:, 0]
-
-        readout_vec, readout_override = self._compose_t0_readout(
-            1 if knocked_in_at_valuation else 0
-        )
-        return PDESolutionResult(
-            solution_vec=solution_vec,
-            x_vec=x_vec,
-            s_vec=s_vec,
-            spot_log=spot_log,
-            readout_vec=readout_vec,
-            readout_override=readout_override,
-        )
 
     def _prepare_solve_state(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -644,55 +490,12 @@ class SnowballPDESolver(BasePDESolver):
             PricingError: If product is not a SnowballOption
             ValidationError: If product configuration is incompatible with PDE
         """
-        return self._price_with_solution(product, pricing_env)[0]
-
-    def _price_with_solution(self, product, pricing_env):
-        """price()'s preamble + one solve; None solution = short-circuit
-        (expired or knocked-out at valuation). Native session seam."""
-        self._product_token_memo.clear()
-        self._check_product_type(product)
-
-        if pricing_env is None:
-            raise ValidationError(
-                f"PricingEnvironment is required for {self._solver_name}"
-            )
-
-        # Validate PDE compatibility
-        self._validate_product(product)
-
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        if tau <= 0:
-            # Expired: return terminal payoff
-            return self._calculate_terminal_value(product, spot, pricing_env), None
-
-        # Check if knocked out at valuation
-        knocked_out_at_valuation = self._is_knocked_out_at_valuation(
-            product, spot, pricing_env
-        )
-        if knocked_out_at_valuation:
-            return self._get_immediate_ko_payoff(product, pricing_env), None
-
-        # Solve PDE and interpolate price. Valuation-date events (an
-        # observation falling exactly on t=0) are deterministic at the known
-        # spot: the readout interpolates the smooth 0+ branch column
-        # (readout_vec) and applies today's transitions pointwise
-        # (readout_override), never blending across the t=0 jump.
-        result = self._solve(product, pricing_env)
-        if result.readout_override is not None:
-            return float(result.readout_override), result
-        readout_vec = (
-            result.readout_vec if result.readout_vec is not None else result.solution_vec
-        )
-        return (
-            self._interpolate_price(readout_vec, result.x_vec, result.spot_log),
-            result,
-        )
+        return self._run(product, pricing_env, OutputRequest(Operation.PRICE))
 
     def _spot_curve_solution(self, product, pricing_env):
-        # The family's own solve until it marches on the core (Task 6).
-        return self._solve(product, pricing_env)
+        # the solved surface alone: no valuation-date short-circuit (as _solve had none)
+        return self._run(product, pricing_env,
+                         OutputRequest(Operation.SESSION_OUTPUTS, price=False, grid=True)).solution
 
     def _session_outputs(
         self,
@@ -711,7 +514,9 @@ class SnowballPDESolver(BasePDESolver):
         """
         from quantark.cashleg.event_distribution import EventDistribution
 
-        npv, solution = self._price_with_solution(product, pricing_env)
+        value = self._run(product, pricing_env,
+                          OutputRequest(Operation.SESSION_OUTPUTS, grid=True))
+        npv, solution = value.npv, value.solution
         stats = None
         dist = None
         if want_events and solution is not None:
@@ -1436,72 +1241,16 @@ class SnowballPDESolver(BasePDESolver):
         """
         Calculate Greeks for a Snowball option using Two-Surface PDE method.
 
-        Args:
-            product: SnowballOption
-            pricing_env: Pricing environment with market data
-
-        Returns:
-            Dictionary with price, delta, gamma
+        Price from the pointwise-exact readout price() uses; delta/gamma from
+        the smooth 0+ branch column (a valuation-date observation writes a
+        value JUMP onto the grid, so differentiating the post-event vector
+        across it is O(J/h) wrong and worsens under refinement).
 
         Raises:
             PricingError: If product is not a SnowballOption
             ValidationError: If product configuration is incompatible with PDE
         """
-        self._check_product_type(product)
-
-        if pricing_env is None:
-            raise ValidationError(
-                f"PricingEnvironment is required for {self._solver_name}"
-            )
-
-        # Validate PDE compatibility
-        self._validate_product(product)
-
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        if tau <= 0:
-            # Expired: return terminal value with zero Greeks
-            return {
-                "price": self._calculate_terminal_value(product, spot, pricing_env),
-                "delta": 0.0,
-                "gamma": 0.0,
-            }
-
-        # Check if knocked out at valuation
-        knocked_out_at_valuation = self._is_knocked_out_at_valuation(
-            product, spot, pricing_env
-        )
-        if knocked_out_at_valuation:
-            # KO payoff is fixed, so delta and gamma are zero
-            return {
-                "price": self._get_immediate_ko_payoff(product, pricing_env),
-                "delta": 0.0,
-                "gamma": 0.0,
-            }
-
-        # Solve PDE
-        result = self._solve(product, pricing_env)
-
-        # Extract price and Greeks from the appropriate surface, through the
-        # SAME readout price() uses (base_pde_solver.calculate_greeks): price
-        # from the pointwise-exact readout, delta/gamma from the smooth 0+
-        # branch column (a cash transition at the known spot is a constant
-        # shift with zero delta/gamma). A valuation-date observation writes a
-        # value JUMP onto the grid, so differentiating the post-event vector
-        # across it is O(J/h) wrong and worsens under refinement.
-        readout_vec = (
-            result.readout_vec if result.readout_vec is not None else result.solution_vec
-        )
-        if result.readout_override is not None:
-            price = float(result.readout_override)
-        else:
-            price = self._interpolate_price(readout_vec, result.x_vec, result.spot_log)
-        delta, gamma = self._calculate_delta_gamma(
-            readout_vec, result.x_vec, result.spot_log, spot
-        )
-
-        return {"price": price, "delta": delta, "gamma": gamma}
+        return self._run(product, pricing_env, OutputRequest(Operation.GREEKS, greeks=True))
 
     def solve_life_surface(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment, *, extra_times: Sequence[float]
@@ -1509,47 +1258,13 @@ class SnowballPDESolver(BasePDESolver):
         """One two-surface solve with ``extra_times`` as grid nodes; both slabs returned.
 
         The solve is the ordinary one (same grid layer, same schedule, same
-        stepping); the extra nodes carry no event and no damping.  The
-        solver's request state is restored afterwards, so a later ``price``
-        is byte-identical to one on a fresh solver.
+        stepping); the extra nodes carry no event and no damping. The nodes
+        travel in the request, so a later ``price`` is byte-identical to one on
+        a fresh solver.
         """
-        self._product_token_memo.clear()
-        self._check_product_type(product)
-        if pricing_env is None:
-            raise ValidationError(f"PricingEnvironment is required for {self._solver_name}")
-        self._validate_product(product)
-        tau = product.get_maturity(pricing_env)
-        if tau <= 0:
-            raise ValidationError("a life surface needs a product with time to maturity")
-        if self._is_knocked_out_at_valuation(product, pricing_env.spot, pricing_env):
-            raise ValidationError("a life surface needs a product that is alive at valuation")
         nodes = tuple(sorted(float(t) for t in extra_times))
-        if any(t <= 0.0 or t >= tau for t in nodes):
-            raise ValidationError(f"extra_times must lie strictly inside (0, {tau})")
-        self._extra_time_nodes = nodes
-        self._capture_branch_columns = True
-        try:
-            result = self._solve(product, pricing_env)
-            layout = self._active_layout
-            if layout is None:
-                raise PricingError("the life surface needs the declarative grid layer")
-            if self._branch_cols is None:
-                raise PricingError("the life surface needs the march's branch columns")
-            branch_v0, branch_v1 = self._branch_cols
-            return LifeSurfaceSolution(
-                t=np.array(layout.time.t, dtype=float), x=np.array(result.x_vec, dtype=float),
-                s=np.array(result.s_vec, dtype=float), v0=np.array(branch_v0, dtype=float),
-                v1=np.array(branch_v1, dtype=float), step_of=dict(layout.time.step_of),
-                t0_readout=None if result.readout_vec is None else np.array(result.readout_vec, dtype=float),
-                knocked_in_at_valuation=bool(self._knocked_in_at_valuation),
-                requested_steps=int(layout.time.requested_steps),
-                actual_steps=int(layout.time.actual_steps),
-                fill_scaled=bool(layout.time.fill_scaled),
-            )
-        finally:
-            self._extra_time_nodes = ()
-            self._capture_branch_columns = False
-            self._branch_cols = None
+        return self._run(product, pricing_env,
+                         OutputRequest(Operation.LIFE_SURFACE, life_surface=True, extra_times=nodes))
 
     def _validate_product(self, product: SnowballOption) -> None:
         """
@@ -1889,87 +1604,6 @@ class SnowballPDESolver(BasePDESolver):
         instant). The base keeps the carried state."""
         return None, carried
 
-    def _build_grids(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Build spatial and temporal grids for the Two-Surface PDE solver.
-
-        Extends base class to:
-        - Include all KO barriers and KI barrier in spatial grid
-        - Align time grid with all observation times
-        - Track observation indices for discrete barrier checks
-        """
-        # Record the environment FIRST: grid_request (in super()._build_grids)
-        # resolves date-based observation schedules against it. Living here —
-        # not in _solve — guarantees subclasses that override _solve
-        # (e.g. KOResetSnowballPDESolver) cannot silently skip it.
-        self._stash_grid_request_env(pricing_env)
-
-        result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = result
-
-        # Store total time to maturity
-        self._total_tau = tau
-
-        # Clear previous observation tracking
-        self._ko_observation_indices.clear()
-        self._ki_observation_indices.clear()
-        self._ki_barrier_by_tidx.clear()
-        self._ko_terminal_record = None
-        self._has_terminal_ko = False
-
-        # Setup KO observation indices
-        ko_records = self._get_cached_ko_records(pricing_env, product)
-        for rec in ko_records:
-            obs_time = rec.observation_time
-            if is_close(obs_time, 0.0):
-                self._ko_observation_indices[0] = rec
-            elif is_close(obs_time, tau):
-                self._ko_terminal_record = rec
-                self._has_terminal_ko = True
-            elif 0.0 < obs_time < tau:
-                idx = self._aligned_time_index(t_vec, obs_time, "KO observation")
-                self._ko_observation_indices[idx] = rec
-
-        # Setup KI observation indices (if discrete).  ``_ki_nodes_in_grid``
-        # gates this: when the grid was deliberately built WITHOUT interior KI
-        # nodes (an already-knocked-in product) alignment is
-        # neither possible nor needed, and demanding it would raise on a grid
-        # that is correct by construction.
-        if (
-            product.has_ki_barrier
-            and not self._ki_continuous
-            and self._ki_nodes_in_grid(product)
-        ):
-            ki_profile = self._get_cached_ki_profile(pricing_env, product)
-            ki_times = ki_profile["observation_times"]
-            ki_barriers = ki_profile.get("barriers") or []
-            for obs_idx, obs_time in enumerate(ki_times):
-                if obs_time is None:
-                    continue
-                barrier = None
-                if obs_idx < len(ki_barriers):
-                    barrier = ki_barriers[obs_idx]
-                if barrier is None:
-                    barrier = self._ki_barrier
-                if is_close(obs_time, 0.0):
-                    self._ki_observation_indices.add(0)
-                    self._ki_barrier_by_tidx[0] = float(barrier)
-                elif 0.0 < obs_time <= tau:
-                    idx = self._aligned_time_index(t_vec, obs_time, "KI observation")
-                    self._ki_observation_indices.add(idx)
-                    self._ki_barrier_by_tidx[idx] = float(barrier)
-
-        return result
-
     @staticmethod
     def _ko_survives_ki(product: SnowballOption) -> bool:
         """Whether a knock-out can still fire once the trade has knocked in.
@@ -2203,7 +1837,8 @@ class SnowballPDESolver(BasePDESolver):
         return True
 
     def grid_request(
-        self, product: BaseEquityProduct, market: MarketSnapshot, tau: float
+        self, product: BaseEquityProduct, market: MarketSnapshot, tau: float,
+        extra_times: Optional[Tuple[float, ...]] = None,
     ) -> GridRequest:
         """Consolidated geometry declaration — ALL regime gating in one place.
 
@@ -2230,7 +1865,7 @@ class SnowballPDESolver(BasePDESolver):
             hard_lower=None,
             hard_upper=None,
             event_times=tuple(sorted(set(align) | set(monitor))),
-            extra_times=self._extra_time_nodes,
+            extra_times=self._extra_time_nodes if extra_times is None else tuple(extra_times),
         )
 
     def _prepare_for_request(
@@ -2303,133 +1938,6 @@ class SnowballPDESolver(BasePDESolver):
                     idx = step_of(obs_time)
                     self._ki_observation_indices.add(idx)
                     self._ki_barrier_by_tidx[idx] = float(barrier)
-
-    def event_schedule(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        layout: Layout,
-    ) -> EventSchedule:
-        """Interior + continuous stages for the two-surface solve.
-
-        Terminal (t = tau) and valuation-date (t = 0) events keep their
-        certified inline handling in ``_solve`` / the t0 readout; interior
-        discrete events and the continuous KI coupling live here as pure
-        transforms over ``{"alive": V0_col, "ki": V1_col}``.
-        """
-        spatial = layout.spatial
-        tau = layout.request.tau
-        is_reverse = bool(getattr(product, "is_reverse", False))
-        interior: dict = {}
-        ko_stages: dict = {}
-
-        def _chain(prev, fn):
-            if prev is None:
-                return fn
-            return lambda states: fn(prev(states))
-
-        # KO: both surfaces projected against the discounted redemption
-        # (breach_up = up-barrier XOR reverse — certified direction rule).
-        for rec in self._get_cached_ko_records(pricing_env, product):
-            t_obs = rec.observation_time
-            if (
-                t_obs is None
-                or is_close(t_obs, 0.0)
-                or is_close(t_obs, tau)
-                or not (0.0 < t_obs < tau)
-            ):
-                continue
-            step = layout.time.step_at(t_obs)
-            cash = self._cashflow_value_at_time(
-                pricing_env=pricing_env,
-                cashflow=rec.payoff if rec.payoff is not None else 0.0,
-                current_time=t_obs,
-                settlement_time=rec.settlement_time,
-            )
-            barrier = float(rec.barrier)
-            breach_up = not is_reverse
-            ko_hits_ki = self._ko_survives_ki(product)
-
-            def _ko(states, _b=barrier, _c=cash, _up=breach_up, _hits_ki=ko_hits_ki):
-                cash_col = np.full_like(states["alive"], _c)
-                return {
-                    "alive": project_between(
-                        spatial, _b, _up, cash_col, states["alive"]
-                    ),
-                    "ki": project_between(
-                        spatial, _b, _up, cash_col, states["ki"]
-                    )
-                    if _hits_ki
-                    else states["ki"],
-                }
-
-            ko_stages[step] = _chain(ko_stages.get(step), _ko)
-
-        # The knock-out wins a tie with a knock-in observed at the same instant. With the knock-out
-        # staged first (certified order) that holds while it survives a knock-in: "ki" carries it
-        # too, so the copy below keeps it. Under disable_ko_after_ki "ki" does not, and the copy
-        # would overwrite the knock-out wherever both levels are breached, so the knock-out is
-        # staged last there (``_ko_jump_goes_last``; the two stages commute on disjoint nodes).
-        ko_last = self._ko_jump_goes_last(product)
-        if not ko_last:
-            interior.update(ko_stages)
-
-        # Discrete KI: alive <- ki below the (possibly per-date) barrier.
-        # Applied AFTER any coincident KO (certified order: KO first).
-        if (
-            product.has_ki_barrier
-            and not self._ki_continuous
-            and self._ki_nodes_in_grid(product)
-        ):
-            ki_profile = self._get_cached_ki_profile(pricing_env, product)
-            ki_times = ki_profile["observation_times"]
-            ki_barriers = ki_profile.get("barriers") or []
-            for obs_idx, t_obs in enumerate(ki_times):
-                if t_obs is None or not (0.0 < t_obs < tau):
-                    continue
-                if is_close(t_obs, 0.0) or is_close(t_obs, tau):
-                    continue
-                barrier = None
-                if obs_idx < len(ki_barriers):
-                    barrier = ki_barriers[obs_idx]
-                if barrier is None:
-                    barrier = self._ki_barrier
-                step = layout.time.step_at(t_obs)
-                breach_up = is_reverse  # KI is a down barrier (up if reverse)
-
-                def _ki(states, _b=float(barrier), _up=breach_up):
-                    return {
-                        "alive": project_between(
-                            spatial, _b, _up, states["ki"], states["alive"]
-                        ),
-                        "ki": states["ki"],
-                    }
-
-                interior[step] = _chain(interior.get(step), _ki)
-
-        if ko_last:
-            for step, stage in ko_stages.items():
-                interior[step] = _chain(interior.get(step), stage)
-
-        # Continuous KI: nodal coupling per step.
-        continuous = None
-        if product.has_ki_barrier and self._ki_continuous:
-            kib = float(self._ki_barrier)
-            s = spatial.s
-
-            def continuous(step, states, _b=kib, _rev=is_reverse):
-                mask = (s >= _b) if _rev else (s <= _b)
-                alive = states["alive"].copy()
-                alive[mask] = states["ki"][mask]
-                # FIRST_PASSAGE correction: restore the intra-step crossing
-                # mass the nodal jump cannot see (see _apply_ki_jump).
-                fp = self._ki_fp
-                if fp is not None and step > 0:
-                    d = states["ki"] - alive
-                    alive += fp.step_correction(step, s, _b, d)
-                return {"alive": alive, "ki": states["ki"]}
-
-        return EventSchedule(interior=interior, continuous=continuous)
 
     def _set_terminal_condition_v0(
         self,
@@ -3237,3 +2745,235 @@ class SnowballPDESolver(BasePDESolver):
         if len(self._ki_profile_cache) > GRID_CACHE_MAX_ENTRIES:
             self._ki_profile_cache.popitem(last=False)
         return profile
+
+
+class _LegacySnowballFacade:
+    """The pre-core snowball facades, verbatim, for the solvers that still own a
+    ``_solve`` (Phoenix until Task 8, KO-reset until Task 7). Deleted with them."""
+
+    def price(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> float:
+        """
+        Price a Snowball option using the Two-Surface PDE method.
+
+        Args:
+            product: SnowballOption to price
+            pricing_env: Pricing environment with market data
+
+        Returns:
+            Option price
+
+        Raises:
+            PricingError: If product is not a SnowballOption
+            ValidationError: If product configuration is incompatible with PDE
+        """
+        return self._legacy_price_with_solution(product, pricing_env)[0]
+
+    def _legacy_price_with_solution(self, product, pricing_env):
+        """price()'s preamble + one solve; None solution = short-circuit
+        (expired or knocked-out at valuation). Native session seam."""
+        self._product_token_memo.clear()
+        self._check_product_type(product)
+
+        if pricing_env is None:
+            raise ValidationError(
+                f"PricingEnvironment is required for {self._solver_name}"
+            )
+
+        # Validate PDE compatibility
+        self._validate_product(product)
+
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        if tau <= 0:
+            # Expired: return terminal payoff
+            return self._calculate_terminal_value(product, spot, pricing_env), None
+
+        # Check if knocked out at valuation
+        knocked_out_at_valuation = self._is_knocked_out_at_valuation(
+            product, spot, pricing_env
+        )
+        if knocked_out_at_valuation:
+            return self._get_immediate_ko_payoff(product, pricing_env), None
+
+        # Solve PDE and interpolate price. Valuation-date events (an
+        # observation falling exactly on t=0) are deterministic at the known
+        # spot: the readout interpolates the smooth 0+ branch column
+        # (readout_vec) and applies today's transitions pointwise
+        # (readout_override), never blending across the t=0 jump.
+        result = self._solve(product, pricing_env)
+        if result.readout_override is not None:
+            return float(result.readout_override), result
+        readout_vec = (
+            result.readout_vec if result.readout_vec is not None else result.solution_vec
+        )
+        return (
+            self._interpolate_price(readout_vec, result.x_vec, result.spot_log),
+            result,
+        )
+
+    def _spot_curve_solution(self, product, pricing_env):
+        # The family's own solve until it marches on the core (Task 6).
+        return self._solve(product, pricing_env)
+
+    def _session_outputs(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        want_events: bool = False,
+        want_grid: bool = False,
+        streams: Optional[frozenset] = None,
+    ) -> PDESessionOutputs:
+        """One VALUE solve serving PV + event stats + grid projection.
+
+        The event-stat indicator sweep remains the engine's designed separate
+        pass (``calculate_event_stats`` with the npv supplied never re-runs
+        the value solve) — the session performs exactly as many backward
+        marches as the direct ``price_with_events`` path.
+        """
+        from quantark.cashleg.event_distribution import EventDistribution
+
+        npv, solution = self._legacy_price_with_solution(product, pricing_env)
+        stats = None
+        dist = None
+        if want_events and solution is not None:
+            stats = self.calculate_event_stats(
+                product, pricing_env, npv=float(npv), streams=streams
+            )
+            if stats is not None:
+                dist = EventDistribution.from_autocallable_stats(stats)
+        return PDESessionOutputs(
+            npv=float(npv),
+            solution=solution if want_grid else None,
+            event_stats=stats,
+            event_distribution=dist,
+        )
+
+    def calculate_greeks(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks for a Snowball option using Two-Surface PDE method.
+
+        Args:
+            product: SnowballOption
+            pricing_env: Pricing environment with market data
+
+        Returns:
+            Dictionary with price, delta, gamma
+
+        Raises:
+            PricingError: If product is not a SnowballOption
+            ValidationError: If product configuration is incompatible with PDE
+        """
+        self._check_product_type(product)
+
+        if pricing_env is None:
+            raise ValidationError(
+                f"PricingEnvironment is required for {self._solver_name}"
+            )
+
+        # Validate PDE compatibility
+        self._validate_product(product)
+
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        if tau <= 0:
+            # Expired: return terminal value with zero Greeks
+            return {
+                "price": self._calculate_terminal_value(product, spot, pricing_env),
+                "delta": 0.0,
+                "gamma": 0.0,
+            }
+
+        # Check if knocked out at valuation
+        knocked_out_at_valuation = self._is_knocked_out_at_valuation(
+            product, spot, pricing_env
+        )
+        if knocked_out_at_valuation:
+            # KO payoff is fixed, so delta and gamma are zero
+            return {
+                "price": self._get_immediate_ko_payoff(product, pricing_env),
+                "delta": 0.0,
+                "gamma": 0.0,
+            }
+
+        # Solve PDE
+        result = self._solve(product, pricing_env)
+
+        # Extract price and Greeks from the appropriate surface, through the
+        # SAME readout price() uses (base_pde_solver.calculate_greeks): price
+        # from the pointwise-exact readout, delta/gamma from the smooth 0+
+        # branch column (a cash transition at the known spot is a constant
+        # shift with zero delta/gamma). A valuation-date observation writes a
+        # value JUMP onto the grid, so differentiating the post-event vector
+        # across it is O(J/h) wrong and worsens under refinement.
+        readout_vec = (
+            result.readout_vec if result.readout_vec is not None else result.solution_vec
+        )
+        if result.readout_override is not None:
+            price = float(result.readout_override)
+        else:
+            price = self._interpolate_price(readout_vec, result.x_vec, result.spot_log)
+        delta, gamma = self._calculate_delta_gamma(
+            readout_vec, result.x_vec, result.spot_log, spot
+        )
+
+        return {"price": price, "delta": delta, "gamma": gamma}
+
+    def solve_life_surface(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, *, extra_times: Sequence[float]
+    ) -> LifeSurfaceSolution:
+        """One two-surface solve with ``extra_times`` as grid nodes; both slabs returned.
+
+        The solve is the ordinary one (same grid layer, same schedule, same
+        stepping); the extra nodes carry no event and no damping.  The
+        solver's request state is restored afterwards, so a later ``price``
+        is byte-identical to one on a fresh solver.
+        """
+        self._product_token_memo.clear()
+        self._check_product_type(product)
+        if pricing_env is None:
+            raise ValidationError(f"PricingEnvironment is required for {self._solver_name}")
+        self._validate_product(product)
+        tau = product.get_maturity(pricing_env)
+        if tau <= 0:
+            raise ValidationError("a life surface needs a product with time to maturity")
+        if self._is_knocked_out_at_valuation(product, pricing_env.spot, pricing_env):
+            raise ValidationError("a life surface needs a product that is alive at valuation")
+        nodes = tuple(sorted(float(t) for t in extra_times))
+        if any(t <= 0.0 or t >= tau for t in nodes):
+            raise ValidationError(f"extra_times must lie strictly inside (0, {tau})")
+        self._extra_time_nodes = nodes
+        self._capture_branch_columns = True
+        try:
+            result = self._solve(product, pricing_env)
+            layout = self._active_layout
+            if layout is None:
+                raise PricingError("the life surface needs the declarative grid layer")
+            if self._branch_cols is None:
+                raise PricingError("the life surface needs the march's branch columns")
+            branch_v0, branch_v1 = self._branch_cols
+            return LifeSurfaceSolution(
+                t=np.array(layout.time.t, dtype=float), x=np.array(result.x_vec, dtype=float),
+                s=np.array(result.s_vec, dtype=float), v0=np.array(branch_v0, dtype=float),
+                v1=np.array(branch_v1, dtype=float), step_of=dict(layout.time.step_of),
+                t0_readout=None if result.readout_vec is None else np.array(result.readout_vec, dtype=float),
+                knocked_in_at_valuation=bool(self._knocked_in_at_valuation),
+                requested_steps=int(layout.time.requested_steps),
+                actual_steps=int(layout.time.actual_steps),
+                fill_scaled=bool(layout.time.fill_scaled),
+            )
+        finally:
+            self._extra_time_nodes = ()
+            self._capture_branch_columns = False
+            self._branch_cols = None
+
+
+# BaseEngine.__init_subclass__ wraps only BaseEngine subclasses: give the mixin the
+# same lifecycle keyword and settlement-capability check its methods had.
+for _name in ("price", "calculate_greeks"):
+    _install_lifecycle_keyword(_LegacySnowballFacade, _name)

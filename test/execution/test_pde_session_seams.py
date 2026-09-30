@@ -48,9 +48,9 @@ class TestPriceWithSolution:
 
     def test_price_equals_seam_pv_snowball(self):
         engine, product, env = _case("SnowballPDESolver")
-        pv, solution = engine._price_with_solution(product, env)
-        assert engine.price(product, env) == pv
-        assert solution is not None
+        out = engine._session_outputs(product, env, want_grid=True)
+        assert engine.price(product, env) == out.npv
+        assert out.solution is not None
 
 
 class TestSessionOutputs:

@@ -101,16 +101,15 @@ class PreparedProblem:
     groups: tuple = ()
     factorizations: Optional[FactorizationCache] = None
     readout: Any = None
-    events: tuple = ()
+    events: Any = ()                  # what the adapter's prepare_events built (the snowball event table)
     identity: Optional[Mapping[str, Optional[str]]] = None
     market_fps: Optional[Mapping[str, Optional[str]]] = None
 
     @classmethod
-    def terminal_only(cls, solver, adapter, product, env, request, lifecycle_state, tau, terminal,
-                      solve_state=None):
+    def terminal_only(cls, solver, adapter, product, env, request, lifecycle_state, tau, terminal):
         return cls(solver=solver, adapter=adapter, product=product, env=env, request=request,
-                   lifecycle_state=lifecycle_state, tau=tau, terminal=terminal,
-                   solve_state={} if solve_state is None else solve_state, identity={})
+                   lifecycle_state=lifecycle_state, tau=tau, terminal=terminal, solve_state={},
+                   identity={})
 
 
 @dataclass(frozen=True, eq=False)
@@ -156,15 +155,15 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
     composite = adapter.composite(product, env, request, lifecycle_state)
     if composite is not None:                                             # decision 21
         return composite
-    solve_state = adapter.solve_state(product, env, request)              # step 2 (American: before maturity)
     terminal = adapter.terminal_outcome(product, env, request, lifecycle_state)   # step 0
     if terminal is not None:
         return PreparedProblem.terminal_only(solver, adapter, product, env, request, lifecycle_state,
-                                             None, terminal, solve_state)
+                                             None, terminal)
     tau = float(product.get_maturity(env))
     adapter.check_route(solver.params)                                    # step 1
     fps = market_fingerprints(env)                                        # decision 14: once per prepare
-    with market_scope(solver, env, fps):
+    with market_scope(solver, env, fps), adapter.scope(product, env):
+        solve_state = adapter.solve_state(product, env, request)          # step 2
         adapter.market_checks(product, env, tau)                          # _solve's guard, before the grid
         market = solver.market_snapshot(product, env)                     # step 3
         grid_request = adapter.grid_request(product, market, tau, request)    # step 4
@@ -183,10 +182,7 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
         schedule = stepper.schedule(layout)
         validate_schedule(schedule, layout, stepper)
         groups = adapter.groups(product, layout, request)                 # step 10
-        factorizations = FactorizationCache(                              # step 11 (retention: full, value groups)
-            enabled=solver._is_cache_enabled(),
-            lu_seed=None if session is None else session.lu_pack,
-            banded_seed=None if session is None else session.banded_pack)
+        factorizations = adapter.factorizations(session)                  # step 11
         identity = {"layout": layout.fingerprint,                         # step 12 (problem id: Task 11)
                     "coefficient_key": adapter.coefficient_key(product, env, layout, fps)}
     return PreparedProblem(solver=solver, adapter=adapter, product=product, env=env, request=request,

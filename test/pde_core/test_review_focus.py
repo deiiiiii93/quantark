@@ -57,3 +57,19 @@ def test_american_greeks_on_a_fresh_solver_equal_greeks_after_price():
     s = AmericanPDESolver(PDEParams()); s.price(p, env)
     after = s.calculate_greeks(p, env)
     assert fresh == after
+
+
+# --- Review Focus 1 for the snowball family (Task 6) -----------------------------
+from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import LocalVolSnowballPDESolver
+
+from pde_bitwise.capture_book import env_grid_vol, snowball
+
+
+@pytest.mark.parametrize("cls,make,env", [(SnowballPDESolver, lambda: snowball("continuous"), env_flat),
+                                          (LocalVolSnowballPDESolver, lambda: snowball("continuous"), env_grid_vol)])
+def test_snowball_solver_deep_copies_and_pickles_after_pricing(cls, make, env):
+    s = cls(PDEParams()); p = make(); e = env()
+    a = s.price(p, e)
+    assert copy.deepcopy(s).price(p, e) == a
+    assert pickle.loads(pickle.dumps(s)).price(p, e) == a

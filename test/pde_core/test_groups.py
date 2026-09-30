@@ -27,3 +27,32 @@ BASE_ROWS = [
 def test_group_declaration_equals_the_historical_solve_calls(cls, make, want):
     p = prepare(cls(PDEParams()), make(), env_flat(), OutputRequest(Operation.PRICE))
     assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == want
+
+
+# --- the snowball family (Task 6) ------------------------------------------------
+from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.pde.grid import GridConfig
+from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import LocalVolSnowballPDESolver
+
+from pde_bitwise.capture_book import env_grid_vol, snowball
+
+SNOWBALL_ROWS = [
+    (SnowballPDESolver, lambda: snowball("continuous"), env_flat,
+     [("value", ("alive", "ki"), Backend.BANDED, VALUE)]),
+    (LocalVolSnowballPDESolver, lambda: snowball("continuous"), env_grid_vol,
+     [("value", ("alive", "ki"), Backend.BANDED, VALUE)]),
+]
+
+
+@pytest.mark.parametrize("cls,make,env,want", SNOWBALL_ROWS)
+def test_snowball_group_declaration_equals_the_historical_solve_calls(cls, make, env, want):
+    p = prepare(cls(PDEParams()), make(), env(), OutputRequest(Operation.PRICE))
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == want
+
+
+def test_snowball_with_two_interior_nodes_falls_back_to_two_lu_groups():
+    # measured at 302fa2ed: points=4, eps_crit=1.0 prices (4 nodes, 2 interior); points=3 is rejected
+    s = SnowballPDESolver(PDEParams(grid=GridConfig(points=4, eps_crit=1.0)))
+    p = prepare(s, snowball("continuous"), env_flat(), OutputRequest(Operation.PRICE))
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == [
+        ("alive", ("alive",), Backend.SPARSE_LU, VALUE), ("ki", ("ki",), Backend.SPARSE_LU, VALUE)]

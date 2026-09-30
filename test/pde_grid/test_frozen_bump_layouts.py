@@ -104,12 +104,13 @@ def test_calendar_roll_rebinds_time_keeps_spatial():
 def test_schedule_rebuilt_each_solve():
     base_env = env()
     product = snowball()
+    from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare
+
     solver = SnowballPDESolver(params=PDEParams())
-    solver.price(product, base_env)
-    s1 = solver._active_schedule
-    solver.grid_binder._cache.clear()  # force nothing — schedules are per-solve anyway
-    solver.price(product, env(vol=0.25))
-    assert solver._active_schedule is not s1
+    # the event table lives on the prepared problem, built per preparation
+    s1 = prepare(solver, product, base_env, OutputRequest(Operation.PRICE)).events
+    s2 = prepare(solver, product, env(vol=0.25), OutputRequest(Operation.PRICE)).events
+    assert s1 is not None and s2 is not None and s2 is not s1
 
 
 def test_out_of_domain_bump_raises():

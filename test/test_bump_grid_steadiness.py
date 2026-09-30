@@ -61,13 +61,13 @@ def test_frozen_context_holds_grid_under_spot_bump():
     product = _snowball()
     bump_engine = solver.create_bump_context(product, env)
 
-    base = bump_engine._solve(product, env)
+    base = bump_engine._spot_curve_solution(product, env)
     env_up = deepcopy(env)
     env_up.spot_quote.spot *= 1.01
-    up = bump_engine._solve(product, env_up)
+    up = bump_engine._spot_curve_solution(product, env_up)
     env_dn = deepcopy(env)
     env_dn.spot_quote.spot *= 0.99
-    dn = bump_engine._solve(product, env_dn)
+    dn = bump_engine._spot_curve_solution(product, env_dn)
 
     assert np.array_equal(base.x_vec, up.x_vec)
     assert np.array_equal(base.x_vec, dn.x_vec)
@@ -79,10 +79,10 @@ def test_unfrozen_context_grid_moves_under_spot_bump():
     solver = SnowballPDESolver(PDEParams())
     env = _env()
     product = _snowball()
-    base = solver._solve(product, env)
+    base = solver._spot_curve_solution(product, env)
     env_up = deepcopy(env)
     env_up.spot_quote.spot *= 1.01
-    up = solver._solve(product, env_up)
+    up = solver._spot_curve_solution(product, env_up)
     assert not np.array_equal(base.x_vec, up.x_vec)
 
 
@@ -91,14 +91,14 @@ def test_frozen_context_holds_grid_under_rate_and_vol_bumps():
     env = _env()
     product = _snowball()
     bump_engine = solver.create_bump_context(product, env)
-    base = bump_engine._solve(product, env)
+    base = bump_engine._spot_curve_solution(product, env)
 
     env_vol = deepcopy(env)
     env_vol.vol_surface = FlatVolSurface(volatility=0.21)
     env_rate = deepcopy(env)
     env_rate.rate_curve = RRFFlatRateCurve(0.04)
 
-    vol = bump_engine._solve(product, env_vol)
-    rate = bump_engine._solve(product, env_rate)
+    vol = bump_engine._spot_curve_solution(product, env_vol)
+    rate = bump_engine._spot_curve_solution(product, env_rate)
     assert np.array_equal(base.x_vec, vol.x_vec)
     assert np.array_equal(base.x_vec, rate.x_vec)

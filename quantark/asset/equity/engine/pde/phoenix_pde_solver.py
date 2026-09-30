@@ -17,7 +17,7 @@ from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult, 
 from quantark.asset.equity.engine.pde.grid.events import (
     project_piecewise_event,
 )
-from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver, _LegacySnowballFacade
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
@@ -27,7 +27,7 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close, is_zero
 
 
-class PhoenixPDESolver(SnowballPDESolver):
+class PhoenixPDESolver(_LegacySnowballFacade, SnowballPDESolver):
     """
     Two-Surface PDE solver for Phoenix options with coupon jumps.
 

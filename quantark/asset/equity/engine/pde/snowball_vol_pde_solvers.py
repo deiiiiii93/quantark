@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
 from typing import Dict, Optional
 
 import numpy as np
@@ -14,6 +15,7 @@ from quantark.asset.equity.engine.pde.core.samples import (
     _validated_local_vol_row,
     sample_local_vol,
 )
+from quantark.asset.equity.engine.pde.core.adapters.snowball import LocalVolSnowballAdapter
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.pde.vol_continuous_ki import (
     Heston2DBarrierCrossingMixin,
@@ -72,6 +74,7 @@ class LocalVolSnowballPDESolver(LocalVolBarrierCrossingMixin, SnowballPDESolver)
 
     engine_type = EngineType.PDE
     _solver_name = "LocalVolSnowballPDESolver"
+    _adapter_class = LocalVolSnowballAdapter
 
     def __init__(
         self,
@@ -82,6 +85,9 @@ class LocalVolSnowballPDESolver(LocalVolBarrierCrossingMixin, SnowballPDESolver)
         super().__init__(params=params, enable_profiling=enable_profiling)
         self._prebuilt = local_vol_surface
         self._active_lv_surface: Optional[LocalVolSurface] = None
+        # The environment the active surface was built for (a direct prepare
+        # builds its own when it differs; see LocalVolSnowballAdapter.scope).
+        self._active_lv_env: Optional[PricingEnvironment] = None
         self._active_s_vec: Optional[np.ndarray] = None
 
     def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
@@ -98,13 +104,19 @@ class LocalVolSnowballPDESolver(LocalVolBarrierCrossingMixin, SnowballPDESolver)
             div_yield=env.get_div_yield,
         )
 
-    def _with_surface(self, env: PricingEnvironment, fn):
-        previous = self._active_lv_surface
+    @contextmanager
+    def _surface_scope(self, env: PricingEnvironment):
+        previous = (self._active_lv_surface, self._active_lv_env)
         self._active_lv_surface = self._build_surface(env)
+        self._active_lv_env = env
         try:
-            return fn()
+            yield
         finally:
-            self._active_lv_surface = previous
+            self._active_lv_surface, self._active_lv_env = previous
+
+    def _with_surface(self, env: PricingEnvironment, fn):
+        with self._surface_scope(env):
+            return fn()
 
     def price(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> float:
         return self._with_surface(

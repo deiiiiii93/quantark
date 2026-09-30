@@ -5,8 +5,11 @@ names; a family adapter overrides only what its solver overrode.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import numpy as np
 
+from ..backends import FactorizationCache
 from ..coefficients import CoefficientsInForce
 from ..components import CentralDifference, scheme_stepper, validate_coefficients, validate_readout
 from ..groups import VALUE, Backend, ColumnGroup
@@ -33,6 +36,17 @@ class FamilyAdapter:
 
     def composite(self, product, env, request, lifecycle_state):
         return None
+
+    def scope(self, product, env):
+        """A context held around preparation (the local-vol routes build their surface in it)."""
+        return nullcontext()
+
+    def factorizations(self, session) -> FactorizationCache:
+        # retention: full, per prepared problem; a prepared session's packs are consulted first
+        return FactorizationCache(
+            enabled=self.solver._is_cache_enabled(),
+            lu_seed=None if session is None else session.lu_pack,
+            banded_seed=None if session is None else session.banded_pack)
 
     def solve_state(self, product, env, request):
         # _solve's state preamble (BasePDESolver._prepare_solve_state); the base has none

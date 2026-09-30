@@ -44,6 +44,15 @@ class FactorizationCache:
         self._stores = {Backend.SPARSE_LU: {}, Backend.BANDED: OrderedDict()}
         self._seeds = {Backend.SPARSE_LU: lu_seed or {}, Backend.BANDED: banded_seed or {}}
 
+    @classmethod
+    def sharing(cls, other: "FactorizationCache", *, lu_seed: Optional[Mapping] = None,
+                banded_seed: Optional[Mapping] = None) -> "FactorizationCache":
+        """A cache over ``other``'s stores (the same objects) with its own seeds."""
+        cache = cls(enabled=other.enabled, banded_max_entries=other._banded_max,
+                    lu_seed=lu_seed, banded_seed=banded_seed)
+        cache._stores = other._stores
+        return cache
+
     @staticmethod
     def key(set_index, dt, theta) -> tuple:
         # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.

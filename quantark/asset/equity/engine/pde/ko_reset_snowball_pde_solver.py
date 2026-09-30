@@ -22,7 +22,7 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     PDESolutionResult,
     _market_scoped,
 )
-from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver, _LegacySnowballFacade
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
@@ -34,7 +34,7 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import Tolerance, is_close, is_zero
 
 
-class KOResetSnowballPDESolver(SnowballPDESolver):
+class KOResetSnowballPDESolver(_LegacySnowballFacade, SnowballPDESolver):
     """
     PDE solver for KO-reset Snowball options using the two-surface method.
 

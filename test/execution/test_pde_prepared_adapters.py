@@ -87,21 +87,21 @@ class TestBitwiseParity:
 
 class TestRichOutputs:
     def test_pv_events_grid_one_value_solve(self):
-        from quantark.asset.equity.engine.pde import SnowballPDESolver
-
         engine, product, env = _case("SnowballPDESolver")
         direct_events = engine.price_with_events(product, env)
         levels = tuple(float(env.spot) * m for m in (0.9, 1.0, 1.1))
         direct_curve = engine.calculate_spot_greeks_curve(product, env, list(levels))
 
+        from quantark.asset.equity.engine.pde.core import march as march_module
+
         solve_calls = []
-        original = SnowballPDESolver._solve
+        original = march_module.march
 
-        def counting(self, *args, **kwargs):
-            solve_calls.append(type(self).__name__)
-            return original(self, *args, **kwargs)
+        def counting(prepared):
+            solve_calls.append(type(prepared.solver).__name__)
+            return original(prepared)
 
-        SnowballPDESolver._solve = counting
+        march_module.march = counting   # one value march (spec 2 §5.3)
         try:
             with PricingSession() as session:
                 outcome = session.execute(
@@ -115,7 +115,7 @@ class TestRichOutputs:
                     ),
                 )
         finally:
-            SnowballPDESolver._solve = original
+            march_module.march = original
 
         value = outcome.value
         assert isinstance(value, PDESessionValue)
