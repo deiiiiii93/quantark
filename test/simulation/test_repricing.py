@@ -129,7 +129,7 @@ def test_the_product_fingerprint_sees_every_contract_term():
 
 
 def test_exact_pde_repricing_solves_each_state_once(monkeypatch):
-    from quantark.asset.equity.engine.pde.core import march as march_module
+    import quantark.asset.equity.engine.pde.core.prepare as march_module   # run resolves march here
 
     count = {"n": 0}
     original = march_module.march

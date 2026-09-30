@@ -26,6 +26,7 @@ from quantark.asset.equity.engine.pde.core.groups import Backend
 from quantark.asset.equity.engine.pde.core.identity import (
     coefficient_key,
     component_fingerprint,
+    group_schedule,
     market_fingerprints,
 )
 from quantark.asset.equity.engine.pde.core.prepare import (
@@ -236,21 +237,6 @@ def _marched_problem(problem, engine):
     return problem
 
 
-def _group_schedules(prepared) -> tuple:
-    """Each group's θ per step: the schedule, θ=1 on zero-diffusion sets for a
-    group with the override (decision 17)."""
-    coeffs = prepared.coefficients
-    out = []
-    for group in prepared.groups:
-        theta = np.array(prepared.theta_schedule, dtype=float)
-        if group.policy.zero_diffusion_theta_one:
-            for j in range(len(theta)):
-                if coeffs.is_zero_diffusion(coeffs.set_at(j)):
-                    theta[j] = 1.0
-        out.append(theta)
-    return tuple(out)
-
-
 def factorization_state(
     engine, product, pricing_env, layout, coefficients, coeff_fp, context
 ) -> ArtifactState:
@@ -315,7 +301,7 @@ def factorization_state(
             coeff_fp,
             component_fingerprint(prepared.stepper),
             tuple(g.backend.value for g in prepared.groups),
-            try_fingerprint(_group_schedules(prepared)),
+            try_fingerprint(tuple(group_schedule(prepared, g) for g in prepared.groups)),
         )
     )
     if fp is None:

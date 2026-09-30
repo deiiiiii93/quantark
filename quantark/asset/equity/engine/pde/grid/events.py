@@ -275,11 +275,18 @@ class EventSchedule:
         continuous: Optional[_StepTransform] = None,
         terminal: Optional[_Transform] = None,
         readout: Optional[_Readout] = None,
+        evidence: tuple = (),
     ):
         self._interior = dict(interior or {})
         self._continuous = continuous
         self._terminal = terminal
         self._readout = readout
+        self._evidence = tuple(evidence)
+
+    def evidence(self) -> tuple:
+        """The rows the transforms were built from, one tuple of plain values per
+        stage (``explain``'s events section; the problem identity)."""
+        return self._evidence
 
     @property
     def interior_steps(self) -> frozenset:

@@ -297,9 +297,6 @@ class SnowballPDESolver(BasePDESolver):
         self._ki_fp: Optional[_ContinuousKIFirstPassage] = None
         self._is_reverse: bool = False
 
-        # Declarative grid layer state for the current solve (None when the
-        # legacy path runs — subclasses not yet migrated, session grids).
-        self._active_layout: Optional[Layout] = None
         self._active_schedule: Optional[EventSchedule] = None
 
         # Time tracking

@@ -328,7 +328,7 @@ class CrankNicolson:
         return event_damp, term_damp
 
     def schedule(self, layout) -> np.ndarray:
-        # base_pde_solver.py (_theta_schedule_from_layout), verbatim order
+        # the 0.6.0 per-step theta rule (base_pde_solver.py), verbatim order
         event_damp, term_damp = self._damping_sets(layout)
         theta = np.full(layout.time.actual_steps, float(self.theta))
         for k in event_damp:

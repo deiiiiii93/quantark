@@ -15,7 +15,7 @@ from ..components import CentralDifference, scheme_stepper, validate_coefficient
 from ..groups import VALUE, Backend, ColumnGroup
 from ..identity import coefficient_key, component_fingerprint
 from ..prepare import Operation, TerminalOutcome
-from ..samples import sample_bsm
+from ..samples import SampleKind, sample_bsm
 
 __all__ = ["FamilyAdapter"]
 
@@ -27,6 +27,12 @@ class FamilyAdapter:
     route = None
     #: Whether event statistics march as a column group of this family (§5.4).
     supports_statistics_group = False
+    #: What the route samples per step (explain's route section).
+    sample_kind = SampleKind.SCALAR
+
+    def readout_mode(self, prepared) -> str:
+        """How the price is read (explain's outputs section)."""
+        return "final column"
 
     def __init__(self, solver):
         self.solver = solver

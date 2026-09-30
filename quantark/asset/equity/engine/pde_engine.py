@@ -247,6 +247,10 @@ class PDEEngine(BaseEngine):
         solver = self._get_solver(product)
         return solver.calculate_spot_greeks_curve(product, pricing_env, spot_levels)
 
+    def explain(self, product, pricing_env, *, lifecycle_state=None):
+        """The dispatched solver's plan (``BasePDESolver.explain``)."""
+        return self._get_solver(product).explain(product, pricing_env, lifecycle_state=lifecycle_state)
+
     def solve_life_surface(self, product, pricing_env, *, extra_times):
         """One solve with extra time nodes, both value slabs (life-surface providers)."""
         solver = self._get_solver(product)

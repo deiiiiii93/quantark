@@ -83,7 +83,7 @@ def test_monthly_snowball_five_dt_floats_resolve_to_one_key():
     from term_structure_benchmarks import make_term_env
     sb = make_snowball(dict(initial_price=100.0, strike=100.0, ko_barrier=103.0, ki_barrier=85.0, ko_rate=0.15,
                             rebate_rate=0.15, months=12, maturity=1.0, contract_multiplier=1.0))
-    s = SnowballPDESolver(PDEParams()); s.price(sb, make_term_env("flat"))
-    dts = {float(d) for d in s._active_layout.time.dt}
+    plan = SnowballPDESolver(PDEParams()).explain(sb, make_term_env("flat"))
+    dts = {float(d) for d in plan.to_dict()["time"]["dt"]}
     keys = {FactorizationCache.key(0, np.float64(d), 0.5)[1] for d in dts}
     assert len(dts) >= 2 and len(keys) < len(dts)   # measured §14: 5 floats -> 1 key

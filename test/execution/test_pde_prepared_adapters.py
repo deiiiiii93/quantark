@@ -92,7 +92,7 @@ class TestRichOutputs:
         levels = tuple(float(env.spot) * m for m in (0.9, 1.0, 1.1))
         direct_curve = engine.calculate_spot_greeks_curve(product, env, list(levels))
 
-        from quantark.asset.equity.engine.pde.core import march as march_module
+        import quantark.asset.equity.engine.pde.core.prepare as march_module   # run resolves march here
 
         solve_calls = []
         original = march_module.march

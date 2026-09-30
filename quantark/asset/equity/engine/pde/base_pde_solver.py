@@ -31,7 +31,6 @@ from quantark.asset.equity.engine.pde.core.components import (
     flat_exact,
     interpolate_price,
     scalar_stencil,
-    scheme_stepper,
 )
 from quantark.asset.equity.engine.pde.core.identity import market_fingerprints
 from quantark.asset.equity.engine.pde.core.samples import sample_bsm
@@ -240,8 +239,6 @@ class BasePDESolver(BaseEngine):
         # Frozen base-market layout held by create_bump_context instances: every
         # bumped re-solve reuses it (theta rolls rebind time only, §4.8).
         self._frozen_base_layout = None
-        # Layout bound for the CURRENT solve (None on the legacy path).
-        self._active_layout = None
         # Discrete-monitoring state shared by the barrier-family solvers
         # (populated by _setup_observation_indices).
         self._observation_indices: set = set()
@@ -551,14 +548,6 @@ class BasePDESolver(BaseEngine):
             event_times=tuple(sorted(set(events))),
         )
 
-    def _theta_schedule_from_layout(self, layout: Layout) -> np.ndarray:
-        """Per-step theta: the built-in stepper's schedule (spec 2 §4.2, decision 5).
-
-        theta = 1.0 on terminal-damped steps (wins on overlap),
-        event_theta on event-damped steps, params.theta elsewhere.
-        """
-        return scheme_stepper(self.params, self.grid_binder.config).schedule(layout)
-
     def _external_layout_check(
         self,
         product: BaseEquityProduct,
@@ -692,6 +681,19 @@ class BasePDESolver(BaseEngine):
             adapter = self._adapter_class(self)
             self._adapter = adapter
         return adapter
+
+    def explain(self, product, pricing_env, *, lifecycle_state=None):
+        """The resolved plan of ``price``'s preparation, without the march (spec 2 §4.7).
+
+        Raises where ``price`` would; its ``identity["problem"]`` is the one
+        ``price`` marches with.
+        """
+        from quantark.asset.equity.engine.pde.core.plan import build_plan
+
+        problem = prepare(self, product, pricing_env, OutputRequest(Operation.PRICE),
+                          lifecycle_state=lifecycle_state, frozen=self._frozen_base_layout,
+                          session=self._session_artefacts)
+        return build_plan(problem, self, product, pricing_env, lifecycle_state)
 
     def _run(self, product, pricing_env, request, *, lifecycle_state=None):
         """``run(prepare(...))`` with this solver's frozen layout and session artefacts."""

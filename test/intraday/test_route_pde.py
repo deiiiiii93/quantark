@@ -168,9 +168,9 @@ def test_a_continuously_observed_touch_barrier_is_a_hard_grid_edge(sse_sessions,
                                                    session_calendar=sse_sessions, variance_profile=desk))
     out = route_for(ctx, OneTouchPDESolver(PDEParams())).price(ctx, OneTouchPDESolver(PDEParams()))
     assert out.numerical["resolution"] == "resolved" and "node overwrite" not in out.numerical["resolution_reason"]
-    layout = out.engine_used._active_layout
-    assert layout.request.hard_upper == 103.0
-    assert float(np.exp(np.asarray(layout.spatial.x, dtype=float)).max()) == pytest.approx(103.0, rel=1e-14)
+    plan = out.engine_used.explain(ctx.numerical.product, ctx.pricing_env).to_dict()
+    assert plan["time"]["request"].hard_upper == 103.0
+    assert float(np.exp(np.asarray(plan["space"]["x"], dtype=float)).max()) == pytest.approx(103.0, rel=1e-14)
     exact = route_for(ctx, OneTouchAnalyticalEngine()).price(ctx, OneTouchAnalyticalEngine())
     assert out.contingent_pv == pytest.approx(exact.contingent_pv, abs=1e-3), "cross-check, not a qualification"
 
@@ -190,9 +190,9 @@ def test_a_discretely_observed_touch_barrier_keeps_the_domain_beyond_it(sse_sess
                                                                                         spot=101.0, r=0.0, q=0.0),
                                                    session_calendar=sse_sessions, variance_profile=desk))
     out = route_for(ctx, OneTouchPDESolver(PDEParams())).price(ctx, OneTouchPDESolver(PDEParams()))
-    layout = out.engine_used._active_layout
-    assert layout.request.hard_upper is None
-    assert float(np.exp(np.asarray(layout.spatial.x, dtype=float)).max()) > 103.0
+    plan = out.engine_used.explain(ctx.numerical.product, ctx.pricing_env).to_dict()
+    assert plan["time"]["request"].hard_upper is None
+    assert float(np.exp(np.asarray(plan["space"]["x"], dtype=float)).max()) > 103.0
 
 
 def test_a_continuous_knock_out_barrier_is_a_hard_grid_edge(sse_sessions, desk):

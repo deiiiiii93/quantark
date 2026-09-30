@@ -64,7 +64,7 @@ def test_base_engine_spot_curve_falls_back_to_repricing(monkeypatch):
 
 
 def test_pde_spot_curve_uses_one_solve_and_matches_point_greeks(monkeypatch):
-    from quantark.asset.equity.engine.pde.core import march as march_module
+    import quantark.asset.equity.engine.pde.core.prepare as march_module   # run resolves march here
 
     engine = EuropeanPDESolver(params=PDEParams())
     calls = 0

@@ -70,7 +70,6 @@ class LegacyBumpCloneMixin:
         return (
             "_grid_binder",
             "_frozen_base_layout",
-            "_active_layout",
             "_session_artefacts",
         )
 

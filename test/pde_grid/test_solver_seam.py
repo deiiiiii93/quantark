@@ -154,5 +154,7 @@ def test_damping_counts_reach_the_time_layout():
     multi = _MigratedProbe(params=PDEParams(grid=GridConfig(terminal_damping_steps=3)))
     layout3 = multi.grid_binder.bind(multi.grid_request(OPTION, m, 1.0), m)
     assert len(layout3.time.terminal_damping_steps) == 3
-    theta = multi._theta_schedule_from_layout(layout3)
+    from quantark.asset.equity.engine.pde.core.components import scheme_stepper
+
+    theta = scheme_stepper(multi.params, multi.grid_binder.config).schedule(layout3)
     assert (theta == 1.0).sum() >= 3  # damped steps are backward Euler

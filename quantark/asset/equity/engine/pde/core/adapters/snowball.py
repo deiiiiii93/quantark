@@ -17,6 +17,7 @@ from quantark.util.numerical import is_close
 
 from ..components import validate_readout
 from ..groups import VALUE, Backend, ColumnGroup
+from ..samples import SampleKind
 from ..prepare import Operation, TerminalOutcome
 from .base import FamilyAdapter
 
@@ -73,7 +74,7 @@ class SnowballAdapter(FamilyAdapter):
             return self._outcome("expired", op, solver._calculate_terminal_value(product, spot, env))
         # Check if knocked out at valuation (KO payoff is fixed, so delta and gamma are zero)
         if solver._is_knocked_out_at_valuation(product, spot, env):
-            return self._outcome("knocked_out", op, solver._get_immediate_ko_payoff(product, env))
+            return self._outcome("knocked_out_at_valuation", op, solver._get_immediate_ko_payoff(product, env))
         return None
 
     def _outcome(self, reason, op, value):
@@ -137,6 +138,7 @@ class SnowballAdapter(FamilyAdapter):
         is_reverse = bool(getattr(product, "is_reverse", False))
         interior: dict = {}
         ko_stages: dict = {}
+        ko_rows, ki_rows = [], []
 
         def _chain(prev, fn):
             if prev is None:
@@ -179,6 +181,7 @@ class SnowballAdapter(FamilyAdapter):
                 }
 
             ko_stages[step] = _chain(ko_stages.get(step), _ko)
+            ko_rows.append(("ko", int(step), float(t_obs), barrier, float(cash), breach_up, bool(ko_hits_ki)))
 
         # The knock-out wins a tie with a knock-in observed at the same instant. With the knock-out
         # staged first (certified order) that holds while it survives a knock-in: "ki" carries it
@@ -221,6 +224,7 @@ class SnowballAdapter(FamilyAdapter):
                     }
 
                 interior[step] = _chain(interior.get(step), _ki)
+                ki_rows.append(("ki", int(step), float(t_obs), float(barrier), breach_up))
 
         if ko_last:
             for step, stage in ko_stages.items():
@@ -244,7 +248,10 @@ class SnowballAdapter(FamilyAdapter):
                     alive += fp.step_correction(step, s, _b, d)
                 return {"alive": alive, "ki": states["ki"]}
 
-        return EventSchedule(interior=interior, continuous=continuous)
+        rows = ki_rows + ko_rows if ko_last else ko_rows + ki_rows    # the staging order
+        if continuous is not None:
+            rows.append(("continuous_ki", kib, is_reverse))
+        return EventSchedule(interior=interior, continuous=continuous, evidence=tuple(rows))
 
     # --- march --------------------------------------------------------------------
 
@@ -330,6 +337,10 @@ class SnowballAdapter(FamilyAdapter):
             )
 
     # --- read ---------------------------------------------------------------------
+
+    def readout_mode(self, prepared) -> str:
+        # the valuation-date column is captured before today's events (_t0_readout)
+        return "t0 capture" if self.solver._t0_has_events(prepared.product) else "final column"
 
     def _value_surface(self, sel):
         """The state whose final column is read (0 = not knocked in, 1 = knocked in)."""
@@ -433,6 +444,8 @@ class SnowballAdapter(FamilyAdapter):
 class LocalVolAdapterMixin:
     """The local-vol routes: a local-vol row per step; the surface is the solve's."""
 
+    sample_kind = SampleKind.NODAL
+
     def scope(self, product, env):
         # The facades build the surface around the whole run (_with_surface); a
         # direct prepare builds its own for this environment.
@@ -448,6 +461,18 @@ class LocalVolAdapterMixin:
     def step_sets(self, product, env, layout, tau):
         self.solver._active_s_vec = layout.spatial.s   # a session builds them before any solve
         return super().step_sets(product, env, layout, tau)
+
+    def coefficient_key(self, product, env, layout, fps):
+        # the surface the local vol is sampled from is a sampler input (decision 18):
+        # no fingerprint for it, no key
+        from ..components import CentralDifference
+        from ..identity import coefficient_key, component_fingerprint
+
+        surface_fp = component_fingerprint(self.solver._active_lv_surface)
+        if surface_fp is None:
+            return None
+        return coefficient_key(layout.fingerprint, fps, self._strike(product, env),
+                               component_fingerprint(CentralDifference()), surface_fp)
 
 
 class LocalVolSnowballAdapter(LocalVolAdapterMixin, SnowballAdapter):

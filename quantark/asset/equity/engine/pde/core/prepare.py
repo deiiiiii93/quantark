@@ -19,7 +19,9 @@ from quantark.asset.equity.engine.pde.grid import resolve_bound_layout
 
 from .backends import FactorizationCache
 from .components import StandardReadout, validate_schedule
-from .identity import market_fingerprints
+from .identity import factorization_key, market_fingerprints, problem_identity
+from .march import march          # run resolves it here: a spy on core.prepare.march sees every entry
+from .readout import read
 from .statistics import StatisticsLegacy
 
 __all__ = ["Operation", "OutputRequest", "TerminalOutcome", "SessionArtefacts", "PreparedProblem",
@@ -249,7 +251,6 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
             layout = _session_layout(solver, session.layout, grid_request)
         else:
             layout = resolve_bound_layout(solver.grid_binder, frozen, grid_request, market)
-        solver._active_layout = layout    # read by helpers, the intraday route (until Task 11) and tests
         adapter.observation_maps(product, env, layout, tau)               # step 6
         # step 7: the value surfaces' events (a statistics-only request marches none)
         events = adapter.prepare_events(product, env, layout, tau, request) if request.price else None
@@ -260,7 +261,7 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
         validate_schedule(schedule, layout, stepper)
         groups = adapter.groups(product, layout, request) if request.price else ()   # step 10
         factorizations = adapter.factorizations(session)                  # step 11
-        identity = {"layout": layout.fingerprint,                         # step 12 (problem id: Task 11)
+        identity = {"layout": layout.fingerprint,                         # step 12
                     "coefficient_key": adapter.coefficient_key(product, env, layout, fps)}
         problem = PreparedProblem(solver=solver, adapter=adapter, product=product, env=env, request=request,
                                   lifecycle_state=lifecycle_state, tau=tau, terminal=None,
@@ -272,6 +273,9 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
             statistics = StatisticsLegacy.create(problem, request.streams)
             if statistics is not None:
                 problem = replace(problem, statistics=statistics, groups=groups + (statistics.group,))
+        # step 12: what the march's factorizations and the march itself depend on
+        identity["factorization"] = factorization_key(problem)
+        identity["problem"] = problem_identity(problem)
     return problem
 
 
@@ -281,8 +285,5 @@ def run(problem):
         return problem.compose(tuple(run(p) for p in problem.parts))
     if problem.terminal is not None:
         return problem.terminal.outputs
-    from .march import march
-    from .readout import read
-
     with market_scope(problem.solver, problem.env, problem.market_fps):
         return read(problem, march(problem))

@@ -412,6 +412,12 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         )
         return layout.spatial.x
 
+    def explain(self, product, pricing_env, *, lifecycle_state=None):
+        """The 1D core's plan would describe the implied-vol problem, not this 2D solve."""
+        raise PricingError(
+            "explain covers the 1D core routes; the 2D Heston/SLV solvers move onto the core in sub-project 3"
+        )
+
     def _bump_transient_attrs(self) -> tuple:
         return super()._bump_transient_attrs() + (
             "_layer_binder_2d",

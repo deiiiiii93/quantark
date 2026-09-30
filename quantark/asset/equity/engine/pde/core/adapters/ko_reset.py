@@ -100,6 +100,9 @@ class KOResetAdapter(SnowballAdapter):
             branch_v1[:, num_t - 1] = grid_v1[:, num_t - 1]
             captures["branch"] = (branch_v0, branch_v1)
 
+    def readout_mode(self, prepared) -> str:
+        return "final column"   # no t0 capture (see _t0_readout)
+
     def _t0_readout(self, prepared, result, sel):
         # KO-reset's result carried no readout_vec / readout_override: price and
         # Greeks read the post-event column 0 (a characterized oddity, kept)

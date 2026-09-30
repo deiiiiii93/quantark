@@ -68,7 +68,9 @@ def test_market_bumps_reuse_whole_layout_by_identity():
         env(div_yield=0.03),      # div
     ):
         ctx.price(product, bumped)
-        assert ctx._active_layout is frozen  # SAME object — no rebuild
+        plan = ctx.explain(product, bumped)
+        assert plan.identity["layout"] == frozen.fingerprint
+        assert plan.to_dict()["space"]["x"] is frozen.spatial.x  # SAME object — no rebuild
 
 
 def test_calendar_roll_rebinds_time_keeps_spatial():
@@ -192,7 +194,9 @@ def test_pde_engine_facade_preserves_frozen_layout():
     frozen = fixed_solver._frozen_base_layout
     assert frozen is not None
     fixed_eng.price(product, env(spot=101.0))
-    assert fixed_solver._active_layout is frozen
+    plan = fixed_eng.explain(product, env(spot=101.0))
+    assert plan.identity["layout"] == frozen.fingerprint
+    assert plan.to_dict()["space"]["x"] is frozen.spatial.x
 
 
 def test_dcn_bump_context_identity_matrix():

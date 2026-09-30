@@ -161,7 +161,9 @@ def test_pde_bump_context_freezes_effective_spatial_bounds(
             _div_bumped_env(env, bump),
         ):
             fixed_solver.price(product, bumped_env)
-            assert fixed_solver._active_layout is frozen
+            plan = fixed_solver.explain(product, bumped_env)
+            assert plan.identity["layout"] == frozen.fingerprint
+            assert plan.to_dict()["space"]["x"] is frozen.spatial.x   # the SAME arrays
     else:
         assert _effective_spatial_bounds(
             fixed_solver, product, _rate_bumped_env(env, bump)
