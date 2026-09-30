@@ -136,10 +136,11 @@ def resolve_bound_layout(
 class GridLayerMixin:
     """Grid-layer seam for engines NOT derived from BasePDESolver.
 
-    ``DCNPDEEngine`` and the Phase-3 LV/Heston/SLV engines derive from
-    ``BaseEngine`` and inherit none of the BasePDESolver seam; this mixin
-    supplies the same contract: binder ownership, market snapshot, external
-    -layout validation, and a frozen-layout bump context. Adopters carry a
+    Used by DCN only (``DCNPDEEngine``, which derives from ``BaseEngine`` and
+    inherits none of the BasePDESolver seam; the local-vol and Heston/SLV
+    engines do not adopt it). It supplies the same contract: binder
+    ownership, market snapshot, external-layout validation, and a
+    frozen-layout bump context. Adopters carry a
     ``PDEParams`` as ``self.params``, implement
     ``grid_request(product, market, tau)`` / ``representative_vol``, and may
     name a route (``_route``) with its own preset table and derived overlay.

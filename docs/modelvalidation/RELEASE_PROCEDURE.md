@@ -76,10 +76,16 @@ Those settings are recorded **resolved, not named**. A candidate that declares
 readability: the resolved configuration feeds the candidate's identity hash, so
 if a future release redefines a profile, the identity changes and stale
 checkpoints and anchors are correctly rejected instead of silently reused.
+Since 0.7.0 a PDE candidate's `grid` record (`resolved_grid_evidence`) composes
+the nine resolved `GridConfig` fields with the built-in stepper's two resolved
+damping counts, under their historical keys, and the candidate executes exactly
+the params it declares (`PDEParams.from_config`); only built-in components are
+certifiable.
 
 The recorded values are what was *requested*. Achieved geometry — the node count
-a grid settled on after alignment, or whether a step cap bit — is not exposed by
-the engines through a public API and is deliberately not guessed at.
+a grid settled on after alignment, or whether a step cap bit — is not part of
+the record. The 1D core PDE engines report it through `explain(product, env)`
+(0.7.0), but it depends on the case, so certificates do not hash it.
 
 ## 3. Reading the result
 

@@ -134,7 +134,7 @@ Exported engines inventoried: **74**
 7. Dupire local-vol surface served from the session artifact cache through prebuilt-surface clones (Phase 1)
 8. abstract base class
 9. PDE solve has no batch axis; Phase 4 covers PDE preparation and rich outcomes
-10. grids, term-structure step coefficients, and factorization packs (and the Dupire surface where the model has one) behind PreparedArtifactCache descriptors; one value solve serves PV/event/grid outputs
+10. grids, term-structure step coefficients, and factorization packs (and the Dupire surface where the model has one) behind PreparedArtifactCache descriptors; one value solve serves PV/event/grid outputs; on the 1D core routes the session builds them through prepare(session=None) and executes through prepare(session=artefacts), storing the bound Layout (pde-prep/v2)
 11. frozen construction-owned model inputs; time-dependent ADI/kernel operators cannot prove factorization reuse safe and are rebuilt (spec 9.2 legality); no session artifacts
 12. one-value-solve session rich outputs (PV + event stats) through a prepared clone; time-dependent ADI operators are rebuilt (spec 9.2 legality), so no factorization artifacts
 13. engine-internal kernel discretization; preparation cost negligible; no session artifacts

@@ -97,7 +97,9 @@ _PREPARED_LV_MC = (
 _PREPARED_PDE = (
     "grids, term-structure step coefficients, and factorization packs (and "
     "the Dupire surface where the model has one) behind PreparedArtifactCache "
-    "descriptors; one value solve serves PV/event/grid outputs"
+    "descriptors; one value solve serves PV/event/grid outputs; on the 1D core "
+    "routes the session builds them through prepare(session=None) and executes "
+    "through prepare(session=artefacts), storing the bound Layout (pde-prep/v2)"
 )
 _PREPARED_PDE_2D = (
     "one-value-solve session rich outputs (PV + event stats) through a "

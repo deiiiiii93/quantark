@@ -5,6 +5,87 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.7.0] - 2026-10-01
+
+PDE 1D one core (spec: `docs/superpowers/specs/2026-09-30-pde-1d-one-core-design.md`;
+architecture: `docs/pde-core.md`). Every shared-grid 1D PDE family (European, American,
+the barrier family, Snowball, Phoenix, KO-reset, and the local-vol Snowball and Phoenix)
+prices through one `prepare → march → read` path; the four per-family time-stepping loops
+and the separate statistics sweep are gone. Numbers are unchanged: a 229-row `float.hex`
+byte compare of the 1D book against 0.6.0 shows zero differences, and every banked
+certificate keeps its identity. The scheme's settings move onto a stepper component, a
+clean break with the old names raising `ValidationError` naming their replacement.
+
+### Added
+- `PDEParams.stepper`, `PDEParams.operator`, `PDEParams.readout`: component slots whose
+  built-ins are `CrankNicolson()`, `CentralDifference()` and `StandardReadout()`
+  (`quantark.asset.equity.engine.pde.core.components`). `CrankNicolson` carries the
+  scheme's four settings: `theta`, `event_theta`, `terminal_damping_steps`,
+  `event_damping_steps` (`None` = the route's defaults). A custom component runs on the
+  core routes; the core validates its results and raises `NumericalError` naming it.
+  `from_config` accepts `stepper: {theta: 1.0, ...}` and rejects `operator` / `readout`.
+- `explain(product, pricing_env)` on `PDEEngine` and every core solver: the resolved plan
+  (route, settings with their source and applicability, space, time, events, scheme,
+  outputs, identities, per-operation terminal outcomes) from the same preparation `price`
+  runs, without marching.
+- `resolved_grid_evidence(params)` (`pde.grid.config`): the certificate `grid` record,
+  the nine resolved grid fields plus the stepper's two damping counts under their 0.6.0
+  keys. `PDEParams.evidence()` for `engine_config`.
+- `OutputRequest`: what one call wants from a preparation (price, Greeks, event
+  statistics, grid, life surface).
+- `Calendar.identity()`: a value identity (name, sorted holidays, weekend days) for the
+  settlement-calendar part of the schedule caches' keys.
+
+### Removed
+| Removed name | Replacement |
+|---|---|
+| `PDEParams(theta=...)` | `stepper=CrankNicolson(theta=...)`; 0.5 is Crank-Nicolson, 1.0 backward Euler |
+| `PDEParams(event_theta=...)` | `stepper=CrankNicolson(event_theta=...)` |
+| `GridConfig(terminal_damping_steps=...)` | `PDEParams(stepper=CrankNicolson(terminal_damping_steps=N))`; 0 disables |
+| `GridConfig(event_damping_steps=...)` | `PDEParams(stepper=CrankNicolson(event_damping_steps=N))`; 0 disables |
+
+`GridConfig` has nine fields and raises `ValidationError` (not `TypeError`) for the two
+removed ones. The 0.6.0 entries that pointed at `GridConfig` damping counts
+(`use_rannacher`, `rannacher_steps`, `rannacher_at_events`, `event_rannacher_steps`,
+`DCNPDEEngine(rannacher_steps=)`) now point at the stepper. `TimeLayout` no longer carries
+the damping index sets; `CrankNicolson.schedule` computes them.
+
+### Changed
+- The factorization caches key on the exact θ. Two θ agreeing to 6 (LU) or 12 (banded)
+  decimals no longer share a matrix. `dt` stays rounded to 12 places, as every banked
+  number was computed.
+- Event statistics are a column group of the price march. `calculate_event_stats`
+  no longer re-prices, and `price_with_events` marches once.
+- Prepared sessions store the bound `Layout` (artefact builder `pde-prep/v2`). Bump
+  contexts are fresh instances holding a frozen layout; the transient-attribute copy
+  machinery is gone (the 2D Heston/SLV Greeks keep a legacy clone).
+- Market memos are keyed by value fingerprints, so mutating a market object after a solve
+  is no longer silently stale; an unfingerprintable input is sampled fresh.
+- Certificate candidates are built from their declared params (`PDEParams.from_config`),
+  so a declared setting is the one executed; a key the engine rejects fails the study at
+  load.
+- The DCN, local-vol vanilla/barrier and 2D Heston/SLV solvers read their damping counts
+  and weights from `params.stepper`, and reject a custom component ("no core seam until
+  sub-project 3"). `LocalVolPDESolver` checks route applicability on construction.
+
+### Fixed
+- Event statistics on a reused solver no longer reuse another market's factorizations
+  (measured: a 0.041 KO-probability error on the second market).
+- American Greeks on a fresh solver, for exercise with a settlement lag, no longer raise.
+- PDE solvers deep-copy and pickle after pricing.
+- A session no longer stores a factorization for a stepper without a value fingerprint
+  (two such steppers could have shared one).
+
+### Sub-project 3
+Still planned: the environment's business day as the grid day (full re-certification);
+half-step damping as a `CrankNicolson` option; coefficient-break nodes; a budget default
+for path-independent routes; failing instead of scaling at the caps; DCN and the
+local-vol vanilla/barrier space axis onto the core; native KO-reset statistics. Added by
+this release, each its own re-certified commit: statistics Level 2 (the statistics group
+on the value policy with a marched maturity leg, memory-state Phoenix coupons); the
+zero-diffusion θ override for Phoenix; Snowball `NODAL` on interior schedule events (or
+withdrawing `NODAL` from the shared-grid table); native 2D Heston/SLV statistics.
+
 ## [0.6.0] - 2026-09-29
 
 PDE 1D surface cleanup (spec: `docs/superpowers/specs/2026-09-28-pde-1d-surface-cleanup-design.md`).

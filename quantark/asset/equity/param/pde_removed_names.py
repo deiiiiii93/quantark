@@ -1,7 +1,7 @@
 """Names removed from the 1D PDE parameter surface in 0.6.0 and 0.7.0 (spec §4.4; spec 2 §4.4).
 
 One map supplies the replacement text for every removed name; it is also
-rendered into docs/engine_param_guide.md and the CHANGELOG. Removed names
+rendered into README.md (PDE parameters) and the CHANGELOG. Removed names
 raise ValidationError, never TypeError, so the user is told what replaces
 them. Names not in the map raise the same error without a replacement line.
 """

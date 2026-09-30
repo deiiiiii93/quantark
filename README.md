@@ -226,7 +226,7 @@ pde_loaded = PDEParams.from_config({"accuracy": "high", "grid": {"time_steps": 8
 
 Quad presets accept either preset names or explicit config objects; see the docstrings in `quantark/asset/equity/param/` for the full schema.
 
-### PDE parameters (0.6.0)
+### PDE parameters (0.7.0)
 
 Every 1D PDE route (`PDEEngine` and its solvers, the local-vol vanilla and barrier
 solvers, DCN) is configured by one `PDEParams`, keyword arguments only:
@@ -235,22 +235,85 @@ solvers, DCN) is configured by one `PDEParams`, keyword arguments only:
 |---|---|---|
 | `accuracy` | A faster preview or a finer answer. | Selects the `GridConfig` preset: fast (200 pts, 4/day), standard (400, 4/day), high (800, 8/day). |
 | `grid` | Override one preset field. | Each non-`None` `GridConfig` field replaces that preset value; the rest inherit. |
-| `theta` | A more diffusive scheme. | 0.5 is Crank-Nicolson (second order), 1.0 backward Euler (first order, more diffusive). |
-| `event_theta` | Studying damping strength after events. | The weight on the event-damped steps after each interior event. |
+| `stepper` | A different time weighting or damping schedule, or you are writing a stepper. | `None` is the built-in `CrankNicolson()` (below). A custom stepper runs on the shared-grid solvers only. |
+| `operator` | You are writing an operator (an exponentially fitted stencil, say). | `None` is the built-in `CentralDifference()`: the central-difference tridiagonal with upwind rows on zero-diffusion steps. |
+| `readout` | You are writing a readout. | `None` is the built-in `StandardReadout()`: linear price interpolation, delta and gamma from the local cubic. |
 | `event_projection` | Validating the event treatment. | `None` is the route's own treatment (cell-average on the shared-grid autocallables); explicit `"cell_average"` or `"nodal"`. |
-| `cache_enabled` | Memory pressure, or a fresh solve every call. | Same numbers either way. |
+| `cache_enabled` | Memory pressure, or a fresh solve every call. | The same numbers to round-off: a cached run shares one factorization across intervals whose `dt` differ by an ULP. |
+
+`CrankNicolson` (`quantark.asset.equity.engine.pde.core.components`) carries the
+scheme's four settings:
+
+| Setting | When to change it | What happens |
+|---|---|---|
+| `theta` (0.5) | Ringing that damping does not cure, or a more diffusive scheme. | 0.5 is Crank-Nicolson (second order), 1.0 backward Euler (first order). |
+| `event_theta` (1.0) | Studying damping strength after events. | The weight on the event-damped steps after each interior event. |
+| `terminal_damping_steps` (`None`) | Checking the payoff kink's smoothing. | Fully implicit steps off the payoff; `None` is the route's default (1; DCN 2), 0 disables. |
+| `event_damping_steps` (`None`) | Studying damping strength after events. | Damped steps before each interior event node; `None` is the route's default (2; DCN 2), 0 disables. |
+
+```python
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+
+pde_euler = PDEParams(stepper=CrankNicolson(theta=1.0))
+pde_loaded = PDEParams.from_config({"accuracy": "high", "stepper": {"terminal_damping_steps": 0}})
+```
 
 `GridConfig` fields: `points`, `steps_per_day` (a density; a "day" is 1/252 of a solver
 year) or `time_steps` (a total budget over the horizon; exactly one time basis is in
-force), `eps_crit`, `num_std`, `bounds`, `max_points`, `max_steps`, `day_count`,
-`terminal_damping_steps`, `event_damping_steps`.
+force), `eps_crit`, `num_std`, `bounds`, `max_points`, `max_steps`, `day_count`.
 
 Routes other than the shared-grid solvers honour a subset and reject the rest loudly
 (`quantark.asset.equity.engine.pde.route_applicability.ROUTE_RULES`): the local-vol
 solvers have a uniform spatial grid of their own (no `eps_crit`, `num_std`, or `bounds`;
-the barrier kernel has no damping schedule), and DCN's observation schedule is its time
-resolution (no `steps_per_day` or `time_steps`). The names removed in 0.6.0, each with its
-replacement, are listed in `CHANGELOG.md` under 0.6.0.
+the barrier kernel has no damping schedule), DCN's observation schedule is its time
+resolution (no `steps_per_day` or `time_steps`), and none of the three accepts a custom
+stepper, operator or readout yet.
+
+**What will this solve do?** `explain(product, pricing_env)` on `PDEEngine` and every
+shared-grid solver returns the resolved plan from the same preparation `price` runs,
+without marching: route, every setting with its source and applicability, space, time,
+events, scheme, outputs, identities, and per-operation terminal outcomes. An excerpt of
+`str(SnowballPDESolver(PDEParams()).explain(snowball, env))` for a one-year monthly
+snowball in a flat environment:
+
+```
+[route]
+  solver       SnowballPDESolver
+  adapter      SnowballAdapter
+  samples      scalar
+  solve_state  (('ki_barrier', 85.0), ('ki_continuous', True), ('knocked_in', False), ('reverse', False))
+[time]
+  basis            steps_per_day
+  value            4.0
+  day_count        252
+  requested_steps  1008
+  actual_steps     1008
+  fill_scaled      False
+  cap_exceeded     False
+  mandatory_nodes  11
+[scheme]
+  stepper                CrankNicolson
+  resolved               {'theta': 0.5, 'event_theta': 1.0, 'terminal_damping_steps': 1, 'event_damping_steps': 2}
+  terminal_damped_steps  1
+  event_damped_steps     22
+  theta_counts           {0.5: 985, 1.0: 23}
+  zero_diffusion_steps   0
+[outputs]
+  groups   ({'name': 'value', 'surfaces': ('alive', 'ki'), 'columns': 2, 'backend': 'banded', 'retention': 'full'},)
+  readout  final column
+```
+
+Names removed in 0.7.0, each raising `ValidationError` with its replacement:
+
+| Removed name | Replacement |
+|---|---|
+| `PDEParams(theta=...)` | `stepper=CrankNicolson(theta=...)`; 0.5 is Crank-Nicolson, 1.0 backward Euler |
+| `PDEParams(event_theta=...)` | `stepper=CrankNicolson(event_theta=...)` |
+| `GridConfig(terminal_damping_steps=...)` | `PDEParams(stepper=CrankNicolson(terminal_damping_steps=N))`; 0 disables |
+| `GridConfig(event_damping_steps=...)` | `PDEParams(stepper=CrankNicolson(event_damping_steps=N))`; 0 disables |
+
+The names removed in 0.6.0 are listed in `CHANGELOG.md` under 0.6.0. How the solvers
+share one core, and how to write a custom component, is in `docs/pde-core.md`.
 
 ## RQMC Target Std Scaling (MC Benchmarking)
 
