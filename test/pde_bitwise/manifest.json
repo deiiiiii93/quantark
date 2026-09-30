@@ -1,0 +1,924 @@
+{
+ "american_dated|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "american_dated|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "american_dated|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "american_dated|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "american_dated|term|high": {
+  "error": null,
+  "none": []
+ },
+ "american_dated|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "american_tenor|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "american_tenor|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "american_tenor|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "american_tenor|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "american_tenor|term|high": {
+  "error": null,
+  "none": []
+ },
+ "american_tenor|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "barrier_cont|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "barrier_cont|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "barrier_cont|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "barrier_cont|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "barrier_cont|term|high": {
+  "error": null,
+  "none": []
+ },
+ "barrier_cont|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "barrier_disc|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "barrier_disc|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "barrier_disc|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "barrier_disc|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "barrier_disc|term|high": {
+  "error": null,
+  "none": []
+ },
+ "barrier_disc|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "bump|frozen_vs_fresh|snowball": {
+  "error": null,
+  "none": []
+ },
+ "dcn|601": {
+  "error": null,
+  "none": []
+ },
+ "dcn|default": {
+  "error": null,
+  "none": []
+ },
+ "double_barrier|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "double_barrier|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "double_barrier|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "double_barrier|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "double_barrier|term|high": {
+  "error": null,
+  "none": []
+ },
+ "double_barrier|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "double_one_touch|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "double_one_touch|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "double_one_touch|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "double_one_touch|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "double_one_touch|term|high": {
+  "error": null,
+  "none": []
+ },
+ "double_one_touch|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "european|bus244": {
+  "error": null,
+  "none": []
+ },
+ "european|flat|budget_eq_density": {
+  "error": null,
+  "none": []
+ },
+ "european|flat|damp01": {
+  "error": null,
+  "none": []
+ },
+ "european|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "european|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "european|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "european|flat|theta1": {
+  "error": null,
+  "none": []
+ },
+ "european|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "european|term|high": {
+  "error": null,
+  "none": []
+ },
+ "european|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "heston_phoenix": {
+  "error": null,
+  "none": []
+ },
+ "heston_phoenix|stats": {
+  "error": null,
+  "none": []
+ },
+ "heston_snowball": {
+  "error": null,
+  "none": []
+ },
+ "heston_snowball|greeks": {
+  "error": null,
+  "none": []
+ },
+ "heston_snowball|stats": {
+  "error": null,
+  "none": []
+ },
+ "intraday_snowball": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|double_in|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|double_in|flat|standard|bump": {
+  "error": "PricingError",
+  "none": []
+ },
+ "knock_in|double_in|knocked_in": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|double_in|knocked_in|bump": {
+  "error": "PricingError",
+  "none": []
+ },
+ "knock_in|double_in|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|double_in|term|standard|bump": {
+  "error": "PricingError",
+  "none": []
+ },
+ "knock_in|down_in_put|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|down_in_put|flat|standard|bump": {
+  "error": "PricingError",
+  "none": []
+ },
+ "knock_in|down_in_put|knocked_in": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|down_in_put|knocked_in|bump": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|down_in_put|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|down_in_put|term|standard|bump": {
+  "error": "PricingError",
+  "none": []
+ },
+ "knock_in|up_in_call|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|up_in_call|flat|standard|bump": {
+  "error": "PricingError",
+  "none": []
+ },
+ "knock_in|up_in_call|knocked_in": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|up_in_call|knocked_in|bump": {
+  "error": "PricingError",
+  "none": []
+ },
+ "knock_in|up_in_call|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "knock_in|up_in_call|term|standard|bump": {
+  "error": "PricingError",
+  "none": []
+ },
+ "ko_reset|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "ko_reset|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "ko_reset|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "ko_reset|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "ko_reset|term|high": {
+  "error": null,
+  "none": []
+ },
+ "ko_reset|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "life_surface|snowball": {
+  "error": null,
+  "none": [
+   "t0_readout"
+  ]
+ },
+ "lu_fallback|phoenix": {
+  "error": null,
+  "none": []
+ },
+ "lu_fallback|snowball": {
+  "error": null,
+  "none": []
+ },
+ "lu_fallback|snowball|stats": {
+  "error": "ValidationError",
+  "none": []
+ },
+ "lv_barrier_cont|600x200": {
+  "error": null,
+  "none": []
+ },
+ "lv_barrier_cont|default": {
+  "error": null,
+  "none": []
+ },
+ "lv_barrier_discrete|600x200": {
+  "error": null,
+  "none": []
+ },
+ "lv_barrier_discrete|default": {
+  "error": null,
+  "none": []
+ },
+ "lv_barrier_expiry|600x200": {
+  "error": null,
+  "none": []
+ },
+ "lv_barrier_expiry|default": {
+  "error": null,
+  "none": []
+ },
+ "lv_dcn|601": {
+  "error": null,
+  "none": []
+ },
+ "lv_dcn|default": {
+  "error": null,
+  "none": []
+ },
+ "lv_phoenix": {
+  "error": null,
+  "none": []
+ },
+ "lv_snowball": {
+  "error": null,
+  "none": []
+ },
+ "lv_snowball|prebuilt": {
+  "error": null,
+  "none": []
+ },
+ "lv_vanilla|600x200": {
+  "error": null,
+  "none": []
+ },
+ "lv_vanilla|default": {
+  "error": null,
+  "none": []
+ },
+ "one_touch|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "one_touch|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "one_touch|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "one_touch|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "one_touch|term|high": {
+  "error": null,
+  "none": []
+ },
+ "one_touch|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_memory|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_memory|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_memory|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_memory|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_memory|term|high": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_memory|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_plain|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_plain|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_plain|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_plain|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_plain|term|high": {
+  "error": null,
+  "none": []
+ },
+ "phoenix_plain|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|ko_reset|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|ko_reset|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|phoenix_memory|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|phoenix_memory|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|phoenix_plain|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|phoenix_plain|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_cont|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_cont|flat|standard|streams_ko": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_cont|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_daily|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_daily|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_knocked_in|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_knocked_in|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_monthly|flat|nodal": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_monthly|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "pwe|snowball_monthly|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "scheme|european|damp01": {
+  "error": null,
+  "none": []
+ },
+ "scheme|european|theta1": {
+  "error": null,
+  "none": []
+ },
+ "scheme|snowball_cont|damp01": {
+  "error": null,
+  "none": []
+ },
+ "scheme|snowball_cont|theta1": {
+  "error": null,
+  "none": []
+ },
+ "session_ko_reset": {
+  "error": null,
+  "none": []
+ },
+ "session_phoenix": {
+  "error": null,
+  "none": []
+ },
+ "session_snowball": {
+  "error": null,
+  "none": []
+ },
+ "settlement_lag|phoenix": {
+  "error": null,
+  "none": []
+ },
+ "settlement_lag|snowball": {
+  "error": null,
+  "none": []
+ },
+ "slv_snowball": {
+  "error": null,
+  "none": []
+ },
+ "slv_snowball|stats": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|bus244": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|flat|budget_eq_density": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|flat|damp01": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|flat|nodal": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|flat|theta1": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|term|high": {
+  "error": null,
+  "none": []
+ },
+ "snowball_cont|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "snowball_daily|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "snowball_daily|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "snowball_daily|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "snowball_daily|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "snowball_daily|term|high": {
+  "error": null,
+  "none": []
+ },
+ "snowball_daily|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "snowball_knocked_in|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "snowball_knocked_in|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "snowball_knocked_in|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "snowball_knocked_in|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "snowball_knocked_in|term|high": {
+  "error": null,
+  "none": []
+ },
+ "snowball_knocked_in|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "snowball_monthly|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "snowball_monthly|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "snowball_monthly|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "snowball_monthly|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "snowball_monthly|term|high": {
+  "error": null,
+  "none": []
+ },
+ "snowball_monthly|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|ko_reset|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|ko_reset|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|ko_reset|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|ko_reset|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|ko_reset|term|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|ko_reset|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_memory|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_memory|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_memory|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_memory|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_memory|term|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_memory|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_plain|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_plain|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_plain|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_plain|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_plain|term|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|phoenix_plain|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_cont|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_cont|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_cont|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_cont|flat|standard|streams_ko": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_cont|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_cont|term|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_cont|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_daily|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_daily|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_daily|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_daily|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_daily|term|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_daily|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_knocked_in|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_knocked_in|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_knocked_in|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_knocked_in|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_knocked_in|term|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_knocked_in|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_monthly|flat|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_monthly|flat|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_monthly|flat|nodal": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_monthly|flat|standard": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_monthly|term|fast": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_monthly|term|high": {
+  "error": null,
+  "none": []
+ },
+ "stats|snowball_monthly|term|standard": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|barrier|greeks": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|barrier|price": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|phoenix|greeks": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|phoenix|price": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|phoenix|pwe": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|phoenix|stats": {
+  "error": null,
+  "none": [
+   "stats"
+  ]
+ },
+ "terminal|expired|snowball|greeks": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|snowball|price": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|snowball|pwe": {
+  "error": null,
+  "none": []
+ },
+ "terminal|expired|snowball|stats": {
+  "error": null,
+  "none": [
+   "stats"
+  ]
+ },
+ "terminal|immediate_ko|snowball|greeks": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|snowball|life_surface": {
+  "error": "ValidationError",
+  "none": []
+ },
+ "terminal|immediate_ko|snowball|price": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|snowball|pwe": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|snowball|stats": {
+  "error": null,
+  "none": []
+ }
+}
