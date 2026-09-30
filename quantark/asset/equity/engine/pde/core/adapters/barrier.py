@@ -100,8 +100,11 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         parts = [prepare(vanilla_solver, self._vanilla_product(product), env, request)]
         if knock_out:
             ko = self._knock_out_product(product)
-            parts.append(prepare(solver, ko, env, request, frozen=solver._frozen_base_layout,
-                                 session=solver._session_artefacts))
+            # A session's artefacts belong to the knock-in product's own request (its
+            # automatic domain); the knock-out leg's hard-edged domain is another
+            # layout, so the leg binds its own in a session. A bump context's frozen
+            # layout is handed on and raises on the bound mismatch (as in 0.6.0).
+            parts.append(prepare(solver, ko, env, request, frozen=solver._frozen_base_layout))
         pr = self._participation(product)
         greeks = request.operation is Operation.GREEKS
         if greeks:

@@ -188,6 +188,15 @@ def _session_layout(solver, stored, grid_request):
     """
     if stored.request == grid_request:
         return stored
+    if (stored.request.hard_lower, stored.request.hard_upper) != (grid_request.hard_lower,
+                                                                 grid_request.hard_upper):
+        from quantark.util.exceptions import PricingError
+
+        raise PricingError(
+            "the session's layout was bound for hard bounds "
+            f"({stored.request.hard_lower}, {stored.request.hard_upper}) but this solve requires "
+            f"({grid_request.hard_lower}, {grid_request.hard_upper}); re-prepare the session"
+        )
     from quantark.asset.equity.engine.pde.grid import Layout
     from quantark.asset.equity.engine.pde.grid.space import SpatialLayout
     from quantark.asset.equity.engine.pde.grid.time import build_time

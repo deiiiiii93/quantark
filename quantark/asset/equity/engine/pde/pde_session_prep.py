@@ -262,6 +262,10 @@ def factorization_state(
     )
     if budget is not None and estimate > budget:
         return ArtifactState(_EMPTY_PACKS, None, None, None)
+    if not engine._is_cache_enabled():
+        # the factorization cache is bypassed when cache_enabled is false (§5.7): a
+        # warmed pack would seed the march with shared factorizations
+        return ArtifactState(_EMPTY_PACKS, None, None, None)
 
     prepared = _marched_problem(
         prepare(engine, product, pricing_env, _PRICE,
@@ -277,11 +281,7 @@ def factorization_state(
         )
 
     cache = getattr(context, "artifact_cache", None)
-    if (
-        not engine._is_cache_enabled()
-        or cache is None
-        or coeff_fp is None
-    ):
+    if cache is None or coeff_fp is None:
         return ArtifactState(build(), None, None, None)
 
     capture = _env_capture(pricing_env)

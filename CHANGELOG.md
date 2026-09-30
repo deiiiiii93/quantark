@@ -75,6 +75,18 @@ the damping index sets; `CrankNicolson.schedule` computes them.
 - PDE solvers deep-copy and pickle after pricing.
 - A session no longer stores a factorization for a stepper without a value fingerprint
   (two such steppers could have shared one).
+- Knock-in barriers (single and double) priced through a `PricingSession` now equal the
+  direct price bit for bit. 0.6.0 marched the knock-out leg on the knock-in product's own
+  spatial grid, masking the barrier instead of using the hard-edged domain (measured:
+  up-and-in call −0.9%, double knock-in −2.2%). A session's layout is now refused, not
+  reassembled, when the hard bounds differ. The session path was not in the byte book;
+  it now has an execution test.
+- A session with `cache_enabled=False` no longer warms a factorization pack.
+
+Unchanged and still raising: bump-context Greeks on a knock-in barrier that has not
+knocked in (`PricingError`: the frozen layout has the knock-in's bounds, the knock-out
+leg needs the barrier's). It is a declared failure in the byte book; freezing the
+knock-out leg's layout is sub-project 3 work.
 
 ### Sub-project 3
 Still planned: the environment's business day as the grid day (full re-certification);
