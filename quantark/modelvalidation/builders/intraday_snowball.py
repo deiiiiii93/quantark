@@ -39,6 +39,7 @@ from quantark.modelvalidation.builders.intraday_common import (
     plain,
 )
 from quantark.modelvalidation.candidate import CandidateResult, ConvergenceAxis, ConvergenceLevel
+from quantark.modelvalidation.builders.pde_declared import declared_pde_params
 from quantark.modelvalidation.engine_config import engine_config
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
@@ -313,22 +314,27 @@ class IntradaySnowballPDECandidate(_IntradayCandidate):
     base_name = "equity.snowball.intraday.pde"
     trees = PDE_TREES
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # the declared params, loaded once: a key the engine rejects fails the study here
+        self._pde_params = declared_pde_params(self._params, exclude=("label",))
+
     def _accuracy(self) -> str:
-        return str(self._params.get("accuracy", "standard"))
+        return self._pde_params.accuracy
 
     def _target_engine(self) -> SnowballPDESolver:
-        return SnowballPDESolver(params=PDEParams(accuracy=self._accuracy()))
+        return SnowballPDESolver(params=self._pde_params)
 
     def _explicit_engine(self, points: int, steps_per_day: float) -> SnowballPDESolver:
         base = resolve_config(self._accuracy(), None)
-        return SnowballPDESolver(params=PDEParams(grid=GridConfig(
+        return SnowballPDESolver(params=PDEParams.from_config(self._declared(), grid=GridConfig(
             points=int(points), steps_per_day=float(steps_per_day),
             max_points=max(int(points), int(base.max_points)), max_steps=10 ** 8)))
 
     def params(self) -> Mapping[str, Any]:
         return {**self._declared(), "engine": "SnowballPDESolver",
                 "desk_bump": float(bump_config_for(self._target_engine()).spot_bump),
-                "grid": resolved_grid_evidence(PDEParams(accuracy=self._accuracy())),
+                "grid": resolved_grid_evidence(self._pde_params),
                 "convergence_axes": {"space": "achieved points x (1, 2, 4)", "time": "achieved steps per day x (1, 2, 4)",
                                      "placement": f"achieved points + {list(_PLACEMENT_SHIFTS)}"}}
 

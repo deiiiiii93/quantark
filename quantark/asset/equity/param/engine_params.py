@@ -3,7 +3,7 @@ Engine configuration parameters.
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Mapping, Optional, Union
 from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode
 from quantark.util.exceptions import ValidationError
@@ -538,6 +538,37 @@ class PDEParams(EngineParams):
                 "event_projection must be None, an EventProjectionMode or its "
                 f"string value, got {type(self.event_projection).__name__}"
             )
+
+    def evidence(self) -> dict:
+        """What this params object runs with, as certificate data (spec 2 §4.6).
+
+        The built-in stepper by its settings; any other stepper, and a non-built-in
+        operator or readout, by its value fingerprint (``"uncertifiable"`` when it
+        has none). ``engine_config`` serializes through this.
+        """
+        from quantark.asset.equity.engine.pde.core.components import (
+            CentralDifference,
+            CrankNicolson,
+            StandardReadout,
+        )
+        from quantark.asset.equity.engine.pde.core.identity import component_fingerprint
+
+        out: dict = {"accuracy": self.accuracy}
+        if self.grid is not None:
+            out["grid"] = dict(self.grid.evidence())
+        if type(self.stepper) is CrankNicolson:
+            out["stepper"] = dict(self.stepper.evidence())
+        else:
+            out["stepper"] = component_fingerprint(self.stepper) or "uncertifiable"
+        for name, builtin in (("operator", CentralDifference()), ("readout", StandardReadout())):
+            component = getattr(self, name)
+            if component != builtin:
+                out[name] = component_fingerprint(component) or "uncertifiable"
+        out["event_projection"] = getattr(self.event_projection, "value", self.event_projection)
+        out["cache_enabled"] = self.cache_enabled
+        for f in fields(EngineParams):
+            out[f.name] = getattr(self, f.name)
+        return out
 
     @classmethod
     def from_config(cls, config_or_path: Any, **overrides: Any) -> "PDEParams":

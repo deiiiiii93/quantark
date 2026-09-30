@@ -291,14 +291,16 @@ def factorization_state(
     market_fp = try_fingerprint(
         (pricing_env.rate_curve, pricing_env.div_yield, pricing_env.vol_surface)
     )
-    if market_fp is None:
+    stepper_fp = component_fingerprint(prepared.stepper)
+    if market_fp is None or stepper_fp is None:
+        # no value identity (decision 8): build fresh and store nothing
         return ArtifactState(build(), None, None, None)
     fp = try_fingerprint(
         (
             "pde-fact",
             _class_path(engine),
             coeff_fp,
-            component_fingerprint(prepared.stepper),
+            stepper_fp,
             tuple(g.backend.value for g in prepared.groups),
             try_fingerprint(tuple(group_schedule(prepared, g) for g in prepared.groups)),
         )

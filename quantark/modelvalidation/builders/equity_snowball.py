@@ -13,6 +13,8 @@ on gamma near a barrier. Those are exactly the cells the gates exist to catch.
 
 from __future__ import annotations
 
+import dataclasses
+
 from datetime import datetime
 from typing import Any, Mapping, Optional, Sequence
 
@@ -41,6 +43,7 @@ from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 
 from quantark.modelvalidation.candidate import CandidateResult, LadderRung
+from quantark.modelvalidation.builders.pde_declared import declared_pde_params
 from quantark.modelvalidation.engine_config import engine_config
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
@@ -453,6 +456,18 @@ class SnowballMCReference(_SnowballArm):
 class SnowballPDECandidate(_SnowballArm):
     """Two-surface PDE solver; delta and gamma come from the solver directly."""
 
+    def __init__(
+        self,
+        environment_params: Mapping[str, Any],
+        product_params: Mapping[str, Any],
+        quantities: Sequence[str],
+        params: Mapping[str, Any],
+    ) -> None:
+        # the declared params, loaded once: a key the engine rejects fails the study here
+        self._pde_params = declared_pde_params(params)
+        super().__init__(environment_params=environment_params, product_params=product_params,
+                         quantities=quantities, params=params)
+
     def name(self) -> str:
         return "equity.snowball.pde"
 
@@ -463,16 +478,19 @@ class SnowballPDECandidate(_SnowballArm):
         makes the certificate self-describing, and what makes the identity hash
         move if a future release redefines the profile.
         """
-        accuracy = str(self._params.get("accuracy", "standard"))
         return {
             **self._params,
             "engine": "SnowballPDESolver",
-            "grid": resolved_grid_evidence(PDEParams(accuracy=accuracy)),
+            "grid": resolved_grid_evidence(self._pde_params),
         }
+
+    def _engine(self, accuracy: str) -> SnowballPDESolver:
+        """The solver this candidate runs at ``accuracy``: the declared params, re-profiled."""
+        return SnowballPDESolver(params=dataclasses.replace(self._pde_params, accuracy=accuracy))
 
     def _greeks(self, case, accuracy: str) -> dict:
         environment, product_spec = self._specs(case)
-        solver = SnowballPDESolver(params=PDEParams(accuracy=accuracy))
+        solver = self._engine(accuracy)
         result = solver.calculate_greeks(
             make_snowball(product_spec), make_environment(environment)
         )
@@ -483,7 +501,7 @@ class SnowballPDECandidate(_SnowballArm):
         }
 
     def evaluate(self, case) -> CandidateResult:
-        accuracy = str(self._params.get("accuracy", "standard"))
+        accuracy = self._pde_params.accuracy
         values = self._greeks(case, accuracy)
         coarser = _COARSER_ACCURACY[accuracy]
         rungs = [LadderRung(axis="accuracy", level="target", values=values)]

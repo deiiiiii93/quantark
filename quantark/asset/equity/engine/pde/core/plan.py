@@ -216,11 +216,14 @@ def _events(prepared) -> Section:
 
 def _scheme(prepared) -> tuple:
     stepper, schedule, coeffs = prepared.stepper, prepared.theta_schedule, prepared.coefficients
-    event_damp, term_damp = stepper._damping_sets(prepared.layout)
+    # damped-step counts are the built-in's notion; a custom stepper reports its schedule only
+    damping = getattr(stepper, "_damping_sets", None)
+    event_damp, term_damp = damping(prepared.layout) if damping is not None else (None, None)
     values, counts = np.unique(np.asarray(schedule, dtype=float), return_counts=True)
     zero = sum(1 for j in range(len(schedule)) if coeffs.is_zero_diffusion(coeffs.set_at(j)))
     section = {"stepper": type(stepper).__name__, "resolved": dict(stepper.evidence()),
-               "terminal_damped_steps": len(term_damp), "event_damped_steps": len(event_damp),
+               "terminal_damped_steps": None if term_damp is None else len(term_damp),
+               "event_damped_steps": None if event_damp is None else len(event_damp),
                "theta_counts": {float(v): int(c) for v, c in zip(values, counts)},
                "zero_diffusion_steps": int(zero)}
     return Section(section), {"theta_by_step": np.asarray(schedule, dtype=float)}

@@ -21,6 +21,8 @@ Two payoff switches are pinned here rather than exposed to the study, the way
 
 from __future__ import annotations
 
+import dataclasses
+
 from typing import Any, Mapping, Sequence
 
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
@@ -44,6 +46,7 @@ from quantark.modelvalidation.builders.equity_snowball import (
     make_environment,
 )
 from quantark.modelvalidation.candidate import CandidateResult, LadderRung
+from quantark.modelvalidation.builders.pde_declared import declared_pde_params
 from quantark.modelvalidation.engine_config import engine_config
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
@@ -326,21 +329,36 @@ class PhoenixMCReference(_PhoenixArm):
 class PhoenixPDECandidate(_PhoenixArm):
     """Two-surface PDE solver; delta and gamma come from the solver directly."""
 
+    def __init__(
+        self,
+        environment_params: Mapping[str, Any],
+        product_params: Mapping[str, Any],
+        quantities: Sequence[str],
+        params: Mapping[str, Any],
+    ) -> None:
+        # the declared params, loaded once: a key the engine rejects fails the study here
+        self._pde_params = declared_pde_params(params)
+        super().__init__(environment_params=environment_params, product_params=product_params,
+                         quantities=quantities, params=params)
+
     def name(self) -> str:
         return "equity.phoenix.pde"
 
     def params(self) -> Mapping[str, Any]:
         """Declared settings plus the grid the accuracy profile resolves to."""
-        accuracy = str(self._params.get("accuracy", "standard"))
         return {
             **self._params,
             "engine": "PhoenixPDESolver",
-            "grid": resolved_grid_evidence(PDEParams(accuracy=accuracy)),
+            "grid": resolved_grid_evidence(self._pde_params),
         }
+
+    def _engine(self, accuracy: str) -> PhoenixPDESolver:
+        """The solver this candidate runs at ``accuracy``: the declared params, re-profiled."""
+        return PhoenixPDESolver(params=dataclasses.replace(self._pde_params, accuracy=accuracy))
 
     def _greeks(self, case, accuracy: str) -> dict:
         environment, product_spec = self._specs(case)
-        solver = PhoenixPDESolver(params=PDEParams(accuracy=accuracy))
+        solver = self._engine(accuracy)
         result = solver.calculate_greeks(
             make_phoenix(product_spec), make_environment(environment)
         )
@@ -351,7 +369,7 @@ class PhoenixPDECandidate(_PhoenixArm):
         }
 
     def evaluate(self, case) -> CandidateResult:
-        accuracy = str(self._params.get("accuracy", "standard"))
+        accuracy = self._pde_params.accuracy
         values = self._greeks(case, accuracy)
         coarser = _COARSER_ACCURACY[accuracy]
         rungs = [LadderRung(axis="accuracy", level="target", values=values)]

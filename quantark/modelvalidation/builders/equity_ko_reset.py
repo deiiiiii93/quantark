@@ -16,6 +16,8 @@ the same benchmark.
 
 from __future__ import annotations
 
+import dataclasses
+
 from typing import Any, Mapping, Sequence
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
@@ -46,6 +48,7 @@ from quantark.modelvalidation.builders.equity_snowball import (
     make_environment,
 )
 from quantark.modelvalidation.candidate import CandidateResult, LadderRung
+from quantark.modelvalidation.builders.pde_declared import declared_pde_params
 from quantark.modelvalidation.engine_config import engine_config
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
@@ -371,20 +374,35 @@ class KOResetMCReference(_KOResetArm):
 class KOResetPDECandidate(_KOResetArm):
     """Two-surface PDE solver; delta and gamma come from the solver directly."""
 
+    def __init__(
+        self,
+        environment_params: Mapping[str, Any],
+        product_params: Mapping[str, Any],
+        quantities: Sequence[str],
+        params: Mapping[str, Any],
+    ) -> None:
+        # the declared params, loaded once: a key the engine rejects fails the study here
+        self._pde_params = declared_pde_params(params)
+        super().__init__(environment_params=environment_params, product_params=product_params,
+                         quantities=quantities, params=params)
+
     def name(self) -> str:
         return "equity.ko_reset_snowball.pde"
 
     def params(self) -> Mapping[str, Any]:
-        accuracy = str(self._params.get("accuracy", "standard"))
         return {
             **self._params,
             "engine": "KOResetSnowballPDESolver",
-            "grid": resolved_grid_evidence(PDEParams(accuracy=accuracy)),
+            "grid": resolved_grid_evidence(self._pde_params),
         }
+
+    def _engine(self, accuracy: str) -> KOResetSnowballPDESolver:
+        """The solver this candidate runs at ``accuracy``: the declared params, re-profiled."""
+        return KOResetSnowballPDESolver(params=dataclasses.replace(self._pde_params, accuracy=accuracy))
 
     def _greeks(self, case, accuracy: str) -> dict:
         environment, product_spec = self._specs(case)
-        solver = KOResetSnowballPDESolver(params=PDEParams(accuracy=accuracy))
+        solver = self._engine(accuracy)
         result = solver.calculate_greeks(
             make_ko_reset(product_spec), make_environment(environment)
         )
@@ -395,7 +413,7 @@ class KOResetPDECandidate(_KOResetArm):
         }
 
     def evaluate(self, case) -> CandidateResult:
-        accuracy = str(self._params.get("accuracy", "standard"))
+        accuracy = self._pde_params.accuracy
         values = self._greeks(case, accuracy)
         coarser = _COARSER_ACCURACY[accuracy]
         rungs = [LadderRung(axis="accuracy", level="target", values=values)]

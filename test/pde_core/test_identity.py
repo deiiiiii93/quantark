@@ -89,3 +89,27 @@ def test_a_local_vol_bump_instance_carries_the_prebuilt_surface():
     solver = LocalVolSnowballPDESolver(PDEParams(), local_vol_surface=surface)
     clone = solver.create_bump_context(p, env)
     assert clone is not solver and clone._prebuilt is solver._prebuilt
+
+
+def test_operators_with_equal_evidence_have_different_identities():
+    from pde_core.components_fixtures import ShiftedOperator
+
+    p, env = make_snowball(SB), env_flat()
+    a, b = ShiftedOperator(0.0), ShiftedOperator(1e-9)
+    assert a.evidence() == b.evidence() == {}
+    from quantark.asset.equity.engine.pde.core.identity import component_fingerprint
+
+    assert component_fingerprint(a) != component_fingerprint(b)
+    ka = SnowballPDESolver(PDEParams(operator=a)).explain(p, env).identity["coefficient_key"]
+    kb = SnowballPDESolver(PDEParams(operator=b)).explain(p, env).identity["coefficient_key"]
+    assert ka is not None and ka != kb
+
+
+def test_a_readout_moves_the_problem_but_not_the_factorization():
+    from pde_core.components_fixtures import NearestNodeReadout
+
+    p, env = make_snowball(SB), env_flat()
+    std = SnowballPDESolver(PDEParams()).explain(p, env).identity
+    near = SnowballPDESolver(PDEParams(readout=NearestNodeReadout())).explain(p, env).identity
+    assert std["problem"] != near["problem"]
+    assert std["factorization"] == near["factorization"] is not None
