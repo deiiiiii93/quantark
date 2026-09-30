@@ -2698,7 +2698,8 @@ class SnowballPDESolver(BasePDESolver):
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         pack = self._session_banded_pack
         if pack is not None:
-            hit = pack.get((coeff_key, round(dt, 12), round(theta, 12)))
+            # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.
+            hit = pack.get((coeff_key, round(dt, 12), float(theta)))
             if hit is not None:
                 return hit
         if not self._is_cache_enabled():
@@ -2716,7 +2717,8 @@ class SnowballPDESolver(BasePDESolver):
             upper1 = (1.0 - theta) * dt * u[1:-2]
             return banded, lower1, main1, upper1
 
-        key = (coeff_key, round(dt, 12), round(theta, 12))
+        # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.
+        key = (coeff_key, round(dt, 12), float(theta))
         cached = self._banded_cache.get(key)
         if cached is not None:
             self._banded_cache.move_to_end(key)
@@ -2754,7 +2756,8 @@ class SnowballPDESolver(BasePDESolver):
         # mirroring the engine's own cache: distinct dt floats can round to
         # one 12-digit key, and the march reuses the first-built entry for
         # all of them — the pack must hold that same entry bitwise.
-        key = (coeff_key, round(dt, 12), round(theta, 12))
+        # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.
+        key = (coeff_key, round(dt, 12), float(theta))
         if key in banded:
             return
         saved, self._banded_cache = self._banded_cache, OrderedDict()

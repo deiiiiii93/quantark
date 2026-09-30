@@ -1337,8 +1337,8 @@ class BasePDESolver(BaseEngine):
                 M1 = I + (1-theta)*dt*A (for RHS)
                 M2_lu = LU factorization of I - theta*dt*A (for LHS)
         """
-        # Round dt to avoid floating point comparison issues
-        key = (coeff_key, round(dt, 12), round(theta, 6))
+        # θ exact (spec 2 decision 6); dt rounded: ULP-different intervals share one factorization, as every banked number was computed.
+        key = (coeff_key, round(dt, 12), float(theta))
 
         pack = self._session_matrix_pack
         if pack is not None:
