@@ -25,6 +25,8 @@ class FamilyAdapter:
 
     #: The route a solver declares (``check_route_applicability``); None = every shared-grid field honoured.
     route = None
+    #: Whether event statistics march as a column group of this family (§5.4).
+    supports_statistics_group = False
 
     def __init__(self, solver):
         self.solver = solver

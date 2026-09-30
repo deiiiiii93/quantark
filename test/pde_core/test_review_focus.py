@@ -89,3 +89,22 @@ def test_phoenix_solver_deep_copies_and_pickles_after_pricing(cls, env):
     a = s.price(p, e)
     assert copy.deepcopy(s).price(p, e) == a
     assert pickle.loads(pickle.dumps(s)).price(p, e) == a   # the solver's own state, round-tripped
+
+
+# --- Review Focus 3 (Task 9) ---------------------------------------------------------
+def _flat(vol):
+    from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+    from quantark.priceenv import PricingEnvironment
+    return PricingEnvironment(spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(volatility=vol),
+                              rate_curve=FlatRateCurve(rate=0.03), div_yield=ContinuousDividendYield(0.01),
+                              valuation_date=datetime(2026, 1, 5))
+
+
+def test_statistics_on_a_reused_solver_ignore_an_earlier_market():
+    # Measured at 302fa2ed: KO probabilities off by up to 0.0407 (a stale factorization store).
+    p = snowball("discrete")
+    s = SnowballPDESolver(PDEParams())
+    s.price(p, _flat(vol=0.20))
+    stale = s.calculate_event_stats(p, _flat(vol=0.25))
+    fresh = SnowballPDESolver(PDEParams()).calculate_event_stats(p, _flat(vol=0.25))
+    assert list(stale.ko_probability) == list(fresh.ko_probability)

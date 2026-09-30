@@ -72,7 +72,7 @@ counted regardless of what happens to it afterward — while QUAD/PDE report
 `P(KI ever AND never KO)`, with the KI indicator absorbed to 0 on **any**
 KO the path experiences, order-agnostic (see the `KI_indicator` /
 `KI_ever_indicator` surface-column comment in
-`SnowballPDESolver._compute_event_stats`, and the `ki_probability`
+`quantark/asset/equity/engine/pde/core/statistics.py`, and the `ki_probability`
 docstring in `event_stats.py`). `AutocallableEventStats` also carries two
 unambiguous, cross-engine-consistent alternatives —
 `ki_ever_probability` and `ki_survive_knocked_in_probability` — that the

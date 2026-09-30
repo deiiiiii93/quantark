@@ -132,8 +132,8 @@ def test_snowball_ki_pruning_preserves_ko_and_pv():
     solver = SnowballPDESolver(PDEParams())
     env = _env()
     product = _snowball()
-    full = solver._compute_event_stats(product, env, streams=None)
-    lean = solver._compute_event_stats(
+    full = solver.calculate_event_stats(product, env, streams=None)
+    lean = solver.calculate_event_stats(
         product, env, streams=frozenset({EventType.KO})
     )
     # KO/survival/pv bit-identical whether or not KI columns are computed.
@@ -156,9 +156,9 @@ def test_npv_passthrough_skips_internal_price():
     solver = SnowballPDESolver(PDEParams())
     env = _env()
     product = _snowball()
-    internal = solver._compute_event_stats(product, env)
+    internal = solver.calculate_event_stats(product, env)
     sentinel = 123456.0
-    passed = solver._compute_event_stats(product, env, npv=sentinel)
+    passed = solver.calculate_event_stats(product, env, npv=sentinel)
     assert float(passed.pv) == sentinel
     assert abs(
         float(passed.expected_discounted_cashflows.sum()) - sentinel
@@ -179,8 +179,8 @@ def test_phoenix_coupon_pruning_preserves_ko_and_pv():
     solver = PhoenixPDESolver(PDEParams())
     env = _env()
     product = _phoenix()
-    full = solver._compute_event_stats(product, env, streams=None)
-    lean = solver._compute_event_stats(
+    full = solver.calculate_event_stats(product, env, streams=None)
+    lean = solver.calculate_event_stats(
         product, env, streams=frozenset({EventType.KO})
     )
     assert np.array_equal(

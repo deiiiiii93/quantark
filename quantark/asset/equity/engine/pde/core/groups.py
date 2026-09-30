@@ -29,11 +29,12 @@ class GroupPolicy:
     boundary: BoundaryPolicy
     zero_diffusion_theta_one: bool    # θ=1 on zero-diffusion coefficient sets
     zero_slope_after_events: bool     # v[0]=v[1], v[-1]=v[-2] after the step's events
+    dt_as_python_float: bool = False  # the step's dt reaches the kernel (and its cache key) as a Python float
 
 
 VALUE = GroupPolicy(BoundaryPolicy.DIRICHLET, True, False)
 VALUE_NO_ZERO_DIFFUSION_OVERRIDE = GroupPolicy(BoundaryPolicy.DIRICHLET, False, False)
-STATISTICS_LEGACY = GroupPolicy(BoundaryPolicy.CARRY, False, True)
+STATISTICS_LEGACY = GroupPolicy(BoundaryPolicy.CARRY, False, True, dt_as_python_float=True)
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class ColumnGroup:
     backend: Backend
     policy: GroupPolicy
     one_dimensional_rhs: bool = False   # Phoenix banded: a 1-D right-hand side (nrhs=1)
+    rolling: bool = False               # states hold ONE column set, replaced every step (statistics)
 
 
 @dataclass(frozen=True, eq=False)

@@ -130,9 +130,8 @@ class TestRichOutputs:
     def test_total_backward_march_parity_with_direct(self):
         """The session performs exactly as many banded backward sweeps as
         the direct price_with_events path — rich outputs add NO marches."""
-        import scipy.linalg as sla
-
-        from quantark.asset.equity.engine.pde import snowball_pde_solver as mod
+        # every banded solve of the core march (value and statistics groups)
+        from quantark.asset.equity.engine.pde.core import backends as mod
 
         engine, product, env = _case("SnowballPDESolver")
 

@@ -15,7 +15,6 @@ from quantark.asset.equity.engine.pde.grid import EventSchedule, project_between
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close
 
-from ..backends import FactorizationCache
 from ..components import validate_readout
 from ..groups import VALUE, Backend, ColumnGroup
 from ..prepare import Operation, TerminalOutcome
@@ -26,6 +25,8 @@ __all__ = ["SnowballAdapter", "LocalVolAdapterMixin", "LocalVolSnowballAdapter"]
 
 class SnowballAdapter(FamilyAdapter):
 
+    supports_statistics_group = True
+
     # --- prepare ------------------------------------------------------------------
 
     def validate(self, product, env, request, lifecycle_state) -> None:
@@ -34,6 +35,8 @@ class SnowballAdapter(FamilyAdapter):
         # is a pure function of the product, so a clear only costs a rebuild.
         solver = self.solver
         solver._product_token_memo.clear()
+        if request.operation is Operation.EVENT_STATS:
+            return   # the facade checked the type and the environment; the product after tau
         solver._check_product_type(product)
         if env is None:
             raise ValidationError(
@@ -55,7 +58,14 @@ class SnowballAdapter(FamilyAdapter):
             if any(t <= 0.0 or t >= tau for t in request.extra_times):
                 raise ValidationError(f"extra_times must lie strictly inside (0, {tau})")
             return None
-        if op is Operation.SESSION_OUTPUTS and not request.price:
+        if op is Operation.EVENT_STATS:
+            # the statistics sweep's preamble: no statistics once expired, then the
+            # PDE compatibility check; no knock-out short-circuit (the sweep marched)
+            if tau <= 0:
+                return TerminalOutcome("expired", None)
+            solver._validate_product(product)
+            return None
+        if op is Operation.SESSION_OUTPUTS and not request.short_circuit:
             # the spot curve's surface: the solve alone, no valuation-date short-circuit
             return None
         if tau <= 0:
@@ -96,17 +106,6 @@ class SnowballAdapter(FamilyAdapter):
         schedule = self._event_schedule(product, env, layout)
         self.solver._prepare_continuous_ki_correction(product, env, layout.time.t)
         return schedule
-
-    def factorizations(self, session) -> FactorizationCache:
-        # The value march fills the solver's own stores, which it clears first, as
-        # the legacy two-surface march did: the statistics sweep reads them after it
-        # (a bridge until the statistics group marches on the core, Task 9).
-        solver = self.solver
-        return FactorizationCache.sharing(
-            solver._factorizations,
-            lu_seed=None if session is None else session.lu_pack,
-            banded_seed=None if session is None else session.banded_pack,
-        )
 
     def groups(self, product, layout, request) -> tuple:
         return self.value_groups(product, layout)
@@ -341,15 +340,36 @@ class SnowballAdapter(FamilyAdapter):
         pre = result.captures.get("t0_pre_event")
         return (None if pre is None else pre[sel]), None
 
-    def read(self, prepared, result):
-        solver, layout = self.solver, prepared.layout
-        spot = prepared.env.spot
-        readout = prepared.readout
+    def _columns(self, prepared, result):
+        """(solution_vec, readout_vec, readout_override) of the surface selected at valuation."""
         sel = 1 if prepared.solve_state["knocked_in"] else 0
         solution_vec = result.states[self._value_surface(sel)][:, 0]
         readout_vec, readout_override = self._t0_readout(prepared, result, sel)
+        return solution_vec, readout_vec, readout_override
+
+    @staticmethod
+    def _price(prepared, columns) -> float:
+        # price from the pointwise-exact readout (the priority _price_with_solution used)
+        solution_vec, readout_vec, readout_override = columns
         column = readout_vec if readout_vec is not None else solution_vec
+        readout = prepared.readout
+        if readout_override is not None:
+            price = float(readout_override)
+        else:
+            price = readout.price(column, prepared.env.spot, prepared.layout)
+        validate_readout(price, readout)
+        return price
+
+    def read(self, prepared, result):
         op = prepared.request.operation
+        if op is Operation.EVENT_STATS:
+            return self._read_statistics(prepared, result)
+        solver, layout = self.solver, prepared.layout
+        spot = prepared.env.spot
+        readout = prepared.readout
+        columns = self._columns(prepared, result)
+        solution_vec, readout_vec, readout_override = columns
+        column = readout_vec if readout_vec is not None else solution_vec
 
         if op is Operation.LIFE_SURFACE:
             from quantark.asset.equity.engine.pde.base_pde_solver import LifeSurfaceSolution
@@ -369,12 +389,7 @@ class SnowballAdapter(FamilyAdapter):
                 fill_scaled=bool(layout.time.fill_scaled),
             )
 
-        # price from the pointwise-exact readout (the priority _price_with_solution used)
-        if readout_override is not None:
-            price = float(readout_override)
-        else:
-            price = readout.price(column, spot, layout)
-        validate_readout(price, readout)
+        price = self._price(prepared, columns)
         if op is Operation.GREEKS:
             # delta/gamma from the smooth 0+ branch column (a cash transition at the
             # known spot is a constant shift with zero delta/gamma)
@@ -388,8 +403,31 @@ class SnowballAdapter(FamilyAdapter):
                 solution_vec=solution_vec, x_vec=layout.spatial.x, s_vec=layout.spatial.s,
                 spot_log=np.log(spot), readout_vec=readout_vec, readout_override=readout_override,
             )
-            return self._session_outputs(price, solution)
+            stats = None if prepared.statistics is None else prepared.statistics.read(
+                result.states, result.captures, price)
+            return self._session_outputs(price, solution, stats)
         return price
+
+    def _read_statistics(self, prepared, result):
+        # the statistics sweep's pv: the caller's, else the value group's readout,
+        # else (a product knocked out at valuation marches no value group) price()'s
+        # immediate knock-out payoff
+        if prepared.statistics is None:
+            return None
+        request = prepared.request
+        if request.external_pv is not None:
+            pv = request.external_pv
+        elif request.price:
+            pv = self._price(prepared, self._columns(prepared, result))
+        else:   # the facade marches no value group for a product knocked out at valuation
+            pv = self.solver._get_immediate_ko_payoff(prepared.product, prepared.env)
+        return prepared.statistics.read(result.states, result.captures, pv)
+
+    @staticmethod
+    def _session_outputs(npv, solution, event_stats=None):
+        from quantark.asset.equity.engine.pde.base_pde_solver import PDESessionOutputs
+        return PDESessionOutputs(npv=float(npv), solution=solution, event_stats=event_stats,
+                                 event_distribution=None)
 
 
 class LocalVolAdapterMixin:

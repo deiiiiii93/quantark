@@ -11,6 +11,7 @@ import numpy as np
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
 from quantark.asset.equity.engine.pde.core.components import CentralDifference, nodal_stencil
+from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
 from quantark.asset.equity.engine.pde.core.samples import (
     _validated_local_vol_row,
     sample_local_vol,
@@ -562,13 +563,10 @@ class _Heston2DSnowballPDEBase(Heston2DBarrierCrossingMixin, SnowballPDESolver):
         if pricing_env is None:
             return None
         pde_pv = float(npv) if npv is not None else float(self.price(product, pricing_env))
-        return SnowballPDESolver.calculate_event_stats(
-            self,
-            product,
-            pricing_env,
-            npv=pde_pv,
-            streams=streams,
-        )
+        # the 1D statistics group at the strike-implied vol, pv from the 2D solve (§8)
+        return self._run(product, pricing_env, OutputRequest(
+            Operation.EVENT_STATS, price=False, event_stats=True,
+            external_pv=pde_pv, streams=streams))
 
     def _session_outputs(
         self,

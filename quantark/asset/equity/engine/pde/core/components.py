@@ -481,9 +481,11 @@ def validate_coefficients(sc, n_steps, num_x, component) -> None:
         _fail(component, "zero_diffusion_sets must be a subset of range(n_unique)")
 
 
-def validate_advanced(out, group, n_int, component) -> None:
+def validate_advanced(out, group, n_int, component, n_cols=None) -> None:
+    """``n_cols``: the columns the group handed the stepper (a rolling group's state widths)."""
     out = np.asarray(out)
-    n_cols = 1 if group.one_dimensional_rhs else len(group.surfaces)
+    if n_cols is None:
+        n_cols = 1 if group.one_dimensional_rhs else len(group.surfaces)
     if out.shape != (n_int, n_cols):
         _fail(component, f"advanced columns have shape {out.shape}, expected ({n_int}, {n_cols})")
     if not np.all(np.isfinite(out)):

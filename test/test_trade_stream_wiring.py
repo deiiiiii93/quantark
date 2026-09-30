@@ -82,14 +82,17 @@ def _position(engine, leg):
 
 
 def _spy_streams(engine):
+    # the streams the statistics group is prepared with (spec 2 §5.4: the
+    # indicator columns march in the value march's request)
     seen = {}
-    original = engine._compute_event_stats
+    original = engine._run
 
-    def wrapper(product, pricing_env, *, npv=None, streams=None):
-        seen["streams"] = streams
-        return original(product, pricing_env, npv=npv, streams=streams)
+    def wrapper(product, pricing_env, request, **kwargs):
+        if request.event_stats:
+            seen["streams"] = request.streams
+        return original(product, pricing_env, request, **kwargs)
 
-    engine._compute_event_stats = wrapper
+    engine._run = wrapper
     return seen
 
 

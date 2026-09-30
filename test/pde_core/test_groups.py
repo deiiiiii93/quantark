@@ -104,3 +104,21 @@ def test_phoenix_expiry_coupons_add_the_termination_surfaces():
     p = prepare(PhoenixPDESolver(PDEParams()), make_phoenix(dict(PHOENIX, memory_coupon=False, coupon_pay_type="expiry")),
                 env_flat(), OutputRequest(Operation.PRICE))
     assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == _phoenix_groups(0, True)
+
+
+# --- the statistics group (Task 9) ------------------------------------------------------
+from quantark.asset.equity.engine.pde.core.groups import STATISTICS_LEGACY
+
+
+def test_statistics_group_is_one_banded_group_of_both_surfaces():
+    p = prepare(SnowballPDESolver(PDEParams()), snowball("discrete"), env_flat(),
+                OutputRequest(Operation.PRICE_WITH_EVENTS, event_stats=True))
+    names = [(g.name, g.surfaces, g.backend, g.policy, g.rolling) for g in p.groups]
+    assert names == [("value", ("alive", "ki"), Backend.BANDED, VALUE, False),
+                     ("stats", ("stats_v0", "stats_v1"), Backend.BANDED, STATISTICS_LEGACY, True)]
+
+
+def test_statistics_only_request_has_no_value_group():
+    p = prepare(SnowballPDESolver(PDEParams()), snowball("discrete"), env_flat(),
+                OutputRequest(Operation.EVENT_STATS, price=False, event_stats=True, external_pv=1.0))
+    assert [g.name for g in p.groups] == ["stats"]

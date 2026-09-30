@@ -9,7 +9,7 @@ as is, and composes a composite problem from its parts.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Callable, Mapping, Optional
 
@@ -20,6 +20,7 @@ from quantark.asset.equity.engine.pde.grid import resolve_bound_layout
 from .backends import FactorizationCache
 from .components import StandardReadout, validate_schedule
 from .identity import market_fingerprints
+from .statistics import StatisticsLegacy
 
 __all__ = ["Operation", "OutputRequest", "TerminalOutcome", "SessionArtefacts", "PreparedProblem",
            "CompositeProblem", "prepare", "run", "market_scope"]
@@ -45,6 +46,8 @@ class OutputRequest:
     life_surface: bool = False
     extra_times: tuple = ()
     external_pv: Optional[float] = None
+    #: False: no valuation-date short-circuit (a spot curve reads the solved surface itself)
+    short_circuit: bool = True
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,7 @@ class PreparedProblem:
     events: Any = ()                  # what the adapter's prepare_events built (the snowball event table)
     identity: Optional[Mapping[str, Optional[str]]] = None
     market_fps: Optional[Mapping[str, Optional[str]]] = None
+    statistics: Any = None            # the statistics group's columns, events and readout (§5.4)
 
     @classmethod
     def terminal_only(cls, solver, adapter, product, env, request, lifecycle_state, tau, terminal):
@@ -175,22 +179,28 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
             layout = resolve_bound_layout(solver.grid_binder, frozen, grid_request, market)
         solver._active_layout = layout    # read by helpers, the intraday route (until Task 11) and tests
         adapter.observation_maps(product, env, layout, tau)               # step 6
-        events = adapter.prepare_events(product, env, layout, tau, request)   # step 7
+        # step 7: the value surfaces' events (a statistics-only request marches none)
+        events = adapter.prepare_events(product, env, layout, tau, request) if request.price else None
         samples = _lazy(lambda: adapter.samples(product, env, layout, tau))   # step 8
         coefficients = adapter.coefficients(product, env, layout, tau, samples, session)
         stepper = adapter.stepper(solver.params)                          # step 9
         schedule = stepper.schedule(layout)
         validate_schedule(schedule, layout, stepper)
-        groups = adapter.groups(product, layout, request)                 # step 10
+        groups = adapter.groups(product, layout, request) if request.price else ()   # step 10
         factorizations = adapter.factorizations(session)                  # step 11
         identity = {"layout": layout.fingerprint,                         # step 12 (problem id: Task 11)
                     "coefficient_key": adapter.coefficient_key(product, env, layout, fps)}
-    return PreparedProblem(solver=solver, adapter=adapter, product=product, env=env, request=request,
-                           lifecycle_state=lifecycle_state, tau=tau, terminal=None, solve_state=solve_state,
-                           market=market, grid_request=grid_request, layout=layout, samples=samples,
-                           coefficients=coefficients, stepper=stepper, theta_schedule=schedule,
-                           groups=groups, factorizations=factorizations, readout=StandardReadout(),
-                           events=events, identity=identity, market_fps=fps)
+        problem = PreparedProblem(solver=solver, adapter=adapter, product=product, env=env, request=request,
+                                  lifecycle_state=lifecycle_state, tau=tau, terminal=None,
+                                  solve_state=solve_state, market=market, grid_request=grid_request,
+                                  layout=layout, samples=samples, coefficients=coefficients, stepper=stepper,
+                                  theta_schedule=schedule, groups=groups, factorizations=factorizations,
+                                  readout=StandardReadout(), events=events, identity=identity, market_fps=fps)
+        if request.event_stats and adapter.supports_statistics_group:     # the statistics group (§5.4)
+            statistics = StatisticsLegacy.create(problem, request.streams)
+            if statistics is not None:
+                problem = replace(problem, statistics=statistics, groups=groups + (statistics.group,))
+    return problem
 
 
 def run(problem):

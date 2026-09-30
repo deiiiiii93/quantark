@@ -19,6 +19,9 @@ __all__ = ["KOResetAdapter"]
 
 class KOResetAdapter(SnowballAdapter):
 
+    #: KO-reset's event statistics are the QUAD engine's (calculate_event_stats), not a PDE group.
+    supports_statistics_group = False
+
     def solve_state(self, product, env, request):
         # A contract past its first schedule and not knocked in has matured (rule 2 of
         # KnockOutResetSnowballOption). The knock-in that keeps it alive is one carried from an
