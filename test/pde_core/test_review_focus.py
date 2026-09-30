@@ -108,3 +108,37 @@ def test_statistics_on_a_reused_solver_ignore_an_earlier_market():
     stale = s.calculate_event_stats(p, _flat(vol=0.25))
     fresh = SnowballPDESolver(PDEParams()).calculate_event_stats(p, _flat(vol=0.25))
     assert list(stale.ko_probability) == list(fresh.ko_probability)
+
+
+# --- Review Focus 4 (Task 10) ----------------------------------------------------
+def test_session_runs_two_products_with_shared_geometry_and_different_coupons(monkeypatch):
+    from quantark.execution import PricingRequest, PricingSession
+    from quantark.execution.cache.artifacts import PreparedArtifactCache
+
+    env = env_flat()
+    a = make_snowball(dict(SB, ko_rate=0.15, rebate_rate=0.15))
+    b = make_snowball(dict(SB, ko_rate=0.30, rebate_rate=0.30))
+    engine = SnowballPDESolver(PDEParams())
+    served = []                                    # (artefact kind, built by this call?)
+    original = PreparedArtifactCache.get_or_build
+
+    def spy(self, descriptor, builder, size_bytes, measure=None):
+        ran = []
+
+        def recording():
+            ran.append(True)
+            return builder()
+
+        handle = original(self, descriptor, recording, size_bytes, measure)
+        served.append((descriptor.kind, bool(ran)))
+        return handle
+
+    monkeypatch.setattr(PreparedArtifactCache, "get_or_build", spy)
+    with PricingSession() as session:
+        va = session.execute(engine, PricingRequest(product=a, pricing_env=env)).value
+        served_a = len(served)
+        vb = session.execute(engine, PricingRequest(product=b, pricing_env=env)).value
+    assert va == SnowballPDESolver(PDEParams()).price(a, env)
+    assert vb == SnowballPDESolver(PDEParams()).price(b, env)
+    assert va != vb   # measured §14: 97.741… vs 100.566…
+    assert ("pde-grid", False) in served[served_a:]   # b reused a's layout

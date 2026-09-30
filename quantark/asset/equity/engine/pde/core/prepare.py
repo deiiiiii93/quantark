@@ -23,7 +23,8 @@ from .identity import market_fingerprints
 from .statistics import StatisticsLegacy
 
 __all__ = ["Operation", "OutputRequest", "TerminalOutcome", "SessionArtefacts", "PreparedProblem",
-           "CompositeProblem", "prepare", "run", "market_scope"]
+           "CompositeProblem", "prepare", "run", "market_scope", "request_geometry", "bind_layout",
+           "session_step_sets"]
 
 
 class Operation(Enum):
@@ -59,27 +60,17 @@ class TerminalOutcome:
 
 @dataclass(frozen=True, eq=False)
 class SessionArtefacts:
-    """What a prepared execution session injected into its engine clone.
+    """What a prepared execution session built for its engine clone (spec 2 §5.10).
 
-    A bridge over the solver's four ``_session_*`` attributes, removed in Task 10.
-    ``grids`` is the injected 5-tuple: the layout is assembled around it once the
-    grid request is known (``BasePDESolver._layout_from_session_grids``).
+    ``layout`` is the Layout ``bind_layout`` bound for the session's product;
+    ``coefficients`` the pre-flat-exact step sets (``session_step_sets``); the
+    packs the warmed factorizations (``march.warm_factorizations``), consulted
+    before the march's own cache.
     """
     layout: Any = None
     coefficients: Any = None
     lu_pack: Optional[Mapping] = None
     banded_pack: Optional[Mapping] = None
-    grids: Optional[tuple] = None
-
-    @classmethod
-    def from_solver(cls, solver, product=None, env=None) -> Optional["SessionArtefacts"]:
-        grids = getattr(solver, "_session_grids", None)
-        coefficients = getattr(solver, "_session_step_coefficients", None)
-        lu_pack = getattr(solver, "_session_matrix_pack", None)
-        banded_pack = getattr(solver, "_session_banded_pack", None)
-        if grids is None and coefficients is None and lu_pack is None and banded_pack is None:
-            return None
-        return cls(coefficients=coefficients, lu_pack=lu_pack, banded_pack=banded_pack, grids=grids)
 
 
 @dataclass(frozen=True, eq=False)
@@ -152,6 +143,92 @@ def market_scope(solver, env, fps):
         solver._market_fp = outer
 
 
+def _geometry(adapter, solver, product, env, request, tau):
+    """Steps 2-4 inside the market scope: (solve state, market snapshot, grid request)."""
+    solve_state = adapter.solve_state(product, env, request)              # step 2
+    adapter.market_checks(product, env, tau)                              # _solve's guard, before the grid
+    market = solver.market_snapshot(product, env)                         # step 3
+    grid_request = adapter.grid_request(product, market, tau, request)    # step 4
+    return solve_state, market, grid_request
+
+
+def _session_layout(solver, stored, grid_request):
+    """The session's layout for ``grid_request`` (step 5).
+
+    The stored layout itself when it was bound for this request. Otherwise (a
+    knock-in's knock-out leg) the request's time layout around the stored spatial
+    grid, verified node for node: a stale artefact raises instead of silently
+    changing the discretization.
+    """
+    if stored.request == grid_request:
+        return stored
+    from quantark.asset.equity.engine.pde.grid import Layout
+    from quantark.asset.equity.engine.pde.grid.space import SpatialLayout
+    from quantark.asset.equity.engine.pde.grid.time import build_time
+    from quantark.util.exceptions import PricingError
+
+    config = solver.grid_binder.config
+    time_layout = build_time(grid_request, config)
+    if not np.array_equal(time_layout.t, stored.time.t):
+        raise PricingError(
+            "injected session grids diverge from the declarative layer "
+            "time geometry; re-prepare the session"
+        )
+    s_vec = stored.spatial.s
+    spatial = SpatialLayout(
+        s=s_vec,
+        x=stored.spatial.x,
+        dx=stored.spatial.dx,
+        bounds=(float(s_vec[0]), float(s_vec[-1])),
+        achieved_eps=float("nan"),
+        active_critical_prices=tuple(
+            float(p)
+            for p in grid_request.critical_prices
+            if float(s_vec[0]) < float(p) < float(s_vec[-1])
+        ),
+        ignored_critical_prices=(),
+    )
+    return Layout(spatial=spatial, time=time_layout, request=grid_request, config_key=config.key)
+
+
+def request_geometry(solver, product, env, request):
+    """``prepare`` steps 0-4 for the product itself: (grid request, market snapshot),
+    or ``None`` when the request has a terminal outcome.
+
+    No composite: a knock-in binds its own request, whose layout its knock-out
+    leg then reuses (frozen) or is assembled around (session), as before.
+    """
+    adapter = solver.adapter
+    adapter.validate(product, env, request, None)
+    if adapter.terminal_outcome(product, env, request, None) is not None:
+        return None
+    tau = float(product.get_maturity(env))
+    adapter.check_route(solver.params)
+    with market_scope(solver, env, market_fingerprints(env)):
+        _, market, grid_request = _geometry(adapter, solver, product, env, request, tau)
+    return grid_request, market
+
+
+def bind_layout(solver, product, env, request, *, frozen=None):
+    """``prepare`` steps 0-5: the Layout a march of ``request`` binds, or ``None``
+    when the request is terminal (spec 2 §5.10). Bump contexts freeze it; sessions
+    store it."""
+    geometry = request_geometry(solver, product, env, request)
+    if geometry is None:
+        return None
+    grid_request, market = geometry
+    return resolve_bound_layout(solver.grid_binder, frozen, grid_request, market)
+
+
+def session_step_sets(solver, product, env, layout):
+    """The pre-flat-exact step sets ``prepare`` builds on ``layout`` (the session's
+    step-coefficient artefact): the adapter's ``step_sets`` in the solve's scopes."""
+    adapter = solver.adapter
+    tau = float(product.get_maturity(env))
+    with market_scope(solver, env, market_fingerprints(env)), adapter.scope(product, env):
+        return adapter.step_sets(product, env, layout, tau)
+
+
 def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None, session=None):
     """The one preparation path (spec 2 §5.2). explain() is this function without the march."""
     adapter = solver.adapter
@@ -167,14 +244,9 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
     adapter.check_route(solver.params)                                    # step 1
     fps = market_fingerprints(env)                                        # decision 14: once per prepare
     with market_scope(solver, env, fps), adapter.scope(product, env):
-        solve_state = adapter.solve_state(product, env, request)          # step 2
-        adapter.market_checks(product, env, tau)                          # _solve's guard, before the grid
-        market = solver.market_snapshot(product, env)                     # step 3
-        grid_request = adapter.grid_request(product, market, tau, request)    # step 4
+        solve_state, market, grid_request = _geometry(adapter, solver, product, env, request, tau)
         if session is not None and session.layout is not None:           # step 5
-            layout = session.layout
-        elif session is not None and session.grids is not None:
-            layout = solver._layout_from_session_grids(grid_request)
+            layout = _session_layout(solver, session.layout, grid_request)
         else:
             layout = resolve_bound_layout(solver.grid_binder, frozen, grid_request, market)
         solver._active_layout = layout    # read by helpers, the intraday route (until Task 11) and tests

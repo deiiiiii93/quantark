@@ -63,6 +63,9 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         self._has_pre_terminal_ko: bool = False
         self._has_post_terminal_ko: bool = False
 
+    def _constructor_kwargs(self) -> dict:
+        return {"params": self.params}   # no enable_profiling argument
+
     # price() / calculate_greeks() are SnowballPDESolver's; KOResetAdapter marches them.
 
     def calculate_event_stats(

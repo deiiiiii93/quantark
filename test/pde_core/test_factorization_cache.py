@@ -1,10 +1,8 @@
 """Factorization-cache keys: θ exact, dt rounded as today (spec 2 decision 6, §5.7)."""
 import numpy as np
 
-from quantark.asset.equity.engine.pde import EuropeanPDESolver, SnowballPDESolver
 from quantark.asset.equity.engine.pde.core.backends import FactorizationCache
 from quantark.asset.equity.engine.pde.core.groups import Backend
-from quantark.asset.equity.param import PDEParams
 
 
 def _lcu(n=8):
@@ -12,35 +10,40 @@ def _lcu(n=8):
     return l, c, u
 
 
+def _lu(fc, l, c, u, dt, theta):
+    from quantark.asset.equity.engine.pde.core.backends import operator_matrix, sparse_lu_factor
+    A = operator_matrix(l, c, u, len(l))
+    return fc.get(Backend.SPARSE_LU, 0, dt, theta, lambda: sparse_lu_factor(A, dt, theta))
+
+
+def _banded(fc, l, c, u, dt, theta):
+    from quantark.asset.equity.engine.pde.core.backends import banded_factor
+    return fc.get(Backend.BANDED, 0, dt, theta, lambda: banded_factor(l, c, u, dt, theta))
+
+
 def test_two_thetas_agreeing_to_six_decimals_get_two_lu_factorizations():
-    import scipy.sparse as sp
-    s = EuropeanPDESolver(PDEParams())
+    fc = FactorizationCache()
     l, c, u = _lcu()
-    A = s._build_operator_matrix(l, c, u, 8)
-    I = sp.eye(6, format="csc")
-    s._matrix_cache.clear()
-    s._get_matrices(I, A, 0.01, 0.5, coeff_key=0)
-    s._get_matrices(I, A, 0.01, 0.5000001, coeff_key=0)
-    assert len(s._matrix_cache) == 2
+    _lu(fc, l, c, u, 0.01, 0.5)
+    _lu(fc, l, c, u, 0.01, 0.5000001)
+    assert len(fc.store(Backend.SPARSE_LU)) == 2
 
 
 def test_two_thetas_agreeing_to_twelve_decimals_get_two_banded_systems():
-    s = SnowballPDESolver(PDEParams())
+    fc = FactorizationCache()
     l, c, u = _lcu()
-    s._banded_cache.clear()
-    s._get_banded_system(l, c, u, 0.01, 0.5, coeff_key=0)
-    s._get_banded_system(l, c, u, 0.01, 0.5 + 1e-13, coeff_key=0)
-    assert len(s._banded_cache) == 2
+    _banded(fc, l, c, u, 0.01, 0.5)
+    _banded(fc, l, c, u, 0.01, 0.5 + 1e-13)
+    assert len(fc.store(Backend.BANDED)) == 2
 
 
 def test_dt_values_within_an_ulp_share_one_factorization():
-    s = SnowballPDESolver(PDEParams())
+    fc = FactorizationCache()
     l, c, u = _lcu()
     dt = np.float64(1.0 / 12.0)
-    s._banded_cache.clear()
-    s._get_banded_system(l, c, u, dt, 0.5)
-    s._get_banded_system(l, c, u, np.nextafter(dt, 1.0), 0.5)
-    assert len(s._banded_cache) == 1
+    _banded(fc, l, c, u, dt, 0.5)
+    _banded(fc, l, c, u, np.nextafter(dt, 1.0), 0.5)
+    assert len(fc.store(Backend.BANDED)) == 1
 
 
 # --- the core's FactorizationCache (spec 2 §5.7) ------------------------------

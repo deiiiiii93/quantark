@@ -78,7 +78,9 @@ def validate_stepdown_pricing():
     
     # Check grid quality implicitly by inspecting the object
     # (Accessing protected members for validation report)
-    x_vec, s_vec, _, _, _ = pde_solver._build_grids(product, env, S, 0.20, 1.0, 0.03, 0.0)
+    from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, bind_layout
+
+    s_vec = bind_layout(pde_solver, product, env, OutputRequest(Operation.PRICE)).spatial.s
     barrier_min = min(product.barrier_config.ko_barrier)
     barrier_max = max(product.barrier_config.ko_barrier)
     points_in_barrier = len(s_vec[(s_vec >= barrier_min) & (s_vec <= barrier_max)])

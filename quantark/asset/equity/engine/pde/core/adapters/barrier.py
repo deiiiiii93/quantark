@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from quantark.util.exceptions import PricingError
 
-from ..prepare import CompositeProblem, Operation, SessionArtefacts, TerminalOutcome, prepare
+from ..prepare import CompositeProblem, Operation, TerminalOutcome, prepare
 from .base import FamilyAdapter
 
 __all__ = ["BarrierAdapter", "DoubleBarrierAdapter", "OneTouchAdapter", "DoubleOneTouchAdapter"]
@@ -101,7 +101,7 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         if knock_out:
             ko = self._knock_out_product(product)
             parts.append(prepare(solver, ko, env, request, frozen=solver._frozen_base_layout,
-                                 session=SessionArtefacts.from_solver(solver, ko, env)))
+                                 session=solver._session_artefacts))
         pr = self._participation(product)
         greeks = request.operation is Operation.GREEKS
         if greeks:
@@ -194,7 +194,7 @@ class BarrierAdapter(_KnockInAdapter):
         return {"price": self._rebate_at_valuation(product, env), "delta": 0.0, "gamma": 0.0}
 
     def observation_maps(self, product, env, layout, tau) -> None:
-        # The deleted _build_grids override: discrete-monitoring indices on the bound layout
+        # Discrete-monitoring indices on the bound layout (the 0.6.0 grid-build override)
         self.solver._setup_observation_indices(
             product,
             env,

@@ -1,9 +1,10 @@
 """Execution-framework adapters for the equity PDE solvers (spec Phase 4).
 
 Prepared-clone pattern (the reviewed Phase 1/3 contract): ``prepare`` clones
-the target engine and injects session artifacts (grids, step coefficients,
-factorization packs — built through ``pde_session_prep`` behind
-``PreparedArtifactCache`` descriptors), so the LIVE engine is never mutated
+the target engine and injects session artifacts (the bound Layout, step
+coefficients, warmed factorizations — built through ``pde_session_prep``
+behind ``PreparedArtifactCache`` descriptors, as ``_session_artefacts``), so
+the LIVE engine is never mutated
 and concurrent dispatches cannot mix market state. Every registration is
 ``exact=True``: an unknown subclass overriding ``price()`` falls to the
 legacy adapter instead of being silently driven through the clone.
@@ -11,8 +12,9 @@ legacy adapter instead of being silently driven through the clone.
 Rich outputs (spec sections 8/9.3): a PRICE request for
 ``{PV, EVENT_STATS, GRID}`` runs ONE value solve through the engines'
 ``_session_outputs`` seam — the same implementation behind
-``price_with_events`` — plus the engines' designed event-indicator sweep;
-the session never adds backward marches over the direct path. When outputs
+``price_with_events``; the event indicators march as its statistics group
+(KO-reset: its QUAD statistics). The session never adds backward marches
+over the direct path. When outputs
 beyond ``{PV}`` are requested the outcome ``value`` is a
 ``PDESessionValue`` (there is no legacy value shape to preserve there — the
 legacy adapter rejected such requests). A GRID request that short-circuits
@@ -24,6 +26,8 @@ constructed with default profiling.
 """
 from dataclasses import dataclass
 
+from quantark.asset.equity.engine.pde.core.groups import Backend
+from quantark.asset.equity.engine.pde.core.prepare import SessionArtefacts
 from quantark.asset.equity.engine.pde.pde_session_prep import (
     factorization_state,
     grid_state,
@@ -211,31 +215,29 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
         fps.append(state.fingerprint)
 
     def _prepare_artifacts(
-        self, clone, product, env, context, handles, descriptors, fps
+        self, clone, product, env, context, handles, descriptors, fps,
+        lv_surface_fp=None,
     ) -> None:
-        # Grid-key evaluation needs the same pre-grid state a direct solve
-        # sets (KI regime, valuation flags) — the shared _solve preamble.
-        clone._prepare_solve_state(product, env)
-        curves_fp = try_fingerprint((env.rate_curve, env.div_yield, env.vol_surface))
+        # The one preparation path (spec 2 §5.10): the Layout, the step sets on
+        # it, the march's warmed factorizations; injected as _session_artefacts.
         grid = grid_state(clone, product, env, context)
         self._track(grid, handles, descriptors, fps)
-        clone._session_grids = grid.value
+        if grid.value is None:
+            return   # a terminal outcome at valuation: nothing is marched
         coeff = step_coefficients_state(
-            clone, product, env, grid.value, grid.fingerprint, curves_fp, context
+            clone, product, env, grid.value, context, lv_surface_fp=lv_surface_fp
         )
         self._track(coeff, handles, descriptors, fps)
-        # Inject coefficients BEFORE the factorization build (plan-gate
-        # ordering finding): _session_factorization_packs consumes them via
-        # _step_coefficients_for_solve.
-        clone._session_step_coefficients = coeff.value
         fact = factorization_state(
-            clone, product, env, grid.value, coeff.fingerprint, context
+            clone, product, env, grid.value, coeff.value, coeff.fingerprint, context
         )
         self._track(fact, handles, descriptors, fps)
-        matrix_pack, banded_pack = fact.value
-        clone._session_matrix_pack = matrix_pack
-        if hasattr(clone, "_session_banded_pack"):
-            clone._session_banded_pack = banded_pack
+        clone._session_artefacts = SessionArtefacts(
+            layout=grid.value,
+            coefficients=coeff.value,
+            lu_pack=fact.value.get(Backend.SPARSE_LU),
+            banded_pack=fact.value.get(Backend.BANDED),
+        )
 
     # -- execution -----------------------------------------------------------
     def execute_native(self, engine, request, normalized, context, prepared=None):
@@ -405,33 +407,13 @@ class EquityLVAutocallableSessionAdapter(EquityLVPDESessionAdapter):
         self, clone, product, env, context, surface, surface_fp,
         handles, descriptors, fps,
     ) -> None:
-        clone._prepare_solve_state(product, env)
-        grid = grid_state(clone, product, env, context)
-        self._track(grid, handles, descriptors, fps)
-        # The LV coefficient/factorization builders need the surface context
-        # active through BOTH builds (plan-gate ordering finding: cold-cache
-        # preparation raises PricingError otherwise), and the surface
-        # fingerprint takes the market-identity slot in the coefficient key.
-        clone._active_lv_surface = surface
-        clone._active_s_vec = grid.value[1]
-        try:
-            coeff = step_coefficients_state(
-                clone, product, env, grid.value, grid.fingerprint,
-                surface_fp, context,
-            )
-            self._track(coeff, handles, descriptors, fps)
-            clone._session_grids = grid.value
-            clone._session_step_coefficients = coeff.value
-            fact = factorization_state(
-                clone, product, env, grid.value, coeff.fingerprint, context
-            )
-            self._track(fact, handles, descriptors, fps)
-            matrix_pack, banded_pack = fact.value
-            clone._session_matrix_pack = matrix_pack
-            clone._session_banded_pack = banded_pack
-        finally:
-            clone._active_lv_surface = None  # _with_surface re-arms at execute
-            clone._active_s_vec = None
+        # The clone holds the session's Dupire surface as its prebuilt one, so
+        # the adapter's surface scope serves every build below; the surface
+        # fingerprint takes the local-vol slot of the coefficient key.
+        self._prepare_artifacts(
+            clone, product, env, context, handles, descriptors, fps,
+            lv_surface_fp=surface_fp,
+        )
 
 
 class Heston2DAutocallableSessionAdapter(_EquityPDESessionBase):

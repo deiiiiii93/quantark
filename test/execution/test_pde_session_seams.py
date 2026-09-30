@@ -104,52 +104,57 @@ class TestSessionOutputs:
 
 
 class TestInjectionSeams:
-    @staticmethod
-    def _artifacts(clone, product, env):
-        spot = env.spot
-        tau = product.get_maturity(env)
-        strike = getattr(product, "strike", spot)
-        r, q = env.get_rate(tau), env.get_div_yield(tau)
-        sigma = env.get_vol(strike, tau)
-        grids = clone._build_grids(product, env, spot, sigma, tau, r, q)
-        coeffs = clone._build_step_coefficients(
-            env, strike, grids[3], grids[2], len(grids[0])
-        )
-        matrix_pack, banded_pack = clone._session_factorization_packs(
-            product, env, grids
-        )
-        return grids, coeffs, matrix_pack, banded_pack
+    """The session artefacts (spec 2 §5.10): the bound Layout, the pre-flat-exact
+    step sets, the warmed factorizations -- injected as ``_session_artefacts``."""
 
-    def _inject(self, clone, grids, coeffs, matrix_pack, banded_pack):
-        clone._session_grids = grids
-        clone._session_step_coefficients = coeffs
-        clone._session_matrix_pack = matrix_pack
-        if hasattr(clone, "_session_banded_pack"):
-            clone._session_banded_pack = banded_pack
+    @staticmethod
+    def _artifacts(clone, product, env, max_entries=None):
+        from quantark.asset.equity.engine.pde.core.groups import Backend
+        from quantark.asset.equity.engine.pde.core.march import warm_factorizations
+        from quantark.asset.equity.engine.pde.core.prepare import (
+            Operation, OutputRequest, SessionArtefacts, bind_layout, prepare, session_step_sets,
+        )
+
+        layout = bind_layout(clone, product, env, OutputRequest(Operation.PRICE))
+        coeffs = session_step_sets(clone, product, env, layout)
+        prepared = prepare(clone, product, env, OutputRequest(Operation.PRICE),
+                           session=SessionArtefacts(layout=layout, coefficients=coeffs))
+        packs = warm_factorizations(prepared, max_entries=max_entries)
+        return SessionArtefacts(layout=layout, coefficients=coeffs,
+                                lu_pack=packs[Backend.SPARSE_LU], banded_pack=packs[Backend.BANDED])
+
+    @staticmethod
+    def _stores_after_price(clone, product, env):
+        """The prepared problem's own factorization stores after its march."""
+        from quantark.asset.equity.engine.pde.core.groups import Backend
+        from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare, run
+
+        prepared = prepare(clone, product, env, OutputRequest(Operation.PRICE),
+                           session=clone._session_artefacts)
+        run(prepared)
+        return {b: len(prepared.factorizations.store(b)) for b in Backend}
 
     def test_injected_artifacts_reproduce_snowball_bitwise(self):
         engine, product, env = _case("SnowballPDESolver")
         baseline = engine.price(product, env)
         clone = type(engine)(params=engine.params)
-        self._inject(clone, *self._artifacts(clone, product, env))
+        clone._session_artefacts = self._artifacts(clone, product, env)
         assert clone.price(product, env) == baseline
 
     def test_injected_artifacts_reproduce_european_bitwise(self):
         engine, product, env = _case("EuropeanPDESolver")
         baseline = engine.price(product, env)
         clone = type(engine)(params=engine.params)
-        self._inject(clone, *self._artifacts(clone, product, env))
+        clone._session_artefacts = self._artifacts(clone, product, env)
         assert clone.price(product, env) == baseline
 
     def test_pack_covers_every_step_key(self):
-        """Every (coeff_key, dt, theta) the march requests is prebuilt: the
-        per-solve lazy caches stay EMPTY when packs are injected."""
+        """Every (set, dt, theta) the march requests is prebuilt: the march's own
+        stores stay EMPTY when the warmed packs are injected."""
         engine, product, env = _case("SnowballPDESolver")
         clone = type(engine)(params=engine.params)
-        self._inject(clone, *self._artifacts(clone, product, env))
-        clone.price(product, env)
-        assert len(clone._matrix_cache) == 0
-        assert len(clone._banded_cache) == 0
+        clone._session_artefacts = self._artifacts(clone, product, env)
+        assert set(self._stores_after_price(clone, product, env).values()) == {0}
 
     def test_banded_pack_covers_two_surface_march(self):
         from quantark.asset.equity.engine.pde import SnowballPDESolver
@@ -162,7 +167,104 @@ class TestInjectionSeams:
         baseline = engine.price(product, env)
         clone = type(engine)(params=engine.params)
         artifacts = self._artifacts(clone, product, env)
-        assert artifacts[3], "banded pack expected for the two-surface family"
-        self._inject(clone, *artifacts)
+        assert artifacts.banded_pack, "banded pack expected for the two-surface family"
+        clone._session_artefacts = artifacts
         assert clone.price(product, env) == baseline
-        assert len(clone._banded_cache) == 0
+        assert set(self._stores_after_price(clone, product, env).values()) == {0}
+
+
+class TestSessionPreparation:
+    """pde-prep/v2 (Task 10): the grid artefact is the Layout execute binds."""
+
+    def test_builder_version(self):
+        from quantark.asset.equity.engine.pde import pde_session_prep
+
+        assert pde_session_prep._BUILDER_VERSION == "pde-prep/v2"
+
+    def test_factorization_fingerprint_moves_with_the_stepper(self):
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.param import PDEParams
+        from quantark.execution import PricingSession
+
+        from execution.matrix_fixtures import _snowball, _eq_flat_env
+        from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+            EquityPDEAutocallableSessionAdapter,
+        )
+        from quantark.execution import PricingRequest
+
+        product, env = _snowball(), _eq_flat_env()
+        fps = []
+        for params in (PDEParams(), PDEParams(theta=1.0)):
+            engine = SnowballPDESolver(params)
+            with PricingSession() as session:
+                state = EquityPDEAutocallableSessionAdapter().prepare(
+                    engine, PricingRequest(product=product, pricing_env=env), session.context)
+                kinds = {d.kind: d.fingerprint for d in state.descriptors}
+                for handle in state.handles:
+                    handle.close()
+            fps.append(kinds)
+        assert fps[0]["pde-grid"] == fps[1]["pde-grid"]
+        assert fps[0]["pde-factorization-pack"] != fps[1]["pde-factorization-pack"]
+
+    def test_stored_layout_is_the_one_execute_binds(self, monkeypatch):
+        from quantark.asset.equity.engine.pde import base_pde_solver
+        from quantark.execution import PricingRequest, PricingSession
+        from quantark.execution.cache.artifacts import PreparedArtifactCache
+
+        engine, product, env = _case("SnowballPDESolver")
+        stored, bound = {}, []
+        original_get = PreparedArtifactCache.get_or_build
+
+        def get_spy(self, descriptor, builder, size_bytes, measure=None):
+            handle = original_get(self, descriptor, builder, size_bytes, measure)
+            stored[descriptor.kind] = handle.value
+            return handle
+
+        original_prepare = base_pde_solver.prepare   # the solver's _run prepares through it
+
+        def prepare_spy(*args, **kwargs):
+            problem = original_prepare(*args, **kwargs)
+            bound.append(problem)
+            return problem
+
+        monkeypatch.setattr(PreparedArtifactCache, "get_or_build", get_spy)
+        with PricingSession() as session:
+            session.execute(engine, PricingRequest(product=product, pricing_env=env))
+            bound.clear()
+            monkeypatch.setattr(base_pde_solver, "prepare", prepare_spy)
+            session.execute(engine, PricingRequest(product=product, pricing_env=env))
+        executed = [p for p in bound if getattr(p, "layout", None) is not None]
+        assert executed and all(p.layout is stored["pde-grid"] for p in executed)
+
+    def test_phoenix_and_ko_reset_honour_injected_coefficients(self, monkeypatch):
+        from quantark.asset.equity.engine.pde import base_pde_solver
+        from quantark.asset.equity.engine.pde.core.components import CentralDifference
+        from quantark.asset.equity.engine.pde.pde_execution_adapters import _EquityPDESessionBase
+        from quantark.execution import PricingRequest, PricingSession
+
+        calls = {"n": 0, "executing": False}
+        original_assemble = CentralDifference.assemble_sets
+
+        def assemble_spy(self, *args, **kwargs):
+            if calls["executing"]:
+                calls["n"] += 1
+            return original_assemble(self, *args, **kwargs)
+
+        original_execute = _EquityPDESessionBase.execute_native
+
+        def execute_spy(self, *args, **kwargs):
+            base_pde_solver._ENV_STEP_COEFF_MEMO.clear()   # no memo can stand in for the injection
+            calls["executing"] = True
+            try:
+                return original_execute(self, *args, **kwargs)
+            finally:
+                calls["executing"] = False
+
+        monkeypatch.setattr(CentralDifference, "assemble_sets", assemble_spy)
+        monkeypatch.setattr(_EquityPDESessionBase, "execute_native", execute_spy)
+        for name in ("PhoenixPDESolver", "KOResetSnowballPDESolver"):
+            engine, product, env = _case(name)
+            with PricingSession() as session:
+                value = session.execute(engine, PricingRequest(product=product, pricing_env=env)).value
+            assert value == engine.price(product, env), name
+        assert calls["n"] == 0

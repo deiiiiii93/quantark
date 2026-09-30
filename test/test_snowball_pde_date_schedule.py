@@ -99,7 +99,11 @@ def test_the_grid_is_told_about_every_resolved_knock_out_time():
     eng = SnowballPDESolver(PDEParams(accuracy="fast"))
     env = _env()
     product = _snowball(True)
-    tau = eng._prepare_for_request(product, env)
+    from quantark.asset.equity.engine.pde.core.prepare import (
+        Operation, OutputRequest, request_geometry,
+    )
+    request_geometry(eng, product, env, OutputRequest(Operation.PRICE))   # the solve state first
+    tau = product.get_maturity(env)
     align = eng._ko_coupon_align_times(product, tau)
     resolved = [r.observation_time for r in product.resolve_ko_observations(env)]
     interior = [t for t in resolved if 0.0 < t < tau]

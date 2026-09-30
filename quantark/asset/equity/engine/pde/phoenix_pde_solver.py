@@ -53,6 +53,9 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._term_df_next_ko: Optional[np.ndarray] = None
         self._term_is_reverse: bool = False
 
+    def _constructor_kwargs(self) -> dict:
+        return {"params": self.params}   # no enable_profiling argument
+
     # --- Native event stats (no MC): reuse the Snowball KO/KI machinery ---
 
     def _event_stats_product_type(self) -> type:

@@ -12,10 +12,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .components import validate_advanced
-from .groups import GroupState
+from types import MappingProxyType
 
-__all__ = ["MarchResult", "march"]
+from .backends import FactorizationCache, factor
+from .components import validate_advanced
+from .groups import Backend, GroupState
+
+__all__ = ["MarchResult", "march", "warm_factorizations"]
 
 
 @dataclass(eq=False)
@@ -78,3 +81,30 @@ def march(prepared) -> MarchResult:
         if stats is not None:
             stats.step_events(states, captures, j)
     return MarchResult(states=states, captures=captures)
+
+
+def warm_factorizations(prepared, max_entries=None) -> dict:
+    """The factorizations ``march(prepared)`` would build, built ahead (spec 2 §5.10).
+
+    Walks the march's own order -- steps last to first, the groups in order, the
+    same θ (with the zero-diffusion override) and the same ``dt`` flavour -- into
+    a fresh cache, and stops once ``max_entries`` entries exist; later keys fall
+    through to the march, which builds them identically. Each entry is built at
+    its first march-order occurrence from the march's inputs, so it is the
+    march's entry bitwise. Returns ``{backend: read-only mapping}``.
+    """
+    cache = FactorizationCache(enabled=True)
+    coeffs, schedule, layout = prepared.coefficients, prepared.theta_schedule, prepared.layout
+    dt_vec = layout.time.dt
+    for j in range(len(layout.time.t) - 2, -1, -1):
+        if max_entries is not None and sum(len(cache.store(b)) for b in Backend) >= max_entries:
+            break
+        dt = dt_vec[j]
+        k = coeffs.set_at(j)
+        for group in prepared.groups:
+            theta = float(schedule[j])
+            if group.policy.zero_diffusion_theta_one and coeffs.is_zero_diffusion(k):
+                theta = 1.0
+            gdt = float(dt) if group.policy.dt_as_python_float else dt
+            factor(group.backend, coeffs.step_set(k, cache), gdt, theta)
+    return {b: MappingProxyType(dict(cache.store(b))) for b in Backend}

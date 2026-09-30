@@ -244,7 +244,9 @@ def test_phoenix_pde_reverse_boundary_unbounded():
     r = env.get_rate(tau)
     q = env.get_div_yield(tau)
     sigma = env.get_vol(phoenix.strike, tau)
-    x_vec, s_vec, _, t_vec, _ = engine._build_grids(phoenix, env, spot, sigma, tau, r, q)
+    from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare
+    layout = prepare(engine, phoenix, env, OutputRequest(Operation.PRICE)).layout  # the solve's state too
+    x_vec, s_vec, t_vec = layout.spatial.x, layout.spatial.s, layout.time.t
     grid = np.zeros((len(x_vec), len(t_vec)))
     engine._set_boundary_conditions_v1(grid, x_vec, s_vec, 0, tau, phoenix, env)
     df = math.exp(-r * tau)

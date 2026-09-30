@@ -24,7 +24,7 @@ from quantark.util.exceptions import NumericalError
 from .groups import Backend, GroupState
 
 __all__ = ["BANDED_CACHE_MAX_ENTRIES", "FactorizationCache", "operator_matrix",
-           "sparse_lu_factor", "banded_factor", "sparse_lu_advance", "banded_advance"]
+           "sparse_lu_factor", "banded_factor", "factor", "sparse_lu_advance", "banded_advance"]
 
 #: Operational cache size (spec §4.3): an implementation detail, not a knob.
 BANDED_CACHE_MAX_ENTRIES = 512
@@ -43,15 +43,6 @@ class FactorizationCache:
         self._banded_max = banded_max_entries
         self._stores = {Backend.SPARSE_LU: {}, Backend.BANDED: OrderedDict()}
         self._seeds = {Backend.SPARSE_LU: lu_seed or {}, Backend.BANDED: banded_seed or {}}
-
-    @classmethod
-    def sharing(cls, other: "FactorizationCache", *, lu_seed: Optional[Mapping] = None,
-                banded_seed: Optional[Mapping] = None) -> "FactorizationCache":
-        """A cache over ``other``'s stores (the same objects) with its own seeds."""
-        cache = cls(enabled=other.enabled, banded_max_entries=other._banded_max,
-                    lu_seed=lu_seed, banded_seed=banded_seed)
-        cache._stores = other._stores
-        return cache
 
     @staticmethod
     def key(set_index, dt, theta) -> tuple:
@@ -95,7 +86,7 @@ def operator_matrix(l, c, u, num_x):
 
 
 def sparse_lu_factor(A, dt, theta):
-    # base_pde_solver.py (_get_matrices build branch), verbatim; I is the
+    # the 0.6.0 sparse-LU build branch (base_pde_solver.py), verbatim; I is the
     # interior identity every caller passed (sp.eye(num_x - 2, format="csc"))
     I = sp.eye(A.shape[0], format="csc")
     M1 = I + (1.0 - theta) * dt * A
@@ -108,7 +99,7 @@ def sparse_lu_factor(A, dt, theta):
 
 
 def banded_factor(l, c, u, dt, theta):
-    # snowball_pde_solver.py (_get_banded_system build branch), verbatim
+    # the 0.6.0 banded build branch (snowball_pde_solver.py), verbatim
     lower = -theta * dt * l[2:-1]
     main = 1.0 - theta * dt * c[1:-1]
     upper = -theta * dt * u[1:-2]
@@ -130,10 +121,23 @@ def _inject(rhs, l1, u2, vn_lo, vn_up, lo, up, dt, theta):
     rhs[-1] += dt * ((1.0 - theta) * u2 * vn_up + theta * u2 * up)
 
 
+def factor(backend: Backend, s, dt, theta):
+    """The factorization of step set ``s`` at (dt, θ) on ``backend``, through its cache.
+
+    The one construction site: the march's advances and the session warm-up
+    (``march.warm_factorizations``) both come here, so a warmed entry is the
+    march's own entry, built from the same inputs.
+    """
+    if backend is Backend.BANDED:
+        return s.factorizations.get(Backend.BANDED, s.index, dt, theta,
+                                    lambda: banded_factor(s.l, s.c, s.u, dt, theta))
+    return s.factorizations.get(Backend.SPARSE_LU, s.index, dt, theta,
+                                lambda: sparse_lu_factor(s.operator(), dt, theta))
+
+
 def sparse_lu_advance(state: GroupState, s, dt, theta, boundaries):
     """Each column in order: rhs = M1 @ v, inject, solve (base march; snowball/phoenix LU fallback)."""
-    M1, M2_lu = s.factorizations.get(Backend.SPARSE_LU, s.index, dt, theta,
-                                     lambda: sparse_lu_factor(s.operator(), dt, theta))
+    M1, M2_lu = factor(Backend.SPARSE_LU, s, dt, theta)
     v = state.v_next
     lo, up = boundaries
     out = np.empty((v.shape[0] - 2, v.shape[1]))
@@ -147,8 +151,7 @@ def sparse_lu_advance(state: GroupState, s, dt, theta, boundaries):
 
 def banded_advance(state: GroupState, s, dt, theta, boundaries):
     """One solve_banded call for the whole group (decision 7)."""
-    banded, lower1, main1, upper1 = s.factorizations.get(
-        Backend.BANDED, s.index, dt, theta, lambda: banded_factor(s.l, s.c, s.u, dt, theta))
+    banded, lower1, main1, upper1 = factor(Backend.BANDED, s, dt, theta)
     v = state.v_next
     lo, up = boundaries
     if state.group.one_dimensional_rhs:

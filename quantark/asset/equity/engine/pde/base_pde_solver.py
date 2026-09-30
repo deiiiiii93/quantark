@@ -9,13 +9,10 @@ from abc import abstractmethod
 import functools
 import weakref
 from collections import OrderedDict
-from copy import deepcopy
 from dataclasses import dataclass, field
 import math
 from typing import Dict, Optional, Tuple, List, NamedTuple, Sequence
 import numpy as np
-import scipy.sparse as sp
-import scipy.sparse.linalg as spla
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.settlement_support import (
@@ -26,12 +23,7 @@ from quantark.asset.equity.settlement import (
     SettlementRequest,
     SettlementResolver,
 )
-from quantark.asset.equity.engine.pde.core.backends import (
-    BANDED_CACHE_MAX_ENTRIES,
-    FactorizationCache,
-    operator_matrix,
-    sparse_lu_factor,
-)
+from quantark.asset.equity.engine.pde.core.backends import BANDED_CACHE_MAX_ENTRIES
 from quantark.asset.equity.engine.pde.core.coefficients import StepCoefficients
 from quantark.asset.equity.engine.pde.core.components import (
     CentralDifference,
@@ -41,7 +33,6 @@ from quantark.asset.equity.engine.pde.core.components import (
     scalar_stencil,
     scheme_stepper,
 )
-from quantark.asset.equity.engine.pde.core.groups import Backend
 from quantark.asset.equity.engine.pde.core.identity import market_fingerprints
 from quantark.asset.equity.engine.pde.core.samples import sample_bsm
 from quantark.asset.equity.engine.pde.core.adapters.base import FamilyAdapter
@@ -49,6 +40,7 @@ from quantark.asset.equity.engine.pde.core.prepare import (
     Operation,
     OutputRequest,
     SessionArtefacts,
+    bind_layout,
     prepare,
     run,
 )
@@ -58,7 +50,6 @@ from quantark.asset.equity.engine.pde.grid import (
     GridRequest,
     Layout,
     MarketSnapshot,
-    resolve_bound_layout,
     validate_external_layout,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -239,23 +230,14 @@ class BasePDESolver(BaseEngine):
         """Initialize the PDE solver with configuration parameters."""
         super().__init__(params if params is not None else PDEParams())
         self._cache_enabled = bool(getattr(self.params, "cache_enabled", True))
-        # Both factorization stores (sparse LU and banded), per solver as
-        # before; the legacy loops read them through the delegates below.
-        self._factorizations = FactorizationCache(enabled=self._cache_enabled)
-        self._critical_points_cache: "OrderedDict[Tuple, Tuple[float, ...]]" = (
-            OrderedDict()
-        )
-        # Session-injected preparation (adapter-owned clones only; spec
-        # section 9.2). Grids/coefficients short-circuit their builders;
-        # the matrix pack is a READ-ONLY mapping consulted before the
-        # per-solve _matrix_cache — misses fall through and build locally,
+        # A prepared execution session's artefacts (adapter-owned clones only;
+        # spec 2 §5.10): the bound Layout, the pre-flat-exact step sets and the
+        # warmed factorizations. Pack misses build in the march, identically,
         # so correctness never depends on pack completeness.
-        self._session_grids = None
-        self._session_step_coefficients = None
-        self._session_matrix_pack = None
+        self._session_artefacts: Optional[SessionArtefacts] = None
         # Declarative grid layer (grid redesign spec §4.6) — built lazily.
         self._grid_binder = None
-        # Frozen base-market layout set by create_bump_context clones: every
+        # Frozen base-market layout held by create_bump_context instances: every
         # bumped re-solve reuses it (theta rolls rebind time only, §4.8).
         self._frozen_base_layout = None
         # Layout bound for the CURRENT solve (None on the legacy path).
@@ -394,85 +376,31 @@ class BasePDESolver(BaseEngine):
         """``PDEParams.cache_enabled`` -- the one cache control (spec §5.2)."""
         return self._cache_enabled
 
-    @property
-    def _matrix_cache(self):
-        """The sparse-LU factorization store (read-only view of ``_factorizations``)."""
-        return self._factorizations.store(Backend.SPARSE_LU)
-
-    @property
-    def _banded_cache(self):
-        """The banded factorization store (read-only view of ``_factorizations``)."""
-        return self._factorizations.store(Backend.BANDED)
-
     def create_bump_context(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> "BasePDESolver":
+        """A fresh instance with the parent's constructor arguments, holding the
+        frozen base layout (spec 2 §5.10).
+
+        Spot/vol/rate/div bumps reuse the layout by identity; calendar (theta)
+        bumps rebuild only the time layout (``rebind_time``). A request with a
+        terminal outcome freezes nothing: bumping re-prices the short-circuit.
         """
-        Return a PDE solver clone with the base spatial domain frozen.
-
-        Migrated solvers freeze the whole base-market ``Layout`` (spec §4.8):
-        spot/vol/rate/div bumps reuse it by identity; calendar (theta) bumps
-        rebuild only the time layout via ``rebind_time``. Legacy solvers keep
-        the historical params-freeze.
-        """
-        if self._uses_grid_layer():
-            tau = product.get_maturity(pricing_env)
-            if tau <= 0:
-                return self
-            clone = self._bump_clone()
-            prep = getattr(clone, "_prepare_for_request", None)
-            if prep is not None:
-                prep(product, pricing_env)
-            market = clone.market_snapshot(product, pricing_env)
-            request = clone.grid_request(product, market, tau)
-            clone._frozen_base_layout = clone.grid_binder.bind(request, market)
-            return clone
-
-        raise NotImplementedError(
-            "legacy params-freeze bump contexts were removed with the "
-            "declarative grid layer (0.4.0)"
-        )
-
-    def _bump_clone(self) -> "BasePDESolver":
-        """A fully configured engine clone for bump contexts.
-
-        ``deepcopy`` of the live instance — not ``type(self)(params=...)`` —
-        so subclasses with richer constructors (Heston ``model_params``, SLV
-        ``leverage_surface``, ADI dimensions, prebuilt LV surfaces) keep their
-        full configuration. Transient per-solve state (caches, session packs,
-        the active/frozen layouts) is excluded and reset on the clone.
-        """
-        transient = self._bump_transient_attrs()
-        saved = {name: getattr(self, name) for name in transient}
-        for name in transient:
-            setattr(self, name, None)
-        try:
-            clone = deepcopy(self)
-        finally:
-            for name, value in saved.items():
-                setattr(self, name, value)
-        # As before: the LU store starts empty (SuperLU does not deep-copy);
-        # the banded store was never transient, so the clone keeps a copy.
-        clone._factorizations = FactorizationCache(enabled=clone._cache_enabled)
-        clone._banded_cache.update(deepcopy(self._banded_cache))
-        clone._critical_points_cache = OrderedDict()
+        if not self._uses_grid_layer():
+            raise NotImplementedError(
+                "legacy params-freeze bump contexts were removed with the "
+                "declarative grid layer (0.4.0)"
+            )
+        layout = bind_layout(self, product, pricing_env, OutputRequest(Operation.PRICE))
+        if layout is None:
+            return self
+        clone = type(self)(**self._constructor_kwargs())
+        clone._frozen_base_layout = layout
         return clone
 
-    def _bump_transient_attrs(self) -> tuple:
-        """Per-solve state excluded from the bump-clone deepcopy (layouts and
-        binder caches hold mappingproxies deepcopy cannot handle; sessions
-        and caches must not leak into clones). Subclasses with extra grid
-        state extend this tuple."""
-        return (
-            "_grid_binder",
-            "_frozen_base_layout",
-            "_active_layout",
-            "_session_grids",
-            "_session_step_coefficients",
-            "_session_matrix_pack",
-            "_factorizations",
-            "_critical_points_cache",
-        )
+    def _constructor_kwargs(self) -> dict:
+        """The arguments a bump context is constructed with (subclasses add theirs)."""
+        return {"params": self.params}
 
     # ------------------------------------------------------------------
     # Declarative grid layer seam (grid redesign spec §4.6)
@@ -482,8 +410,7 @@ class BasePDESolver(BaseEngine):
         """Whether this solver has migrated to the declarative grid layer.
 
         Migrated solvers return True and implement ``grid_request`` /
-        ``event_schedule``; the legacy ``_build_grids`` path serves the rest
-        until their phase lands (the flag disappears at Phase 4).
+        ``event_schedule``; every 1D solver has (the legacy grid path is gone).
         """
         return False
 
@@ -624,75 +551,6 @@ class BasePDESolver(BaseEngine):
             event_times=tuple(sorted(set(events))),
         )
 
-    def _grids_via_layer(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Bind (or reuse the frozen) layout and expose it as the 5-tuple."""
-        stash_env = getattr(self, "_stash_grid_request_env", None)
-        if stash_env is not None:
-            stash_env(pricing_env)
-        market = self.market_snapshot(product, pricing_env)
-        request = self.grid_request(product, market, tau)
-        if self._session_grids is not None:
-            layout = self._layout_from_session_grids(request)
-        else:
-            layout = self._bound_layout_for_solve(request, market)
-        self._populate_observation_maps(product, pricing_env, layout, tau)
-        self._active_layout = layout
-        return (
-            layout.spatial.x,
-            layout.spatial.s,
-            layout.spatial.dx,
-            layout.time.t,
-            layout.time.dt,
-        )
-
-    def _layout_from_session_grids(self, request: GridRequest) -> Layout:
-        """Assemble the layout AROUND injected session grids (no spatial
-        rebuild — the expensive node placement was done at preparation).
-
-        The cheap TimeLayout is rebuilt from the request (damping schedules,
-        step_of) and verified node-for-node against the injected time grid —
-        a stale pack raises instead of silently changing the discretization.
-        """
-        from quantark.asset.equity.engine.pde.grid.config import resolve_config
-        from quantark.asset.equity.engine.pde.grid.space import SpatialLayout
-        from quantark.asset.equity.engine.pde.grid.time import build_time
-
-        x_vec, s_vec, dx_vec, t_vec, _ = self._session_grids
-        time_layout = build_time(request, self.grid_binder.config)
-        if not np.array_equal(time_layout.t, t_vec):
-            raise PricingError(
-                "injected session grids diverge from the declarative layer "
-                "time geometry; re-prepare the session"
-            )
-        spatial = SpatialLayout(
-            s=s_vec,
-            x=x_vec,
-            dx=dx_vec,
-            bounds=(float(s_vec[0]), float(s_vec[-1])),
-            achieved_eps=float("nan"),
-            active_critical_prices=tuple(
-                float(p)
-                for p in request.critical_prices
-                if float(s_vec[0]) < float(p) < float(s_vec[-1])
-            ),
-            ignored_critical_prices=(),
-        )
-        return Layout(
-            spatial=spatial,
-            time=time_layout,
-            request=request,
-            config_key=self.grid_binder.config.key,
-        )
-
     def _theta_schedule_from_layout(self, layout: Layout) -> np.ndarray:
         """Per-step theta: the built-in stepper's schedule (spec 2 §4.2, decision 5).
 
@@ -700,21 +558,6 @@ class BasePDESolver(BaseEngine):
         event_theta on event-damped steps, params.theta elsewhere.
         """
         return scheme_stepper(self.params, self.grid_binder.config).schedule(layout)
-
-
-    def _bound_layout_for_solve(
-        self, request: GridRequest, market: MarketSnapshot
-    ) -> Layout:
-        """The layout for this solve: frozen (bump clone) > rebind > bind.
-
-        Alignment-identical requests reuse the frozen layout by identity;
-        a changed schedule/tau (calendar roll) rebinds the time layout on
-        the SAME spatial object. Both reuse paths are coverage-validated,
-        and changed hard bounds fail closed (``resolve_bound_layout``).
-        """
-        return resolve_bound_layout(
-            self.grid_binder, self._frozen_base_layout, request, market
-        )
 
     def _external_layout_check(
         self,
@@ -791,20 +634,6 @@ class BasePDESolver(BaseEngine):
                 return ("repr", repr(product))
         return ("id", id(product))
 
-    def _params_cache_key(self) -> Tuple:
-        params: PDEParams = self.params
-        # Post-0.4.0: grid geometry is fingerprinted by the resolved
-        # GridConfig key; surviving scheme/engine knobs listed explicitly.
-        # (Legacy resolution knobs are excluded — grid-layer solvers reject
-        # non-default values, so they are constant on this hierarchy.)
-        return (
-            self.grid_binder.config.key,
-            params.event_projection,
-            params.theta,
-            params.event_theta,
-            params.bus_days_in_year,
-        )
-
     def set_terminal_condition(
         self,
         grid: np.ndarray,
@@ -867,8 +696,7 @@ class BasePDESolver(BaseEngine):
     def _run(self, product, pricing_env, request, *, lifecycle_state=None):
         """``run(prepare(...))`` with this solver's frozen layout and session artefacts."""
         return run(prepare(self, product, pricing_env, request, lifecycle_state=lifecycle_state,
-                           frozen=self._frozen_base_layout,
-                           session=SessionArtefacts.from_solver(self, product, pricing_env)))
+                           frozen=self._frozen_base_layout, session=self._session_artefacts))
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -945,50 +773,6 @@ class BasePDESolver(BaseEngine):
             for spot in spots
         ]
 
-    def _build_grids(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Construct the spatial and temporal grids for solving the PDE.
-
-        ONE construction site for every path (value solve, event-stats sweep,
-        session preparation and injection): migrated solvers route through the
-        declarative layer; injected session grids are verified against the
-        layer geometry rather than trusted (a stale pack cannot silently
-        change the discretization).
-        """
-        if self._uses_grid_layer():
-            return self._grids_via_layer(
-                product, pricing_env, spot, sigma, tau, r, q
-            )
-        raise PricingError(
-            "the legacy grid path was removed with the declarative grid "
-            "layer (0.4.0); every PDE solver now binds through GridBinder"
-        )
-
-    def _step_coefficients_for_solve(
-        self,
-        pricing_env: PricingEnvironment,
-        ref_strike: float,
-        t_vec: np.ndarray,
-        dx_vec: np.ndarray,
-        num_x: int,
-    ) -> StepCoefficients:
-        """Session-injection dispatch: an injected artifact (PRE-flat-exact;
-        the caller still applies _flat_exact_step_coefficients, which is
-        deterministic and value-identical) short-circuits the build."""
-        if self._session_step_coefficients is not None:
-            return self._session_step_coefficients
-        return self._build_step_coefficients(
-            pricing_env, ref_strike, t_vec, dx_vec, num_x
-        )
-
     def _build_step_coefficients(
         self,
         pricing_env: PricingEnvironment,
@@ -1053,66 +837,6 @@ class BasePDESolver(BaseEngine):
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Calculate coefficients (l, c, u) for the tridiagonal FD system."""
         return scalar_stencil(r, q, sigma, dx_vec, num_x)
-
-    def _build_operator_matrix(
-        self, l: np.ndarray, c: np.ndarray, u: np.ndarray, num_x: int
-    ) -> sp.csc_matrix:
-        """Construct the sparse spatial operator matrix A."""
-        return operator_matrix(l, c, u, num_x)
-
-    def _inject_boundary_contributions(self, rhs, grid, l, u, j, dt, theta) -> None:
-        """Add Dirichlet boundary terms to the RHS of the reduced interior system."""
-        if len(grid) > 2:
-            # Terms from V[0]
-            rhs[0] += dt * (
-                (1.0 - theta) * l[1] * grid[0, j + 1] + theta * l[1] * grid[0, j]
-            )
-            # Terms from V[-1]
-            rhs[-1] += dt * (
-                (1.0 - theta) * u[-2] * grid[-1, j + 1] + theta * u[-2] * grid[-1, j]
-            )
-
-    def _operator_matrix_for_set(
-        self, step_coeffs: StepCoefficients, k: int, num_x: int
-    ) -> sp.csc_matrix:
-        """Lazy per-unique-set sparse operator (reset by each legacy two-surface march)."""
-        A = self._term_A_cache.get(k)
-        if A is None:
-            l, c, u = step_coeffs.lcu_sets[k]
-            A = self._build_operator_matrix(l, c, u, num_x)
-            self._term_A_cache[k] = A
-        return A
-
-    def _get_matrices(
-        self, I: sp.csc_matrix, A: sp.csc_matrix, dt: float, theta: float,
-        coeff_key: int = 0,
-    ) -> Tuple[sp.csc_matrix, spla.SuperLU]:
-        """
-        Get or compute matrices for time stepping.
-
-        Caches LU factorizations for efficiency when dt and theta repeat.
-
-        Args:
-            I: Identity matrix
-            A: Spatial operator matrix
-            dt: Time step size
-            theta: Scheme parameter (0.5 = CN, 1.0 = BE)
-
-        Returns:
-            Tuple of (M1, M2_lu) where:
-                M1 = I + (1-theta)*dt*A (for RHS)
-                M2_lu = LU factorization of I - theta*dt*A (for LHS)
-        """
-        # A prepared session's pack first, then the per-solver store; ``I`` is
-        # the interior identity, which ``sparse_lu_factor`` rebuilds from ``A``.
-        pack = self._session_matrix_pack
-        if pack is not None:
-            hit = pack.get(FactorizationCache.key(coeff_key, dt, theta))
-            if hit is not None:
-                return hit
-        return self._factorizations.get(
-            Backend.SPARSE_LU, coeff_key, dt, theta, lambda: sparse_lu_factor(A, dt, theta)
-        )
 
     def _apply_step_modifications(
         self,
@@ -1372,146 +1096,3 @@ class BasePDESolver(BaseEngine):
                 if val is not None and val > 0:
                     barriers.append(val)
         return barriers
-
-    def _pack_uses_banded(self, num_x: int) -> bool:
-        """Whether the backward march for this configuration uses the banded
-        solver path (only the two-surface family does)."""
-        return False
-
-    def _pack_banded_entry(
-        self, banded: dict, step_coeffs, l, c, u, dt, theta, coeff_key
-    ) -> None:
-        raise NotImplementedError(
-            "banded packs exist only where _pack_uses_banded is True"
-        )
-
-    def _session_factorization_packs(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment,
-        grids, max_entries: Optional[int] = None,
-    ) -> Tuple[dict, dict]:
-        """Eagerly build the (coeff_key, dt, theta) -> matrices maps one solve
-        would lazily build, through the SAME builders the solve uses.
-
-        Numeric factorization reuse is legal only when coefficients, time
-        step, theta schedule, and scheme parameters are identical (spec
-        section 9.2); the caller keys the published pack by exactly those
-        inputs. Returns (matrix_pack, banded_pack) as plain dicts.
-
-        ``max_entries`` bounds the eager build (code-gate finding
-        2026-07-16): once the packs hold that many entries, enumeration
-        stops and the remaining keys are built lazily per solve — bitwise
-        identically, since the march's own construction is the same code.
-        The enumeration runs in march order, so the bounded pack holds the
-        keys the march requests first.
-        """
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = grids
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-        strike = getattr(product, "strike", spot)
-        r = pricing_env.get_rate(tau)
-        q = pricing_env.get_div_yield(tau)
-        sigma = pricing_env.get_vol(strike, tau)
-        num_x = len(x_vec)
-
-        sc = self._step_coefficients_for_solve(
-            pricing_env, strike, t_vec, dx_vec, num_x
-        )
-        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
-        step_coeffs = None if sc.n_unique == 1 else sc
-        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
-        A = self._build_operator_matrix(l, c, u, num_x)
-
-        theta_by_step = self._theta_schedule_from_layout(self._active_layout)
-        use_banded = self._pack_uses_banded(num_x)
-        banded: dict = {}
-        # Build into a fresh cache (as the legacy fresh _matrix_cache), restored after.
-        saved_factorizations = self._factorizations
-        self._factorizations = FactorizationCache(enabled=self._cache_enabled)
-        saved_term_A = getattr(self, "_term_A_cache", {})
-        self._term_A_cache = {}
-        try:
-            I_int = sp.eye(num_x - 2, format="csc")
-            for j in range(len(t_vec) - 2, -1, -1):
-                if (
-                    max_entries is not None
-                    and len(self._matrix_cache) + len(banded) >= max_entries
-                ):
-                    break
-                dt = dt_vec[j]
-                theta = float(theta_by_step[j])
-                if step_coeffs is not None:
-                    k = int(step_coeffs.set_index[j])
-                    l_j, c_j, u_j = step_coeffs.lcu_sets[k]
-                else:
-                    k = 0
-                    l_j, c_j, u_j = l, c, u
-                if use_banded:
-                    self._pack_banded_entry(
-                        banded, step_coeffs, l_j, c_j, u_j, dt, theta, k
-                    )
-                else:
-                    A_j = (
-                        self._operator_matrix_for_set(step_coeffs, k, num_x)
-                        if step_coeffs is not None
-                        else A
-                    )
-                    self._get_matrices(I_int, A_j, dt, theta, coeff_key=k)
-            matrix_pack = dict(self._matrix_cache)
-        finally:
-            self._factorizations = saved_factorizations
-            self._term_A_cache = saved_term_A
-        return matrix_pack, banded
-
-    def _critical_points_cache_key(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-    ) -> Tuple:
-        strategy = _CACHE_KEYING
-        return (
-            strategy,
-            f"{product.__class__.__module__}.{product.__class__.__qualname__}",
-            self._product_cache_token(product, strategy),
-            round(spot, 12),
-            pricing_env.valuation_date,
-            pricing_env.day_count_convention,
-            pricing_env.bus_days_in_year,
-        )
-
-    def _get_cached_critical_points(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-    ) -> Tuple[float, ...]:
-        if not self._is_cache_enabled():
-            return tuple(
-                sorted(
-                    [
-                        round(p, 12)
-                        for p in self.get_critical_points(product, pricing_env)
-                        if p is not None
-                    ]
-                )
-            )
-        key = self._critical_points_cache_key(product, pricing_env, spot)
-        cached = self._critical_points_cache.get(key)
-        if cached is not None:
-            self._critical_points_cache.move_to_end(key)
-            return cached
-        points = tuple(
-            sorted(
-                [
-                    round(p, 12)
-                    for p in self.get_critical_points(product, pricing_env)
-                    if p is not None
-                ]
-            )
-        )
-        self._critical_points_cache[key] = points
-        self._critical_points_cache.move_to_end(key)
-        max_entries = GRID_CACHE_MAX_ENTRIES
-        if len(self._critical_points_cache) > max_entries:
-            self._critical_points_cache.popitem(last=False)
-        return points

@@ -11,6 +11,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
 from quantark.asset.equity.engine.pde.core.components import CentralDifference, nodal_stencil
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
+from quantark.asset.equity.engine.pde._legacy_bump import LegacyBumpCloneMixin
 from quantark.asset.equity.engine.pde.core.samples import (
     _validated_local_vol_row,
     sample_local_vol,
@@ -124,10 +125,8 @@ class LocalVolPhoenixPDESolver(LocalVolBarrierCrossingMixin, PhoenixPDESolver):
             ),
         )
 
-    def _build_grids(self, product, pricing_env, spot, sigma, tau, r, q):
-        result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
-        self._active_s_vec = result[1]
-        return result
+    def _constructor_kwargs(self) -> dict:
+        return {**super()._constructor_kwargs(), "local_vol_surface": self._prebuilt}
 
     def _build_step_coefficients(
         self,
@@ -153,7 +152,7 @@ class LocalVolPhoenixPDESolver(LocalVolBarrierCrossingMixin, PhoenixPDESolver):
         return nodal_stencil(r, q, _validated_local_vol_row(sigma_vec, num_x), dx_vec, num_x)
 
 
-class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
+class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin, PhoenixPDESolver):
     """Shared 2-D (log-spot, variance) ADI machinery for the Phoenix solvers.
 
     ``v0_boundary`` defaults to ``"degenerate_pde"`` rather than the ADI core's

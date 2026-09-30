@@ -165,7 +165,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
 
         # Continuous monitoring: edges sit AT the barriers (absorbing).
         # Discrete monitoring: edges sit >=5 sigma outside the corridor
-        # (see _build_grids), where knockout at the next observation is
+        # (see grid_request), where knockout at the next observation is
         # almost sure, so the discounted rebate is the correct far-field
         # limit between observations. After the LAST observation the exact
         # far-field would relax to the vanilla continuation; the resulting
@@ -204,7 +204,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
                 return
 
         schedule_records = self._schedule_records.get(t_idx)
-        # _setup_observation_indices (via _build_grids) always sets _total_tau
+        # _setup_observation_indices (the adapter's observation maps) always sets _total_tau
         # before any time step runs.
         total_tau = self._total_tau
         current_time = self._current_time(total_tau, tau)

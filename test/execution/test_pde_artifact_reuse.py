@@ -1,14 +1,14 @@
 """Phase 4 artifact-state and reuse gates (spec sections 9.2/10.1/21)."""
 import pytest
 
+from quantark.asset.equity.engine.pde.core.groups import Backend
+from quantark.asset.equity.engine.pde.core.prepare import SessionArtefacts
 from quantark.asset.equity.engine.pde.pde_session_prep import (
     factorization_state,
     grid_state,
-    market_scalars,
     step_coefficients_state,
 )
 from quantark.execution import PricingRequest, PricingSession
-from quantark.execution.cache.fingerprint import try_fingerprint
 from quantark.execution.errors import DeterminismViolation
 
 from execution.matrix_fixtures import FIXTURE_BUILDERS
@@ -17,10 +17,6 @@ from execution.matrix_fixtures import FIXTURE_BUILDERS
 def _case(name):
     engine, product, env, _shape = FIXTURE_BUILDERS[name]()
     return engine, product, env
-
-
-def _curves_fp(env):
-    return try_fingerprint((env.rate_curve, env.div_yield, env.vol_surface))
 
 
 class TestArtifactStates:
@@ -54,27 +50,20 @@ class TestArtifactStates:
         with PricingSession() as session:
             ctx = session.context
             grid = grid_state(engine, product, env, ctx)
-            coeff = step_coefficients_state(
-                engine, product, env, grid.value, grid.fingerprint,
-                _curves_fp(env), ctx,
+            coeff = step_coefficients_state(engine, product, env, grid.value, ctx)
+            fact = factorization_state(
+                engine, product, env, grid.value, coeff.value, coeff.fingerprint, ctx
             )
-            engine._session_grids = grid.value
-            engine._session_step_coefficients = coeff.value
-            try:
-                fact = factorization_state(
-                    engine, product, env, grid.value, coeff.fingerprint, ctx
-                )
-                assert grid.fingerprint and coeff.fingerprint and fact.fingerprint
-                matrix_pack, banded_pack = fact.value
-                assert len(matrix_pack) + len(banded_pack) > 0
-                with pytest.raises(TypeError):
-                    matrix_pack["x"] = 1  # published packs are immutable
-                for state in (grid, coeff, fact):
-                    if state.handle is not None:
-                        state.handle.close()
-            finally:
-                engine._session_grids = None
-                engine._session_step_coefficients = None
+            assert grid.fingerprint and coeff.fingerprint and fact.fingerprint
+            packs = fact.value
+            assert len(packs[Backend.SPARSE_LU]) + len(packs[Backend.BANDED]) > 0
+            with pytest.raises(TypeError):
+                packs[Backend.BANDED]["x"] = 1  # published packs are immutable
+            with pytest.raises(TypeError):
+                packs["x"] = 1
+            for state in (grid, coeff, fact):
+                if state.handle is not None:
+                    state.handle.close()
 
     def test_mutation_during_build_raises_determinism_violation(self):
         from quantark.param import FlatRateCurve
@@ -110,28 +99,19 @@ class TestArtifactStates:
         with PricingSession() as session:
             ctx = session.context
             grid = grid_state(clone, product, env, ctx)
-            coeff = step_coefficients_state(
-                clone, product, env, grid.value, grid.fingerprint,
-                _curves_fp(env), ctx,
-            )
-            clone._session_grids = grid.value
-            clone._session_step_coefficients = coeff.value
+            coeff = step_coefficients_state(clone, product, env, grid.value, ctx)
             fact = factorization_state(
-                clone, product, env, grid.value, coeff.fingerprint, ctx
+                clone, product, env, grid.value, coeff.value, coeff.fingerprint, ctx
             )
-            clone._session_matrix_pack, clone._session_banded_pack = fact.value
+            clone._session_artefacts = SessionArtefacts(
+                layout=grid.value, coefficients=coeff.value,
+                lu_pack=fact.value[Backend.SPARSE_LU],
+                banded_pack=fact.value[Backend.BANDED],
+            )
             assert clone.price(product, env) == baseline
             for state in (grid, coeff, fact):
                 if state.handle is not None:
                     state.handle.close()
-
-    def test_market_scalars_match_solve_preamble(self):
-        engine, product, env = _case("EuropeanPDESolver")
-        spot, strike, tau, r, q, sigma = market_scalars(product, env)
-        assert spot == env.spot
-        assert tau == product.get_maturity(env)
-        assert r == env.get_rate(tau) and q == env.get_div_yield(tau)
-        assert sigma == env.get_vol(strike, tau)
 
 
 class TestBuildCountGates:
@@ -164,7 +144,7 @@ class TestBuildCountGates:
     def test_grid_and_factorizations_built_once_across_crn_repricings(
         self, monkeypatch
     ):
-        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.engine.pde.core import backends
 
         engine, product, env = _case("SnowballPDESolver")
         direct = engine.price(product, env)
@@ -185,19 +165,14 @@ class TestBuildCountGates:
         )
 
         banded_counts = {"n": 0}
-        original_banded = SnowballPDESolver._get_banded_system
+        original_banded = backends.banded_factor
 
-        def counting_banded(self, *args, **kwargs):
-            before = len(self._banded_cache)
-            out = original_banded(self, *args, **kwargs)
-            # count CONSTRUCTIONS (cache inserts), not lookups: pack hits
-            # and cache hits return without inserting.
-            banded_counts["n"] += len(self._banded_cache) - before
-            return out
+        def counting_banded(*args, **kwargs):
+            # the one construction site: pack hits and cache hits never reach it
+            banded_counts["n"] += 1
+            return original_banded(*args, **kwargs)
 
-        monkeypatch.setattr(
-            SnowballPDESolver, "_get_banded_system", counting_banded
-        )
+        monkeypatch.setattr(backends, "banded_factor", counting_banded)
 
         with PricingSession() as session:
             values = [
@@ -209,9 +184,9 @@ class TestBuildCountGates:
             stats = session.context.artifact_cache.stats()
         assert values == [direct] * 3
         assert grid_counts["n"] == 1  # one spatial-grid construction, ever
-        # Banded systems are constructed ONLY inside the single
-        # factorization-pack build (once per unique (dt, theta) key across
-        # the whole session); the three marches hit the injected pack.
+        # Banded systems are constructed ONLY inside the single warm-up of the
+        # factorization pack (once per unique (set, dt, theta) key across the
+        # whole session); the three marches hit the injected pack.
         assert 0 < banded_counts["n"] <= 4
         assert stats["misses"] >= 3      # grid + coeffs + pack built once
         assert stats["hits"] >= 6        # ...and reused by dispatches 2 and 3

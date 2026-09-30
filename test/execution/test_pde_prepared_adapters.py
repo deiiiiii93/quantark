@@ -347,23 +347,15 @@ class TestCodeGateRegressions:
         )
         from quantark.execution.errors import DeterminismViolation
 
+        from quantark.asset.equity.engine.pde.core.groups import Backend
+        from quantark.asset.equity.engine.pde.core.prepare import SessionArtefacts
+
         engine, product, env = _case("EuropeanPDESolver")
         clone = type(engine)(params=engine.params)
-        clone._prepare_solve_state(product, env)
         with PricingSession() as session:
             ctx = session.context
             grid = grid_state(clone, product, env, ctx)
-            from quantark.execution.cache.fingerprint import try_fingerprint
-
-            curves_fp = try_fingerprint(
-                (env.rate_curve, env.div_yield, env.vol_surface)
-            )
-            coeff = step_coefficients_state(
-                clone, product, env, grid.value, grid.fingerprint,
-                curves_fp, ctx,
-            )
-            clone._session_grids = grid.value
-            clone._session_step_coefficients = coeff.value
+            coeff = step_coefficients_state(clone, product, env, grid.value, ctx)
 
             rate_obj = env.rate_curve
             original_rate = rate_obj.rate
@@ -399,7 +391,8 @@ class TestCodeGateRegressions:
             try:
                 with pytest.raises(DeterminismViolation):
                     factorization_state(
-                        clone, product, env, grid.value, coeff.fingerprint, Ctx()
+                        clone, product, env, grid.value, coeff.value,
+                        coeff.fingerprint, Ctx(),
                     )
                 # the poisoned entry was invalidated: a clean rebuild after
                 # restoring the market must produce a working pack, and the
@@ -409,9 +402,14 @@ class TestCodeGateRegressions:
                 except Exception:
                     object.__setattr__(rate_obj, "rate", original_rate)
                 fact = factorization_state(
-                    clone, product, env, grid.value, coeff.fingerprint, ctx
+                    clone, product, env, grid.value, coeff.value,
+                    coeff.fingerprint, ctx,
                 )
-                clone._session_matrix_pack = fact.value[0]
+                clone._session_artefacts = SessionArtefacts(
+                    layout=grid.value, coefficients=coeff.value,
+                    lu_pack=fact.value[Backend.SPARSE_LU],
+                    banded_pack=fact.value[Backend.BANDED],
+                )
                 assert clone.price(product, env) == engine.price(product, env)
                 if fact.handle is not None:
                     fact.handle.close()
@@ -452,25 +450,22 @@ class TestCodeGateRegressions:
                 pass  # bound asserted structurally below
 
         # structural bound check on the builder itself
-        clone = type(engine)(params=engine.params)
-        clone._prepare_solve_state(product, env)
-        surface = engine._build_surface(env)
-        clone._active_lv_surface = surface
-        spot, tau = env.spot, product.get_maturity(env)
-        strike = product.strike
-        r, q = env.get_rate(tau), env.get_div_yield(tau)
-        sigma = env.get_vol(strike, tau)
-        grids = clone._build_grids(product, env, spot, sigma, tau, r, q)
-        clone._active_s_vec = grids[1]
-        try:
-            packs = clone._session_factorization_packs(
-                product, env, grids, max_entries=_PACK_MAX_ENTRIES
-            )
-        finally:
-            clone._active_lv_surface = None
-            clone._active_s_vec = None
-        assert len(packs[0]) + len(packs[1]) <= _PACK_MAX_ENTRIES
-        assert len(grids[3]) - 1 > _PACK_MAX_ENTRIES  # the cap actually bound
+        from quantark.asset.equity.engine.pde.core.march import warm_factorizations
+        from quantark.asset.equity.engine.pde.core.prepare import (
+            Operation, OutputRequest, SessionArtefacts, bind_layout, prepare,
+            session_step_sets,
+        )
+
+        clone = type(engine)(params=engine.params,
+                             local_vol_surface=engine._build_surface(env))
+        request = OutputRequest(Operation.PRICE)
+        layout = bind_layout(clone, product, env, request)
+        coeffs = session_step_sets(clone, product, env, layout)
+        prepared = prepare(clone, product, env, request,
+                           session=SessionArtefacts(layout=layout, coefficients=coeffs))
+        packs = warm_factorizations(prepared, max_entries=_PACK_MAX_ENTRIES)
+        assert sum(len(p) for p in packs.values()) <= _PACK_MAX_ENTRIES
+        assert len(layout.time.t) - 1 > _PACK_MAX_ENTRIES  # the cap actually bound
 
         # tiny budget: eager packing skipped pre-allocation, still bitwise
         ctx = default_context()

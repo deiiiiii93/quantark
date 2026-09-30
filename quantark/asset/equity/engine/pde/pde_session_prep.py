@@ -1,11 +1,14 @@
 """Session preparation artifact states for the 1D equity PDE families.
 
-Spec section 9.2: grids (with event-aligned time grids), term-structure step
-coefficients (the materialized term context), and eager factorization packs
-go behind ``PreparedArtifactCache`` descriptors. Keys derive from the
-engine's own sanctioned reuse contract — the declarative ``GridRequest``
-tuple — plus curve/surface value fingerprints; anything uncanonicalizable
-builds fresh (spec section 10.1: correctness never depends on cacheability).
+Spec section 9.2, spec 2 §5.10 (pde-prep/v2): the Layout a march binds, the
+per-step coefficient sets on it (pre-flat-exact), and the warmed factorizations
+of the march go behind ``PreparedArtifactCache`` descriptors. All three are
+built through the one preparation path (``core.prepare``): the grid key is the
+declarative ``GridRequest`` plus the market snapshot, the coefficient key the
+coefficients' identity (``coefficient_key``), the factorization key the
+coefficient key plus the stepper, the groups' backends and their θ schedules.
+Anything uncanonicalizable builds fresh (spec section 10.1: correctness never
+depends on cacheability).
 
 Capture-and-reverify (plan-gate finding 2026-07-16): every state captures
 its environment dependencies ONCE, builds, then re-verifies both object
@@ -18,19 +21,35 @@ from typing import NamedTuple, Optional
 
 import numpy as np
 
+from quantark.asset.equity.engine.pde.core.components import CentralDifference
+from quantark.asset.equity.engine.pde.core.groups import Backend
+from quantark.asset.equity.engine.pde.core.identity import (
+    coefficient_key,
+    component_fingerprint,
+    market_fingerprints,
+)
+from quantark.asset.equity.engine.pde.core.prepare import (
+    CompositeProblem,
+    Operation,
+    OutputRequest,
+    SessionArtefacts,
+    bind_layout,
+    prepare,
+    request_geometry,
+    session_step_sets,
+)
 from quantark.execution.cache.artifacts import ArtifactDescriptor
 from quantark.execution.cache.fingerprint import try_fingerprint
 from quantark.execution.errors import DeterminismViolation
 
 __all__ = [
     "ArtifactState",
-    "market_scalars",
     "grid_state",
     "step_coefficients_state",
     "factorization_state",
 ]
 
-_BUILDER_VERSION = "pde-prep/v1"
+_BUILDER_VERSION = "pde-prep/v2"
 _GRID_TAGS = frozenset(
     {
         "spot",
@@ -44,6 +63,9 @@ _GRID_TAGS = frozenset(
 )
 _COEFF_TAGS = _GRID_TAGS
 _FACT_TAGS = _GRID_TAGS | {"solver_policy"}
+#: The request a session prepares for: its artefacts serve PRICE and the rich
+#: session outputs alike (the same layout, coefficients and value groups).
+_PRICE = OutputRequest(Operation.PRICE)
 
 
 class ArtifactState(NamedTuple):
@@ -53,17 +75,6 @@ class ArtifactState(NamedTuple):
     descriptor: Optional[ArtifactDescriptor]
     handle: object  # Optional[ArtifactHandle]
     fingerprint: Optional[str]
-
-
-def market_scalars(product, pricing_env):
-    """The _solve preamble scalars: (spot, strike, tau, r, q, sigma)."""
-    spot = pricing_env.spot
-    tau = product.get_maturity(pricing_env)
-    strike = getattr(product, "strike", spot)
-    r = pricing_env.get_rate(tau)
-    q = pricing_env.get_div_yield(tau)
-    sigma = pricing_env.get_vol(strike, tau)
-    return spot, strike, tau, r, q, sigma
 
 
 def _class_path(engine) -> str:
@@ -93,8 +104,9 @@ def _reverify(pricing_env, capture, recompute_fp, expected_fp, handle, cache, ta
         )
 
 
-def _grids_nbytes(grids) -> int:
-    return int(sum(np.asarray(arr).nbytes for arr in grids))
+def _layout_nbytes(layout) -> int:
+    arrays = (layout.spatial.x, layout.spatial.s, layout.spatial.dx, layout.time.t, layout.time.dt)
+    return int(sum(np.asarray(arr).nbytes for arr in arrays))
 
 
 def _coeffs_nbytes(sc) -> int:
@@ -107,22 +119,21 @@ def _coeffs_nbytes(sc) -> int:
 def _packs_nbytes(value) -> int:
     """Measured banded bytes + estimated splu bytes (SuperLU is opaque; use
     3.5x the M1 sparse size as a conservative per-entry stand-in)."""
-    matrix_pack, banded_pack = value
     total = 0
-    for m1, _lu in matrix_pack.values():
+    for m1, _lu in value[Backend.SPARSE_LU].values():
         m1_bytes = m1.data.nbytes + m1.indices.nbytes + m1.indptr.nbytes
         total += int(3.5 * m1_bytes)
-    for entry in banded_pack.values():
+    for entry in value[Backend.BANDED].values():
         total += sum(np.asarray(arr).nbytes for arr in entry)
     return total + 1024
 
 
 def grid_state(engine, product, pricing_env, context) -> ArtifactState:
-    """Spatial + event-aligned time grids behind a descriptor."""
-    spot, strike, tau, r, q, sigma = market_scalars(product, pricing_env)
+    """The Layout a march binds (``bind_layout``) behind a descriptor; the value
+    is ``None`` for a request with a terminal outcome (nothing to prepare)."""
 
     def build():
-        return engine._build_grids(product, pricing_env, spot, sigma, tau, r, q)
+        return bind_layout(engine, product, pricing_env, _PRICE)
 
     cache = getattr(context, "artifact_cache", None)
     if not engine._is_cache_enabled() or cache is None:
@@ -131,26 +142,14 @@ def grid_state(engine, product, pricing_env, context) -> ArtifactState:
     capture = _env_capture(pricing_env)
 
     def key_fp():
-        # grid_request depends on resolved solve state (a knocked-in product
-        # drops the discrete-KI interior nodes): prepare BEFORE fingerprinting,
-        # exactly as _grids_via_layer does before binding — otherwise the
-        # initial fingerprint captures unprepared geometry and reverify (post-build)
-        # sees a different request, a self-inflicted DeterminismViolation.
-        prep = getattr(engine, "_prepare_for_request", None)
-        if prep is not None:
-            prep(product, pricing_env)
+        # the grid request after the solve state it depends on (a knocked-in
+        # product drops the discrete-KI interior nodes): prepare steps 0-4
+        geometry = request_geometry(engine, product, pricing_env, _PRICE)
+        if geometry is None:
+            return None
+        grid_request, market = geometry
         return try_fingerprint(
-            (
-                "pde-grid",
-                _class_path(engine),
-                engine.grid_request(
-                    product,
-                    engine.market_snapshot(product, pricing_env),
-                    tau,
-                ),
-                engine.market_snapshot(product, pricing_env),
-                engine.grid_binder.config.key,
-            )
+            ("pde-grid", _class_path(engine), grid_request, market, engine.grid_binder.config.key)
         )
 
     fp = key_fp()
@@ -163,59 +162,43 @@ def grid_state(engine, product, pricing_env, context) -> ArtifactState:
         builder_version=_BUILDER_VERSION,
     )
     handle = cache.get_or_build(
-        descriptor, build, size_bytes=256 * 1024, measure=_grids_nbytes
+        descriptor, build, size_bytes=256 * 1024, measure=_layout_nbytes
     )
     _reverify(pricing_env, capture, key_fp, fp, handle, cache, _GRID_TAGS)
     return ArtifactState(handle.value, descriptor, handle, fp)
 
 
 def step_coefficients_state(
-    engine, product, pricing_env, grids, grid_fp, extra_fp, context
+    engine, product, pricing_env, layout, context, lv_surface_fp=None
 ) -> ArtifactState:
-    """Per-step operator coefficient sets (the materialized term context).
+    """Per-step operator coefficient sets on ``layout`` (PRE-flat-exact; the
+    adapter's ``coefficients`` hook applies the flat-exact replacement on the
+    injected and the built path alike).
 
-    ``extra_fp`` carries the market identity beyond the grid key: the curve
-    fingerprint for the base family, the Dupire-surface fingerprint (plus the
-    curve fingerprint) for the LV family. The stored value is PRE-flat-exact;
-    the solve applies ``_flat_exact_step_coefficients`` identically on both
-    the injected and the built path.
+    Keyed by the coefficients' identity (decision 18): the layout, every
+    sampler input, the operator and -- local vol -- the surface. No key (an
+    unfingerprintable market) builds fresh and stores nothing.
     """
-    x_vec, _s_vec, dx_vec, t_vec, _dt_vec = grids
-    _spot, strike, _tau, _r, _q, _sigma = market_scalars(product, pricing_env)
-    num_x = len(x_vec)
 
     def build():
-        return engine._build_step_coefficients(
-            pricing_env, strike, t_vec, dx_vec, num_x
-        )
+        return session_step_sets(engine, product, pricing_env, layout)
 
     cache = getattr(context, "artifact_cache", None)
-    if (
-        not engine._is_cache_enabled()
-        or cache is None
-        or grid_fp is None
-        or extra_fp is None
-    ):
+    if not engine._is_cache_enabled() or cache is None:
         return ArtifactState(build(), None, None, None)
 
     capture = _env_capture(pricing_env)
-    curves_fp = try_fingerprint(
-        (pricing_env.rate_curve, pricing_env.div_yield, pricing_env.vol_surface)
-    )
-    if curves_fp is None:
-        return ArtifactState(build(), None, None, None)
+    strike = engine.adapter._strike(product, pricing_env)
+    operator_fp = component_fingerprint(CentralDifference())
 
     def key_fp():
-        live_curves = try_fingerprint(
-            (pricing_env.rate_curve, pricing_env.div_yield, pricing_env.vol_surface)
-        )
-        return try_fingerprint(
-            ("pde-step-coeffs", _class_path(engine), grid_fp, extra_fp, live_curves)
-        )
+        key = coefficient_key(layout.fingerprint, market_fingerprints(pricing_env), strike,
+                              operator_fp, lv_surface_fp)
+        if key is None:
+            return None
+        return try_fingerprint(("pde-step-coeffs", _class_path(engine), *key))
 
-    fp = try_fingerprint(
-        ("pde-step-coeffs", _class_path(engine), grid_fp, extra_fp, curves_fp)
-    )
+    fp = key_fp()
     if fp is None:
         return ArtifactState(build(), None, None, None)
     descriptor = ArtifactDescriptor(
@@ -231,54 +214,82 @@ def step_coefficients_state(
     return ArtifactState(handle.value, descriptor, handle, fp)
 
 
-# Eager packs hold at most this many factorization entries; further keys
-# fall through to the engine's bounded lazy per-solve caches, bitwise
-# identically (code-gate finding 2026-07-16: LV coefficients create one key
-# per step, so an uncapped eager build could allocate far beyond the
-# reserved estimate).
+# Warmed packs hold at most this many factorization entries; further keys
+# fall through to the march's own cache, bitwise identically (code-gate
+# finding 2026-07-16: LV coefficients create one key per step, so an uncapped
+# eager build could allocate far beyond the reserved estimate).
 _PACK_MAX_ENTRIES = 64
 
-_EMPTY_PACKS = (types.MappingProxyType({}), types.MappingProxyType({}))
+_EMPTY_PACKS = types.MappingProxyType(
+    {Backend.SPARSE_LU: types.MappingProxyType({}), Backend.BANDED: types.MappingProxyType({})}
+)
+
+
+def _marched_problem(problem, engine):
+    """The prepared problem ``engine`` marches: a composite's own part (a knock-in's
+    knock-out leg); ``None`` when nothing is marched (a terminal outcome)."""
+    if isinstance(problem, CompositeProblem):
+        own = [p for p in problem.parts if p.solver is engine]
+        problem = own[0] if own else None
+    if problem is None or problem.terminal is not None:
+        return None
+    return problem
+
+
+def _group_schedules(prepared) -> tuple:
+    """Each group's θ per step: the schedule, θ=1 on zero-diffusion sets for a
+    group with the override (decision 17)."""
+    coeffs = prepared.coefficients
+    out = []
+    for group in prepared.groups:
+        theta = np.array(prepared.theta_schedule, dtype=float)
+        if group.policy.zero_diffusion_theta_one:
+            for j in range(len(theta)):
+                if coeffs.is_zero_diffusion(coeffs.set_at(j)):
+                    theta[j] = 1.0
+        out.append(theta)
+    return tuple(out)
 
 
 def factorization_state(
-    engine, product, pricing_env, grids, coeff_fp, context
+    engine, product, pricing_env, layout, coefficients, coeff_fp, context
 ) -> ArtifactState:
-    """Eager, size-bounded (matrix_pack, banded_pack) maps behind a descriptor.
+    """Warmed, size-bounded factorizations ``{backend: mapping}`` behind a descriptor.
 
-    Legality (spec section 9.2): the key derives from the coefficient
-    fingerprint (which encodes grid + market + params identity) plus the
-    banded-solver policy bit, so a hit proves identical coefficients, time
-    steps, theta schedule, and scheme. The caller must have injected the
-    coefficient artifact on ``engine`` BEFORE calling this (plan-gate
-    ordering finding) so the builder consumes it via
-    ``_step_coefficients_for_solve``.
+    Legality (spec section 9.2): the key is the coefficient fingerprint (grid +
+    market + operator identity), the stepper, the groups' backends and their θ
+    schedules, so a hit proves identical coefficients, time steps, θ and scheme.
+    The packs are ``march.warm_factorizations`` over the problem the session's
+    march prepares -- the march's own entries, in march order.
 
-    Budget honesty (code-gate finding 2026-07-16): the eager build is
-    bounded to ``_PACK_MAX_ENTRIES`` entries — the same bound the admission
-    estimate charges — and when even the bounded estimate exceeds the
-    configured artifact budget the pack is skipped BEFORE any allocation
-    (empty packs; the solve builds its factorizations lazily, bitwise
-    identically).
+    Budget honesty (code-gate finding 2026-07-16): the build is bounded to
+    ``_PACK_MAX_ENTRIES`` entries -- the bound the admission estimate charges --
+    and when even that estimate exceeds the configured artifact budget the pack
+    is skipped BEFORE any allocation (empty packs; the march builds its
+    factorizations itself, bitwise identically).
     """
-    x_vec = grids[0]
-    n_steps = max(1, len(grids[3]) - 1)
-    estimate = min(n_steps, _PACK_MAX_ENTRIES) * len(x_vec) * 8 * 12 + (1 << 20)
+    from quantark.asset.equity.engine.pde.core.march import warm_factorizations
 
-    def build():
-        matrix_pack, banded_pack = engine._session_factorization_packs(
-            product, pricing_env, grids, max_entries=_PACK_MAX_ENTRIES
-        )
-        return (
-            types.MappingProxyType(matrix_pack),
-            types.MappingProxyType(banded_pack),
-        )
-
+    n_steps = max(1, len(layout.time.t) - 1)
+    estimate = min(n_steps, _PACK_MAX_ENTRIES) * len(layout.spatial.x) * 8 * 12 + (1 << 20)
     budget = getattr(
         getattr(context, "resource_budget", None), "artifact_cache_bytes", None
     )
     if budget is not None and estimate > budget:
         return ArtifactState(_EMPTY_PACKS, None, None, None)
+
+    prepared = _marched_problem(
+        prepare(engine, product, pricing_env, _PRICE,
+                session=SessionArtefacts(layout=layout, coefficients=coefficients)),
+        engine,
+    )
+    if prepared is None:
+        return ArtifactState(_EMPTY_PACKS, None, None, None)
+
+    def build():
+        return types.MappingProxyType(
+            warm_factorizations(prepared, max_entries=_PACK_MAX_ENTRIES)
+        )
 
     cache = getattr(context, "artifact_cache", None)
     if (
@@ -289,18 +300,23 @@ def factorization_state(
         return ArtifactState(build(), None, None, None)
 
     capture = _env_capture(pricing_env)
-    # The builder rereads live market values (r/q/sigma, theta schedule), so
-    # the post-build verification must recompute a LIVE market fingerprint —
-    # a static key recomputation cannot detect in-place mutation during the
-    # build (code-gate finding 2026-07-16).
+    # The post-build verification recomputes a LIVE market fingerprint, so an
+    # in-place mutation during the build is still caught (code-gate finding
+    # 2026-07-16).
     market_fp = try_fingerprint(
         (pricing_env.rate_curve, pricing_env.div_yield, pricing_env.vol_surface)
     )
     if market_fp is None:
         return ArtifactState(build(), None, None, None)
-    banded_policy = engine._pack_uses_banded(len(x_vec))
     fp = try_fingerprint(
-        ("pde-fact", _class_path(engine), coeff_fp, banded_policy)
+        (
+            "pde-fact",
+            _class_path(engine),
+            coeff_fp,
+            component_fingerprint(prepared.stepper),
+            tuple(g.backend.value for g in prepared.groups),
+            try_fingerprint(_group_schedules(prepared)),
+        )
     )
     if fp is None:
         return ArtifactState(build(), None, None, None)

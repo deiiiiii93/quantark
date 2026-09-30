@@ -108,17 +108,23 @@ class FamilyAdapter:
         return sample_bsm(env, layout.time.t, ref_strike=self._strike(product, env),
                           r_tau=r, q_tau=q, sigma_tau=sigma)
 
+    def step_sets(self, product, env, layout, tau):
+        """The per-step sets before the flat-exact replacement (the session's
+        step-coefficient artefact): the solver's memoized builder."""
+        dx, num_x = layout.spatial.dx, len(layout.spatial.x)
+        return self.solver._build_step_coefficients(env, self._strike(product, env), layout.time.t,
+                                                    dx, num_x)
+
     def coefficients(self, product, env, layout, tau, samples, session):
-        # _solve: the session's (pre-flat-exact) sets, else the memoized builder;
+        # _solve: the session's (pre-flat-exact) sets, else step_sets;
         # the flat-exact replacement; the scalar stencil when one set remains
         solver = self.solver
-        strike = self._strike(product, env)
         dx, num_x = layout.spatial.dx, len(layout.spatial.x)
         r, q, sigma = self._scalars(product, env, tau)
         if session is not None and session.coefficients is not None:
             sc = session.coefficients
         else:
-            sc = solver._build_step_coefficients(env, strike, layout.time.t, dx, num_x)
+            sc = self.step_sets(product, env, layout, tau)
         # The solver's own stencil and flat-exact methods: a subclass override stays in force.
         flat = solver._calculate_coefficients(r, q, sigma, dx, num_x)
         sc = solver._flat_exact_step_coefficients(sc, r, q, sigma, dx, num_x)

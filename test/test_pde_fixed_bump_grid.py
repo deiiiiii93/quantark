@@ -86,29 +86,17 @@ def _phoenix() -> PhoenixOption:
 
 def _base_spatial_bounds(solver, product, pricing_env):
     # Layer-native: bounds come from binding the declarative request.
-    prep = getattr(solver, "_prepare_for_request", None)
-    tau = (
-        prep(product, pricing_env)
-        if prep is not None
-        else product.get_maturity(pricing_env)
-    )
-    market = solver.market_snapshot(product, pricing_env)
-    layout = solver.grid_binder.bind(
-        solver.grid_request(product, market, tau), market
-    )
-    return layout.spatial.bounds
+    from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, bind_layout
+
+    return bind_layout(solver, product, pricing_env, OutputRequest(Operation.PRICE)).spatial.bounds
 
 
 def _effective_spatial_bounds(solver, product, pricing_env):
-    tau = product.get_maturity(pricing_env)
-    spot = pricing_env.spot
-    strike = getattr(product, "strike", spot)
-    rate = pricing_env.get_rate(tau)
-    div = pricing_env.get_div_yield(tau)
-    vol = pricing_env.get_vol(strike, tau)
-    _, s_vec, _, _, _ = solver._build_grids(
-        product, pricing_env, spot, vol, tau, rate, div
-    )
+    # the layout the solver's own march binds (a bump context's frozen one)
+    from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare
+
+    s_vec = prepare(solver, product, pricing_env, OutputRequest(Operation.PRICE),
+                    frozen=solver._frozen_base_layout).layout.spatial.s
     return float(s_vec[0]), float(s_vec[-1])
 
 

@@ -23,8 +23,6 @@ from scipy.special import ndtr
 
 _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
-from quantark.asset.equity.engine.pde.core.backends import FactorizationCache, banded_factor
-from quantark.asset.equity.engine.pde.core.groups import Backend
 from quantark.asset.equity.engine.pde.core.adapters.snowball import SnowballAdapter
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
 from quantark.asset.equity.engine.pde.base_pde_solver import (
@@ -307,11 +305,6 @@ class SnowballPDESolver(BasePDESolver):
         # Time tracking
         self._total_tau: float = 0.0
         self._structured_terminal_delay_df: float = 1.0
-        # The banded store is BasePDESolver._factorizations (``_banded_cache``
-        # is its read-only view), LRU-bounded at BANDED_CACHE_MAX_ENTRIES.
-        # Session-injected banded factorization pack (read-only; see
-        # BasePDESolver._session_matrix_pack for the contract).
-        self._session_banded_pack = None
         self._profile_enabled = enable_profiling
         self._profile_stats: Dict[str, float] = {}
         self._ko_records_cache: "OrderedDict[Tuple, List[ResolvedObservationRecord]]" = OrderedDict()
@@ -328,6 +321,9 @@ class SnowballPDESolver(BasePDESolver):
         # mutated (or GC'd and id-reused) between solves can never hit a stale
         # token.
         self._product_token_memo: Dict[Tuple[int, str], Tuple[str, object]] = {}
+
+    def _constructor_kwargs(self) -> dict:
+        return {**super()._constructor_kwargs(), "enable_profiling": self._profile_enabled}
 
     def enable_profiling(self, enabled: bool = True) -> None:
         """Toggle internal timing breakdown collection."""
@@ -1024,8 +1020,8 @@ class SnowballPDESolver(BasePDESolver):
         """Whether the time grid carries the interior daily-KI nodes.
 
         SINGLE source of truth for a decision two places must agree on:
-        ``_time_grid_spec`` builds the grid, and ``_build_grids`` demands that
-        every KI observation land on a node.  A regime that drops the nodes
+        ``grid_request`` declares the grid, and the observation maps demand
+        that every KI observation land on a node.  A regime that drops the nodes
         but still demands them raises ``ValidationError`` at pricing time, so
         both read this predicate rather than re-deriving the condition.
 
@@ -1159,14 +1155,15 @@ class SnowballPDESolver(BasePDESolver):
 
         ``grid_request`` cannot take one (it is a frozen geometry declaration
         shared by every solver), so the caller must have run
-        ``_prepare_for_request`` or ``_stash_grid_request_env`` first. Both do.
+        ``_stash_grid_request_env`` first; the adapter's solve state does
+        (``core.prepare.request_geometry`` for a caller outside a solve).
         """
         env = self._grid_request_env
         if env is None:
             raise ValidationError(
                 f"a date-based {what} observation schedule needs a pricing environment to "
                 "resolve its observation times, but the grid was requested without one: "
-                "call _prepare_for_request(product, pricing_env) before grid_request"
+                "resolve it through core.prepare.request_geometry before grid_request"
             )
         return env
 
@@ -1231,8 +1228,8 @@ class SnowballPDESolver(BasePDESolver):
         ``_ko_coupon_align_times`` (must-be-nodes), daily-KI dates from
         ``_ki_monitor_times`` gated by ``_ki_nodes_in_grid`` (dropped for
         already-knocked-in products). Requires the solve state and the
-        environment first — ``_solve`` guarantees the order; external callers
-        go through ``_prepare_for_request``.
+        environment first — the adapter's solve state guarantees the order;
+        external callers go through ``core.prepare.request_geometry``.
         """
         strike = float(product.strike)
         align = self._ko_coupon_align_times(product, tau)
@@ -1252,15 +1249,6 @@ class SnowballPDESolver(BasePDESolver):
             event_times=tuple(sorted(set(align) | set(monitor))),
             extra_times=() if extra_times is None else tuple(extra_times),
         )
-
-    def _prepare_for_request(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> float:
-        """Resolve the solve state grid_request depends on; returns tau."""
-        self._grid_request_env = pricing_env
-        tau = product.get_maturity(pricing_env)
-        self._prepare_solve_state(product, pricing_env)
-        return tau
 
     def _populate_observation_maps(
         self,
@@ -1397,49 +1385,6 @@ class SnowballPDESolver(BasePDESolver):
 
         for grid in grids:
             grid[mask, -1] = cashflow_value
-
-    def _get_banded_system(
-        self,
-        l: np.ndarray,
-        c: np.ndarray,
-        u: np.ndarray,
-        dt: float,
-        theta: float,
-        coeff_key: int = 0,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        # A prepared session's pack first, then the per-solver LRU store.
-        pack = self._session_banded_pack
-        if pack is not None:
-            hit = pack.get(FactorizationCache.key(coeff_key, dt, theta))
-            if hit is not None:
-                return hit
-        return self._factorizations.get(
-            Backend.BANDED, coeff_key, dt, theta, lambda: banded_factor(l, c, u, dt, theta)
-        )
-
-    def _pack_uses_banded(self, num_x: int) -> bool:
-        # The two-surface family: banded whenever the interior system is
-        # non-trivial (mirrors the value group, SnowballAdapter.value_groups).
-        return (num_x - 2) > 2
-
-    def _pack_banded_entry(
-        self, banded: dict, step_coeffs, l, c, u, dt, theta, coeff_key
-    ) -> None:
-        # Route through _get_banded_system itself (single construction
-        # implementation) against a throwaway cache. FIRST build wins,
-        # mirroring the engine's own cache: distinct dt floats can round to
-        # one 12-digit key, and the march reuses the first-built entry for
-        # all of them — the pack must hold that same entry bitwise.
-        key = FactorizationCache.key(coeff_key, dt, theta)
-        if key in banded:
-            return
-        saved = self._factorizations
-        self._factorizations = FactorizationCache(enabled=self._cache_enabled)
-        try:
-            entry = self._get_banded_system(l, c, u, dt, theta, coeff_key=coeff_key)
-            banded[key] = entry
-        finally:
-            self._factorizations = saved
 
     def _set_boundary_conditions_v0(
         self,

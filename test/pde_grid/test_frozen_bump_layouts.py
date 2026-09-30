@@ -93,8 +93,11 @@ def test_calendar_roll_rebinds_time_keeps_spatial():
         hard_upper=None,
         event_times=tuple(t - roll for t in fr.event_times if t - roll > 0),
     )
+    from quantark.asset.equity.engine.pde.grid import resolve_bound_layout
+
     market = ctx.market_snapshot(product, base_env)
-    rolled = ctx._bound_layout_for_solve(rolled_request, market)
+    # prepare step 5 on a bump context: its frozen layout, rebound in time
+    rolled = resolve_bound_layout(ctx.grid_binder, ctx._frozen_base_layout, rolled_request, market)
     assert rolled is not frozen
     assert rolled.spatial is frozen.spatial  # spatial identity retained
     assert rolled.time is not frozen.time

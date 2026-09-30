@@ -85,7 +85,7 @@ class SnowballAdapter(FamilyAdapter):
 
     def solve_state(self, product, env, request):
         # _solve's state preamble, then the environment grid_request resolves
-        # date schedules against (_prepare_for_request / _stash_grid_request_env)
+        # date schedules against (_stash_grid_request_env)
         solver = self.solver
         knocked_in = solver._prepare_solve_state(product, env)
         solver._stash_grid_request_env(env)
@@ -443,7 +443,11 @@ class LocalVolAdapterMixin:
 
     def observation_maps(self, product, env, layout, tau) -> None:
         super().observation_maps(product, env, layout, tau)
-        self.solver._active_s_vec = layout.spatial.s   # the LV _build_grids override
+        self.solver._active_s_vec = layout.spatial.s   # the S grid the local vol is sampled on
+
+    def step_sets(self, product, env, layout, tau):
+        self.solver._active_s_vec = layout.spatial.s   # a session builds them before any solve
+        return super().step_sets(product, env, layout, tau)
 
 
 class LocalVolSnowballAdapter(LocalVolAdapterMixin, SnowballAdapter):
