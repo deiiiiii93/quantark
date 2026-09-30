@@ -17,6 +17,7 @@ from quantark.util.enum import DoubleBarrierType, ObservationType, ObservationAg
 from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
+from .core.adapters.barrier import DoubleBarrierAdapter
 
 
 class DoubleBarrierPDESolver(BasePDESolver):
@@ -35,6 +36,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
     """
 
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    _adapter_class = DoubleBarrierAdapter
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -52,202 +54,6 @@ class DoubleBarrierPDESolver(BasePDESolver):
         super().__init__(params)
         # Discrete-monitoring state is initialized by BasePDESolver and
         # populated by the shared _setup_observation_indices.
-
-    def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> float:
-        """
-        Price a double barrier option using PDE method.
-
-        For knock-in options, uses: Knock-in = Vanilla - Knock-out
-
-        Args:
-            product: Double barrier option
-            pricing_env: Pricing environment
-
-        Returns:
-            Option price
-
-        Raises:
-            PricingError: If product is not a double barrier option
-        """
-        if not isinstance(product, DoubleBarrierOption):
-            raise PricingError(
-                f"DoubleBarrierPDESolver only supports DoubleBarrierOption, "
-                f"got {type(product).__name__}"
-            )
-
-        # Check if barrier is already hit (outside corridor)
-        spot = pricing_env.spot
-        if product.is_barrier_hit(spot):
-            if product.is_knock_out:
-                # Already knocked out
-                return self._cashflow_value_at_time(
-                    pricing_env,
-                    product.rebate,
-                    0.0,
-                    self._event_payment_time(product, pricing_env, 0.0),
-                )
-            else:
-                # Knocked in, price as vanilla
-                return self._price_vanilla(product, pricing_env)
-
-        if product.is_knock_in:
-            # Knock-in = Vanilla - Knock-out
-            vanilla_price = self._price_vanilla(product, pricing_env)
-            ko_price = self._price_knock_out(product, pricing_env)
-            return vanilla_price - ko_price
-        else:
-            # Direct knock-out pricing
-            return super().price(product, pricing_env)
-
-    def _price_vanilla(
-        self, product: DoubleBarrierOption, pricing_env: PricingEnvironment
-    ) -> float:
-        """
-        Price the underlying vanilla option.
-        """
-        from quantark.asset.equity.product.option import EuropeanVanillaOption
-        from .european_pde_solver import EuropeanPDESolver
-
-        vanilla = EuropeanVanillaOption(
-            strike=product.strike,
-            option_type=product.option_type,
-            maturity=product.maturity,
-            exercise_date=product.exercise_date,
-            settlement_date=product.settlement_date,
-            settlement_convention=product.settlement_convention,
-        )
-
-        solver = EuropeanPDESolver(self.params)
-        return solver.price(vanilla, pricing_env)
-
-    def _price_knock_out(
-        self, product: DoubleBarrierOption, pricing_env: PricingEnvironment
-    ) -> float:
-        """
-        Price as knock-out (for knock-in decomposition).
-        """
-        ko_product = DoubleBarrierOption(
-            strike=product.strike,
-            option_type=product.option_type,
-            upper_barrier=product.upper_barrier,
-            lower_barrier=product.lower_barrier,
-            barrier_type=DoubleBarrierType.KNOCK_OUT,
-            maturity=product.maturity,
-            exercise_date=product.exercise_date,
-            settlement_date=product.settlement_date,
-            rebate=0.0,  # Zero rebate for decomposition
-            observation_type=product.observation_type,
-            observation_dates=product.observation_dates,
-            observation_schedule=product.observation_schedule,
-            settlement_convention=product.settlement_convention,
-        )
-
-        return super().price(ko_product, pricing_env)
-
-    def calculate_greeks(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> Dict[str, float]:
-        """
-        Calculate Greeks for a double barrier option using PDE method.
-
-        For knock-in options, uses: Greeks_KI = Greeks_Vanilla - Greeks_KO
-
-        Args:
-            product: Double barrier option
-            pricing_env: Pricing environment
-
-        Returns:
-            Dictionary with price, delta, gamma
-
-        Raises:
-            PricingError: If product is not a double barrier option
-        """
-        if not isinstance(product, DoubleBarrierOption):
-            raise PricingError(
-                f"DoubleBarrierPDESolver only supports DoubleBarrierOption, "
-                f"got {type(product).__name__}"
-            )
-
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        # Handle expired case
-        if tau <= 0:
-            return {
-                "price": self._calculate_intrinsic(product, spot),
-                "delta": self._intrinsic_delta(product, spot),
-                "gamma": 0.0,
-            }
-
-        # Check if barrier is already hit (outside corridor)
-        if product.is_barrier_hit(spot):
-            if product.is_knock_out:
-                # Already knocked out: rebate is constant, so delta=gamma=0
-                return {"price": product.rebate, "delta": 0.0, "gamma": 0.0}
-            else:
-                # Knocked in: return vanilla Greeks
-                return self._calculate_greeks_vanilla(product, pricing_env)
-
-        if product.is_knock_in:
-            # Knock-in = Vanilla - Knock-out decomposition
-            vanilla_greeks = self._calculate_greeks_vanilla(product, pricing_env)
-            ko_greeks = self._calculate_greeks_knock_out(product, pricing_env)
-
-            return {
-                "price": vanilla_greeks["price"] - ko_greeks["price"],
-                "delta": vanilla_greeks["delta"] - ko_greeks["delta"],
-                "gamma": vanilla_greeks["gamma"] - ko_greeks["gamma"],
-            }
-        else:
-            # Direct knock-out pricing
-            return super().calculate_greeks(product, pricing_env)
-
-    def _calculate_greeks_vanilla(
-        self, product: DoubleBarrierOption, pricing_env: PricingEnvironment
-    ) -> Dict[str, float]:
-        """
-        Calculate Greeks for the underlying vanilla option.
-        """
-        from quantark.asset.equity.product.option import EuropeanVanillaOption
-        from .european_pde_solver import EuropeanPDESolver
-
-        vanilla = EuropeanVanillaOption(
-            strike=product.strike,
-            option_type=product.option_type,
-            maturity=product.maturity,
-            exercise_date=product.exercise_date,
-            settlement_date=product.settlement_date,
-            settlement_convention=product.settlement_convention,
-        )
-
-        solver = EuropeanPDESolver(self.params)
-        return solver.calculate_greeks(vanilla, pricing_env)
-
-    def _calculate_greeks_knock_out(
-        self, product: DoubleBarrierOption, pricing_env: PricingEnvironment
-    ) -> Dict[str, float]:
-        """
-        Calculate Greeks as knock-out (for knock-in decomposition).
-        """
-        ko_product = DoubleBarrierOption(
-            strike=product.strike,
-            option_type=product.option_type,
-            upper_barrier=product.upper_barrier,
-            lower_barrier=product.lower_barrier,
-            barrier_type=DoubleBarrierType.KNOCK_OUT,
-            maturity=product.maturity,
-            exercise_date=product.exercise_date,
-            settlement_date=product.settlement_date,
-            rebate=0.0,  # Zero rebate for decomposition
-            observation_type=product.observation_type,
-            observation_dates=product.observation_dates,
-            observation_schedule=product.observation_schedule,
-            settlement_convention=product.settlement_convention,
-        )
-
-        return super().calculate_greeks(ko_product, pricing_env)
 
     def set_terminal_condition(
         self,

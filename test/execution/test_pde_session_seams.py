@@ -31,12 +31,19 @@ def _dist_equal(a, b) -> bool:
 
 class TestPriceWithSolution:
     def test_price_equals_seam_pv_vanilla(self):
+        from quantark.asset.equity.engine.pde.core.march import march
+        from quantark.asset.equity.engine.pde.core.prepare import (
+            Operation, OutputRequest, prepare,
+        )
+
         engine, product, env = _case("EuropeanPDESolver")
-        pv, solution = engine._price_with_solution(product, env)
-        assert engine.price(product, env) == pv
-        assert solution is not None
+        out = engine._session_outputs(product, env, want_grid=True)
+        assert engine.price(product, env) == out.npv
+        assert out.solution is not None
         assert np.array_equal(
-            solution.solution_vec, engine._solve(product, env).solution_vec
+            out.solution.solution_vec,
+            march(prepare(engine, product, env, OutputRequest(Operation.PRICE)))
+            .states["value"][:, 0],
         )
 
     def test_price_equals_seam_pv_snowball(self):

@@ -44,6 +44,14 @@ from quantark.asset.equity.engine.pde.core.components import (
 from quantark.asset.equity.engine.pde.core.groups import Backend
 from quantark.asset.equity.engine.pde.core.identity import market_fingerprints
 from quantark.asset.equity.engine.pde.core.samples import sample_bsm
+from quantark.asset.equity.engine.pde.core.adapters.base import FamilyAdapter
+from quantark.asset.equity.engine.pde.core.prepare import (
+    Operation,
+    OutputRequest,
+    SessionArtefacts,
+    prepare,
+    run,
+)
 from quantark.asset.equity.engine.pde.grid import (
     EventSchedule,
     GridBinder,
@@ -831,91 +839,6 @@ class BasePDESolver(BaseEngine):
             points.append(product.strike)
         return points
 
-    @_market_scoped
-    def _solve(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> PDESolutionResult:
-        """
-        Core PDE solving logic shared by price() and calculate_greeks().
-
-        This method contains all the common grid building, terminal condition setup,
-        and time stepping logic. Subclasses can override this method to implement
-        custom solving strategies (e.g., two-surface approach for Snowball).
-
-        Args:
-            product: The equity product to price
-            pricing_env: Pricing environment with market data
-
-        Returns:
-            PDESolutionResult containing solution vector and grid data
-
-        Note:
-            This method assumes tau > 0 (not expired). Callers should handle
-            the expired case before calling _solve().
-        """
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        strike = getattr(product, "strike", spot)
-        r = pricing_env.get_rate(tau)
-        q = pricing_env.get_div_yield(tau)
-        sigma = pricing_env.get_vol(strike, tau)
-
-        # This PDE solver diffuses with a single strike-selected constant vol;
-        # a smile surface is collapsed (skew ignored). Make that explicit.
-        from quantark.param.vol.collapse_guard import guard_constant_vol
-        guard_constant_vol(
-            pricing_env.vol_surface, type(self).__name__,
-            strict=getattr(self.params, "strict_smile", False),
-        )
-
-        # 1. Discretization
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
-
-        # 2. Setup System
-        grid = np.zeros((len(x_vec), len(t_vec)))
-        self.set_terminal_condition(grid, x_vec, s_vec, product, pricing_env)
-
-        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, len(x_vec))
-        A = self._build_operator_matrix(l, c, u, len(x_vec))
-
-        # Term-structure step coefficients: one set for flat inputs (exact
-        # scalar substitution -> zero behavior change), one per unique
-        # forward triple otherwise (designed per-step rebuild).
-        sc = self._step_coefficients_for_solve(
-            pricing_env, strike, t_vec, dx_vec, len(x_vec)
-        )
-        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, len(x_vec))
-        step_coeffs = None if sc.n_unique == 1 else sc
-
-        # 3. Solve
-        self._time_stepping(
-            grid,
-            A,
-            l,
-            u,
-            x_vec,
-            s_vec,
-            t_vec,
-            dt_vec,
-            product,
-            pricing_env,
-            r,
-            q,
-            sigma,
-            tau,
-            step_coeffs=step_coeffs,
-        )
-
-        return PDESolutionResult(
-            solution_vec=grid[:, 0],
-            x_vec=x_vec,
-            s_vec=s_vec,
-            spot_log=np.log(spot),
-        )
-
     def _prepare_solve_state(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ):
@@ -929,32 +852,29 @@ class BasePDESolver(BaseEngine):
         """
         return None
 
-    def _price_with_solution(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> Tuple[float, Optional[PDESolutionResult]]:
-        """price()'s preamble + one solve; None solution = short-circuit.
+    #: The family seam (spec 2 §5.1): each solver names its adapter class.
+    _adapter_class = FamilyAdapter
 
-        Native session seam: valid only where ``price`` delegates to it (the
-        2D ADI autocallable solvers override ``price`` entirely and never use
-        this).
-        """
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
+    @property
+    def adapter(self) -> FamilyAdapter:
+        """This solver's family adapter, built once (a copy of the solver rebuilds its own)."""
+        adapter = self.__dict__.get("_adapter")
+        if adapter is None or adapter.solver is not self:
+            adapter = self._adapter_class(self)
+            self._adapter = adapter
+        return adapter
 
-        if tau <= 0:
-            return self._calculate_intrinsic(product, spot), None
-
-        result = self._solve(product, pricing_env)
-        return (
-            self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log),
-            result,
-        )
+    def _run(self, product, pricing_env, request, *, lifecycle_state=None):
+        """``run(prepare(...))`` with this solver's frozen layout and session artefacts."""
+        return run(prepare(self, product, pricing_env, request, lifecycle_state=lifecycle_state,
+                           frozen=self._frozen_base_layout,
+                           session=SessionArtefacts.from_solver(self, product, pricing_env)))
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
         """Price the option using the PDE finite difference method."""
-        return self._price_with_solution(product, pricing_env)[0]
+        return self._run(product, pricing_env, OutputRequest(Operation.PRICE))
 
     def _session_outputs(
         self,
@@ -966,44 +886,14 @@ class BasePDESolver(BaseEngine):
     ) -> PDESessionOutputs:
         """One value solve serving PV (+ grid projection). Event fields are
         autocallable-only; the base family always returns them as None."""
-        npv, solution = self._price_with_solution(product, pricing_env)
-        return PDESessionOutputs(
-            npv=float(npv),
-            solution=solution if want_grid else None,
-            event_stats=None,
-            event_distribution=None,
-        )
+        return self._run(product, pricing_env,
+                         OutputRequest(Operation.SESSION_OUTPUTS, grid=want_grid))
 
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Dict[str, float]:
         """Calculate Delta and Gamma directly from the PDE solution surface."""
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        if tau <= 0:
-            return {
-                "price": self._calculate_intrinsic(product, spot),
-                "delta": self._intrinsic_delta(product, spot),
-                "gamma": 0.0,
-            }
-
-        result = self._solve(product, pricing_env)
-        # Valuation-date events: price from the pointwise-exact readout,
-        # delta/gamma from the smooth 0+ branch column (a cash transition at
-        # the known spot is a constant shift with zero delta/gamma).
-        readout_vec = (
-            result.readout_vec if result.readout_vec is not None else result.solution_vec
-        )
-        if result.readout_override is not None:
-            price = float(result.readout_override)
-        else:
-            price = self._interpolate_price(readout_vec, result.x_vec, result.spot_log)
-        delta, gamma = self._calculate_delta_gamma(
-            readout_vec, result.x_vec, result.spot_log, spot
-        )
-
-        return {"price": price, "delta": delta, "gamma": gamma}
+        return self._run(product, pricing_env, OutputRequest(Operation.GREEKS, greeks=True))
 
     def calculate_spot_greeks_curve(
         self,
@@ -1020,8 +910,15 @@ class BasePDESolver(BaseEngine):
         if product.get_maturity(pricing_env) <= 0:
             return super().calculate_spot_greeks_curve(product, pricing_env, spots)
 
-        result = self._solve(product, pricing_env)
+        result = self._spot_curve_solution(product, pricing_env)
         return self._grid_projection_from_solution(result, spots)
+
+    def _spot_curve_solution(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> PDESolutionResult:
+        """The solved surface a spot Greeks curve reads: the value march's final column."""
+        return self._run(product, pricing_env,
+                         OutputRequest(Operation.SESSION_OUTPUTS, grid=True)).solution
 
     def _grid_projection_from_solution(
         self,
@@ -1163,63 +1060,6 @@ class BasePDESolver(BaseEngine):
         """Construct the sparse spatial operator matrix A."""
         return operator_matrix(l, c, u, num_x)
 
-    def _time_stepping(
-        self,
-        grid: np.ndarray,
-        A: sp.csc_matrix,
-        l: np.ndarray,
-        u: np.ndarray,
-        x_vec: np.ndarray,
-        s_vec: np.ndarray,
-        t_vec: np.ndarray,
-        dt_vec: np.ndarray,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        r: float,
-        q: float,
-        sigma: float,
-        tau: float,
-        step_coeffs: Optional[StepCoefficients] = None,
-    ) -> None:
-        """Backward time stepping using the Crank-Nicolson scheme."""
-        params: PDEParams = self.params
-        num_t, num_x = len(t_vec), len(x_vec)
-        I_int = sp.eye(num_x - 2, format="csc")
-        self._matrix_cache.clear()
-        self._term_A_cache: dict = {}
-
-        # Canonical damping schedule (terminal Rannacher + event smoothing),
-        # derived once from the bound layout (_theta_schedule_from_layout).
-        theta_by_step = self._theta_schedule_from_layout(self._active_layout)
-
-        for j in range(num_t - 2, -1, -1):
-            dt = dt_vec[j]
-            theta = float(theta_by_step[j])
-
-            if step_coeffs is not None:
-                k = int(step_coeffs.set_index[j])
-                if k in step_coeffs.zero_diffusion_sets:
-                    # upwind advection is monotone only fully implicit
-                    # (spec 2026-09-01 trading-clock-vol §4.5)
-                    theta = 1.0
-                l, _c_j, u = step_coeffs.lcu_sets[k]
-                A = self._operator_matrix_for_set(step_coeffs, k, num_x)
-            else:
-                k = 0
-            M1, M2_lu = self._get_matrices(I_int, A, dt, theta, coeff_key=k)
-            self.set_boundary_conditions(
-                grid, x_vec, s_vec, j, tau - t_vec[j], product, pricing_env
-            )
-
-            # Solve system for interior points
-            rhs = M1 @ grid[1:-1, j + 1]
-            self._inject_boundary_contributions(rhs, grid, l, u, j, dt, theta)
-            grid[1:-1, j] = M2_lu.solve(rhs)
-
-            self._apply_step_modifications(
-                grid, x_vec, s_vec, j, tau - t_vec[j], product, pricing_env
-            )
-
     def _inject_boundary_contributions(self, rhs, grid, l, u, j, dt, theta) -> None:
         """Add Dirichlet boundary terms to the RHS of the reduced interior system."""
         if len(grid) > 2:
@@ -1235,7 +1075,7 @@ class BasePDESolver(BaseEngine):
     def _operator_matrix_for_set(
         self, step_coeffs: StepCoefficients, k: int, num_x: int
     ) -> sp.csc_matrix:
-        """Lazy per-unique-set sparse operator (cleared per _time_stepping)."""
+        """Lazy per-unique-set sparse operator (reset by each legacy two-surface march)."""
         A = self._term_A_cache.get(k)
         if A is None:
             l, c, u = step_coeffs.lcu_sets[k]

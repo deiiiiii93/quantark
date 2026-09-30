@@ -9,19 +9,14 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.settlement_support import (
-    pending_receivable_pv,
-    resolve_terminal_timing,
-    terminal_lifecycle_pv,
-    validate_settlement_capability,
-)
+from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
-from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
-from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
+from .core.adapters.european import EuropeanAdapter
+from .core.prepare import Operation, OutputRequest
 
 
 class EuropeanPDESolver(BasePDESolver):
@@ -42,6 +37,7 @@ class EuropeanPDESolver(BasePDESolver):
 
     settlement_support = SettlementSupport.TERMINAL_ONLY
     supports_lifecycle_state = True
+    _adapter_class = EuropeanAdapter
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -78,26 +74,8 @@ class EuropeanPDESolver(BasePDESolver):
         Raises:
             PricingError: If product is not a European vanilla option
         """
-        if not isinstance(product, EuropeanVanillaOption):
-            raise PricingError(
-                f"EuropeanPDESolver only supports EuropeanVanillaOption, "
-                f"got {type(product).__name__}"
-            )
-
-        validate_settlement_capability(self, product, lifecycle_state)
-        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
-        if fixed_pv is not None:
-            return fixed_pv
-
-        timing = resolve_terminal_timing(product, pricing_env)
-        if product.get_maturity(pricing_env) <= 0.0:
-            contingent = (
-                self._calculate_intrinsic(product, pricing_env.spot)
-                * timing.delay_df
-            )
-        else:
-            contingent = super().price(product, pricing_env)
-        return contingent + pending_receivable_pv(lifecycle_state, pricing_env)
+        return self._run(product, pricing_env, OutputRequest(Operation.PRICE),
+                         lifecycle_state=lifecycle_state)
 
     def calculate_greeks(
         self,
@@ -107,28 +85,8 @@ class EuropeanPDESolver(BasePDESolver):
         lifecycle_state=None,
     ) -> Dict[str, float]:
         """Return grid Greeks plus any spot-invariant pending receivables."""
-        validate_settlement_capability(self, product, lifecycle_state)
-        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
-        if fixed_pv is not None:
-            return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
-
-        timing = resolve_terminal_timing(product, pricing_env)
-        if product.get_maturity(pricing_env) <= 0.0:
-            greeks = {
-                "price": (
-                    self._calculate_intrinsic(product, pricing_env.spot)
-                    * timing.delay_df
-                ),
-                "delta": (
-                    self._intrinsic_delta(product, pricing_env.spot)
-                    * timing.delay_df
-                ),
-                "gamma": 0.0,
-            }
-        else:
-            greeks = super().calculate_greeks(product, pricing_env)
-        greeks["price"] += pending_receivable_pv(lifecycle_state, pricing_env)
-        return greeks
+        return self._run(product, pricing_env, OutputRequest(Operation.GREEKS, greeks=True),
+                         lifecycle_state=lifecycle_state)
     
     def set_terminal_condition(
         self,

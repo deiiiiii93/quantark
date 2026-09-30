@@ -18,6 +18,7 @@ from quantark.util.exceptions import PricingError
 from quantark.util.numerical import Tolerance
 
 from .base_pde_solver import BasePDESolver
+from .core.adapters.barrier import DoubleOneTouchAdapter
 
 
 class DoubleOneTouchPDESolver(BasePDESolver):
@@ -37,6 +38,7 @@ class DoubleOneTouchPDESolver(BasePDESolver):
     """
 
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    _adapter_class = DoubleOneTouchAdapter
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -54,104 +56,6 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         super().__init__(params)
         # Discrete-monitoring state is initialized by BasePDESolver and
         # populated by the shared _setup_observation_indices.
-
-    def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> float:
-        """
-        Price a double one-touch or double no-touch option.
-
-        Args:
-            product: Double one-touch option
-            pricing_env: Pricing environment
-
-        Returns:
-            Option price
-
-        Raises:
-            PricingError: If product is not a double one-touch option
-        """
-        if not isinstance(product, DoubleOneTouchOption):
-            raise PricingError(
-                f"DoubleOneTouchPDESolver only supports DoubleOneTouchOption, "
-                f"got {type(product).__name__}"
-            )
-
-        # Check if barrier already hit (outside corridor)
-        spot = pricing_env.spot
-        if product.is_barrier_hit(spot):
-            if product.is_double_one_touch:
-                settlement_time = (
-                    self._event_payment_time(product, pricing_env, 0.0)
-                    if product.payment_at_hit
-                    else self._terminal_payment_time(product, pricing_env)
-                )
-                return self._cashflow_value_at_time(
-                    pricing_env,
-                    product.rebate,
-                    0.0,
-                    settlement_time,
-                )
-            else:
-                # No-touch already failed
-                return 0.0
-
-        return super().price(product, pricing_env)
-
-    def calculate_greeks(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> Dict[str, float]:
-        """
-        Calculate Greeks for a double one-touch or double no-touch option.
-
-        Args:
-            product: Double one-touch option
-            pricing_env: Pricing environment
-
-        Returns:
-            Dictionary with price, delta, gamma
-
-        Raises:
-            PricingError: If product is not a double one-touch option
-        """
-        if not isinstance(product, DoubleOneTouchOption):
-            raise PricingError(
-                f"DoubleOneTouchPDESolver only supports DoubleOneTouchOption, "
-                f"got {type(product).__name__}"
-            )
-
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        # Handle expired case
-        if tau <= 0:
-            return {
-                "price": self._calculate_intrinsic(product, spot),
-                "delta": self._intrinsic_delta(product, spot),
-                "gamma": 0.0,
-            }
-
-        # Check if barrier already hit (outside corridor)
-        if product.is_barrier_hit(spot):
-            if product.is_double_one_touch:
-                # Already touched, fixed rebate (delta=gamma=0)
-                settlement_time = (
-                    self._event_payment_time(product, pricing_env, 0.0)
-                    if product.payment_at_hit
-                    else self._terminal_payment_time(product, pricing_env)
-                )
-                price = self._cashflow_value_at_time(
-                    pricing_env,
-                    product.rebate,
-                    0.0,
-                    settlement_time,
-                )
-                return {"price": price, "delta": 0.0, "gamma": 0.0}
-            else:
-                # No-touch already failed
-                return {"price": 0.0, "delta": 0.0, "gamma": 0.0}
-
-        return super().calculate_greeks(product, pricing_env)
 
     def set_terminal_condition(
         self,

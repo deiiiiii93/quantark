@@ -690,6 +690,10 @@ class SnowballPDESolver(BasePDESolver):
             result,
         )
 
+    def _spot_curve_solution(self, product, pricing_env):
+        # The family's own solve until it marches on the core (Task 6).
+        return self._solve(product, pricing_env)
+
     def _session_outputs(
         self,
         product: BaseEquityProduct,

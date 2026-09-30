@@ -13,6 +13,7 @@ extras-scaling and can never move or drop a node. Damping schedules for the
 from __future__ import annotations
 
 import logging
+import dataclasses
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
@@ -62,6 +63,23 @@ class TimeLayout:
             if is_close(key, obs_time):
                 return idx
         raise KeyError(obs_time)
+
+    def __reduce__(self):
+        # mappingproxy does not pickle or deep-copy; rebuild from plain values.
+        state = {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
+        state["step_of"] = dict(self.step_of)
+        return (_rebuild_time_layout, (state,))
+
+
+def _rebuild_time_layout(state: dict) -> TimeLayout:
+    """``TimeLayout.__reduce__``'s constructor: read-only arrays, a read-only step map."""
+    state = dict(state)
+    for name in ("t", "dt"):
+        arr = np.array(state[name], dtype=float)
+        arr.setflags(write=False)
+        state[name] = arr
+    state["step_of"] = MappingProxyType(dict(state["step_of"]))
+    return TimeLayout(**state)
 
 
 def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:

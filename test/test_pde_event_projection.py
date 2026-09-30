@@ -1043,10 +1043,14 @@ class TestEventDampingPolicy:
         cfg = resolve_config("standard", GridConfig(
             time_steps=10, event_damping_steps=event_damping_steps,
             terminal_damping_steps=terminal_damping_steps))
-        tl = build_time(GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
-                                    hard_lower=None, hard_upper=None, event_times=(0.5,)), cfg)
-        solver = SnowballPDESolver(params=PDEParams(theta=0.5, event_theta=1.0))
-        return solver._theta_schedule_from_layout(types.SimpleNamespace(time=tl))
+        from quantark.asset.equity.engine.pde.core.components import scheme_stepper
+
+        req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
+                          hard_lower=None, hard_upper=None, event_times=(0.5,))
+        tl = build_time(req, cfg)
+        # the stepper owns the schedule (spec 2 decision 5); its counts come from the config
+        return scheme_stepper(PDEParams(theta=0.5, event_theta=1.0), cfg).schedule(
+            types.SimpleNamespace(time=tl, request=req))
 
     def test_event_damping_decoupled_from_auto_grid(self):
         """Two backward-Euler steps follow the event node (node 5 of 10)."""

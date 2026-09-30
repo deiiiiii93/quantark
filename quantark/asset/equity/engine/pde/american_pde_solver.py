@@ -15,16 +15,15 @@ from quantark.asset.equity.engine.settlement_support import (
     AmericanExerciseTimings,
     american_exercise_requires_dates,
     build_american_exercise_date_grid,
-    resolve_american_exercise_timings,
     resolve_terminal_timing,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
-from quantark.asset.equity.product.option.american_option import AmericanOption
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
+from .core.adapters.american import AmericanAdapter
 
 
 class AmericanPDESolver(BasePDESolver):
@@ -48,6 +47,7 @@ class AmericanPDESolver(BasePDESolver):
     """
 
     settlement_support = SettlementSupport.AMERICAN_EXERCISE
+    _adapter_class = AmericanAdapter
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -94,54 +94,6 @@ class AmericanPDESolver(BasePDESolver):
             )
             self._exercise_dates = dates
             self._exercise_date_times = times
-    
-    def price(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment
-    ) -> float:
-        """
-        Price an American option using PDE method with early exercise.
-        
-        Args:
-            product: American option
-            pricing_env: Pricing environment
-            
-        Returns:
-            Option price
-            
-        Raises:
-            PricingError: If product is not an American option
-        """
-        if not isinstance(product, AmericanOption):
-            raise PricingError(
-                f"AmericanPDESolver only supports AmericanOption, "
-                f"got {type(product).__name__}"
-            )
-
-        self._prepare_solve_state(product, pricing_env)
-        tau = product.get_maturity(pricing_env)
-        if tau <= 0.0:
-            timings = resolve_american_exercise_timings(
-                product,
-                pricing_env,
-                np.array([0.0]),
-                exercise_dates=self._exercise_dates,
-            )
-            self._exercise_timings = timings
-            return product.get_payoff(pricing_env.spot) * timings.delay_dfs[0]
-
-        value = super().price(product, pricing_env)
-        timings = self._exercise_timings
-        if timings is None:
-            raise PricingError(
-                "American exercise timings were not retained by the PDE solve"
-            )
-        valuation_obstacle = (
-            product.intrinsic_value(pricing_env.spot)
-            * timings.delay_dfs[0]
-        )
-        return max(value, valuation_obstacle)
     
     def set_terminal_condition(
         self,
@@ -281,86 +233,6 @@ class AmericanPDESolver(BasePDESolver):
         )
         grid[:, t_idx] = np.maximum(grid[:, t_idx], exercise_value)
 
-    def _time_stepping(
-        self,
-        grid,
-        A,
-        l,
-        u,
-        x_vec,
-        s_vec,
-        t_vec,
-        dt_vec,
-        product,
-        pricing_env,
-        r,
-        q,
-        sigma,
-        tau,
-        step_coeffs=None,
-    ) -> None:
-        """Resolve exercise payment timing once, then run the PDE march."""
-        node_dates = None
-        if american_exercise_requires_dates(product):
-            dates = self._exercise_dates
-            date_times = self._exercise_date_times
-            if dates is None or date_times is None:
-                raise PricingError(
-                    "American exercise dates must be resolved before "
-                    "building the PDE grid"
-                )
-            mapped: list[Optional[datetime]] = [None] * len(t_vec)
-            for date, date_time in zip(dates, date_times):
-                index = int(np.searchsorted(t_vec, date_time))
-                if (
-                    index >= len(t_vec)
-                    or float(t_vec[index]) != float(date_time)
-                ):
-                    raise PricingError(
-                        "American exercise date is not an exact PDE time node"
-                    )
-                mapped[index] = date
-            node_dates = tuple(mapped)
-
-        timings = resolve_american_exercise_timings(
-            product,
-            pricing_env,
-            t_vec,
-            exercise_dates=node_dates,
-        )
-        self._exercise_timings = timings
-
-        eligible_indices = np.flatnonzero(timings.eligible)
-        boundary_delay_dfs = np.empty(len(t_vec), dtype=float)
-        for index, node_time in enumerate(t_vec):
-            positions = eligible_indices[eligible_indices >= index]
-            next_index = int(
-                positions[0] if positions.size else eligible_indices[-1]
-            )
-            boundary_delay_dfs[index] = (
-                timings.payment_dfs[next_index]
-                / pricing_env.get_discount_factor(float(node_time))
-            )
-        self._exercise_boundary_delay_dfs = boundary_delay_dfs
-
-        super()._time_stepping(
-            grid,
-            A,
-            l,
-            u,
-            x_vec,
-            s_vec,
-            t_vec,
-            dt_vec,
-            product,
-            pricing_env,
-            r,
-            q,
-            sigma,
-            tau,
-            step_coeffs=step_coeffs,
-        )
-    
     def get_critical_points(
         self,
         product: BaseEquityProduct,

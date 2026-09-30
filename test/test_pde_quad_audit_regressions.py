@@ -102,16 +102,18 @@ class TestRannacherTerminalSmoothing:
         """The layout-derived per-step theta of a 10-step, event-free grid."""
         import types
 
-        from quantark.asset.equity.engine.pde import SnowballPDESolver
         from quantark.asset.equity.engine.pde.grid import GridConfig, GridRequest, resolve_config
         from quantark.asset.equity.engine.pde.grid.time import build_time
 
         cfg = resolve_config("standard", GridConfig(
             time_steps=10, terminal_damping_steps=terminal_damping_steps))
-        tl = build_time(GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
-                                    hard_lower=None, hard_upper=None, event_times=()), cfg)
-        return SnowballPDESolver(params=params)._theta_schedule_from_layout(
-            types.SimpleNamespace(time=tl))
+        from quantark.asset.equity.engine.pde.core.components import scheme_stepper
+
+        req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
+                          hard_lower=None, hard_upper=None, event_times=())
+        tl = build_time(req, cfg)
+        # the stepper owns the schedule (spec 2 decision 5); its counts come from the config
+        return scheme_stepper(params, cfg).schedule(types.SimpleNamespace(time=tl, request=req))
 
     def test_default_rannacher_smooths_first_backward_step(self):
         params = PDEParams()  # terminal_damping_steps=1 by default

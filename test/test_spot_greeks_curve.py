@@ -64,16 +64,19 @@ def test_base_engine_spot_curve_falls_back_to_repricing(monkeypatch):
 
 
 def test_pde_spot_curve_uses_one_solve_and_matches_point_greeks(monkeypatch):
+    from quantark.asset.equity.engine.pde.core import march as march_module
+
     engine = EuropeanPDESolver(params=PDEParams())
     calls = 0
-    original = engine._solve
+    original = march_module.march
 
-    def counted(product, env):
+    def counted(prepared):
         nonlocal calls
         calls += 1
-        return original(product, env)
+        return original(prepared)
 
-    monkeypatch.setattr(engine, "_solve", counted)
+    # one backward march (spec 2 §5.3) serves the whole curve
+    monkeypatch.setattr(march_module, "march", counted)
     spots = [90.0, 100.0, 110.0]
     curve = engine.calculate_spot_greeks_curve(_product(), _env(), spots)
 

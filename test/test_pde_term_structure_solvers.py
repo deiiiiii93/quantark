@@ -289,8 +289,14 @@ def test_step_coefficients_invalidate_when_div_or_vol_replaced():
     )
     from quantark.param.div.dividend_yield import TermStructureDividendYield
 
+    from quantark.param import FlatRateCurve
+
     solver = EuropeanPDESolver()
     env = make_term_env("kinked")
+    # The memo is value-keyed (spec 2 decisions 18/19): a market object without a
+    # value fingerprint (LinearRateCurve) gets no memo at all, so give the env a
+    # fingerprintable rate curve -- this test is about the div and vol inputs.
+    env.rate_curve = FlatRateCurve(0.03)
     t_vec = np.linspace(0.0, 1.0, 6)
     dx_vec = np.full(10, 0.02)
 
