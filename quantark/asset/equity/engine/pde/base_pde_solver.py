@@ -115,7 +115,7 @@ def _market_scoped(method):
     @functools.wraps(method)
     def scoped(self, product, pricing_env, *args, **kwargs):
         outer = getattr(self, "_market_fp", None)
-        self._market_fp = (pricing_env, market_fingerprints(pricing_env))
+        self._market_fp = (pricing_env, market_fingerprints(pricing_env), {})
         try:
             return method(self, product, pricing_env, *args, **kwargs)
         finally:
@@ -224,6 +224,8 @@ class BasePDESolver(BaseEngine):
     """
 
     engine_type = EngineType.PDE
+    #: (env, market fingerprints, in-scope memos) while a solve's market scope is open
+    _market_fp = None
 
     def __init__(self, params: Optional[PDEParams] = None):
         """Initialize the PDE solver with configuration parameters."""
@@ -931,6 +933,20 @@ class BasePDESolver(BaseEngine):
         """
         curve = pricing_env.rate_curve if leg == "r" else pricing_env.div_yield
         scope = getattr(self, "_market_fp", None)
+        # Within one market scope (one prepare's fingerprints) a leg's memo is fixed:
+        # resolve it once per scope, not twice per step (timing gate §9.5). The
+        # resolved memos live in the scope tuple, so they end with it.
+        resolved = scope[2] if scope is not None and scope[0] is pricing_env else None
+        if resolved is not None:
+            hit = resolved.get(leg)
+            if hit is not None and hit[0] is curve:
+                return hit[1]
+        memo = self._resolve_curve_df_memo(leg, pricing_env, curve, scope)
+        if resolved is not None:
+            resolved[leg] = (curve, memo)
+        return memo
+
+    def _resolve_curve_df_memo(self, leg, pricing_env, curve, scope) -> dict:
         if scope is not None and scope[0] is pricing_env:
             curve_fp = scope[1]["rate" if leg == "r" else "div"]
         else:
@@ -965,7 +981,13 @@ class BasePDESolver(BaseEngine):
         """
         if end_time <= start_time:
             return 1.0
-        memo = self._curve_df_memo("r", pricing_env)
+        # _curve_df_memo's in-scope hit, inline: this runs twice per column group per step
+        scope = self._market_fp
+        hit = scope[2].get("r") if scope is not None and scope[0] is pricing_env else None
+        if hit is not None and hit[0] is pricing_env.rate_curve:
+            memo = hit[1]
+        else:
+            memo = self._curve_df_memo("r", pricing_env)
         key = (round(float(start_time), 12), round(float(end_time), 12))
         v = memo.get(key)
         if v is None:
@@ -988,7 +1010,12 @@ class BasePDESolver(BaseEngine):
         """
         if end_time <= start_time:
             return 1.0
-        memo = self._curve_df_memo("q", pricing_env)
+        scope = self._market_fp
+        hit = scope[2].get("q") if scope is not None and scope[0] is pricing_env else None
+        if hit is not None and hit[0] is pricing_env.div_yield:
+            memo = hit[1]
+        else:
+            memo = self._curve_df_memo("q", pricing_env)
         key = ("q", round(float(start_time), 12), round(float(end_time), 12))
         v = memo.get(key)
         if v is None:

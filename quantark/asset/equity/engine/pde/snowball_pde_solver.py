@@ -1837,8 +1837,17 @@ class SnowballPDESolver(BasePDESolver):
             effective_settlement_calendar,
         )
 
+        # Read once per step by the boundary and event paths: inside one market
+        # scope (a fixed environment, one call's product) the key is computed once.
+        scope = getattr(self, "_market_fp", None)
+        memo = scope[2] if scope is not None and len(scope) > 2 and scope[0] is pricing_env else None
+        memo_key = ("observation_cache_key", kind, id(product))
+        if memo is not None:
+            hit = memo.get(memo_key)
+            if hit is not None and hit[0] is product:
+                return hit[1]
         strategy = _CACHE_KEYING
-        return (
+        key = (
             kind,
             strategy,
             f"{product.__class__.__module__}.{product.__class__.__qualname__}",
@@ -1848,6 +1857,9 @@ class SnowballPDESolver(BasePDESolver):
             pricing_env.bus_days_in_year,
             calendar_identity(effective_settlement_calendar(product, pricing_env)),
         )
+        if memo is not None:
+            memo[memo_key] = (product, key)
+        return key
 
     def _get_cached_ko_records(
         self, pricing_env: PricingEnvironment, product: SnowballOption

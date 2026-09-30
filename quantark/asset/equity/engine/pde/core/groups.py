@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import NamedTuple
 
 import numpy as np
 
@@ -48,8 +49,9 @@ class ColumnGroup:
     rolling: bool = False               # states hold ONE column set, replaced every step (statistics)
 
 
-@dataclass(frozen=True, eq=False)
-class GroupState:
-    """What a stepper sees: the group and its columns at step j+1 (read-only)."""
+class GroupState(NamedTuple):
+    """What a stepper sees: the group and its columns at step j+1 (read-only).
+
+    A NamedTuple, not a dataclass: the march builds one per group per step."""
     group: ColumnGroup
     v_next: np.ndarray

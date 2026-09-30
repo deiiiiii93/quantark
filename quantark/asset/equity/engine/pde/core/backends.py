@@ -26,6 +26,9 @@ from .groups import Backend, GroupState
 __all__ = ["BANDED_CACHE_MAX_ENTRIES", "FactorizationCache", "operator_matrix",
            "sparse_lu_factor", "banded_factor", "factor", "sparse_lu_advance", "banded_advance"]
 
+# enum members as module constants: read several times per step (timing gate §9.5)
+_BANDED, _SPARSE_LU = Backend.BANDED, Backend.SPARSE_LU
+
 #: Operational cache size (spec §4.3): an implementation detail, not a knob.
 BANDED_CACHE_MAX_ENTRIES = 512
 
@@ -41,8 +44,12 @@ class FactorizationCache:
                  lu_seed: Optional[Mapping] = None, banded_seed: Optional[Mapping] = None):
         self.enabled = enabled
         self._banded_max = banded_max_entries
-        self._stores = {Backend.SPARSE_LU: {}, Backend.BANDED: OrderedDict()}
-        self._seeds = {Backend.SPARSE_LU: lu_seed or {}, Backend.BANDED: banded_seed or {}}
+        self._stores = {_SPARSE_LU: {}, _BANDED: OrderedDict()}
+        self._seeds = {_SPARSE_LU: lu_seed or {}, _BANDED: banded_seed or {}}
+        # The march asks for the same (set, dt, θ) step after step: the previous
+        # answer per backend, for exactly equal arguments, is the entry the full
+        # lookup below would return (and for BANDED it is already the LRU's newest).
+        self._last = {_SPARSE_LU: None, _BANDED: None}
 
     @staticmethod
     def key(set_index, dt, theta) -> tuple:
@@ -50,6 +57,15 @@ class FactorizationCache:
         return (int(set_index), round(dt, 12), float(theta))
 
     def get(self, backend: Backend, set_index, dt, theta, build: Callable):
+        last = self._last[backend]
+        if last is not None and last[0] == set_index and last[1] == dt and last[2] == theta:
+            return last[3]
+        value = self._get(backend, set_index, dt, theta, build)
+        if self.enabled:
+            self._last[backend] = (set_index, dt, theta, value)
+        return value
+
+    def _get(self, backend: Backend, set_index, dt, theta, build: Callable):
         key = self.key(set_index, dt, theta)
         hit = self._seeds[backend].get(key)
         if hit is not None:
@@ -58,12 +74,12 @@ class FactorizationCache:
             return build()
         store = self._stores[backend]
         if key in store:
-            if backend is Backend.BANDED:
+            if backend is _BANDED:
                 store.move_to_end(key)
             return store[key]
         value = build()
         store[key] = value
-        if backend is Backend.BANDED:
+        if backend is _BANDED:
             while len(store) > self._banded_max:
                 store.popitem(last=False)
         return value
@@ -72,6 +88,7 @@ class FactorizationCache:
         for b, store in self._stores.items():
             if backend is None or b is backend:
                 store.clear()
+                self._last[b] = None
 
     def store(self, backend: Backend) -> Mapping:
         return self._stores[backend]
@@ -128,16 +145,20 @@ def factor(backend: Backend, s, dt, theta):
     (``march.warm_factorizations``) both come here, so a warmed entry is the
     march's own entry, built from the same inputs.
     """
-    if backend is Backend.BANDED:
-        return s.factorizations.get(Backend.BANDED, s.index, dt, theta,
-                                    lambda: banded_factor(s.l, s.c, s.u, dt, theta))
-    return s.factorizations.get(Backend.SPARSE_LU, s.index, dt, theta,
-                                lambda: sparse_lu_factor(s.operator(), dt, theta))
+    cache = s.factorizations
+    last = cache._last[backend]
+    if last is not None and last[0] == s.index and last[1] == dt and last[2] == theta:
+        return last[3]                      # FactorizationCache.get's own shortcut, before the closure
+    if backend is _BANDED:
+        return cache.get(_BANDED, s.index, dt, theta,
+                         lambda: banded_factor(s.l, s.c, s.u, dt, theta))
+    return cache.get(_SPARSE_LU, s.index, dt, theta,
+                     lambda: sparse_lu_factor(s.operator(), dt, theta))
 
 
 def sparse_lu_advance(state: GroupState, s, dt, theta, boundaries):
     """Each column in order: rhs = M1 @ v, inject, solve (base march; snowball/phoenix LU fallback)."""
-    M1, M2_lu = factor(Backend.SPARSE_LU, s, dt, theta)
+    M1, M2_lu = factor(_SPARSE_LU, s, dt, theta)
     v = state.v_next
     lo, up = boundaries
     out = np.empty((v.shape[0] - 2, v.shape[1]))
@@ -151,7 +172,7 @@ def sparse_lu_advance(state: GroupState, s, dt, theta, boundaries):
 
 def banded_advance(state: GroupState, s, dt, theta, boundaries):
     """One solve_banded call for the whole group (decision 7)."""
-    banded, lower1, main1, upper1 = factor(Backend.BANDED, s, dt, theta)
+    banded, lower1, main1, upper1 = factor(_BANDED, s, dt, theta)
     v = state.v_next
     lo, up = boundaries
     if state.group.one_dimensional_rhs:
@@ -168,6 +189,17 @@ def banded_advance(state: GroupState, s, dt, theta, boundaries):
     # the statistics group: its stacked indicator columns)
     vn = v[1:-1, :]
     rhs = np.empty(vn.shape)
+    if vn.shape[1] <= 2:
+        # the two-surface march's own form: per column on 1-D views, scalar boundary
+        # injection (elementwise the same operations, so the same bits; fewer temporaries)
+        for k in range(vn.shape[1]):
+            col, r = vn[:, k], rhs[:, k]
+            np.multiply(main1, col, out=r)
+            r[1:] += lower1 * col[:-1]
+            r[:-1] += upper1 * col[1:]
+            if v.shape[0] > 2:
+                _inject(r, s.l[1], s.u[-2], v[0, k], v[-1, k], lo[k], up[k], dt, theta)
+        return solve_banded((1, 1), banded, rhs, overwrite_b=True, check_finite=False)
     rhs[:] = main1[:, None] * vn
     rhs[1:, :] += lower1[:, None] * vn[:-1, :]
     rhs[:-1, :] += upper1[:, None] * vn[1:, :]

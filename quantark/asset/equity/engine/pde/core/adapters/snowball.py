@@ -307,6 +307,8 @@ class SnowballAdapter(FamilyAdapter):
     def after_solve(self, prepared, group, states, j) -> None:
         pass
 
+    after_solve.noop = True      # the march skips a hook marked no-op (an override is not marked)
+
     def step_events(self, prepared, states, captures, j) -> None:
         # the legacy two-surface march, after the solves. The valuation-date column is
         # captured BEFORE its events: t=0 events are deterministic at the known

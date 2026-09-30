@@ -11,6 +11,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
+from collections import abc
 from typing import Any, Callable, Mapping, Optional
 
 import numpy as np
@@ -118,6 +119,29 @@ class CompositeProblem:
     description: str
 
 
+class LazyIdentity(abc.Mapping):
+    """``PreparedProblem.identity``: plain values, or zero-argument thunks evaluated
+    once on first access (the identities a march never reads)."""
+
+    def __init__(self, values):
+        self._values = dict(values)
+
+    def update(self, **thunks):
+        self._values.update(thunks)
+
+    def __getitem__(self, key):
+        value = self._values[key]
+        if callable(value):
+            value = self._values[key] = value()
+        return value
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+
 def _lazy(fn):
     """A zero-argument callable that evaluates ``fn`` once and caches the result."""
     cell = []
@@ -138,7 +162,7 @@ def market_scope(solver, env, fps):
     ``BasePDESolver._market_fps``; an outer scope is restored on exit.
     """
     outer = getattr(solver, "_market_fp", None)
-    solver._market_fp = (env, fps)
+    solver._market_fp = (env, fps, {})   # the third slot: memos resolved inside this scope
     try:
         yield
     finally:
@@ -261,8 +285,8 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
         validate_schedule(schedule, layout, stepper)
         groups = adapter.groups(product, layout, request) if request.price else ()   # step 10
         factorizations = adapter.factorizations(session)                  # step 11
-        identity = {"layout": layout.fingerprint,                         # step 12
-                    "coefficient_key": adapter.coefficient_key(product, env, layout, fps)}
+        identity = LazyIdentity({"layout": layout.fingerprint,            # step 12
+                                 "coefficient_key": adapter.coefficient_key(product, env, layout, fps)})
         problem = PreparedProblem(solver=solver, adapter=adapter, product=product, env=env, request=request,
                                   lifecycle_state=lifecycle_state, tau=tau, terminal=None,
                                   solve_state=solve_state, market=market, grid_request=grid_request,
@@ -273,9 +297,11 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
             statistics = StatisticsLegacy.create(problem, request.streams)
             if statistics is not None:
                 problem = replace(problem, statistics=statistics, groups=groups + (statistics.group,))
-        # step 12: what the march's factorizations and the march itself depend on
-        identity["factorization"] = factorization_key(problem)
-        identity["problem"] = problem_identity(problem)
+        # step 12: what the march's factorizations and the march itself depend on. Read
+        # by explain, sessions and tests, never by the march: computed on first access.
+        final = problem
+        identity.update(factorization=lambda: factorization_key(final),
+                        problem=lambda: problem_identity(final))
     return problem
 
 

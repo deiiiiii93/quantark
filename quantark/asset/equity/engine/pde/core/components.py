@@ -30,7 +30,7 @@ from .samples import MarketSamples, SampleKind
 __all__ = [
     "OperatorFactory", "TimeStepper", "Readout",
     "CentralDifference", "CrankNicolson", "StandardReadout",
-    "scheme_stepper", "scalar_stencil", "nodal_stencil", "flat_exact",
+    "resolve_stepper", "scalar_stencil", "nodal_stencil", "flat_exact",
     "interpolate_price", "delta_gamma",
     "validate_schedule", "validate_coefficients", "validate_advanced", "validate_readout",
 ]
@@ -280,6 +280,8 @@ class CentralDifference:
 
 # --- the stepper ---------------------------------------------------------------
 
+_BANDED = Backend.BANDED          # read once per group per step
+
 @dataclass(frozen=True, kw_only=True)
 class CrankNicolson:
     """The built-in stepper: θ-weighted time stepping with terminal and event damping.
@@ -338,7 +340,7 @@ class CrankNicolson:
         return theta
 
     def step(self, state, s, dt, theta, boundaries):
-        if state.group.backend is Backend.BANDED:
+        if state.group.backend is _BANDED:
             return banded_advance(state, s, dt, theta, boundaries)
         return sparse_lu_advance(state, s, dt, theta, boundaries)
 
@@ -483,7 +485,7 @@ def validate_advanced(out, group, n_int, component, n_cols=None) -> None:
         n_cols = 1 if group.one_dimensional_rhs else len(group.surfaces)
     if out.shape != (n_int, n_cols):
         _fail(component, f"advanced columns have shape {out.shape}, expected ({n_int}, {n_cols})")
-    if not np.all(np.isfinite(out)):
+    if not np.isfinite(out).all():          # the method, not np.all: this runs once per step
         _fail(component, "advanced columns are not finite")
 
 
