@@ -161,7 +161,7 @@ def banded_advance(state: GroupState, s, dt, theta, boundaries):
         if v.shape[0] > 2:
             _inject(rhs, s.l[1], s.u[-2], v[0, 0], v[-1, 0], lo[0], up[0], dt, theta)
         return solve_banded((1, 1), banded, rhs, overwrite_b=True, check_finite=False)[:, None]
-    # snowball_pde_solver.py (_time_stepping_two_surface: value, two columns;
+    # snowball_pde_solver.py (the legacy two-surface value march, two columns;
     # _compute_event_stats: statistics)
     vn = v[1:-1, :]
     rhs = np.empty(vn.shape)

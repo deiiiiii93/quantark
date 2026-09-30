@@ -56,3 +56,16 @@ def test_snowball_with_two_interior_nodes_falls_back_to_two_lu_groups():
     p = prepare(s, snowball("continuous"), env_flat(), OutputRequest(Operation.PRICE))
     assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == [
         ("alive", ("alive",), Backend.SPARSE_LU, VALUE), ("ki", ("ki",), Backend.SPARSE_LU, VALUE)]
+
+
+# --- KO-reset (Task 7) ---------------------------------------------------------------
+def test_ko_reset_group_declaration_equals_the_historical_solve_calls():
+    from quantark.asset.equity.engine.pde.core.adapters.ko_reset import KOResetAdapter
+    from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
+    from pde_bitwise.capture_book import KO_RESET, make_ko_reset
+
+    p = prepare(KOResetSnowballPDESolver(PDEParams()), make_ko_reset(KO_RESET), env_flat(),
+                OutputRequest(Operation.PRICE))
+    assert type(p.adapter) is KOResetAdapter
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == [
+        ("value", ("alive", "ki"), Backend.BANDED, VALUE)]

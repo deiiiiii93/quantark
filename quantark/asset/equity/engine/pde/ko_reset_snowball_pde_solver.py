@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import replace
-from time import perf_counter
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -17,12 +16,9 @@ import numpy as np
 from quantark.asset.equity.engine.event_stats import (
     payment_aware_cashflow_fields,
 )
-from quantark.asset.equity.engine.pde.base_pde_solver import (
-    GRID_CACHE_MAX_ENTRIES,
-    PDESolutionResult,
-    _market_scoped,
-)
-from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver, _LegacySnowballFacade
+from quantark.asset.equity.engine.pde.base_pde_solver import GRID_CACHE_MAX_ENTRIES
+from quantark.asset.equity.engine.pde.core.adapters.ko_reset import KOResetAdapter
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
@@ -30,11 +26,11 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
-from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import Tolerance, is_close, is_zero
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
 
 
-class KOResetSnowballPDESolver(_LegacySnowballFacade, SnowballPDESolver):
+class KOResetSnowballPDESolver(SnowballPDESolver):
     """
     PDE solver for KO-reset Snowball options using the two-surface method.
 
@@ -45,6 +41,7 @@ class KOResetSnowballPDESolver(_LegacySnowballFacade, SnowballPDESolver):
     # Override class attributes for product type checking
     _supported_product_type: type = KnockOutResetSnowballOption
     _solver_name: str = "KOResetSnowballPDESolver"
+    _adapter_class = KOResetAdapter
 
     def __init__(self, params=None):
         super().__init__(params=params)
@@ -66,7 +63,7 @@ class KOResetSnowballPDESolver(_LegacySnowballFacade, SnowballPDESolver):
         self._has_pre_terminal_ko: bool = False
         self._has_post_terminal_ko: bool = False
 
-    # price() is inherited from SnowballPDESolver using _check_product_type()
+    # price() / calculate_greeks() are SnowballPDESolver's; KOResetAdapter marches them.
 
     def calculate_event_stats(
         self,
@@ -297,24 +294,6 @@ class KOResetSnowballPDESolver(_LegacySnowballFacade, SnowballPDESolver):
                     )
                 self._post_ko_observation_indices[idx] = rec
 
-    def _build_grids(
-        self,
-        product: KnockOutResetSnowballOption,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
-        if self._active_layout is None:
-            _, _, _, t_vec, _ = result
-            self._register_post_ko_observations(
-                product, pricing_env, tau, t_vec=t_vec
-            )
-        return result
-
     def _post_ki_ko_times(
         self, product: KnockOutResetSnowballOption, tau: float
     ) -> List[float]:
@@ -362,162 +341,6 @@ class KOResetSnowballPDESolver(_LegacySnowballFacade, SnowballPDESolver):
         elif post_barrier > 0:
             barriers.append(post_barrier)
         return barriers
-
-    @_market_scoped
-    def _solve(
-        self, product: KnockOutResetSnowballOption, pricing_env: PricingEnvironment
-    ) -> PDESolutionResult:
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        # A contract past its first schedule and not knocked in has matured (rule 2 of
-        # KnockOutResetSnowballOption). The knock-in that keeps it alive is one carried from an
-        # earlier day: a level breached today is not tested once the first schedule has ended.
-        product.require_alive(
-            pricing_env, bool(getattr(product, "_otc_lifecycle_knocked_in", False))
-        )
-
-        # State preamble shared with session preparation (see
-        # SnowballPDESolver._prepare_solve_state).
-        knocked_in_at_valuation = self._prepare_solve_state(product, pricing_env)
-
-        strike = product.strike
-        r = pricing_env.get_rate(tau)
-        q = pricing_env.get_div_yield(tau)
-        sigma = pricing_env.get_vol(strike, tau)
-
-        if self._profile_enabled:
-            self._reset_profile_stats()
-
-        if self._profile_enabled:
-            t0 = perf_counter()
-        self._active_layout = None
-        self._active_schedule = None  # certified pre/post dispatch stays inline
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
-        if self._profile_enabled:
-            self._profile_stats["grid_build"] += perf_counter() - t0
-
-        num_x, num_t = len(x_vec), len(t_vec)
-        self._grid_v0 = np.zeros((num_x, num_t))
-        self._grid_v1 = np.zeros((num_x, num_t))
-
-        self._set_terminal_condition_v1(
-            self._grid_v1, x_vec, s_vec, product, pricing_env
-        )
-
-        # A not-yet-knocked-in contract matures on the PRE-KI schedule; only a
-        # knocked-in one runs on to `tau`. Seeding V0 at the end of the grid
-        # would march it back through a period it can never reach, so when the
-        # two horizons differ V0 stays zero above the pre-KI maturity -- its
-        # true value there -- and is seeded at that index during stepping.
-        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
-        self._v0_seed_idx = None
-        self._v0_seed_values = None
-        staged_v0 = (
-            self._pre_ko_observation_indices
-            and pre_maturity < tau
-            and not is_close(pre_maturity, tau, abs_tol=Tolerance.PRECISION)
-        )
-        if staged_v0:
-            seed = np.zeros((num_x, 1))
-            self._set_terminal_condition_v0(seed, x_vec, s_vec, product, pricing_env)
-            self._v0_seed_values = seed[:, -1].copy()
-            self._v0_seed_idx = max(self._pre_ko_observation_indices)
-        else:
-            self._set_terminal_condition_v0(
-                self._grid_v0, x_vec, s_vec, product, pricing_env
-            )
-
-        # The first-schedule knock-out wins a tie with a knock-in observed at the same instant. The
-        # knocked-in surface never carries that knock-out (it carries the second schedule's), so the
-        # knock-in copy below would overwrite it wherever both levels are breached: for a discrete
-        # knock-in it is applied last (``_pre_ko_goes_last``; disjoint nodes otherwise, so the order
-        # changes nothing for any other contract).
-        pre_terminal_ko = self._has_pre_terminal_ko and self._pre_ko_terminal_record is not None
-        pre_ko_last = pre_terminal_ko and self._pre_ko_goes_last()
-        if pre_terminal_ko and not pre_ko_last:
-            self._apply_terminal_ko_single(
-                self._grid_v0,
-                s_vec,
-                product,
-                pricing_env,
-                self._pre_ko_terminal_record,
-            )
-
-        if (
-            self._has_post_terminal_ko
-            and self._post_ko_terminal_record is not None
-            and not product.barrier_config.disable_ko_after_ki
-        ):
-            self._apply_terminal_ko_single(
-                self._grid_v1,
-                s_vec,
-                product,
-                pricing_env,
-                self._post_ko_terminal_record,
-            )
-
-        if product.has_ki_barrier and not staged_v0:
-            is_terminal_ki = self._ki_continuous
-            if not is_terminal_ki:
-                if (num_t - 1) in self._ki_observation_indices:
-                    is_terminal_ki = True
-            if is_terminal_ki:
-                self._apply_ki_jump(
-                    self._grid_v0, self._grid_v1, s_vec, num_t - 1, product
-                )
-
-        if pre_ko_last:
-            self._apply_terminal_ko_single(
-                self._grid_v0,
-                s_vec,
-                product,
-                pricing_env,
-                self._pre_ko_terminal_record,
-            )
-
-        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
-        A = self._build_operator_matrix(l, c, u, num_x)
-
-        # Term-structure step coefficients (one set for flat inputs)
-        sc = self._build_step_coefficients(pricing_env, product.strike, t_vec, dx_vec, num_x)
-        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
-        step_coeffs = None if sc.n_unique == 1 else sc
-
-        self._time_stepping_two_surface(
-            self._grid_v0,
-            self._grid_v1,
-            A,
-            l,
-            c,
-            u,
-            x_vec,
-            s_vec,
-            t_vec,
-            dt_vec,
-            product,
-            pricing_env,
-            r,
-            q,
-            sigma,
-            tau,
-            step_coeffs=step_coeffs,
-        )
-
-        spot_log = np.log(spot)
-        if knocked_in_at_valuation:
-            solution_vec = self._grid_v1[:, 0]
-        else:
-            solution_vec = self._grid_v0[:, 0]
-
-        return PDESolutionResult(
-            solution_vec=solution_vec,
-            x_vec=x_vec,
-            s_vec=s_vec,
-            spot_log=spot_log,
-        )
 
     def _apply_step_modifications_two_surface(
         self,

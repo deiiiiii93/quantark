@@ -1,6 +1,6 @@
 """The snowball family (``snowball_pde_solver.py``): two surfaces, alive and knocked-in.
 
-Every hook is the legacy ``_solve`` / ``_time_stepping_two_surface`` body it
+Every hook is the legacy ``_solve`` / two-surface march body it
 cites, in the same order. The two surfaces advance as one banded group (two
 right-hand-side columns) whenever the interior system is non-trivial, else as
 two sparse-LU groups -- exactly the two solve calls the legacy march made.
@@ -99,7 +99,7 @@ class SnowballAdapter(FamilyAdapter):
 
     def factorizations(self, session) -> FactorizationCache:
         # The value march fills the solver's own stores, which it clears first, as
-        # _time_stepping_two_surface did: the statistics sweep reads them after it
+        # the legacy two-surface march did: the statistics sweep reads them after it
         # (a bridge until the statistics group marches on the core, Task 9).
         solver = self.solver
         return FactorizationCache.sharing(
@@ -112,7 +112,7 @@ class SnowballAdapter(FamilyAdapter):
         return self.value_groups(product, layout)
 
     def value_groups(self, product, layout) -> tuple:
-        # _time_stepping_two_surface: banded whenever the interior system is non-trivial
+        # the legacy two-surface march: banded whenever the interior system is non-trivial
         if (len(layout.spatial.x) - 2) > 2:
             return (ColumnGroup("value", ("alive", "ki"), Backend.BANDED, VALUE),)
         return (ColumnGroup("alive", ("alive",), Backend.SPARSE_LU, VALUE),
@@ -302,7 +302,7 @@ class SnowballAdapter(FamilyAdapter):
         pass
 
     def step_events(self, prepared, states, captures, j) -> None:
-        # _time_stepping_two_surface, after the solves. The valuation-date column is
+        # the legacy two-surface march, after the solves. The valuation-date column is
         # captured BEFORE its events: t=0 events are deterministic at the known
         # spot, so the readout interpolates this smooth 0+ branch and applies
         # today's transitions pointwise instead of blending across the nodal jump.
