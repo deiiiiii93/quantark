@@ -14,7 +14,12 @@ from quantark.asset.equity.engine.pde.grid.config import (
 from quantark.asset.equity.engine.pde.grid.time import TimeLayout, build_time, time_fill
 from quantark.asset.equity.engine.pde.grid.space import SpatialLayout, build_space
 from quantark.asset.equity.engine.pde.grid.events import (
+    DiscreteEvent,
+    EventOp,
+    EventRecord,
     EventSchedule,
+    Nodes,
+    apply_discrete_event,
     breach_weights,
     project_between,
     project_piecewise,
@@ -45,6 +50,11 @@ __all__ = [
     "SpatialLayout",
     "build_space",
     "EventSchedule",
+    "DiscreteEvent",
+    "EventOp",
+    "EventRecord",
+    "Nodes",
+    "apply_discrete_event",
     "breach_weights",
     "project_between",
     "project_piecewise",

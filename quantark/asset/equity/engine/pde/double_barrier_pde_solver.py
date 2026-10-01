@@ -18,6 +18,7 @@ from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
 from .core.adapters.barrier import DoubleBarrierAdapter
+from .grid import DiscreteEvent, EventOp, EventRecord
 
 
 class DoubleBarrierPDESolver(BasePDESolver):
@@ -78,10 +79,6 @@ class DoubleBarrierPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         K = product.strike
-        upper = product.upper_barrier
-        lower = product.lower_barrier
-        rebate = product.rebate
-
         terminal_delay_df = self._terminal_delay_df(product, pricing_env)
 
         # Calculate base payoff
@@ -100,33 +97,9 @@ class DoubleBarrierPDESolver(BasePDESolver):
         )
 
         if apply_terminal_barrier:
-            for rec, cashflow_value in self._resolved_terminal_payoffs(
-                product,
-                pricing_env,
-                default_payoff=rebate,
-                event_payment=False,
-            ):
-                rec_upper = (
-                    rec.upper_barrier
-                    if rec is not None and rec.upper_barrier is not None
-                    else upper
-                )
-                rec_lower = (
-                    rec.lower_barrier
-                    if rec is not None and rec.lower_barrier is not None
-                    else lower
-                )
-                outside = (s_vec >= rec_upper) | (s_vec <= rec_lower)
-                if (
-                    rec is not None
-                    and self._schedule_aggregation
-                    == ObservationAggregation.ACCUMULATE
-                ):
-                    payoff[outside] += cashflow_value
-                else:
-                    payoff[outside] = cashflow_value
-                    break
-
+            payoff = self._apply_discrete_event(
+                payoff, x_vec, s_vec, self._terminal_event(product, pricing_env),
+                nodal=product.observation_type != ObservationType.DISCRETE)
         grid[:, -1] = payoff
 
     def set_boundary_conditions(
@@ -203,53 +176,50 @@ class DoubleBarrierPDESolver(BasePDESolver):
             if t_idx not in self._observation_indices:
                 return
 
-        schedule_records = self._schedule_records.get(t_idx)
         # _setup_observation_indices (the adapter's observation maps) always sets _total_tau
         # before any time step runs.
-        total_tau = self._total_tau
-        current_time = self._current_time(total_tau, tau)
+        current_time = self._current_time(self._total_tau, tau)
+        event = self._step_event(product, pricing_env, t_idx, current_time)
+        grid[:, t_idx] = self._apply_discrete_event(
+            grid[:, t_idx], x_vec, s_vec, event,
+            nodal=product.observation_type != ObservationType.DISCRETE or t_idx == 0)
 
+    def _terminal_event(self, product, pricing_env) -> DiscreteEvent:
+        """The maturity observation's records and operations (spec 3A §5.4 table)."""
+        accumulate = self._schedule_aggregation == ObservationAggregation.ACCUMULATE
+        out = []
+        for rec, cashflow_value in self._resolved_terminal_payoffs(
+            product, pricing_env, default_payoff=product.rebate, event_payment=False,
+        ):
+            upper = rec.upper_barrier if rec is not None and rec.upper_barrier is not None else product.upper_barrier
+            lower = rec.lower_barrier if rec is not None and rec.lower_barrier is not None else product.lower_barrier
+            if rec is not None and accumulate:
+                out.append(EventRecord(lower, upper, cashflow_value, EventOp.ADD))
+            else:
+                out.append(EventRecord(lower, upper, cashflow_value, EventOp.SET))   # the default record: SET
+                break
+        return DiscreteEvent(tuple(out))
+
+    def _step_event(self, product, pricing_env, t_idx, current_time) -> DiscreteEvent:
+        """The interior observation's records and operations at node ``t_idx`` (spec 3A §5.4 table)."""
+        schedule_records = self._schedule_records.get(t_idx)
         if schedule_records:
+            accumulate = self._schedule_aggregation == ObservationAggregation.ACCUMULATE
+            out = []
             for rec in schedule_records:
-                upper = (
-                    rec.upper_barrier
-                    if rec.upper_barrier is not None
-                    else product.upper_barrier
-                )
-                lower = (
-                    rec.lower_barrier
-                    if rec.lower_barrier is not None
-                    else product.lower_barrier
-                )
-                discounted_payoff = self._cashflow_value_at_time(
-                    pricing_env=pricing_env,
-                    cashflow=rec.payoff,
-                    current_time=current_time,
-                    settlement_time=self._terminal_payment_time(
-                        product, pricing_env
-                    ),
-                )
-                outside_corridor = (s_vec >= upper) | (s_vec <= lower)
-                if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
-                    grid[outside_corridor, t_idx] += discounted_payoff
-                else:
-                    grid[outside_corridor, t_idx] = discounted_payoff
-                    return
-            return
-
-        upper = product.upper_barrier
-        lower = product.lower_barrier
-        rebate = product.rebate
-
-        discounted_rebate = rebate * self._df_between_times(
-            pricing_env,
-            current_time,
-            self._terminal_payment_time(product, pricing_env),
-        )
-
-        # Apply knockout at both barriers
-        outside_corridor = (s_vec >= upper) | (s_vec <= lower)
-        grid[outside_corridor, t_idx] = discounted_rebate
+                upper = rec.upper_barrier if rec.upper_barrier is not None else product.upper_barrier
+                lower = rec.lower_barrier if rec.lower_barrier is not None else product.lower_barrier
+                value = self._cashflow_value_at_time(
+                    pricing_env=pricing_env, cashflow=rec.payoff, current_time=current_time,
+                    settlement_time=self._terminal_payment_time(product, pricing_env))
+                out.append(EventRecord(lower, upper, value, EventOp.ADD if accumulate else EventOp.SET))
+                if not accumulate:
+                    break
+            return DiscreteEvent(tuple(out))
+        discounted_rebate = product.rebate * self._df_between_times(
+            pricing_env, current_time, self._terminal_payment_time(product, pricing_env))
+        return DiscreteEvent((EventRecord(product.lower_barrier, product.upper_barrier, discounted_rebate,
+                                          EventOp.SET),))
 
     def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
         """Include schedule-specific barriers when building spatial bounds."""

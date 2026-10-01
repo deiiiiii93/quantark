@@ -21,11 +21,15 @@ trigger semantics at spot).
 
 from __future__ import annotations
 
-from typing import Callable, Mapping, Optional
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Mapping, NamedTuple, Optional, Tuple
 
 import numpy as np
 
 from quantark.asset.equity.engine.pde.grid.space import SpatialLayout
+from quantark.util.enum.engine_enums import EventProjectionMode
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_log
 
 # ---------------------------------------------------------------------------
@@ -318,3 +322,111 @@ class EventSchedule:
                 "this EventSchedule was built without a valuation readout"
             )
         return self._readout(spot, states)
+
+
+# ---------------------------------------------------------------------------
+# Base-family discrete observations (spec 3A §5.4; decisions 8, 14)
+# ---------------------------------------------------------------------------
+
+
+class EventOp(Enum):
+    SET = "set"     # column[breached] = value
+    ADD = "add"     # column[breached] += value
+
+
+@dataclass(frozen=True)
+class EventRecord:
+    """One record a base-family solver applies at an observation.
+
+    Breached where ``s >= upper`` or ``s <= lower`` (either may be None; a corridor sets both),
+    the thresholds exactly as the solver compares them, tolerance included where it has one.
+    ``value`` is the cash already valued at the node, with the record's own settlement and
+    discounting. ``op`` is what the solver's own nodal code does to a breached node.
+    """
+
+    lower: Optional[float]
+    upper: Optional[float]
+    value: float
+    op: EventOp
+
+    def __post_init__(self):
+        if self.lower is None and self.upper is None:
+            raise ValidationError("an EventRecord needs a lower or an upper threshold")
+        if not isinstance(self.op, EventOp):
+            raise ValidationError(f"EventRecord.op must be an EventOp, got {self.op!r}")
+
+    def breached(self, s: np.ndarray) -> np.ndarray:
+        mask = np.zeros(np.shape(s), dtype=bool)
+        if self.upper is not None:
+            mask |= s >= self.upper
+        if self.lower is not None:
+            mask |= s <= self.lower
+        return mask
+
+
+@dataclass(frozen=True)
+class DiscreteEvent:
+    """Every record a solver applies at one time node, in the order it applies them (decision 14)."""
+
+    records: Tuple[EventRecord, ...]
+
+    def evidence(self) -> tuple:
+        return tuple((r.lower, r.upper, float(r.value), r.op.value) for r in self.records)
+
+
+class Nodes(NamedTuple):
+    """The nodes an event is applied on: log-prices ``x`` and prices ``s`` (a SpatialLayout also serves)."""
+
+    x: np.ndarray
+    s: np.ndarray
+
+
+def _fold(column: np.ndarray, records) -> np.ndarray:
+    out = np.array(column, dtype=float, copy=True)
+    for rec in records:
+        if rec.op is EventOp.SET:
+            out[:] = rec.value
+        else:
+            out += rec.value
+    return out
+
+
+def _breached_on(rec: EventRecord, lo: float, hi: float) -> bool:
+    """Whether ``rec`` is breached on the whole log-price region ``lo <= x < hi``."""
+    if rec.upper is not None and lo >= float(safe_log(rec.upper)):
+        return True
+    if rec.lower is not None and hi <= float(safe_log(rec.lower)):
+        return True
+    return False
+
+
+def apply_discrete_event(spatial, column: np.ndarray, event: DiscreteEvent, projection) -> np.ndarray:
+    """One observation's records applied to ``column``; returns a new column (spec 3A §5.4).
+
+    ``NODAL``: for each record in order, ``column[breached] = value`` (SET) or ``+= value`` (ADD),
+    the solvers' 0.7.0 code moved here. ``CELL_AVERAGE``: the same fold as a function of
+    log-price, projected ONCE: the breakpoints are the records' distinct thresholds; on a region
+    between two of them the branch is ``column`` folded through the records breached there, in
+    order; ``project_piecewise_event`` gives every dual cell a threshold crosses the exact cell
+    average of the whole event. Projecting record by record is not equivalent (review 1, finding 3).
+    """
+    s = np.asarray(spatial.s, dtype=float)
+    if projection is EventProjectionMode.NODAL:
+        out = np.array(column, dtype=float, copy=True)
+        for rec in event.records:
+            mask = rec.breached(s)
+            if rec.op is EventOp.SET:
+                out[mask] = rec.value
+            else:
+                out[mask] += rec.value
+        return out
+    if projection is not EventProjectionMode.CELL_AVERAGE:
+        raise ValidationError(f"apply_discrete_event: unknown projection {projection!r}")
+    thresholds = {t for rec in event.records for t in (rec.lower, rec.upper) if t is not None}
+    breaks = sorted({float(safe_log(t)) for t in thresholds})
+    branches = []
+    for r in range(len(breaks) + 1):
+        lo = -np.inf if r == 0 else breaks[r - 1]
+        hi = np.inf if r == len(breaks) else breaks[r]
+        branches.append(_fold(column, [rec for rec in event.records if _breached_on(rec, lo, hi)]))
+    return project_piecewise_event(np.asarray(spatial.x, dtype=float), breaks, branches)

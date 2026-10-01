@@ -18,6 +18,7 @@ from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
 from .core.adapters.barrier import OneTouchAdapter
+from .grid import DiscreteEvent, EventOp, EventRecord
 
 
 class OneTouchPDESolver(BasePDESolver):
@@ -78,7 +79,6 @@ class OneTouchPDESolver(BasePDESolver):
             product: One-touch option
             pricing_env: Pricing environment
         """
-        barrier = product.barrier
         rebate = product.rebate
 
         # Base terminal value assuming no touch happens exactly at maturity.
@@ -99,30 +99,9 @@ class OneTouchPDESolver(BasePDESolver):
         if not apply_terminal_touch:
             return
 
-        for rec, payoff in self._resolved_terminal_payoffs(
-            product,
-            pricing_env,
-            default_payoff=rebate,
-            event_payment=(
-                product.is_one_touch and product.payment_at_hit
-            ),
-        ):
-            rec_barrier = (
-                rec.barrier if rec is not None and rec.barrier is not None else barrier
-            )
-            touched = (
-                s_vec >= rec_barrier if product.is_up_barrier else s_vec <= rec_barrier
-            )
-            if product.is_one_touch:
-                # Mirror the interior-step aggregation semantics.
-                if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
-                    grid[touched, -1] += payoff
-                else:
-                    grid[touched, -1] = payoff
-                    break
-            else:
-                # No-touch: any touch region pays zero (aggregation-neutral).
-                grid[touched, -1] = 0.0
+        grid[:, -1] = self._apply_discrete_event(
+            grid[:, -1], x_vec, s_vec, self._terminal_event(product, pricing_env),
+            nodal=product.observation_type != ObservationType.DISCRETE)
 
     def set_boundary_conditions(
         self,
@@ -222,66 +201,71 @@ class OneTouchPDESolver(BasePDESolver):
             if t_idx not in self._observation_indices:
                 return
 
-        barrier = product.barrier
-        rebate = product.rebate
         current_time = self._current_time(self._total_tau, tau)
-        terminal_payment_time = self._terminal_payment_time(
-            product, pricing_env
-        )
-        terminal_df = self._df_between_times(
-            pricing_env, current_time, terminal_payment_time
-        )
+        event = self._step_event(product, pricing_env, t_idx, current_time)
+        grid[:, t_idx] = self._apply_discrete_event(
+            grid[:, t_idx], x_vec, s_vec, event,
+            nodal=product.observation_type != ObservationType.DISCRETE or t_idx == 0)
 
+    @staticmethod
+    def _sides(product, barrier):
+        """(lower, upper) as ``_apply_step_modifications`` compared them: up >= b, down <= b."""
+        return (None, barrier) if product.is_up_barrier else (barrier, None)
+
+    def _terminal_event(self, product, pricing_env) -> DiscreteEvent:
+        """The maturity observation's records and operations (spec 3A §5.4 table)."""
+        accumulate = self._schedule_aggregation == ObservationAggregation.ACCUMULATE
+        out = []
+        for rec, payoff in self._resolved_terminal_payoffs(
+            product, pricing_env, default_payoff=product.rebate,
+            event_payment=(product.is_one_touch and product.payment_at_hit),
+        ):
+            rec_barrier = rec.barrier if rec is not None and rec.barrier is not None else product.barrier
+            sides = self._sides(product, rec_barrier)
+            if product.is_one_touch:
+                if accumulate:
+                    out.append(EventRecord(*sides, payoff, EventOp.ADD))
+                else:
+                    out.append(EventRecord(*sides, payoff, EventOp.SET))
+                    break
+            else:
+                out.append(EventRecord(*sides, 0.0, EventOp.SET))   # no-touch: every record zeroes its region
+        return DiscreteEvent(tuple(out))
+
+    def _step_event(self, product, pricing_env, t_idx, current_time) -> DiscreteEvent:
+        """The interior observation's records and operations at node ``t_idx`` (spec 3A §5.4 table)."""
+        terminal_df = self._df_between_times(
+            pricing_env, current_time, self._terminal_payment_time(product, pricing_env))
         schedule_records = self._schedule_records.get(t_idx)
         if schedule_records:
+            accumulate = self._schedule_aggregation == ObservationAggregation.ACCUMULATE
+            out = []
             for rec in schedule_records:
                 barrier = rec.barrier if rec.barrier is not None else product.barrier
-                payoff = rec.payoff
                 if product.is_one_touch:
                     if product.payment_at_hit:
-                        barrier_value = self._cashflow_value_at_time(
-                            pricing_env=pricing_env,
-                            cashflow=payoff,
-                            current_time=current_time,
-                            settlement_time=rec.settlement_time,
-                        )
+                        value = self._cashflow_value_at_time(pricing_env=pricing_env, cashflow=rec.payoff,
+                                                             current_time=current_time,
+                                                             settlement_time=rec.settlement_time)
                     else:
-                        barrier_value = payoff * terminal_df
+                        value = rec.payoff * terminal_df
                 else:
-                    barrier_value = 0.0
-                if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
-                    if product.is_up_barrier:
-                        grid[s_vec >= barrier, t_idx] += barrier_value
-                    else:
-                        grid[s_vec <= barrier, t_idx] += barrier_value
-                else:
-                    if product.is_up_barrier:
-                        grid[s_vec >= barrier, t_idx] = barrier_value
-                    else:
-                        grid[s_vec <= barrier, t_idx] = barrier_value
-                    return
-            return
-
+                    value = 0.0
+                out.append(EventRecord(*self._sides(product, barrier), value,
+                                       EventOp.ADD if accumulate else EventOp.SET))
+                if not accumulate:
+                    break
+            return DiscreteEvent(tuple(out))
         if product.is_one_touch:
             if product.payment_at_hit:
-                barrier_value = self._cashflow_value_at_time(
-                    pricing_env,
-                    rebate,
-                    current_time,
-                    self._event_payment_time(
-                        product, pricing_env, current_time
-                    ),
-                )
+                value = self._cashflow_value_at_time(
+                    pricing_env, product.rebate, current_time,
+                    self._event_payment_time(product, pricing_env, current_time))
             else:
-                barrier_value = rebate * terminal_df
+                value = product.rebate * terminal_df
         else:
-            barrier_value = 0.0
-
-        # Apply barrier value where barrier is hit
-        if product.is_up_barrier:
-            grid[s_vec >= barrier, t_idx] = barrier_value
-        else:
-            grid[s_vec <= barrier, t_idx] = barrier_value
+            value = 0.0
+        return DiscreteEvent((EventRecord(*self._sides(product, product.barrier), value, EventOp.SET),))
 
     def _populate_observation_maps(self, product, pricing_env, layout, tau):
         # Discrete-monitoring bookkeeping (search-based; works on layer

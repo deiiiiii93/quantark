@@ -48,8 +48,11 @@ from quantark.asset.equity.engine.pde.grid import (
     GridBinder,
     GridRequest,
     Layout,
+    DiscreteEvent,
     MarketSnapshot,
+    Nodes,
     TimeRefinement,
+    apply_discrete_event,
     validate_external_layout,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -59,7 +62,7 @@ from quantark.util.exceptions import PricingError, NumericalError
 from quantark.util.numerical import is_close, safe_divide
 from quantark.util.enum.option_enums import ExerciseType, ObservationType
 from quantark.util.enum import ObservationAggregation
-from quantark.util.enum.engine_enums import EngineType
+from quantark.util.enum.engine_enums import EngineType, EventProjectionMode
 
 
 
@@ -78,6 +81,10 @@ from quantark.util.enum.engine_enums import EngineType
 _ENV_DF_MEMO: dict = {}
 _ENV_STEP_COEFF_MEMO: "OrderedDict[tuple, StepCoefficients]" = OrderedDict()
 _DF_MEMO_MAX_ENTRIES = 200_000
+
+#: The base family's treatment for ``event_projection=None`` (spec 3A §5.4). NODAL through stage 1
+#: (bitwise); flip (c) makes it CELL_AVERAGE, the treatment of every other core route.
+_BASE_FAMILY_DEFAULT_PROJECTION = EventProjectionMode.NODAL
 _STEP_COEFF_MEMO_MAX_ENTRIES = 64
 
 
@@ -687,6 +694,18 @@ class BasePDESolver(BaseEngine):
         stepper = self.adapter.stepper(self.params, product)
         ask = getattr(stepper, "time_refinement", None)
         return TimeRefinement() if ask is None else ask()
+
+    def _base_family_projection(self) -> EventProjectionMode:
+        """The projection a base-family discrete observation uses (spec 3A §5.4)."""
+        mode = self.params.event_projection
+        return _BASE_FAMILY_DEFAULT_PROJECTION if mode is None else mode
+
+    def _apply_discrete_event(self, column, x_vec, s_vec, event: DiscreteEvent, *, nodal: bool) -> np.ndarray:
+        """One observation's records on ``column``. ``nodal``: continuous monitoring (the barrier is
+        the domain edge) and the valuation-date observation (a terminal outcome, ``prepare``
+        step 0) keep the nodal mask in every mode."""
+        mode = EventProjectionMode.NODAL if nodal else self._base_family_projection()
+        return apply_discrete_event(Nodes(x_vec, s_vec), column, event, mode)
 
     @property
     def adapter(self) -> FamilyAdapter:

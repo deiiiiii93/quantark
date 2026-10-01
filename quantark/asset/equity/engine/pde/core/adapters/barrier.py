@@ -15,10 +15,22 @@ from quantark.util.exceptions import PricingError
 from ..prepare import CompositeProblem, Operation, TerminalOutcome, prepare
 from .base import FamilyAdapter
 
-__all__ = ["BarrierAdapter", "DoubleBarrierAdapter", "OneTouchAdapter", "DoubleOneTouchAdapter"]
+__all__ = ["BaseFamilyEvents", "BarrierAdapter", "DoubleBarrierAdapter", "OneTouchAdapter", "DoubleOneTouchAdapter"]
 
 _FACADE = (Operation.PRICE, Operation.GREEKS)
 _GREEK_KEYS = ("price", "delta", "gamma")
+
+
+class BaseFamilyEvents:
+    """The base family's discrete observations as ``explain`` reports them (spec 3A §5.4): per
+    observation node its records and the projection in force. Evidence only; the march applies
+    events through the solver (``_apply_step_modifications``)."""
+
+    def __init__(self, rows: tuple, projection):
+        self.rows, self.projection = rows, projection
+
+    def evidence(self) -> tuple:
+        return (("projection", self.projection.value),) + self.rows
 
 
 class _BarrierFamilyAdapter(FamilyAdapter):
@@ -73,6 +85,24 @@ class _BarrierFamilyAdapter(FamilyAdapter):
 
     def _hit_greeks(self, product, env):
         raise NotImplementedError
+
+    def prepare_events(self, product, env, layout, tau, request):
+        from quantark.util.enum import ObservationType
+        solver = self.solver
+        if getattr(product, "observation_type", None) != ObservationType.DISCRETE:
+            return ()                                   # continuous: the barrier is the domain edge
+        t, projection = layout.time.t, solver._base_family_projection()
+        total = solver._total_tau if solver._total_tau > 0 else tau
+        rows = []
+        for idx in sorted(solver._observation_indices):
+            current = solver._current_time(total, tau - t[idx])         # as _apply_step_modifications
+            event = solver._step_event(product, env, idx, current)
+            rows.append(("observation", int(idx), float(t[idx]),
+                         "nodal" if idx == 0 else projection.value, event.evidence()))
+        if solver._has_terminal_observation:
+            rows.append(("maturity", len(t) - 1, float(t[-1]), projection.value,
+                         solver._terminal_event(product, env).evidence()))
+        return BaseFamilyEvents(tuple(rows), projection)
 
 
 class _KnockInAdapter(_BarrierFamilyAdapter):
