@@ -19,7 +19,8 @@ from typing import Optional, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 
-from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.asset.equity.engine.pde.grid.request import TimeRefinement
+from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 from quantark.util.numerical import is_close
 
 from .backends import banded_advance, sparse_lu_advance
@@ -282,17 +283,25 @@ class CentralDifference:
 
 _BANDED = Backend.BANDED          # read once per group per step
 
+#: The two forms of a damped interval (spec 3A §5.3).
+DAMPING_FORMS = ("full_step", "half_step")
+
+
 @dataclass(frozen=True, kw_only=True)
 class CrankNicolson:
     """The built-in stepper: θ-weighted time stepping with terminal and event damping.
 
-    ``None`` damping counts are the route's defaults (1 and 2 on the core routes,
-    2 and 2 on DCN), resolved once by ``prepare``.
+    ``damping`` is the form of a damped interval (spec 3A §5.3): ``"full_step"`` takes it as one
+    whole step at the damping weight (0.7.0); ``"half_step"`` as two half-steps, and the two counts
+    then count intervals, whose midpoints the time builder inserts (``time_refinement``). ``None``
+    form or counts are the route's defaults (``grid.config.DAMPING_DEFAULTS``), resolved once by
+    ``prepare``.
     """
     theta: float = 0.5
     event_theta: float = 1.0
     terminal_damping_steps: Optional[int] = None
     event_damping_steps: Optional[int] = None
+    damping: Optional[str] = None
 
     def __post_init__(self):
         if not 0.0 <= float(self.theta) <= 1.0:
@@ -303,28 +312,44 @@ class CrankNicolson:
             v = getattr(self, name)
             if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v < 0):
                 raise ValidationError(f"{name} must be a non-negative int or None, got {v!r}")
+        if self.damping is not None and self.damping not in DAMPING_FORMS:
+            raise ValidationError(f"damping must be None or one of {DAMPING_FORMS}, got {self.damping!r}")
 
     def resolved(self, damping_defaults: tuple) -> "CrankNicolson":
-        term, event = damping_defaults
+        form, term, event = damping_defaults
         return replace(self,
+                       damping=form if self.damping is None else self.damping,
                        terminal_damping_steps=term if self.terminal_damping_steps is None else self.terminal_damping_steps,
                        event_damping_steps=event if self.event_damping_steps is None else self.event_damping_steps)
 
+    def _require_resolved(self, what: str) -> None:
+        if self.damping is None or self.terminal_damping_steps is None or self.event_damping_steps is None:
+            raise ValidationError(f"CrankNicolson.{what} needs a resolved stepper; call resolved() first")
+
+    def time_refinement(self) -> TimeRefinement:
+        """The intervals the time grid must split for this schedule: the two counts under
+        ``half_step``, none under ``full_step``."""
+        self._require_resolved("time_refinement")
+        if self.damping == "half_step":
+            return TimeRefinement(int(self.terminal_damping_steps), int(self.event_damping_steps))
+        return TimeRefinement()
+
     def _damping_sets(self, layout) -> tuple:
-        # grid/time.py (build_time), verbatim: damping follows EVENT nodes only
-        if self.terminal_damping_steps is None or self.event_damping_steps is None:
-            raise ValidationError("CrankNicolson.schedule needs resolved damping counts; call resolved() first")
+        # grid/time.py (build_time), verbatim: damping follows EVENT nodes only. Under half_step
+        # each counted interval is two half-steps, exactly the ones the builder created.
+        self._require_resolved("schedule")
+        per = 2 if self.damping == "half_step" else 1
         step_of = layout.time.step_of
         event_damp = frozenset(
             step_of[e] - j
             for e in layout.request.event_times
-            for j in range(1, int(self.event_damping_steps) + 1)
+            for j in range(1, per * int(self.event_damping_steps) + 1)
             if step_of[e] - j >= 0
         )
         n_steps = len(layout.time.dt)
         term_damp = frozenset(
             n_steps - j
-            for j in range(1, int(self.terminal_damping_steps) + 1)
+            for j in range(1, per * int(self.terminal_damping_steps) + 1)
             if n_steps - j >= 0
         )
         return event_damp, term_damp
@@ -349,6 +374,8 @@ class CrankNicolson:
         for name in ("terminal_damping_steps", "event_damping_steps"):
             if getattr(self, name) is not None:
                 out[name] = int(getattr(self, name))
+        if self.damping is not None:
+            out["damping"] = self.damping
         return out
 
 
@@ -451,6 +478,14 @@ def _fail(component, message):
 
 
 def validate_schedule(schedule, layout, component) -> None:
+    ask = getattr(component, "time_refinement", None)
+    expected = TimeRefinement() if ask is None else ask()
+    got = layout.request.refinement
+    if got != expected:
+        raise PricingError(
+            f"{type(component).__name__} marches a time grid refined {expected}, but this layout "
+            f"was built refined {got}: a frozen, session or external layout from another damping "
+            "form is refused, never marched (spec 3A §5.3)")
     schedule = np.asarray(schedule)
     n = layout.time.actual_steps
     if schedule.shape != (n,):

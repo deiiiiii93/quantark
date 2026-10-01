@@ -64,7 +64,7 @@ def validate_external_layout(
     old = layout.request
     # extra_times too: a price layout lacks a life surface's readout nodes
     # (spec 2 §5.2 step 5), so it must not be reused for that request.
-    for field in ("tau", "event_times", "extra_times", "hard_lower", "hard_upper"):
+    for field in ("tau", "event_times", "extra_times", "refinement", "hard_lower", "hard_upper"):
         if getattr(old, field) != getattr(fresh_request, field):
             raise ValidationError(
                 f"external layout mismatch on {field}: layout has "
@@ -121,6 +121,10 @@ def resolve_bound_layout(
             "cannot be reused across products with different absorbing "
             "barriers — create a new bump context for this product"
         )
+    if request.refinement != fr.refinement:
+        raise PricingError(
+            f"frozen bump layout was built refined {fr.refinement} but this solve's stepper asks for "
+            f"{request.refinement}; a bump context cannot change the damping form (spec 3A §5.3)")
     if (
         request.tau == fr.tau
         and request.event_times == fr.event_times

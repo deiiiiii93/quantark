@@ -118,7 +118,7 @@ def _terminal(solver, product, env, lifecycle_state) -> Section:
     return Section(out)
 
 
-def _settings(solver) -> Section:
+def _settings(solver, product) -> Section:
     """Per PDEParams field and per GridConfig field: requested, effective, source, applicability."""
     params = solver.params
     overlay = getattr(params, "grid", None)
@@ -146,7 +146,7 @@ def _settings(solver) -> Section:
                            "source": "preset" if value == builtin else "overlay",
                            "applicability": rules.get(key, "honoured") if custom else "honoured"}
             if f.name == "stepper" and not custom:
-                resolved = solver.adapter.stepper(params)
+                resolved = solver.adapter.stepper(params, product)
                 for s in dataclasses.fields(value):
                     requested = getattr(value, s.name)
                     out[f"stepper.{s.name}"] = {
@@ -271,19 +271,19 @@ def build_plan(problem, solver, product, env, lifecycle_state=None) -> PDEPlan:
         return PDEPlan(
             route=Section({"solver": type(solver).__name__, "adapter": type(solver.adapter).__name__,
                            "composition": problem.description}),
-            settings=_settings(solver), space=Section(), time=Section(), events=Section(),
+            settings=_settings(solver, product), space=Section(), time=Section(), events=Section(),
             scheme=Section(), outputs=Section(), identity=Section(), terminal=terminal,
             layout_bound=any(p.layout_bound for p in parts), parts=parts)
     if problem.terminal is not None:
         return PDEPlan(
             route=Section({"solver": type(solver).__name__, "adapter": type(problem.adapter).__name__,
                            "terminal": problem.terminal.reason}),
-            settings=_settings(solver), space=Section(), time=Section(), events=Section(), scheme=Section(),
+            settings=_settings(solver, product), space=Section(), time=Section(), events=Section(), scheme=Section(),
             outputs=Section(), identity=Section(), terminal=terminal, layout_bound=False)
     space, space_detail = _space(problem)
     time, time_detail = _time(problem)
     scheme, scheme_detail = _scheme(problem)
-    return PDEPlan(route=_route(problem), settings=_settings(solver), space=space, time=time,
+    return PDEPlan(route=_route(problem), settings=_settings(solver, product), space=space, time=time,
                    events=_events(problem), scheme=scheme, outputs=_outputs(problem),
                    identity=_identity(problem), terminal=terminal, layout_bound=True,
                    _detail={"space": space_detail, "time": time_detail, "scheme": scheme_detail})

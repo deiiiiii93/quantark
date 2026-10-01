@@ -19,14 +19,18 @@ from ..components import validate_readout
 from ..groups import VALUE, Backend, ColumnGroup
 from ..samples import SampleKind
 from ..prepare import Operation, TerminalOutcome
-from .base import FamilyAdapter
+from .base import FamilyAdapter, continuous_knock_in
 
-__all__ = ["SnowballAdapter", "LocalVolAdapterMixin", "LocalVolSnowballAdapter"]
+__all__ = ["SnowballAdapter", "LocalVolAdapterMixin", "LocalVolSnowballAdapter", "Heston2DSnowballAdapter"]
 
 
 class SnowballAdapter(FamilyAdapter):
 
     supports_statistics_group = True
+
+    def damping_key(self, product) -> str:
+        # decision 12: the contract alone, alive or knocked in (spec 3A §5.3)
+        return "core-continuous-ki" if continuous_knock_in(product) else "core"
 
     # --- prepare ------------------------------------------------------------------
 
@@ -486,3 +490,10 @@ class LocalVolAdapterMixin:
 
 class LocalVolSnowballAdapter(LocalVolAdapterMixin, SnowballAdapter):
     """``LocalVolSnowballPDESolver``."""
+
+
+class Heston2DSnowballAdapter(SnowballAdapter):
+    """The 2D solver's inherited 1D statistics march: the "2D" damping row (spec 3A §5.3)."""
+
+    def damping_key(self, product) -> str:
+        return "2D"

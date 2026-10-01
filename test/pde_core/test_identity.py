@@ -32,7 +32,7 @@ def test_a_budget_with_no_node_a_readout_node_and_an_event_node():
     event = _bind(event_times=(2.0 / 3.0,))
     assert plain.time.t.tobytes() == readout.time.t.tobytes() == event.time.t.tobytes()
     assert len({plain.fingerprint, readout.fingerprint, event.fingerprint}) == 3
-    stepper = CrankNicolson().resolved((1, 2))
+    stepper = CrankNicolson().resolved(("full_step", 1, 2))
     assert not np.array_equal(stepper.schedule(readout), stepper.schedule(event))
 
 

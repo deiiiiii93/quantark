@@ -21,7 +21,7 @@ from quantark.asset.equity.engine.pde.core.samples import (
 from quantark.asset.equity.engine.pde.grid.events import (
     project_piecewise_event,
 )
-from quantark.asset.equity.engine.pde.core.adapters.phoenix import LocalVolPhoenixAdapter
+from quantark.asset.equity.engine.pde.core.adapters.phoenix import Heston2DPhoenixAdapter, LocalVolPhoenixAdapter
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -165,6 +165,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
 
     engine_type = EngineType.PDE
     _solver_name = "Heston2DPhoenixPDESolver"
+    _adapter_class = Heston2DPhoenixAdapter
 
     def __init__(
         self,
@@ -491,7 +492,9 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         self._prepare_2d_continuous_ki_correction(core, product)
 
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
-        st = resolve_stepper(self.params, DAMPING_DEFAULTS["core"])
+        from quantark.asset.equity.engine.pde.route_applicability import check_route_applicability
+        check_route_applicability(self.params, "2D")
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["2D"])
         damped_keys = event_damped_step_keys(st, event_maps, core.N_T)
         v1_snapshots: dict[float, np.ndarray] = {}
 

@@ -1049,7 +1049,7 @@ class TestEventDampingPolicy:
         tl = build_time(req, cfg)
         # the stepper owns the schedule and its counts (spec 2 decision 5)
         stepper = CrankNicolson(theta=0.5, event_theta=1.0, event_damping_steps=event_damping_steps,
-                                terminal_damping_steps=terminal_damping_steps)
+                                terminal_damping_steps=terminal_damping_steps, damping="full_step")
         return stepper.schedule(types.SimpleNamespace(time=tl, request=req))
 
     def test_event_damping_decoupled_from_auto_grid(self):

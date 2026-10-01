@@ -49,7 +49,8 @@ __all__ = [
     "factorization_state",
 ]
 
-_BUILDER_VERSION = "pde-prep/v2"
+# the request gained refinement (3A Task 4) and day_count (3A Task 7): no 0.7.0 artefact may be reused
+_BUILDER_VERSION = "pde-prep/v3"
 _GRID_TAGS = frozenset(
     {
         "spot",

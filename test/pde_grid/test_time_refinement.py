@@ -91,3 +91,51 @@ def test_refinement_validates_its_counts():
     for bad in (-1, 1.5, True):
         with pytest.raises(ValidationError):
             TimeRefinement(bad, 0)
+
+
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson, validate_schedule
+from quantark.util.exceptions import PricingError
+
+
+class _L:                                              # the two attributes a schedule reads
+    def __init__(self, request, time):
+        self.request, self.time = request, time
+
+
+@pytest.mark.parametrize("counts", [(1, 1), (2, 2), (2, 1)])
+@pytest.mark.parametrize("events", [(5 / 252,), (1 / 252, 2 / 252, 10 / 252)])
+def test_the_schedule_marks_exactly_the_builders_half_steps(counts, events):
+    st = CrankNicolson(damping="half_step", terminal_damping_steps=counts[0], event_damping_steps=counts[1])
+    r = req(events=events, refinement=st.time_refinement())
+    base, tl = build_time(req(events=events), CFG), build_time(r, CFG)
+    halves = {j for j in range(tl.actual_steps) if tl.dt[j] < base.dt.max() * 0.75}
+    theta = st.schedule(_L(r, tl))
+    assert {j for j in range(len(theta)) if theta[j] != 0.5} == halves
+
+
+def test_full_step_asks_for_no_refinement():
+    st = CrankNicolson(damping="full_step", terminal_damping_steps=1, event_damping_steps=2)
+    assert st.time_refinement() == TimeRefinement()
+
+
+def test_an_unresolved_stepper_cannot_state_its_refinement():
+    with pytest.raises(ValidationError):
+        CrankNicolson().time_refinement()
+
+
+def test_validate_schedule_refuses_a_layout_built_for_another_form():
+    half = CrankNicolson(damping="half_step", terminal_damping_steps=1, event_damping_steps=1)
+    full = CrankNicolson(damping="full_step", terminal_damping_steps=1, event_damping_steps=1)
+    r = req(events=(5 / 252,), refinement=half.time_refinement())
+    layout = _L(r, build_time(r, CFG))
+    validate_schedule(half.schedule(layout), layout, half)
+    with pytest.raises(PricingError, match="refined"):
+        validate_schedule(full.schedule(layout), layout, full)
+
+
+def test_validate_external_layout_refuses_another_refinement():
+    from quantark.asset.equity.engine.pde.grid import GridBinder, MarketSnapshot, validate_external_layout
+    market = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.02, q_ref=0.0)
+    layout = GridBinder("fast", None).bind(req(events=(5 / 252,)), market)
+    with pytest.raises(ValidationError, match="refinement"):
+        validate_external_layout(layout, req(events=(5 / 252,), refinement=TimeRefinement(0, 1)), market)

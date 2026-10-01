@@ -18,7 +18,7 @@ def schedule(tl, request, term=1, event=2):
     1.0 terminal-damped (damping left TimeLayout for the stepper, spec 2 §4.2)."""
     from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 
-    return CrankNicolson(theta=0.5, event_theta=0.7, terminal_damping_steps=term,
+    return CrankNicolson(theta=0.5, event_theta=0.7, terminal_damping_steps=term, damping="full_step",
                          event_damping_steps=event).schedule(types.SimpleNamespace(time=tl, request=request))
 
 
@@ -266,5 +266,6 @@ def test_stepper_schedule_equals_the_0_6_time_layout_schedule(term, event):
     time = build_time(req, resolve_config("standard", GridConfig(time_steps=20)))
     assert not hasattr(time, "event_damping_steps") and not hasattr(time, "terminal_damping_steps")
     layout = types.SimpleNamespace(time=time, request=req)
-    got = CrankNicolson(theta=0.5, event_theta=0.7, terminal_damping_steps=term, event_damping_steps=event).schedule(layout)
+    got = CrankNicolson(theta=0.5, event_theta=0.7, terminal_damping_steps=term, event_damping_steps=event,
+                        damping="full_step").schedule(layout)
     assert got.tolist() == _FROZEN_SCHEDULES[(term, event)]

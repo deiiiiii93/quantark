@@ -254,7 +254,8 @@ class _IntradayCandidate(IntradayArm):
         if target is not None:
             return ConvergenceLevel(label, float(resolution), target, settings, is_target=True)
         values, _, _, numerical = _measure(engine, *specs, self.quantities)
-        achieved = {k: numerical[k] for k in ("points", "steps_per_day", "requested_steps", "nodes", "cells", "resolution")
+        achieved = {k: numerical[k] for k in ("points", "steps_per_day", "requested_steps", "actual_steps", "nodes",
+                                                    "cells", "resolution")
                     if k in numerical}
         return ConvergenceLevel(label, float(resolution), values, {**settings, "achieved": achieved})
 
@@ -350,7 +351,7 @@ class IntradaySnowballPDECandidate(_IntradayCandidate):
         if points is None or spd is None:
             # decided without a grid (terminated, or an event at the valuation instant): nothing to refine
             return CandidateResult(values=values, statuses=statuses, reasons=reasons, exact=True)
-        points, spd, steps = int(points), float(spd), float(numerical.get("requested_steps") or 0.0)
+        points, spd, steps = int(points), float(spd), float(numerical.get("actual_steps") or 0.0)
         solved = {"points": points, "steps_per_day": spd, "resolution": numerical.get("resolution")}
 
         def level(label, resolution, p, s):

@@ -16,8 +16,21 @@ from ..groups import VALUE, Backend, ColumnGroup
 from ..identity import coefficient_key, component_fingerprint
 from ..prepare import Operation, TerminalOutcome
 from ..samples import SampleKind, sample_bsm
+from quantark.util.enum import ObservationType
 
-__all__ = ["FamilyAdapter"]
+__all__ = ["FamilyAdapter", "continuous_knock_in"]
+
+
+def continuous_knock_in(product) -> bool:
+    """Whether the contract monitors a knock-in barrier continuously (spec 3A decision 12).
+
+    Contract terms only: never spot, the knocked-in state or a lifecycle flag, which a bump or
+    an event can move. A bump therefore cannot change a solve's damping class.
+    """
+    if not getattr(product, "has_ki_barrier", False):
+        return False
+    bc = product.barrier_config
+    return bool(bc.ki_continuous or bc.ki_observation_type == ObservationType.CONTINUOUS)
 
 
 class FamilyAdapter:
@@ -154,9 +167,13 @@ class FamilyAdapter:
         validate_coefficients(sc, len(layout.time.dt), num_x, CentralDifference())
         return CoefficientsInForce(flat=flat, sets=None if sc.n_unique == 1 else sc, num_x=num_x)
 
-    def stepper(self, params):
+    def damping_key(self, product) -> str:
+        """The ``DAMPING_DEFAULTS`` row this product's solves resolve against (decision 12)."""
+        return "core"
+
+    def stepper(self, params, product):
         from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
-        return resolve_stepper(params, DAMPING_DEFAULTS["core"])
+        return resolve_stepper(params, DAMPING_DEFAULTS[self.damping_key(product)])
 
     def coefficient_key(self, product, env, layout, fps):
         return coefficient_key(layout.fingerprint, fps, self._strike(product, env),

@@ -289,7 +289,7 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
         events = adapter.prepare_events(product, env, layout, tau, request) if request.price else None
         samples = _lazy(lambda: adapter.samples(product, env, layout, tau))   # step 8
         coefficients = adapter.coefficients(product, env, layout, tau, samples, session)
-        stepper = adapter.stepper(solver.params)                          # step 9
+        stepper = adapter.stepper(solver.params, product)                 # step 9
         schedule = stepper.schedule(layout)
         validate_schedule(schedule, layout, stepper)
         groups = adapter.groups(product, layout, request) if request.price else ()   # step 10

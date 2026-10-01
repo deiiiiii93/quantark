@@ -49,6 +49,7 @@ from quantark.asset.equity.engine.pde.grid import (
     GridRequest,
     Layout,
     MarketSnapshot,
+    TimeRefinement,
     validate_external_layout,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -548,6 +549,7 @@ class BasePDESolver(BaseEngine):
             hard_lower=hard_lower,
             hard_upper=hard_upper,
             event_times=tuple(sorted(set(events))),
+            refinement=self._time_refinement(product),
         )
 
     def _external_layout_check(
@@ -674,6 +676,17 @@ class BasePDESolver(BaseEngine):
 
     #: The family seam (spec 2 §5.1): each solver names its adapter class.
     _adapter_class = FamilyAdapter
+
+    def _time_refinement(self, product) -> TimeRefinement:
+        """The refinement this solve's stepper asks of the time grid (spec 3A §5.3, decision 6).
+
+        A function of ``(params, product)`` alone, so every path that builds this product's
+        request (prepare, bump contexts, sessions, external-layout checks) builds the same one.
+        A custom stepper without ``time_refinement`` asks for none.
+        """
+        stepper = self.adapter.stepper(self.params, product)
+        ask = getattr(stepper, "time_refinement", None)
+        return TimeRefinement() if ask is None else ask()
 
     @property
     def adapter(self) -> FamilyAdapter:

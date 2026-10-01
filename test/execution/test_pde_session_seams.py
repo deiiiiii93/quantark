@@ -180,7 +180,7 @@ class TestSessionPreparation:
     def test_builder_version(self):
         from quantark.asset.equity.engine.pde import pde_session_prep
 
-        assert pde_session_prep._BUILDER_VERSION == "pde-prep/v2"
+        assert pde_session_prep._BUILDER_VERSION == "pde-prep/v3"
 
     def test_factorization_fingerprint_moves_with_the_stepper(self):
         from quantark.asset.equity.engine.pde import SnowballPDESolver

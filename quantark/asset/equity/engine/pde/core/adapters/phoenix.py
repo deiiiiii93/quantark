@@ -15,7 +15,7 @@ from quantark.util.exceptions import ValidationError
 from ..groups import VALUE_NO_ZERO_DIFFUSION_OVERRIDE, Backend, ColumnGroup
 from .snowball import LocalVolAdapterMixin, SnowballAdapter
 
-__all__ = ["PhoenixAdapter", "LocalVolPhoenixAdapter"]
+__all__ = ["PhoenixAdapter", "LocalVolPhoenixAdapter", "Heston2DPhoenixAdapter"]
 
 
 class PhoenixAdapter(SnowballAdapter):
@@ -156,3 +156,10 @@ class PhoenixAdapter(SnowballAdapter):
 
 class LocalVolPhoenixAdapter(LocalVolAdapterMixin, PhoenixAdapter):
     """``LocalVolPhoenixPDESolver``: a local-vol row per step, no flat-exact replacement."""
+
+
+class Heston2DPhoenixAdapter(PhoenixAdapter):
+    """The 2D solver's inherited 1D statistics march: the "2D" damping row (spec 3A §5.3)."""
+
+    def damping_key(self, product) -> str:
+        return "2D"

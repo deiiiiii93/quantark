@@ -31,9 +31,19 @@ _SHARED_DEFAULTS = dict(
     day_count=252,
 )
 
-#: The built-in stepper's route defaults; a ``None`` count on ``CrankNicolson``
-#: resolves to these.
-DAMPING_DEFAULTS = {"core": (1, 2), "DCN": (2, 2)}
+#: The built-in stepper's route defaults, ``(form, terminal count, event count)`` (spec 3A §5.3):
+#: a ``None`` on ``CrankNicolson`` resolves to its route's row. The core has two rows chosen by the
+#: contract alone (decision 12): a product whose knock-in is monitored continuously keeps
+#: full-step; every other core product takes "core". DCN, the local-vol kernels and the 2D solvers
+#: have their own rows, so a core flip cannot reach them. The local-vol vanilla kernel reads only
+#: ``terminal > 0`` (one two-half-step startup); the barrier kernel reads none of them.
+DAMPING_DEFAULTS = {
+    "core": ("full_step", 1, 2),
+    "core-continuous-ki": ("full_step", 1, 2),
+    "DCN": ("half_step", 2, 2),
+    "local-vol": ("half_step", 1, 2),
+    "2D": ("full_step", 1, 2),
+}
 
 #: Local-vol vanilla/barrier routes (spec §4.2, decision 16): today's plan at
 #: standard (400 points, a 200-step budget); fast/high are new resolution
@@ -205,15 +215,26 @@ def _validate_resolved(cfg: GridConfig) -> None:
 
 
 def resolved_grid_evidence(params) -> dict:
-    """The historical ten-key ``grid`` record certificates hash (spec 2 §4.6): the nine
-    resolved GridConfig fields plus the built-in stepper's two resolved damping counts,
-    under their 0.6.0 keys. It is the numerical fact, not a serialization of GridConfig."""
+    """The certificates' ``grid`` record (spec 3A §5.8): the resolved GridConfig fields, then the
+    damping of a product with continuous knock-in under its historical keys, ``damping`` only when
+    that form is half-step, and ``discrete_monitoring_damping`` only when every other core solve
+    resolves differently. A full-step (1, 2) configuration still serializes to the 0.7.0 record.
+    It is the numerical fact, not a serialization of GridConfig."""
     from quantark.asset.equity.engine.pde.core.components import CrankNicolson, resolve_stepper
 
     record = dict(resolve_config(params.accuracy, params.grid).evidence())
-    st = resolve_stepper(params, DAMPING_DEFAULTS["core"])
-    if type(st) is not CrankNicolson:
+    cont = resolve_stepper(params, DAMPING_DEFAULTS["core-continuous-ki"])
+    disc = resolve_stepper(params, DAMPING_DEFAULTS["core"])
+    if type(cont) is not CrankNicolson or type(disc) is not CrankNicolson:
         raise ValidationError("resolved_grid_evidence: only the built-in stepper is certifiable")
-    record["terminal_damping_steps"] = int(st.terminal_damping_steps)
-    record["event_damping_steps"] = int(st.event_damping_steps)
+    record["terminal_damping_steps"] = int(cont.terminal_damping_steps)
+    record["event_damping_steps"] = int(cont.event_damping_steps)
+    if cont.damping == "half_step":
+        record["damping"] = "half_step"
+
+    def as_row(st):
+        return [st.damping, int(st.terminal_damping_steps), int(st.event_damping_steps)]
+
+    if as_row(disc) != as_row(cont):
+        record["discrete_monitoring_damping"] = as_row(disc)
     return record

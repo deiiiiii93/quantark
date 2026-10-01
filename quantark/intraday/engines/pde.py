@@ -138,23 +138,28 @@ def _basis_label(grid, factor: float) -> str:
     return f"{float(grid.steps_per_day) * factor:g} steps per day"
 
 
-def _time_fill_for(ctx, solver, plan, grid, numbers, dx_min, max_steps):
-    """(time factor, requested steps) of the smallest power-of-two multiple of the current fill whose time
-    layout meets the time floors on the given space grid, or the last multiple within ``max_steps``."""
-    from quantark.asset.equity.engine.pde.core.components import resolve_stepper
-    from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
-    from quantark.asset.equity.engine.pde.grid.time import build_time
+def _time_fill_for(ctx, solver, twin, plan, grid, numbers, dx_min, max_steps):
+    """(time factor, delivered steps) of the smallest power-of-two multiple of the current fill whose
+    layout meets the time floors on the given space grid, or the last multiple within ``max_steps``.
+
+    Delivered steps include half-step nodes (spec 3A §5.9). Each trial is counted with ``time_fill``
+    first: a count over the budget ends the search with the last feasible trial; only a feasible
+    trial is built, with its half nodes, so its schedule is the one the solve would march.
+    """
+    from quantark.asset.equity.engine.pde.grid.time import build_time, time_fill
 
     request = plan["time"]["request"]
-    stepper = resolve_stepper(solver.params, DAMPING_DEFAULTS["core"])
+    stepper = solver.adapter.stepper(solver.params, twin)          # the stepper the solve resolved
     factor = 1.0
-    best = (factor, int(plan["time"]["requested_steps"]))
+    best = (factor, int(plan["time"]["actual_steps"]))
     while True:
         factor *= 2.0
-        candidate = build_time(request, _with_time_factor(grid, factor, max(max_steps, 1)))
-        if candidate.requested_steps > max_steps:
+        trial = _with_time_factor(grid, factor, max(max_steps, 1))
+        delivered = time_fill(request, trial)
+        if delivered > max_steps:
             return best
-        best = (factor, int(candidate.requested_steps))
+        candidate = build_time(request, replace(trial, max_steps=max(max_steps, delivered)))
+        best = (factor, int(candidate.actual_steps))
         # the stepper's schedule reads the event times from the request the candidate was built from
         theta = stepper.schedule(SimpleNamespace(time=candidate, request=request))
         if time_resolved(_time_status(ctx, candidate.t, theta, numbers, dx_min)):
@@ -191,7 +196,7 @@ class PDERoute:
         records = ()
         if numbers is None:          # an at-valuation event decided the price without a grid
             # decided on the known spot by an event at the valuation instant: no grid, nothing to discretise
-            return EnginePriceOutcome(pv, self._method(engine), {"resolution": "not_solved"}, {}, engine_used=solver,
+            return EnginePriceOutcome(pv, self._method(solver, twin), {"resolution": "not_solved"}, {}, engine_used=solver,
                                       exact=True)
         grid = solver.grid_binder.config            # the resolved config the solve used (scheme knobs included)
         dx_min = _dx_min(plan)
@@ -202,7 +207,7 @@ class PDERoute:
             points = int(grid.points)
             if status.required_points > numbers["points"]:
                 points = max(points, min(status.required_points, INTRADAY_PDE_MAX_POINTS))
-            steps_now = int(numbers["requested_steps"])
+            steps_now = int(numbers["actual_steps"])
             if points * (steps_now + 1) > max_cells:
                 points, budget_bound = max(int(grid.points), max_cells // (steps_now + 1)), True
             # the time floors are judged on the refined space grid: its smallest cell shrinks with the point count
@@ -212,7 +217,7 @@ class PDERoute:
             # a layer the point or memory cap cannot resolve stays under-resolved: more steps would buy cost, not accuracy
             if space_resolvable and not time_resolved(_plan_status(ctx, plan, numbers, dx_min)):
                 max_steps = min(INTRADAY_PDE_MAX_STEPS, max_cells // points - 1)
-                factor, requested = _time_fill_for(ctx, solver, plan, grid, numbers, dx_min, max_steps)
+                factor, requested = _time_fill_for(ctx, solver, twin, plan, grid, numbers, dx_min, max_steps)
                 budget_bound = budget_bound or max_steps < INTRADAY_PDE_MAX_STEPS
             if points > numbers["points"] or factor > 1.0:
                 refined = deepcopy(engine)
@@ -238,7 +243,7 @@ class PDERoute:
                          cells_per_layer=status.cells_per_layer, layer_log_width=status.layer_log_width,
                          steps_per_layer=status.steps_per_layer, grid_mode_damping=status.grid_mode_damping,
                          steps_per_day=None if grid.steps_per_day is None else float(grid.steps_per_day))
-        return EnginePriceOutcome(pv, self._method(engine), numerical, {}, records, engine_used=solver)
+        return EnginePriceOutcome(pv, self._method(solver, twin), numerical, {}, records, engine_used=solver)
 
     def point_greeks(self, ctx, engine) -> PointGreeks:
         """The solver's own stencil on the grid the route priced on.
@@ -267,13 +272,10 @@ class PDERoute:
         return point_greeks_from_estimates(delta, gamma, "grid_stencil", note=note)
 
     @staticmethod
-    def _method(engine) -> str:
-        from quantark.asset.equity.engine.pde.core.components import resolve_stepper
-        from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
-
-        params = engine.params
+    def _method(solver, twin) -> str:
+        params = solver.params
         if getattr(params, "stepper", None) is None:
             return "pde_cn_theta0.5"
-        st = resolve_stepper(params, DAMPING_DEFAULTS["core"])
+        st = solver.adapter.stepper(params, twin)                   # the stepper the solve resolved
         rannacher = int(getattr(st, "terminal_damping_steps", 0) or 0) > 0
         return f"pde_{'rannacher' if rannacher else 'cn'}_theta{getattr(st, 'theta', 0.5)}"

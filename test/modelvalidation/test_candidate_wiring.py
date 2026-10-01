@@ -59,3 +59,13 @@ def test_pdeparams_evidence_records_the_components_it_runs_with():
 def test_a_key_from_config_rejects_fails_the_study_at_load():
     with pytest.raises(ValidationError):
         _arm({"accuracy": "standard", "operator": {}})
+
+
+def test_a_half_step_stepper_records_its_form():
+    rec = resolved_grid_evidence(PDEParams(stepper=CrankNicolson(damping="half_step")))
+    assert rec["damping"] == "half_step" and "discrete_monitoring_damping" not in rec
+
+
+def test_the_default_records_the_continuous_ki_counts():
+    rec = resolved_grid_evidence(PDEParams())
+    assert (rec["terminal_damping_steps"], rec["event_damping_steps"]) == (1, 2) and "damping" not in rec

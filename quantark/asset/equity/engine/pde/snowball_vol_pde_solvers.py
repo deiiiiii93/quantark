@@ -19,7 +19,7 @@ from quantark.asset.equity.engine.pde.core.samples import (
     _validated_local_vol_row,
     sample_local_vol,
 )
-from quantark.asset.equity.engine.pde.core.adapters.snowball import LocalVolSnowballAdapter
+from quantark.asset.equity.engine.pde.core.adapters.snowball import Heston2DSnowballAdapter, LocalVolSnowballAdapter
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.pde.vol_continuous_ki import (
     Heston2DBarrierCrossingMixin,
@@ -197,6 +197,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
 
     engine_type = EngineType.PDE
     _solver_name = "Heston2DSnowballPDESolver"
+    _adapter_class = Heston2DSnowballAdapter
     DEFAULT_V_GRID_POWER = 2.5
     DEFAULT_BARRIER_GREEK_STEPS_PER_TICK = 8
     PRODUCTION_BARRIER_GREEK_STEPS_PER_TICK = 16
@@ -965,7 +966,9 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
 
         v1_snapshots: dict[float, np.ndarray] = {}
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
-        st = resolve_stepper(self.params, DAMPING_DEFAULTS["core"])
+        from quantark.asset.equity.engine.pde.route_applicability import check_route_applicability
+        check_route_applicability(self.params, "2D")
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["2D"])
         damped_keys = event_damped_step_keys(st, event_maps, core.N_T)
 
         terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)

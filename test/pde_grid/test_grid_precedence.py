@@ -60,7 +60,7 @@ def test_t4_damping_never_changes_fill_and_spills_backward():  # existing
     # and the schedule spills backward from the event, clipped at step 0
     r = req(events=(0.5,))
     tl = build_time(r, cfg(time_steps=10))
-    theta = CrankNicolson(theta=0.5, event_theta=0.7, event_damping_steps=7,
+    theta = CrankNicolson(theta=0.5, event_theta=0.7, event_damping_steps=7, damping="full_step",
                           terminal_damping_steps=3).schedule(types.SimpleNamespace(time=tl, request=r))
     k = tl.step_of[0.5]  # node 5
     assert [i for i, th in enumerate(theta) if th == 0.7] == list(range(k - 5, k))  # 7 asked
@@ -71,7 +71,8 @@ def test_t4_extra_times_are_not_damped():  # existing
     r = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
                     hard_lower=None, hard_upper=None, event_times=(), extra_times=(0.5,))
     tl = build_time(r, cfg(time_steps=10))
-    theta = CrankNicolson(event_theta=0.7, terminal_damping_steps=0, event_damping_steps=2).schedule(
+    theta = CrankNicolson(event_theta=0.7, terminal_damping_steps=0, event_damping_steps=2,
+                          damping="full_step").schedule(
         types.SimpleNamespace(time=tl, request=r))
     assert (theta == 0.5).all()
     assert tl.t[tl.step_of[0.5]] == 0.5

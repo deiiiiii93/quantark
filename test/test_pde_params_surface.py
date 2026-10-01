@@ -63,10 +63,13 @@ def test_damping_knobs_removed(name):
 def test_intraday_method_label_unchanged():
     from quantark.asset.equity.engine.pde import SnowballPDESolver
     from quantark.intraday.engines.pde import PDERoute
+    from quantark.modelvalidation.builders.equity_snowball import make_snowball
 
-    assert PDERoute._method(SnowballPDESolver(PDEParams())) == "pde_rannacher_theta0.5"
+    twin = make_snowball(dict(initial_price=100.0, strike=100.0, ko_barrier=103.0, ki_barrier=85.0,
+                              ko_rate=0.15, rebate_rate=0.15, months=12, maturity=1.0, contract_multiplier=1.0))
+    assert PDERoute._method(SnowballPDESolver(PDEParams()), twin) == "pde_rannacher_theta0.5"
     no_term = SnowballPDESolver(PDEParams(stepper=CrankNicolson(terminal_damping_steps=0)))
-    assert PDERoute._method(no_term) == "pde_cn_theta0.5"
+    assert PDERoute._method(no_term, twin) == "pde_cn_theta0.5"
 
 
 def test_cache_off_is_the_instance_flag_and_changes_no_number():
@@ -300,3 +303,63 @@ def test_a_component_missing_its_methods_is_rejected():
 
     with pytest.raises(ValidationError, match="step"):
         PDEParams(stepper=NoStep())
+
+
+# --- the damping form (0.8.0; spec 3A §5.3) ----------------------------------------------
+
+def test_crank_nicolson_rejects_an_unknown_damping_form():
+    with pytest.raises(ValidationError, match="damping"):
+        CrankNicolson(damping="halfstep")
+
+
+def test_local_vol_vanilla_rejects_full_step_damping():
+    from quantark.asset.equity.engine.pde import LocalVolPDESolver
+    with pytest.raises(ValidationError, match="stepper.damping"):
+        LocalVolPDESolver(params=PDEParams(stepper=CrankNicolson(damping="full_step")))
+    LocalVolPDESolver(params=PDEParams(stepper=CrankNicolson(damping="half_step")))   # its own form
+
+
+@pytest.mark.parametrize("form", ["full_step", "half_step"])
+def test_local_vol_barrier_has_no_damping_to_set(form):
+    from datetime import datetime
+
+    import numpy as np
+
+    from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import LocalVolBarrierPDESolver
+    from quantark.asset.equity.product.option import BarrierOption
+    from quantark.param import FlatRateCurve, GridVolSurface, SpotQuote
+    from quantark.param.div import ContinuousDividendYield
+    from quantark.priceenv import PricingEnvironment
+    from quantark.util.enum import BarrierType, ObservationType, OptionType
+
+    strikes = list(100.0 * np.exp(np.linspace(-0.6, 0.6, 9)))
+    env = PricingEnvironment(rate_curve=FlatRateCurve(0.03), valuation_date=datetime(2026, 1, 1),
+                             spot_quote=SpotQuote(spot=100.0), div_yield=ContinuousDividendYield(0.01),
+                             vol_surface=GridVolSurface(strikes, list(np.linspace(0.1, 2.0, 6)),
+                                                        np.full((6, 9), 0.22)))
+    product = BarrierOption(strike=100.0, maturity=1.0, option_type=OptionType.CALL, barrier=130.0,
+                            barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.CONTINUOUS)
+    # the route is checked where the route config resolves: at price
+    with pytest.raises(ValidationError, match="inapplicable"):
+        LocalVolBarrierPDESolver(PDEParams(stepper=CrankNicolson(damping=form))).price(product, env)
+
+
+def test_dcn_rejects_full_step_damping():
+    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+    with pytest.raises(ValidationError, match="stepper.damping"):
+        DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(damping="full_step")))
+    DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(damping="half_step")))
+
+
+def test_the_2d_solvers_reject_half_step_damping():
+    from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import HestonSnowballPDESolver
+    from quantark.modelvalidation.builders.equity_snowball import make_environment, make_snowball
+    from quantark.volmodels.heston import HestonParams
+
+    hp = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.6)
+    solver = HestonSnowballPDESolver(hp, params=PDEParams(stepper=CrankNicolson(damping="half_step")),
+                                     n_x=40, n_v=16, n_t=20)
+    product = make_snowball(dict(initial_price=100.0, strike=100.0, ko_barrier=103.0, ki_barrier=85.0,
+                                 ko_rate=0.15, rebate_rate=0.15, months=12, maturity=1.0, contract_multiplier=1.0))
+    with pytest.raises(ValidationError, match="stepper.damping"):
+        solver.price(product, make_environment(dict(spot=100.0, vol=0.22, rate=0.025, div_yield=0.03)))

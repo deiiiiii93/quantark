@@ -55,6 +55,9 @@ _LV_DOMAIN = (
     ),
 )
 _NO_DAMPING = "the local-vol barrier kernel has no damping schedule"
+_HALF_STEP_KERNEL = (
+    "the kernel damps every damped interval in two half-steps; damping='full_step' cannot be applied"
+)
 _NO_SEAM = "no core seam until sub-project 3"
 _COMPONENTS = (
     Rule("component.stepper_class", REJECTED, _NO_SEAM),
@@ -76,10 +79,12 @@ ROUTE_RULES = {
             "count of 2 or more cannot be applied",
             allowed=(0, 1),
         ),
+        Rule("stepper.damping", REJECTED, _HALF_STEP_KERNEL, allowed=("half_step",)),
     )
     + _COMPONENTS,
     "local-vol barrier": _LV_DOMAIN
     + (
+        Rule("stepper.damping", INAPPLICABLE, _NO_DAMPING),
         Rule("stepper.terminal_damping_steps", INAPPLICABLE, _NO_DAMPING),
         Rule("stepper.event_damping_steps", INAPPLICABLE, _NO_DAMPING),
         Rule("stepper.event_theta", INAPPLICABLE, _NO_DAMPING),
@@ -100,8 +105,17 @@ ROUTE_RULES = {
             "DCN's events are nodal masks",
             allowed=(EventProjectionMode.NODAL,),
         ),
+        Rule("stepper.damping", REJECTED, "DCN " + _HALF_STEP_KERNEL[4:], allowed=("half_step",)),
     )
     + _COMPONENTS,
+    "2D": (
+        Rule(
+            "stepper.damping",
+            REJECTED,
+            "the 2D ADI solvers damp in whole steps; damping='half_step' cannot be applied",
+            allowed=("full_step",),
+        ),
+    ),
 }
 
 

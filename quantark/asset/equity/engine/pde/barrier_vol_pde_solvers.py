@@ -190,7 +190,7 @@ class LocalVolBarrierPDESolver(BaseEngine):
 
         observe_steps = None if continuous else [_obs_index(float(d)) for d in dates]
         is_call = product.option_type == OptionType.CALL
-        st = resolve_stepper(self.params, DAMPING_DEFAULTS["core"])
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["local-vol"])
 
         def price_of_rebate(reb):
             return price_barrier_lv_pde(float(env.spot), float(product.strike), is_call, T, lv,

@@ -12,7 +12,7 @@ def test_resolve_standard_fully_populated():
     c = resolve_config("standard", None)
     assert c.points == 400 and c.steps_per_day == 4.0 and c.day_count == 252
     assert not hasattr(c, "terminal_damping_steps") and not hasattr(c, "event_damping_steps")
-    assert DAMPING_DEFAULTS["core"] == (1, 2)   # the stepper's defaults on the core routes
+    assert DAMPING_DEFAULTS["core"] == ("full_step", 1, 2)   # the stepper's defaults on the core routes
     assert c.eps_crit == 0.003 and c.num_std == 4.0
     assert c.max_points == 2000 and c.max_steps == 5000
     assert c.bounds == (None, None)
@@ -211,7 +211,7 @@ def test_lv_table():
 def test_dcn_table_standard_is_todays_plan():
     cfg = resolve_config("standard", None, profiles=DCN_ACCURACY_PROFILES)
     assert (cfg.points, cfg.steps_per_day, cfg.max_points) == (801, 0.1, 2000)
-    assert DAMPING_DEFAULTS["DCN"] == (2, 2)
+    assert DAMPING_DEFAULTS["DCN"] == ("half_step", 2, 2)
     assert (cfg.eps_crit, cfg.num_std, cfg.max_steps, cfg.day_count) == (0.003, 4.0, 5000, 252)
     assert [
         resolve_config(a, None, profiles=DCN_ACCURACY_PROFILES).points

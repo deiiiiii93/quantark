@@ -103,7 +103,7 @@ class LocalVolPDESolver(BaseEngine):
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
         is_call = product.option_type == OptionType.CALL
-        st = resolve_stepper(self.params, DAMPING_DEFAULTS["core"])
+        st = resolve_stepper(self.params, DAMPING_DEFAULTS["local-vol"])
         unit = price_european_lv_pde(
             s0=spot, strike=strike, is_call=is_call, T=T,
             lv_surface=lv, step_dt=np.diff(t_grid), r_fwd=r_fwd, carry_fwd=carry_fwd,
