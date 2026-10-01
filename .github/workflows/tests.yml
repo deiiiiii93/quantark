@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      QUANTARK_REQUIRE_MESH_KERNEL: python
     strategy:
       fail-fast: false
       matrix:
@@ -26,6 +28,22 @@ jobs:
           else
             python -m pytest
           fi
+
+  accel:
+    runs-on: ubuntu-latest
+    env:
+      QUANTARK_REQUIRE_MESH_KERNEL: numba
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev,accel]"
+      - name: Mesh kernel and 1D byte-sensitive tests
+        run: |
+          python -m pytest test/pde_grid test/pde_core test/modelvalidation/test_anchors.py \
+            test/modelvalidation/test_banked_certificates.py test/execution -q
 
   package-smoke:
     runs-on: ubuntu-latest

@@ -21,6 +21,7 @@ from typing import Tuple
 
 import numpy as np
 
+from quantark.asset.equity.engine.pde.grid import mesh_kernels
 from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.engine.pde.grid.request import GridRequest, MarketSnapshot
 from quantark.util.exceptions import ValidationError
@@ -422,15 +423,25 @@ def _legacy_ode_integrate(
     return mesh
 
 
+def _kernel_integrate(y_min: float, N: int, A: float, beta: float, crits: np.ndarray) -> np.ndarray:
+    """RK4 on the selected mesh kernel (spec 3A §5.1). A deferral re-runs this call on the NumPy
+    reference, under the caller's ``np.errstate``, so it raises what 0.7.0 raised."""
+    try:
+        return mesh_kernels.integrate(y_min, N, A, beta, crits)
+    except mesh_kernels.Deferred:
+        return _legacy_ode_integrate(y_min, N, A, beta, crits)
+
+
 def _legacy_ode_find_A(
-    y_min: float, y_max: float, N: int, beta: float, crits: np.ndarray
+    y_min: float, y_max: float, N: int, beta: float, crits: np.ndarray, integrate=None
 ) -> float:
+    integrate = _legacy_ode_integrate if integrate is None else integrate
     a_lo = 0.0
     a_hi = max(4.0 * abs(y_max), abs(y_max - y_min))
 
     def residual(A: float) -> float:
         return (
-            _legacy_ode_integrate(y_min, N, A, beta, crits)[-1] - y_max
+            integrate(y_min, N, A, beta, crits)[-1] - y_max
         )
 
     f_lo = residual(a_lo)
@@ -455,17 +466,22 @@ def _legacy_ode_find_A(
 
 
 def _legacy_concentrated_mesh(
-    x_lo: float, x_hi: float, N: int, x_crits: np.ndarray, dx_target: float
+    x_lo: float, x_hi: float, N: int, x_crits: np.ndarray, dx_target: float, *, integrate=None
 ) -> np.ndarray:
-    """Certified pre-fix layout path for small critical sets."""
+    """Certified pre-fix layout path for small critical sets.
+
+    The RK4 integration runs on ``mesh_kernels`` (spec 3A §5.1); ``integrate=_legacy_ode_integrate``
+    is the 0.7.0 NumPy path, kept as the reference and the test oracle.
+    """
+    integrate = _kernel_integrate if integrate is None else integrate
     beta_lo = 1e-12
     beta_hi = 1e3 * (x_hi - x_lo)
     n_coarse = min(N, 64)
     dx_target_adj = dx_target * (N / n_coarse)
 
     def worst_spacing(beta: float) -> float:
-        A = _legacy_ode_find_A(x_lo, x_hi, n_coarse, beta, x_crits)
-        mesh = _legacy_ode_integrate(x_lo, n_coarse, A, beta, x_crits)
+        A = _legacy_ode_find_A(x_lo, x_hi, n_coarse, beta, x_crits, integrate=integrate)
+        mesh = integrate(x_lo, n_coarse, A, beta, x_crits)
         return _worst_spacing(mesh, x_crits)
 
     if worst_spacing(beta_lo) > dx_target_adj:
@@ -481,8 +497,8 @@ def _legacy_concentrated_mesh(
         beta = lo
 
     def mesh_for(value: float) -> np.ndarray:
-        A = _legacy_ode_find_A(x_lo, x_hi, N, value, x_crits)
-        return _legacy_ode_integrate(x_lo, N, A, value, x_crits)
+        A = _legacy_ode_find_A(x_lo, x_hi, N, value, x_crits, integrate=integrate)
+        return integrate(x_lo, N, A, value, x_crits)
 
     mesh = mesh_for(beta)
     for _ in range(8):
