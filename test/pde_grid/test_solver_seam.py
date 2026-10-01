@@ -51,6 +51,7 @@ class _MigratedProbe(_SeamProbe):
             hard_lower=None,
             hard_upper=None,
             event_times=(0.5,),
+            day_count=252,
         )
 
 
@@ -63,7 +64,7 @@ def test_defaults_unmigrated():
     s = _SeamProbe()
     assert s._uses_grid_layer() is False
     with pytest.raises(NotImplementedError):
-        s.grid_request(OPTION, MarketSnapshot(100.0, 0.2, 0.05, 0.02), 1.0)
+        s.grid_request(OPTION, MarketSnapshot(100.0, 0.2, 0.05, 0.02, bus_days_in_year=252), 1.0)
 
 
 def test_representative_vol_is_strike_selected():
@@ -113,7 +114,8 @@ def test_external_layout_check_accepts_and_rejects():
                 critical_prices=base.critical_prices,
                 hard_lower=None,
                 hard_upper=None,
-                event_times=(0.25,),  # different schedule
+                event_times=(0.25,),  # different schedule,
+                day_count=252,
             )
 
     with pytest.raises(ValidationError):

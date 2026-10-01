@@ -30,6 +30,7 @@ def req(tau=1.0, events=(0.25, 0.5, 0.75)):
         hard_lower=None,
         hard_upper=None,
         event_times=events,
+        day_count=252,
     )
 
 
@@ -136,6 +137,7 @@ def test_the_default_request_is_unchanged_by_the_new_field():
     plain, explicit = req(), GridRequest(
         tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None, hard_upper=None,
         event_times=(0.25, 0.5, 0.75), extra_times=(),
+        day_count=252,
     )
     assert plain == explicit and hash(plain) == hash(explicit)
     a, b = build_time(plain, CFG()), build_time(explicit, CFG())
@@ -146,7 +148,7 @@ def test_the_default_request_is_unchanged_by_the_new_field():
 def test_extra_times_are_exact_nodes_without_damping():
     extras = tuple(d / 365.0 for d in range(1, 365))
     request = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None,
-                          hard_upper=None, event_times=(0.25, 0.5, 0.75), extra_times=extras)
+                          hard_upper=None, event_times=(0.25, 0.5, 0.75), extra_times=extras, day_count=252)
     tl = build_time(request, CFG())
     for t in extras:
         assert tl.t[tl.step_at(t)] == pytest.approx(t, abs=1e-15)
@@ -158,7 +160,7 @@ def test_extra_times_are_exact_nodes_without_damping():
 
 def test_an_extra_time_on_an_event_is_folded_into_it():
     request = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None,
-                          hard_upper=None, event_times=(0.5,), extra_times=(0.5 + 1e-13, 0.25))
+                          hard_upper=None, event_times=(0.5,), extra_times=(0.5 + 1e-13, 0.25), day_count=252)
     assert request.extra_times == (0.25,)
     tl = build_time(request, CFG())
     assert tl.step_at(0.5) == tl.step_of[0.5]
@@ -169,7 +171,7 @@ def test_extra_times_at_the_endpoints_are_rejected():
 
     with pytest.raises(ValidationError):
         GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None,
-                    hard_upper=None, event_times=(), extra_times=(1.0,))
+                    hard_upper=None, event_times=(), extra_times=(1.0,), day_count=252)
 
 
 def test_scaled_fill_is_flagged_and_warned(caplog):
@@ -262,7 +264,7 @@ _FROZEN_SCHEDULES = {
 def test_stepper_schedule_equals_the_0_6_time_layout_schedule(term, event):
     from quantark.asset.equity.engine.pde.core.components import CrankNicolson
     req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
-                      hard_lower=None, hard_upper=None, event_times=(0.25, 0.5, 0.75), extra_times=(0.6,))
+                      hard_lower=None, hard_upper=None, event_times=(0.25, 0.5, 0.75), extra_times=(0.6,), day_count=252)
     time = build_time(req, resolve_config("standard", GridConfig(time_steps=20)))
     assert not hasattr(time, "event_damping_steps") and not hasattr(time, "terminal_damping_steps")
     layout = types.SimpleNamespace(time=time, request=req)

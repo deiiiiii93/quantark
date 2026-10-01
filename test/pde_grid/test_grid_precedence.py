@@ -21,13 +21,13 @@ from quantark.asset.equity.engine.pde.grid.space import build_space
 from quantark.asset.equity.engine.pde.grid.time import build_time
 from quantark.util.exceptions import PricingError, ValidationError
 
-MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01)
+MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01, bus_days_in_year=252)
 
 
 def req(tau=1.0, events=(), criticals=(100.0,), hard_lower=None, hard_upper=None,
         anchors=(100.0,)):
     return GridRequest(tau=tau, bound_anchors=anchors, critical_prices=criticals,
-                       hard_lower=hard_lower, hard_upper=hard_upper, event_times=events)
+                       hard_lower=hard_lower, hard_upper=hard_upper, event_times=events, day_count=252)
 
 
 def cfg(**kw):
@@ -69,7 +69,7 @@ def test_t4_damping_never_changes_fill_and_spills_backward():  # existing
 
 def test_t4_extra_times_are_not_damped():  # existing
     r = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
-                    hard_lower=None, hard_upper=None, event_times=(), extra_times=(0.5,))
+                    hard_lower=None, hard_upper=None, event_times=(), extra_times=(0.5,), day_count=252)
     tl = build_time(r, cfg(time_steps=10))
     theta = CrankNicolson(event_theta=0.7, terminal_damping_steps=0, event_damping_steps=2,
                           damping="full_step").schedule(

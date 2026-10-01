@@ -1045,7 +1045,7 @@ class TestEventDampingPolicy:
         cfg = resolve_config("standard", GridConfig(time_steps=10))
 
         req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
-                          hard_lower=None, hard_upper=None, event_times=(0.5,))
+                          hard_lower=None, hard_upper=None, event_times=(0.5,), day_count=252)
         tl = build_time(req, cfg)
         # the stepper owns the schedule and its counts (spec 2 decision 5)
         stepper = CrankNicolson(theta=0.5, event_theta=1.0, event_damping_steps=event_damping_steps,

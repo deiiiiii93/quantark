@@ -99,6 +99,7 @@ class LocalVolPDESolver(BaseEngine):
         t_grid = build_time(GridRequest(
             tau=T, bound_anchors=(spot,), critical_prices=(spot, strike),
             hard_lower=None, hard_upper=None, event_times=(),
+            day_count=int(env.bus_days_in_year),
         ), config).t
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)

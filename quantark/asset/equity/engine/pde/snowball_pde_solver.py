@@ -1246,6 +1246,7 @@ class SnowballPDESolver(BasePDESolver):
             event_times=tuple(sorted(set(align) | set(monitor))),
             extra_times=() if extra_times is None else tuple(extra_times),
             refinement=self._time_refinement(product),
+            day_count=market.bus_days_in_year,
         )
 
     def _populate_observation_maps(

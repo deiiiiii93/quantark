@@ -94,6 +94,7 @@ def test_calendar_roll_rebinds_time_keeps_spatial():
         hard_lower=None,
         hard_upper=None,
         event_times=tuple(t - roll for t in fr.event_times if t - roll > 0),
+        day_count=252,
     )
     from quantark.asset.equity.engine.pde.grid import resolve_bound_layout
 

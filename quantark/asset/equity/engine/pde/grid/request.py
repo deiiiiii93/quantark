@@ -34,6 +34,11 @@ def _dedup_sorted_interior(times, tau: float) -> Tuple[float, ...]:
     return tuple(out)
 
 
+def _require_positive_int(name: str, value) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValidationError(f"{name} must be a positive int, got {value!r}")
+
+
 @dataclass(frozen=True)
 class MarketSnapshot:
     """Minimal market state consumed by the spatial builder (spec §4.2)."""
@@ -42,8 +47,11 @@ class MarketSnapshot:
     sigma_ref: float
     r_ref: float
     q_ref: float
+    #: The pricing environment's business days per year (spec 3A §5.5).
+    bus_days_in_year: int
 
     def __post_init__(self):
+        _require_positive_int("bus_days_in_year", self.bus_days_in_year)
         if self.spot <= 0.0:
             raise ValidationError(f"spot must be positive, got {self.spot}")
         if self.sigma_ref <= 0.0:
@@ -94,6 +102,9 @@ class GridRequest:
             (spec 3A §5.3). Part of the request so every cache and artefact
             key that hashes the request separates the damping forms
             (decision 6).
+        day_count: the pricing environment's business days per year: the grid
+            day of the ``steps_per_day`` density (spec 3A §5.5). Read from
+            0.8.0 (flip a); carried and compared before that.
     """
 
     tau: float
@@ -104,8 +115,10 @@ class GridRequest:
     event_times: Tuple[float, ...]
     extra_times: Tuple[float, ...] = ()
     refinement: TimeRefinement = field(default=TimeRefinement(), kw_only=True)
+    day_count: int = field(kw_only=True)
 
     def __post_init__(self):
+        _require_positive_int("day_count", self.day_count)
         if self.tau <= 0.0:
             raise ValidationError(f"tau must be positive, got {self.tau}")
         for name in ("bound_anchors", "critical_prices"):

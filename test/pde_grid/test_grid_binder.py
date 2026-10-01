@@ -14,7 +14,7 @@ from quantark.asset.equity.engine.pde.grid.binder import (
 )
 from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 
-MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01)
+MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01, bus_days_in_year=252)
 
 
 def req(**kw):
@@ -27,7 +27,7 @@ def req(**kw):
         event_times=(0.25, 0.5, 0.75),
     )
     base.update(kw)
-    return GridRequest(**base)
+    return GridRequest(**base, day_count=252)
 
 
 def binder(**kw):
@@ -130,7 +130,7 @@ def test_external_validation_accepts_match_and_drifted_criticals():
     b = binder()
     lay = b.bind(req(), MKT)
     fresh = req(critical_prices=(101.0, 103.0))  # spot drifted under a bump
-    validate_external_layout(lay, fresh, MarketSnapshot(101.0, 0.2, 0.03, 0.01))
+    validate_external_layout(lay, fresh, MarketSnapshot(101.0, 0.2, 0.03, 0.01, bus_days_in_year=252))
 
 
 def test_external_validation_accepts_unchanged_unreachable_marker():
@@ -162,7 +162,7 @@ def test_external_validation_rejects_alignment_mismatches():
 def test_external_validation_coverage():
     b = binder()
     lay = b.bind(req(), MKT)
-    far = MarketSnapshot(500.0, 0.2, 0.03, 0.01)  # spot outside frozen domain
+    far = MarketSnapshot(500.0, 0.2, 0.03, 0.01, bus_days_in_year=252)  # spot outside frozen domain
     with pytest.raises(NumericalError):
         validate_external_layout(lay, req(), far)
     inside = req(critical_prices=(100.0, 5000.0))  # critical outside domain

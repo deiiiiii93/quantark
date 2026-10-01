@@ -460,6 +460,7 @@ class BasePDESolver(BaseEngine):
             sigma_ref=self.representative_vol(product, pricing_env),
             r_ref=float(pricing_env.get_rate(tau)),
             q_ref=float(pricing_env.get_div_yield(tau)),
+            bus_days_in_year=int(pricing_env.bus_days_in_year),
         )
 
     @property
@@ -557,6 +558,7 @@ class BasePDESolver(BaseEngine):
             hard_upper=hard_upper,
             event_times=tuple(sorted(set(events))),
             refinement=self._time_refinement(product),
+            day_count=market.bus_days_in_year,
         )
 
     def _external_layout_check(

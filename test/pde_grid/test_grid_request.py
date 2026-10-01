@@ -16,7 +16,7 @@ def make_request(**kw):
         event_times=(0.25, 0.5, 0.75),
     )
     base.update(kw)
-    return GridRequest(**base)
+    return GridRequest(**base, day_count=252)
 
 
 def test_valid_request_hashable_and_equal_by_value():
@@ -61,13 +61,13 @@ def test_bound_anchors_required():
 
 
 def test_market_snapshot_value_semantics():
-    a = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01)
-    b = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01)
+    a = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01, bus_days_in_year=252)
+    b = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01, bus_days_in_year=252)
     assert a == b and hash(a) == hash(b)
 
 
 def test_market_snapshot_validation():
     with pytest.raises(ValidationError):
-        MarketSnapshot(spot=0.0, sigma_ref=0.2, r_ref=0.0, q_ref=0.0)
+        MarketSnapshot(spot=0.0, sigma_ref=0.2, r_ref=0.0, q_ref=0.0, bus_days_in_year=252)
     with pytest.raises(ValidationError):
-        MarketSnapshot(spot=100.0, sigma_ref=-0.1, r_ref=0.0, q_ref=0.0)
+        MarketSnapshot(spot=100.0, sigma_ref=-0.1, r_ref=0.0, q_ref=0.0, bus_days_in_year=252)

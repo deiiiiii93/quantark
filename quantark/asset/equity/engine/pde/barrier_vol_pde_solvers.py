@@ -166,6 +166,7 @@ class LocalVolBarrierPDESolver(BaseEngine):
         layout = build_time(GridRequest(
             tau=T, bound_anchors=(spot,), critical_prices=(spot, strike),
             hard_lower=None, hard_upper=None, event_times=interior,
+            day_count=int(env.bus_days_in_year),
         ), config)
         t_grid = layout.t
         market = TermMarketContext.from_env(env, t_grid, ref_strike=strike)

@@ -12,7 +12,7 @@ CFG = resolve_config("standard", GridConfig(steps_per_day=1.0, max_steps=10**6))
 
 def req(events=(), extras=(), refinement=TimeRefinement(), tau=20 / 252):
     return GridRequest(tau=tau, bound_anchors=(100.0,), critical_prices=(100.0,), hard_lower=None,
-                       hard_upper=None, event_times=events, extra_times=extras, refinement=refinement)
+                       hard_upper=None, event_times=events, extra_times=extras, refinement=refinement, day_count=252)
 
 
 def test_zero_refinement_is_the_unrefined_grid():
@@ -135,7 +135,7 @@ def test_validate_schedule_refuses_a_layout_built_for_another_form():
 
 def test_validate_external_layout_refuses_another_refinement():
     from quantark.asset.equity.engine.pde.grid import GridBinder, MarketSnapshot, validate_external_layout
-    market = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.02, q_ref=0.0)
+    market = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.02, q_ref=0.0, bus_days_in_year=252)
     layout = GridBinder("fast", None).bind(req(events=(5 / 252,)), market)
     with pytest.raises(ValidationError, match="refinement"):
         validate_external_layout(layout, req(events=(5 / 252,), refinement=TimeRefinement(0, 1)), market)

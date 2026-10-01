@@ -64,7 +64,7 @@ def validate_external_layout(
     old = layout.request
     # extra_times too: a price layout lacks a life surface's readout nodes
     # (spec 2 §5.2 step 5), so it must not be reused for that request.
-    for field in ("tau", "event_times", "extra_times", "refinement", "hard_lower", "hard_upper"):
+    for field in ("tau", "event_times", "extra_times", "refinement", "day_count", "hard_lower", "hard_upper"):
         if getattr(old, field) != getattr(fresh_request, field):
             raise ValidationError(
                 f"external layout mismatch on {field}: layout has "
@@ -125,6 +125,10 @@ def resolve_bound_layout(
         raise PricingError(
             f"frozen bump layout was built refined {fr.refinement} but this solve's stepper asks for "
             f"{request.refinement}; a bump context cannot change the damping form (spec 3A §5.3)")
+    if request.day_count != fr.day_count:
+        raise PricingError(
+            f"frozen bump layout was built on a {fr.day_count}-day year but this solve's environment "
+            f"has {request.day_count}; a bump context cannot change the grid day (spec 3A §5.5)")
     if (
         request.tau == fr.tau
         and request.event_times == fr.event_times
@@ -194,6 +198,7 @@ class GridLayerMixin:
             sigma_ref=self.representative_vol(product, pricing_env),
             r_ref=float(pricing_env.get_rate(tau)),
             q_ref=float(pricing_env.get_div_yield(tau)),
+            bus_days_in_year=int(pricing_env.bus_days_in_year),
         )
 
     @staticmethod
@@ -291,6 +296,10 @@ class GridBinder:
                     "bind_shared cannot include hard-bounded (continuous "
                     "barrier) products; bind them privately"
                 )
+        day_counts = sorted({r.day_count for r in requests})
+        if len(day_counts) != 1:
+            raise ValidationError(
+                f"bind_shared requires one day_count across its requests, got {day_counts}")
         union = GridRequest(
             tau=max(r.tau for r in requests),
             bound_anchors=tuple(
@@ -302,6 +311,7 @@ class GridBinder:
             hard_lower=None,
             hard_upper=None,
             event_times=(),
+            day_count=requests[0].day_count,
         )
         spatial = build_space(union, market, self.config)
         time_by_request: dict = {}

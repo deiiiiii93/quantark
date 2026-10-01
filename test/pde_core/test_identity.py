@@ -18,11 +18,11 @@ SB = dict(initial_price=100.0, strike=100.0, ko_barrier=103.0, ki_barrier=85.0, 
 
 def _bind(**request):
     binder = GridBinder("standard", GridConfig(time_steps=3))
-    market = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01)
+    market = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01, bus_days_in_year=252)
     base = dict(tau=1.0, bound_anchors=(100.0, 100.0), critical_prices=(100.0,), hard_lower=None, hard_upper=None,
                 event_times=())
     base.update(request)
-    return binder.bind(GridRequest(**base), market)
+    return binder.bind(GridRequest(**base, day_count=252), market)
 
 
 def test_a_budget_with_no_node_a_readout_node_and_an_event_node():

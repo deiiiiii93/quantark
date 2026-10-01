@@ -14,7 +14,7 @@ from quantark.asset.equity.engine.pde.grid import (
 from quantark.asset.equity.engine.pde.grid.space import build_space
 from quantark.util.exceptions import ValidationError
 
-MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01)
+MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01, bus_days_in_year=252)
 
 
 def CFG(**kw):
@@ -31,7 +31,7 @@ def req(**kw):
         event_times=(),
     )
     base.update(kw)
-    return GridRequest(**base)
+    return GridRequest(**base, day_count=252)
 
 
 def test_auto_bounds_formula():

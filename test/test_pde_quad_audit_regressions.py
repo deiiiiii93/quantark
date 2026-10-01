@@ -112,7 +112,7 @@ class TestRannacherTerminalSmoothing:
         from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 
         req = GridRequest(tau=1.0, bound_anchors=(100.0,), critical_prices=(100.0,),
-                          hard_lower=None, hard_upper=None, event_times=())
+                          hard_lower=None, hard_upper=None, event_times=(), day_count=252)
         tl = build_time(req, cfg)
         # the stepper owns the schedule and its counts (spec 2 decision 5)
         stepper = dataclasses.replace(params.stepper, terminal_damping_steps=terminal_damping_steps)

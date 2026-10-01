@@ -17,7 +17,7 @@ from quantark.asset.equity.engine.pde.grid.events import (
 )
 from quantark.asset.equity.engine.pde.grid.space import build_space
 
-MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01)
+MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01, bus_days_in_year=252)
 
 
 def layout(points=201):
@@ -28,6 +28,7 @@ def layout(points=201):
         hard_lower=None,
         hard_upper=None,
         event_times=(),
+        day_count=252,
     )
     return build_space(r, MKT, resolve_config("standard", GridConfig(points=points)))
 

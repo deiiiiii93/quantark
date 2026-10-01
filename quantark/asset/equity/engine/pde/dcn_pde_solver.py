@@ -197,6 +197,7 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
             hard_lower=None,
             hard_upper=None,
             event_times=interior,
+            day_count=market.bus_days_in_year,
         )
 
     def price(self, product, pricing_env) -> float:
