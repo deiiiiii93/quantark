@@ -8,7 +8,7 @@ built per solve — never here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from quantark.util.exceptions import ValidationError
@@ -53,6 +53,28 @@ class MarketSnapshot:
 
 
 @dataclass(frozen=True)
+class TimeRefinement:
+    """Intervals of the time grid split in two at their midpoint (spec 3A §5.3, decision 5).
+
+    ``terminal_intervals``: the first intervals below the terminal node; ``event_intervals``: the
+    first intervals below every ``event_times`` node (backward time). Zero means no refinement.
+    """
+
+    terminal_intervals: int = 0
+    event_intervals: int = 0
+
+    def __post_init__(self):
+        for name in ("terminal_intervals", "event_intervals"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                raise ValidationError(f"TimeRefinement.{name} must be a non-negative int, got {v!r}")
+
+    @property
+    def is_zero(self) -> bool:
+        return self.terminal_intervals == 0 and self.event_intervals == 0
+
+
+@dataclass(frozen=True)
 class GridRequest:
     """Frozen geometry declaration for one product (spec §4.2).
 
@@ -68,6 +90,10 @@ class GridRequest:
             nodes but carry NO event and NO damping (a life-surface readout
             along a path).  One within ``is_close`` of an event time is
             dropped: the event's node serves it.
+        refinement: the intervals the stepper's damping form splits in two
+            (spec 3A §5.3). Part of the request so every cache and artefact
+            key that hashes the request separates the damping forms
+            (decision 6).
     """
 
     tau: float
@@ -77,6 +103,7 @@ class GridRequest:
     hard_upper: Optional[float]
     event_times: Tuple[float, ...]
     extra_times: Tuple[float, ...] = ()
+    refinement: TimeRefinement = field(default=TimeRefinement(), kw_only=True)
 
     def __post_init__(self):
         if self.tau <= 0.0:

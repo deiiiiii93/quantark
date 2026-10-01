@@ -5,13 +5,13 @@ turns it into immutable layouts; a per-solve :class:`EventSchedule` applies
 event semantics. One spatial builder, one time builder, no modes.
 """
 
-from quantark.asset.equity.engine.pde.grid.request import GridRequest, MarketSnapshot
+from quantark.asset.equity.engine.pde.grid.request import GridRequest, MarketSnapshot, TimeRefinement
 from quantark.asset.equity.engine.pde.grid.config import (
     ACCURACY_PROFILES,
     GridConfig,
     resolve_config,
 )
-from quantark.asset.equity.engine.pde.grid.time import TimeLayout, build_time
+from quantark.asset.equity.engine.pde.grid.time import TimeLayout, build_time, time_fill
 from quantark.asset.equity.engine.pde.grid.space import SpatialLayout, build_space
 from quantark.asset.equity.engine.pde.grid.events import (
     EventSchedule,
@@ -35,11 +35,13 @@ __all__ = [
     "validate_external_layout",
     "GridRequest",
     "MarketSnapshot",
+    "TimeRefinement",
     "GridConfig",
     "ACCURACY_PROFILES",
     "resolve_config",
     "TimeLayout",
     "build_time",
+    "time_fill",
     "SpatialLayout",
     "build_space",
     "EventSchedule",
