@@ -431,9 +431,9 @@ def session_stats_row(cls, product):
 
 # --- the book ----------------------------------------------------------------
 
-def book():
-    rows = {}
-    facade = {
+def _facade_products():
+    """name -> (product factory, event stats) of the facade rows priced at each accuracy."""
+    return {
         "european": (european, False), "american_tenor": (american_tenor, False),
         "american_dated": (american_dated, False),
         "barrier_cont": (lambda: barrier(ObservationType.CONTINUOUS), False),
@@ -447,6 +447,11 @@ def book():
         "ko_reset": (lambda: make_ko_reset(KO_RESET), True),
         "phoenix_memory": (lambda: make_phoenix(PHOENIX), True),
     }
+
+
+def book():
+    rows = {}
+    facade = _facade_products()
     for name, (make, stats) in facade.items():
         for env_name, env in (("flat", env_flat), ("term", env_term)):
             for acc in ACCURACIES:
@@ -520,14 +525,16 @@ def book():
 
 @dataclasses.dataclass(frozen=True)
 class Row:
-    """A book row: its thunk, outputs declared None, and a declared failure type."""
+    """A book row: its thunk, outputs declared None, a declared failure type, and the tags that
+    say which stage-2 flips may move it (``movers.py``, spec 3A §7.1)."""
     fn: object
     none: frozenset = frozenset()
     error: Optional[str] = None   # exception class name the row must raise on both sides
+    tags: frozenset = frozenset()
 
 
-def _row(fn, *, none=(), error=None):
-    return Row(fn, frozenset(none), error)
+def _row(fn, *, none=(), error=None, tags=()):
+    return Row(fn, frozenset(none), error, frozenset(tags))
 
 
 def _solvers():
@@ -628,6 +635,330 @@ def engine_bump_greeks(product, env, params):
     bump = GreeksCalculator().calculate_numerical_greeks(
         product=product, pricing_env=env, engine=PDEEngine(params=params))
     return {f"bump_{k}": _hex(bump.get(k)) for k in BUMP_GREEKS}
+
+
+# --- sub-project 3A (spec 3A §7.1) ---------------------------------------------------
+
+def _cn(**kw):
+    """CrankNicolson kwargs; ``damping`` only where the API has it (base: 0.7.0)."""
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+    if "damping" not in _fields(CrankNicolson):
+        kw.pop("damping", None)
+    return CrankNicolson(**kw)
+
+
+def p_full_step(**extra):
+    """The explicit 0.7.0 scheme: one whole damped step at the terminal node, two at events."""
+    return PDEParams(stepper=_cn(damping="full_step", terminal_damping_steps=1, event_damping_steps=2), **extra)
+
+
+def p_v070(**extra):
+    """The 0.7.0 configuration spelled out: full-step, nodal, the 0.7.0 cap."""
+    return p_full_step(event_projection="nodal", grid=GridConfig(max_steps=5000), **extra)
+
+
+def env_tc():
+    """Flat vol on the SSE trading clock, 252 days a year.
+
+    252, not 244, so that flip (a) does not move these rows and flip (e) is the only
+    flip that does.
+    """
+    from quantark.param.vol.trading_clock_surface import TradingClockVolSurface
+    from quantark.util.calendar.trading_clock import BusinessTimeMap, TradingClock
+    anchor = datetime(2026, 2, 9)
+    cal = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2029))
+    tmap = BusinessTimeMap(TradingClock(cal, 252), anchor, datetime(2028, 6, 30))
+    return PricingEnvironment(rate_curve=FlatRateCurve(0.025), valuation_date=anchor,
+                              spot_quote=SpotQuote(100.0),
+                              vol_surface=TradingClockVolSurface(FlatVolSurface(0.22), tmap),
+                              div_yield=ContinuousDividendYield(0.03), bus_days_in_year=252)
+
+
+def solver_greeks_lag(cls, product, env, params):
+    """Solver-class price and Greeks: the facade declares no settlement support (spec §14, review 2)."""
+    return solver_price_greeks(cls(params=params), product, env)
+
+
+def _p3a():
+    """The 3A evidence's products (test/pde_3a/products.py)."""
+    from pde_3a import products
+    return products
+
+
+#: Tags of the rows that predate 3A, by row-id glob (spec 3A §7.1). The rules:
+#:   default_damping     the params leave the stepper's damping at its default and the product
+#:                       has no continuous knock-in (the core class that flips at (f)); American
+#:                       is a core route, the local-vol vanilla/barrier kernels and DCN and 2-D
+#:                       have their own keys and do not flip
+#:   continuous_ki       the product's knock-in is monitored continuously (never moves at (f))
+#:   default_projection  base-family discrete monitoring under the route's default projection
+#:   bus244              the solve's day basis is not 252: env_244, and the intraday route,
+#:                       whose desk profile runs on 244 days (F1)
+#:   snowball_nodal      the snowball priced with an explicit nodal projection (flip d)
+#:   barrier_call_*      a discrete-monitoring Barrier call whose upper row is a far-field row
+#:                       (flip g; flat curves move by ULPs at most, F2)
+#:   put_far_field       a put priced through the European put's lower row (flip g)
+#: Settlement-lag products: continuous knock-in (test_structured_numerical_settlement._barriers).
+_EXISTING_TAGS = (
+    ("default_damping", (
+        "european|*", "american_tenor|*", "american_dated|*", "barrier_cont|*", "barrier_disc|*",
+        "double_barrier|*", "one_touch|*", "double_one_touch|*",
+        "snowball_monthly|*", "snowball_daily|*", "stats|snowball_monthly|*", "stats|snowball_daily|*",
+        "pwe|snowball_monthly|*", "pwe|snowball_daily|*", "scheme|european|*", "knock_in|*",
+        "terminal|expired|barrier|*", "terminal|immediate_ko|snowball|*", "intraday_snowball")),
+    ("continuous_ki", (
+        "snowball_cont|*", "snowball_knocked_in|*", "ko_reset|*", "phoenix_memory|*", "phoenix_plain|*",
+        "stats|snowball_cont|*", "stats|snowball_knocked_in|*", "stats|phoenix_*", "stats|ko_reset|*",
+        "pwe|snowball_cont|*", "pwe|snowball_knocked_in|*", "pwe|phoenix_*", "pwe|ko_reset|*",
+        "scheme|snowball_cont|*", "terminal|expired|snowball|*", "terminal|expired|phoenix|*",
+        "session_*", "life_surface|snowball", "bump|frozen_vs_fresh|snowball", "lv_snowball*", "lv_phoenix",
+        "heston_*", "slv_snowball*", "lu_fallback|*", "settlement_lag|*")),
+    ("default_projection", ("barrier_disc|*",)),
+    ("bus244", ("*|bus244", "intraday_snowball")),
+    ("snowball_nodal", ("snowball_cont|flat|nodal", "pwe|snowball_monthly|flat|nodal",
+                        "stats|snowball_monthly|flat|nodal")),
+    ("barrier_call_kinked", ("barrier_disc|term|*",)),
+    ("barrier_call_flat", ("barrier_disc|flat|*",)),
+    ("put_far_field", ("knock_in|down_in_put|*",)),
+)
+
+
+def _existing_tags(rid):
+    import fnmatch
+    return frozenset(tag for tag, globs in _EXISTING_TAGS if any(fnmatch.fnmatchcase(rid, g) for g in globs))
+
+
+def _coincident_product():
+    """Two records at t = 0.5 whose thresholds share one dual cell of the standard layout.
+
+    g = 0.01 (measured, Task 1): log(130) and log(130.01) sit in the same dual cell of
+    ``BarrierPDESolver(PDEParams()).explain(product, env_flat())``'s space grid, a cell
+    2.6e-3 wide in log spot against a 7.7e-5 gap.
+    """
+    from quantark.asset.equity.product.option.observation_schedule import (
+        ObservationRecord, ObservationSchedule)
+    from quantark.util.enum.option_enums import ObservationAggregation
+    g = 0.01
+    return BarrierOption(
+        strike=100.0, maturity=1.0, option_type=OptionType.CALL, barrier=130.0,
+        barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.DISCRETE,
+        observation_schedule=ObservationSchedule(records=[
+            ObservationRecord(observation_time=0.5, barrier=130.0, payoff=2.0),
+            ObservationRecord(observation_time=0.5, barrier=130.0 + g, payoff=3.0),
+            ObservationRecord(observation_time=1.0, barrier=130.0, payoff=1.0)],
+            aggregation_mode=ObservationAggregation.ACCUMULATE))
+
+
+def _farfield_products(lag):
+    """e17's products (``e17_put_boundary_term_curves.py::PRODUCTS``) and its down-in put."""
+    from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+    obs = [k / 12.0 for k in range(1, 13)]
+    kw = dict(settlement_convention=SettlementConvention(lag=lag, lag_unit=SettlementLagUnit.YEAR_FRACTION)) if lag else {}
+
+    def bar(kind, level, btype):
+        return BarrierOption(strike=100.0, option_type=kind, barrier=level, barrier_type=btype,
+                             observation_type=ObservationType.DISCRETE, observation_dates=obs,
+                             maturity=1.0, **kw)
+    return {
+        "european_put": EuropeanVanillaOption(strike=100.0, option_type=OptionType.PUT, maturity=1.0, **kw),
+        "uo_put_130": bar(OptionType.PUT, 130.0, BarrierType.UP_OUT),
+        "di_put_85": bar(OptionType.PUT, 85.0, BarrierType.DOWN_IN),
+        "do_call_85": bar(OptionType.CALL, 85.0, BarrierType.DOWN_OUT),
+        "european_call": EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0, **kw),
+    }
+
+
+def _class_product(family, mode, state):
+    """The damping-class rows' products (spec 3A decision 12)."""
+    p3 = _p3a()
+    if family == "snowball":
+        p = snowball("continuous" if mode == "cont" else "discrete")
+    elif family == "phoenix":
+        p = make_phoenix(PHOENIX) if mode == "cont" else p3.phoenix(100.0, {}, "monthly")
+    else:
+        p = make_ko_reset(KO_RESET) if mode == "cont" else p3.ko_reset_discrete()
+    if state == "knocked_in":
+        setattr(p, "_otc_lifecycle_knocked_in", True)
+    return p
+
+
+def _bumpcross_product(family, mode):
+    """Knock-in barrier at 85 on every family, so 85.5 and 84.9 sit either side of it."""
+    disc = {} if mode == "cont" else dict(ki_monitoring="discrete")
+    if family == "snowball":
+        return make_snowball(dict(SNOWBALL, **disc))
+    if family == "phoenix":
+        return make_phoenix(dict(PHOENIX, ki_barrier=85.0, coupon_barrier=90.0, **disc))
+    return make_ko_reset(dict(KO_RESET, ki_barrier=85.0, **disc))
+
+
+def _d16_row(market, variant, at):
+    p3 = _p3a()
+    if market == "flat":
+        spot = 100.0 if at == "1.0" else 76.0
+        return facade_outputs(p3.phoenix(100.0, *p3.PHOENIX_VARIANTS[variant]), p3.env(spot=spot), p_default())
+    from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import LocalVolPhoenixPDESolver
+    product, env, lv = p3.localvol_phoenix_case(market, 1.0 if at == "1.0" else 0.76, variant)
+    return solver_price_greeks(LocalVolPhoenixPDESolver(params=PDEParams(), local_vol_surface=lv), product, env)
+
+
+def _lv_class_row(family, mode):
+    from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import LocalVolPhoenixPDESolver
+    from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import LocalVolSnowballPDESolver
+    if family == "snowball":
+        return solver_price(LocalVolSnowballPDESolver(params=PDEParams()),
+                            snowball("continuous" if mode == "cont" else "discrete"), env_grid_vol())
+    product = make_phoenix(PHOENIX) if mode == "cont" else _p3a().phoenix(100.0, {}, "monthly")
+    return solver_price(LocalVolPhoenixPDESolver(params=PDEParams()), product, env_grid_vol())
+
+
+def _base6_row(name, mode):
+    p3 = _p3a()
+    product = p3.PRODUCTS[name][1](p3.dates(1.0 / 12.0))
+    return facade_outputs(product, env_flat(), p_default() if mode == "default" else p_v070())
+
+
+def rows_3a(existing):
+    """The 3A rows (spec 3A §7.1). ``existing`` is the registry of the rows that predate 3A."""
+    from quantark.asset.equity.engine.pde import BarrierPDESolver, EuropeanPDESolver
+    from quantark.asset.equity.engine.pde.american_pde_solver import AmericanPDESolver
+    out = {}
+    disc_tags = ("discrete_ki", "default_damping")
+
+    # explicit full-step copies of every facade row priced with the default params
+    copies = {}
+    for name, (make, stats) in _facade_products().items():
+        for env_name, env in (("flat", env_flat), ("term", env_term)):
+            for acc in ACCURACIES:
+                copies[f"{name}|{env_name}|{acc}"] = (
+                    lambda m=make, e=env, a=acc, s=stats: facade_outputs(m(), e(), p_full_step(accuracy=a), event_stats=s))
+    for env_name, env in (("flat", env_flat), ("term", env_term)):
+        for acc in ACCURACIES:
+            copies[f"phoenix_plain|{env_name}|{acc}"] = (
+                lambda e=env, a=acc: facade_outputs(phoenix_plain(), e(), p_full_step(accuracy=a), event_stats=True))
+    copies["snowball_cont|flat|nodal"] = lambda: facade_outputs(
+        snowball(), env_flat(), p_full_step(event_projection="nodal"), True)
+    for name, make in (("snowball_cont", snowball), ("european", european)):
+        copies[f"{name}|bus244"] = lambda m=make: facade_outputs(m(), env_244(), p_full_step())
+    for rid, fn in copies.items():
+        assert rid in existing, rid
+        tags = (set(existing[rid].tags) - {"default_damping"}) | {"explicit_full_step"}
+        out[f"3a|fullstep|{rid}"] = _row(fn, tags=tags)
+
+    # the six base-family discrete products: today's default, and 0.7.0 spelled out
+    for name in ("uo_call", "di_put", "double_ko_call", "one_touch_up_at_hit", "no_touch_up",
+                 "double_one_touch_at_hit"):
+        for mode in ("default", "v070"):
+            if mode == "default":
+                tags = {"base_discrete", "default_damping", "default_projection"}
+                if name == "di_put":
+                    tags.add("put_far_field")
+            else:
+                tags = {"v070_base"} | ({"put_far_field_v070"} if name == "di_put" else set())
+            if name == "uo_call":
+                tags.add("barrier_call_flat")
+            out[f"3a|base6|{name}|{mode}"] = _row(lambda n=name, m=mode: _base6_row(n, m), tags=tags)
+
+    # day basis 244 (flip a)
+    for name, make, stats in (("snowball_cont", lambda: snowball("continuous"), True),
+                              ("phoenix_memory", lambda: make_phoenix(PHOENIX), True),
+                              ("european", european, False)):
+        tags = {"bus244"} | ({"default_damping"} if name == "european" else {"continuous_ki"})
+        out[f"3a|bus244|{name}"] = _row(
+            lambda m=make, s=stats: facade_outputs(m(), env_244(), p_default(), event_stats=s), tags=tags)
+
+    # the step cap (flip b): a fill that the 0.7.0 cap of 5000 scales, and the same under a cap of 20000
+    for name, spec, acc in (("sb5y_standard", dict(SNOWBALL, months=60, maturity=5.0), "standard"),
+                            ("sb3y_high", dict(SNOWBALL, months=36, maturity=3.0), "high")):
+        out[f"3a|capped|{name}|default"] = _row(
+            lambda s=spec, a=acc: facade_outputs(make_snowball(s), env_flat(), p_default(a)),
+            tags={"capped", "continuous_ki"})
+        out[f"3a|capped|{name}|cap20000"] = _row(
+            lambda s=spec, a=acc: facade_outputs(make_snowball(s), env_flat(),
+                                                 PDEParams(accuracy=a, grid=GridConfig(max_steps=20000))),
+            tags={"continuous_ki"})
+
+    # the trading clock (flip e moves the Phoenix only); the Phoenix here has continuous knock-in
+    out["3a|tc|snowball_monthly"] = _row(
+        lambda: facade_outputs(snowball("discrete"), env_tc(), p_default(), event_stats=True),
+        tags={"trading_clock"} | set(disc_tags))
+    out["3a|tc|phoenix_plain"] = _row(
+        lambda: facade_outputs(phoenix_plain(), env_tc(), p_default(), event_stats=True),
+        tags={"trading_clock", "phoenix", "continuous_ki"})
+
+    # continuous knock-in keeps full-step on every solve (spec §5.2)
+    for acc in ACCURACIES:
+        out[f"3a|cont_ki|snowball|{acc}"] = _row(
+            lambda a=acc: facade_outputs(snowball("continuous"), env_flat(), p_default(a), event_stats=True),
+            tags={"continuous_ki"})
+
+    # damping classes (decision 12): keyed on the contract, alive or knocked in
+    for family in ("snowball", "phoenix", "ko_reset"):
+        for mode in ("cont", "disc"):
+            for state in ("alive", "knocked_in"):
+                out[f"3a|class|{family}|{mode}|{state}"] = _row(
+                    lambda f=family, m=mode, s=state: facade_outputs(_class_product(f, m, s), env_flat(),
+                                                                     p_default(), event_stats=True),
+                    tags={"continuous_ki"} if mode == "cont" else set(disc_tags))
+    out["3a|class|snowball_daily"] = _row(
+        lambda: facade_outputs(snowball("daily"), env_flat(), p_default(), True), tags=disc_tags)
+    for family in ("snowball", "phoenix"):
+        for mode in ("cont", "disc"):
+            tags = {"continuous_ki"} if mode == "cont" else set(disc_tags)
+            if mode == "disc" and family == "phoenix":
+                tags.add("lv_phoenix")
+            out[f"3a|class|lv_{family}|{mode}"] = _row(lambda f=family, m=mode: _lv_class_row(f, m), tags=tags)
+
+    # decision 16: discrete-KI Phoenix variants, flat and local vol, and the discrete-KI KO-reset
+    for market in ("flat", "crash", "calm"):
+        for variant in ("daily_ki", "daily_ki_memory", "coupon_at_ko", "coupon_near_ko"):
+            for at in ("1.0", "ki+1"):
+                tags = set(disc_tags) | ({"lv_phoenix"} if market != "flat" else set())
+                out[f"3a|d16|{market}|phoenix|{variant}|{at}"] = _row(
+                    lambda mk=market, v=variant, a=at: _d16_row(mk, v, a), tags=tags)
+    for at, spot in (("1.0", 100.0), ("ki+1", 81.0)):
+        out[f"3a|d16|ko_reset|{at}"] = _row(
+            lambda s=spot: facade_outputs(_p3a().ko_reset_discrete(), _p3a().env(spot=s), p_default()),
+            tags=disc_tags)
+
+    # a 1% spot bump either side of the knock-in barrier at 85 must not change the class
+    for family in ("snowball", "phoenix", "ko_reset"):
+        for mode in ("cont", "disc"):
+            for spot in ("85.5", "84.9"):
+                out[f"3a|bumpcross|{family}|{mode}|{spot}"] = _row(
+                    lambda f=family, m=mode, s=float(spot): engine_bump_greeks(
+                        _bumpcross_product(f, m), env_with_spot(env_flat(), s), p_default()),
+                    tags={"continuous_ki"} if mode == "cont" else set(disc_tags))
+
+    # far-field rows (flip g), on flat and kinked curves, with and without a settlement lag
+    for name in ("european_put", "uo_put_130", "di_put_85", "do_call_85", "european_call"):
+        is_barrier = name not in ("european_put", "european_call")
+        for shape in ("flat", "kinked"):
+            for spot in (100, 80):
+                for lag_tag, lag in (("lag0", 0.0), ("lag01", 0.1)):
+                    tags = {"default_damping"} | ({"default_projection"} if is_barrier else set())
+                    if "put" in name:
+                        tags.add("put_far_field")
+                    elif name == "do_call_85":
+                        tags.add("barrier_call_kinked" if shape == "kinked" else "barrier_call_flat")
+                    cls = BarrierPDESolver if is_barrier else EuropeanPDESolver
+                    out[f"3a|farfield|{name}|{shape}|{spot}|{lag_tag}"] = _row(
+                        lambda c=cls, n=name, sh=shape, s=float(spot), lg=lag: solver_greeks_lag(
+                            c, _farfield_products(lg)[n], make_term_env(sh, spot=s), p_default()),
+                        tags=tags)
+    for shape in ("flat", "kinked"):
+        out[f"3a|farfield|american_put|{shape}"] = _row(
+            lambda sh=shape: solver_price_greeks(AmericanPDESolver(params=p_default()),
+                                                 AmericanOption(100.0, OptionType.PUT, maturity=1.0),
+                                                 make_term_env(sh)),
+            tags={"default_damping"})
+
+    # two records at one node (decision 14); a discrete up-and-out call, so its upper row is far field
+    for mode, proj in (("nodal", "nodal"), ("projected", "cell_average")):
+        out[f"3a|coincident|{mode}"] = _row(
+            lambda p=proj: facade_outputs(_coincident_product(), env_flat(), p_full_step(event_projection=p)),
+            tags={"coincident", "barrier_call_flat"})
+    return out
 
 
 def rows():
@@ -735,6 +1066,10 @@ def rows():
 
     for kind in ("snowball", "phoenix"):
         out[f"settlement_lag|{kind}"] = _row(lambda k=kind: settlement_lag_row(k))
+
+    # spec 3A §7.1: tag the rows above by rule (_EXISTING_TAGS), then add the 3A rows
+    out = {rid: dataclasses.replace(r, tags=r.tags | _existing_tags(rid)) for rid, r in out.items()}
+    out.update(rows_3a(out))
     return out
 
 

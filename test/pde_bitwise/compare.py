@@ -10,6 +10,7 @@ proves nothing about preservation.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import math
 import sys
@@ -70,6 +71,9 @@ def main(argv=None) -> int:
                     help="row-id prefix whose diffs are reported, not failed")
     ap.add_argument("--manifest", default=None,
                     help="manifest.json: declared rows, None outputs and failures")
+    ap.add_argument("--allow-file", default=None, help="exact row ids, one per line, whose diffs are allowed")
+    ap.add_argument("--bound", action="append", default=[], metavar="GLOB=REL",
+                    help="allowed rows matching GLOB may move by at most REL relative")
     a = ap.parse_args(argv)
     base = _load(a.base)
     branch = _load(a.branch)
@@ -80,10 +84,34 @@ def main(argv=None) -> int:
         violations = (_manifest_violations(base, manifest, "base")
                       + _manifest_violations(branch, manifest, "branch"))
     bad, allowed = [], []
+    exact = set()
+    if a.allow_file:
+        with open(a.allow_file) as fh:
+            exact = {line.strip() for line in fh if line.strip()}
+    bounds = [(g, float(r)) for g, r in (b.split("=", 1) for b in a.bound)]
     for row in sorted(set(base) | set(branch)):
         if base.get(row) == branch.get(row):
             continue
-        (allowed if any(row.startswith(p) for p in a.allow) else bad).append(row)
+        ok = row in exact or any(row.startswith(p) for p in a.allow)
+        (allowed if ok else bad).append(row)
+    for row in allowed:
+        for glob, rel in bounds:
+            if fnmatch.fnmatch(row, glob):
+                for k in set(base.get(row, {})) & set(branch.get(row, {})):
+                    vb, vn = base[row][k], branch[row][k]
+                    if vb == vn or k in _NON_HEX_KEYS:
+                        continue
+                    pairs = list(zip(vb, vn)) if isinstance(vb, list) and isinstance(vn, list) and len(vb) == len(vn) \
+                        else [(vb, vn)]
+                    try:
+                        far = any(abs(float.fromhex(n) - float.fromhex(b)) > rel * max(1.0, abs(float.fromhex(b)))
+                                  for b, n in pairs)
+                    except (TypeError, ValueError):
+                        far = True   # a shape or type change is not a bounded move
+                    if far:
+                        bad.append(f"{row}.{k} beyond bound {rel}")
+    for row in sorted(exact - set(allowed)):
+        print(f"ALLOWED-UNCHANGED {row}")
     for row in allowed:
         b, n = base.get(row, {}), branch.get(row, {})
         for k in sorted(set(b) | set(n)):
@@ -95,7 +123,10 @@ def main(argv=None) -> int:
                     continue
                 print(f"ALLOWED {row}.{k}: base={fb!r} branch={fn!r} delta={fn - fb:+.3e}")
     for row in bad:
-        print(f"DIFF {row}\n  base:   {base.get(row)}\n  branch: {branch.get(row)}")
+        if row in base or row in branch:
+            print(f"DIFF {row}\n  base:   {base.get(row)}\n  branch: {branch.get(row)}")
+        else:
+            print(f"BOUND {row}")
     for v in violations:
         print(f"MANIFEST {v}")
     print(f"{len(base)} base rows, {len(branch)} branch rows, {len(bad)} unexpected diffs, "
