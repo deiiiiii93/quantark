@@ -303,10 +303,13 @@ class SnowballAdapter(FamilyAdapter):
         solver, product, env = self.solver, prepared.product, prepared.env
         x_vec, s_vec = prepared.layout.spatial.x, prepared.layout.spatial.s
         tau_remaining = prepared.tau - prepared.layout.time.t[j]
+        # The knocked-in rows first (spec 3A §5.2): under continuous KI the alive lower row is
+        # documented to "transition to V1" and reads V1's row of this step. An alive-only group
+        # (the split LU march) writes them too; the ki group rewrites the same values.
+        if "ki" in group.surfaces or "alive" in group.surfaces:
+            solver._set_boundary_conditions_v1(states["ki"], x_vec, s_vec, j, tau_remaining, product, env)
         if "alive" in group.surfaces:
             solver._set_boundary_conditions_v0(states["alive"], x_vec, s_vec, j, tau_remaining, product, env)
-        if "ki" in group.surfaces:
-            solver._set_boundary_conditions_v1(states["ki"], x_vec, s_vec, j, tau_remaining, product, env)
 
     def after_solve(self, prepared, group, states, j) -> None:
         pass
