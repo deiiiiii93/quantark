@@ -26,7 +26,7 @@ def test_resolved_grid_evidence_is_the_banked_record(study):
     certs = sorted((REPO_ROOT / "docs" / "modelvalidation" / "certificates" / study).glob("*/certificate.json"))
     banked = _banked_pde_grid(certs[-1])
     # JSON round trip: bounds is a tuple in memory and a list in the certificate
-    assert json.loads(json.dumps(resolved_grid_evidence(PDEParams(accuracy="standard")))) == banked
+    assert json.loads(json.dumps(resolved_grid_evidence(PDEParams(accuracy="standard"), day_count=252))) == banked
 
 
 def _arm(params):
@@ -62,10 +62,22 @@ def test_a_key_from_config_rejects_fails_the_study_at_load():
 
 
 def test_a_half_step_stepper_records_its_form():
-    rec = resolved_grid_evidence(PDEParams(stepper=CrankNicolson(damping="half_step")))
+    rec = resolved_grid_evidence(PDEParams(stepper=CrankNicolson(damping="half_step")), day_count=252)
     assert rec["damping"] == "half_step" and "discrete_monitoring_damping" not in rec
 
 
 def test_the_default_records_the_continuous_ki_counts():
-    rec = resolved_grid_evidence(PDEParams())
+    rec = resolved_grid_evidence(PDEParams(), day_count=252)
     assert (rec["terminal_damping_steps"], rec["event_damping_steps"]) == (1, 2) and "damping" not in rec
+
+
+def test_a_builder_on_a_244_environment_records_244():
+    arm = SnowballPDECandidate(environment_params={"bus_days_in_year": 244}, product_params={},
+                               quantities=("pv",), params={"accuracy": "standard"})
+    assert arm.params()["grid"]["day_count"] == 244
+
+
+def test_the_banked_record_keeps_its_key_order():
+    rec = resolved_grid_evidence(PDEParams(), day_count=252)
+    keys = list(rec)
+    assert keys.index("day_count") == keys.index("max_steps") + 1

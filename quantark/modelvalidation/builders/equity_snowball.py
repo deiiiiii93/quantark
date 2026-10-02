@@ -43,7 +43,11 @@ from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 
 from quantark.modelvalidation.candidate import CandidateResult, LadderRung
-from quantark.modelvalidation.builders.pde_declared import declared_pde_params
+from quantark.modelvalidation.builders.pde_declared import (
+    declared_pde_params,
+    environment_day_count,
+    refuse_case_day_count,
+)
 from quantark.modelvalidation.engine_config import engine_config
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
@@ -291,6 +295,7 @@ def make_environment(spec: Mapping[str, Any], spot: float | None = None) -> Pric
         rate_curve=FlatRateCurve(rate=float(spec["rate"])),
         div_yield=ContinuousDividendYield(div_yield=float(spec["div_yield"])),
         valuation_date=VALUATION_DATE,
+        bus_days_in_year=environment_day_count(spec),
     )
 
 
@@ -367,6 +372,7 @@ class _SnowballArm:
         self._params = dict(params)
 
     def _specs(self, case) -> tuple[dict, dict]:
+        refuse_case_day_count(self.environment_params, case.environment_params)
         environment = dict(self.environment_params)
         environment.update(case.environment_params)
         product = dict(self.product_params)
@@ -481,7 +487,8 @@ class SnowballPDECandidate(_SnowballArm):
         return {
             **self._params,
             "engine": "SnowballPDESolver",
-            "grid": resolved_grid_evidence(self._pde_params),
+            "grid": resolved_grid_evidence(self._pde_params,
+                                   day_count=environment_day_count(self.environment_params)),
         }
 
     def _engine(self, accuracy: str) -> SnowballPDESolver:

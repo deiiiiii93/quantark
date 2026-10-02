@@ -196,7 +196,7 @@ def _time(prepared) -> tuple:
         basis = {"basis": "time_steps", "value": int(config.time_steps)}
     else:
         basis = {"basis": "steps_per_day", "value": float(config.steps_per_day),
-                 "day_count": plain(config.day_count)}
+                 "day_count": int(request.day_count)}
     section = dict(basis,
                    requested_steps=int(time.requested_steps), actual_steps=int(time.actual_steps),
                    fill_scaled=bool(time.fill_scaled), cap_exceeded=bool(time.cap_exceeded),

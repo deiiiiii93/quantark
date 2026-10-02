@@ -48,7 +48,11 @@ from quantark.modelvalidation.builders.equity_snowball import (
     make_environment,
 )
 from quantark.modelvalidation.candidate import CandidateResult, LadderRung
-from quantark.modelvalidation.builders.pde_declared import declared_pde_params
+from quantark.modelvalidation.builders.pde_declared import (
+    declared_pde_params,
+    environment_day_count,
+    refuse_case_day_count,
+)
 from quantark.modelvalidation.engine_config import engine_config
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
@@ -293,6 +297,7 @@ class _KOResetArm:
         self._params = dict(params)
 
     def _specs(self, case) -> tuple[dict, dict]:
+        refuse_case_day_count(self.environment_params, case.environment_params)
         environment = dict(self.environment_params)
         environment.update(case.environment_params)
         product = dict(self.product_params)
@@ -393,7 +398,8 @@ class KOResetPDECandidate(_KOResetArm):
         return {
             **self._params,
             "engine": "KOResetSnowballPDESolver",
-            "grid": resolved_grid_evidence(self._pde_params),
+            "grid": resolved_grid_evidence(self._pde_params,
+                                   day_count=environment_day_count(self.environment_params)),
         }
 
     def _engine(self, accuracy: str) -> KOResetSnowballPDESolver:

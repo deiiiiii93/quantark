@@ -40,3 +40,22 @@ def test_bind_shared_refuses_mixed_day_counts():
     market = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.02, q_ref=0.0, bus_days_in_year=252)
     with pytest.raises(ValidationError, match="day_count"):
         GridBinder("fast", None).bind_shared([_req(252), _req(244)], market)
+
+
+def test_step_counts_follow_the_environment():
+    from dataclasses import replace
+
+    from quantark.asset.equity.engine.pde import EuropeanPDESolver
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    from quantark.util.enum import OptionType
+    euro = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    env = make_term_env("flat")
+    n252 = EuropeanPDESolver(PDEParams()).explain(euro, env).time.actual_steps
+    n244 = EuropeanPDESolver(PDEParams()).explain(euro, replace(env, bus_days_in_year=244)).time.actual_steps
+    assert (n252, n244) == (1008, 976)                     # spec §4.7: a 244 environment, 976 steps
+
+
+def test_griddconfig_day_count_is_removed():
+    from quantark.asset.equity.engine.pde.grid.config import GridConfig
+    with pytest.raises(ValidationError, match="bus_days_in_year"):
+        GridConfig(day_count=244)

@@ -63,6 +63,10 @@ REMOVED_PDE_NAMES: Mapping[str, str] = {
 REMOVED_GRID_NAMES: Mapping[str, str] = {
     "terminal_damping_steps": _TERMINAL,
     "event_damping_steps": _EVENT,
+    "day_count": (
+        "PricingEnvironment(bus_days_in_year=...): the grid day is the environment's business days "
+        "per year (spec 3A §5.5)"
+    ),
 }
 
 #: The release each name left in; every name not listed left in 0.6.0.
@@ -71,6 +75,7 @@ REMOVED_IN: Mapping[str, str] = {
     "event_theta": "0.7.0",
     "terminal_damping_steps": "0.7.0",
     "event_damping_steps": "0.7.0",
+    "day_count": "0.8.0",
 }
 
 REMOVED_DCN_NAMES: Mapping[str, str] = {

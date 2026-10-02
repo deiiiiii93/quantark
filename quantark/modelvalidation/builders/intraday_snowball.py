@@ -37,6 +37,8 @@ from quantark.modelvalidation.builders.intraday_common import (
     bumped_env,
     implementation_fingerprint,
     plain,
+    session_calendar,
+    variance_profile,
 )
 from quantark.modelvalidation.candidate import CandidateResult, ConvergenceAxis, ConvergenceLevel
 from quantark.modelvalidation.builders.pde_declared import declared_pde_params
@@ -332,10 +334,15 @@ class IntradaySnowballPDECandidate(_IntradayCandidate):
             points=int(points), steps_per_day=float(steps_per_day),
             max_points=max(int(points), int(base.max_points)), max_steps=10 ** 8)))
 
+    def _day_count(self) -> int:
+        """The route prices on the context's numerical environment (F1): its business days per year."""
+        calendar = session_calendar(str(self.context_params.get("calendar", "SSE")))
+        return variance_profile(str(self.context_params.get("profile", "desk")), calendar).days_per_year
+
     def params(self) -> Mapping[str, Any]:
         return {**self._declared(), "engine": "SnowballPDESolver",
                 "desk_bump": float(bump_config_for(self._target_engine()).spot_bump),
-                "grid": resolved_grid_evidence(self._pde_params),
+                "grid": resolved_grid_evidence(self._pde_params, day_count=self._day_count()),
                 "convergence_axes": {"space": "achieved points x (1, 2, 4)", "time": "achieved steps per day x (1, 2, 4)",
                                      "placement": f"achieved points + {list(_PLACEMENT_SHIFTS)}"}}
 

@@ -50,7 +50,11 @@ from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 
-from quantark.modelvalidation.builders.pde_declared import declared_pde_params
+from quantark.modelvalidation.builders.pde_declared import (
+    declared_pde_params,
+    environment_day_count,
+    refuse_case_day_count,
+)
 from quantark.modelvalidation.builders.equity_snowball import (
     _central_difference_greeks,
     build_snowball_product_spec,
@@ -71,7 +75,7 @@ REFERENCE_SPOT = 4993.105
 #: module location rather than from the process working directory.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-_ENVIRONMENT_KEYS = ("surface", "rate", "spot_moneyness", "asset_name")
+_ENVIRONMENT_KEYS = ("surface", "rate", "spot_moneyness", "asset_name", "bus_days_in_year")
 
 #: Product keys this study accepts. Levels are MONEYNESS; everything else is
 #: passed through to the flat-BSM product builder unchanged.
@@ -186,6 +190,7 @@ def make_localvol_environment(
         ),
         vol_surface=surface.grid,
         div_yield=surface.div_yield,
+        bus_days_in_year=environment_day_count(spec),
     )
 
 
@@ -270,6 +275,7 @@ class _LocalVolArm:
         self._params = dict(params)
 
     def _specs(self, case) -> tuple[dict, dict]:
+        refuse_case_day_count(self.environment_params, case.environment_params)
         environment = dict(self.environment_params)
         environment.update(case.environment_params)
         product = dict(self.product_params)
@@ -309,7 +315,8 @@ class LocalVolPDECandidate(_LocalVolArm):
         return {
             **self._params,
             "engine": "LocalVolSnowballPDESolver",
-            "grid": resolved_grid_evidence(self._pde_params),
+            "grid": resolved_grid_evidence(self._pde_params,
+                                   day_count=environment_day_count(self.environment_params)),
         }
 
     def _engine(self, accuracy: str, local_vol_surface=None) -> LocalVolSnowballPDESolver:

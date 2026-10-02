@@ -10,7 +10,7 @@ from quantark.util.exceptions import ValidationError
 
 def test_resolve_standard_fully_populated():
     c = resolve_config("standard", None)
-    assert c.points == 400 and c.steps_per_day == 4.0 and c.day_count == 252
+    assert c.points == 400 and c.steps_per_day == 4.0
     assert not hasattr(c, "terminal_damping_steps") and not hasattr(c, "event_damping_steps")
     assert DAMPING_DEFAULTS["core"] == ("full_step", 1, 2)   # the stepper's defaults on the core routes
     assert c.eps_crit == 0.003 and c.num_std == 4.0
@@ -127,9 +127,9 @@ def test_positional_construction_raises_type_error():
         GridConfig(400)
 
 
-def test_key_has_nine_entries():
+def test_key_has_eight_entries():  # day_count left in 0.8.0 (spec 3A §5.5)
     # the damping counts left GridConfig for the stepper (spec 2 §4.2)
-    assert len(resolve_config("standard", None).key) == 9
+    assert len(resolve_config("standard", None).key) == 8
 
 
 def test_shared_tables_unchanged():
@@ -212,7 +212,7 @@ def test_dcn_table_standard_is_todays_plan():
     cfg = resolve_config("standard", None, profiles=DCN_ACCURACY_PROFILES)
     assert (cfg.points, cfg.steps_per_day, cfg.max_points) == (801, 0.1, 2000)
     assert DAMPING_DEFAULTS["DCN"] == ("half_step", 2, 2)
-    assert (cfg.eps_crit, cfg.num_std, cfg.max_steps, cfg.day_count) == (0.003, 4.0, 5000, 252)
+    assert (cfg.eps_crit, cfg.num_std, cfg.max_steps) == (0.003, 4.0, 5000)
     assert [
         resolve_config(a, None, profiles=DCN_ACCURACY_PROFILES).points
         for a in ("fast", "standard", "high")
@@ -226,12 +226,10 @@ def test_resolved_density_config_reresolves_to_itself():
 
 
 def test_with_time_steps_on_resolved_config_resolves():
-    # Review Focus 3: day_count cleared with the density, so no conflict
     cfg = resolve_config("standard", None).with_time_steps(1234)
-    assert cfg.day_count is None and cfg.steps_per_day is None
+    assert cfg.steps_per_day is None
     again = resolve_config("standard", cfg)
-    # the day basis is not in force on the budget basis: it stays None
-    assert again.time_steps == 1234 and again.day_count is None
+    assert again.time_steps == 1234
     assert resolve_config("standard", again) == again
 
 
@@ -269,5 +267,4 @@ def test_pinned_resolved_budget_grid_round_trips_through_pdeparams():
     from quantark.asset.equity.param import PDEParams
 
     pinned = PDEParams(grid=GridConfig(time_steps=500)).resolved_grid()
-    assert pinned.day_count is None  # the day basis is not in force
     assert PDEParams(grid=pinned).resolved_grid() == pinned

@@ -28,7 +28,6 @@ _SHARED_DEFAULTS = dict(
     bounds=(None, None),
     max_points=2000,
     max_steps=5000,
-    day_count=252,
 )
 
 #: The built-in stepper's route defaults, ``(form, terminal count, event count)`` (spec 3A §5.3):
@@ -77,16 +76,11 @@ class GridConfig:
     """Expert grid configuration; ``None`` fields inherit from the profile.
 
     Exactly one time basis is in force after resolution: ``steps_per_day``
-    (a density per numerical day, ``day_count`` days per solver year) or
-    ``time_steps`` (a total budget over the horizon).
+    (steps per business day of the pricing environment
+    (``PricingEnvironment.bus_days_in_year``, carried on ``GridRequest.day_count``))
+    or ``time_steps`` (a total budget over the horizon).
     """
 
-    #: NOTE: ``day_count`` is a STEP-DENSITY constant in the units of the
-    #: engine's time axis (interval_length * day_count = "days" of fill),
-    #: not a day-count convention: 252 per solver year, not exchange
-    #: sessions. On the default ACT/365 calendar axis the 252 default yields
-    #: ~0.69 steps-per-"day" per calendar day; see docs/trading-clock.md.
-    #: It becomes the environment's business day in sub-project 3.
     points: Optional[int] = None
     steps_per_day: Optional[float] = None
     time_steps: Optional[int] = None
@@ -95,7 +89,6 @@ class GridConfig:
     bounds: Optional[Tuple[Optional[float], Optional[float]]] = None
     max_points: Optional[int] = None
     max_steps: Optional[int] = None
-    day_count: Optional[int] = None
 
     @property
     def key(self) -> tuple:
@@ -120,10 +113,8 @@ class GridConfig:
         return replace(self, steps_per_day=steps_per_day, time_steps=None)
 
     def with_time_steps(self, time_steps: int) -> "GridConfig":
-        """Copy on the budget basis: the density and its day basis cleared."""
-        return replace(
-            self, time_steps=time_steps, steps_per_day=None, day_count=None
-        )
+        """Copy on the budget basis (the density cleared)."""
+        return replace(self, time_steps=time_steps, steps_per_day=None)
 
 
 def resolve_config(
@@ -155,18 +146,6 @@ def resolve_config(
             merged["steps_per_day"] = None
         elif override.steps_per_day is not None:
             merged["time_steps"] = None
-        if override.day_count is not None and merged.get("time_steps") is not None:
-            raise ValidationError(
-                "GridConfig.day_count applies only to the steps_per_day density; "
-                "the time basis in force is time_steps. Set steps_per_day too, or "
-                "drop day_count"
-            )
-    if merged.get("time_steps") is not None:
-        # The day basis belongs to the density: on the budget basis it is not
-        # in force, so it resolves to None (like with_time_steps). Otherwise a
-        # resolved budget config fed back as an overlay would trip the check
-        # above on a day_count the user never set.
-        merged["day_count"] = None
     cfg = GridConfig(**merged)  # type: ignore[arg-type]  # merged is per-field typed
     _validate_resolved(cfg)
     return cfg
@@ -176,10 +155,6 @@ def _validate_resolved(cfg: GridConfig) -> None:
     for name in ("points", "max_points", "max_steps"):
         if getattr(cfg, name) <= 0:
             raise ValidationError(f"{name} must be positive, got {getattr(cfg, name)}")
-    if cfg.steps_per_day is not None and (cfg.day_count is None or cfg.day_count <= 0):
-        raise ValidationError(
-            f"day_count must be positive on the steps_per_day basis, got {cfg.day_count}"
-        )
     if (cfg.steps_per_day is None) == (cfg.time_steps is None):
         raise ValidationError(
             "exactly one time basis must be in force after resolution "
@@ -214,8 +189,9 @@ def _validate_resolved(cfg: GridConfig) -> None:
         raise ValidationError(f"bounds must be ordered, got ({lo}, {hi})")
 
 
-def resolved_grid_evidence(params) -> dict:
-    """The certificates' ``grid`` record (spec 3A §5.8): the resolved GridConfig fields, then the
+def resolved_grid_evidence(params, *, day_count: int) -> dict:
+    """The certificates' ``grid`` record (spec 3A §5.8): the resolved GridConfig fields (with the
+    environment's ``day_count`` after ``max_steps`` on the density basis, where 0.7.0 had it), then the
     damping of a product with continuous knock-in under its historical keys, ``damping`` only when
     that form is half-step, and ``discrete_monitoring_damping`` only when every other core solve
     resolves differently. A full-step (1, 2) configuration still serializes to the 0.7.0 record.
@@ -223,6 +199,8 @@ def resolved_grid_evidence(params) -> dict:
     from quantark.asset.equity.engine.pde.core.components import CrankNicolson, resolve_stepper
 
     record = dict(resolve_config(params.accuracy, params.grid).evidence())
+    if record.get("time_steps") is None:
+        record["day_count"] = int(day_count)
     cont = resolve_stepper(params, DAMPING_DEFAULTS["core-continuous-ki"])
     disc = resolve_stepper(params, DAMPING_DEFAULTS["core"])
     if type(cont) is not CrankNicolson or type(disc) is not CrankNicolson:

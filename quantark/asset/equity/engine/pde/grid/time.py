@@ -104,7 +104,7 @@ def _base_fill(request: GridRequest, config: GridConfig):
         )
         requested = int(config.time_steps)
     else:
-        days = np.maximum(1.0, lengths * float(config.day_count))
+        days = np.maximum(1.0, lengths * float(request.day_count))
         fill = np.maximum(1, np.round(days * float(config.steps_per_day)).astype(int))
         requested = int(fill.sum())
     return nodes, boundaries, fill, requested
