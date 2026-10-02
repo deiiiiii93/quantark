@@ -12,7 +12,7 @@ from typing import NamedTuple
 import numpy as np
 
 __all__ = ["Backend", "BoundaryPolicy", "GroupPolicy", "ColumnGroup", "GroupState",
-           "VALUE", "VALUE_NO_ZERO_DIFFUSION_OVERRIDE", "STATISTICS_LEGACY"]
+           "VALUE", "STATISTICS_LEGACY"]
 
 
 class Backend(Enum):
@@ -34,7 +34,6 @@ class GroupPolicy:
 
 
 VALUE = GroupPolicy(BoundaryPolicy.DIRICHLET, True, False)
-VALUE_NO_ZERO_DIFFUSION_OVERRIDE = GroupPolicy(BoundaryPolicy.DIRICHLET, False, False)
 STATISTICS_LEGACY = GroupPolicy(BoundaryPolicy.CARRY, False, True, dt_as_python_float=True)
 
 

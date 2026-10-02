@@ -4,7 +4,7 @@ The legacy vector-surface march advanced every column separately, in a fixed
 order: ``v0[0..K]``, then ``v1[0..K]``, then the termination surfaces ``w0``,
 ``w1`` for EXPIRY coupons -- each a one-column banded (or sparse-LU) solve on
 the step's one factorization. Each column is a group here, in that order.
-Phoenix never forced θ = 1 on zero-diffusion steps; it still does not (§8).
+θ = 1 on zero-diffusion steps, as every value group (spec 3A §5.7).
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import numpy as np
 
 from quantark.util.exceptions import ValidationError
 
-from ..groups import VALUE_NO_ZERO_DIFFUSION_OVERRIDE, Backend, ColumnGroup
+from ..groups import VALUE, Backend, ColumnGroup
 from .snowball import LocalVolAdapterMixin, SnowballAdapter
 
 __all__ = ["PhoenixAdapter", "LocalVolPhoenixAdapter", "Heston2DPhoenixAdapter"]
@@ -54,7 +54,7 @@ class PhoenixAdapter(SnowballAdapter):
         names += [f"v1[{k}]" for k in range(self._max_k(product) + 1)]
         if self.solver._termination_surface_active(product):
             names += ["w0", "w1"]
-        return tuple(ColumnGroup(n, (n,), backend, VALUE_NO_ZERO_DIFFUSION_OVERRIDE,
+        return tuple(ColumnGroup(n, (n,), backend, VALUE,
                                  one_dimensional_rhs=use_banded) for n in names)
 
     @staticmethod

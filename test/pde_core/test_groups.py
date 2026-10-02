@@ -73,7 +73,6 @@ def test_ko_reset_group_declaration_equals_the_historical_solve_calls():
 
 # --- Phoenix (Task 8) ----------------------------------------------------------------
 from quantark.asset.equity.engine.pde import PhoenixPDESolver
-from quantark.asset.equity.engine.pde.core.groups import VALUE_NO_ZERO_DIFFUSION_OVERRIDE
 from quantark.modelvalidation.builders.equity_phoenix import make_phoenix
 
 from pde_bitwise.capture_book import PHOENIX, phoenix_plain
@@ -81,10 +80,10 @@ from pde_bitwise.capture_book import PHOENIX, phoenix_plain
 
 def _phoenix_groups(max_k, termination, banded=True):
     b = Backend.BANDED if banded else Backend.SPARSE_LU
-    g = [(f"v0[{k}]", (f"v0[{k}]",), b, VALUE_NO_ZERO_DIFFUSION_OVERRIDE) for k in range(max_k + 1)]
-    g += [(f"v1[{k}]", (f"v1[{k}]",), b, VALUE_NO_ZERO_DIFFUSION_OVERRIDE) for k in range(max_k + 1)]
+    g = [(f"v0[{k}]", (f"v0[{k}]",), b, VALUE) for k in range(max_k + 1)]
+    g += [(f"v1[{k}]", (f"v1[{k}]",), b, VALUE) for k in range(max_k + 1)]
     if termination:
-        g += [("w0", ("w0",), b, VALUE_NO_ZERO_DIFFUSION_OVERRIDE), ("w1", ("w1",), b, VALUE_NO_ZERO_DIFFUSION_OVERRIDE)]
+        g += [("w0", ("w0",), b, VALUE), ("w1", ("w1",), b, VALUE)]
     return g
 
 
@@ -122,3 +121,9 @@ def test_statistics_only_request_has_no_value_group():
     p = prepare(SnowballPDESolver(PDEParams()), snowball("discrete"), env_flat(),
                 OutputRequest(Operation.EVENT_STATS, price=False, event_stats=True, external_pv=1.0))
     assert [g.name for g in p.groups] == ["stats"]
+
+
+def test_the_phoenix_override_name_is_gone():
+    # spec 3A §5.7 (flip e): Phoenix takes theta = 1 on zero-diffusion steps like every value group
+    import quantark.asset.equity.engine.pde.core.groups as g
+    assert not hasattr(g, "VALUE_NO_ZERO_DIFFUSION_OVERRIDE")
