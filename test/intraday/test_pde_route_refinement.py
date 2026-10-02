@@ -122,3 +122,41 @@ def test_a_discrete_barrier_is_not_reported_misplaced_under_the_projection(sse_s
     # 3A §5.4 (flip c): the projection enters the barrier's exact level into each dual cell; NODAL overwrites nodes
     assert _discrete_touch(sse_sessions, PDEParams()) == ""
     assert "node overwrite" in _discrete_touch(sse_sessions, PDEParams(event_projection="nodal"))
+
+
+def _route_price(ctx, solver):
+    from quantark.intraday.engines import route_for
+    return route_for(ctx, solver).price(ctx, solver)
+
+
+
+def test_a_budget_below_the_base_count_leaves_the_fill_and_says_why(ctx, monkeypatch):
+    # spec 3A section 7.2: the memory budget allows fewer steps than the base grid delivers
+    base = SnowballPDESolver(PDEParams())
+    _, numbers = _numbers(base, ctx)
+    pv = base.price(ctx.numerical.product, ctx.pricing_env)
+    steps = numbers["actual_steps"]
+    cells = numbers["points"] * steps // 2                      # the base grid alone is over the budget
+    monkeypatch.setattr(route, "INTRADAY_PDE_MAX_GRID_BYTES",
+                        cells * route.bytes_per_grid_cell(base, ctx.numerical.product))
+    out = _route_price(ctx, SnowballPDESolver(PDEParams()))
+    assert out.contingent_pv == pv
+    assert (out.numerical["actual_steps"], out.numerical["points"]) == (steps, numbers["points"])
+    assert out.records == ()
+    assert out.numerical["resolution"] == route.UNDER_RESOLVED
+    assert "refinement capped by the grid memory budget" in out.numerical["resolution_reason"]
+
+
+def test_the_refined_solve_lifts_max_steps_to_the_chosen_trial(ctx):
+    # spec 3A section 5.9 item 4: the chosen trial delivers more than the 12,000 cap; the refined solve prices it
+    solver = SnowballPDESolver(PDEParams())
+    plan, numbers = _numbers(solver, ctx)
+    max_cells = route.INTRADAY_PDE_MAX_GRID_BYTES // route.bytes_per_grid_cell(solver, ctx.numerical.product)
+    budget = min(route.INTRADAY_PDE_MAX_STEPS, max_cells // numbers["points"] - 1)
+    factor, delivered = route._time_fill_for(ctx, solver, ctx.numerical.product, plan, solver.grid_binder.config,
+                                             numbers, route._dx_min(plan), budget)
+    assert delivered > solver.grid_binder.config.max_steps    # the lift is needed, not incidental
+    out = _route_price(ctx, SnowballPDESolver(PDEParams()))
+    refined = out.engine_used.grid_binder.config
+    assert refined.max_steps == delivered == out.numerical["actual_steps"]
+    assert out.numerical["steps_per_day"] == factor * solver.grid_binder.config.steps_per_day

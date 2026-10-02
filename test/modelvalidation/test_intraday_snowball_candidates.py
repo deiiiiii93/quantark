@@ -138,3 +138,21 @@ def test_declared_anchor_weights_are_the_stencils_the_runtime_disclosed(name):
 def test_no_theta_weight_where_no_roll_exists():
     weights = _candidate("equity.snowball.intraday.quad_v2").anchor_noise_weights(ON_BARRIER)
     assert "desk_theta" not in weights and weights["desk_gamma"] > 0.0
+
+
+def test_pde_ladder_levels_are_sized_by_delivered_steps_and_record_them(monkeypatch):
+    # spec 3A section 5.9: half nodes make the delivered count exceed the requested one; the memory cap reads delivered
+    pde = _candidate("equity.snowball.intraday.pde", accuracy="standard")
+    case = CaseSpec(name="ordinary")
+    _, _, _, numerical = intraday_snowball._measure(pde._target_engine(), *pde.specs(case), pde.quantities)
+    points, steps, requested = numerical["points"], numerical["actual_steps"], numerical["requested_steps"]
+    assert steps > requested
+    # "steps x2" fits when sized on requested steps and not on delivered ones; the placement shifts fit either way
+    monkeypatch.setattr(intraday_snowball, "LADDER_MAX_GRID_CELLS", points * (2 * steps + 1) - 1)
+    axes = {axis.name: axis for axis in pde.evaluate(case).convergence}
+    assert [lv.label for lv in axes["time"].levels if not lv.is_target] == []
+    shifted = [lv for lv in axes["placement"].levels if not lv.is_target]
+    assert len(shifted) == 3
+    for level in shifted:
+        achieved = level.settings["achieved"]
+        assert achieved["actual_steps"] > achieved["requested_steps"]
