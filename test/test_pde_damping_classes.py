@@ -13,6 +13,7 @@ from quantark.asset.equity.engine.pde.core.identity import component_fingerprint
 from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.util.exceptions import ValidationError
 from quantark.modelvalidation.builders.equity_ko_reset import make_ko_reset
 from quantark.modelvalidation.builders.equity_phoenix import make_phoenix
 from quantark.modelvalidation.builders.equity_snowball import make_environment, make_snowball
@@ -141,3 +142,19 @@ def test_custom_steppers_on_a_core_route():
     plan = SnowballPDESolver(PDEParams(stepper=custom)).explain(product, env)
     assert plan.to_dict()["time"]["request"].refinement == custom.time_refinement()
     assert plan.time.actual_steps > plan.time.requested_steps
+
+
+def test_a_subclass_without_a_form_names_the_fields_it_must_set():
+    # final review, Important 1: a subclass is a custom stepper, used as given (route_applicability),
+    # so the route never fills its damping form. 0.7.0 priced (1, 2) with no form; the refusal must
+    # say what to set, not "call resolved()", which the caller never calls.
+    _, product = _products("disc")["snowball"]
+    env = make_environment(ENV)
+    legacy = _HalfStepCustom(terminal_damping_steps=1, event_damping_steps=2)
+    with pytest.raises(ValidationError, match=r"damping.*'full_step'") as raised:
+        SnowballPDESolver(PDEParams(stepper=legacy)).price(product, env)
+    assert "resolved()" not in str(raised.value)
+    fixed = _HalfStepCustom(damping="full_step", terminal_damping_steps=1, event_damping_steps=2)
+    builtin = CrankNicolson(damping="full_step", terminal_damping_steps=1, event_damping_steps=2)
+    assert (SnowballPDESolver(PDEParams(stepper=fixed)).price(product, env)
+            == SnowballPDESolver(PDEParams(stepper=builtin)).price(product, env))

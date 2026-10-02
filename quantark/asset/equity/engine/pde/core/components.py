@@ -323,8 +323,15 @@ class CrankNicolson:
                        event_damping_steps=event if self.event_damping_steps is None else self.event_damping_steps)
 
     def _require_resolved(self, what: str) -> None:
-        if self.damping is None or self.terminal_damping_steps is None or self.event_damping_steps is None:
-            raise ValidationError(f"CrankNicolson.{what} needs a resolved stepper; call resolved() first")
+        missing = [name for name in ("damping", "terminal_damping_steps", "event_damping_steps")
+                   if getattr(self, name) is None]
+        if missing:
+            # the built-in CrankNicolson reaches here resolved (resolve_stepper); a subclass is a
+            # custom stepper, used as given, so the route never fills what it leaves None
+            raise ValidationError(
+                f"{type(self).__name__}.{what}: set {', '.join(missing)}. Only the built-in CrankNicolson "
+                "takes the route's defaults for fields left None; a subclass is used as given. "
+                "damping='full_step' gives explicit counts their 0.7.0 meaning, 'half_step' halves them")
 
     def time_refinement(self) -> TimeRefinement:
         """The intervals the time grid must split for this schedule: the two counts under
