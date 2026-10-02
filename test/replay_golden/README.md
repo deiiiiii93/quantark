@@ -121,3 +121,41 @@ gamma were re-certified alongside it (release procedure, section 1).
 No other frame moved. PV, states, trades, rebalances, actions, event statistics
 and all three summaries are byte-identical: the hedge rounds the new delta to
 the same futures quantity on every day, and `book` prices on QUAD.
+
+## 2026-10-02 — 0.8.0, the PDE 1D numerical policy (spec 3A)
+
+Spec: `docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md`.
+Seven flips, one commit each, every one checked against the PDE byte book
+(`test/pde_bitwise/`) with its declared movers:
+
+- (a) the grid day is `PricingEnvironment.bus_days_in_year`; (b) `max_steps`
+  is 12,000 and an over-cap grid raises; (c) the barrier/touch family projects
+  discrete observations on the dual cell; (d) Snowball `NODAL` is nodal on
+  interior events; (e) Phoenix takes θ = 1 on zero-diffusion steps; (f)
+  half-step damping (1, 1) on every core solve whose product has no continuous
+  knock-in; (g) forward far-field rows.
+
+**Which frames moved and why.** Only flip (f) moved these frames: the
+`scalar_bsm` and `localvol` fixtures price a snowball with discrete knock-in
+on `PDEEngine`, whose damping is now half-step (1, 1). The frames that moved:
+`scalar_bsm_{states,greeks,surfaces,daily_event_summary,event_probabilities}`
+and `scalar_bsm_summary.json`; `localvol_{states,greeks,daily_event_summary,
+event_probabilities}` and `localvol_summary.json`. The size:
+
+| fixture | initial portfolio value before | after | total PnL before | after |
+|---|---|---|---|---|
+| scalar_bsm | −10131.86225680955 | −10131.70307842902 | 130.76636639859134 | 130.6071880180607 |
+| localvol | −10156.288723735766 | −10156.45932315723 | 155.192833324807 | 155.36343274627143 |
+
+About 1.6e-5 of the notional, the size of the time-error change spec 3A §4.2
+measures for discrete knock-in at the standard density. Flips (a)–(e) and (g)
+moved no frame: the fixtures' environments have 252 days, their grids are
+under the cap, they hold no barrier/touch product, they price under the
+default projection, they hold no Phoenix, and they hold no put.
+
+`book` did not move: it prices on QUAD. `trades`, `rebalances`, `actions` and
+both `localvol_surfaces` and `book_*` frames are byte-identical: the hedge
+rounds the moved delta to the same futures quantity on every day.
+
+**Execution goldens** (`test/execution/goldens/`, regenerated in the same
+commit): see `test/execution/goldens/PROVENANCE.md`.
