@@ -9,7 +9,6 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
@@ -111,7 +110,7 @@ class EuropeanPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         K = product.strike
-        delay_df = resolve_terminal_timing(product, pricing_env).delay_df
+        delay_df = self._terminal_timing(product, pricing_env).delay_df
         
         if product.is_call():
             grid[:, -1] = np.maximum(s_vec - K, 0.0) * delay_df
@@ -155,7 +154,7 @@ class EuropeanPDESolver(BasePDESolver):
 
         df = self._df_between_times(pricing_env, current_time, total_tau)
         df_div = self._carry_df_between_times(pricing_env, current_time, total_tau)
-        delay_df = resolve_terminal_timing(product, pricing_env).delay_df
+        delay_df = self._terminal_timing(product, pricing_env).delay_df
         
         if product.is_call():
             # Lower boundary: call worth 0 when S = 0

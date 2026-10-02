@@ -109,7 +109,14 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
         seen.append(tuple(r.op.value for r in event.records))
         return orig(self, column, x, s, event, nodal=nodal)
 
+    orig_at = BasePDESolver._apply_discrete_event_at
+
+    def spy_at(self, grid, t_idx, x, s, event, *, nodal):  # the per-step entry (nodal: no inner call)
+        seen.append(tuple(r.op.value for r in event.records))
+        return orig_at(self, grid, t_idx, x, s, event, nodal=nodal)
+
     monkeypatch.setattr(BasePDESolver, "_apply_discrete_event", spy)
+    monkeypatch.setattr(BasePDESolver, "_apply_discrete_event_at", spy_at)
     solver = cls(PDEParams(event_projection="nodal"))
     g = solver.calculate_greeks(factory(), env)
     banked = V070[name]

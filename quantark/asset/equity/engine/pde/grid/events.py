@@ -356,12 +356,11 @@ class EventRecord:
             raise ValidationError(f"EventRecord.op must be an EventOp, got {self.op!r}")
 
     def breached(self, s: np.ndarray) -> np.ndarray:
-        mask = np.zeros(np.shape(s), dtype=bool)
-        if self.upper is not None:
-            mask |= s >= self.upper
-        if self.lower is not None:
-            mask |= s <= self.lower
-        return mask
+        if self.lower is None:
+            return s >= self.upper
+        if self.upper is None:
+            return s <= self.lower
+        return (s >= self.upper) | (s <= self.lower)
 
 
 @dataclass(frozen=True)
@@ -400,6 +399,17 @@ def _breached_on(rec: EventRecord, lo: float, hi: float) -> bool:
     return False
 
 
+def fold_nodal(out: np.ndarray, s: np.ndarray, event: DiscreteEvent) -> None:
+    """The NODAL fold, in place on ``out`` (a column, or a view of a grid's column): for each record
+    in order, ``out[breached] = value`` (SET) or ``+= value`` (ADD)."""
+    for rec in event.records:
+        mask = rec.breached(s)
+        if rec.op is EventOp.SET:
+            out[mask] = rec.value
+        else:
+            out[mask] += rec.value
+
+
 def apply_discrete_event(spatial, column: np.ndarray, event: DiscreteEvent, projection) -> np.ndarray:
     """One observation's records applied to ``column``; returns a new column (spec 3A §5.4).
 
@@ -413,12 +423,7 @@ def apply_discrete_event(spatial, column: np.ndarray, event: DiscreteEvent, proj
     s = np.asarray(spatial.s, dtype=float)
     if projection is EventProjectionMode.NODAL:
         out = np.array(column, dtype=float, copy=True)
-        for rec in event.records:
-            mask = rec.breached(s)
-            if rec.op is EventOp.SET:
-                out[mask] = rec.value
-            else:
-                out[mask] += rec.value
+        fold_nodal(out, s, event)
         return out
     if projection is not EventProjectionMode.CELL_AVERAGE:
         raise ValidationError(f"apply_discrete_event: unknown projection {projection!r}")

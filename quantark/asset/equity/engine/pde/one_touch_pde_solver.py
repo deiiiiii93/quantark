@@ -203,8 +203,8 @@ class OneTouchPDESolver(BasePDESolver):
 
         current_time = self._current_time(self._total_tau, tau)
         event = self._step_event(product, pricing_env, t_idx, current_time)
-        grid[:, t_idx] = self._apply_discrete_event(
-            grid[:, t_idx], x_vec, s_vec, event,
+        self._apply_discrete_event_at(
+            grid, t_idx, x_vec, s_vec, event,
             nodal=product.observation_type != ObservationType.DISCRETE or t_idx == 0)
 
     @staticmethod

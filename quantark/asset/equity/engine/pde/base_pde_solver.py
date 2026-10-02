@@ -53,6 +53,7 @@ from quantark.asset.equity.engine.pde.grid import (
     Nodes,
     TimeRefinement,
     apply_discrete_event,
+    fold_nodal,
     validate_external_layout,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -709,6 +710,14 @@ class BasePDESolver(BaseEngine):
         mode = EventProjectionMode.NODAL if nodal else self._base_family_projection()
         return apply_discrete_event(Nodes(x_vec, s_vec), column, event, mode)
 
+    def _apply_discrete_event_at(self, grid, t_idx, x_vec, s_vec, event: DiscreteEvent, *, nodal: bool) -> None:
+        """``_apply_discrete_event`` on ``grid[:, t_idx]``, written back. The nodal fold runs in place
+        on the column, as the 0.7.0 step hooks did: no column copy on the per-step path."""
+        if nodal or self._base_family_projection() is EventProjectionMode.NODAL:
+            fold_nodal(grid[:, t_idx], s_vec, event)
+        else:
+            grid[:, t_idx] = self._apply_discrete_event(grid[:, t_idx], x_vec, s_vec, event, nodal=False)
+
     @property
     def adapter(self) -> FamilyAdapter:
         """This solver's family adapter, built once (a copy of the solver rebuilds its own)."""
@@ -1084,7 +1093,7 @@ class BasePDESolver(BaseEngine):
         pricing_env: PricingEnvironment,
     ) -> float:
         """Return the payment time for the terminal determination."""
-        return float(resolve_terminal_timing(product, pricing_env).payment_time)
+        return float(self._terminal_timing(product, pricing_env).payment_time)
 
     def _terminal_delay_df(
         self,
@@ -1092,7 +1101,22 @@ class BasePDESolver(BaseEngine):
         pricing_env: PricingEnvironment,
     ) -> float:
         """Return DF(payment) / DF(terminal determination)."""
-        return float(resolve_terminal_timing(product, pricing_env).delay_df)
+        return float(self._terminal_timing(product, pricing_env).delay_df)
+
+    def _terminal_timing(self, product: BaseEquityProduct, pricing_env: PricingEnvironment):
+        """``resolve_terminal_timing``, once per market scope and product: the boundary and event
+        hooks read it every step, and it is fixed for the scope's product and environment. The
+        memo lives in the scope tuple, so it ends with the scope (as ``_curve_df_memo``)."""
+        scope = self._market_fp
+        resolved = scope[2] if scope is not None and scope[0] is pricing_env else None
+        if resolved is None:
+            return resolve_terminal_timing(product, pricing_env)
+        hit = resolved.get("terminal_timing")
+        if hit is not None and hit[0] is product:
+            return hit[1]
+        timing = resolve_terminal_timing(product, pricing_env)
+        resolved["terminal_timing"] = (product, timing)
+        return timing
 
     def _event_payment_time(
         self,

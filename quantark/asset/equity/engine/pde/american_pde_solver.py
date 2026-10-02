@@ -15,7 +15,6 @@ from quantark.asset.equity.engine.settlement_support import (
     AmericanExerciseTimings,
     american_exercise_requires_dates,
     build_american_exercise_date_grid,
-    resolve_terminal_timing,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import PDEParams
@@ -119,7 +118,7 @@ class AmericanPDESolver(BasePDESolver):
         """
         K = product.strike
         multiplier = product.contract_multiplier
-        delay_df = resolve_terminal_timing(product, pricing_env).delay_df
+        delay_df = self._terminal_timing(product, pricing_env).delay_df
         
         if product.is_call():
             grid[:, -1] = (
