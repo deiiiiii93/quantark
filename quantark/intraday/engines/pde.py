@@ -49,13 +49,15 @@ def _layout_numbers(plan, spot: float):
             "requested_steps": int(time["requested_steps"]), "actual_steps": int(time["actual_steps"])}
 
 
-def _barrier_placement(ctx, plan) -> str:
+def _barrier_placement(ctx, plan, solver) -> str:
     """Why a barrier-bearing twin's barrier is not where the contract puts it on the solved grid ("" when it is).
 
     A continuous knock-out barrier is a hard domain edge of the layout (exact). Otherwise the solver overwrites
     the nodes at and beyond the barrier, so the effective barrier is the first such node: first order in dx and
-    alignment-dependent unless a node sits on the barrier itself.
+    alignment-dependent unless a node sits on the barrier itself. A discrete observation under the dual-cell
+    projection is exact too: the barrier's level enters each dual cell (spec 3A §5.4).
     """
+    from quantark.util.enum.engine_enums import EventProjectionMode
     from quantark.util.enum.option_enums import ObservationType
     from quantark.util.numerical import is_close
 
@@ -66,6 +68,9 @@ def _barrier_placement(ctx, plan) -> str:
     request, b = plan["time"]["request"], float(barrier)
     if b in (request.hard_upper, request.hard_lower):
         return ""
+    if (getattr(twin, "observation_type", None) == ObservationType.DISCRETE
+            and solver._base_family_projection() is EventProjectionMode.CELL_AVERAGE):
+        return ""          # the observation is projected: the barrier's exact level enters each dual cell
     s = np.exp(np.asarray(plan["space"]["x"], dtype=float))
     beyond = np.nonzero(s >= b)[0] if twin.is_up_barrier else np.nonzero(s <= b)[0]
     if len(beyond) == 0:
@@ -235,7 +240,7 @@ class PDERoute:
                 status = replace(status, reason=f"{status.reason}; refinement capped by the grid memory budget "
                                                 f"({INTRADAY_PDE_MAX_GRID_BYTES / 2**30:.2f} GiB = {max_cells:.2e} "
                                                 "points x time nodes for this solver)")
-        placement = _barrier_placement(ctx, plan) if status.status == "resolved" else ""
+        placement = _barrier_placement(ctx, plan, solver) if status.status == "resolved" else ""
         if placement:
             status = replace(status, status=UNDER_RESOLVED, reason=placement)
         numerical = dict(numbers, resolution=status.status, resolution_reason=status.reason,

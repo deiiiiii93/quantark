@@ -88,3 +88,37 @@ def test_a_feasible_trial_marks_its_half_steps(ctx, monkeypatch):
     route._time_fill_for(ctx, solver, ctx.numerical.product, plan, solver.grid_binder.config, numbers,
                          route._dx_min(plan), 4 * numbers["actual_steps"] + 64)
     assert marked and all(m > 0 for m in marked)
+
+
+def _discrete_touch(sse_sessions, params):
+    """The discretely observed one-touch of test_route_pde's domain test, priced through the route under ``params``."""
+    from datetime import datetime
+
+    from intraday.conftest import SHANGHAI, flat_env
+    from quantark.asset.equity.engine.pde import OneTouchPDESolver
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
+    from quantark.intraday import VarianceProfile, resolve_context
+    from quantark.intraday.engines import route_for
+    from quantark.intraday.request import IntradayValuationRequest
+    from quantark.util.enum.option_enums import BarrierDirection, ObservationType
+
+    dates = [datetime(2026, 9, 18), datetime(2026, 9, 24), datetime(2026, 9, 30)]
+    product = OneTouchOption(barrier=103.0, barrier_direction=BarrierDirection.UP, rebate=1.0,
+                             exercise_date=datetime(2026, 9, 30), observation_type=ObservationType.DISCRETE,
+                             observation_schedule=ObservationSchedule(
+                                 records=[ObservationRecord(observation_date=d, barrier=103.0) for d in dates]))
+    desk = VarianceProfile("desk", "1", 244, 0.25, (0.35, 0.35), (0.05,))
+    ctx = resolve_context(IntradayValuationRequest(
+        product=product, pricing_env=flat_env(datetime(2026, 9, 15, 10, 0, tzinfo=SHANGHAI), spot=101.0, r=0.0, q=0.0),
+        session_calendar=sse_sessions, variance_profile=desk))
+    out = route_for(ctx, OneTouchPDESolver(params)).price(ctx, OneTouchPDESolver(params))
+    solver = out.engine_used
+    plan = route._solved_plan(solver, ctx.numerical.product, ctx.pricing_env)
+    return route._barrier_placement(ctx, plan, solver)
+
+
+def test_a_discrete_barrier_is_not_reported_misplaced_under_the_projection(sse_sessions):
+    # 3A §5.4 (flip c): the projection enters the barrier's exact level into each dual cell; NODAL overwrites nodes
+    assert _discrete_touch(sse_sessions, PDEParams()) == ""
+    assert "node overwrite" in _discrete_touch(sse_sessions, PDEParams(event_projection="nodal"))

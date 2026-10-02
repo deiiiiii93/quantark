@@ -446,10 +446,11 @@ class PDEParams(EngineParams):
       samples. Constructed in code only (not from a config file).
     - ``readout`` -- how price and delta/gamma are read off the solution.
       ``None`` is the built-in ``StandardReadout()``. Constructed in code only.
-    - ``event_projection`` -- validating the event treatment. ``None`` is the
-      route's own treatment (CELL_AVERAGE on the shared-grid autocallable
-      solvers); explicit CELL_AVERAGE splits the trigger cell by its exact
-      overlap, explicit NODAL assigns whole nodes. Lower-case strings coerce.
+    - ``event_projection`` -- validating the event treatment. ``None`` is
+      CELL_AVERAGE on every core route (the autocallables and, since 0.8.0, the
+      barrier / touch family's discrete observations); explicit CELL_AVERAGE
+      splits the trigger cell by its exact overlap, explicit NODAL assigns whole
+      nodes (the 0.7.0 base-family mask). Lower-case strings coerce.
     - ``cache_enabled`` -- memory pressure, or a fresh solve every call. Same
       numbers to round-off: a cached run shares one factorization across
       intervals whose dt differ by an ULP (Review Focus 5).
@@ -471,8 +472,9 @@ class PDEParams(EngineParams):
     operator: Optional[object] = None
     readout: Optional[object] = None
     # Discrete event operators (coupon/KO/KI jumps). None = the route's own
-    # treatment (decision 15): CELL_AVERAGE on the shared-grid autocallable
-    # solvers (1D BSM/LV and 2D Heston/SLV slice-wise; the dual-cell
+    # treatment (decision 15): CELL_AVERAGE on every core route, the base
+    # family's discrete observations included (spec 3A §5.4), and on the
+    # 1D BSM/LV and 2D Heston/SLV autocallables slice-wise (the dual-cell
     # projection that removes the half-cell trigger-phase bias documented in
     # pde_auto_grid_investigation.md), NODAL on DCN, a mid-cell-aligned nodal
     # mask on the local-vol barrier. Continuously monitored barriers keep

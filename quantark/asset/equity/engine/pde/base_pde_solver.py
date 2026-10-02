@@ -85,7 +85,7 @@ _DF_MEMO_MAX_ENTRIES = 200_000
 
 #: The base family's treatment for ``event_projection=None`` (spec 3A §5.4). NODAL through stage 1
 #: (bitwise); flip (c) makes it CELL_AVERAGE, the treatment of every other core route.
-_BASE_FAMILY_DEFAULT_PROJECTION = EventProjectionMode.NODAL
+_BASE_FAMILY_DEFAULT_PROJECTION = EventProjectionMode.CELL_AVERAGE
 _STEP_COEFF_MEMO_MAX_ENTRIES = 64
 
 

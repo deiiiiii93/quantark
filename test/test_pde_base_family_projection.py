@@ -152,3 +152,109 @@ def test_a_valuation_date_observation_stays_nodal_under_projection():
                           OutputRequest(Operation.SESSION_OUTPUTS, grid=True)))
         cols.append(out.solution.solution_vec.tobytes())
     assert cols[0] == cols[1]
+
+
+# ---- flip (c): the dual-cell projection is the base family's default (spec 3A §5.4, §4.6) ----------
+
+from pde_3a.products import PRODUCTS, HORIZONS, dates, env as study_env  # noqa: E402
+from quantark.asset.equity.engine import PDEEngine  # noqa: E402
+from quantark.asset.equity.riskmeasures import GreeksCalculator  # noqa: E402
+
+REF = json.loads((Path(__file__).parent / "pde_3a" / "fixtures" / "base_family_reference.json").read_text())
+V070_GREEKS = json.loads((Path(__file__).parent / "pde_3a" / "fixtures" / "base_family_nodal_v070.json").read_text())
+QUANTITIES = ("pv", "delta", "gamma", "bump_delta", "bump_gamma")
+
+#: Twice the largest error spec §4.6 reports at 400 points, per horizon and quantity. "projection" is
+#: flip (c) alone; "projection_half_step" is the 3A default after flip (f). Task 14 switches STAGE.
+SPEC_46 = {
+    "projection": {
+        "1m": dict(pv=1.5e-4, delta=1.8e-5, gamma=1.9e-6, bump_delta=1.7e-5, bump_gamma=2.8e-5),
+        "5d": dict(pv=3.2e-4, delta=1.8e-4, gamma=7.2e-5, bump_delta=1.2e-4, bump_gamma=1.2e-4),
+        "1d": dict(pv=7.9e-3, delta=3.4e-3, gamma=9.1e-3, bump_delta=2.0e-3, bump_gamma=6.4e-3),
+    },
+    "projection_half_step": {
+        "1m": dict(pv=1.7e-4, delta=9.8e-6, gamma=1.7e-6, bump_delta=1.9e-5, bump_gamma=2.8e-5),
+        "5d": dict(pv=2.1e-4, delta=4.9e-5, gamma=2.2e-5, bump_delta=5.3e-5, bump_gamma=5.6e-5),
+        "1d": dict(pv=1.1e-3, delta=8.5e-4, gamma=1.8e-3, bump_delta=4.9e-4, bump_gamma=8.5e-4),
+    },
+}
+STAGE = "projection"
+KO_AND_TOUCH = sorted(n for n in PRODUCTS if n != "di_put")
+CELLS = [(r["product"], r["horizon"], r["spot"]) for r in REF["refs"] if r["product"] in KO_AND_TOUCH]
+
+
+def _engine_values(name, horizon, spot, params):
+    product = PRODUCTS[name][1](dates(HORIZONS[horizon]))
+    env = study_env(spot=spot)
+    g = PDEEngine(params=params).calculate_greeks(product, env)
+    b = GreeksCalculator().calculate_numerical_greeks(product=product, pricing_env=env,
+                                                      engine=PDEEngine(params=params), greeks=["delta", "gamma"])
+    return dict(pv=g["price"], delta=g["delta"], gamma=g["gamma"], bump_delta=b["delta"], bump_gamma=b["gamma"])
+
+
+@pytest.mark.parametrize("name,horizon,spot", CELLS)
+def test_the_default_meets_the_deterministic_reference(name, horizon, spot):
+    ref = next(r for r in REF["refs"] if (r["product"], r["horizon"], r["spot"]) == (name, horizon, spot))
+    got = _engine_values(name, horizon, spot, PDEParams())
+    tol = SPEC_46[STAGE][horizon]
+    for q in QUANTITIES:
+        assert abs(got[q] - ref[q]) <= 2.0 * tol[q], (q, got[q] - ref[q])
+
+
+def _first_per_product_horizon(rows, n_products=4):
+    """The first banked row per (product, horizon), for the first ``n_products`` products in banked
+    order: four products x three horizons (the first-twelve slice covers only two products)."""
+    seen, products = {}, []
+    for r in rows:
+        if r["product"] not in products:
+            products.append(r["product"])
+        if r["product"] in products[:n_products]:
+            seen.setdefault((r["product"], r["horizon"]), r)
+    return list(seen.values())
+
+
+@pytest.mark.parametrize("row", _first_per_product_horizon([r for r in V070_GREEKS if r["product"] in KO_AND_TOUCH]),
+                         ids=lambda r: f"{r['product']}|{r['horizon']}|{r['spot']}")
+def test_nodal_full_step_is_the_070_value(row):
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+    params = PDEParams(event_projection="nodal", stepper=CrankNicolson(
+        damping="full_step", terminal_damping_steps=1, event_damping_steps=2))
+    got = _engine_values(row["product"], row["horizon"], row["spot"], params)
+    assert_close(got, {q: row[q] for q in QUANTITIES})
+
+
+#: capture_book._coincident_product (Task 1, measured): log(130) and log(130.01) share one dual cell of
+#: the standard layout (a cell 2.6e-3 wide in log spot against a 7.7e-5 gap).
+COINCIDENT_GAP = 0.01
+#: Twice the error measured on the flip (c) commit against the closed form below (+8.873e-05).
+COINCIDENT_TOL = 1.8e-4
+
+
+def test_coincident_records_through_the_product_meet_the_closed_form():
+    from math import exp, log, sqrt
+
+    from scipy.special import ndtr
+
+    from quantark.asset.equity.product.option import BarrierOption
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+    from quantark.util.enum import BarrierType, ObservationAggregation, ObservationType, OptionType
+
+    g = COINCIDENT_GAP                        # the gap Task 1 measured: both thresholds in one dual cell
+    recs = [(0.5, 130.0, 2.0), (0.5, 130.0 + g, 3.0), (1.0, 130.0, 1.0)]
+    product = BarrierOption(
+        strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
+        maturity=1.0, rebate=0.0, pay_at_hit=False, observation_type=ObservationType.DISCRETE,
+        observation_schedule=ObservationSchedule(
+            records=[ObservationRecord(observation_time=t, barrier=b, payoff=c) for t, b, c in recs],
+            aggregation_mode=ObservationAggregation.ACCUMULATE))
+    s, vol, r, q = 100.0, 0.22, 0.025, 0.03
+    env = study_env(spot=s)
+
+    def d2(k, t):
+        return (log(s / k) + (r - q - 0.5 * vol * vol) * t) / (vol * sqrt(t))
+
+    call = s * exp(-q) * ndtr(d2(100.0, 1.0) + vol) - 100.0 * exp(-r) * ndtr(d2(100.0, 1.0))
+    digitals = sum(c * exp(-r * 1.0) * ndtr(d2(b, t)) for t, b, c in recs)   # paid at maturity
+    exact = call + digitals
+    got = BarrierPDESolver(PDEParams()).price(product, env)
+    assert abs(got - exact) <= COINCIDENT_TOL

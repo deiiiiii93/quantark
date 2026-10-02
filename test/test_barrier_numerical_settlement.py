@@ -93,7 +93,8 @@ def _discrete_barrier(convention):
 
 def test_barrier_pde_event_node_uses_payment_delay_ratio(env):
     product = _discrete_barrier(_lagged())
-    solver = BarrierPDESolver(PDEParams(grid=GridConfig(points=51, time_steps=4)))
+    # the breached node's cash, not the projection: the 0.7.0 nodal mask (0.8.0 projects by default, 3A §5.4)
+    solver = BarrierPDESolver(PDEParams(grid=GridConfig(points=51, time_steps=4), event_projection="nodal"))
     t_vec = np.array([0.0, 0.5, 1.0])
     solver._setup_observation_indices(
         product,
@@ -163,7 +164,8 @@ def test_barrier_pde_expiry_paid_boundary_uses_terminal_delay(env):
 def test_barrier_pde_expiry_paid_discrete_node_uses_terminal_delay(env):
     product = _discrete_barrier(_lagged())
     product.pay_at_hit = False
-    solver = BarrierPDESolver(PDEParams(grid=GridConfig(points=51, time_steps=4)))
+    # the breached node's cash, not the projection: the 0.7.0 nodal mask (0.8.0 projects by default, 3A §5.4)
+    solver = BarrierPDESolver(PDEParams(grid=GridConfig(points=51, time_steps=4), event_projection="nodal"))
     t_vec = np.array([0.0, 0.5, 1.0])
     solver._setup_observation_indices(
         product,
