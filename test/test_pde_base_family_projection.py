@@ -125,9 +125,13 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
     solver = cls(PDEParams(event_projection="nodal", stepper=V070_STEPPER))
     g = solver.calculate_greeks(factory(), env)
     banked = V070[name]
-    assert_close({"price": g["price"], "delta": g["delta"], "gamma": g["gamma"]},
-                 {k: banked[k] for k in ("price", "delta", "gamma")})
-    if "column" in banked:
+    # flip (g) moves every put's far-field row (forward over [t, T], spec 3A §5.10): a put keeps its
+    # 0.7.0 event semantics (the ops below) but not its 0.7.0 values
+    put = "_put" in name
+    if not put:
+        assert_close({"price": g["price"], "delta": g["delta"], "gamma": g["gamma"]},
+                     {k: banked[k] for k in ("price", "delta", "gamma")})
+    if "column" in banked and not put:
         out = run(prepare(cls(PDEParams(event_projection="nodal", stepper=V070_STEPPER)), factory(), env,
                           OutputRequest(Operation.SESSION_OUTPUTS, grid=True)))
         assert_close(list(map(float, out.solution.solution_vec)), [float.fromhex(h) for h in banked["column"]])
@@ -263,3 +267,20 @@ def test_coincident_records_through_the_product_meet_the_closed_form():
     exact = call + digitals
     got = BarrierPDESolver(PDEParams()).price(product, env)
     assert abs(got - exact) <= COINCIDENT_TOL
+
+
+DI_PUT_CELLS = [(r["product"], r["horizon"], r["spot"]) for r in REF["refs"] if r["product"] == "di_put"]
+
+
+@pytest.mark.parametrize("name,horizon,spot", DI_PUT_CELLS)
+def test_the_down_and_in_put_meets_the_reference_with_a_forward_far_field_row(name, horizon, spot):
+    # flip (g): the vanilla leg's put row gains its forward term; within twice spec 3A §4.10's patched errors.
+    # Bump Greeks are not asserted: the knock-in bump context raises on this tree (spec 2 handoff).
+    ref = next(r for r in REF["refs"] if (r["product"], r["horizon"], r["spot"]) == (name, horizon, spot))
+    product = PRODUCTS[name][1](dates(HORIZONS[horizon]))
+    g = PDEEngine(params=PDEParams()).calculate_greeks(product, study_env(spot=spot))
+    # the larger of twice spec 4.10's patched errors and twice the base family's own bound at this
+    # horizon: one day out, the knock-out leg's projection error dominates (1d 87.55: delta 4.8e-4)
+    tol = SPEC_46[STAGE][horizon]
+    assert abs(g["price"] - ref["pv"]) <= max(2.0 * 2.0e-4, 2.0 * tol["pv"])
+    assert abs(g["delta"] - ref["delta"]) <= max(2.0 * 1e-4, 2.0 * tol["delta"])

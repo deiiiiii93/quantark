@@ -136,8 +136,8 @@ class BarrierPDESolver(BasePDESolver):
         df_to_maturity = self._df_between_times(pricing_env, current_time, total_tau)
         terminal_delay_df = self._terminal_delay_df(product, pricing_env)
 
-        q = pricing_env.get_div_yield(tau) if tau > 0 else 0.0
-        df_div = np.exp(-q * tau) if tau > 0 else 1.0
+        # forward carry over [t, T] (spec 3A §5.10): exp(-(q(T) T - q(t) t)), never exp(-q(tau) tau)
+        df_div = self._carry_df_between_times(pricing_env, current_time, total_tau)
         participation = product.participation_rate
 
         if product.observation_type == ObservationType.DISCRETE:
@@ -150,7 +150,9 @@ class BarrierPDESolver(BasePDESolver):
                 )
             else:
                 grid[0, t_idx] = (
-                    K * df_to_maturity * participation * terminal_delay_df
+                    max(K * df_to_maturity - s_vec[0] * df_div, 0.0)
+                    * participation
+                    * terminal_delay_df
                 )
                 grid[-1, t_idx] = 0.0
             return
@@ -172,7 +174,9 @@ class BarrierPDESolver(BasePDESolver):
                 grid[0, t_idx] = 0.0
             else:
                 grid[0, t_idx] = (
-                    K * df_to_maturity * participation * terminal_delay_df
+                    max(K * df_to_maturity - s_vec[0] * df_div, 0.0)
+                    * participation
+                    * terminal_delay_df
                 )
             grid[-1, t_idx] = rebate_value
         else:

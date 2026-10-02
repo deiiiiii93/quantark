@@ -131,9 +131,9 @@ class EuropeanPDESolver(BasePDESolver):
         Set boundary conditions at spatial edges.
         
         For European options:
-            Lower boundary (S → 0):
+            Lower boundary (the grid's lower edge S_min):
                 Call: V → 0
-                Put:  V → K * exp(-r*tau)
+                Put:  V → K DF(t,T) - S_min CF(t,T), floored at 0
             
             Upper boundary (S → ∞):
                 Call: V → S - K * exp(-r*tau)
@@ -164,8 +164,9 @@ class EuropeanPDESolver(BasePDESolver):
                 max(s_vec[-1] * df_div - K * df, 0.0) * delay_df
             )
         else:  # put
-            # Lower boundary: put worth K*exp(-r*tau) when S = 0
-            grid[0, t_idx] = K * df * delay_df
+            # Lower boundary: the put at the grid's finite lower edge, forward over [t, T]
+            # (spec 3A §5.10): K DF(t,T) - S_min CF(t,T), not its S -> 0 limit K DF(t,T)
+            grid[0, t_idx] = max(K * df - s_vec[0] * df_div, 0.0) * delay_df
             # Upper boundary: put worth 0 when S is very large
             grid[-1, t_idx] = 0.0
     

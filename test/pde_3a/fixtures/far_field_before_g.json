@@ -1,0 +1,22 @@
+{
+ "machine": "arm64",
+ "values": {
+  "flat": {
+   "european_call": "0x1.1a7b93ef19b2dp+3",
+   "american_put": "0x1.c41532ac15b24p+2",
+   "barrier_call": "0x1.1428c6ce5f164p+3"
+  },
+  "up": {
+   "european_call": "0x1.2a2b5d067ecb9p+3",
+   "american_put": "0x1.ff7c05ae3da95p+2"
+  },
+  "down": {
+   "european_call": "0x1.12c6ff7493e1dp+3",
+   "american_put": "0x1.d244c1fd854acp+2"
+  },
+  "kinked": {
+   "european_call": "0x1.6087088995679p+3",
+   "american_put": "0x1.0a455d6cabdc0p+3"
+  }
+ }
+}
