@@ -140,6 +140,8 @@ class SnowballAdapter(FamilyAdapter):
         spatial = layout.spatial
         tau = layout.request.tau
         is_reverse = bool(getattr(product, "is_reverse", False))
+        nodal = not solver._use_cell_average_events()     # NODAL: the inline path's masks (spec 3A §5.4, flip d)
+        treatment = "nodal" if nodal else "cell_average"
         interior: dict = {}
         ko_stages: dict = {}
         ko_rows, ki_rows = [], []
@@ -172,6 +174,16 @@ class SnowballAdapter(FamilyAdapter):
             ko_hits_ki = solver._ko_survives_ki(product)
 
             def _ko(states, _b=barrier, _c=cash, _up=breach_up, _hits_ki=ko_hits_ki):
+                if nodal:
+                    # NODAL: the product's inclusive comparison at each node (spec 3A §5.4, flip d)
+                    mask = solver._event_nodal_mask(spatial.s, _b, is_reverse, True)
+                    alive = states["alive"].copy()
+                    alive[mask] = _c
+                    ki = states["ki"]
+                    if _hits_ki:
+                        ki = ki.copy()
+                        ki[mask] = _c
+                    return {"alive": alive, "ki": ki}
                 cash_col = np.full_like(states["alive"], _c)
                 return {
                     "alive": project_between(
@@ -185,7 +197,8 @@ class SnowballAdapter(FamilyAdapter):
                 }
 
             ko_stages[step] = _chain(ko_stages.get(step), _ko)
-            ko_rows.append(("ko", int(step), float(t_obs), barrier, float(cash), breach_up, bool(ko_hits_ki)))
+            ko_rows.append(("ko", int(step), float(t_obs), barrier, float(cash), breach_up, bool(ko_hits_ki),
+                            treatment))
 
         # The knock-out wins a tie with a knock-in observed at the same instant. With the knock-out
         # staged first (certified order) that holds while it survives a knock-in: "ki" carries it
@@ -220,6 +233,11 @@ class SnowballAdapter(FamilyAdapter):
                 breach_up = is_reverse  # KI is a down barrier (up if reverse)
 
                 def _ki(states, _b=float(barrier), _up=breach_up):
+                    if nodal:
+                        mask = solver._event_nodal_mask(spatial.s, _b, is_reverse, False)
+                        alive = states["alive"].copy()
+                        alive[mask] = states["ki"][mask]
+                        return {"alive": alive, "ki": states["ki"]}
                     return {
                         "alive": project_between(
                             spatial, _b, _up, states["ki"], states["alive"]
@@ -228,7 +246,7 @@ class SnowballAdapter(FamilyAdapter):
                     }
 
                 interior[step] = _chain(interior.get(step), _ki)
-                ki_rows.append(("ki", int(step), float(t_obs), float(barrier), breach_up))
+                ki_rows.append(("ki", int(step), float(t_obs), float(barrier), breach_up, treatment))
 
         if ko_last:
             for step, stage in ko_stages.items():

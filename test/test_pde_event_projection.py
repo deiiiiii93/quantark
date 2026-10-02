@@ -1402,3 +1402,22 @@ def test_default_event_projection_is_the_route_treatment():
         PDEParams(event_projection="nodal")
     )._use_cell_average_events()
     assert PDEParams(event_projection="NODAL").event_projection is EventProjectionMode.NODAL
+
+
+def test_snowball_nodal_masks_its_interior_events(monkeypatch):
+    # spec 3A §5.4 (flip d): NODAL means nodal on the interior KO and discrete-KI events too
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+    from quantark.asset.equity.engine.pde.core.adapters import snowball as sb
+    from quantark.asset.equity.param import PDEParams
+    from quantark.modelvalidation.builders.equity_snowball import make_environment, make_snowball
+    calls = []
+    orig = sb.project_between
+    monkeypatch.setattr(sb, "project_between", lambda *a, **k: calls.append(1) or orig(*a, **k))
+    product = make_snowball(dict(initial_price=100.0, strike=100.0, ko_barrier=103.0, ki_barrier=85.0,
+                                 ko_rate=0.15, rebate_rate=0.15, months=12, maturity=1.0, contract_multiplier=1.0,
+                                 ki_monitoring="discrete"))
+    env = make_environment(dict(spot=100.0, vol=0.22, rate=0.025, div_yield=0.03))
+    SnowballPDESolver(PDEParams(event_projection="nodal")).price(product, env)
+    assert calls == []
+    SnowballPDESolver(PDEParams()).price(product, env)
+    assert calls
