@@ -113,7 +113,7 @@ def test_a_life_surface_over_the_cap_raises():
 
     product = _product()
     full = PDEEngine(params=PDEParams()).solve_life_surface(product, _env(), extra_times=_daily())
-    assert full.actual_steps == full.requested_steps == full.t.size - 1
+    assert full.actual_steps == full.t.size - 1 >= full.requested_steps   # half-step nodes on top (3A flip f)
 
     with pytest.raises(ValidationError, match="max_steps"):
         PDEEngine(params=PDEParams(grid=GridConfig(max_steps=100))).solve_life_surface(

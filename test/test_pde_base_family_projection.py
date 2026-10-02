@@ -8,6 +8,7 @@ import pytest
 from golden_compare import assert_close
 from quantark.asset.equity.engine.pde import BarrierPDESolver
 from quantark.asset.equity.engine.pde.base_pde_solver import BasePDESolver
+from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare, run
 from quantark.asset.equity.engine.pde.grid import DiscreteEvent, EventOp, EventRecord, Nodes, apply_discrete_event
 from quantark.asset.equity.engine.pde.grid.events import _dual_cell_edges
@@ -98,6 +99,10 @@ def test_a_corridor_sharing_a_cell_is_exact():
                                _exact_cell_average(nd, col, ev), rtol=0, atol=1e-7)
 
 
+#: The 0.7.0 core stepper: flip (f) made half-step (1, 1) the default where monitoring is discrete.
+V070_STEPPER = CrankNicolson(damping="full_step", terminal_damping_steps=1, event_damping_steps=2)
+
+
 @pytest.mark.parametrize("name", sorted(cases()))
 def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
     cls, factory, ops = cases()[name]
@@ -117,13 +122,13 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
 
     monkeypatch.setattr(BasePDESolver, "_apply_discrete_event", spy)
     monkeypatch.setattr(BasePDESolver, "_apply_discrete_event_at", spy_at)
-    solver = cls(PDEParams(event_projection="nodal"))
+    solver = cls(PDEParams(event_projection="nodal", stepper=V070_STEPPER))
     g = solver.calculate_greeks(factory(), env)
     banked = V070[name]
     assert_close({"price": g["price"], "delta": g["delta"], "gamma": g["gamma"]},
                  {k: banked[k] for k in ("price", "delta", "gamma")})
     if "column" in banked:
-        out = run(prepare(cls(PDEParams(event_projection="nodal")), factory(), env,
+        out = run(prepare(cls(PDEParams(event_projection="nodal", stepper=V070_STEPPER)), factory(), env,
                           OutputRequest(Operation.SESSION_OUTPUTS, grid=True)))
         assert_close(list(map(float, out.solution.solution_vec)), [float.fromhex(h) for h in banked["column"]])
     if ops is not None:
@@ -178,7 +183,7 @@ SPEC_46 = {
         "1d": dict(pv=1.1e-3, delta=8.5e-4, gamma=1.8e-3, bump_delta=4.9e-4, bump_gamma=8.5e-4),
     },
 }
-STAGE = "projection"
+STAGE = "projection_half_step"
 KO_AND_TOUCH = sorted(n for n in PRODUCTS if n != "di_put")
 CELLS = [(r["product"], r["horizon"], r["spot"]) for r in REF["refs"] if r["product"] in KO_AND_TOUCH]
 

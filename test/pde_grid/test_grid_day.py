@@ -50,9 +50,11 @@ def test_step_counts_follow_the_environment():
     from quantark.util.enum import OptionType
     euro = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
     env = make_term_env("flat")
-    n252 = EuropeanPDESolver(PDEParams()).explain(euro, env).time.actual_steps
-    n244 = EuropeanPDESolver(PDEParams()).explain(euro, replace(env, bus_days_in_year=244)).time.actual_steps
-    assert (n252, n244) == (1008, 976)                     # spec §4.7: a 244 environment, 976 steps
+    t252 = EuropeanPDESolver(PDEParams()).explain(euro, env).time
+    t244 = EuropeanPDESolver(PDEParams()).explain(euro, replace(env, bus_days_in_year=244)).time
+    assert (t252.requested_steps, t244.requested_steps) == (1008, 976)   # spec §4.7: a 244 environment, 976 steps
+    # flip (f): half-step (1, 1) splits the terminal interval, one delivered step more
+    assert (t252.actual_steps, t244.actual_steps) == (1009, 977)
 
 
 def test_griddconfig_day_count_is_removed():

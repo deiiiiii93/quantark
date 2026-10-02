@@ -36,8 +36,9 @@ _SHARED_DEFAULTS = dict(
 #: full-step; every other core product takes "core". DCN, the local-vol kernels and the 2D solvers
 #: have their own rows, so a core flip cannot reach them. The local-vol vanilla kernel reads only
 #: ``terminal > 0`` (one two-half-step startup); the barrier kernel reads none of them.
+#: flip (f): half-step, one interval at the terminal node and at each event (spec 3A §4.2).
 DAMPING_DEFAULTS = {
-    "core": ("full_step", 1, 2),
+    "core": ("half_step", 1, 1),
     "core-continuous-ki": ("full_step", 1, 2),
     "DCN": ("half_step", 2, 2),
     "local-vol": ("half_step", 1, 2),

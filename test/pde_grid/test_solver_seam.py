@@ -124,7 +124,7 @@ def test_external_layout_check_accepts_and_rejects():
 
 def test_damping_counts_drive_layout_damping():
     """The damping schedule is the stepper's two counts (spec 2 §4.2): the
-    route defaults (1, 2), 0 disables, explicit counts flow through."""
+    route defaults ((1, 1) on the core since flip f), 0 disables, explicit counts flow through."""
     from quantark.asset.equity.engine.pde.core.components import CrankNicolson, resolve_stepper
     from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 
@@ -132,8 +132,8 @@ def test_damping_counts_drive_layout_damping():
         return resolve_stepper(_MigratedProbe(params=PDEParams(stepper=CrankNicolson(**kw))).params,
                                DAMPING_DEFAULTS["core"])
 
-    # defaults mirror the 0.6.0 profile exactly (no repricing at defaults)
-    assert (st().terminal_damping_steps, st().event_damping_steps) == (1, 2)
+    # the core row's counts (spec 3A §4.2, flip f; 0.7.0 had (1, 2))
+    assert (st().terminal_damping_steps, st().event_damping_steps) == (1, 1)
     off = st(terminal_damping_steps=0, event_damping_steps=0)
     assert (off.terminal_damping_steps, off.event_damping_steps) == (0, 0)
     multi = st(terminal_damping_steps=3, event_damping_steps=1)

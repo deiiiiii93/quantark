@@ -63,7 +63,8 @@ def test_a_key_from_config_rejects_fails_the_study_at_load():
 
 def test_a_half_step_stepper_records_its_form():
     rec = resolved_grid_evidence(PDEParams(stepper=CrankNicolson(damping="half_step")), day_count=252)
-    assert rec["damping"] == "half_step" and "discrete_monitoring_damping" not in rec
+    # continuous KI keeps its (1, 2) counts in the half-step form; the core row resolves (1, 1) (flip f)
+    assert rec["damping"] == "half_step" and rec["discrete_monitoring_damping"] == ["half_step", 1, 1]
 
 
 def test_the_default_records_the_continuous_ki_counts():
@@ -81,3 +82,20 @@ def test_the_banked_record_keeps_its_key_order():
     rec = resolved_grid_evidence(PDEParams(), day_count=252)
     keys = list(rec)
     assert keys.index("day_count") == keys.index("max_steps") + 1
+
+
+def test_the_default_record_carries_the_discrete_monitoring_row():
+    rec = resolved_grid_evidence(PDEParams(), day_count=252)
+    assert rec["discrete_monitoring_damping"] == ["half_step", 1, 1]
+    assert (rec["terminal_damping_steps"], rec["event_damping_steps"]) == (1, 2) and "damping" not in rec
+
+
+def test_the_070_configuration_serializes_to_the_banked_record():
+    # the 2026-09-28 certificates are the 0.7.0 records (Task 17 banks newer ones beside them)
+    from quantark.asset.equity.engine.pde.grid.config import GridConfig
+    params = PDEParams(grid=GridConfig(max_steps=5000), stepper=CrankNicolson(
+        damping="full_step", terminal_damping_steps=1, event_damping_steps=2))
+    for study in ("snowball-flat-bsm", "phoenix-flat-bsm", "ko-reset-flat-bsm"):
+        cert = REPO_ROOT / "docs" / "modelvalidation" / "certificates" / study / "2026-09-28" / "certificate.json"
+        banked = _banked_pde_grid(cert)
+        assert json.loads(json.dumps(resolved_grid_evidence(params, day_count=252))) == banked

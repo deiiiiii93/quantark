@@ -518,10 +518,15 @@ class TestEventProjectionParam:
         assert PDEParams().event_projection is None
         assert SnowballPDESolver(PDEParams())._use_cell_average_events()
 
-    def test_default_event_damping_steps_is_two(self):
+    def test_default_event_damping_is_two_implicit_solves(self):
         """Two implicit solves per event is the field-tested minimum
-        (Pooley/d'Halluin); one full BE step has no literature support."""
-        assert resolve_stepper(PDEParams(), DAMPING_DEFAULTS["core"]).event_damping_steps == 2
+        (Pooley/d'Halluin); one full BE step has no literature support. Continuous
+        KI takes two full steps; the core since flip (f) one interval split into
+        two half-steps (spec 3A §4.2)."""
+        cont = resolve_stepper(PDEParams(), DAMPING_DEFAULTS["core-continuous-ki"])
+        assert (cont.damping, cont.event_damping_steps) == ("full_step", 2)
+        core = resolve_stepper(PDEParams(), DAMPING_DEFAULTS["core"])
+        assert (core.damping, core.event_damping_steps) == ("half_step", 1)
 
     def test_string_coercion(self):
         p = PDEParams(event_projection="nodal")

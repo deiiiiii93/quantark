@@ -12,7 +12,8 @@ def test_resolve_standard_fully_populated():
     c = resolve_config("standard", None)
     assert c.points == 400 and c.steps_per_day == 4.0
     assert not hasattr(c, "terminal_damping_steps") and not hasattr(c, "event_damping_steps")
-    assert DAMPING_DEFAULTS["core"] == ("full_step", 1, 2)   # the stepper's defaults on the core routes
+    assert DAMPING_DEFAULTS["core"] == ("half_step", 1, 1)   # flip (f): discrete monitoring (spec 3A §4.2)
+    assert DAMPING_DEFAULTS["core-continuous-ki"] == ("full_step", 1, 2)
     assert c.eps_crit == 0.003 and c.num_std == 4.0
     assert c.max_points == 2000 and c.max_steps == 12000
     assert c.bounds == (None, None)

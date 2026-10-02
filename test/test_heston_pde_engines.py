@@ -71,7 +71,7 @@ def test_2d_event_damping_keys_follow_resolved_stepper_counts():
     from quantark.asset.equity.param import PDEParams
 
     def st(**kw):
-        return resolve_stepper(PDEParams(stepper=CrankNicolson(**kw)), DAMPING_DEFAULTS["core"])
+        return resolve_stepper(PDEParams(stepper=CrankNicolson(**kw)), DAMPING_DEFAULTS["2D"])  # the 2D row
 
     maps = {"ko": {10: None, 20: None}, "ki": {0: None}}
     assert event_damped_step_keys(st(), maps, 100) == {11, 12, 21, 22}  # default 2
