@@ -28,9 +28,9 @@ def test_unknown_name_raises_validation_error():
 
 def test_resolved_grid_is_the_requested_preset_expansion():
     g = PDEParams(accuracy="high", grid=GridConfig(points=900)).resolved_grid()
-    assert (g.points, g.steps_per_day, g.max_steps) == (900, 8.0, 5000)
+    assert (g.points, g.steps_per_day, g.max_steps) == (900, 8.0, 12000)
     doc = PDEParams.resolved_grid.__doc__
-    assert "max_steps" in doc and "5,040" in doc and "TimeLayout" in doc
+    assert "max_steps" in doc and "raises" in doc and "TimeLayout" in doc
 
 
 def test_params_clone_round_trips():
@@ -121,7 +121,7 @@ def test_pdeparams_field_list_is_final():
 def test_gridconfig_field_list_is_final():
     assert [f.name for f in dataclasses.fields(GridConfig)] == [
         "points", "steps_per_day", "time_steps", "eps_crit", "num_std", "bounds",
-        "max_points", "max_steps", "day_count"]
+        "max_points", "max_steps"]   # day_count left in 0.8.0 (spec 3A §5.5)
 
 
 def _removed_maps():
@@ -264,11 +264,11 @@ def test_components_cannot_be_named_from_a_config_file(key):
         PDEParams.from_config({key: {}})
 
 
-def test_gridconfig_key_has_nine_entries():
+def test_gridconfig_key_has_eight_entries():
     assert [f.name for f in dataclasses.fields(GridConfig)] == [
         "points", "steps_per_day", "time_steps", "eps_crit", "num_std", "bounds",
-        "max_points", "max_steps", "day_count"]
-    assert len(GridConfig().key) == 9
+        "max_points", "max_steps"]   # day_count left in 0.8.0 (spec 3A §5.5)
+    assert len(GridConfig().key) == 8
 
 
 def test_crank_nicolson_validates_its_four_settings():

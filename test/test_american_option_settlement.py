@@ -56,6 +56,7 @@ def _env(
         div_yield=ContinuousDividendYield(div_yield=0.01),
         valuation_date=VALUATION_DATE,
         calendar=calendar,
+        bus_days_in_year=365,  # the PDE grid day (0.7.0: GridConfig(day_count=365); spec 3A §5.5)
     )
 
 
@@ -111,7 +112,6 @@ def _pde() -> AmericanPDESolver:
             grid=GridConfig(
                 points=121,
                 steps_per_day=1.0,
-                day_count=365,
             )
         )
     )

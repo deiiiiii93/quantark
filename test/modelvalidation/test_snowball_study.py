@@ -144,7 +144,7 @@ def test_pde_records_the_grid_its_profile_resolves_to(study):
     grid = params["grid"]
     assert grid["points"] == 400
     assert grid["steps_per_day"] == 4.0
-    assert grid["max_steps"] == 5000
+    assert grid["max_steps"] == 12000
     assert grid["day_count"] == 252
 
 
