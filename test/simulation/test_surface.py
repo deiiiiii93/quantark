@@ -141,3 +141,17 @@ def test_a_compact_pricer_prices_exactly_like_the_full_one_with_less_memory():
         for a, b in zip(full.price_day(states), compact.price_day(states)):
             assert np.array_equal(a, b)
     assert compact.stats()["surface_cache"]["bytes_used"] < full.stats()["surface_cache"]["bytes_used"] / 2
+
+
+def test_a_life_surface_over_max_steps_raises_naming_the_cap():
+    # 3A §5.6: the engine refuses an over-cap grid, the pricer wraps it with the market point
+    from quantark.asset.equity.engine.pde.grid import GridConfig
+    from quantark.asset.equity.param import PDEParams
+
+    pricer = LifeSurfacePricer(
+        short_snowball(), engine_config=pde_engine_config(pde_params=PDEParams(grid=GridConfig(max_steps=10))),
+        start_date=DATES[0], dates=DATES, underlying="CSI1000", vol_step=0.01, q_step=0.0025,
+        surface_cache_bytes=200_000_000, gate=GATE, compact=True,
+    )
+    with pytest.raises(ValidationError, match="max_steps"):
+        pricer.price_day(_states(0, [SPOT]))

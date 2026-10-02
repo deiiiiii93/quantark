@@ -617,13 +617,9 @@ class PDEParams(EngineParams):
     def resolved_grid(self):
         """The REQUESTED grid: ``accuracy``'s shared preset under the ``grid`` overlay.
 
-        This is the configuration before the ``max_steps`` cap, which binds
-        only once a maturity is known (``build_time``): a five-year monthly
-        ``standard`` snowball asks 5,040 steps and gets 4,980; a three-year
-        ``high`` one asks 6,048 and gets 4,968 (the cap bounds the count;
-        event alignment lands it below). The delivered count is on
-        the solve's ``TimeLayout`` (``requested_steps``, ``actual_steps``,
-        ``fill_scaled``). Routes with their own preset table (local-vol
+        ``max_steps`` is checked once a maturity is known (``build_time``): a grid
+        over it raises, it is never scaled (spec 3A §5.6). The delivered count is
+        on the solve's ``TimeLayout`` (``requested_steps``, ``actual_steps``). Routes with their own preset table (local-vol
         vanilla/barrier, DCN) resolve over that table instead.
         """
         from quantark.asset.equity.engine.pde.grid.config import resolve_config

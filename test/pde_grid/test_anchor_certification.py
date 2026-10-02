@@ -240,7 +240,7 @@ def test_spatial_convergence_order_european():
     for pts in (200, 400, 800):
         pde = float(
             EuropeanPDESolver(
-                params=PDEParams(grid=GridConfig(points=pts, steps_per_day=64.0))
+                params=PDEParams(grid=GridConfig(points=pts, steps_per_day=64.0, max_steps=20000))  # 16128 steps
             ).price(opt, e)
         )
         errs.append(abs(pde - bs))

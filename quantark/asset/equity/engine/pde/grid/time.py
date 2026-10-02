@@ -5,13 +5,13 @@ and every ``extra_times`` entry a node only (indexed, never damped, no event
 keyed on it); fill between nodes is
 sized by the time basis in force — the ``steps_per_day`` density or the
 ``time_steps`` budget (no per-interval floor beyond 1 — the ≥10
-floor caused the historical ~10x grid inflation); ``max_steps`` caps fill via
-extras-scaling and can never move or drop a node. The damping schedule is the
-stepper's (``CrankNicolson.schedule``).
+floor caused the historical ~10x grid inflation); ``max_steps`` caps the
+delivered count; a grid over it raises (spec 3A §5.6: a grid is never scaled).
+The damping schedule is the stepper's (``CrankNicolson.schedule``).
 
 Refinement (spec 3A §5.3): ``request.refinement`` names the intervals below the
 terminal node and below every event node that are split in two at their
-midpoint, after the cap; the midpoint is an ordinary node and each half is half
+midpoint; the midpoint is an ordinary node and each half is half
 the interval's constructed ``dt``. ``requested_steps`` is the basis fill (the
 budget, or the density's fill); ``actual_steps`` is the delivered count, half
 steps included. ``time_fill`` counts the delivered steps without building.
@@ -19,7 +19,6 @@ steps included. ``time_fill`` counts the delivered steps without building.
 
 from __future__ import annotations
 
-import logging
 import dataclasses
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -31,8 +30,6 @@ from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.engine.pde.grid.request import GridRequest, TimeRefinement
 from quantark.util.exceptions import ValidationError
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True, eq=False)
 class TimeLayout:
@@ -43,13 +40,6 @@ class TimeLayout:
     step_of: Mapping[float, int]
     requested_steps: int
     actual_steps: int
-    cap_exceeded: bool
-    #: True whenever fewer steps were delivered than ``steps_per_day`` asked
-    #: for: the extras were scaled into ``max_steps`` (``cap_exceeded`` stays
-    #: False) or the mandatory nodes alone overflowed it (``cap_exceeded``
-    #: True).  A refinement ladder that does not check this refines space
-    #: while time stays put.
-    fill_scaled: bool = False
 
     def step_at(self, obs_time: float) -> int:
         """Node index for an event-bearing time.
@@ -90,7 +80,7 @@ def _rebuild_time_layout(state: dict) -> TimeLayout:
 
 def _base_fill(request: GridRequest, config: GridConfig):
     """(sorted nodes, interval boundaries, fill per interval, requested steps): the basis in force,
-    before any cap or refinement."""
+    before refinement."""
     tau, events = request.tau, request.event_times
     nodes = tuple(sorted(set(events) | set(request.extra_times)))
     boundaries = np.array([0.0, *nodes, tau], dtype=float)
@@ -148,11 +138,10 @@ def _refine(t: np.ndarray, dt: np.ndarray, step_of: dict, split) -> tuple:
 
 
 def time_fill(request: GridRequest, config: GridConfig) -> int:
-    """The step count ``build_time`` delivers for ``request`` with no cap applied, half-step nodes
-    included (spec 3A §5.6), computed without building arrays. A search over fills asks this
-    before it builds: a trial over its budget is a stop condition, not an exception.
-
-    It ignores ``max_steps``: ``build_time`` still scales an over-cap fill (until flip b).
+    """The step count ``build_time`` delivers for ``request``, half-step nodes included (spec 3A
+    §5.6), computed without building arrays: what ``build_time`` checks against ``max_steps``. A
+    search over fills asks this before it builds: a trial over its budget is a stop condition, not
+    an exception.
     """
     nodes, _, fill, _ = _base_fill(request, config)
     cum = np.cumsum(fill)
@@ -169,41 +158,13 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
     ``k+1`` to node ``k``; a step is "after" an event node (backward time)
     when its index is ``node_index - j`` for ``j = 1..count``.
     """
+    n = time_fill(request, config)
+    if n > int(config.max_steps):
+        raise ValidationError(
+            f"time grid needs {n} steps (half-step nodes included) but GridConfig.max_steps is "
+            f"{int(config.max_steps)}; raise GridConfig(max_steps=...) to at least {n}, or lower "
+            "steps_per_day (spec 3A §5.6: a grid is never scaled)")
     nodes, boundaries, fill, requested = _base_fill(request, config)
-    lengths = np.diff(boundaries)
-    # The fill before the cap: "scaled" means the cap cut it, never rounding.
-    unscaled = int(fill.sum())
-
-    n_int, cap = len(lengths), int(config.max_steps)
-    cap_exceeded = False
-    if n_int > cap:
-        # Mandatory nodes are inviolable: keep every node, minimal fill,
-        # exceed the cap and say so (spec §4.3).
-        fill = np.ones_like(fill)
-        cap_exceeded = True
-        logger.warning(
-            "time grid: %d event intervals exceed max_steps=%d; keeping all "
-            "nodes and exceeding the cap",
-            n_int,
-            cap,
-        )
-    elif unscaled > cap:
-        # Scale only the extras into the remaining budget: baselines (1 per
-        # interval) + scaled extras <= baselines + budget = cap.
-        extras = fill - 1
-        budget = cap - n_int
-        total_extras = int(extras.sum())
-        if total_extras > 0:
-            fill = 1 + np.floor(
-                extras.astype(float) * (budget / total_extras)
-            ).astype(int)
-        logger.warning(
-            "time grid: %d requested steps scaled to %d by max_steps=%d; "
-            "raise GridConfig(max_steps=...) for the requested fill",
-            unscaled,
-            int(fill.sum()),
-            cap,
-        )
 
     # Nodes via linspace (exact endpoints); dt as the CONSTRUCTED constant
     # per interval, not np.diff(t): interior linspace spacings wobble by an
@@ -240,6 +201,4 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
         step_of=MappingProxyType(dict(step_of)),
         requested_steps=requested,
         actual_steps=len(dt),
-        cap_exceeded=cap_exceeded,
-        fill_scaled=base_steps < unscaled,
     )

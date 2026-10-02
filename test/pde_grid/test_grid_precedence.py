@@ -36,17 +36,17 @@ def cfg(**kw):
 
 # ---- time axis, highest authority first ---------------------------------------
 
-def test_t1_mandatory_nodes_survive_a_cap_the_intervals_alone_exceed():  # existing
+def test_t1_intervals_alone_over_the_cap_raise():  # 3A §5.6: nodes are never dropped, the grid raises
     events = tuple(k / 20 for k in range(1, 20))  # 20 intervals
-    tl = build_time(req(events=events), cfg(max_steps=10))
-    assert tl.cap_exceeded and tl.actual_steps == 20
-    assert all(tl.t[tl.step_of[e]] == e for e in events)
+    with pytest.raises(ValidationError, match="max_steps"):
+        build_time(req(events=events), cfg(max_steps=10))
 
 
-def test_t2_density_over_cap_scales_extras_only():  # existing: 5y standard asks 5040
+def test_t2_density_over_cap_raises():  # 3A §5.6: 5y standard asks 5040, a 5000 cap refuses it
+    with pytest.raises(ValidationError, match="5040"):
+        build_time(req(tau=5.0, events=(1.0, 2.0, 3.0, 4.0)), cfg(max_steps=5000))
     tl = build_time(req(tau=5.0, events=(1.0, 2.0, 3.0, 4.0)), cfg())
-    assert tl.requested_steps == 5040
-    assert tl.actual_steps <= 5000 and tl.fill_scaled and not tl.cap_exceeded
+    assert tl.requested_steps == tl.actual_steps == 5040
 
 
 def test_t3_budget_below_interval_count_floors_to_one_per_interval():
@@ -81,7 +81,7 @@ def test_t4_extra_times_are_not_damped():  # existing
 @pytest.mark.parametrize("overlay,match", [
     (dict(steps_per_day=4.0, time_steps=100), "both"),  # new
     (dict(day_count=244, time_steps=100), "day_count"),  # new
-    (dict(time_steps=6000), "max_steps"),  # new
+    (dict(time_steps=13000), "max_steps"),  # new (the 0.8.0 cap is 12000)
 ])
 def test_t_resolution_conflicts_raise(overlay, match):
     with pytest.raises(ValidationError, match=match):

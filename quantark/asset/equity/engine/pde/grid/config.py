@@ -27,7 +27,7 @@ _SHARED_DEFAULTS = dict(
     num_std=4.0,
     bounds=(None, None),
     max_points=2000,
-    max_steps=5000,
+    max_steps=12000,
 )
 
 #: The built-in stepper's route defaults, ``(form, terminal count, event count)`` (spec 3A §5.3):

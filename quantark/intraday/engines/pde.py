@@ -46,8 +46,7 @@ def _layout_numbers(plan, spot: float):
     dx = float(x[i] - x[i - 1])
     time = plan["time"]
     return {"points": int(len(x)), "dx_at_spot": dx, "domain_log_width": float(x[-1] - x[0]),
-            "requested_steps": int(time["requested_steps"]), "actual_steps": int(time["actual_steps"]),
-            "fill_scaled": bool(time["fill_scaled"])}
+            "requested_steps": int(time["requested_steps"]), "actual_steps": int(time["actual_steps"])}
 
 
 def _barrier_placement(ctx, plan) -> str:

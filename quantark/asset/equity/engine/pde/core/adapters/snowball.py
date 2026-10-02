@@ -406,7 +406,6 @@ class SnowballAdapter(FamilyAdapter):
                 knocked_in_at_valuation=bool(solver._knocked_in_at_valuation),
                 requested_steps=int(layout.time.requested_steps),
                 actual_steps=int(layout.time.actual_steps),
-                fill_scaled=bool(layout.time.fill_scaled),
             )
 
         price = self._price(prepared, columns)

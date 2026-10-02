@@ -199,7 +199,6 @@ def _time(prepared) -> tuple:
                  "day_count": int(request.day_count)}
     section = dict(basis,
                    requested_steps=int(time.requested_steps), actual_steps=int(time.actual_steps),
-                   fill_scaled=bool(time.fill_scaled), cap_exceeded=bool(time.cap_exceeded),
                    mandatory_nodes=len(request.event_times) + len(request.extra_times))
     detail = {"t": np.asarray(time.t), "dt": np.asarray(time.dt), "event_times": tuple(request.event_times),
               "extra_times": tuple(request.extra_times), "request": request}

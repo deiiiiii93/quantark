@@ -71,7 +71,7 @@ def test_one_day_out_refines_the_time_fill_so_no_step_jumps_the_layer(sse_calend
     out = route_for(ctx, engine).price(ctx, engine)
     assert out.numerical["resolution"] == "resolved" and out.numerical["points"] == 400
     assert out.numerical["steps_per_day"] > 4.0 and out.numerical["steps_per_layer"] >= REQUIRED_STEPS_PER_LAYER
-    assert out.numerical["fill_scaled"] is False and "steps per day" in out.records[0]
+    assert "fill_scaled" not in out.numerical and "steps per day" in out.records[0]
     quad = route_for(ctx, SnowballQuadEngineV2()).price(ctx, SnowballQuadEngineV2()).contingent_pv
     assert out.contingent_pv == pytest.approx(quad, rel=CROSS_CHECK_REL), "cross-check with QUAD V2, not a qualification"
 
@@ -81,7 +81,7 @@ def test_fifteen_minutes_out_refines_the_grid_to_resolve_the_layer(sse_calendar,
     engine = _pde()
     out = route_for(ctx, engine).price(ctx, engine)
     assert out.numerical["points"] > 400 and out.numerical["resolution"] == "resolved" and out.records
-    assert out.engine_used is not engine and out.numerical["fill_scaled"] is False
+    assert out.engine_used is not engine
     with PricingSession() as session:                     # the kernel re-dispatches the refined clone
         res = value_intraday(engine, ctx.request, session=session)
     assert any(r.startswith("manifest:") for r in res.records) and res.contingent_pv == out.contingent_pv

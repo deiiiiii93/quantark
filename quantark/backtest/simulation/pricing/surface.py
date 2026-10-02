@@ -275,16 +275,6 @@ class LifeSurfacePricer:
             raise ValidationError(
                 f"life-surface solve failed at vol={vol!r}, q={q!r}, rate={rate!r}: {exc}"
             ) from exc
-        if sol.fill_scaled:
-            # The gate reads this surface against fresh solves that mostly
-            # sit under the cap, so a surface whose fill was cut would
-            # measure the cap and call it propagation.  Refuse, naming the
-            # knob and the count it needs.
-            raise ValidationError(
-                f"life-surface time grid was scaled from {sol.requested_steps} to {sol.actual_steps} "
-                f"steps by the engine's max_steps; set GridConfig(max_steps=...) to at least "
-                f"{sol.requested_steps} or lower steps_per_day"
-            )
         self._solves += 1
         # Every column is a branch column now (LifeSurfaceSolution), column 0
         # included, so the valuation-date readout needs no separate vector:

@@ -105,17 +105,16 @@ def test_a_product_without_the_seam_is_refused():
         PDEEngine(params=PDEParams()).solve_life_surface(vanilla, _env(), extra_times=(0.1,))
 
 
-def test_the_solution_reports_whether_its_time_fill_was_scaled():
+def test_a_life_surface_over_the_cap_raises():
     """A life surface asks for hundreds of intervals, so max_steps bites it
-    first; the solution carries the requested and delivered step counts."""
+    first: a surface over the cap raises (3A §5.6), it is never scaled; under
+    it, the solution carries the requested and delivered step counts."""
     from quantark.asset.equity.engine.pde.grid import GridConfig
 
     product = _product()
     full = PDEEngine(params=PDEParams()).solve_life_surface(product, _env(), extra_times=_daily())
-    assert not full.fill_scaled
     assert full.actual_steps == full.requested_steps == full.t.size - 1
 
-    capped = PDEEngine(params=PDEParams(grid=GridConfig(max_steps=100))).solve_life_surface(
-        product, _env(), extra_times=_daily())
-    assert capped.fill_scaled
-    assert capped.actual_steps <= 100 < capped.requested_steps == full.requested_steps
+    with pytest.raises(ValidationError, match="max_steps"):
+        PDEEngine(params=PDEParams(grid=GridConfig(max_steps=100))).solve_life_surface(
+            product, _env(), extra_times=_daily())

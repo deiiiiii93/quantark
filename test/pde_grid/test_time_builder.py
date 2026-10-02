@@ -7,6 +7,7 @@ import pytest
 
 from quantark.asset.equity.engine.pde.grid import GridConfig, GridRequest, resolve_config
 from quantark.asset.equity.engine.pde.grid.time import build_time
+from quantark.util.exceptions import ValidationError
 
 
 def CFG(**kw):
@@ -46,7 +47,6 @@ def test_fill_formula_uncapped():
     tl = build_time(req(), CFG())
     assert tl.actual_steps == 4 * 252
     assert tl.requested_steps == 4 * 252
-    assert not tl.cap_exceeded
 
 
 def test_no_events_degenerates_to_uniform():
@@ -77,22 +77,17 @@ def test_sub_day_maturity_floor():
     assert tl.actual_steps == 4  # interval_days floored at 1.0 → 4 steps
 
 
-def test_cap_extras_scaling_enforces_cap():
-    # spec §5 adversarial case: many tiny intervals + one huge, tight cap
+def test_a_fill_over_the_cap_raises_never_scales():
+    # spec 3A §5.6 (decision 7): many tiny intervals + one huge, tight cap
     events = tuple(np.linspace(1e-4, 99e-4, 99))
-    tl = build_time(req(tau=1.0, events=events), CFG(max_steps=100))
-    assert tl.actual_steps <= 100
-    assert not tl.cap_exceeded
-    for e in events:
-        assert tl.t[tl.step_of[e]] == e  # nodes survive scaling
+    with pytest.raises(ValidationError, match="max_steps"):
+        build_time(req(tau=1.0, events=events), CFG(max_steps=100))
 
 
-def test_mandatory_overflow_keeps_nodes_sets_flag():
+def test_mandatory_overflow_raises():
     events = tuple(np.linspace(0.001, 0.999, 400))  # 401 intervals > cap 100
-    tl = build_time(req(events=events), CFG(max_steps=100))
-    for e in events:
-        assert tl.t[tl.step_of[e]] == e  # inviolable
-    assert tl.cap_exceeded and tl.actual_steps == 401
+    with pytest.raises(ValidationError, match="max_steps"):
+        build_time(req(events=events), CFG(max_steps=100))
 
 
 def test_damping_steps_after_each_event_node_and_terminal():
@@ -174,35 +169,21 @@ def test_extra_times_at_the_endpoints_are_rejected():
                     hard_upper=None, event_times=(), extra_times=(1.0,), day_count=252)
 
 
-def test_scaled_fill_is_flagged_and_warned(caplog):
-    """A request over max_steps is delivered with less fill than asked for;
-    the layout must say so, not just shrink quietly."""
-    import logging
-
+def test_the_over_cap_message_names_the_count_and_both_fixes():
     events = tuple(np.linspace(1e-4, 99e-4, 99))
-    with caplog.at_level(logging.WARNING, logger="quantark.asset.equity.engine.pde.grid.time"):
-        tl = build_time(req(tau=1.0, events=events), CFG(max_steps=100))
-    assert tl.fill_scaled
-    assert tl.actual_steps < tl.requested_steps
-    assert not tl.cap_exceeded
-    message = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
-    assert str(tl.requested_steps) in message and str(tl.actual_steps) in message
+    with pytest.raises(ValidationError) as exc:
+        build_time(req(tau=1.0, events=events), CFG(max_steps=100))
+    msg = str(exc.value)
+    assert "GridConfig(max_steps=" in msg and "steps_per_day" in msg and "100" in msg
 
 
-def test_fill_under_the_cap_is_not_flagged(caplog):
+def test_fill_under_the_cap_is_delivered_as_asked(caplog):
     import logging
 
     with caplog.at_level(logging.WARNING, logger="quantark.asset.equity.engine.pde.grid.time"):
         tl = build_time(req(), CFG())
-    assert not tl.fill_scaled
     assert tl.actual_steps == tl.requested_steps
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
-
-
-def test_mandatory_overflow_is_also_a_scaled_fill():
-    events = tuple(np.linspace(0.001, 0.999, 400))
-    tl = build_time(req(events=events), CFG(max_steps=100))
-    assert tl.cap_exceeded and tl.fill_scaled
 
 
 # ---- 0.6.0: the time_steps budget basis (spec §4.2, §5.3, decision 16) ----
@@ -226,15 +207,15 @@ def test_budget_below_interval_count_floors_to_one_each():
     events = tuple(k / 10 for k in range(1, 10))  # 10 intervals
     tl = build_time(req(events=events), CFG(time_steps=4))
     assert tl.actual_steps == 10 and tl.requested_steps == 4
-    assert tl.actual_steps > tl.requested_steps and not tl.fill_scaled
+    assert tl.actual_steps > tl.requested_steps
 
 
 def test_budget_capped_by_max_steps():
     events = tuple(k / 10 for k in range(1, 10))
-    # a built config (not re-resolved): the cap scales the extras only
+    # a built config (not re-resolved): a budget over the cap raises, never scales
     cfg = dataclasses.replace(CFG(time_steps=100), max_steps=50)
-    tl = build_time(req(events=events), cfg)
-    assert tl.actual_steps <= 50 and tl.fill_scaled
+    with pytest.raises(ValidationError, match="max_steps"):
+        build_time(req(events=events), cfg)
 
 
 def test_budget_equal_to_density_fill_is_bit_identical():

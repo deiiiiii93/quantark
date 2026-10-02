@@ -69,8 +69,8 @@ SB = dict(initial_price=100.0, strike=100.0, ko_barrier=103.0, ki_barrier=85.0, 
 def test_explain_reports_the_cap_on_a_five_year_standard_snowball():
     p = make_snowball(dict(SB, months=60, maturity=5.0))
     plan = SnowballPDESolver(PDEParams()).explain(p, env_flat())
-    # measured on the pre-branch base too: 5040 requested, scaled under max_steps=5000 to 4980
-    assert (plan.time.requested_steps, plan.time.actual_steps, plan.time.fill_scaled) == (5040, 4980, True)
+    # 0.7.0 scaled this 5040-step request under max_steps=5000 to 4980; 0.8.0 delivers it (3A §5.6)
+    assert (plan.time.requested_steps, plan.time.actual_steps) == (5040, 5040)
     assert plan.time.actual_steps <= plan.settings["grid.max_steps"]["effective"]
 
 
@@ -94,7 +94,8 @@ def test_explain_settings_report_the_components_and_the_resolved_stepper():
 def test_explain_reports_the_cap_on_a_three_year_high_snowball():
     p = make_snowball(dict(SB, months=36, maturity=3.0))
     plan = SnowballPDESolver(PDEParams(accuracy="high")).explain(p, env_flat())
-    assert (plan.time.requested_steps, plan.time.actual_steps) == (6048, 4968)   # measured, base too
+    # 0.7.0 scaled this request under max_steps=5000 to 4968; 0.8.0 delivers it (3A §5.6)
+    assert (plan.time.requested_steps, plan.time.actual_steps) == (6048, 6048)
 
 
 def test_explain_raises_where_price_would():
