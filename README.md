@@ -97,6 +97,10 @@ From source / latest development version:
 pip install git+https://github.com/deiiiiii93/quantark
 ```
 
+Optional accelerator (Numba): `pip install "quantark[accel]"` compiles the Monte Carlo QE
+kernels and the PDE mesh builder. Results are bit-identical with or without it; a cold PDE
+solve is faster with it.
+
 For development (editable install with test tooling):
 
 ```bash
@@ -226,7 +230,7 @@ pde_loaded = PDEParams.from_config({"accuracy": "high", "grid": {"time_steps": 8
 
 Quad presets accept either preset names or explicit config objects; see the docstrings in `quantark/asset/equity/param/` for the full schema.
 
-### PDE parameters (0.7.0)
+### PDE parameters (0.8.0)
 
 Every 1D PDE route (`PDEEngine` and its solvers, the local-vol vanilla and barrier
 solvers, DCN) is configured by one `PDEParams`, keyword arguments only:
@@ -238,29 +242,122 @@ solvers, DCN) is configured by one `PDEParams`, keyword arguments only:
 | `stepper` | A different time weighting or damping schedule, or you are writing a stepper. | `None` is the built-in `CrankNicolson()` (below). A custom stepper runs on the shared-grid solvers only. |
 | `operator` | You are writing an operator (an exponentially fitted stencil, say). | `None` is the built-in `CentralDifference()`: the central-difference tridiagonal with upwind rows on zero-diffusion steps. |
 | `readout` | You are writing a readout. | `None` is the built-in `StandardReadout()`: linear price interpolation, delta and gamma from the local cubic. |
-| `event_projection` | Validating the event treatment. | `None` is the route's own treatment (cell-average on the shared-grid autocallables); explicit `"cell_average"` or `"nodal"`. |
+| `event_projection` | Validating the event treatment. | `None` is `"cell_average"` on every core route: the autocallables, and the barrier / double-barrier / one-touch / double-one-touch discrete observations. `"nodal"` assigns whole nodes (the 0.7.0 base-family mask). Continuous monitoring and a valuation-date observation stay nodal either way. |
 | `cache_enabled` | Memory pressure, or a fresh solve every call. | The same numbers to round-off: a cached run shares one factorization across intervals whose `dt` differ by an ULP. |
 
 `CrankNicolson` (`quantark.asset.equity.engine.pde.core.components`) carries the
-scheme's four settings:
+scheme's settings:
 
 | Setting | When to change it | What happens |
 |---|---|---|
 | `theta` (0.5) | Ringing that damping does not cure, or a more diffusive scheme. | 0.5 is Crank-Nicolson (second order), 1.0 backward Euler (first order). |
 | `event_theta` (1.0) | Studying damping strength after events. | The weight on the event-damped steps after each interior event. |
-| `terminal_damping_steps` (`None`) | Checking the payoff kink's smoothing. | Fully implicit steps off the payoff; `None` is the route's default (1; DCN 2), 0 disables. |
-| `event_damping_steps` (`None`) | Studying damping strength after events. | Damped steps before each interior event node; `None` is the route's default (2; DCN 2), 0 disables. |
+| `damping` (`None`) | See "Damping" below. | `"half_step"`: each damped interval is split in two; both halves take `event_theta` below an event and 1.0 at the terminal node; `"full_step"`: whole damped steps. `None` is the route's form. |
+| `terminal_damping_steps` (`None`) | Checking the payoff kink's smoothing. | Damped intervals off the payoff; `None` is the route's count, 0 disables. |
+| `event_damping_steps` (`None`) | Studying damping strength after events. | Damped intervals below each interior event node; `None` is the route's count, 0 disables. |
+
+The route defaults (`DAMPING_DEFAULTS`, form, terminal count, event count):
+
+| Route | Default |
+|---|---|
+| Core, product without continuous knock-in | half-step, 1, 1 |
+| Core, product with continuous knock-in | full-step, 1, 2 |
+| DCN | half-step, 2, 2 |
+| Local-vol vanilla and barrier kernels | half-step, 1, 2 |
+| 2D (Heston, SLV) | full-step, 1, 2 |
+
+The class is read from the contract alone (`continuous_knock_in`), never from the spot or
+the knocked-in state, so a spot bump cannot change it. **A count means intervals of the
+form in force:** `CrankNicolson(event_damping_steps=2)` with no form gives two halved
+intervals on every core solve without continuous knock-in, where 0.7.0 gave two whole
+steps; under continuous knock-in it keeps its 0.7.0 meaning. `damping="full_step"` with
+explicit counts restores the old meaning everywhere; on its own it takes the route's counts,
+`(full_step, 1, 1)` on the core, which 0.7.0 never used. The 0.7.0 schedule is `pde_070` below.
+A `CrankNicolson` subclass is a custom stepper, used as given: set all three fields.
 
 ```python
 from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 
 pde_euler = PDEParams(stepper=CrankNicolson(theta=1.0))
+pde_070 = PDEParams(stepper=CrankNicolson(damping="full_step", terminal_damping_steps=1, event_damping_steps=2))
 pde_loaded = PDEParams.from_config({"accuracy": "high", "stepper": {"terminal_damping_steps": 0}})
 ```
 
-`GridConfig` fields: `points`, `steps_per_day` (a density; a "day" is 1/252 of a solver
-year) or `time_steps` (a total budget over the horizon; exactly one time basis is in
-force), `eps_crit`, `num_std`, `bounds`, `max_points`, `max_steps`, `day_count`.
+**Damping: when to change it.** Time error at standard against each case's own limit
+(pv unless stated; spec `docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md` §4.2):
+
+| Case | Full-step (1, 2) | Two intervals halved | Half-step (1, 1), the default | Undamped |
+|---|---|---|---|---|
+| European | −8.8e-7 | −8.8e-7 | −3.0e-7 | +2.8e-7 |
+| Barrier, monthly | +3.6e-5 | +1.8e-5 | +7.4e-6 | −3.1e-6 |
+| Snowball, monthly discrete KI | +9.5e-5 | +4.8e-5 | +2.3e-5 | −2.2e-6 |
+| Snowball, daily KI | +3.0e-3 | +1.5e-3 | +6.3e-4 | +4.3e-5 |
+| Snowball, daily KI, spot 86: delta | +1.1e-3 | +5.3e-4 | +1.5e-4 | −2.1e-4 |
+| Snowball, daily KI, spot 86: gamma | −5.6e-4 | −2.2e-4 | +1.5e-4 | −1.2e-3 |
+
+Undamped Crank-Nicolson has the smallest pv error and the worst gamma next to a barrier.
+Under discrete knock-in the half-step default cuts the pv time error three to eight times
+on the Phoenix and KO-reset too (flat market, daily KI: Phoenix +3.7e-3 → +7.4e-4,
+KO-reset +1.9e-3 → +3.9e-4) and on the local-vol Snowball and Phoenix (calm surface,
+daily KI: +9.6e-3 → +2.0e-3). It costs one extra step per event and one at the terminal
+node: daily KI goes from 1,008 to 1,260 steps. Where it is worse, and stays the default:
+
+- gamma one point above a daily knock-in barrier on the local-vol calm surface at
+  standard (Snowball 3.7e-4 → 1.5e-3, Phoenix 1.8e-4 → 1.6e-3); pv improves seven times
+  and delta eleven to thirteen times in the same cells, and the Snowball's gamma is better
+  from 8 steps per day. Raise `steps_per_day` if that gamma matters;
+- delta and gamma on the local-vol crash surface at spot 102.5%, under a coupon barrier at
+  102.9% and a KO barrier at 103% (1.7e-5 to 4.9e-5 and 4.6e-5); pv improves six times.
+
+The local-vol Phoenix takes the half-step default with the core, but no certification
+study covers it: it is not a certified route.
+
+Products with continuous knock-in keep full-step: there the first-passage correction
+needs `sigma * sqrt(dt)` larger than a cell, and half-step moved seven of nine resolved
+cases away from an exact reference. **On a continuous-knock-in product, refine `points`
+together with `steps_per_day`**: time-only refinement drifts (Snowball `ordinary`
+96.46045, 96.46211, 96.46310, 96.46417 at 8, 16, 32, 64 steps per day). The correction
+carries an error of its own that joint refinement does not remove: about 5e-4 contracts in
+pv on the certified cases, 9e-3 on a three-month Snowball, 1.3e-2 at 8% volatility one
+point above the barrier.
+
+**Projection.** A discrete observation of the barrier family enters each dual cell at the
+record's exact level instead of overwriting whole nodes. Monthly observations, flat
+market, against exact-GBM Monte Carlo (spec §4.6):
+
+| Product | Nodal mask (0.7.0), 400 points | Dual-cell projection, 400 points |
+|---|---|---|
+| Up-and-out call, K 100, B 130 | −0.81%, −21 SE | −0.05%, −1.2 SE |
+| Down-and-in put, K 100, B 85 | +0.22%, +8.8 SE | +0.05%, +2.2 SE (the far-field row; fixed in 0.8.0) |
+| Double knock-out call, K 100, (80, 120) | +1.89%, +34 SE | +0.01%, +0.2 SE |
+| One-touch up 115 | +0.03%, +1.5 SE (+0.9% at 200 points) | −0.02%, −0.9 SE |
+| Double one-touch (85, 115) | −0.45%, −28 SE | −0.02%, −1.1 SE |
+
+Greeks, largest error at 400 points over 93 knock-out and touch cells against an exact
+recursion:
+
+| First observation in | Quantity | Nodal (0.7.0) | Projection | Projection and half-step (0.8.0) |
+|---|---|---|---|---|
+| 1 month | pv | 4.1e-2 | 1.5e-4 | 1.7e-4 |
+| | grid delta / gamma | 1.7e-3 / 2.2e-4 | 1.8e-5 / 1.9e-6 | 9.8e-6 / 1.7e-6 |
+| 5 days | pv | 5.3e-2 | 3.2e-4 | 2.1e-4 |
+| | grid delta / gamma | 1.9e-3 / 8.3e-4 | 1.8e-4 / 7.2e-5 | 4.9e-5 / 2.2e-5 |
+| 1 day | pv | 4.5e-2 | 7.9e-3 | 1.1e-3 |
+| | grid delta / gamma | 9.4e-3 / 9.7e-3 | 3.4e-3 / 9.1e-3 | 8.5e-4 / 1.8e-3 |
+
+`GridConfig` fields: `points`, `steps_per_day` (a density per **business day of the
+pricing environment**: `PricingEnvironment.bus_days_in_year`, carried on
+`GridRequest.day_count`) or `time_steps` (a total budget over the horizon; exactly one
+time basis is in force), `eps_crit`, `num_std`, `bounds`, `max_points`, `max_steps`.
+A 244-day environment gives a one-year Snowball 972 steps where a 252-day one gives
+1,008.
+
+`max_steps` (12,000) caps the delivered step count, half-step nodes included. **A grid over
+it raises** `ValidationError` naming the count it needs and both fixes, raise
+`GridConfig(max_steps=...)` or lower `steps_per_day`; it is never scaled down. A
+five-year `high` Snowball asks 10,080 and fits; on a 252-day environment the default cap
+holds a little under six years at `high` and twelve at `standard` (half-step nodes count),
+and a six-year monthly Snowball at `high` raises where 0.7.0 scaled it.
 
 Routes other than the shared-grid solvers honour a subset and reject the rest loudly
 (`quantark.asset.equity.engine.pde.route_applicability.ROUTE_RULES`): the local-vol
@@ -274,7 +371,7 @@ shared-grid solver returns the resolved plan from the same preparation `price` r
 without marching: route, every setting with its source and applicability, space, time,
 events, scheme, outputs, identities, and per-operation terminal outcomes. An excerpt of
 `str(SnowballPDESolver(PDEParams()).explain(snowball, env))` for a one-year monthly
-snowball in a flat environment:
+snowball with continuous knock-in in a flat environment:
 
 ```
 [route]
@@ -288,12 +385,10 @@ snowball in a flat environment:
   day_count        252
   requested_steps  1008
   actual_steps     1008
-  fill_scaled      False
-  cap_exceeded     False
   mandatory_nodes  11
 [scheme]
   stepper                CrankNicolson
-  resolved               {'theta': 0.5, 'event_theta': 1.0, 'terminal_damping_steps': 1, 'event_damping_steps': 2}
+  resolved               {'theta': 0.5, 'event_theta': 1.0, 'terminal_damping_steps': 1, 'event_damping_steps': 2, 'damping': 'full_step'}
   terminal_damped_steps  1
   event_damped_steps     22
   theta_counts           {0.5: 985, 1.0: 23}
@@ -303,17 +398,16 @@ snowball in a flat environment:
   readout  final column
 ```
 
-Names removed in 0.7.0, each raising `ValidationError` with its replacement:
+Names removed in 0.8.0:
 
-| Removed name | Replacement |
+| Removed | Replacement |
 |---|---|
-| `PDEParams(theta=...)` | `stepper=CrankNicolson(theta=...)`; 0.5 is Crank-Nicolson, 1.0 backward Euler |
-| `PDEParams(event_theta=...)` | `stepper=CrankNicolson(event_theta=...)` |
-| `GridConfig(terminal_damping_steps=...)` | `PDEParams(stepper=CrankNicolson(terminal_damping_steps=N))`; 0 disables |
-| `GridConfig(event_damping_steps=...)` | `PDEParams(stepper=CrankNicolson(event_damping_steps=N))`; 0 disables |
+| `GridConfig(day_count=...)` (raises `ValidationError`) | `PricingEnvironment(bus_days_in_year=...)`: the grid day is the environment's business days |
+| `TimeLayout.fill_scaled`, `.cap_exceeded`; the same keys in `explain` and on `LifeSurfaceSolution` | none: a grid over `max_steps` raises |
+| `groups.VALUE_NO_ZERO_DIFFUSION_OVERRIDE` | `groups.VALUE` (Phoenix now takes θ = 1 on zero-diffusion steps) |
 
-The names removed in 0.6.0 are listed in `CHANGELOG.md` under 0.6.0. How the solvers
-share one core, and how to write a custom component, is in `docs/pde-core.md`.
+The names removed in 0.6.0 and 0.7.0 are listed in `CHANGELOG.md`. How the solvers share
+one core, and how to write a custom component, is in `docs/pde-core.md`.
 
 ## RQMC Target Std Scaling (MC Benchmarking)
 

@@ -5,6 +5,159 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.8.0] - 2026-10-03
+
+PDE 1D numerical policy (spec: `docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md`).
+Seven deliberate numerics changes, each its own commit checked against the 445-row PDE byte
+book with its declared movers: the grid day is the environment's business days, the step
+cap raises instead of scaling, the barrier family projects discrete observations, Snowball
+`NODAL` means nodal, Phoenix takes θ = 1 on zero-diffusion steps, half-step damping where
+monitoring is discrete, and forward far-field rows. No flip touches the damping of a
+product with continuous knock-in: on a 252-day environment, inside 0.7.0's 5,000-step cap
+and with the default projection, it keeps its 0.7.0 numbers bit for bit (one exception,
+below); the grid day (a) and the cap (b) move it like any product. The flat Snowball, Phoenix and
+KO-reset and the local-vol Snowball certificates are amended and re-banked (2026-10-02) with
+their PDE candidates re-admitted; the intraday daily-KI certificate is re-banked (2026-10-03)
+with QUAD V2 admitted and its PDE candidate rejected, as in 0.7.0.
+
+### Added
+- `CrankNicolson(damping="full_step" | "half_step")`: the damping form; `None` is the
+  route's. Half-step splits each damped interval at its midpoint; both halves take
+  `event_theta` below an event and 1.0 at the terminal node.
+- `event_projection` is honoured by `BarrierPDESolver`, `DoubleBarrierPDESolver`,
+  `OneTouchPDESolver` and `DoubleOneTouchPDESolver`.
+- `MarketSnapshot.bus_days_in_year`, `GridRequest.day_count`, `GridRequest.refinement`,
+  `TimeRefinement`, `time_fill`, `EventRecord`, `DiscreteEvent`, `apply_discrete_event`
+  (`quantark.asset.equity.engine.pde.grid`).
+- `DAMPING_DEFAULTS["core-continuous-ki"]`, `["2D"]`, `["local-vol"]` (`pde.grid.config`).
+- `grid.mesh_kernels.backend()`: `"numba"` with the `accel` extra, else `"python"`.
+- `pde_declared.environment_day_count` / `refuse_case_day_count` (model validation): the
+  environment's business days recorded on a PDE candidate's `grid` record.
+
+### Changed (defaults)
+- **Core damping:** half-step, one interval at the terminal node and at each event,
+  `(half_step, 1, 1)`, for every product without continuous knock-in; a product with
+  continuous knock-in keeps full-step `(1, 2)`. The class is read from the contract, never
+  from the spot or the knocked-in state.
+- **Base-family discrete observations:** dual-cell projection (`event_projection=None` is
+  `CELL_AVERAGE` on every core route). `"nodal"` keeps the 0.7.0 masks.
+- **`max_steps`:** 12,000; a grid over it raises `ValidationError` naming the count it
+  needs, `GridConfig(max_steps=...)` and `steps_per_day`. A grid is never scaled.
+- **Snowball `NODAL`:** nodal on interior KO and discrete-KI events too.
+- **Phoenix:** θ = 1 on zero-diffusion steps, as every value group.
+- **Grid day:** `steps_per_day` counts the pricing environment's `bus_days_in_year`.
+- **Far-field rows:** European and Barrier puts' lower row is `K·DF(t,T) − S_min·CF(t,T)`
+  (floored at 0); the Barrier call's upper-row carry factor is the forward one
+  `exp(−(q(T)T − q(t)t))` (it moves only on a term-dependent carry curve).
+- `adapter.stepper(params)` becomes `adapter.stepper(params, product)`.
+- `GridRequest(day_count=...)` and `MarketSnapshot(bus_days_in_year=...)` are required: code
+  that constructs either directly gets a `TypeError` until it passes them.
+- Event statistics (KO/KI probabilities) march the same layout, so they move with the half
+  nodes at (f), as the prices do; their conventions are unchanged.
+- The step cap holds a little under six years at `high` and twelve at `standard` on a 252-day
+  environment; a six-year monthly Snowball at `high` now raises where 0.7.0 scaled it.
+- The certificates' `grid` record: `max_steps` 12000, `day_count` from the environment,
+  and `discrete_monitoring_damping: ["half_step", 1, 1]`. A full-step `(1, 2)`
+  configuration with `max_steps=5000` on a 252-day environment still serializes to the
+  0.7.0 record.
+- Prepared PDE sessions: artefact builder `pde-prep/v3` (the request carries `refinement`
+  and `day_count`); no 0.7.0 artefact is reused.
+
+**Clean break (count meaning).** A caller who sets a count and no form, for example
+`CrankNicolson(event_damping_steps=2)`, gets two halved intervals after flip (f) on every
+solve that resolves against `"core"`, where 0.7.0 gave two whole steps; on a product with
+continuous knock-in the count keeps its 0.7.0 meaning. Nothing can detect the intent, so no
+error is possible. `CrankNicolson(damping="full_step", terminal_damping_steps=1,
+event_damping_steps=2)` restores 0.7.0 everywhere; `damping="full_step"` alone takes the
+route's counts, `(full_step, 1, 1)` on the core. A `CrankNicolson` **subclass** is a custom
+stepper, used as given: one that sets counts and no `damping` priced in 0.7.0 and now raises
+`ValidationError` naming the fields to set.
+
+### Removed
+| Removed | Replacement |
+|---|---|
+| `GridConfig(day_count=...)` (raises `ValidationError`) | `PricingEnvironment(bus_days_in_year=...)` |
+| `TimeLayout.fill_scaled`, `TimeLayout.cap_exceeded`; the same keys in `explain` and the intraday numerical record; `LifeSurfaceSolution.fill_scaled` | none: a grid over `max_steps` raises |
+| `groups.VALUE_NO_ZERO_DIFFUSION_OVERRIDE` | `groups.VALUE` |
+
+`GridConfig` has eight fields. `TimeLayout` and `LifeSurfaceSolution` are results the
+library constructs, so reading a removed field is a plain `AttributeError`.
+
+### Fixed
+- **Put far-field row.** The European and Barrier put's lower row was its `S → 0` limit
+  `K·DF` at a grid edge four standard deviations below spot, ~39 too high there. Error
+  against Black-Scholes at 400 points (pv / delta / gamma), study environment:
+
+  | European put, strike 100 | 0.7.0 | 0.8.0 | the call, for scale |
+  |---|---|---|---|
+  | vol 22%, 1y, spot 100 | +2.5e-3 / −4.3e-4 / +9.1e-5 | +1.1e-4 / +4.1e-5 / +2.1e-6 | +2.1e-4 / +4.2e-5 / +2.2e-6 |
+  | vol 22%, 1y, spot 80 | +1.9e-3 / −5.4e-4 / +1.1e-4 | −1.4e-5 / −6.6e-5 / +1.7e-6 | +2.6e-5 / −6.6e-5 / +1.7e-6 |
+  | vol 22%, 3m, spot 100 | +4.2e-3 / −1.4e-3 / +5.9e-4 | +1.9e-4 / +8.4e-5 / +2.2e-5 | +2.5e-4 / +8.4e-5 / +2.2e-5 |
+  | vol 22%, 3y, spot 100 | +1.1e-3 / −1.0e-4 / +1.5e-5 | −7.6e-5 / +2.3e-5 / +1.9e-7 | +2.0e-5 / +2.7e-5 / +2.2e-7 |
+  | vol 12%, 1y, spot 100 | +3.9e-3 / −1.2e-3 / +4.6e-4 | +2.0e-4 / +6.2e-5 / +1.6e-5 | +2.8e-4 / +6.2e-5 / +1.6e-5 |
+  | vol 40%, 1y, spot 100 | +1.0e-3 / −9.3e-5 / +1.3e-5 | −9.6e-5 / +2.4e-5 / +1.2e-7 | +1.4e-5 / +2.9e-5 / +1.6e-7 |
+
+  The down-and-in put, dominated by that row, now meets its exact reference. The American
+  put's lower row is unchanged (spec §9).
+- **Snowball `event_projection="nodal"`** projected interior events anyway; it now masks
+  them (spec §4.6 cases, NODAL pv 0.7.0 → 0.8.0: ordinary +3.5e-2, spot 102.5 +2.6e-2,
+  monthly discrete KI +2.6e-2).
+- **Phoenix** took θ = 0.5 on zero-diffusion (trading-clock night and weekend) steps where
+  every other family took 1 (trading-clock Phoenix: +1.6e-7).
+- **Continuous knock-in, alive boundary:** the knocked-in boundary rows are written before
+  the alive rows that read them. Bitwise on every certified cell but one:
+  `snowball-localvol-1d/calm_near_expiry` moves by 1.1e-13 (pv) to 3.5e-11 (delta) relative;
+  the sparse-LU fallback Snowball (two interior nodes) moves +1.457.
+
+### Performance
+- **Mesh build.** The concentrated mesh's RK4 integration (the cold-solve cost, spec §4.9)
+  runs on a Python-float kernel, or on a Numba kernel with the `accel` extra
+  (`pip install "quantark[accel]"`), both bit-identical to the 0.7.0 NumPy reference on 549
+  layouts. A value a kernel does not handle (non-finite, zero denominator, more than eight
+  critical points) re-runs that call on the NumPy reference, so every exception and fallback
+  is 0.7.0's. On 49 production layouts: 43.1 s (NumPy), 4.06 s (Python kernel), 0.30 s (Numba).
+  CI requires the Python kernel on its four Python jobs and Numba in the `accel` job
+  (`QUANTARK_REQUIRE_MESH_KERNEL`, a test switch). The
+  Numba runtime adds ~30 MB to a process's peak memory.
+- **Barrier step events** fold in place on the grid column (no per-step copy), and the
+  terminal settlement timing is resolved once per march, not once per step (bitwise).
+
+Timing gate (`test/pde_bitwise/timing.py`, 0.7.0 and 0.8.0 interleaved, two rounds of five
+repetitions, ARM64 macOS with the `accel` extra; seconds, better round):
+
+| Family (timing book, `standard`) | Cold 0.7.0 | Cold 0.8.0 | Speed-up | Warm 0.7.0 | Warm 0.8.0 |
+|---|---|---|---|---|---|
+| European | 0.774 | 0.022 | 35× | 0.0185 | 0.0150 |
+| American | 0.765 | 0.026 | 29× | 0.0207 | 0.0207 |
+| Snowball | 0.916 | 0.050 | 18× | 0.0434 | 0.0432 |
+| Local-vol Snowball | 1.002 | 0.126 | 8.0× | 0.119 | 0.119 |
+| Event statistics | 1.04 | 0.165 | 6.3× | 0.158 | 0.158 |
+| Phoenix (memory) | 1.542 | 0.668 | 2.3× | 0.654 | 0.658 |
+| Barrier (continuous) | 0.030 | 0.021 | 1.4× | 0.0282 | 0.0189 |
+| KO-reset | 0.026 | 0.026 | 1.0× | 0.0254 | 0.0255 |
+
+A cold solve is now dominated by its march: the Phoenix's mesh share fell from 0.89 s to
+0.01 s, and the barrier and KO-reset cases build no concentrated mesh. Event statistics
+from 15-repetition interleaved runs. Peak memory rises ~30 MB with Numba loaded.
+
+### Per-flip deltas (PDE byte book, largest price moves)
+- (a) grid day: 244-day environments only — Phoenix memory −2.7e-4, continuous-KI Snowball
+  −1.6e-4, European −5.2e-8, intraday Snowball +6.4e-8. The intraday route's grid moved
+  because its numerical environment has 244 days (F1).
+- (b) cap: five-year standard Snowball −4.9e-7 (5,040 steps, was 4,980), three-year high
+  −2.1e-6 (6,048, was 4,968).
+- (c) projection: discrete barrier calls up to ±3.8e-2, double knock-out −2.8e-2, the
+  down-and-in composite −8.0e-3, touches ~1e-3.
+- (d) Snowball NODAL: +1.2e-2 to +1.8e-2 on the book's NODAL rows.
+- (e) Phoenix θ: +1.6e-7 on the trading-clock Phoenix only.
+- (f) half-step damping: local-vol Phoenix daily KI −3.6e-3, Snowball daily KI −3.3e-3,
+  KO-reset discrete −1.6e-3, Snowball monthly −1.3e-4, discrete Snowball/Phoenix ≤ 9e-5,
+  barrier/touch ≤ 3.6e-5, European ~1e-6. No continuous-KI row moved.
+- (g) far field: puts (above); flat-curve barrier calls bitwise unchanged.
+
+Goldens: replay frames (scalar_bsm, localvol) moved at (f) by ~1.6e-5 of notional;
+execution goldens at (d) and (f) (`test/execution/goldens/PROVENANCE.md`).
+
 ## [0.7.0] - 2026-10-01
 
 PDE 1D one core (spec: `docs/superpowers/specs/2026-09-30-pde-1d-one-core-design.md`;

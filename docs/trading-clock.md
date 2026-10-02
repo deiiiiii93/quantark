@@ -124,6 +124,18 @@ same `ko_rate` on both axes produces two *different contracts* (0.15·τ_td ≠
 restate the accrual so the cash paid at each date is unchanged — the
 axis-equivalence gate uses a zero-coupon contract for exactly this reason.
 
+## PDE grid day
+
+The PDE's `steps_per_day` density counts the pricing environment's business days
+(0.8.0): an interval of length `L` years on the engine's time axis gets
+`L · PricingEnvironment.bus_days_in_year · steps_per_day` steps, at least one day's worth.
+Set `bus_days_in_year=244` for a CFFEX/CSI/SSE book and the grid follows it (a one-year
+Snowball at `standard`: 972 steps instead of 1,008); nothing on `GridConfig` sets it any
+more (`GridConfig(day_count=...)` raises, naming `bus_days_in_year`). On the calendar axis
+a grid "day" is still `1 / bus_days_in_year` of a year of engine time, not a calendar
+day. The intraday route prices on its context's numerical environment, whose
+`bus_days_in_year` is the variance profile's `days_per_year`.
+
 ## Scope
 
 BSM autocallable stack (Snowball / Phoenix / KO-reset PDE, QUAD, MC +

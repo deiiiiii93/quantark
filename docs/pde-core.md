@@ -1,11 +1,13 @@
-# The 1D PDE core (0.7.0)
+# The 1D PDE core (0.8.0)
 
 Every shared-grid 1D PDE route prices through one path: European, American, the
 barrier family (single, double, one-touch, double one-touch, knock-in by composition),
 Snowball, Phoenix, KO-reset, and the local-vol Snowball and Phoenix. The pieces live in
 `quantark/asset/equity/engine/pde/core/`. This page explains how they fit together,
 how to plug in a custom component, and what the core keeps from 0.6.0 on purpose.
-The design is `docs/superpowers/specs/2026-09-30-pde-1d-one-core-design.md`.
+The design is `docs/superpowers/specs/2026-09-30-pde-1d-one-core-design.md`; 0.8.0's
+numerical policy (damping form, projection, grid day, cap, far-field rows) is
+`docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md`.
 
 DCN, the local-vol vanilla and barrier solvers, and the 2D Heston/SLV solvers are not
 on the core yet (sub-project 3). They take their damping counts and weights from
@@ -56,7 +58,7 @@ independently and composed as `vanilla − knock-out` for the price and for each
 
 | Policy | Boundary | θ | After events |
 |---|---|---|---|
-| value | the adapter's Dirichlet values, set before the solve | the schedule; θ=1 on zero-diffusion steps for the base family, American, Snowball, KO-reset; no override for Phoenix | none |
+| value | the adapter's Dirichlet values, set before the solve | the schedule; θ=1 on zero-diffusion steps (every value group, Phoenix included since 0.8.0) | none |
 | statistics-legacy | the previous row carried into the right-hand side | the schedule, no zero-diffusion override | zero-slope copy (`v[0] = v[1]`, `v[-1] = v[-2]`) |
 
 Event statistics are a column group of the price march: `calculate_event_stats` marches
@@ -84,11 +86,27 @@ per-solve state still lives on the solver. The march itself holds none.
 | `operator` | `CentralDifference()` | `assemble(samples, layout) -> StepCoefficients`; `supports: frozenset[SampleKind]`; `evidence() -> dict` |
 | `readout` | `StandardReadout()` | `price(column, spot, layout)`; `delta_gamma(column, spot, layout)`; `evidence() -> dict` |
 
-`CrankNicolson` carries the scheme's four settings: `theta` (0.5), `event_theta` (1.0),
-`terminal_damping_steps` and `event_damping_steps` (`None` = the route's defaults: 1 and 2
-on the core routes, 2 and 2 on DCN; 0 disables). Its schedule is 0.6.0's rule: `theta`
-everywhere, `event_theta` on the damped steps before each interior event node, 1.0 on the
-terminal steps, terminal wins on overlap.
+`CrankNicolson` carries the scheme's settings: `theta` (0.5), `event_theta` (1.0),
+`damping` (`"full_step"` or `"half_step"`), `terminal_damping_steps` and
+`event_damping_steps` (`None` = the route's row of `grid.config.DAMPING_DEFAULTS`; 0
+disables). The core has two rows chosen by the contract alone
+(`core.adapters.base.continuous_knock_in(product)`): half-step (1, 1) for every product without
+continuous knock-in, full-step (1, 2) for one with it; DCN, the local-vol kernels and the
+2D solvers have their own rows. Its schedule is 0.6.0's rule: `theta` everywhere,
+`event_theta` on the damped intervals before each interior event node, 1.0 on the terminal
+intervals, terminal wins on overlap.
+
+**Time refinement.** Half-step damping is a property of the time grid, not of the
+schedule: `CrankNicolson.time_refinement()` returns a `TimeRefinement(terminal_intervals,
+event_intervals)` that `prepare` puts on the `GridRequest`, and `build_time` splits each
+of those intervals below the terminal node and below every event node at its midpoint,
+after the fill. The midpoint is an ordinary node and each half is half the interval's
+constructed `dt`. `time_fill(request, config)` counts the delivered steps without
+building, and is what `build_time` checks against `max_steps`: a grid over the cap raises
+`ValidationError`, it is never scaled. The stepper's `validate_schedule` refuses a layout
+whose refinement does not match its own (a frozen or shared layout built for the other
+form), and `validate_external_layout` compares `refinement` and `day_count`. The grid day
+is the request's `day_count`, the pricing environment's `bus_days_in_year`.
 
 A worked custom stepper, fully implicit everywhere through the built-in arithmetic (the
 test fixture `test/pde_core/components_fixtures.py`):
@@ -160,16 +178,53 @@ are certifiable**: a study declares its PDE candidate through `PDEParams.from_co
 which cannot name a custom component, and a candidate built any other way is refused at
 load.
 
+## Discrete events of the base family
+
+The barrier, double-barrier, one-touch and double-one-touch solvers state each
+observation as data: `EventRecord(lower, upper, value, op)` (breached where `s >= upper` or
+`s <= lower`; `op` is `SET` or `ADD`) and `DiscreteEvent(records)`, in the order the solver
+applies them (`_step_event`, `_terminal_event`). `grid.apply_discrete_event(nodes, column,
+event, projection)` applies one observation:
+
+- `NODAL`: for each record in order, `column[breached] = value` or `+= value` (the 0.7.0
+  masks; `fold_nodal` runs the same fold in place on a grid column on the per-step path);
+- `CELL_AVERAGE` (the default since 0.8.0): the same fold as a function of log-price,
+  projected **once** per time node: the breakpoints are the records' distinct thresholds,
+  and every dual cell a threshold crosses gets the exact cell average of the whole event.
+  Projecting record by record is not equivalent when two thresholds share a cell.
+
+Continuous monitoring (the barrier is the domain edge) and the valuation-date observation
+(a terminal outcome) stay nodal in every mode. `explain`'s `events` section lists each
+observation's records and treatment (`BaseFamilyEvents`).
+
+## Mesh kernels
+
+`space._legacy_concentrated_mesh` integrates the concentrated mesh's ODE with RK4, about
+460,000 evaluations per layout, which was most of a cold solve. `grid.mesh_kernels` runs the
+same IEEE operations in the same order on Python floats, or compiled by Numba when the
+`accel` extra is installed (`mesh_kernels.backend()` says which); both are bit-identical to
+the NumPy reference on every input the builders produce. **Deferral rule:** a kernel never
+handles an unusual value. A non-finite or zero denominator, a non-finite sum or node, or
+more than eight critical points raises `Deferred`, and the call re-runs on the NumPy
+reference under the caller's `np.errstate`, so every exception and the fallback mesh happen
+exactly as before. CI's four Python jobs require the Python kernel
+(`QUANTARK_REQUIRE_MESH_KERNEL=python`); the `accel` job requires Numba and runs the grid,
+core, anchor, banked-certificate and execution tests.
+
 ## The evidence record
 
 Certificates hash `{declared params, engine, grid: <resolved record>}`. The candidate
 builders construct the engine they run from the mapping they record
 (`declared_pde_params` → `PDEParams.from_config`), and the record is
-`resolved_grid_evidence(params)`. That is the nine resolved `GridConfig` fields plus the
-built-in stepper's two resolved damping counts, under their 0.6.0 keys
-(`terminal_damping_steps`, `event_damping_steps`). The record is the numerical grid plus
-the scheme's damping, not a serialization of `GridConfig`, and it is byte-identical for
-every banked configuration.
+`resolved_grid_evidence(params, day_count=...)`. That is the eight resolved `GridConfig`
+fields, `day_count` (on the density basis, after `max_steps`, where 0.7.0 had it: the
+environment's business days, `environment_day_count`), the continuous-knock-in row's two
+damping counts under their 0.6.0 keys (`terminal_damping_steps`, `event_damping_steps`),
+`damping` only when that row's form is half-step, and `discrete_monitoring_damping`
+(`[form, terminal, event]`) only when the core row resolves differently, which is the
+0.8.0 default. A full-step (1, 2) configuration on a 252-day environment with
+`max_steps=5000` serializes to the 0.7.0 record byte for byte. The record is the numerical
+grid plus the scheme's damping, not a serialization of `GridConfig`.
 
 `PDEParams.evidence()` (what `engine_config(params)` serializes) records `accuracy`, the
 `grid` overlay, the stepper (the built-in's settings; a custom stepper's fingerprint or
@@ -188,14 +243,12 @@ would. The routes outside the core have no `explain`; the 2D solvers raise.
 
 ## Kept on purpose
 
-The core reproduces these 0.6.0 behaviours bit for bit. Each is decided in sub-project 3,
-under re-certification, not here:
+The core reproduces these 0.6.0 behaviours bit for bit. Each is decided in a later
+sub-project, under re-certification, not here. (0.8.0 decided three former entries: Snowball
+`NODAL` masks interior events nodally, Phoenix takes θ = 1 on zero-diffusion steps, and under
+continuous KI the knocked-in boundary rows are written before the alive rows that read them.)
 
-- Snowball interior discrete events cell-average through the schedule even under
-  `event_projection=NODAL`; terminal, valuation-date and statistics events go nodal.
 - The thirteen statistics conventions (spec section 6).
-- Phoenix's value sweep has no zero-diffusion θ override; the other families do.
-- The alive column's lower boundary under continuous KI is zero before the coupling.
 - Heston/SLV statistics march in 1D on implied vol with the 2D price as residual.
 - KO-reset statistics come from QUAD, with the price difference in the maturity leg.
 - The life-surface pricer's node Greeks use its own three-point stencil.

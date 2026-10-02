@@ -76,15 +76,22 @@ Those settings are recorded **resolved, not named**. A candidate that declares
 readability: the resolved configuration feeds the candidate's identity hash, so
 if a future release redefines a profile, the identity changes and stale
 checkpoints and anchors are correctly rejected instead of silently reused.
-Since 0.7.0 a PDE candidate's `grid` record (`resolved_grid_evidence`) composes
-the nine resolved `GridConfig` fields with the built-in stepper's two resolved
-damping counts, under their historical keys, and the candidate executes exactly
-the params it declares (`PDEParams.from_config`); only built-in components are
-certifiable.
+A PDE candidate's `grid` record (`resolved_grid_evidence(params, day_count=...)`)
+composes, in this order: the eight resolved `GridConfig` fields; `day_count` after
+`max_steps` on the density basis, which since 0.8.0 is the business days of the
+environment the study builds (`pde_declared.environment_day_count`: the study's declared
+`bus_days_in_year`, else `PricingEnvironment`'s default 252; a case may not override it,
+`refuse_case_day_count`; the intraday candidate records its numerical environment's
+`days_per_year`); the continuous-knock-in damping row's two counts under their historical
+keys (`terminal_damping_steps`, `event_damping_steps`); `damping` only when that row is
+half-step; and `discrete_monitoring_damping` (`[form, terminal, event]`) only when the
+core row for products without continuous knock-in resolves differently, as the 0.8.0
+default `["half_step", 1, 1]` does. The candidate executes exactly the params it declares
+(`PDEParams.from_config`); only built-in components are certifiable.
 
 The recorded values are what was *requested*. Achieved geometry — the node count
-a grid settled on after alignment, or whether a step cap bit — is not part of
-the record. The 1D core PDE engines report it through `explain(product, env)`
+a grid settled on after alignment — is not part of the record (since 0.8.0 a grid over
+`max_steps` raises instead of being scaled). The 1D core PDE engines report it through `explain(product, env)`
 (0.7.0), but it depends on the case, so certificates do not hash it.
 
 ## 3. Reading the result
