@@ -20,12 +20,31 @@ import sys
 _NON_HEX_KEYS = ("adapter", "steps", "actual_steps", "requested_steps")
 
 
+def _tagged(x) -> bool:
+    """The capture's non-numeric outputs (spec 3B §7.1): ``none``, ``bool:0/1``, ``repr:...``."""
+    return isinstance(x, str) and (x == "none" or x.startswith("bool:") or x.startswith("repr:"))
+
+
 def _finite_hex(v) -> bool:
     try:
         vals = v if isinstance(v, list) else [v]
-        return all(isinstance(x, str) and math.isfinite(float.fromhex(x)) for x in vals)
+        return all(_tagged(x) or (isinstance(x, str) and math.isfinite(float.fromhex(x))) for x in vals)
     except (TypeError, ValueError):
         return False
+
+
+def _same(b, n, added_globs):
+    """Rows equal up to branch-only keys a glob allows (F3); a base-only key is always a diff."""
+    if b == n:
+        return True
+    if b is None or n is None or "__error__" in b or "__error__" in n:
+        return False
+    if set(b) - set(n):
+        return False
+    extra = set(n) - set(b)
+    if any(not any(fnmatch.fnmatchcase(k, g) for g in added_globs) for k in extra):
+        return False
+    return all(b[k] == n[k] for k in b)
 
 
 def _manifest_violations(book: dict, manifest: dict, side: str) -> list:
@@ -74,6 +93,13 @@ def main(argv=None) -> int:
     ap.add_argument("--allow-file", default=None, help="exact row ids, one per line, whose diffs are allowed")
     ap.add_argument("--bound", action="append", default=[], metavar="GLOB=REL",
                     help="allowed rows matching GLOB may move by at most REL relative")
+    ap.add_argument("--bound-field", action="append", default=[], metavar="ROWGLOB:FIELDGLOB=ABS",
+                    help="on allowed rows matching ROWGLOB, fields matching FIELDGLOB may move by at most ABS (absolute)")
+    ap.add_argument("--movable-fields", action="append", default=[], metavar="FIELDGLOB",
+                    help="on allowed rows, a differing field that matches none of these globs is a violation")
+    ap.add_argument("--allow-added-key", action="append", default=[], metavar="KEYGLOB",
+                    help="a key present only on the branch side is not a diff when it matches")
+    ap.add_argument("--base-manifest", default=None, help="manifest for the base side (default: --manifest)")
     a = ap.parse_args(argv)
     base = _load(a.base)
     branch = _load(a.branch)
@@ -81,7 +107,11 @@ def main(argv=None) -> int:
     if a.manifest:
         with open(a.manifest) as fh:
             manifest = json.load(fh)
-        violations = (_manifest_violations(base, manifest, "base")
+        base_manifest = manifest
+        if a.base_manifest:
+            with open(a.base_manifest) as fh:
+                base_manifest = json.load(fh)
+        violations = (_manifest_violations(base, base_manifest, "base")
                       + _manifest_violations(branch, manifest, "branch"))
     bad, allowed = [], []
     exact = set()
@@ -90,7 +120,7 @@ def main(argv=None) -> int:
             exact = {line.strip() for line in fh if line.strip()}
     bounds = [(g, float(r)) for g, r in (b.split("=", 1) for b in a.bound)]
     for row in sorted(set(base) | set(branch)):
-        if base.get(row) == branch.get(row):
+        if _same(base.get(row), branch.get(row), a.allow_added_key):
             continue
         ok = row in exact or any(row.startswith(p) for p in a.allow)
         (allowed if ok else bad).append(row)
@@ -110,6 +140,39 @@ def main(argv=None) -> int:
                         far = True   # a shape or type change is not a bounded move
                     if far:
                         bad.append(f"{row}.{k} beyond bound {rel}")
+    field_bounds = []
+    for spec in a.bound_field:
+        lhs, abs_tol = spec.rsplit("=", 1)
+        rglob, fglob = lhs.split(":", 1)
+        field_bounds.append((rglob, fglob, float(abs_tol)))
+    maxdelta = {}
+    for row in allowed:
+        b_row, n_row = base.get(row) or {}, branch.get(row) or {}
+        for k in sorted(set(b_row) & set(n_row)):
+            if b_row[k] == n_row[k] or k in _NON_HEX_KEYS:
+                continue
+            if a.movable_fields and not any(fnmatch.fnmatchcase(k, g) for g in a.movable_fields):
+                bad.append(f"{row}.{k} moved but is not a movable field")
+                continue
+            for rglob, fglob, tol in field_bounds:
+                if not (fnmatch.fnmatchcase(row, rglob) and fnmatch.fnmatchcase(k, fglob)):
+                    continue
+                vb, vn = b_row[k], n_row[k]
+                if isinstance(vb, list) != isinstance(vn, list) or (isinstance(vb, list) and len(vb) != len(vn)):
+                    bad.append(f"{row}.{k} changed shape under bound {tol}")
+                    continue
+                pairs = list(zip(vb, vn)) if isinstance(vb, list) else [(vb, vn)]
+                try:
+                    d = max(abs(float.fromhex(y) - float.fromhex(x)) for x, y in pairs)
+                except (TypeError, ValueError):
+                    bad.append(f"{row}.{k} is not numeric under bound {tol}")
+                    continue
+                if d > maxdelta.get(k, (0.0, ""))[0]:
+                    maxdelta[k] = (d, row)
+                if d > tol:
+                    bad.append(f"{row}.{k} beyond bound {tol} (delta {d:.3e})")
+    for k, (d, row) in sorted(maxdelta.items()):
+        print(f"MAXDELTA {k} {d:.3e} {row}")
     for row in sorted(exact - set(allowed)):
         print(f"ALLOWED-UNCHANGED {row}")
     for row in allowed:

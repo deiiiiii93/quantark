@@ -245,17 +245,7 @@ def facade_outputs(product, env, params, event_stats=False):
     if event_stats:
         stats = PDEEngine(params=params).calculate_event_stats(product, env)
         if stats is not None:
-            for name, val in sorted(vars(stats).items()):
-                if isinstance(val, bool):
-                    continue
-                if isinstance(val, (int, float)):
-                    out[f"stats_{name}"] = _hex(val)
-                elif isinstance(val, (list, tuple, np.ndarray)):
-                    try:
-                        arr = np.asarray(val, dtype=float).ravel()
-                    except (TypeError, ValueError):
-                        continue
-                    out[f"stats_{name}"] = [x.hex() for x in arr.tolist()]
+            out.update(_stats_fields(stats))
     return out
 
 
@@ -303,19 +293,44 @@ def intraday_row():
 
 # --- sub-project 2 outputs (spec 2 §9.1) --------------------------------------
 
+def _field_value(val):
+    """One output value (spec 3B §7.1): numbers and numeric arrays as hex, booleans as ``bool:0/1``,
+    ``None`` as ``"none"``, anything else (dates, provenance, enums, sets) as ``repr:``."""
+    if val is None:
+        return "none"
+    if isinstance(val, (bool, np.bool_)):
+        return f"bool:{int(bool(val))}"
+    if isinstance(val, (int, float, np.integer, np.floating)):
+        return _hex(val)
+    if isinstance(val, (list, tuple, np.ndarray)):
+        try:
+            arr = np.asarray(val, dtype=float).ravel()
+        except (TypeError, ValueError):
+            return f"repr:{val!r}"
+        return [x.hex() for x in arr.tolist()]
+    return f"repr:{val!r}"
+
+
 def _stats_fields(stats, prefix="stats_"):
-    out = {}
-    for name, val in sorted(vars(stats).items()):
-        if isinstance(val, bool):
+    """Every field of a statistics dataclass, in field order (booleans and objects included)."""
+    return {f"{prefix}{f.name}": _field_value(getattr(stats, f.name)) for f in dataclasses.fields(stats)}
+
+
+def _dist_fields(dist):
+    """Every field of an EventDistribution; the three pre-3B keys keep their names."""
+    out = {"dist_times": _field_value(dist.event_times),
+           "dist_survival": _field_value(dist.survival_probability)}
+    for et in sorted(dist.probabilities, key=str):
+        out[f"dist_{et}"] = _field_value(np.atleast_1d(np.asarray(dist.probabilities[et], float)))
+    for f in dataclasses.fields(dist):
+        if f.name in ("event_times", "survival_probability", "probabilities"):
             continue
-        if isinstance(val, (int, float)):
-            out[f"{prefix}{name}"] = _hex(val)
-        elif isinstance(val, (list, tuple, np.ndarray)):
-            try:
-                arr = np.asarray(val, dtype=float).ravel()
-            except (TypeError, ValueError):
-                continue
-            out[f"{prefix}{name}"] = [x.hex() for x in arr.tolist()]
+        val = getattr(dist, f.name)
+        if isinstance(val, dict):
+            for key in sorted(val, key=str):
+                out[f"dist_{f.name}_{key}"] = _field_value(val[key])
+        else:
+            out[f"dist_{f.name}"] = _field_value(val)
     return out
 
 
@@ -330,11 +345,7 @@ def pwe(solver, product, env, streams=None):
     out = {"npv": _hex(res.npv)}
     dist = res.event_distribution
     if dist is not None:
-        out["dist_times"] = [float(x).hex() for x in np.asarray(dist.event_times, float).ravel()]
-        out["dist_survival"] = [float(x).hex() for x in np.asarray(dist.survival_probability, float).ravel()]
-        for et in sorted(dist.probabilities, key=str):
-            out[f"dist_{et}"] = [float(x).hex() for x in
-                                 np.atleast_1d(np.asarray(dist.probabilities[et], float)).ravel()]
+        out.update(_dist_fields(dist))
     return out
 
 
