@@ -28,6 +28,10 @@ class PhoenixAdapter(SnowballAdapter):
         self.solver._reset_t0_readout_state()
         return state
 
+    def statistics_family(self, prepared, streams):
+        from ..statistics.phoenix import PhoenixStatistics
+        return PhoenixStatistics.create(prepared, streams)
+
     def observation_maps(self, product, env, layout, tau) -> None:
         super().observation_maps(product, env, layout, tau)   # registers the coupons (single site)
         solver = self.solver

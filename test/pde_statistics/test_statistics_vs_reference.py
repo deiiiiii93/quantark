@@ -18,15 +18,9 @@ BOUNDS = {"cont": dict(ko=2e-4, ki_ever=2e-3, ki_survive=1e-3),
           "disc": dict(ko=3e-5, ki_ever=1e-4, ki_survive=1e-4),
           "daily": dict(ko=2e-4, ki_ever=7e-4, ki_survive=1e-4)}
 COUPON, CASH, PV = 1e-4, 2e-2, 2e-2
-PHOENIX_PENDING = pytest.mark.xfail(strict=True, reason="Phoenix value mode: Task 13")
 
 
-def _param(name):
-    marks = [PHOENIX_PENDING] if name.startswith("ph") else []
-    return pytest.param(name, marks=marks, id=name)
-
-
-@pytest.mark.parametrize("name", [_param(n) for n in sorted(CLASS)])
+@pytest.mark.parametrize("name", sorted(CLASS))
 def test_statistics_within_measured_bounds(value_mode, name):
     value_mode("snowball", "phoenix")
     product, env = CASES[name][0](), CASES[name][1]()

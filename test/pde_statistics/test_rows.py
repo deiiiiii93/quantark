@@ -153,3 +153,31 @@ def test_value_mode_rows_do_not_depend_on_the_value_march(value_mode):
     assert len(with_value) == len(stats_only)
     for (a_lo, a_up), (b_lo, b_up) in zip(with_value, stats_only):
         assert np.array_equal(a_lo, b_lo) and np.array_equal(a_up, b_up)
+
+
+def test_value_mode_phoenix_rows(value_mode):
+    """Task 13: the alive lower row is the value's 0.0 (Phoenix never exposes the knocked-in grid), the
+    coupon cash rows are 0 (the value's rows carry no coupon), and the knock-out edge triggers the coupon
+    of the record it pays, in payment units (F8)."""
+    value_mode("phoenix")
+    solver, e = PhoenixPDESolver(SHORT), env()
+    product = make_phoenix(dict(PHOENIX, memory_coupon=True))      # continuous KI
+    p, stats, rows = _stats_rows(solver, product, e)
+    L, w = stats.layout, stats.n_cols
+    t = p.layout.time.t
+    seen_trigger = False
+    for j, (lower, upper) in enumerate(rows):
+        lo0, up0 = lower[:w], upper[:w]
+        cash = L.cash.ravel()
+        assert not lo0[L.ko].any() and lo0[L.maturity[0]] == 0.0 and not lo0[L.trigger_cols].any(), j
+        assert not lower[cash].any() and not upper[cash].any() and not upper[w + cash].any(), j
+        _, v_up0 = solver._boundary_rows_v0(j, p.tau - t[j], product, e, p.layout.spatial.s)
+        (term,) = v_up0.terms
+        if term.column == "KO" and term.record_time is not None:
+            k = stats.column_of_record(term.record_time)
+            current = solver._total_tau - (p.tau - t[j])
+            pay = solver._coupon_payment_time(product, e, stats._obs_of_k[k])
+            assert up0[L.trigger_cols[k]] == solver._cashflow_value_at_time(e, 1.0, current, pay), j
+            assert np.count_nonzero(up0[L.trigger_cols]) == 1, j
+            seen_trigger = True
+    assert seen_trigger

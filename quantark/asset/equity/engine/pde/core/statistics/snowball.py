@@ -37,13 +37,17 @@ class SnowballBreach:
     def __init__(self, stats):
         self.stats = stats
 
+    def unit(self, record):
+        """The knock-out unit: one paid at the record's settlement, at its observation."""
+        s = self.stats
+        return s.solver._cashflow_value_at_time(
+            pricing_env=s.env, cashflow=1.0, current_time=float(record.observation_time),
+            settlement_time=record.settlement_time)
+
     def ko(self, record, block, surface):
         s, L = self.stats, self.stats.layout
         target = np.zeros_like(block)
-        unit = s.solver._cashflow_value_at_time(
-            pricing_env=s.env, cashflow=1.0, current_time=float(record.observation_time),
-            settlement_time=record.settlement_time)
-        target[:, s.column_of_record(record, surface)] = unit
+        target[:, s.column_of_record(record, surface)] = self.unit(record)
         if L.kie is not None:
             target[:, L.kie] = block[:, L.kie]          # knock-in-ever is exempt from the knock-out
         return target
@@ -147,12 +151,19 @@ class SnowballStatistics(RollingStatistics):
         lo0, up0 = solver._boundary_rows_v0(j, tau_rem, product, env, self.s)
         r_lo1, r_up1 = self._cash_row(lo1, "ki"), self._cash_row(up1, "ki")
         r_up0 = self._cash_row(up0, "alive")
-        # continuous KI: the value's alive lower row is the knocked-in row (copied, allocation and all)
-        r_lo0 = r_lo1.copy() if lo0.copy_from_ki else self._cash_row(lo0, "alive")
+        if lo0.copy_from_ki:
+            # continuous KI: the value's alive lower row is the knocked-in row (copied, allocation and
+            # all) -- or 0.0 on a family whose value never exposes that row (``_alive_lower_copies_ki``)
+            r_lo0 = r_lo1.copy() if self._alive_lower_copies_ki else np.zeros(self.n_cols)
+        else:
+            r_lo0 = self._cash_row(lo0, "alive")
         if self.layout.kis is not None:
             self._ki_rows(current, r_lo0, r_up0, r_lo1, r_up1)
-        self._probability_rows(j, current, r_lo0, r_up0, r_lo1, r_up1)
+        self._probability_rows(j, current, (r_lo0, r_up0, r_lo1, r_up1), (lo0, up0, lo1, up1))
         return np.concatenate([r_lo0, r_lo1]), np.concatenate([r_up0, r_up1])
+
+    #: SnowballAdapter.allocate exposes the knocked-in grid to the alive lower row (``solver._grid_v1``)
+    _alive_lower_copies_ki = True
 
     def _ki_rows(self, current, r_lo0, r_up0, r_lo1, r_up1):
         """The knock-in columns' rows, in determination units ``DF(t, T)``, by edge (spec 3B §5.1).
@@ -176,8 +187,9 @@ class SnowballStatistics(RollingStatistics):
         ko0[L.kis] = 0.0
         ko0[L.kie] = 0.0
 
-    def _probability_rows(self, j, current, r_lo0, r_up0, r_lo1, r_up1):
-        """Family hook (Phoenix: the trigger rows; KO-reset: the maturity units)."""
+    def _probability_rows(self, j, current, rows, edges):
+        """Family hook (Phoenix: the trigger rows; KO-reset: the maturity units). ``rows`` are the
+        statistics rows ``(lo0, up0, lo1, up1)``, filled in place; ``edges`` the value's EdgeRows."""
 
     def _cash_row(self, edge, surface):
         row = np.zeros(self.n_cols)

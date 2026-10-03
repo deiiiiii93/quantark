@@ -668,6 +668,12 @@ class PhoenixPDESolver(SnowballPDESolver):
         """
         if self._term_w0 is not None:
             return self._term_w0[:, t_idx], self._term_w1[:, t_idx]
+        scalar = self._coupon_discount_scalar(t_idx, current_time, product, pricing_env, obs_idx)
+        return scalar, scalar
+
+    def _coupon_discount_scalar(self, t_idx, current_time, product, pricing_env, obs_idx=None) -> float:
+        """The coupon discount without a termination surface (``_coupon_discounts``' scalar branch): to
+        the record's settlement under INSTANT, to the terminal payment under EXPIRY."""
         if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
             settlement_time = self._terminal_payment_time(product, pricing_env)
         elif obs_idx is not None:
@@ -676,8 +682,7 @@ class PhoenixPDESolver(SnowballPDESolver):
             )
         else:
             settlement_time = current_time
-        scalar = self._df_between_times(pricing_env, current_time, settlement_time)
-        return scalar, scalar
+        return self._df_between_times(pricing_env, current_time, settlement_time)
 
     def _apply_coupon_jump_vector(
         self,

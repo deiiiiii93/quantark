@@ -4,12 +4,14 @@ import itertools
 import numpy as np
 import pytest
 
+from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.param import PDEParams
 from quantark.cashleg.event_distribution import EventType
 from quantark.execution import OutputKind, PricingRequest, PricingSession
+from quantark.modelvalidation.builders.equity_phoenix import make_phoenix
 from quantark.modelvalidation.builders.equity_snowball import make_snowball
-from pde_3a.products import SNOWBALL, env
+from pde_3a.products import PHOENIX, SNOWBALL, env
 from pde_statistics.cases import CASES, trading_clock_env
 
 BOUND = 1e-10
@@ -88,3 +90,73 @@ def test_local_vol_snowball_identity(value_mode):
     stats = LocalVolSnowballPDESolver(params=PDEParams()).calculate_event_stats(snowball("continuous"), env_grid_vol())
     assert stats.provenance.statistics_model == "local_vol_1d"
     _check(stats)
+
+
+# --- Phoenix, INSTANT coupons (Task 13; spec 3B §5.3) ------------------------------------------------
+
+def _arrears(p, arrears=2.0):
+    import dataclasses
+    p.coupon_config = dataclasses.replace(p.coupon_config, initial_coupon_arrears=arrears)
+    return p
+
+
+PHOENIX_CASES = {
+    "plain": (lambda: CASES["ph_cont"][0](), {}),
+    "memory": (lambda: CASES["ph_memory"][0](), {}),
+    "near_coupon": (lambda: CASES["ph_memory"][0](), {"spot": 86.0}),
+    "c105": (lambda: make_phoenix(dict(PHOENIX, memory_coupon=True, coupon_barrier=105.0)), {}),
+    "coincident": (lambda: make_phoenix(dict(PHOENIX, coupon_barrier=103.0)), {}),
+    "arrears": (lambda: _arrears(CASES["ph_memory"][0]()), {}),
+}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case,env_name,accuracy,projection,streams,entry", [
+    p for p in itertools.product(sorted(PHOENIX_CASES), sorted(ENVS), ("standard", "high"),
+                                 (None, "nodal"), sorted(STREAMS), ("direct", "pwe", "session"))
+    if p[5] == "direct" or (p[2] == "standard" and p[4] == "all")], ids=_ids)
+def test_phoenix_identity(value_mode, case, env_name, accuracy, projection, streams, entry):
+    value_mode("phoenix")
+    make, over = PHOENIX_CASES[case]
+    solver = PhoenixPDESolver(PDEParams(accuracy=accuracy, event_projection=projection))
+    _check(_entry(entry, solver, make(), ENVS[env_name](**over), STREAMS[streams]))
+
+
+@pytest.mark.parametrize("case", ["plain", "memory", "coincident"])
+def test_phoenix_identity_fast(value_mode, case):
+    value_mode("phoenix")
+    make, over = PHOENIX_CASES[case]
+    _check(PhoenixPDESolver(PDEParams()).calculate_event_stats(make(), env(**over)))
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("projection", [None, "nodal"])
+def test_local_vol_memory_phoenix_identity(value_mode, projection):
+    """Review Focus 5: a daily-KI memory Phoenix on a crash local-vol surface."""
+    from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import LocalVolPhoenixPDESolver
+    from pde_3a.products import localvol_phoenix_case
+
+    value_mode("phoenix")
+    product, e, lv = localvol_phoenix_case("crash", 1.0, "daily_ki_memory")
+    solver = LocalVolPhoenixPDESolver(params=PDEParams(event_projection=projection), local_vol_surface=lv)
+    _check(solver.calculate_event_stats(product, e))
+
+
+@pytest.mark.parametrize("projection", [None, "nodal"])
+@pytest.mark.parametrize("spot", [78.0, 95.0], ids=["miss", "pay"])
+def test_dated_memory_phoenix_on_its_first_observation_date(value_mode, spot, projection):
+    """F16: a memory coupon decided at valuation -- the miss reads the one-missed state, the pay adds today's coupon."""
+    from pde_bitwise.capture_book import _dated, _dated_env, _first_obs
+
+    value_mode("phoenix")
+    # a fixed coupon fraction: 0.8.0 accrues the floating first period to zero at its own date, and a
+    # zero missed coupon would leave the one-missed state equal to state 0
+    p, _ = _dated("phoenix", fixed_fraction=1.0 / 12.0)
+    stats = PhoenixPDESolver(PDEParams(event_projection=projection)).calculate_event_stats(
+        p, _dated_env(p, _first_obs(p), spot))
+    _check(stats)          # a miss read from state 0 would miss the arrears the value carries in state 1
+    if projection is None:  # the cell-average route decides today's coupon at the spot (nodal interpolates)
+        trigger = stats.coupon_probability[0]
+        assert abs(trigger - 1.0) <= 1e-12 if spot == 95.0 else trigger == 0.0
+        paid = stats.expected_discounted_coupon_cashflow[0]
+        assert paid > 0.0 if spot == 95.0 else paid == 0.0

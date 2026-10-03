@@ -39,7 +39,8 @@ def test_statistics_only_expiry_phoenix_builds_its_termination_tables():
 @pytest.mark.parametrize("name", sorted(PRODUCTS))
 def test_supplied_npv_equal_to_the_price_changes_no_field(value_mode, name, mode):
     if mode == "value":
-        value_mode("snowball")      # Phoenix and KO-reset join in Tasks 13-15
+        # the EXPIRY Phoenix joins in Task 14, KO-reset in Task 15
+        value_mode("snowball", *(() if name == "phoenix_expiry" else ("phoenix",)))
     solver, product = PRODUCTS[name]()
     own = solver.calculate_event_stats(product, env())
     passed = solver.calculate_event_stats(product, env(), npv=float(own.pv))
