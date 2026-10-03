@@ -89,3 +89,67 @@ def test_phoenix_termination_rows_allocate_bit_for_bit():
             assert [t.column for t in upper.terms] == ["T"] and upper.terms[0].record_time == next_obs
             seen_t = True
     assert seen_t
+
+
+# --- the value-mode statistics rows (Task 12; spec 3B §5.1 "Rows", decision 14) ----------------
+
+def _stats_rows(solver, product, e, price=True):
+    request = (OutputRequest(Operation.EVENT_STATS, event_stats=True) if price
+               else OutputRequest(Operation.EVENT_STATS, price=False, event_stats=True, external_pv=1.0))
+    p = prepare(solver, product, e, request)
+    stats, n = p.statistics, len(p.layout.spatial.x)
+    out = [stats.rows(j, np.zeros((n, 2 * stats.n_cols))) for j in range(len(p.layout.time.t) - 1)]
+    return p, stats, out
+
+
+def _lagged(spec, lag):
+    from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+    product = make_snowball(spec)
+    product.settlement_convention = SettlementConvention(lag=lag, lag_unit=SettlementLagUnit.YEAR_FRACTION)
+    return product
+
+
+@pytest.mark.parametrize("lag", [0.0, 0.2])
+def test_value_mode_knock_in_rows_are_determination_units(value_mode, lag):
+    value_mode("snowball")
+    solver, e = SnowballPDESolver(SHORT), env()
+    spec = SNOWBALLS["standard_disc"]
+    product = _lagged(spec, lag) if lag else make_snowball(spec)
+    p, stats, rows = _stats_rows(solver, product, e)
+    L, w = stats.layout, stats.n_cols
+    t, s = p.layout.time.t, p.layout.spatial.s
+    for j, (lower, upper) in enumerate(rows):
+        current = solver._total_tau - (p.tau - t[j])
+        df_det = solver._df_between_times(e, current, p.tau)
+        lo0, lo1, up1 = lower[:w], lower[w:], upper[w:]
+        assert lo1[L.kis] == lo1[L.kie] == df_det, j          # knocked in, at the knock-in edge
+        assert lo0[L.kis] == lo0[L.kie] == df_det, j          # a certain discrete knock-in
+        assert up1[L.kis] == 0.0 and up1[L.kie] == df_det, j  # the knock-out survives the knock-in
+        # the maturity leg's rows are the value's own rows (the lag's discount included)
+        v_lo0, _ = solver._boundary_rows_v0(j, p.tau - t[j], product, e, s)
+        v_lo1, _ = solver._boundary_rows_v1(j, p.tau - t[j], product, e, s)
+        assert lo0[L.maturity[0]] == v_lo0.value and lo1[L.maturity[0]] == v_lo1.value, j
+
+
+def test_value_mode_lag_discounts_the_maturity_leg_only(value_mode):
+    value_mode("snowball")
+    e, spec = env(), SNOWBALLS["standard_disc"]
+    _, stats, plain = _stats_rows(SnowballPDESolver(SHORT), make_snowball(spec), e)
+    _, _, lagged = _stats_rows(SnowballPDESolver(SHORT), _lagged(spec, 0.2), e)
+    assert len(plain) == len(lagged)
+    L, w = stats.layout, stats.n_cols
+    for (pl, pu), (ll, lu) in zip(plain, lagged):
+        for a, b in ((pl, ll), (pu, lu)):
+            for off in (0, w):
+                assert a[off + L.kis] == b[off + L.kis] and a[off + L.kie] == b[off + L.kie]
+        assert ll[L.maturity[0]] < pl[L.maturity[0]]        # the lag's extra discount on the leg
+
+
+def test_value_mode_rows_do_not_depend_on_the_value_march(value_mode):
+    value_mode("snowball")
+    e, product = env(), make_snowball(SNOWBALLS["standard_cont"])
+    _, _, with_value = _stats_rows(SnowballPDESolver(SHORT), product, e, price=True)
+    _, _, stats_only = _stats_rows(SnowballPDESolver(SHORT), product, e, price=False)
+    assert len(with_value) == len(stats_only)
+    for (a_lo, a_up), (b_lo, b_up) in zip(with_value, stats_only):
+        assert np.array_equal(a_lo, b_lo) and np.array_equal(a_up, b_up)

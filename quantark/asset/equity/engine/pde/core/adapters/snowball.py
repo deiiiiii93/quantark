@@ -107,6 +107,10 @@ class SnowballAdapter(FamilyAdapter):
         return {"knocked_in": bool(knocked_in), "reverse": solver._is_reverse,
                 "ki_continuous": solver._ki_continuous, "ki_barrier": solver._ki_barrier}
 
+    def statistics_family(self, prepared, streams):
+        from ..statistics.snowball import SnowballStatistics
+        return SnowballStatistics.create(prepared, streams)
+
     def market_checks(self, product, env, tau) -> None:
         """The two-surface solve never collapsed a smile explicitly (no guard in its _solve)."""
 

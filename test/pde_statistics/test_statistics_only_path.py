@@ -35,8 +35,11 @@ def test_statistics_only_expiry_phoenix_builds_its_termination_tables():
     assert solver._term_df_maturity is not None and solver._term_next_ko_time is not None
 
 
+@pytest.mark.parametrize("mode", ["legacy", "value"])
 @pytest.mark.parametrize("name", sorted(PRODUCTS))
-def test_supplied_npv_equal_to_the_price_changes_no_field(name):
+def test_supplied_npv_equal_to_the_price_changes_no_field(value_mode, name, mode):
+    if mode == "value":
+        value_mode("snowball")      # Phoenix and KO-reset join in Tasks 13-15
     solver, product = PRODUCTS[name]()
     own = solver.calculate_event_stats(product, env())
     passed = solver.calculate_event_stats(product, env(), npv=float(own.pv))

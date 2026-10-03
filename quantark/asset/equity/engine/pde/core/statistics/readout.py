@@ -14,12 +14,18 @@ from quantark.util.enum import CouponPayType
 __all__ = ["assemble_autocallable"]
 
 
-def assemble_autocallable(solver, product, env, *, pv, ko_records, ed_unit, ki, extra_fields):
-    """Probabilities, the maturity residual and the payment-aware ledger from the read columns.
+def assemble_autocallable(solver, product, env, *, pv, ko_records, ed_unit, ki, extra_fields,
+                          maturity=None, coupon_rows=None):
+    """Probabilities, the maturity leg and the payment-aware ledger from the read columns.
 
     ``ed_unit`` is the discounted knock-out unit per record; ``ki`` is ``(ki_probability,
     ki_ever_probability, ki_times, ki_event_probability, ki_survival_probability)``;
     ``extra_fields`` the family's extra readout (the Phoenix coupon fields).
+
+    ``maturity`` (spec 3B §5.2): the marched maturity leg; the leg is then that value and
+    ``reconciliation_error = pv - Σ ko - Σ coupon - maturity``. ``None``: the legacy residual
+    leg and an error of ``0.0``. ``coupon_rows``: ``(determination_times, payment_times, cash,
+    determination_dates, payment_dates)``, the coupon ledger rows in place of the legacy block.
     """
     pricing_env = env
     ki_probability, ki_ever_probability, ki_times, ki_event_probability, ki_survival_probability = ki
@@ -72,7 +78,16 @@ def assemble_autocallable(solver, product, env, *, pv, ko_records, ed_unit, ki, 
         record.settlement_date for record in ko_records
     ]
 
-    if "coupon_probability" in extra_fields:
+    coupon_ledger_cash = 0.0
+    if coupon_rows is not None:
+        c_det, c_pay, c_cash, c_det_dates, c_pay_dates = coupon_rows
+        determination_times.extend(float(t) for t in c_det)
+        payment_times.extend(float(t) for t in c_pay)
+        discounted_cashflows.extend(float(c) for c in c_cash)
+        determination_dates.extend(c_det_dates)
+        payment_dates.extend(c_pay_dates)
+        coupon_ledger_cash = float(np.sum(np.asarray(c_cash, dtype=float)))
+    elif "coupon_probability" in extra_fields:
         coupon_cashflows = np.asarray(
             (
                 extra_fields["expected_discounted_coupon_cashflow"]
@@ -113,6 +128,14 @@ def assemble_autocallable(solver, product, env, *, pv, ko_records, ed_unit, ki, 
             for record in ko_records
         )
 
+    reconciliation_error = 0.0
+    if maturity is not None:
+        # spec 3B §5.2: the marched leg, and the identity's residual reported, not absorbed
+        coupon_cash = (coupon_ledger_cash if coupon_rows is not None
+                       else (float(np.sum(coupon_cf)) if coupon_cf is not None else 0.0))
+        expected_discounted_maturity_cf = float(maturity)
+        reconciliation_error = float(pv - float(np.sum(ed_ko_cf)) - coupon_cash - expected_discounted_maturity_cf)
+
     determination_times.append(float(terminal.determination_time))
     payment_times.append(float(terminal.payment_time))
     discounted_cashflows.append(expected_discounted_maturity_cf)
@@ -135,7 +158,7 @@ def assemble_autocallable(solver, product, env, *, pv, ko_records, ed_unit, ki, 
         expected_discounted_ko_cashflow=ed_ko_cf,
         ki_probability=ki_probability,
         expected_discounted_maturity_cashflow=expected_discounted_maturity_cf,
-        reconciliation_error=0.0,
+        reconciliation_error=reconciliation_error,
         ki_times=ki_times,
         ki_event_probability=ki_event_probability,
         ki_survival_probability=ki_survival_probability,
