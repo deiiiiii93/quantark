@@ -105,8 +105,7 @@ def test_phoenix_expiry_coupons_add_the_termination_surfaces():
     assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == _phoenix_groups(0, True)
 
 
-# --- the statistics group (Task 9) ------------------------------------------------------
-from quantark.asset.equity.engine.pde.core.groups import STATISTICS_LEGACY
+# --- the statistics group (Task 9; the value policy since spec 3B stage 2 (a)) --------------
 
 
 def test_statistics_group_is_one_banded_group_of_both_surfaces():
@@ -114,9 +113,9 @@ def test_statistics_group_is_one_banded_group_of_both_surfaces():
                 OutputRequest(Operation.PRICE_WITH_EVENTS, event_stats=True))
     names = [(g.name, g.surfaces, g.backend, g.policy, g.rolling) for g in p.groups]
     assert names == [("value", ("alive", "ki"), Backend.BANDED, VALUE, False),
-                     ("stats", ("stats_v0", "stats_v1"), Backend.BANDED, STATISTICS_LEGACY, True)]
-    from quantark.asset.equity.engine.pde.core.statistics import StatisticsLegacy
-    assert isinstance(p.statistics, StatisticsLegacy) and p.groups[-1] is p.statistics.group
+                     ("stats", ("stats_v0", "stats_v1"), Backend.BANDED, VALUE, True)]
+    from quantark.asset.equity.engine.pde.core.statistics.snowball import SnowballStatistics
+    assert isinstance(p.statistics, SnowballStatistics) and p.groups[-1] is p.statistics.group
 
 
 def test_statistics_only_request_has_no_value_group():

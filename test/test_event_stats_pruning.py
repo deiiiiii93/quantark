@@ -106,9 +106,11 @@ def _phoenix():
 # Verification against SnowballMCEngine at 262,144 paths (exact first-passage
 # ki_ever 0.150738): ki_ever moved 0.147043 -> 0.150637, closing the gap to
 # ~1e-4; pv is steps-per-day invariant to 0.5c/unit post-fix (was O(sqrt(dt))).
+# Re-frozen 2026-10-04 for spec 3B stage 2 (a): the statistics take the value policy (allocated rows,
+# VALUE theta, the adapter's stages); moves ki -6.0e-9, ki_ever -6.3e-9; pv unchanged.
 SNOWBALL_PV = 987699.4565124855  # re-frozen with the FIRST_PASSAGE default
-SNOWBALL_KI = 0.1137292664812044
-SNOWBALL_KI_EVER = 0.1506367647842925
+SNOWBALL_KI = 0.1137292604459367
+SNOWBALL_KI_EVER = 0.15063675851573247
 
 
 def test_snowball_full_stream_matches_golden():
@@ -160,19 +162,10 @@ def test_npv_passthrough_skips_internal_price():
     sentinel = 123456.0
     passed = solver.calculate_event_stats(product, env, npv=sentinel)
     assert float(passed.pv) == sentinel
-    assert abs(
-        float(passed.expected_discounted_cashflows.sum()) - sentinel
-    ) < 1e-8
-    # maturity residual shifts by exactly the pv delta; KO cashflows unchanged.
-    assert np.array_equal(
-        np.asarray(internal.expected_discounted_ko_cashflow),
-        np.asarray(passed.expected_discounted_ko_cashflow),
-    )
-    delta = sentinel - float(internal.pv)
-    assert abs(
-        float(passed.expected_discounted_maturity_cashflow)
-        - (float(internal.expected_discounted_maturity_cashflow) + delta)
-    ) < 1e-6
+    # the leg is marched (spec 3B decision 3): the supplied npv moves the residual, not the leg
+    assert passed.expected_discounted_maturity_cashflow == internal.expected_discounted_maturity_cashflow
+    assert np.array_equal(passed.expected_discounted_cashflows, internal.expected_discounted_cashflows)
+    assert abs(passed.reconciliation_error - (sentinel - float(np.sum(internal.expected_discounted_cashflows)))) < 1e-8
 
 
 def test_phoenix_coupon_pruning_preserves_ko_and_pv():
