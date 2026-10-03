@@ -110,8 +110,7 @@ def _lagged(spec, lag):
 
 
 @pytest.mark.parametrize("lag", [0.0, 0.2])
-def test_value_mode_knock_in_rows_are_determination_units(value_mode, lag):
-    value_mode("snowball")
+def test_knock_in_rows_are_determination_units(lag):
     solver, e = SnowballPDESolver(SHORT), env()
     spec = SNOWBALLS["standard_disc"]
     product = _lagged(spec, lag) if lag else make_snowball(spec)
@@ -131,8 +130,7 @@ def test_value_mode_knock_in_rows_are_determination_units(value_mode, lag):
         assert lo0[L.maturity[0]] == v_lo0.value and lo1[L.maturity[0]] == v_lo1.value, j
 
 
-def test_value_mode_lag_discounts_the_maturity_leg_only(value_mode):
-    value_mode("snowball")
+def test_lag_discounts_the_maturity_leg_only():
     e, spec = env(), SNOWBALLS["standard_disc"]
     _, stats, plain = _stats_rows(SnowballPDESolver(SHORT), make_snowball(spec), e)
     _, _, lagged = _stats_rows(SnowballPDESolver(SHORT), _lagged(spec, 0.2), e)
@@ -145,8 +143,7 @@ def test_value_mode_lag_discounts_the_maturity_leg_only(value_mode):
         assert ll[L.maturity[0]] < pl[L.maturity[0]]        # the lag's extra discount on the leg
 
 
-def test_value_mode_rows_do_not_depend_on_the_value_march(value_mode):
-    value_mode("snowball")
+def test_rows_do_not_depend_on_the_value_march():
     e, product = env(), make_snowball(SNOWBALLS["standard_cont"])
     _, _, with_value = _stats_rows(SnowballPDESolver(SHORT), product, e, price=True)
     _, _, stats_only = _stats_rows(SnowballPDESolver(SHORT), product, e, price=False)
@@ -155,11 +152,10 @@ def test_value_mode_rows_do_not_depend_on_the_value_march(value_mode):
         assert np.array_equal(a_lo, b_lo) and np.array_equal(a_up, b_up)
 
 
-def test_value_mode_phoenix_rows(value_mode):
+def test_phoenix_rows():
     """Task 13: the alive lower row is the value's 0.0 (Phoenix never exposes the knocked-in grid), the
     coupon cash rows are 0 (the value's rows carry no coupon), and the knock-out edge triggers the coupon
     of the record it pays, in payment units (F8)."""
-    value_mode("phoenix")
     solver, e = PhoenixPDESolver(SHORT), env()
     product = make_phoenix(dict(PHOENIX, memory_coupon=True))      # continuous KI
     p, stats, rows = _stats_rows(solver, product, e)

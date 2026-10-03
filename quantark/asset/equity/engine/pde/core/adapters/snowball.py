@@ -27,7 +27,6 @@ __all__ = ["SnowballAdapter", "LocalVolAdapterMixin", "LocalVolSnowballAdapter",
 class SnowballAdapter(FamilyAdapter):
 
     supports_statistics_group = True
-    statistics_mode = "value"     # spec 3B stage 2 (a), Phoenix (b); KOResetAdapter pins "legacy" until (c)
 
     def damping_key(self, product) -> str:
         # decision 12: the contract alone, alive or knocked in (spec 3A §5.3)

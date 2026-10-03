@@ -138,3 +138,9 @@ def test_ko_reset_pde_event_stats_absolute():
         + float(stats.expected_discounted_maturity_cashflow)
     )
     assert stats.pv == pytest.approx(pv_parts, abs=1e-8)
+
+
+def test_ko_reset_pde_module_has_no_quad_import():
+    import pathlib
+    import quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver as mod
+    assert "QuadEngine" not in pathlib.Path(mod.__file__).read_text()

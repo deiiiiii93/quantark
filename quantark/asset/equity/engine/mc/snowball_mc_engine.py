@@ -986,6 +986,18 @@ class SnowballMCEngine(BaseEngine):
             pre_ko_probability_total=pre_prob_total,
             post_ko_probability_total=post_prob_total,
             expected_discounted_post_ko_cashflow=float(expected_discounted_post_ko_cashflow),
+            # F6: each knock-out's settlement; a REBASED post schedule holds offsets from the
+            # knock-in time, so it has no payment time and says so
+            pre_ko_payment_times=np.asarray(pre_settlement_times, dtype=float),
+            post_ko_payment_times=(
+                np.array([
+                    float(r.settlement_time if r.settlement_time is not None else r.observation_time)
+                    for r in grid["post_profile"]["records"]
+                ])
+                if post_mode == PostKOScheduleMode.ABSOLUTE
+                else None
+            ),
+            post_ko_times_are_offsets=post_mode != PostKOScheduleMode.ABSOLUTE,
             **cashflow_fields,
         )
 

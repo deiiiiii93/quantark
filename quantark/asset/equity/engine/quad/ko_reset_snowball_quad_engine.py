@@ -928,6 +928,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             expected_discounted_post_ko_cashflow=float(
                 expected_discounted_post_ko_cashflow
             ),
+            pre_ko_payment_times=np.array([
+                float(r.settlement_time if r.settlement_time is not None else r.observation_time)
+                for r in pre_ko_records
+            ]),
+            post_ko_payment_times=np.array([
+                float(r.settlement_time if r.settlement_time is not None else r.observation_time)
+                for r in post_ko_records
+            ]),
             **cashflow_fields,
         )
 

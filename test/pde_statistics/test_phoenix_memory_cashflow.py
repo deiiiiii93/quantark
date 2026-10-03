@@ -13,8 +13,7 @@ PER_DATE, TOTAL = 2e-4, 5e-4
 
 
 @pytest.mark.slow
-def test_study_product_memory_coupon_cash_against_v2(value_mode):
-    value_mode("phoenix")
+def test_study_product_memory_coupon_cash_against_v2():
     product, env = CASES["ph_memory"][0](), CASES["ph_memory"][1]()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, env)
     v2 = PhoenixQuadEngineV2().calculate_event_stats(product, env)
@@ -23,8 +22,7 @@ def test_study_product_memory_coupon_cash_against_v2(value_mode):
     assert abs(pde.reconciliation_error) <= 1e-10
 
 
-def test_trigger_probability_is_memory_free(value_mode):
-    value_mode("phoenix")
+def test_trigger_probability_is_memory_free():
     mem, env = CASES["ph_memory"][0](), CASES["ph_memory"][1]()
     plain = CASES["ph_cont"][0]()
     a = PhoenixPDESolver(PDEParams()).calculate_event_stats(mem, env).coupon_probability
@@ -39,11 +37,10 @@ def _expiry(memory):
 
 
 @pytest.mark.parametrize("memory", [False, True])
-def test_expiry_buckets_hold_the_per_earning_cash(value_mode, memory):
+def test_expiry_buckets_hold_the_per_earning_cash(memory):
     """EXPIRY (spec 3B §5.3, decision 5): the ledger's n + 1 payment buckets carry exactly the coupon cash
     reported per earning date, and the coupon payment is path dependent."""
     from pde_3a.products import env
-    value_mode("phoenix")
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(_expiry(memory), env())
     assert pde.coupon_payment_is_path_dependent is True
     n = pde.ko_times.size
@@ -52,7 +49,7 @@ def test_expiry_buckets_hold_the_per_earning_cash(value_mode, memory):
     assert abs(pde.reconciliation_error) <= 1e-10
 
 
-def test_nodal_termination_units_are_the_knock_out_columns(value_mode):
+def test_nodal_termination_units_are_the_knock_out_columns():
     """Plan F4's control: without the coupon-barrier smoothing (NODAL) a termination unit T_j is the
     knock-out column KO_j, node for node, on the not-knocked-in block at every interior record. (At the
     maturity record the unit is U's; on the knocked-in block W's upper row is the always-knock-out row
@@ -60,7 +57,6 @@ def test_nodal_termination_units_are_the_knock_out_columns(value_mode):
     from quantark.asset.equity.engine.pde.core.march import march
     from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare
     from pde_3a.products import env
-    value_mode("phoenix")
     solver = PhoenixPDESolver(PDEParams(event_projection="nodal"))
     p = prepare(solver, _expiry(False), env(), OutputRequest(Operation.EVENT_STATS, event_stats=True))
     L = p.statistics.layout
@@ -71,7 +67,7 @@ def test_nodal_termination_units_are_the_knock_out_columns(value_mode):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("memory", [False, True])
-def test_expiry_buckets_match_v2(value_mode, memory):
+def test_expiry_buckets_match_v2(memory):
     """V2's ledger (quad/v2/engine.py ``_event_stats_from_result``): n knock-out rows, n coupon rows at
     the knock-out settlements, then the terminal rows with the terminal coupon merged into the maturity
     cash -- so the knock-out buckets compare per payment time before maturity, and the coupon cash per
@@ -79,7 +75,6 @@ def test_expiry_buckets_match_v2(value_mode, memory):
     coupon earned at the maturity observation on that record's row, this ledger books it in the terminal
     bucket unless a knock-out pays it (measured: 0.0016 vs V2's 0.017 on that row, plain)."""
     from pde_3a.products import env
-    value_mode("phoenix")
     product, e = _expiry(memory), env()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, e)
     v2 = PhoenixQuadEngineV2().calculate_event_stats(product, e)
@@ -94,9 +89,8 @@ def test_expiry_buckets_match_v2(value_mode, memory):
     assert abs(pde.expected_discounted_coupon_cashflow.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
 
 
-def test_carried_arrears_add_less_than_their_discounted_face(value_mode):
+def test_carried_arrears_add_less_than_their_discounted_face():
     """Review Focus 1: arrears carried in are paid at most once, with the first coupon that triggers."""
-    value_mode("phoenix")
     env = CASES["ph_memory"][1]()
     base = CASES["ph_memory"][0]()
     carried = CASES["ph_memory"][0]()

@@ -21,8 +21,7 @@ COUPON, CASH, PV = 1e-4, 2e-2, 2e-2
 
 
 @pytest.mark.parametrize("name", sorted(CLASS))
-def test_statistics_within_measured_bounds(value_mode, name):
-    value_mode("snowball", "phoenix")
+def test_statistics_within_measured_bounds(name):
     product, env = CASES[name][0](), CASES[name][1]()
     solver = (PhoenixPDESolver if name.startswith("ph") else SnowballPDESolver)(PDEParams())
     got, ref, b = solver.calculate_event_stats(product, env), BANK[name]["values"], BOUNDS[CLASS[name]]

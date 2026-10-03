@@ -8,18 +8,13 @@ to the V1 surface (ABSOLUTE post-KO mode only).
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import replace
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from quantark.asset.equity.engine.event_stats import (
-    payment_aware_cashflow_fields,
-)
 from quantark.asset.equity.engine.pde.base_pde_solver import GRID_CACHE_MAX_ENTRIES
 from quantark.asset.equity.engine.pde.core.adapters.ko_reset import KOResetAdapter
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
-from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
@@ -75,65 +70,8 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         fields.setdefault("provenance", self._native_provenance())
         return KOResetEventStats(**fields)
 
-    # price() / calculate_greeks() are SnowballPDESolver's; KOResetAdapter marches them.
-
-    def calculate_event_stats(
-        self,
-        product: KnockOutResetSnowballOption,
-        pricing_env: PricingEnvironment,
-        *,
-        npv: Optional[float] = None,
-        streams: Optional[frozenset] = None,
-    ) -> Optional[object]:
-        # the value mode marches the statistics as the PDE group of the value's own march
-        # (spec 3B §5.4, decision 6); the legacy mode delegates to the QUAD engine below
-        if self.adapter.supports_statistics_group:
-            return SnowballPDESolver.calculate_event_stats(self, product, pricing_env, npv=npv, streams=streams)
-        # streams is ignored: the KO-reset stats are QUAD-delegated (full
-        # distribution), not a prunable PDE indicator sweep. npv, when supplied
-        # by the single-pass price_with_events, is the PDE value used for the
-        # reconciliation residual (avoids a redundant self.price() solve).
-        if not isinstance(product, KnockOutResetSnowballOption):
-            return None
-        if pricing_env is None:
-            return None
-
-        from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
-            KOResetSnowballQuadEngine,
-        )
-
-        grid_points = max(501, int(getattr(self.params, "grid_size", 0) or 0))
-        quad_stats = KOResetSnowballQuadEngine(
-            QuadParams(grid_points=grid_points)
-        ).calculate_event_stats(product, pricing_env)
-        if quad_stats is None:
-            return None
-
-        pde_pv = float(npv) if npv is not None else float(self.price(product, pricing_env))
-        pv_delta = pde_pv - float(quad_stats.pv)
-        discounted_cashflows = np.array(
-            quad_stats.expected_discounted_cashflows,
-            dtype=float,
-            copy=True,
-        )
-        if discounted_cashflows.size:
-            discounted_cashflows[-1] += pv_delta
-        cashflow_fields = payment_aware_cashflow_fields(
-            pricing_env,
-            determination_times=quad_stats.determination_times,
-            payment_times=quad_stats.payment_times,
-            expected_discounted_cashflows=discounted_cashflows,
-            determination_dates=quad_stats.determination_dates,
-            payment_dates=quad_stats.payment_dates,
-        )
-        return replace(
-            quad_stats,
-            pv=pde_pv,
-            expected_discounted_maturity_cashflow=(
-                float(quad_stats.expected_discounted_maturity_cashflow) + pv_delta
-            ),
-            **cashflow_fields,
-        )
+    # price() / calculate_greeks() / calculate_event_stats() are SnowballPDESolver's; KOResetAdapter
+    # marches them (the statistics as the value's PDE group, spec 3B §5.4, decision 6).
 
     def _validate_product(self, product: KnockOutResetSnowballOption) -> None:
         super()._validate_product(product)

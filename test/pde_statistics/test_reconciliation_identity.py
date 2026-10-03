@@ -68,27 +68,24 @@ def _check(stats):
     p for p in itertools.product(sorted(SNOWBALL_CASES), sorted(ENVS), ("standard", "high"),
                                  (None, "nodal"), sorted(STREAMS), ("direct", "pwe", "session"))
     if p[5] == "direct" or (p[2] == "standard" and p[4] == "all")], ids=_ids)
-def test_snowball_identity(value_mode, case, env_name, accuracy, projection, streams, entry):
-    value_mode("snowball")
+def test_snowball_identity(case, env_name, accuracy, projection, streams, entry):
     make, over = SNOWBALL_CASES[case]
     solver = SnowballPDESolver(PDEParams(accuracy=accuracy, event_projection=projection))
     _check(_entry(entry, solver, make(), ENVS[env_name](**over), STREAMS[streams]))
 
 
 @pytest.mark.parametrize("case", ["cont", "discrete", "reverse"])
-def test_snowball_identity_fast(value_mode, case):
+def test_snowball_identity_fast(case):
     """The matrix's quick slice: one standard flat-env direct run per KI class (the slow matrix has the rest)."""
-    value_mode("snowball")
     make, over = SNOWBALL_CASES[case]
     _check(SnowballPDESolver(PDEParams()).calculate_event_stats(make(), env(**over)))
 
 
-def test_local_vol_snowball_identity(value_mode):
+def test_local_vol_snowball_identity():
     """Review Focus 5: the local-vol route marches the same value-mode statistics."""
     from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import LocalVolSnowballPDESolver
     from pde_bitwise.capture_book import env_grid_vol, snowball
 
-    value_mode("snowball")
     stats = LocalVolSnowballPDESolver(params=PDEParams()).calculate_event_stats(snowball("continuous"), env_grid_vol())
     assert stats.provenance.statistics_model == "local_vol_1d"
     _check(stats)
@@ -119,28 +116,25 @@ PHOENIX_CASES = {
     p for p in itertools.product(sorted(PHOENIX_CASES), sorted(ENVS), ("standard", "high"),
                                  (None, "nodal"), sorted(STREAMS), ("direct", "pwe", "session"))
     if p[5] == "direct" or (p[2] == "standard" and p[4] == "all")], ids=_ids)
-def test_phoenix_identity(value_mode, case, env_name, accuracy, projection, streams, entry):
-    value_mode("phoenix")
+def test_phoenix_identity(case, env_name, accuracy, projection, streams, entry):
     make, over = PHOENIX_CASES[case]
     solver = PhoenixPDESolver(PDEParams(accuracy=accuracy, event_projection=projection))
     _check(_entry(entry, solver, make(), ENVS[env_name](**over), STREAMS[streams]))
 
 
 @pytest.mark.parametrize("case", ["plain", "memory", "coincident"])
-def test_phoenix_identity_fast(value_mode, case):
-    value_mode("phoenix")
+def test_phoenix_identity_fast(case):
     make, over = PHOENIX_CASES[case]
     _check(PhoenixPDESolver(PDEParams()).calculate_event_stats(make(), env(**over)))
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("projection", [None, "nodal"])
-def test_local_vol_memory_phoenix_identity(value_mode, projection):
+def test_local_vol_memory_phoenix_identity(projection):
     """Review Focus 5: a daily-KI memory Phoenix on a crash local-vol surface."""
     from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import LocalVolPhoenixPDESolver
     from pde_3a.products import localvol_phoenix_case
 
-    value_mode("phoenix")
     product, e, lv = localvol_phoenix_case("crash", 1.0, "daily_ki_memory")
     solver = LocalVolPhoenixPDESolver(params=PDEParams(event_projection=projection), local_vol_surface=lv)
     _check(solver.calculate_event_stats(product, e))
@@ -160,25 +154,22 @@ KO_RESET_CASES = {
     p for p in itertools.product(sorted(KO_RESET_CASES), sorted(ENVS), ("standard", "high"),
                                  (None, "nodal"), sorted(STREAMS), ("direct", "pwe", "session"))
     if p[5] == "direct" or (p[2] == "standard" and p[4] == "all")], ids=_ids)
-def test_ko_reset_identity(value_mode, case, env_name, accuracy, projection, streams, entry):
-    value_mode("ko_reset")
+def test_ko_reset_identity(case, env_name, accuracy, projection, streams, entry):
     make, over = KO_RESET_CASES[case]
     solver = KOResetSnowballPDESolver(PDEParams(accuracy=accuracy, event_projection=projection))
     _check(_entry(entry, solver, make(), ENVS[env_name](**over), STREAMS[streams]))
 
 
 @pytest.mark.parametrize("case", sorted(KO_RESET_CASES))
-def test_ko_reset_identity_fast(value_mode, case):
-    value_mode("ko_reset")
+def test_ko_reset_identity_fast(case):
     make, over = KO_RESET_CASES[case]
     _check(KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(make(), env(**over)))
 
 
 @pytest.mark.parametrize("projection", [None, "nodal"])
 @pytest.mark.parametrize("memory", [False, True], ids=["plain", "memory"])
-def test_expiry_phoenix_identity(value_mode, memory, projection):
+def test_expiry_phoenix_identity(memory, projection):
     """EXPIRY (Task 14): coupons paid at termination through the termination-unit columns (plan F4)."""
-    value_mode("phoenix")
     product = make_phoenix(dict(PHOENIX, memory_coupon=memory, coupon_pay_type="expiry"))
     _check(PhoenixPDESolver(PDEParams(event_projection=projection)).calculate_event_stats(product, env()))
 
@@ -186,12 +177,11 @@ def test_expiry_phoenix_identity(value_mode, memory, projection):
 @pytest.mark.parametrize("pay_type", ["instant", "expiry"])
 @pytest.mark.parametrize("projection", [None, "nodal"])
 @pytest.mark.parametrize("spot", [78.0, 95.0], ids=["miss", "pay"])
-def test_dated_memory_phoenix_on_its_first_observation_date(value_mode, spot, projection, pay_type):
+def test_dated_memory_phoenix_on_its_first_observation_date(spot, projection, pay_type):
     """F16: a memory coupon decided at valuation -- the miss reads the one-missed state, the pay adds today's
     coupon (EXPIRY: through the termination value at the spot)."""
     from pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
 
-    value_mode("phoenix")
     # a fixed coupon fraction: 0.8.0 accrues the floating first period to zero at its own date, and a
     # zero missed coupon would leave the one-missed state equal to state 0
     p, _ = _dated("phoenix", fixed_fraction=1.0 / 12.0)

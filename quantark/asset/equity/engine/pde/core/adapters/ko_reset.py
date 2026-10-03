@@ -19,13 +19,7 @@ __all__ = ["KOResetAdapter"]
 
 class KOResetAdapter(SnowballAdapter):
 
-    statistics_mode = "legacy"   # pinned: the Snowball flip (stage 2 (a)) must not reach this family
-
-    @property
-    def supports_statistics_group(self):
-        """The legacy mode delegates the statistics to the QUAD engine (calculate_event_stats); the
-        value mode marches them as a PDE group (spec 3B §5.4, decision 6)."""
-        return self.statistics_mode == "value"
+    supports_statistics_group = True   # spec 3B stage 2 (c): native, the QUAD delegation is gone
 
     def statistics_family(self, prepared, streams):
         from ..statistics.ko_reset import KOResetStatistics

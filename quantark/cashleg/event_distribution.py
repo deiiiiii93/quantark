@@ -14,7 +14,7 @@ from quantark.asset.equity.engine.event_stats import (
     PhoenixEventStats,
     StatisticsProvenance,
 )
-from quantark.util.exceptions import NumericalError
+from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.util.numerical import Tolerance, almost_equal
 
 
@@ -138,6 +138,10 @@ class EventDistribution:
         cls, stats: AutocallableEventStats
     ) -> "EventDistribution":
         """Convert the existing engine event-stats API into EventDistribution."""
+        from quantark.asset.equity.engine.event_stats import KOResetEventStats
+
+        if isinstance(stats, KOResetEventStats):
+            return cls._from_ko_reset(stats)
 
         ko_times = np.asarray(stats.ko_times, dtype=float)
         ko_probability = np.asarray(stats.ko_probability, dtype=float)
@@ -239,6 +243,86 @@ class EventDistribution:
                 and stats.coupon_payment_is_path_dependent
                 else frozenset()
             ),
+            provenance=getattr(stats, "provenance", None),
+        )
+        return dist.normalized()
+
+    @classmethod
+    def _from_ko_reset(cls, stats) -> "EventDistribution":
+        """Both knock-out schedules on one time axis and, when the producer reports them, the two
+        maturity outcomes with their own determination and payment times (spec 3B §5.4, plan F5, F6)."""
+        if stats.post_ko_times_are_offsets:
+            raise NotImplementedError(
+                "a REBASED post-knock-in schedule holds offsets from the knock-in time; "
+                "a distribution needs absolute times"
+            )
+        if stats.pre_ko_payment_times is None or stats.post_ko_payment_times is None:
+            raise ValidationError(
+                f"{type(stats).__name__} from this producer carries no knock-out payment times "
+                "(pre_ko_payment_times / post_ko_payment_times)"
+            )
+        pre_t = np.asarray(stats.pre_ko_times, dtype=float)
+        post_t = np.asarray(stats.post_ko_times, dtype=float)
+        n_pre, n_post = pre_t.size, post_t.size
+        times = np.r_[pre_t, post_t]
+        tag = np.r_[np.zeros(n_pre), np.ones(n_post)]
+        order = np.lexsort((tag, times))                     # the pre record first at a tie
+        event_times = times[order]
+        ko_probability = np.r_[np.asarray(stats.pre_ko_probability, dtype=float),
+                               np.asarray(stats.post_ko_probability, dtype=float)][order]
+        ko_payment = np.r_[np.asarray(stats.pre_ko_payment_times, dtype=float),
+                           np.asarray(stats.post_ko_payment_times, dtype=float)][order]
+
+        ledger_payment = np.asarray(getattr(stats, "payment_times", np.array([])), dtype=float)
+        payment_times: Dict[EventType, Union[np.ndarray, float]] = {EventType.KO: ko_payment}
+        determination_times: Dict[EventType, float] = {}
+        buckets = stats.pre_maturity_probability is not None
+        if buckets:
+            maturity_no_ko = float(stats.pre_maturity_probability)
+            maturity_with_ki = float(stats.post_maturity_probability)
+            payment_times[EventType.MATURITY_NO_KO] = float(stats.pre_maturity_payment_time)
+            payment_times[EventType.MATURITY_WITH_KI] = float(stats.post_maturity_payment_time)
+            determination_times = {EventType.MATURITY_NO_KO: float(stats.pre_maturity_time),
+                                   EventType.MATURITY_WITH_KI: float(stats.post_maturity_time)}
+        else:
+            # one maturity outcome, split by the knocked-in share as for every other autocallable
+            maturity_probability = max(0.0, 1.0 - float(np.sum(ko_probability)))
+            ki_settle = stats.ki_survive_knocked_in_probability
+            if ki_settle is None:
+                ki_settle = stats.ki_probability
+            maturity_with_ki = min(maturity_probability, max(0.0, float(ki_settle)))
+            maturity_no_ko = max(0.0, maturity_probability - maturity_with_ki)
+            if ledger_payment.size:
+                payment_times[EventType.MATURITY_NO_KO] = float(ledger_payment[-1])
+                payment_times[EventType.MATURITY_WITH_KI] = float(ledger_payment[-1])
+
+        event_dates, payment_dates = None, {}
+        det_dates = getattr(stats, "determination_dates", None)
+        pay_dates = getattr(stats, "payment_dates", None)
+        n = n_pre + n_post
+        if det_dates is not None and len(det_dates) >= n:
+            event_dates = [det_dates[i] for i in order]
+        if pay_dates is not None and len(pay_dates) >= n + 1:
+            payment_dates[EventType.KO] = tuple(pay_dates[i] for i in order)
+            payment_dates[EventType.MATURITY_NO_KO] = pay_dates[-2] if buckets else pay_dates[-1]
+            payment_dates[EventType.MATURITY_WITH_KI] = pay_dates[-1]
+
+        # F5: the pre-maturity mass leaves the survival at its own determination when that precedes
+        # the last knock-out; otherwise the last node keeps the one-maturity convention
+        survival = 1.0 - np.cumsum(ko_probability)
+        if buckets and float(stats.pre_maturity_time) < float(event_times[-1]) - Tolerance.PROBABILITY:
+            survival = survival - np.where(event_times >= float(stats.pre_maturity_time), maturity_no_ko, 0.0)
+        survival = np.concatenate([[1.0], survival])
+
+        dist = cls(
+            event_times=event_times,
+            event_dates=event_dates,
+            probabilities={EventType.KO: ko_probability, EventType.MATURITY_NO_KO: maturity_no_ko,
+                           EventType.MATURITY_WITH_KI: maturity_with_ki},
+            survival_probability=survival,
+            payment_times=payment_times,
+            payment_dates=payment_dates or None,
+            determination_times=determination_times,
             provenance=getattr(stats, "provenance", None),
         )
         return dist.normalized()

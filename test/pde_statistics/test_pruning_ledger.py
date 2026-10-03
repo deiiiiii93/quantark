@@ -14,8 +14,7 @@ LEDGER = ("determination_times", "payment_times", "expected_discounted_cashflows
 
 @pytest.mark.parametrize("streams", [frozenset({EventType.KO}), frozenset(), frozenset({EventType.KI})],
                          ids=["ko", "none", "ki"])
-def test_snowball_pruning_is_reporting_only(value_mode, streams):
-    value_mode("snowball")
+def test_snowball_pruning_is_reporting_only(streams):
     solver, product, e = SnowballPDESolver(PDEParams()), CASES["sb_cont"][0](), CASES["sb_cont"][1]()
     full, lean = solver.calculate_event_stats(product, e), solver.calculate_event_stats(product, e, streams=streams)
     for f in ("determination_times", "payment_times", "expected_discounted_cashflows", "ko_probability",
@@ -30,8 +29,7 @@ def test_snowball_pruning_is_reporting_only(value_mode, streams):
 @pytest.mark.parametrize("case", ["ph_cont", "ph_memory"])
 @pytest.mark.parametrize("streams", [frozenset({EventType.KO}), frozenset(), frozenset({EventType.KI})],
                          ids=["ko", "none", "ki"])
-def test_phoenix_pruning_is_reporting_only(value_mode, case, streams):
-    value_mode("phoenix")
+def test_phoenix_pruning_is_reporting_only(case, streams):
     solver, product, e = PhoenixPDESolver(PDEParams()), CASES[case][0](), CASES[case][1]()
     full, lean = solver.calculate_event_stats(product, e), solver.calculate_event_stats(product, e, streams=streams)
     for f in LEDGER:

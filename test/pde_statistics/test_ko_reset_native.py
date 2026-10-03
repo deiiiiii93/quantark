@@ -16,8 +16,7 @@ SPOTS = {"kr_cont": 100.0, "kr_cont_spot90": 90.0, "kr_cont_spot101": 101.0}
 
 
 @pytest.mark.parametrize("name", sorted(SPOTS))
-def test_against_the_converged_quad(value_mode, name):
-    value_mode("ko_reset")
+def test_against_the_converged_quad(name):
     product, e = make_ko_reset(KO_RESET), env(spot=SPOTS[name])
     s, ref = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, e), REF[name]
     assert np.max(np.abs(s.pre_ko_probability - ref["pre_ko_probability"])) <= 5e-5
@@ -38,8 +37,7 @@ V2_QUALIFIED, M_PRE, M_POST = 5e-4, 3e-2, 5e-3
 
 @pytest.mark.slow
 @pytest.mark.parametrize("name", sorted(SPOTS))
-def test_maturity_buckets_against_v2(value_mode, name):
-    value_mode("ko_reset")
+def test_maturity_buckets_against_v2(name):
     product, e = make_ko_reset(KO_RESET), env(spot=SPOTS[name])
     s = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, e)
     v2 = KOResetSnowballQuadEngineV2().calculate_event_stats(product, e)
@@ -51,8 +49,7 @@ def test_maturity_buckets_against_v2(value_mode, name):
     assert {s.pre_maturity_payment_time, s.post_maturity_payment_time} <= set(s.payment_times.tolist())
 
 
-def test_field_layout_is_complete(value_mode):
-    value_mode("ko_reset")
+def test_field_layout_is_complete():
     s = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(make_ko_reset(KO_RESET), env())
     for f in ("pre_ko_payment_times", "post_ko_payment_times", "expected_discounted_pre_maturity_cashflow",
               "expected_discounted_post_maturity_cashflow", "pre_maturity_probability", "post_maturity_probability",

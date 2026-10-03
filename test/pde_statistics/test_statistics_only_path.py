@@ -23,9 +23,8 @@ PRODUCTS = {
 }
 
 
-def test_statistics_only_ko_reset_seeds_its_staged_surface(value_mode):
+def test_statistics_only_ko_reset_seeds_its_staged_surface():
     """The staged seed index is the value terminal's; a statistics-only march sets it itself (decision 14)."""
-    value_mode("ko_reset")
     solver, product = PRODUCTS["ko_reset"]()
     own = solver.calculate_event_stats(product, env())
     solver._v0_seed_idx = None
@@ -47,11 +46,8 @@ def test_statistics_only_expiry_phoenix_builds_its_termination_tables():
     assert solver._term_df_maturity is not None and solver._term_next_ko_time is not None
 
 
-@pytest.mark.parametrize("mode", ["legacy", "value"])
 @pytest.mark.parametrize("name", sorted(PRODUCTS))
-def test_supplied_npv_equal_to_the_price_changes_no_field(value_mode, name, mode):
-    if mode == "value":
-        value_mode("snowball", "phoenix", "ko_reset")
+def test_supplied_npv_equal_to_the_price_changes_no_field(name):
     solver, product = PRODUCTS[name]()
     own = solver.calculate_event_stats(product, env())
     passed = solver.calculate_event_stats(product, env(), npv=float(own.pv))

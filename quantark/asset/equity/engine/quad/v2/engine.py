@@ -483,6 +483,17 @@ class AutocallableQuadEngineV2(BaseEngine):
                 expected_discounted_post_ko_cashflow=sum(
                     values[f"ko_cash:{r[0]}"] for r in post
                 ),
+                # each knock-out's settlement and the two maturity outcomes (spec 3B §5.4, F6)
+                pre_ko_payment_times=np.array([r[2] for r in pre], dtype=float),
+                post_ko_payment_times=np.array([r[2] for r in post], dtype=float),
+                expected_discounted_pre_maturity_cashflow=values["terminal_alive_cash"],
+                expected_discounted_post_maturity_cashflow=values["terminal_ki_cash"],
+                pre_maturity_probability=values["terminal_alive_probability"],
+                post_maturity_probability=values["terminal_ki_probability"],
+                pre_maturity_time=metadata["pre_maturity"],
+                post_maturity_time=metadata["maturity"],
+                pre_maturity_payment_time=metadata["pre_maturity"] + metadata["terminal_delay"],
+                post_maturity_payment_time=metadata["maturity"] + metadata["terminal_delay"],
             )
             return KOResetEventStats(**fields)
         return AutocallableEventStats(**fields)
