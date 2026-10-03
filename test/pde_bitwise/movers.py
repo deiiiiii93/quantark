@@ -34,14 +34,33 @@ def _carries_statistics(fields):
     return any(k.startswith(("stats_", "dist_")) for k in fields)
 
 
-def movers_3b(stage, rows, capture):
+def phoenix_kind(fields):
+    """``plain`` (non-memory INSTANT), ``memory`` or ``expiry`` from a row's previous capture, else ``None``.
+
+    The legacy statistics reported no coupon cash for a memory coupon, and their EXPIRY ledger paid every
+    coupon at the terminal payment; a plain coupon pays at its own observation."""
+    if "stats_ko_times" not in fields or "stats_payment_times" not in fields:
+        return None
+    cash = fields.get("stats_expected_discounted_coupon_cashflow")
+    if not isinstance(cash, list) or not cash:
+        return "memory"
+    n = len(fields["stats_ko_times"])
+    pay = fields["stats_payment_times"]
+    coupon_pay, terminal = pay[n:2 * n], pay[-1]
+    return "expiry" if all(t == terminal for t in coupon_pay) else "plain"
+
+
+def movers_3b(stage, rows, capture, kind=None):
     """Data-driven: a family stage moves every row of the family whose PREVIOUS capture carries statistics
     or distribution fields; a rule stage moves its tagged rows."""
     import capture_book as cb
     spec = STAGE_3B[stage]
     if "family" in spec:
-        return sorted(rid for rid in rows
-                      if cb.family_tag(rid) == spec["family"] and _carries_statistics(capture.get(rid, {})))
+        out = sorted(rid for rid in rows
+                     if cb.family_tag(rid) == spec["family"] and _carries_statistics(capture.get(rid, {})))
+        if kind is not None:
+            out = [rid for rid in out if phoenix_kind(capture[rid]) == kind]
+        return out
     return sorted(rid for rid, row in rows.items() if row.tags & spec["tags"])
 
 
@@ -67,6 +86,8 @@ def main(argv=None):
     mode.add_argument("--write", nargs=2, metavar=("FLIP", "PATH"), help="3A flip movers")
     mode.add_argument("--stage", choices=sorted(STAGE_3B), help="3B stage movers (needs --capture and PATH)")
     ap.add_argument("--capture", default=None, help="the previous commit's capture (3B family stages)")
+    ap.add_argument("--kind", choices=("plain", "memory", "expiry"), default=None,
+                    help="stage b: only the Phoenix movers of this kind (phoenix_kind)")
     ap.add_argument("path", nargs="?", default=None)
     a = ap.parse_args(argv)
     import capture_book as cb
@@ -80,7 +101,7 @@ def main(argv=None):
         ap.error("--stage needs --capture PREV.json and PATH")
     with open(a.capture) as fh:
         capture = json.load(fh)
-    ids = movers_3b(a.stage, cb.rows(), capture)
+    ids = movers_3b(a.stage, cb.rows(), capture, a.kind)
     with open(a.path, "w") as fh:
         fh.write("\n".join(ids) + "\n")
     print(f"stage {a.stage}: {len(ids)} movers -> {a.path}")

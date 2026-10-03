@@ -45,6 +45,19 @@ def test_the_first_matching_bound_applies(tmp_path):
     assert code == 1 and "beyond bound 1e-10" in out
 
 
+def test_bound_field_row_list_from_a_file(tmp_path):
+    """``@PATH`` names exact row ids, one per line (spec 3B stage 2 (b): the plain Phoenix movers)."""
+    base = {"r": {"stats_x": h(1.0)}}
+    branch = {"r": {"stats_x": h(1.5)}}
+    listed, other = tmp_path / "listed.txt", tmp_path / "other.txt"
+    listed.write_text("r\n")
+    other.write_text("q\n")
+    code, out = _run(tmp_path, base, branch, "--bound-field", f"@{listed}:stats_x=1e-3")
+    assert code == 1 and "beyond bound 0.001" in out
+    code, out = _run(tmp_path, base, branch, "--bound-field", f"@{other}:stats_x=1e-3")
+    assert code == 0, out
+
+
 def test_movable_fields_reject_a_price_move(tmp_path):
     base = {"r": {"stats_pv": h(1.0), "price": h(100.0)}}
     branch = {"r": {"stats_pv": h(1.5), "price": h(100.0 + 1e-13)}}

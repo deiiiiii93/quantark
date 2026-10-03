@@ -54,8 +54,7 @@ def march(prepared) -> MarchResult:
     # (only while CrankNicolson.step is still that dispatch: a patched step is honoured)
     builtin = type(stepper) is CrankNicolson and CrankNicolson.step is _BUILTIN_STEP
     advance = {Backend.BANDED: banded_advance, Backend.SPARSE_LU: sparse_lu_advance}
-    plan = [(g, bool(g.policy.zero_diffusion_theta_one), bool(g.policy.dt_as_python_float),
-             tuple(g.surfaces),
+    plan = [(g, bool(g.policy.zero_diffusion_theta_one), tuple(g.surfaces),
              None if g.rolling else (n_int, 1 if g.one_dimensional_rhs else len(g.surfaces)),
              advance[g.backend] if builtin else stepper.step)
             for g in prepared.groups]
@@ -66,7 +65,7 @@ def march(prepared) -> MarchResult:
         s = step_sets.get(k)
         if s is None:
             s = step_sets[k] = coeffs.step_set(k, cache)
-        for group, zd_theta_one, dt_float, surfaces, shape, step in plan:
+        for group, zd_theta_one, surfaces, shape, step in plan:
             theta = thetas[j]
             if zd_theta_one and coeffs.is_zero_diffusion(k):
                 theta = 1.0  # upwind advection is monotone only fully implicit
@@ -92,8 +91,7 @@ def march(prepared) -> MarchResult:
                 n_cols = None
             if not builtin:
                 v_next.setflags(write=False)   # a component gets a read-only view (§5.8); the built-in never writes
-            gdt = float(dt) if dt_float else dt
-            out = step(GroupState(group, v_next), s, gdt, theta, (lower, upper))
+            out = step(GroupState(group, v_next), s, dt, theta, (lower, upper))
             # the validator's two checks inline; it runs (and raises, naming the
             # stepper) only when one of them fails, or for a rolling group
             if shape is None or type(out) is not np.ndarray or out.shape != shape \
@@ -138,6 +136,5 @@ def warm_factorizations(prepared, max_entries=None) -> dict:
             theta = float(schedule[j])
             if group.policy.zero_diffusion_theta_one and coeffs.is_zero_diffusion(k):
                 theta = 1.0
-            gdt = float(dt) if group.policy.dt_as_python_float else dt
-            factor(group.backend, coeffs.step_set(k, cache), gdt, theta)
+            factor(group.backend, coeffs.step_set(k, cache), dt, theta)
     return {b: MappingProxyType(dict(cache.store(b))) for b in Backend}

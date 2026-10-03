@@ -12,7 +12,7 @@ from typing import NamedTuple
 import numpy as np
 
 __all__ = ["Backend", "BoundaryPolicy", "GroupPolicy", "ColumnGroup", "GroupState",
-           "VALUE", "STATISTICS_LEGACY"]
+           "VALUE"]
 
 
 class Backend(Enum):
@@ -22,19 +22,15 @@ class Backend(Enum):
 
 class BoundaryPolicy(Enum):
     DIRICHLET = "dirichlet"   # the adapter writes rows 0/-1 of step j before the solve
-    CARRY = "carry"           # rows 0/-1 of step j are step j+1's (statistics-legacy)
 
 
 @dataclass(frozen=True)
 class GroupPolicy:
     boundary: BoundaryPolicy
     zero_diffusion_theta_one: bool    # θ=1 on zero-diffusion coefficient sets
-    zero_slope_after_events: bool     # v[0]=v[1], v[-1]=v[-2] after the step's events
-    dt_as_python_float: bool = False  # the step's dt reaches the kernel (and its cache key) as a Python float
 
 
-VALUE = GroupPolicy(BoundaryPolicy.DIRICHLET, True, False)
-STATISTICS_LEGACY = GroupPolicy(BoundaryPolicy.CARRY, False, True, dt_as_python_float=True)
+VALUE = GroupPolicy(BoundaryPolicy.DIRICHLET, True)
 
 
 @dataclass(frozen=True)

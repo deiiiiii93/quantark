@@ -42,7 +42,8 @@ class FamilyAdapter:
     supports_statistics_group = False
     #: What the route samples per step (explain's route section).
     sample_kind = SampleKind.SCALAR
-    #: "legacy" (the 0.8.0 statistics sweep) or "value" (spec 3B §5.1); flipped per family at stage 2
+    #: "value" (spec 3B §5.1) once a family's statistics march as a value-policy group; KO-reset's
+    #: "legacy" (its QUAD delegation) goes at stage 2 (c)
     statistics_mode = "legacy"
     #: The model the family's own statistics belong to (StatisticsProvenance.statistics_model)
     statistics_model = "flat_vol_1d"

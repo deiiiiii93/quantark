@@ -35,11 +35,11 @@ def test_phoenix_price_with_events_emits_coupon_stream(kind):
 @pytest.mark.parametrize("memory", [False, True])
 @pytest.mark.parametrize("kind", ["mc", "pde", "quad"])
 def test_phoenix_cashflow_decomposition_reconciles(kind, memory):
-    # pv == sum(ko_cf) + sum(coupon_cf) + maturity_cf. For non-memory coupons the
-    # coupon PV is classified in its own field (native PDE/QUAD parity with MC);
-    # for memory coupons the path-dependent amount can't be recovered from a
-    # trigger indicator, so PDE/QUAD omit the coupon cashflow (maturity absorbs it)
-    # but still reconcile. coupon_probability is always present.
+    # pv == sum(ko_cf) + sum(coupon_cf) + maturity_cf. memory coupons now carry their
+    # cash (spec 3B §5.3): PDE reports the coupon cashflow and the maturity leg holds
+    # the redemption only. QUAD keeps its own behaviour: it omits a memory coupon's
+    # cash (the maturity leg absorbs it) and still reconciles.
+    # coupon_probability is always present.
     env = make_env()
     ph = make_phoenix(memory=memory)
     s = make_engine(kind, "phoenix").calculate_event_stats(ph, env)
@@ -54,6 +54,11 @@ def test_phoenix_cashflow_decomposition_reconciles(kind, memory):
         # Non-memory PDE/QUAD classify the coupon PV separately.
         if kind in ("pde", "quad"):
             assert s.expected_discounted_coupon_cashflow.size == s.ko_times.size
+    elif kind == "pde":
+        assert s.expected_discounted_coupon_cashflow.size > 0
+        assert float(np.sum(s.expected_discounted_coupon_cashflow)) > 0.0
+    elif kind == "quad":
+        assert s.expected_discounted_coupon_cashflow.size == 0
 
 
 @pytest.mark.parametrize("kind", ["mc", "pde", "quad"])

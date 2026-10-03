@@ -128,3 +128,11 @@ def test_the_phoenix_override_name_is_gone():
     # spec 3A §5.7 (flip e): Phoenix takes theta = 1 on zero-diffusion steps like every value group
     import quantark.asset.equity.engine.pde.core.groups as g
     assert not hasattr(g, "VALUE_NO_ZERO_DIFFUSION_OVERRIDE")
+
+
+def test_the_legacy_statistics_policy_is_gone():
+    # spec 3B stage 2 (b): every statistics group takes the value policy
+    import quantark.asset.equity.engine.pde.core.groups as g
+    assert not hasattr(g, "STATISTICS_LEGACY")
+    assert [f.name for f in __import__("dataclasses").fields(g.GroupPolicy)] == ["boundary", "zero_diffusion_theta_one"]
+    assert [b.name for b in g.BoundaryPolicy] == ["DIRICHLET"]

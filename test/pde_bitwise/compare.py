@@ -94,7 +94,8 @@ def main(argv=None) -> int:
     ap.add_argument("--bound", action="append", default=[], metavar="GLOB=REL",
                     help="allowed rows matching GLOB may move by at most REL relative")
     ap.add_argument("--bound-field", action="append", default=[], metavar="ROWGLOB:FIELDGLOB=ABS",
-                    help="on allowed rows matching ROWGLOB, fields matching FIELDGLOB may move by at most ABS (absolute)")
+                    help="on allowed rows matching ROWGLOB (or listed in @PATH), fields matching FIELDGLOB may move "
+                         "by at most ABS (absolute); the first matching bound applies")
     ap.add_argument("--movable-fields", action="append", default=[], metavar="FIELDGLOB",
                     help="on allowed rows, a differing field that matches none of these globs is a violation")
     ap.add_argument("--allow-added-key", action="append", default=[], metavar="KEYGLOB",
@@ -143,7 +144,10 @@ def main(argv=None) -> int:
     field_bounds = []
     for spec in a.bound_field:
         lhs, abs_tol = spec.rsplit("=", 1)
-        rglob, fglob = lhs.split(":", 1)
+        rglob, fglob = lhs.rsplit(":", 1)
+        if rglob.startswith("@"):                       # @PATH: exact row ids, one per line
+            with open(rglob[1:]) as fh:
+                rglob = frozenset(line.strip() for line in fh if line.strip())
         field_bounds.append((rglob, fglob, float(abs_tol)))
     maxdelta = {}
     for row in allowed:
@@ -155,7 +159,8 @@ def main(argv=None) -> int:
                 bad.append(f"{row}.{k} moved but is not a movable field")
                 continue
             for rglob, fglob, tol in field_bounds:
-                if not (fnmatch.fnmatchcase(row, rglob) and fnmatch.fnmatchcase(k, fglob)):
+                row_ok = row in rglob if isinstance(rglob, frozenset) else fnmatch.fnmatchcase(row, rglob)
+                if not (row_ok and fnmatch.fnmatchcase(k, fglob)):
                     continue
                 vb, vn = b_row[k], n_row[k]
                 if isinstance(vb, list) != isinstance(vn, list) or (isinstance(vb, list) and len(vb) != len(vn)):

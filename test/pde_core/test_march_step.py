@@ -14,7 +14,7 @@ from quantark.asset.equity.engine.pde.core.backends import (
     FactorizationCache, banded_advance, operator_matrix, sparse_lu_advance)
 from quantark.asset.equity.engine.pde.core.coefficients import StepSet
 from quantark.asset.equity.engine.pde.core.groups import (
-    STATISTICS_LEGACY, VALUE, Backend, ColumnGroup, GroupState)
+    VALUE, Backend, ColumnGroup, GroupState)
 
 RNG = np.random.default_rng(7)
 N = 12
@@ -51,9 +51,10 @@ def test_two_column_banded_group_matches_the_legacy_step():
     assert_close(out.tolist(), _legacy_banded(l, c, u, 0.01, 0.5, v, lo, up).tolist())
 
 
-def test_statistics_group_matches_the_legacy_step():
+def test_rolling_value_group_matches_the_legacy_banded_step():
+    # the step arithmetic does not depend on the policy: the rolling statistics group (spec 3B §5.1)
     l, c, u = _lcu(); v = RNG.random((N, 6))
-    g = ColumnGroup("stats", ("stats_v0", "stats_v1"), Backend.BANDED, STATISTICS_LEGACY)
+    g = ColumnGroup("stats", ("stats_v0", "stats_v1"), Backend.BANDED, VALUE, rolling=True)
     out = banded_advance(GroupState(g, v), _set(l, c, u), 0.01, 1.0, (v[0], v[-1]))
     assert_close(out.tolist(), _legacy_banded(l, c, u, 0.01, 1.0, v, v[0], v[-1]).tolist())
 

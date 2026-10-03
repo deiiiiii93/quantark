@@ -111,22 +111,24 @@ class PhoenixPDESolver(SnowballPDESolver):
                 "Immediate KO payoff requested but no KO observation exists at valuation date."
             )
 
-        spot = pricing_env.spot
-        coupon_payoff = 0.0
-        if product.is_coupon_triggered(spot, 0):
-            coupon_payoff = product.get_coupon_payoff(0)
-            if product.has_memory_coupon:
-                # A knock-out is the memory arrears' last chance: Monte Carlo, QUAD V2 and the lifecycle
-                # tracker all release them with the period's coupon. Leaving them out paid a knock-out
-                # decided at the valuation instant short by every coupon owed.
-                coupon_payoff += float(product.coupon_config.initial_coupon_arrears)
-
-        payoff = float(ko_record_0.payoff or 0.0) + float(coupon_payoff)
+        payoff = float(ko_record_0.payoff or 0.0) + float(self._immediate_ko_coupon(product, pricing_env))
         settlement_time = ko_record_0.settlement_time
         if settlement_time is not None and settlement_time > 0.0:
             df = pricing_env.get_discount_factor(settlement_time)
             return float(payoff) * float(df)
         return float(payoff)
+
+    def _immediate_ko_coupon(self, product: PhoenixOption, pricing_env: PricingEnvironment) -> float:
+        """The undiscounted coupon a knock-out at the valuation instant pays with its redemption."""
+        if not product.is_coupon_triggered(pricing_env.spot, 0):
+            return 0.0
+        coupon_payoff = product.get_coupon_payoff(0)
+        if product.has_memory_coupon:
+            # A knock-out is the memory arrears' last chance: Monte Carlo, QUAD V2 and the lifecycle
+            # tracker all release them with the period's coupon. Leaving them out paid a knock-out
+            # decided at the valuation instant short by every coupon owed.
+            coupon_payoff += float(product.coupon_config.initial_coupon_arrears)
+        return float(coupon_payoff)
 
     def _calculate_terminal_value(
         self, product: PhoenixOption, spot: float, pricing_env: PricingEnvironment
