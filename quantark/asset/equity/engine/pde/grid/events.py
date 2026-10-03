@@ -302,12 +302,16 @@ class EventSchedule:
             return states
         return self._terminal(states)
 
-    def apply(self, step: int, states: States) -> States:
-        """Interior stage: when the backward loop lands on an event node."""
+    def apply(self, step: int, states: States, breach=None) -> States:
+        """Interior stage: when the backward loop lands on an event node.
+
+        ``breach`` (spec 3B §5.1) is passed to the stage when a statistics block asks for its
+        per-column targets; the value calls without one, so a stage may take ``states`` alone.
+        """
         fn = self._interior.get(step)
         if fn is None:
             return states
-        return fn(states)
+        return fn(states) if breach is None else fn(states, breach)
 
     def continuous(self, step: int, states: States) -> States:
         """Every-step stage: continuous-monitoring regime coupling."""

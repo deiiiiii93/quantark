@@ -75,14 +75,16 @@ class KOResetAdapter(SnowballAdapter):
         pre_terminal_ko = solver._has_pre_terminal_ko and solver._pre_ko_terminal_record is not None
         pre_ko_last = pre_terminal_ko and solver._pre_ko_goes_last()
         if pre_terminal_ko and not pre_ko_last:
-            solver._apply_terminal_ko_single(grid_v0, s_vec, product, env, solver._pre_ko_terminal_record)
+            solver._apply_terminal_ko_single(grid_v0, s_vec, product, env, solver._pre_ko_terminal_record,
+                                            surface="alive")
 
         if (
             solver._has_post_terminal_ko
             and solver._post_ko_terminal_record is not None
             and not product.barrier_config.disable_ko_after_ki
         ):
-            solver._apply_terminal_ko_single(grid_v1, s_vec, product, env, solver._post_ko_terminal_record)
+            solver._apply_terminal_ko_single(grid_v1, s_vec, product, env, solver._post_ko_terminal_record,
+                                            surface="ki")
 
         if product.has_ki_barrier and not staged_v0:
             is_terminal_ki = solver._ki_continuous
@@ -93,7 +95,8 @@ class KOResetAdapter(SnowballAdapter):
                 solver._apply_ki_jump(grid_v0, grid_v1, s_vec, num_t - 1, product)
 
         if pre_ko_last:
-            solver._apply_terminal_ko_single(grid_v0, s_vec, product, env, solver._pre_ko_terminal_record)
+            solver._apply_terminal_ko_single(grid_v0, s_vec, product, env, solver._pre_ko_terminal_record,
+                                            surface="alive")
 
         if prepared.request.life_surface:
             branch_v0, branch_v1 = np.empty_like(grid_v0), np.empty_like(grid_v1)

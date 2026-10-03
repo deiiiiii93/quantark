@@ -1316,32 +1316,42 @@ class SnowballPDESolver(BasePDESolver):
         ko_record: ResolvedObservationRecord,
     ) -> None:
         """Apply KO payoff at terminal time for grid points in breached region."""
-        barrier = ko_record.barrier
-        payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
-
-        # Discount payoff if settlement is different from observation
-        cashflow_value = self._cashflow_value_at_time(
-            pricing_env=pricing_env,
-            cashflow=payoff,
-            current_time=self._total_tau,
-            settlement_time=ko_record.settlement_time,
-        )
-
         grids = (grid_v0, grid_v1) if self._ko_survives_ki(product) else (grid_v0,)
+        names = ("alive", "ki")[:len(grids)]
+        self._terminal_ko_columns([g[:, -1] for g in grids], s_vec, ko_record, product, pricing_env,
+                                  surfaces=names)
+
+    def _terminal_ko_columns(self, cols, s_vec, ko_record, product, pricing_env, breach=None,
+                             surfaces=("alive", "ki")):
+        """The terminal knock-out on columns (spec 3B §5.1): ``_ko_columns`` at maturity, where the
+        projection follows ``_use_cell_average_events`` and the nodal stage is the plain barrier mask."""
+        barrier = ko_record.barrier
+        if breach is None:
+            payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
+            # Discount payoff if settlement is different from observation
+            cashflow_value = self._cashflow_value_at_time(
+                pricing_env=pricing_env,
+                cashflow=payoff,
+                current_time=self._total_tau,
+                settlement_time=ko_record.settlement_time,
+            )
+            targets = [cashflow_value] * len(cols)
+        else:
+            targets = [breach.ko(ko_record, col, name) for col, name in zip(cols, surfaces)]
 
         if self._use_cell_average_events():
-            for grid in grids:
-                grid[:, -1] = self._project_event_values(
+            for col, target in zip(cols, targets):
+                col[...] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
-                    grid[:, -1], cashflow_value,
+                    col, target,
                 )
             return
 
         # Apply to breached region (KO is an UP barrier)
         mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
-        for grid in grids:
-            grid[mask, -1] = cashflow_value
+        for col, target in zip(cols, targets):
+            col[mask] = target if np.ndim(target) == 0 else target[mask]
 
     def _set_boundary_conditions_v0(
         self,
@@ -1528,45 +1538,39 @@ class SnowballPDESolver(BasePDESolver):
         knock-out wherever both levels are breached; the knock-out is then applied last
         (``_ko_jump_goes_last``).
         """
-        current_time = self._total_tau - tau
+        self._two_surface_events(grid_v0[:, t_idx], grid_v1[:, t_idx], s_vec, t_idx, grid_v0.shape[1],
+                                 self._total_tau - tau, product, pricing_env)
 
+    def _two_surface_events(self, v0, v1, s_vec, t_idx, num_t, current_time, product, pricing_env,
+                            breach=None) -> None:
+        """The column form of ``_apply_step_modifications_two_surface`` (spec 3B §5.1): ``v0``/``v1`` are
+        the value columns at ``t_idx`` or statistics blocks, modified in place; ``breach`` as
+        ``_ko_columns``."""
         ko_record = self._ko_observation_indices.get(t_idx)
         should_apply_ki = product.has_ki_barrier and (
             self._ki_continuous
             or t_idx in self._ki_observation_indices
         )
         ko_last = ko_record is not None and should_apply_ki and self._ko_jump_goes_last(product)
+        # V1 is the knocked-in surface; disable_ko_after_ki removes it from the knock-out.
+        survives = self._ko_survives_ki(product)
+        ko_cols = [v0, v1] if survives else [v0]
+        ko_names = ("alive", "ki") if survives else ("alive",)
 
         # 1. Apply KO jump if this is a KO observation time
         if ko_record is not None and not ko_last:
-            self._apply_ko_jump(
-                grid_v0,
-                grid_v1,
-                s_vec,
-                t_idx,
-                current_time,
-                product,
-                pricing_env,
-                ko_record,
-            )
+            self._ko_columns(ko_cols, s_vec, t_idx, ko_record, product, pricing_env, current_time,
+                             breach=breach, surfaces=ko_names)
 
         # 2. Apply KI jump
         # For continuous KI: apply at every time step
         # For discrete KI: apply only at observation times
         if should_apply_ki:
-            self._apply_ki_jump(grid_v0, grid_v1, s_vec, t_idx, product)
+            self._ki_columns(v0, v1, s_vec, t_idx, num_t, product)
 
         if ko_last:
-            self._apply_ko_jump(
-                grid_v0,
-                grid_v1,
-                s_vec,
-                t_idx,
-                current_time,
-                product,
-                pricing_env,
-                ko_record,
-            )
+            self._ko_columns(ko_cols, s_vec, t_idx, ko_record, product, pricing_env, current_time,
+                             breach=breach, surfaces=ko_names)
 
     def _ko_jump_goes_last(self, product: SnowballOption) -> bool:
         """Whether a knock-out sharing an observation with a knock-in must be applied after it.
@@ -1591,25 +1595,36 @@ class SnowballPDESolver(BasePDESolver):
         ko_record: ResolvedObservationRecord,
     ) -> None:
         """Apply KO payoff to both surfaces in the breached region."""
-        barrier = ko_record.barrier
-        payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
-
-        # Discount payoff based on settlement time
-        cashflow_value = self._cashflow_value_at_time(
-            pricing_env=pricing_env,
-            cashflow=payoff,
-            current_time=current_time,
-            settlement_time=ko_record.settlement_time,
-        )
-
         # V1 is the knocked-in surface; disable_ko_after_ki removes it here.
         grids = (grid_v0, grid_v1) if self._ko_survives_ki(product) else (grid_v0,)
+        names = ("alive", "ki")[:len(grids)]
+        self._ko_columns([g[:, t_idx] for g in grids], s_vec, t_idx, ko_record, product, pricing_env,
+                         current_time, surfaces=names)
+
+    def _ko_columns(self, cols, s_vec, t_idx, ko_record, product, pricing_env, current_time,
+                    breach=None, surfaces=("alive", "ki")):
+        """The knock-out stage on columns (spec 3B §5.1): each array in ``cols`` -- a value column
+        ``grid[:, t_idx]`` or a statistics block -- takes the breach target where the barrier is breached,
+        in place. ``breach=None`` is the value's scalar cash: the same calls on the same arrays as before."""
+        barrier = ko_record.barrier
+        if breach is None:
+            payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
+            # Discount payoff based on settlement time
+            cashflow_value = self._cashflow_value_at_time(
+                pricing_env=pricing_env,
+                cashflow=payoff,
+                current_time=current_time,
+                settlement_time=ko_record.settlement_time,
+            )
+            targets = [cashflow_value] * len(cols)
+        else:
+            targets = [breach.ko(ko_record, col, name) for col, name in zip(cols, surfaces)]
 
         if self._event_uses_projection(t_idx):
-            for grid in grids:
-                grid[:, t_idx] = self._project_event_values(
+            for col, target in zip(cols, targets):
+                col[...] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
-                    grid[:, t_idx], cashflow_value,
+                    col, target,
                 )
             return
 
@@ -1618,8 +1633,8 @@ class SnowballPDESolver(BasePDESolver):
             s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
         )
 
-        for grid in grids:
-            grid[mask, t_idx] = cashflow_value
+        for col, target in zip(cols, targets):
+            col[mask] = target if np.ndim(target) == 0 else target[mask]
 
     def _apply_ki_jump(
         self,
@@ -1635,6 +1650,12 @@ class SnowballPDESolver(BasePDESolver):
         When the KI barrier is hit, the "not knocked-in" value becomes
         the "knocked-in" value at that spot.
         """
+        self._ki_columns(grid_v0[:, t_idx], grid_v1[:, t_idx], s_vec, t_idx, grid_v0.shape[1], product)
+
+    def _ki_columns(self, v0, v1, s_vec, t_idx, num_t, product) -> None:
+        """The knock-in stage on columns (spec 3B §5.1): ``v0 <- v1`` where the barrier is breached, in
+        place. ``v0``/``v1`` are value columns ``grid[:, t_idx]`` or statistics blocks: a knock-in copies
+        every column."""
         ki_barrier = self._resolve_ki_barrier_at_tidx(t_idx)
 
         # Continuous KI monitoring is a continuous-barrier
@@ -1642,9 +1663,9 @@ class SnowballPDESolver(BasePDESolver):
         # event_projection setting. Only discretely observed KI events project.
         ki_discrete = not self._ki_continuous
         if self._event_uses_projection(t_idx) and ki_discrete:
-            grid_v0[:, t_idx] = self._project_event_values(
+            v0[...] = self._project_event_values(
                 s_vec, ki_barrier, product.is_reverse, False,
-                grid_v0[:, t_idx], grid_v1[:, t_idx],
+                v0, v1,
             )
             return
 
@@ -1655,7 +1676,7 @@ class SnowballPDESolver(BasePDESolver):
         )
 
         # V0 transitions to V1 in breached region
-        grid_v0[mask, t_idx] = grid_v1[mask, t_idx]
+        v0[mask] = v1[mask]
 
         # FIRST_PASSAGE correction [2026-08-18]: the jump above monitors the
         # continuous barrier only at step boundaries, so crossings INSIDE the
@@ -1666,9 +1687,9 @@ class SnowballPDESolver(BasePDESolver):
         # Interior steps only: the terminal column has no step interior, and
         # the valuation column's events are owned by the t0 readout.
         fp = self._ki_fp
-        if fp is not None and 0 < t_idx < grid_v0.shape[1] - 1:
-            d = grid_v1[:, t_idx] - grid_v0[:, t_idx]
-            grid_v0[:, t_idx] += fp.step_correction(t_idx, s_vec, ki_barrier, d)
+        if fp is not None and 0 < t_idx < num_t - 1:
+            d = v1 - v0
+            v0 += fp.step_correction(t_idx, s_vec, ki_barrier, d)
 
     def _get_max_ko_barrier(self, product: SnowballOption) -> float:
         """Get the maximum KO barrier level."""

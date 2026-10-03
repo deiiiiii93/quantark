@@ -356,39 +356,32 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         product: KnockOutResetSnowballOption,
         pricing_env: PricingEnvironment,
     ) -> None:
-        current_time = self._total_tau - tau
+        self._two_surface_events(grid_v0[:, t_idx], grid_v1[:, t_idx], s_vec, t_idx, grid_v0.shape[1],
+                                 self._total_tau - tau, product, pricing_env)
 
+    def _two_surface_events(self, v0, v1, s_vec, t_idx, num_t, current_time, product, pricing_env,
+                            breach=None) -> None:
+        """The column form of ``_apply_step_modifications_two_surface`` (spec 3B §5.1): the staged seed,
+        the pre schedule on the not-knocked-in surface, the post schedule on the knocked-in one, the
+        knock-in, in today's order; ``breach`` as ``_ko_columns``, and its ``seed`` fills the staged
+        pre-maturity index."""
         if self._v0_seed_idx is not None and t_idx == self._v0_seed_idx:
-            grid_v0[:, t_idx] = self._v0_seed_values
+            v0[...] = self._v0_seed_values if breach is None else breach.seed(v0)
 
         pre_record = self._pre_ko_observation_indices.get(t_idx)
         # the first-schedule knock-out wins a tie with a discrete knock-in (see _pre_ko_goes_last)
         pre_ko_last = pre_record is not None and self._pre_ko_goes_last()
         if pre_record is not None and not pre_ko_last:
-            self._apply_ko_jump_single(
-                grid_v0,
-                s_vec,
-                t_idx,
-                current_time,
-                product,
-                pricing_env,
-                pre_record,
-            )
+            self._ko_columns([v0], s_vec, t_idx, pre_record, product, pricing_env, current_time,
+                             breach=breach, surfaces=("alive",))
 
         post_record = self._post_ko_observation_indices.get(t_idx)
         if (
             post_record is not None
             and not product.barrier_config.disable_ko_after_ki
         ):
-            self._apply_ko_jump_single(
-                grid_v1,
-                s_vec,
-                t_idx,
-                current_time,
-                product,
-                pricing_env,
-                post_record,
-            )
+            self._ko_columns([v1], s_vec, t_idx, post_record, product, pricing_env, current_time,
+                             breach=breach, surfaces=("ki",))
 
         v0_live = self._v0_seed_idx is None or t_idx <= self._v0_seed_idx
         if product.has_ki_barrier and v0_live:
@@ -396,18 +389,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                 self._ki_continuous or t_idx in self._ki_observation_indices
             )
             if should_apply_ki:
-                self._apply_ki_jump(grid_v0, grid_v1, s_vec, t_idx, product)
+                self._ki_columns(v0, v1, s_vec, t_idx, num_t, product)
 
         if pre_ko_last:
-            self._apply_ko_jump_single(
-                grid_v0,
-                s_vec,
-                t_idx,
-                current_time,
-                product,
-                pricing_env,
-                pre_record,
-            )
+            self._ko_columns([v0], s_vec, t_idx, pre_record, product, pricing_env, current_time,
+                             breach=breach, surfaces=("alive",))
 
     def _pre_ko_goes_last(self) -> bool:
         """Whether a first-schedule knock-out is applied after the knock-in sharing its observation.
@@ -428,26 +414,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         product: KnockOutResetSnowballOption,
         pricing_env: PricingEnvironment,
         ko_record: ResolvedObservationRecord,
+        surface: str = "alive",
     ) -> None:
-        barrier = ko_record.barrier
-        payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
-        cashflow_value = self._cashflow_value_at_time(
-            pricing_env=pricing_env,
-            cashflow=payoff,
-            current_time=current_time,
-            settlement_time=ko_record.settlement_time,
-        )
-
-        if self._event_uses_projection(t_idx):
-            grid[:, t_idx] = self._project_event_values(
-                s_vec, barrier, product.is_reverse, True,
-                grid[:, t_idx], cashflow_value,
-            )
-            return
-        mask = self._event_nodal_mask(
-            s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
-        )
-        grid[mask, t_idx] = cashflow_value
+        """One surface's knock-out: ``"alive"`` for the pre schedule, ``"ki"`` for the post schedule."""
+        self._ko_columns([grid[:, t_idx]], s_vec, t_idx, ko_record, product, pricing_env, current_time,
+                         surfaces=(surface,))
 
     def _apply_terminal_ko_single(
         self,
@@ -456,24 +427,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         product: KnockOutResetSnowballOption,
         pricing_env: PricingEnvironment,
         ko_record: ResolvedObservationRecord,
+        surface: str = "alive",
     ) -> None:
-        barrier = ko_record.barrier
-        payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
-        cashflow_value = self._cashflow_value_at_time(
-            pricing_env=pricing_env,
-            cashflow=payoff,
-            current_time=self._total_tau,
-            settlement_time=ko_record.settlement_time,
-        )
-
-        if self._use_cell_average_events():
-            grid[:, -1] = self._project_event_values(
-                s_vec, barrier, product.is_reverse, True,
-                grid[:, -1], cashflow_value,
-            )
-            return
-        mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
-        grid[mask, -1] = cashflow_value
+        """One surface's terminal knock-out: ``"alive"`` for the pre schedule, ``"ki"`` for the post."""
+        self._terminal_ko_columns([grid[:, -1]], s_vec, ko_record, product, pricing_env,
+                                  surfaces=(surface,))
 
     def __repr__(self) -> str:
         return "KOResetSnowballPDESolver()"

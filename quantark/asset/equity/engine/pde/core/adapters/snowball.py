@@ -149,7 +149,7 @@ class SnowballAdapter(FamilyAdapter):
         def _chain(prev, fn):
             if prev is None:
                 return fn
-            return lambda states: fn(prev(states))
+            return lambda states, breach=None: fn(prev(states, breach), breach)
 
         # KO: both surfaces projected against the discounted redemption
         # (breach_up = up-barrier XOR reverse — certified direction rule).
@@ -173,24 +173,29 @@ class SnowballAdapter(FamilyAdapter):
             breach_up = not is_reverse
             ko_hits_ki = solver._ko_survives_ki(product)
 
-            def _ko(states, _b=barrier, _c=cash, _up=breach_up, _hits_ki=ko_hits_ki):
+            def _ko(states, breach=None, _b=barrier, _c=cash, _up=breach_up, _hits_ki=ko_hits_ki, _rec=rec):
+                # breach=None: the value's discounted redemption; a statistics block asks the breach
+                # for its per-column target (spec 3B §5.1)
+                tgt_alive = _c if breach is None else breach.ko(_rec, states["alive"], "alive")
+                tgt_ki = _c if breach is None else breach.ko(_rec, states["ki"], "ki")
                 if nodal:
                     # NODAL: the product's inclusive comparison at each node (spec 3A §5.4, flip d)
                     mask = solver._event_nodal_mask(spatial.s, _b, is_reverse, True)
                     alive = states["alive"].copy()
-                    alive[mask] = _c
+                    alive[mask] = tgt_alive if breach is None else tgt_alive[mask]
                     ki = states["ki"]
                     if _hits_ki:
                         ki = ki.copy()
-                        ki[mask] = _c
+                        ki[mask] = tgt_ki if breach is None else tgt_ki[mask]
                     return {"alive": alive, "ki": ki}
-                cash_col = np.full_like(states["alive"], _c)
+                if breach is None:
+                    tgt_alive = tgt_ki = np.full_like(states["alive"], _c)
                 return {
                     "alive": project_between(
-                        spatial, _b, _up, cash_col, states["alive"]
+                        spatial, _b, _up, tgt_alive, states["alive"]
                     ),
                     "ki": project_between(
-                        spatial, _b, _up, cash_col, states["ki"]
+                        spatial, _b, _up, tgt_ki, states["ki"]
                     )
                     if _hits_ki
                     else states["ki"],
@@ -232,7 +237,7 @@ class SnowballAdapter(FamilyAdapter):
                 step = layout.time.step_at(t_obs)
                 breach_up = is_reverse  # KI is a down barrier (up if reverse)
 
-                def _ki(states, _b=float(barrier), _up=breach_up):
+                def _ki(states, breach=None, _b=float(barrier), _up=breach_up):   # a knock-in copies every column
                     if nodal:
                         mask = solver._event_nodal_mask(spatial.s, _b, is_reverse, False)
                         alive = states["alive"].copy()
