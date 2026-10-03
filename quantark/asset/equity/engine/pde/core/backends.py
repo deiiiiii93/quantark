@@ -1,8 +1,8 @@
 """The two private arithmetic backends and the factorization cache (spec 2 §5.7).
 
 Keys: (set index, round(dt, 12), θ) per backend. θ is exact (decision 6). dt
-is rounded exactly as each caller passes it (np.float64 on the value marches,
-float on the statistics march): intervals of nearly equal length differ by
+is rounded exactly as each caller passes it (np.float64 on every march since
+spec 3B stage 2 (b)): intervals of nearly equal length differ by
 ULPs and share one factorization, first build wins -- every banked number was
 computed that way. LU store unbounded, banded store LRU-bounded, as today.
 
@@ -17,7 +17,7 @@ from typing import Callable, Mapping, Optional
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-from scipy.linalg import solve_banded
+from scipy.linalg import LinAlgError, get_lapack_funcs
 
 from quantark.util.exceptions import NumericalError
 
@@ -132,6 +132,28 @@ def banded_factor(l, c, u, dt, theta):
     return banded, lower1, main1, upper1
 
 
+_GTSV, = get_lapack_funcs(("gtsv",), (np.empty(1),))
+
+
+def _tridiagonal_solve(banded, rhs):
+    """``solve_banded((1, 1), banded, rhs, overwrite_b=True, check_finite=False)`` without its argument
+    validation: the same LAPACK ``gtsv`` call on the same operands as scipy's ``_solve_banded``, so the
+    same bits. ``banded`` and ``rhs`` are float64 arrays the backend built; ``banded`` is not overwritten.
+
+    The wrapper's validation was a third of the step's bookkeeping (spec 3B §7.3 timing gate)."""
+    if rhs.size == 0:
+        return np.empty_like(rhs)
+    if banded.shape[-1] == 1:                    # a 1x1 system: scipy divides by the diagonal in place
+        rhs /= banded[1, 0]
+        return rhs
+    du2, d, du, x, info = _GTSV(banded[2, :-1], banded[1, :], banded[0, 1:], rhs, False, False, False, True)
+    if info > 0:
+        raise LinAlgError("singular matrix")
+    if info < 0:
+        raise ValueError(f"illegal value in {-info}-th argument of internal gbsv/gtsv")
+    return x
+
+
 def _inject(rhs, l1, u2, vn_lo, vn_up, lo, up, dt, theta):
     # base_pde_solver.py (_inject_boundary_contributions): the formula and its operand order
     rhs[0] += dt * ((1.0 - theta) * l1 * vn_lo + theta * l1 * lo)
@@ -184,7 +206,7 @@ def banded_advance(state: GroupState, s, dt, theta, boundaries):
         rhs[:-1] += upper1 * vn[1:]
         if v.shape[0] > 2:
             _inject(rhs, s.l[1], s.u[-2], v[0, 0], v[-1, 0], lo[0], up[0], dt, theta)
-        return solve_banded((1, 1), banded, rhs, overwrite_b=True, check_finite=False)[:, None]
+        return _tridiagonal_solve(banded, rhs)[:, None]
     # snowball_pde_solver.py (the legacy two-surface value march, two columns;
     # the statistics group: its stacked indicator columns)
     vn = v[1:-1, :]
@@ -199,10 +221,40 @@ def banded_advance(state: GroupState, s, dt, theta, boundaries):
             r[:-1] += upper1 * col[1:]
             if v.shape[0] > 2:
                 _inject(r, s.l[1], s.u[-2], v[0, k], v[-1, k], lo[k], up[k], dt, theta)
-        return solve_banded((1, 1), banded, rhs, overwrite_b=True, check_finite=False)
-    rhs[:] = main1[:, None] * vn
+        return _tridiagonal_solve(banded, rhs)
+    # a column that is +0.0 with +0.0 rows (a statistics column of an observation the backward march
+    # has not reached) is not solved: one +0.0 template column is, and its result -- the same
+    # per-column arithmetic on the same operands, signed zeros included -- fills every such column
+    live = _live_columns(v, lo, up)
+    if live is not None and not live.all():
+        idx = np.flatnonzero(live)
+        sub = np.zeros((v.shape[0], idx.size + 1))
+        sub[:, :idx.size] = v[:, idx]
+        sub_lo, sub_up = np.zeros(idx.size + 1), np.zeros(idx.size + 1)
+        sub_lo[:idx.size], sub_up[:idx.size] = lo[idx], up[idx]
+        x = _banded_columns(banded, lower1, main1, upper1, s, sub, sub_lo, sub_up, dt, theta)
+        out = np.empty((x.shape[0], v.shape[1]))
+        out[:, idx] = x[:, :idx.size]
+        out[:, ~live] = x[:, idx.size:]
+        return out
+    return _banded_columns(banded, lower1, main1, upper1, s, v, lo, up, dt, theta)
+
+
+def _live_columns(v, lo, up):
+    """Per column: does any of its bits differ from +0.0 (its values or its two rows)? ``None`` when the
+    operands are not the float64 arrays the statistics group builds (then every column is solved)."""
+    if not (v.dtype == np.float64 and v.flags.c_contiguous and isinstance(lo, np.ndarray)
+            and isinstance(up, np.ndarray) and lo.dtype == np.float64 and up.dtype == np.float64):
+        return None
+    return np.any(v.view(np.uint64), axis=0) | (lo.view(np.uint64) != 0) | (up.view(np.uint64) != 0)
+
+
+def _banded_columns(banded, lower1, main1, upper1, s, v, lo, up, dt, theta):
+    """The multi-column banded step: the right-hand side of every column, then one solve."""
+    vn = v[1:-1, :]
+    rhs = np.multiply(main1[:, None], vn)
     rhs[1:, :] += lower1[:, None] * vn[:-1, :]
     rhs[:-1, :] += upper1[:, None] * vn[1:, :]
     if v.shape[0] > 2:
         _inject(rhs, s.l[1], s.u[-2], v[0, :], v[-1, :], lo, up, dt, theta)
-    return solve_banded((1, 1), banded, rhs, overwrite_b=True, check_finite=False)
+    return _tridiagonal_solve(banded, rhs)

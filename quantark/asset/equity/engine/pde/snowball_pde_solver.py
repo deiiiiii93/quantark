@@ -186,6 +186,23 @@ class _ContinuousKIFirstPassage:
             return G[:, None] * np.asarray(lam)[None, :]
         return G * lam
 
+    def add_correction(self, t_idx: int, s_vec: np.ndarray, barrier: float, v0: np.ndarray,
+                       v1: np.ndarray) -> None:
+        """``v0 += step_correction(t_idx, s_vec, barrier, v1 - v0)`` in place. On a statistics block
+        with per-step coefficients only the ``k_star`` row of ``v1 - v0`` is read, so only that row
+        is formed (the same subtraction, so the same bits)."""
+        if self._columnar or v0.ndim != 2:
+            v0 += self.step_correction(t_idx, s_vec, barrier, v1 - v0)
+            return
+        G, k_star, dist = self._geometry(
+            float(self._dt[t_idx]), float(self._mu[t_idx]), float(self._sig2[t_idx]), s_vec, barrier
+        )
+        if G is None:
+            v0 += 0.0                       # step_correction's zeros_like(d)
+            return
+        lam = (v1[k_star] - v0[k_star]) / dist
+        v0 += G[:, None] * np.asarray(lam)[None, :]
+
     def _columnar_correction(
         self,
         dt: float,
@@ -1719,8 +1736,13 @@ class SnowballPDESolver(BasePDESolver):
             at_valuation=(t_idx == 0 and ki_discrete),
         )
 
-        # V0 transitions to V1 in breached region
-        v0[mask] = v1[mask]
+        # V0 transitions to V1 in breached region (a contiguous mask -- every one-sided barrier on a
+        # sorted grid -- copies a slice: the same values, without the boolean gather on a block)
+        idx = np.flatnonzero(mask)
+        if idx.size and idx[-1] - idx[0] + 1 == idx.size:
+            v0[idx[0]:idx[-1] + 1] = v1[idx[0]:idx[-1] + 1]
+        elif idx.size:
+            v0[mask] = v1[mask]
 
         # FIRST_PASSAGE correction [2026-08-18]: the jump above monitors the
         # continuous barrier only at step boundaries, so crossings INSIDE the
@@ -1732,8 +1754,7 @@ class SnowballPDESolver(BasePDESolver):
         # the valuation column's events are owned by the t0 readout.
         fp = self._ki_fp
         if fp is not None and 0 < t_idx < num_t - 1:
-            d = v1 - v0
-            v0 += fp.step_correction(t_idx, s_vec, ki_barrier, d)
+            fp.add_correction(t_idx, s_vec, ki_barrier, v0, v1)
 
     def _get_max_ko_barrier(self, product: SnowballOption) -> float:
         """Get the maximum KO barrier level."""

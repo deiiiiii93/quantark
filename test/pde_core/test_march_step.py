@@ -5,6 +5,7 @@ tolerance (a byte-pinned array would be a cross-architecture golden). The
 exact gate is the same-machine byte book.
 """
 import numpy as np
+import pytest
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from scipy.linalg import solve_banded
@@ -69,3 +70,62 @@ def test_single_column_lu_matches_the_legacy_step():
     rhs[0] += 0.01 * (0.5 * l[1] * v[0, 0] + 0.5 * l[1] * lo[0])
     rhs[-1] += 0.01 * (0.5 * u[-2] * v[-1, 0] + 0.5 * u[-2] * up[0])
     assert_close(out[:, 0].tolist(), lu.solve(rhs).tolist())
+
+
+@pytest.mark.parametrize("shape", [(N - 2,), (N - 2, 1), (N - 2, 2), (N - 2, 39), (1,), (1, 3)])
+def test_tridiagonal_solve_is_solve_banded_bit_for_bit(shape):
+    # the march's direct LAPACK gtsv call (spec 3B §7.3 timing): the operands scipy's solve_banded passes
+    from scipy.linalg import solve_banded
+    from quantark.asset.equity.engine.pde.core.backends import _tridiagonal_solve
+    n = shape[0]
+    ab = RNG.random((3, n)); ab[1] += 2.0
+    rhs = RNG.random(shape)
+    want = solve_banded((1, 1), ab.copy(), rhs.copy(), overwrite_b=True, check_finite=False)
+    got = _tridiagonal_solve(ab, rhs.copy())
+    assert got.shape == want.shape and got.tobytes() == want.tobytes()
+
+
+@pytest.mark.parametrize("theta,dt", [(0.5, 0.01), (0.5, 40.0), (1.0, 0.01)])
+def test_banded_group_skips_zero_columns_bit_for_bit(theta, dt):
+    # the statistics block's columns of a later observation are +0.0 with +0.0 rows until the march
+    # reaches it; their solve is skipped and filled from one solved template column (spec 3B §7.3)
+    from quantark.asset.equity.engine.pde.core import backends
+    l, c, u = _lcu(); v = RNG.random((N, 9)); lo = RNG.random(9); up = RNG.random(9)
+    v[:, [1, 4, 5]] = 0.0; lo[[1, 4, 5]] = 0.0; up[[1, 4, 5]] = 0.0
+    v[3, 6] = -0.0; lo[7] = -0.0                                # a signed zero is not a skipped column
+    g = ColumnGroup("stats", ("stats_v0", "stats_v1"), Backend.BANDED, VALUE, rolling=True)
+    calls = []
+    real = backends._tridiagonal_solve
+    out = None
+    try:
+        backends._tridiagonal_solve = lambda ab, rhs: (calls.append(rhs.shape), real(ab, rhs))[1]
+        out = banded_advance(GroupState(g, v), _set(l, c, u), dt, theta, (lo, up))
+    finally:
+        backends._tridiagonal_solve = real
+    full = solve_banded((1, 1), *_full_system(l, c, u, dt, theta, v, lo, up), overwrite_b=True, check_finite=False)
+    assert out.tobytes() == full.tobytes()
+    assert calls == [(N - 2, 7)]                                 # six active columns and the template
+
+
+def _full_system(l, c, u, dt, theta, v, lo, up):
+    from quantark.asset.equity.engine.pde.core.backends import banded_factor, _inject
+    banded, lower1, main1, upper1 = banded_factor(l, c, u, dt, theta)
+    vn = v[1:-1, :]
+    rhs = main1[:, None] * vn
+    rhs[1:, :] += lower1[:, None] * vn[:-1, :]
+    rhs[:-1, :] += upper1[:, None] * vn[1:, :]
+    _inject(rhs, l[1], u[-2], v[0, :], v[-1, :], lo, up, dt, theta)
+    return banded, rhs
+
+
+@pytest.mark.parametrize("barrier", [80.0, 1.0])            # a live band, and none (G is None)
+def test_first_passage_block_correction_is_step_correction_bit_for_bit(barrier):
+    from quantark.asset.equity.engine.pde.snowball_pde_solver import _ContinuousKIFirstPassage
+    s = np.linspace(50.0, 150.0, 41)
+    fp = _ContinuousKIFirstPassage(np.full(5, 0.01), np.full(5, 0.02), np.full(5, 0.04), False)
+    v0, v1 = RNG.random((41, 7)), RNG.random((41, 7))
+    v0[30, 2] = -0.0
+    want = v0 + fp.step_correction(2, s, barrier, v1 - v0)
+    got = v0.copy()
+    fp.add_correction(2, s, barrier, got, v1)
+    assert got.tobytes() == want.tobytes()
