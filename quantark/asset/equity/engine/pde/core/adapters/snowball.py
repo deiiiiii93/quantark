@@ -65,10 +65,18 @@ class SnowballAdapter(FamilyAdapter):
             return None
         if op is Operation.EVENT_STATS:
             # the statistics sweep's preamble: no statistics once expired, then the
-            # PDE compatibility check; no knock-out short-circuit (the sweep marched)
+            # PDE compatibility check; a knock-out that fires at valuation is a terminal
+            # outcome with the legacy readout's numbers (spec 3B §10 step 3). Under NODAL the
+            # legacy readout still interpolates the post-event knock-in-ever column, so that
+            # path marches until stage 2 (d).
             if tau <= 0:
                 return TerminalOutcome("expired", None)
             solver._validate_product(product)
+            if (self.supports_statistics_group and solver._use_cell_average_events()
+                    and solver._is_knocked_out_at_valuation(product, spot, env)):
+                from ..statistics.terminal import knocked_out_statistics
+                return TerminalOutcome("knocked_out_at_valuation",
+                                       knocked_out_statistics(solver, product, env, request))
             return None
         if op is Operation.SESSION_OUTPUTS and not request.short_circuit:
             # the spot curve's surface: the solve alone, no valuation-date short-circuit

@@ -244,37 +244,8 @@ class PhoenixPDESolver(SnowballPDESolver):
             return
 
         ko_times = [rec.observation_time for rec in ko_records]
-        num_obs = len(ko_times)
-
-        coupon_barrier = product.coupon_config.coupon_barrier
-        if isinstance(coupon_barrier, list):
-            if len(coupon_barrier) != num_obs:
-                raise ValidationError(
-                    "Coupon barrier schedule length does not match KO observations."
-                )
-            self._coupon_barriers = np.array(coupon_barrier, dtype=float)
-        else:
-            self._coupon_barriers = np.full(num_obs, float(coupon_barrier))
-
-        period_year_fractions = np.array(
-            product.get_coupon_period_year_fractions(ko_times),
-            dtype=float,
-        )
-        self._coupon_amounts = np.array(
-            [
-                product.get_coupon_payoff(i, year_fraction=period_year_fractions[i])
-                for i in range(num_obs)
-            ],
-            dtype=float,
-        )
-        self._coupon_cumulative = np.concatenate(
-            ([0.0], np.cumsum(self._coupon_amounts))
-        )
-        self._initial_coupon_arrears = (
-            float(product.coupon_config.initial_coupon_arrears)
-            if product.has_memory_coupon
-            else 0.0
-        )
+        (self._coupon_barriers, self._coupon_amounts, self._coupon_cumulative,
+         self._initial_coupon_arrears) = self._coupon_schedule(product, pricing_env)
         for obs_idx, obs_time in enumerate(ko_times):
             if is_close(obs_time, 0.0):
                 self._coupon_observation_indices[0] = obs_idx
@@ -288,6 +259,44 @@ class PhoenixPDESolver(SnowballPDESolver):
                         t_vec, obs_time, "Coupon observation"
                     )
                 self._coupon_observation_indices[idx] = obs_idx
+
+    def _coupon_schedule(self, product: PhoenixOption, pricing_env: PricingEnvironment):
+        """The coupon barriers, amounts, their running sum and the carried arrears, one per resolved
+        knock-out record (the arrays ``_register_coupon_observations`` installs; spec 3B §10 step 3)."""
+        ko_records = self._get_cached_ko_records(pricing_env, product)
+        ko_times = [rec.observation_time for rec in ko_records]
+        num_obs = len(ko_times)
+
+        coupon_barrier = product.coupon_config.coupon_barrier
+        if isinstance(coupon_barrier, list):
+            if len(coupon_barrier) != num_obs:
+                raise ValidationError(
+                    "Coupon barrier schedule length does not match KO observations."
+                )
+            coupon_barriers = np.array(coupon_barrier, dtype=float)
+        else:
+            coupon_barriers = np.full(num_obs, float(coupon_barrier))
+
+        period_year_fractions = np.array(
+            product.get_coupon_period_year_fractions(ko_times),
+            dtype=float,
+        )
+        coupon_amounts = np.array(
+            [
+                product.get_coupon_payoff(i, year_fraction=period_year_fractions[i])
+                for i in range(num_obs)
+            ],
+            dtype=float,
+        )
+        coupon_cumulative = np.concatenate(
+            ([0.0], np.cumsum(coupon_amounts))
+        )
+        initial_coupon_arrears = (
+            float(product.coupon_config.initial_coupon_arrears)
+            if product.has_memory_coupon
+            else 0.0
+        )
+        return coupon_barriers, coupon_amounts, coupon_cumulative, initial_coupon_arrears
 
     def _uses_grid_layer(self) -> bool:
         return True

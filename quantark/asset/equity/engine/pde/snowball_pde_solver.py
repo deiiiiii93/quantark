@@ -523,10 +523,13 @@ class SnowballPDESolver(BasePDESolver):
             return None
         if pricing_env is None:
             return None
-        # the value group marches alongside unless the caller supplied the npv; a
-        # product knocked out at valuation reads price()'s immediate KO payoff instead
+        # the value group marches alongside unless the caller supplied the npv. A product
+        # knocked out at valuation is the adapter's terminal outcome under the cell-average
+        # projection; under NODAL it still marches the statistics alone and reads price()'s
+        # immediate KO payoff, until stage 2 (d) moves that rule (spec 3B §10 step 3)
         march_value = npv is None and not (
-            product.get_maturity(pricing_env) > 0
+            not self._use_cell_average_events()
+            and product.get_maturity(pricing_env) > 0
             and self._is_knocked_out_at_valuation(product, pricing_env.spot, pricing_env)
         )
         return self._run(product, pricing_env, OutputRequest(
