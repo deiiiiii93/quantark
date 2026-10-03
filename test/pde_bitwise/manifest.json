@@ -863,6 +863,234 @@
   "error": null,
   "none": []
  },
+ "3b|dated_phoenix|mid10|fixed|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|mid10|fixed|price": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|mid10|fixed|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|mid10|fixed|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|mid10|float|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|mid10|float|price": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|mid10|float|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|mid10|float|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|ko|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|ko|price": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|ko|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|ko|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|miss|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|miss|price": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|miss|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|miss|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|pay|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|pay|price": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|pay|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|dated_phoenix|obs1|pay|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|dkak_carried|obs1|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3b|dkak_carried|obs1|price": {
+  "error": null,
+  "none": []
+ },
+ "3b|dkak_carried|obs1|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|dkak_carried|obs1|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|heston_phoenix|surrogate|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|heston_snowball|half_step|stats": {
+  "error": "ValidationError",
+  "none": []
+ },
+ "3b|heston_snowball|surrogate|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|ko_reset_carried|obs1|greeks": {
+  "error": "KeyError",
+  "none": []
+ },
+ "3b|ko_reset_carried|obs1|price": {
+  "error": "KeyError",
+  "none": []
+ },
+ "3b|ko_reset_carried|obs1|pwe": {
+  "error": "KeyError",
+  "none": []
+ },
+ "3b|ko_reset_carried|obs1|stats": {
+  "error": "KeyError",
+  "none": []
+ },
+ "3b|ko_reset|below_ki|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|ko_reset|below_ki|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|ko_reset|flat|standard|streams_ko": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_c105|expiry|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_c105|expiry|price": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_c105|expiry|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_c105|expiry|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_c105|instant|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_c105|instant|price": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_c105|instant|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_c105|instant|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_expiry|memory|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_expiry|plain|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_knocked_in|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_knocked_in|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_memory|flat|86|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_memory|flat|86|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_memory|term|86|pwe": {
+  "error": null,
+  "none": []
+ },
+ "3b|phoenix_memory|term|86|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|slv_snowball|half_step|stats": {
+  "error": "ValidationError",
+  "none": []
+ },
+ "3b|slv_snowball|surrogate|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|snowball_airbag|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|snowball_dkak|cont|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|snowball_dkak|disc|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|snowball_reverse|stats": {
+  "error": null,
+  "none": []
+ },
+ "3b|tc|ko_reset": {
+  "error": null,
+  "none": []
+ },
  "american_dated|flat|fast": {
   "error": null,
   "none": []
@@ -1764,6 +1992,38 @@
   "none": [
    "stats"
   ]
+ },
+ "terminal|immediate_ko|ko_reset|greeks": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|ko_reset|price": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|ko_reset|pwe": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|ko_reset|stats": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|phoenix|greeks": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|phoenix|price": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|phoenix|pwe": {
+  "error": null,
+  "none": []
+ },
+ "terminal|immediate_ko|phoenix|stats": {
+  "error": null,
+  "none": []
  },
  "terminal|immediate_ko|snowball|greeks": {
   "error": null,

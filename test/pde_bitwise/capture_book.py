@@ -584,21 +584,29 @@ def knock_in_products(knocked_in=False):
     }
 
 
-def _vol_solver(name):
+def _vol_solver(name, params=None, surrogate=False):
+    """A 2D solver. ``surrogate`` asks for ``statistics="flat_vol_surrogate"`` only where the class
+    takes a ``statistics`` option (spec 3B F7), so the base builds today's solver."""
     from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import HestonPhoenixPDESolver
     from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
         HestonSLVSnowballPDESolver, HestonSnowballPDESolver)
     from quantark.volmodels.heston import HestonParams
     from quantark.volmodels.slv.leverage import LeverageSurface
     hp = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.6)
+    params = PDEParams() if params is None else params
     if name == "heston_snowball":
-        return HestonSnowballPDESolver(hp, params=PDEParams(), n_x=80, n_v=32, n_t=40)
-    if name == "slv_snowball":
+        cls, args = HestonSnowballPDESolver, (hp,)
+    elif name == "slv_snowball":
         ks = np.array(list(100.0 * np.exp(np.linspace(-1.2, 1.2, 15))))
         lev = LeverageSurface(time_grid=np.linspace(0, 1, 6), strike_grid=ks,
                               leverage_grid=np.ones((6, ks.size)))
-        return HestonSLVSnowballPDESolver(hp, lev, params=PDEParams(), n_x=80, n_v=32, n_t=40)
-    return HestonPhoenixPDESolver(hp, params=PDEParams(), n_x=80, n_v=32, n_t=40)
+        cls, args = HestonSLVSnowballPDESolver, (hp, lev)
+    else:
+        cls, args = HestonPhoenixPDESolver, (hp,)
+    kw = dict(params=params, n_x=80, n_v=32, n_t=40)
+    if surrogate and "statistics" in inspect.signature(cls.__init__).parameters:
+        kw["statistics"] = "flat_vol_surrogate"
+    return cls(*args, **kw)
 
 
 def bump_frozen_vs_fresh():
@@ -972,6 +980,187 @@ def rows_3a(existing):
     return out
 
 
+# --- sub-project 3B (spec 3B §7.1) ---------------------------------------------------
+
+def family_tag(row_id: str):
+    """The statistics family a row id names (spec 3B §7.1 movers): KO-reset before Phoenix before Snowball."""
+    for fam in ("ko_reset", "phoenix", "snowball"):
+        if fam in row_id:
+            return fam
+    return None
+
+
+def _dated(kind, **kw):
+    """The intraday fixture's dated products (plain functions, test/intraday/conftest.py)."""
+    from intraday.conftest import dated_ko_reset, dated_phoenix, dated_snowball
+    cal = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+    t0 = datetime(2026, 3, 16)
+    return {"phoenix": dated_phoenix, "snowball": dated_snowball, "ko_reset": dated_ko_reset}[kind](cal, t0, **kw), cal
+
+
+def _first_obs(product):
+    return product.barrier_config.ko_observation_schedule.records[0].observation_date
+
+
+def _dated_env(product, when, spot):
+    from intraday.conftest import flat_env
+    return flat_env(when, spot=spot)
+
+
+def _ten_days_in(cal, t0):
+    return cal.add_business_days(t0, 10)
+
+
+def _with_flag(product):
+    setattr(product, "_otc_lifecycle_knocked_in", True)
+    return product
+
+
+def _stats_or_greeks(op, cls_or_solver, product, env):
+    """price / greeks / stats / pwe on a fresh p_default() solver (terminal_op's dispatch)."""
+    return terminal_op(op, cls_or_solver, product, env)
+
+
+def _phoenix_expiry(p):
+    from quantark.util.enum.option_enums import CouponPayType
+    p.coupon_config = dataclasses.replace(p.coupon_config, coupon_pay_type=CouponPayType.EXPIRY)
+    return p
+
+
+def _dkak_carried():
+    p, _ = _dated("snowball")
+    p.barrier_config = dataclasses.replace(p.barrier_config, disable_ko_after_ki=True)
+    return _with_flag(p)
+
+
+def _ko_reset_carried():
+    p, _ = _dated("ko_reset")
+    return _with_flag(p)
+
+
+def _dated_op(kind, idx, op, spot):
+    """``op`` on a fresh dated product of ``kind`` valued on its first observation date."""
+    p, _ = _dated(kind)
+    return _stats_or_greeks(op, _solvers()[idx], p, _dated_env(p, _first_obs(p), spot))
+
+
+def rows_3b(existing):
+    """The 3B rows (spec 3B §7.1). ``existing`` is the registry built so far; its default 2D rows and
+    knocked-in Snowball statistics rows are re-tagged here."""
+    import fnmatch
+    from quantark.cashleg.event_distribution import EventType
+    SB, PH, KR = 0, 1, 2
+    ops = ("price", "greeks", "stats", "pwe")
+    out = {}
+
+    def solver(i):
+        return _solvers()[i]
+
+    # memory Phoenix one point above the coupon barrier
+    for env_name, env in (("flat", env_flat), ("term", env_term)):
+        for op, fn in (("stats", stats_only), ("pwe", pwe)):
+            out[f"3b|phoenix_memory|{env_name}|86|{op}"] = _row(
+                lambda e=env, f=fn: f(solver(PH)(params=p_default()), make_phoenix(PHOENIX),
+                                      env_with_spot(e(), 86.0)),
+                tags={"continuous_ki"})
+    # EXPIRY-paid Phoenix
+    for kind, mem in (("plain", False), ("memory", True)):
+        out[f"3b|phoenix_expiry|{kind}|stats"] = _row(
+            lambda m=mem: stats_only(solver(PH)(params=p_default()),
+                                     make_phoenix(dict(PHOENIX, memory_coupon=m, coupon_pay_type="expiry")),
+                                     env_flat()),
+            tags={"continuous_ki"})
+    # dated Phoenix on its first observation date: coupon missed / paid / knocked out
+    for outcome, spot in (("miss", 78.0), ("pay", 95.0), ("ko", 130.0)):
+        tags = {"valuation_rules", "accrual"} | ({"release_rule"} if outcome == "ko" else set())
+        for op in ops:
+            out[f"3b|dated_phoenix|obs1|{outcome}|{op}"] = _row(
+                lambda o=op, sp=spot: _dated_op("phoenix", PH, o, sp), tags=tags)
+    # dated Phoenix ten business days in: the floating first period against a fixed fraction
+    for kind, frac in (("float", None), ("fixed", 1.0 / 12.0)):
+        for op in ops:
+            def mid10(o=op, f=frac):
+                p, cal = _dated("phoenix", fixed_fraction=f)
+                return _stats_or_greeks(o, solver(PH), p, _dated_env(p, _ten_days_in(cal, p.initial_date), 100.0))
+            out[f"3b|dated_phoenix|mid10|{kind}|{op}"] = _row(mid10, tags={"accrual"} if kind == "float" else ())
+    # coupon barrier above the knock-out barrier: the release rule's product
+    for pay in ("instant", "expiry"):
+        for op in ops:
+            def c105(o=op, py=pay):
+                p, _ = _dated("phoenix", coupon_barrier=105.0)
+                if py == "expiry":
+                    p = _phoenix_expiry(p)
+                return _stats_or_greeks(o, solver(PH), p, _dated_env(p, p.initial_date, 100.0))
+            out[f"3b|phoenix_c105|{pay}|{op}"] = _row(c105, tags={"release_rule"})
+    # KO-reset
+    out["3b|ko_reset|flat|standard|streams_ko"] = _row(
+        lambda: stats_only(solver(KR)(params=p_default()), make_ko_reset(KO_RESET), env_flat(),
+                           streams=frozenset({EventType.KO})))
+    for op, fn in (("stats", stats_only), ("pwe", pwe)):
+        out[f"3b|ko_reset|below_ki|{op}"] = _row(
+            lambda f=fn: f(solver(KR)(params=p_default()), make_ko_reset(KO_RESET), env_with_spot(env_flat(), 78.0)))
+    # knocked out at valuation
+    for kind, idx in (("phoenix", PH), ("ko_reset", KR)):
+        for op in ops:
+            out[f"terminal|immediate_ko|{kind}|{op}"] = _row(
+                lambda o=op, k=kind, i=idx: _dated_op(k, i, o, 130.0), tags={"valuation_rules"})
+    # lifecycle knocked-in Phoenix
+    for op, fn in (("stats", stats_only), ("pwe", pwe)):
+        out[f"3b|phoenix_knocked_in|{op}"] = _row(
+            lambda f=fn: f(solver(PH)(params=p_default()), _with_flag(make_phoenix(PHOENIX)), env_flat()),
+            tags={"valuation_rules"})
+    # Snowball variants
+    for kind, extra in (("cont", {}), ("disc", {"ki_monitoring": "discrete"})):
+        out[f"3b|snowball_dkak|{kind}|stats"] = _row(
+            lambda x=extra: stats_only(solver(SB)(params=p_default()),
+                                       make_snowball(dict(SNOWBALL, disable_ko_after_ki=True, **x)), env_flat()))
+    out["3b|snowball_reverse|stats"] = _row(
+        lambda: stats_only(solver(SB)(params=p_default()),
+                           make_snowball(dict(SNOWBALL, is_reverse=True, ko_barrier=97.0, ki_barrier=115.0)),
+                           env_flat()))
+    out["3b|snowball_airbag|stats"] = _row(
+        lambda: stats_only(solver(SB)(params=p_default()),
+                           make_snowball(dict(SNOWBALL, airbag_barrier=90.0, airbag_participation_rate=0.5)),
+                           env_flat()))
+    # a carried knock-in valued on the first observation date
+    for op in ops:
+        def dkak(o=op):
+            p = _dkak_carried()
+            return _stats_or_greeks(o, solver(SB), p, _dated_env(p, _first_obs(p), 130.0))
+
+        def kr_carried(o=op):
+            p = _ko_reset_carried()
+            return _stats_or_greeks(o, solver(KR), p, _dated_env(p, _first_obs(p), 100.0))
+        out[f"3b|dkak_carried|obs1|{op}"] = _row(dkak, tags={"valuation_rules"})
+        # the dated post schedule never reaches the grid (F11): KeyError until stage 2 (d)
+        out[f"3b|ko_reset_carried|obs1|{op}"] = _row(kr_carried, error="KeyError", tags={"valuation_rules"})
+    # 2D: the half-step scheme (the 2D price path already refuses it on fc569df1) and the surrogate option
+    for name in ("heston_snowball", "slv_snowball"):
+        out[f"3b|{name}|half_step|stats"] = _row(
+            lambda n=name: stats_only(_vol_solver(n, params=PDEParams(stepper=_cn(damping="half_step"))),
+                                      snowball(), env_flat()),
+            error="ValidationError", tags={"twod_halfstep"})
+    for name in ("heston_snowball", "slv_snowball", "heston_phoenix"):
+        prod = phoenix_plain if name == "heston_phoenix" else snowball
+        out[f"3b|{name}|surrogate|stats"] = _row(
+            lambda n=name, m=prod: stats_only(_vol_solver(n, surrogate=True), m(), env_flat()))
+    # trading clock
+    out["3b|tc|ko_reset"] = _row(
+        lambda: facade_outputs(make_ko_reset(KO_RESET), env_tc(), p_default(), event_stats=True),
+        tags={"trading_clock"})
+
+    # re-tag existing rows
+    for rid, r in existing.items():
+        extra = set()
+        if rid in ("heston_snowball|stats", "slv_snowball|stats", "heston_phoenix|stats"):
+            extra.add("twod_default")
+        if fnmatch.fnmatchcase(rid, "stats|snowball_knocked_in|*") or fnmatch.fnmatchcase(rid, "pwe|snowball_knocked_in|*"):
+            extra.add("valuation_rules")
+        if extra:
+            out[rid] = dataclasses.replace(r, tags=r.tags | frozenset(extra))
+    return out
+
+
 def rows():
     out = {rid: Row(fn) for rid, fn in book().items()}
     for env_name, env in (("flat", env_flat), ("term", env_term)):
@@ -1081,6 +1270,7 @@ def rows():
     # spec 3A §7.1: tag the rows above by rule (_EXISTING_TAGS), then add the 3A rows
     out = {rid: dataclasses.replace(r, tags=r.tags | _existing_tags(rid)) for rid, r in out.items()}
     out.update(rows_3a(out))
+    out.update(rows_3b(out))
     return out
 
 

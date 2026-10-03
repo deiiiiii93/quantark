@@ -3,6 +3,7 @@ gate; declared rows that did not move are reported and must be explained in the 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 #: flip -> the tags whose rows it may move
@@ -15,6 +16,33 @@ FLIP_TAGS = {
     "f": {"default_damping"},
     "g": {"put_far_field", "put_far_field_v070", "barrier_call_kinked", "barrier_call_flat"},
 }
+
+
+#: 3B stage -> how its movers are chosen (spec 3B §7.1 gates)
+STAGE_3B = {
+    "a": {"family": "snowball"},
+    "b": {"family": "phoenix"},
+    "c": {"family": "ko_reset"},
+    "d": {"tags": {"valuation_rules"}},
+    "e": {"tags": {"twod_default"}},
+    "f": {"tags": {"release_rule"}},
+    "g": {"tags": {"accrual"}},
+}
+
+
+def _carries_statistics(fields):
+    return any(k.startswith(("stats_", "dist_")) for k in fields)
+
+
+def movers_3b(stage, rows, capture):
+    """Data-driven: a family stage moves every row of the family whose PREVIOUS capture carries statistics
+    or distribution fields; a rule stage moves its tagged rows."""
+    import capture_book as cb
+    spec = STAGE_3B[stage]
+    if "family" in spec:
+        return sorted(rid for rid in rows
+                      if cb.family_tag(rid) == spec["family"] and _carries_statistics(capture.get(rid, {})))
+    return sorted(rid for rid, row in rows.items() if row.tags & spec["tags"])
 
 
 def _tags(row):
@@ -35,13 +63,28 @@ def movers(flip, rows):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--write", nargs=2, metavar=("FLIP", "PATH"), required=True)
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--write", nargs=2, metavar=("FLIP", "PATH"), help="3A flip movers")
+    mode.add_argument("--stage", choices=sorted(STAGE_3B), help="3B stage movers (needs --capture and PATH)")
+    ap.add_argument("--capture", default=None, help="the previous commit's capture (3B family stages)")
+    ap.add_argument("path", nargs="?", default=None)
     a = ap.parse_args(argv)
     import capture_book as cb
-    ids = movers(a.write[0], cb.rows())
-    with open(a.write[1], "w") as fh:
+    if a.write:
+        ids = movers(a.write[0], cb.rows())
+        with open(a.write[1], "w") as fh:
+            fh.write("\n".join(ids) + "\n")
+        print(f"flip {a.write[0]}: {len(ids)} movers -> {a.write[1]}")
+        return 0
+    if not (a.capture and a.path):
+        ap.error("--stage needs --capture PREV.json and PATH")
+    with open(a.capture) as fh:
+        capture = json.load(fh)
+    ids = movers_3b(a.stage, cb.rows(), capture)
+    with open(a.path, "w") as fh:
         fh.write("\n".join(ids) + "\n")
-    print(f"flip {a.write[0]}: {len(ids)} movers -> {a.write[1]}")
+    print(f"stage {a.stage}: {len(ids)} movers -> {a.path}")
+    return 0
 
 
 if __name__ == "__main__":
