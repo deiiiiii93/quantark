@@ -115,7 +115,8 @@ def test_terminal_plan_on_an_expired_and_a_knocked_out_product():
                              "event_stats": "expired", "life_surface": "raises ValidationError"}
     plan = SnowballPDESolver(PDEParams()).explain(immediate_ko_snowball(), immediate_ko_env())
     assert plan.terminal["price"] == "knocked_out_at_valuation"
-    assert plan.terminal["event_stats"] == "marches"          # decision 16: no short-circuit
+    # spec 3B §10 step 3: the cell-average statistics of a knock-out at valuation are a terminal outcome
+    assert plan.terminal["event_stats"] == "knocked_out_at_valuation"
     assert plan.terminal["life_surface"] == "raises ValidationError"
 
 
