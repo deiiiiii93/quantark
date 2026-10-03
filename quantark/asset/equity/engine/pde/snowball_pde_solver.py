@@ -572,48 +572,6 @@ class SnowballPDESolver(BasePDESolver):
         """Construct the event-stats dataclass (overridable by subclasses)."""
         return AutocallableEventStats(**fields)
 
-    # --- Extra indicator-surface hooks (overridden by Phoenix for coupons) ---
-
-    def _n_extra_event_cols(self, n_ko: int) -> int:
-        """Extra stacked indicator columns beyond ``[KO_0..KO_{n-1}]``."""
-        return 0
-
-    def _set_extra_event_indicators(
-        self, v0, v1, s_vec, n_ko, ko_idx, rec, product, pricing_env, t_vec, t_idx
-    ) -> None:
-        """Set extra indicator columns at an observation (no-op for Snowball)."""
-        return None
-
-    def _extract_extra_event_stats(
-        self,
-        initial_grid,
-        x_vec,
-        spot_log,
-        n_ko,
-        ko_records,
-        pricing_env,
-        product,
-        col_overrides=None,
-    ) -> dict:
-        """Extra event-stats fields from the extra columns (none for Snowball)."""
-        return {}
-
-    def _t0_extra_indicator_overrides(
-        self,
-        product,
-        pricing_env,
-        spot,
-        n_ko,
-        rec0_pos,
-        rec0,
-        t_vec,
-        ko_triggered,
-        df_delay0,
-    ) -> dict:
-        """Exact valuation-date outcomes for extra indicator columns
-        (none for Snowball)."""
-        return {}
-
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Dict[str, float]:

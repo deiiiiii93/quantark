@@ -21,6 +21,7 @@ class KOResetAdapter(SnowballAdapter):
 
     #: KO-reset's event statistics are the QUAD engine's (calculate_event_stats), not a PDE group.
     supports_statistics_group = False
+    statistics_mode = "legacy"   # pinned: the Snowball flip (stage 2 (a)) must not reach this family
 
     def solve_state(self, product, env, request):
         # A contract past its first schedule and not knocked in has matured (rule 2 of

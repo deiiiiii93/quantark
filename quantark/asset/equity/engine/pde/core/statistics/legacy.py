@@ -1,5 +1,10 @@
 """Event statistics as a column group of the value march (spec 2 §5.4, Level 1).
 
+Moved verbatim from ``core/statistics.py`` (spec 3B §10 step 1): the column indices come from
+:class:`ColumnLayout`, the Phoenix coupon hooks are the module functions below (moved from
+``PhoenixPDESolver`` with ``self.`` -> ``solver.``, dispatched on the product), and the
+readout's dataclass-and-ledger tail is :func:`readout.assemble_autocallable`.
+
 The legacy statistics sweep (``SnowballPDESolver._compute_event_stats``) marched
 stacked indicator columns -- ``[KO_0..KO_{n-1}, <extra coupon cols>, KI, KI_ever]``
 for both regimes -- through the value operator after the value solve. Here the
@@ -14,18 +19,19 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from quantark.asset.equity.engine.event_stats import payment_aware_cashflow_fields
-from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
-from quantark.util.enum import CouponPayType
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
-from .groups import STATISTICS_LEGACY, Backend, ColumnGroup
+from ..groups import STATISTICS_LEGACY, Backend, ColumnGroup
+from .columns import ColumnLayout
+from .group import RollingStatistics
+from .readout import assemble_autocallable
 
 __all__ = ["StatisticsLegacy"]
 
 
-class StatisticsLegacy:
+class StatisticsLegacy(RollingStatistics):
     """The statistics sweep's columns, events and readout for one prepared problem."""
 
     group = ColumnGroup("stats", ("stats_v0", "stats_v1"), Backend.BANDED, STATISTICS_LEGACY, rolling=True)
@@ -100,15 +106,18 @@ class StatisticsLegacy:
             want_coupon = EventType.COUPON in streams
         self.want_ki, self.want_coupon = want_ki, want_coupon
 
-        n_extra = solver._n_extra_event_cols(n_ko) if want_coupon else 0
+        n_extra = _n_extra_event_cols(solver, product, n_ko) if want_coupon else 0
+        layout_cols = ColumnLayout(
+            n_ko, trigger=want_coupon and isinstance(product, PhoenixOption), ki=want_ki)
+        assert layout_cols.n_cols == n_ko + n_extra + (2 if want_ki else 0)
         if want_ki:
-            ki_col = n_ko + n_extra
-            ki_ever_col = n_ko + n_extra + 1
-            n_cols = n_ko + n_extra + 2
+            ki_col = layout_cols.kis
+            ki_ever_col = layout_cols.kie
         else:
             ki_col = -1
             ki_ever_col = -1
-            n_cols = n_ko + n_extra
+        n_cols = layout_cols.n_cols
+        self.columns = layout_cols
         self.ki_col, self.ki_ever_col, self.n_cols = ki_col, ki_ever_col, n_cols
 
         use_banded = (num_x - 2) > 2
@@ -188,8 +197,8 @@ class StatisticsLegacy:
                     v0_next[mask_ko, ki_ever_col] = ever0
                     v1_next[mask_ko, ki_ever_col] = ever1
             if want_coupon:
-                solver._set_extra_event_indicators(
-                    v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
+                _set_extra_event_indicators(
+                    solver, v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
                     product, pricing_env, t_vec, terminal_tidx,
                 )
 
@@ -262,8 +271,8 @@ class StatisticsLegacy:
                     if want_ki:
                         v[mask_ko, ki_ever_col] = ever
             if want_coupon:
-                solver._set_extra_event_indicators(
-                    v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
+                _set_extra_event_indicators(
+                    solver, v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
                     product, pricing_env, t_vec, j,
                 )
 
@@ -358,7 +367,8 @@ class StatisticsLegacy:
                 t0_overrides[rec0_pos] = 0.0
             if want_coupon:
                 t0_overrides.update(
-                    solver._t0_extra_indicator_overrides(
+                    _t0_extra_indicator_overrides(
+                        solver,
                         product,
                         pricing_env,
                         spot,
@@ -377,25 +387,6 @@ class StatisticsLegacy:
             return float(np.interp(spot_log, x_vec, initial_grid[:, col]))
 
         ed_unit = np.array([_read_col(i) for i in range(n_ko)], dtype=float)
-        ko_times = np.array([float(rec.observation_time) for rec in ko_records], dtype=float)
-        ko_probability = np.zeros(n_ko, dtype=float)
-        ed_ko_cf = np.zeros(n_ko, dtype=float)
-
-        for i, rec in enumerate(ko_records):
-            obs_time = float(rec.observation_time)
-            settle = rec.settlement_time if rec.settlement_time is not None else obs_time
-            settle = float(settle)
-            df0 = pricing_env.get_discount_factor(settle)
-            if df0 > 0.0:
-                ko_probability[i] = float(ed_unit[i] / df0)
-            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
-            ed_ko_cf[i] = float(ed_unit[i] * payoff)
-
-        survival_probability = np.ones(n_ko, dtype=float)
-        cumulative = 0.0
-        for i in range(n_ko):
-            cumulative += ko_probability[i]
-            survival_probability[i] = max(0.0, 1.0 - cumulative)
 
         ki_times = np.array([], dtype=float)
         ki_event_probability = np.array([], dtype=float)
@@ -417,11 +408,9 @@ class StatisticsLegacy:
             ki_probability = 0.0
             ki_ever_probability = 0.0
 
-        pv = float(pv)   # the caller's: external, or the same march's value readout
-        expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
-
         if want_coupon:
-            extra_fields = solver._extract_extra_event_stats(
+            extra_fields = _extract_extra_event_stats(
+                solver,
                 initial_grid,
                 x_vec,
                 spot_log,
@@ -433,105 +422,174 @@ class StatisticsLegacy:
             )
         else:
             extra_fields = {}
-        # The maturity cashflow is pv minus KO cashflows; for products with extra
-        # cashflow streams (Phoenix coupons) also remove those so the decomposition
-        # pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
-        coupon_cf = extra_fields.get("expected_discounted_coupon_cashflow")
-        if coupon_cf is not None:
-            expected_discounted_maturity_cf -= float(np.sum(coupon_cf))
+        return assemble_autocallable(
+            solver, product, pricing_env, pv=pv, ko_records=ko_records, ed_unit=ed_unit,
+            ki=(ki_probability, ki_ever_probability, ki_times, ki_event_probability, ki_survival_probability),
+            extra_fields=extra_fields,
+        )
 
-        terminal = resolve_terminal_timing(product, pricing_env)
-        determination_times = list(ko_times)
-        payment_times = [
-            float(
-                record.settlement_time
-                if record.settlement_time is not None
-                else record.observation_time
-            )
-            for record in ko_records
-        ]
-        discounted_cashflows = list(ed_ko_cf)
-        determination_dates = [
-            record.observation_date for record in ko_records
-        ]
-        payment_dates = [
-            record.settlement_date for record in ko_records
-        ]
 
-        if "coupon_probability" in extra_fields:
-            coupon_cashflows = np.asarray(
-                (
-                    extra_fields["expected_discounted_coupon_cashflow"]
-                    if coupon_cf is not None
-                    else np.zeros(n_ko, dtype=float)
-                ),
-                dtype=float,
-            )
-            coupon_at_expiry = (
-                product.coupon_config.coupon_pay_type
-                == CouponPayType.EXPIRY
-            )
-            determination_times.extend(ko_times)
-            payment_times.extend(
-                [
-                    (
-                        float(terminal.payment_time)
-                        if coupon_at_expiry
-                        else float(
-                            record.settlement_time
-                            if record.settlement_time is not None
-                            else record.observation_time
-                        )
-                    )
-                    for record in ko_records
-                ]
-            )
-            discounted_cashflows.extend(coupon_cashflows)
-            determination_dates.extend(
-                record.observation_date for record in ko_records
-            )
-            payment_dates.extend(
-                (
-                    terminal.payment_date
-                    if coupon_at_expiry
-                    else record.settlement_date
-                )
-                for record in ko_records
-            )
+# --- the coupon hooks (moved from PhoenixPDESolver; a Snowball has none) -------------
 
-        determination_times.append(float(terminal.determination_time))
-        payment_times.append(float(terminal.payment_time))
-        discounted_cashflows.append(expected_discounted_maturity_cf)
-        determination_dates.append(terminal.determination_date)
-        payment_dates.append(terminal.payment_date)
-        cashflow_fields = payment_aware_cashflow_fields(
+def _n_extra_event_cols(solver, product, n_ko):
+    return n_ko if isinstance(product, PhoenixOption) else 0
+
+
+def _set_extra_event_indicators(
+    solver, v0, v1, s_vec, n_ko, ko_idx, rec, product, pricing_env, t_vec, t_idx
+) -> None:
+    if not isinstance(product, PhoenixOption):
+        return None
+    # Set the coupon-trigger column on the coupon-pay mask AFTER the KO jump,
+    # so a coupon at a simultaneous KO is still counted (matches the Phoenix MC
+    # reference: coupon_hit gated on "alive entering obs i", incl. first_ko_idx==i).
+    if ko_idx is None or ko_idx >= solver._coupon_barriers.shape[0]:
+        return
+    coupon_barrier = float(solver._coupon_barriers[ko_idx])
+    coupon_payment_time = solver._coupon_payment_time(
+        product,
+        pricing_env,
+        ko_idx,
+    )
+    df_delay = solver._cashflow_value_at_time(
+        pricing_env=pricing_env,
+        cashflow=1.0,
+        current_time=float(t_vec[t_idx]),
+        settlement_time=coupon_payment_time,
+    )
+    coup_col = n_ko + ko_idx
+    if solver._event_uses_projection(t_idx):
+        for v in (v0, v1):
+            v[:, coup_col] = solver._project_event_values(
+                s_vec, coupon_barrier, product.is_reverse, True,
+                v[:, coup_col], df_delay,
+            )
+        return
+    pay_mask = solver._event_nodal_mask(
+        s_vec, coupon_barrier, product.is_reverse, True,
+        at_valuation=(t_idx == 0),
+    )
+    v0[pay_mask, coup_col] = df_delay
+    v1[pay_mask, coup_col] = df_delay
+
+
+def _t0_extra_indicator_overrides(
+    solver,
+    product,
+    pricing_env,
+    spot,
+    n_ko,
+    rec0_pos,
+    rec0,
+    t_vec,
+    ko_triggered,
+    df_delay0,
+) -> dict:
+    """Deterministic valuation-date coupon indicator at the known spot.
+
+    Mirrors _set_extra_event_indicators (a coupon at a simultaneous KO is
+    still counted); a triggered t=0 KO kills every later coupon stream."""
+    if not isinstance(product, PhoenixOption):
+        return {}
+    overrides: dict = {}
+    if rec0_pos is None or rec0_pos >= solver._coupon_barriers.shape[0]:
+        return overrides
+    coupon_barrier = float(solver._coupon_barriers[rec0_pos])
+    pay = bool(
+        solver._event_nodal_mask(
+            np.asarray([float(spot)], dtype=float),
+            coupon_barrier,
+            product.is_reverse,
+            True,
+            at_valuation=True,
+        )[0]
+    )
+    coupon_payment_time = solver._coupon_payment_time(
+        product,
+        pricing_env,
+        rec0_pos,
+    )
+    coupon_delay0 = solver._cashflow_value_at_time(
+        pricing_env=pricing_env,
+        cashflow=1.0,
+        current_time=float(t_vec[0]),
+        settlement_time=coupon_payment_time,
+    )
+    overrides[n_ko + rec0_pos] = coupon_delay0 if pay else 0.0
+    if ko_triggered:
+        for i in range(n_ko):
+            if i != rec0_pos:
+                overrides[n_ko + i] = 0.0
+    return overrides
+
+
+def _extract_extra_event_stats(
+    solver,
+    initial_grid,
+    x_vec,
+    spot_log,
+    n_ko,
+    ko_records,
+    pricing_env,
+    product,
+    col_overrides=None,
+) -> dict:
+    if not isinstance(product, PhoenixOption):
+        return {}
+    overrides = col_overrides or {}
+
+    def _read(col: int) -> float:
+        if col in overrides:
+            return float(overrides[col])
+        return float(np.interp(spot_log, x_vec, initial_grid[:, col]))
+
+    ed_coup = np.array([_read(n_ko + i) for i in range(n_ko)], dtype=float)
+    coupon_probability = np.zeros(n_ko, dtype=float)
+    for i, rec in enumerate(ko_records):
+        obs_time = float(rec.observation_time)
+        settle = solver._coupon_payment_time(
+            product,
             pricing_env,
-            determination_times=determination_times,
-            payment_times=payment_times,
-            expected_discounted_cashflows=discounted_cashflows,
-            determination_dates=determination_dates,
-            payment_dates=payment_dates,
+            i,
         )
+        df0 = pricing_env.get_discount_factor(settle)
+        if df0 > 0.0:
+            coupon_probability[i] = float(ed_coup[i] / df0)
+    result = {"coupon_probability": coupon_probability}
+    ecc = _coupon_cashflow_from_probability(
+        solver, coupon_probability, n_ko, ko_records, pricing_env, product
+    )
+    if ecc is not None:
+        result["expected_discounted_coupon_cashflow"] = ecc
+    return result
 
-        return solver._make_event_stats(
-            pv=pv,
-            ko_times=ko_times,
-            ko_probability=ko_probability,
-            survival_probability=survival_probability,
-            expected_discounted_ko_cashflow=ed_ko_cf,
-            ki_probability=ki_probability,
-            expected_discounted_maturity_cashflow=expected_discounted_maturity_cf,
-            reconciliation_error=0.0,
-            ki_times=ki_times,
-            ki_event_probability=ki_event_probability,
-            ki_survival_probability=ki_survival_probability,
-            # Two unambiguous, cross-engine-consistent KI fields. The legacy
-            # `ki_probability` keeps the PDE's historical "settles knocked-in"
-            # meaning (KI indicator absorbed to 0 on any KO), which equals
-            # `ki_survive_knocked_in_probability`. `ki_ever_probability` comes from
-            # the dedicated KI-ever column that carries no KO absorption.
-            ki_ever_probability=ki_ever_probability,
-            ki_survive_knocked_in_probability=ki_probability,
-            **cashflow_fields,
-            **extra_fields,
+
+def _coupon_cashflow_from_probability(
+    solver, coupon_probability, n_ko, ko_records, pricing_env, product
+):
+    """Expected discounted coupon cashflow for non-memory coupons, else None.
+
+    With a deterministic per-period coupon amount and a deterministic
+    settlement time, E[DF(0->settle) * amount * 1{coupon}] factors exactly as
+    DF(0->settle) * amount * P(coupon). For memory coupons the paid amount is
+    path-dependent and cannot be recovered from the trigger indicator, so we
+    omit the field (probability stays correct) rather than report a wrong value.
+    """
+    if product.has_memory_coupon:
+        return None
+    ecc = np.zeros(n_ko, dtype=float)
+    for i, rec in enumerate(ko_records):
+        settle = solver._coupon_payment_time(
+            product,
+            pricing_env,
+            i,
         )
+        amt = (
+            float(solver._coupon_amounts[i])
+            if i < solver._coupon_amounts.shape[0]
+            else 0.0
+        )
+        ecc[i] = float(
+            pricing_env.get_discount_factor(settle) * amt * coupon_probability[i]
+        )
+    return ecc

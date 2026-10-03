@@ -23,7 +23,7 @@ from .components import validate_schedule
 from .identity import factorization_key, market_fingerprints, problem_identity
 from .march import march          # run resolves it here: a spy on core.prepare.march sees every entry
 from .readout import read
-from .statistics import StatisticsLegacy
+from .statistics import create_statistics
 
 __all__ = ["Operation", "OutputRequest", "TerminalOutcome", "SessionArtefacts", "PreparedProblem",
            "CompositeProblem", "prepare", "run", "market_scope", "request_geometry", "bind_layout",
@@ -303,7 +303,7 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
                                   theta_schedule=schedule, groups=groups, factorizations=factorizations,
                                   readout=solver.params.readout, events=events, identity=identity, market_fps=fps)
         if request.event_stats and adapter.supports_statistics_group:     # the statistics group (§5.4)
-            statistics = StatisticsLegacy.create(problem, request.streams)
+            statistics = create_statistics(problem, request.streams)
             if statistics is not None:
                 problem = replace(problem, statistics=statistics, groups=groups + (statistics.group,))
         # step 12: what the march's factorizations and the march itself depend on. Read

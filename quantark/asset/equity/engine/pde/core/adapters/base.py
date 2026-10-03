@@ -42,6 +42,14 @@ class FamilyAdapter:
     supports_statistics_group = False
     #: What the route samples per step (explain's route section).
     sample_kind = SampleKind.SCALAR
+    #: "legacy" (the 0.8.0 statistics sweep) or "value" (spec 3B §5.1); flipped per family at stage 2
+    statistics_mode = "legacy"
+    #: The model the family's own statistics belong to (StatisticsProvenance.statistics_model)
+    statistics_model = "flat_vol_1d"
+
+    def statistics_family(self, prepared, streams):
+        """The value-mode statistics group (spec 3B §5.1); per family, Tasks 12-15."""
+        raise NotImplementedError(f"{type(self).__name__} has no value-mode statistics")
 
     def readout_mode(self, prepared) -> str:
         """How the price is read (explain's outputs section)."""

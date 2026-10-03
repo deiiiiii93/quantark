@@ -471,6 +471,7 @@ class LocalVolAdapterMixin:
     """The local-vol routes: a local-vol row per step; the surface is the solve's."""
 
     sample_kind = SampleKind.NODAL
+    statistics_model = "local_vol_1d"
 
     def scope(self, product, env):
         # The facades build the surface around the whole run (_with_surface); a

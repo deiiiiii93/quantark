@@ -115,6 +115,8 @@ def test_statistics_group_is_one_banded_group_of_both_surfaces():
     names = [(g.name, g.surfaces, g.backend, g.policy, g.rolling) for g in p.groups]
     assert names == [("value", ("alive", "ki"), Backend.BANDED, VALUE, False),
                      ("stats", ("stats_v0", "stats_v1"), Backend.BANDED, STATISTICS_LEGACY, True)]
+    from quantark.asset.equity.engine.pde.core.statistics import StatisticsLegacy
+    assert isinstance(p.statistics, StatisticsLegacy) and p.groups[-1] is p.statistics.group
 
 
 def test_statistics_only_request_has_no_value_group():

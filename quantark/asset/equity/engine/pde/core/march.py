@@ -70,9 +70,9 @@ def march(prepared) -> MarchResult:
             theta = thetas[j]
             if zd_theta_one and coeffs.is_zero_diffusion(k):
                 theta = 1.0  # upwind advection is monotone only fully implicit
-            if group.rolling:                                   # statistics-legacy: carry the boundary rows
+            if group.rolling:                                   # the statistics group: it supplies its rows
                 v_next = np.hstack([states[n] for n in surfaces])
-                lower, upper = v_next[0, :].copy(), v_next[-1, :].copy()
+                lower, upper = stats.rows(j, v_next)
                 n_cols = v_next.shape[1]
             else:
                 adapter.boundaries(prepared, group, states, j)
@@ -100,13 +100,7 @@ def march(prepared) -> MarchResult:
                     or not np.isfinite(out).all():
                 validate_advanced(out, group, n_int, stepper, n_cols=n_cols)
             if group.rolling:
-                col = 0
-                for name in group.surfaces:
-                    width = states[name].shape[1]
-                    new = states[name].copy()                   # legacy: v_cur = v_next.copy()
-                    new[1:-1, :] = out[:, col:col + width]
-                    states[name] = new
-                    col += width
+                stats.store(states, out, lower, upper)
             else:
                 if len(surfaces) == 1:
                     surface[1:-1, j] = out[:, 0]

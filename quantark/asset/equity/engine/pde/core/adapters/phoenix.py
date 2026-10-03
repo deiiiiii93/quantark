@@ -20,6 +20,8 @@ __all__ = ["PhoenixAdapter", "LocalVolPhoenixAdapter", "Heston2DPhoenixAdapter"]
 
 class PhoenixAdapter(SnowballAdapter):
 
+    statistics_mode = "legacy"   # pinned: the Snowball flip (stage 2 (a)) must not reach this family
+
     def solve_state(self, product, env, request):
         state = super().solve_state(product, env, request)
         # per-solve valuation-date readout state (_solve reset it after the preamble)
