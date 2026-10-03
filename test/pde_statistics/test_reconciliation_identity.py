@@ -107,6 +107,8 @@ PHOENIX_CASES = {
     "c105": (lambda: make_phoenix(dict(PHOENIX, memory_coupon=True, coupon_barrier=105.0)), {}),
     "coincident": (lambda: make_phoenix(dict(PHOENIX, coupon_barrier=103.0)), {}),
     "arrears": (lambda: _arrears(CASES["ph_memory"][0]()), {}),
+    "expiry_plain": (lambda: make_phoenix(dict(PHOENIX, coupon_pay_type="expiry")), {}),
+    "expiry_memory": (lambda: make_phoenix(dict(PHOENIX, memory_coupon=True, coupon_pay_type="expiry")), {}),
 }
 
 
@@ -143,15 +145,28 @@ def test_local_vol_memory_phoenix_identity(value_mode, projection):
 
 
 @pytest.mark.parametrize("projection", [None, "nodal"])
+@pytest.mark.parametrize("memory", [False, True], ids=["plain", "memory"])
+def test_expiry_phoenix_identity(value_mode, memory, projection):
+    """EXPIRY (Task 14): coupons paid at termination through the termination-unit columns (plan F4)."""
+    value_mode("phoenix")
+    product = make_phoenix(dict(PHOENIX, memory_coupon=memory, coupon_pay_type="expiry"))
+    _check(PhoenixPDESolver(PDEParams(event_projection=projection)).calculate_event_stats(product, env()))
+
+
+@pytest.mark.parametrize("pay_type", ["instant", "expiry"])
+@pytest.mark.parametrize("projection", [None, "nodal"])
 @pytest.mark.parametrize("spot", [78.0, 95.0], ids=["miss", "pay"])
-def test_dated_memory_phoenix_on_its_first_observation_date(value_mode, spot, projection):
-    """F16: a memory coupon decided at valuation -- the miss reads the one-missed state, the pay adds today's coupon."""
-    from pde_bitwise.capture_book import _dated, _dated_env, _first_obs
+def test_dated_memory_phoenix_on_its_first_observation_date(value_mode, spot, projection, pay_type):
+    """F16: a memory coupon decided at valuation -- the miss reads the one-missed state, the pay adds today's
+    coupon (EXPIRY: through the termination value at the spot)."""
+    from pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
 
     value_mode("phoenix")
     # a fixed coupon fraction: 0.8.0 accrues the floating first period to zero at its own date, and a
     # zero missed coupon would leave the one-missed state equal to state 0
     p, _ = _dated("phoenix", fixed_fraction=1.0 / 12.0)
+    if pay_type == "expiry":
+        p = _phoenix_expiry(p)
     stats = PhoenixPDESolver(PDEParams(event_projection=projection)).calculate_event_stats(
         p, _dated_env(p, _first_obs(p), spot))
     _check(stats)          # a miss read from state 0 would miss the arrears the value carries in state 1
