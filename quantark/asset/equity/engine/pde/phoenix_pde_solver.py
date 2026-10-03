@@ -475,26 +475,108 @@ class PhoenixPDESolver(SnowballPDESolver):
         w0, w1 = self._term_w0, self._term_w1
         if w0 is None:
             return
-        barrier = ko_record.barrier
-        settled = self._cashflow_value_at_time(
-            pricing_env=pricing_env,
-            cashflow=1.0,
-            current_time=current_time,
-            settlement_time=ko_record.settlement_time,
-        )
         grids = (w0, w1) if self._ko_survives_ki(product) else (w0,)
+        self._termination_ko_columns([g[:, t_idx] for g in grids], s_vec, t_idx, current_time, product,
+                                     pricing_env, ko_record)
+
+    def _termination_ko_columns(self, cols, s_vec, t_idx, current_time, product, pricing_env, ko_record,
+                                breach=None) -> None:
+        """The termination knock-out on columns (spec 3B §5.3, plan F4): ``W`` (the value) or the
+        statistics' ``T_j``/``U`` columns take the settlement unit where the barrier is breached, in place.
+        ``cols`` is ``[alive]`` or ``[alive, ki]``; ``breach`` as ``_ko_columns``."""
+        barrier = ko_record.barrier
+        if breach is None:
+            settled = self._cashflow_value_at_time(
+                pricing_env=pricing_env,
+                cashflow=1.0,
+                current_time=current_time,
+                settlement_time=ko_record.settlement_time,
+            )
+            targets = [settled] * len(cols)
+        else:
+            targets = [breach.ko(ko_record, col, name) for col, name in zip(cols, ("alive", "ki"))]
         if self._event_uses_projection(t_idx):
-            for grid in grids:
-                grid[:, t_idx] = self._project_event_values(
+            for col, target in zip(cols, targets):
+                col[...] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
-                    grid[:, t_idx], settled,
+                    col, target,
                 )
             return
         mask = self._event_nodal_mask(
             s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
         )
-        for grid in grids:
-            grid[mask, t_idx] = settled
+        for col, target in zip(cols, targets):
+            col[mask] = target if np.ndim(target) == 0 else target[mask]
+
+    # --- the shared event updates (spec 3B §5.1, §5.3): the value and the statistics call the same ones
+
+    def _coupon_update(self, s_vec, barrier, is_reverse, t_idx, miss, pay, pay_mask=None) -> np.ndarray:
+        """The coupon fan-in at one memory state: ``pay`` where the coupon barrier is breached, ``miss``
+        elsewhere -- the cell-average projection, or the nodal ``pay_mask`` (broadcast over a block's
+        columns)."""
+        if pay_mask is None:
+            if self._event_uses_projection(t_idx):
+                return self._project_event_values(s_vec, barrier, is_reverse, True, miss, pay)
+            pay_mask = self._event_nodal_mask(s_vec, barrier, is_reverse, True, at_valuation=(t_idx == 0))
+        mask = pay_mask if np.ndim(miss) == 1 else pay_mask[:, None]
+        return np.where(mask, pay, miss)
+
+    def _ko_update(self, s_vec, barrier, is_reverse, t_idx, survive, breach_values, ko_mask=None) -> np.ndarray:
+        """The knock-out at one memory state: ``breach_values`` where the barrier is breached, ``survive``
+        elsewhere -- the projection, or ``survive`` with ``breach_values`` written on the nodal mask."""
+        if ko_mask is None:
+            if self._event_uses_projection(t_idx):
+                return self._project_event_values(s_vec, barrier, is_reverse, True, survive, breach_values)
+            ko_mask = self._event_nodal_mask(s_vec, barrier, is_reverse, True, at_valuation=(t_idx == 0))
+        out = np.array(survive, dtype=float, copy=True)
+        out[ko_mask] = breach_values if np.ndim(breach_values) == 0 else breach_values[ko_mask]
+        return out
+
+    def _ko_coupon_breach(self, s_vec, coupon_barrier, is_reverse, without, with_):
+        """The coupon paid with a non-joint knock-out: ``with_`` above the coupon barrier, ``without``
+        below, by the inner coupon projection."""
+        return self._project_event_values(s_vec, coupon_barrier, is_reverse, True, without, with_)
+
+    def _coupon_masks(self, s_vec, t_idx, obs_idx, record, product):
+        """The nodal ``(pay_mask, ko_mask)`` the knock-out stage uses at ``t_idx``."""
+        at_val = t_idx == 0
+        ko_mask = self._event_nodal_mask(
+            s_vec, record.barrier, product.is_reverse, True, at_valuation=at_val
+        )
+        if obs_idx is not None:
+            coupon_barrier = float(self._coupon_barriers[obs_idx])
+            pay_mask = self._event_nodal_mask(
+                s_vec, coupon_barrier, product.is_reverse, True,
+                at_valuation=at_val,
+            )
+        else:
+            pay_mask = np.zeros_like(s_vec, dtype=bool)
+        return pay_mask, ko_mask
+
+    @staticmethod
+    def _joint_branches(lows, his, b_c_x, b_ko_x, trig_up, ko_here, in_coupon_fan, ko_value, pay_value,
+                        miss_value, keep_value):
+        """The joint coupon + knock-out partition's per-region arrays (``_apply_joint_coupon_ko_projection``):
+        ``ko_value(m_pay)`` in the knock-out region, then survive-and-pay, survive-and-miss, and the
+        out-of-fan array. Arrays are columns (the value) or blocks (the statistics)."""
+        branches = []
+        for j in range(len(lows)):
+            if trig_up:
+                m_ko = b_ko_x <= lows[j]
+                m_pay = b_c_x <= lows[j]
+            else:
+                m_ko = his[j] <= b_ko_x
+                m_pay = his[j] <= b_c_x
+            m_ko = m_ko and ko_here
+            if m_ko:
+                branches.append(ko_value(m_pay))
+            elif in_coupon_fan and m_pay:
+                branches.append(pay_value)
+            elif in_coupon_fan:
+                branches.append(miss_value)
+            else:
+                branches.append(keep_value)
+        return branches
 
     def _coupon_record_settlement_time(
         self, obs_idx: int, current_time: float
@@ -579,13 +661,13 @@ class PhoenixPDESolver(SnowballPDESolver):
                 next_k = k + 1 if use_memory else 0
 
                 val_miss_0 = grid_v0_list[next_k][:, t_idx]
-                grid_v0_list[k][:, t_idx] = self._project_event_values(
-                    s_vec, barrier, product.is_reverse, True,
+                grid_v0_list[k][:, t_idx] = self._coupon_update(
+                    s_vec, barrier, product.is_reverse, t_idx,
                     val_miss_0, diffused_v0_0 + earned * disc_v0,
                 )
                 val_miss_1 = grid_v1_list[next_k][:, t_idx]
-                grid_v1_list[k][:, t_idx] = self._project_event_values(
-                    s_vec, barrier, product.is_reverse, True,
+                grid_v1_list[k][:, t_idx] = self._coupon_update(
+                    s_vec, barrier, product.is_reverse, t_idx,
                     val_miss_1, diffused_v1_0 + earned * disc_v1,
                 )
             return
@@ -622,15 +704,17 @@ class PhoenixPDESolver(SnowballPDESolver):
             next_k = k + 1 if use_memory else 0
             val_miss_0 = grid_v0_list[next_k][:, t_idx]
 
-            grid_v0_list[k][pay_mask, t_idx] = val_pay_0[pay_mask]
-            grid_v0_list[k][~pay_mask, t_idx] = val_miss_0[~pay_mask]
+            grid_v0_list[k][:, t_idx] = self._coupon_update(
+                s_vec, barrier, product.is_reverse, t_idx, val_miss_0, val_pay_0, pay_mask=pay_mask,
+            )
 
             # V1
             val_pay_1 = diffused_v1_0 + earned * disc_v1
             val_miss_1 = grid_v1_list[next_k][:, t_idx]
 
-            grid_v1_list[k][pay_mask, t_idx] = val_pay_1[pay_mask]
-            grid_v1_list[k][~pay_mask, t_idx] = val_miss_1[~pay_mask]
+            grid_v1_list[k][:, t_idx] = self._coupon_update(
+                s_vec, barrier, product.is_reverse, t_idx, val_miss_1, val_pay_1, pay_mask=pay_mask,
+            )
 
     def _t0_has_events(self, product) -> bool:
         if super()._t0_has_events(product):
@@ -730,31 +814,17 @@ class PhoenixPDESolver(SnowballPDESolver):
                 (grid_v0_list, diffused_cols[0], True, disc_v0),
                 (grid_v1_list, diffused_cols[1], self._ko_survives_ki(product), disc_v1),
             ):
-                branches = []
-                for j in range(len(breaks) + 1):
-                    if trig_up:
-                        m_ko = b_ko_x <= lows[j]
-                        m_pay = b_c_x <= lows[j]
-                    else:
-                        m_ko = his[j] <= b_ko_x
-                        m_pay = his[j] <= b_c_x
-                    m_ko = m_ko and ko_here
-                    if m_ko:
-                        branches.append(
-                            np.full(
-                                n,
-                                (base_payoff + (coupon_at_ko if m_pay else 0.0))
-                                * df,
-                            )
-                        )
-                    elif in_coupon_fan and m_pay:
-                        # `disc` is this regime's termination value under
-                        # EXPIRY, a plain discount factor otherwise.
-                        branches.append(diffused0 + earned_k * disc)
-                    elif in_coupon_fan:
-                        branches.append(grids[next_k][:, t_idx])
-                    else:
-                        branches.append(grids[k][:, t_idx])
+                branches = self._joint_branches(
+                    lows, his, b_c_x, b_ko_x, trig_up, ko_here, in_coupon_fan,
+                    ko_value=lambda m_pay, _c=coupon_at_ko: np.full(
+                        n, (base_payoff + (_c if m_pay else 0.0)) * df
+                    ),
+                    # `disc` is this regime's termination value under
+                    # EXPIRY, a plain discount factor otherwise.
+                    pay_value=(diffused0 + earned_k * disc) if in_coupon_fan else None,
+                    miss_value=grids[next_k][:, t_idx] if in_coupon_fan else None,
+                    keep_value=grids[k][:, t_idx],
+                )
                 grids[k][:, t_idx] = project_piecewise_event(
                     x_vec, breaks, branches
                 )
@@ -846,18 +916,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         max_k = obs_idx if (obs_idx is not None and use_memory) else 0
 
         if not self._event_uses_projection(t_idx):
-            at_val = t_idx == 0
-            ko_mask = self._event_nodal_mask(
-                s_vec, barrier, product.is_reverse, True, at_valuation=at_val
-            )
-            if obs_idx is not None:
-                coupon_barrier = float(self._coupon_barriers[obs_idx])
-                pay_mask = self._event_nodal_mask(
-                    s_vec, coupon_barrier, product.is_reverse, True,
-                    at_valuation=at_val,
-                )
-            else:
-                pay_mask = np.zeros_like(s_vec, dtype=bool)
+            pay_mask, ko_mask = self._coupon_masks(s_vec, t_idx, obs_idx, ko_record, product)
 
         df = 1.0
         if ko_record.settlement_time is not None and ko_record.settlement_time > current_time:
@@ -899,21 +958,21 @@ class PhoenixPDESolver(SnowballPDESolver):
                 coupon_at_ko = coupon_amt + accumulated_pay
                 if coupon_at_ko > 0.0 and obs_idx is not None:
                     coupon_barrier = float(self._coupon_barriers[obs_idx])
-                    total_payoff = self._project_event_values(
-                        s_vec, coupon_barrier, product.is_reverse, True,
+                    total_payoff = self._ko_coupon_breach(
+                        s_vec, coupon_barrier, product.is_reverse,
                         base_payoff * df, (base_payoff + coupon_at_ko) * df,
                     )
                 else:
                     total_payoff = np.full(len(s_vec), base_payoff * df)
-                grid_v0_list[k][:, t_idx] = self._project_event_values(
-                    s_vec, barrier, product.is_reverse, True,
+                grid_v0_list[k][:, t_idx] = self._ko_update(
+                    s_vec, barrier, product.is_reverse, t_idx,
                     grid_v0_list[k][:, t_idx], total_payoff,
                 )
                 # V1 is the knocked-in surface; disable_ko_after_ki removes the
                 # knock-out from it and leaves it running on unbarriered.
                 if self._ko_survives_ki(product):
-                    grid_v1_list[k][:, t_idx] = self._project_event_values(
-                        s_vec, barrier, product.is_reverse, True,
+                    grid_v1_list[k][:, t_idx] = self._ko_update(
+                        s_vec, barrier, product.is_reverse, t_idx,
                         grid_v1_list[k][:, t_idx], total_payoff,
                     )
             return
@@ -938,6 +997,12 @@ class PhoenixPDESolver(SnowballPDESolver):
                 )
 
             if ko_mask.any():
-                grid_v0_list[k][ko_mask, t_idx] = total_payoff[ko_mask]
+                grid_v0_list[k][:, t_idx] = self._ko_update(
+                    s_vec, barrier, product.is_reverse, t_idx,
+                    grid_v0_list[k][:, t_idx], total_payoff, ko_mask=ko_mask,
+                )
                 if self._ko_survives_ki(product):
-                    grid_v1_list[k][ko_mask, t_idx] = total_payoff[ko_mask]
+                    grid_v1_list[k][:, t_idx] = self._ko_update(
+                        s_vec, barrier, product.is_reverse, t_idx,
+                        grid_v1_list[k][:, t_idx], total_payoff, ko_mask=ko_mask,
+                    )
