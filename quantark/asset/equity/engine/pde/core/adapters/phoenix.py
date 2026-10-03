@@ -163,5 +163,8 @@ class LocalVolPhoenixAdapter(LocalVolAdapterMixin, PhoenixAdapter):
 class Heston2DPhoenixAdapter(PhoenixAdapter):
     """The 2D solver's inherited 1D statistics march: the "2D" damping row (spec 3A §5.3)."""
 
+    #: the 2D route's applicability rules also guard its 1D statistics march (spec 3B §5.6)
+    route = "2D"
+
     def damping_key(self, product) -> str:
         return "2D"

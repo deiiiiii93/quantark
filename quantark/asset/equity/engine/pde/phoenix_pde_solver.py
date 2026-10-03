@@ -67,6 +67,7 @@ class PhoenixPDESolver(SnowballPDESolver):
     def _make_event_stats(self, **fields):
         from quantark.asset.equity.engine.event_stats import PhoenixEventStats
 
+        fields.setdefault("provenance", self._native_provenance())
         return PhoenixEventStats(**fields)
 
     # price() and calculate_greeks() are inherited from SnowballPDESolver

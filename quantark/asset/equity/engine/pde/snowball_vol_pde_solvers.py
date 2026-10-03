@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from copy import deepcopy
 from contextlib import contextmanager
 from typing import Dict, Optional
@@ -9,6 +10,7 @@ from typing import Dict, Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.event_stats import StatisticsProvenance, StatisticsRefused
 from quantark.asset.equity.engine.pde.core.components import resolve_stepper
 from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
@@ -227,9 +229,17 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         greek_min_n_v: int = 0,
         greek_min_steps_per_year: int = 0,
         barrier_greek_min_n_x: int = 0,
+        statistics: str = "flat_vol_surrogate",
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
+        # spec 3B §5.6: the event statistics of a 2D solver are the flat-vol 1D march, reported
+        # only on request ("flat_vol_surrogate") with their provenance, or refused
+        if statistics not in ("refuse", "flat_vol_surrogate"):
+            raise ValidationError(
+                f"statistics must be 'refuse' or 'flat_vol_surrogate', got {statistics!r}"
+            )
+        self._statistics = statistics
         super().__init__(params=params or PDEParams())
         try:
             scheme = ADIScheme[scheme.upper()] if isinstance(scheme, str) else scheme
@@ -571,11 +581,19 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             return None
         if pricing_env is None:
             return None
+        if self._statistics == "refuse":
+            raise StatisticsRefused(
+                f"statistics for a 2D solver are not native; pass statistics='flat_vol_surrogate' to "
+                f"{type(self).__name__} to receive the flat-vol 1D statistics with their provenance"
+            )
         pde_pv = float(npv) if npv is not None else float(self.price(product, pricing_env))
         # the 1D statistics group at the strike-implied vol, pv from the 2D solve (§8)
-        return self._run(product, pricing_env, OutputRequest(
+        stats = self._run(product, pricing_env, OutputRequest(
             Operation.EVENT_STATS, price=False, event_stats=True,
             external_pv=pde_pv, streams=streams))
+        if stats is None:
+            return None
+        return dataclasses.replace(stats, provenance=StatisticsProvenance("flat_vol_1d", self._price_model))
 
     def _session_outputs(
         self,
@@ -1207,12 +1225,14 @@ class HestonSnowballPDESolver(_Heston2DSnowballPDEBase):
     """Two-surface Snowball PDE under the Heston stochastic-volatility model."""
 
     _solver_name = "HestonSnowballPDESolver"
+    _price_model = "heston_adi_2d"
 
 
 class HestonSLVSnowballPDESolver(SLVBarrierLeverageMixin, _Heston2DSnowballPDEBase):
     """Two-surface Snowball PDE under Heston-SLV using a calibrated leverage surface."""
 
     _solver_name = "HestonSLVSnowballPDESolver"
+    _price_model = "slv_adi_2d"
 
     def __init__(
         self,
