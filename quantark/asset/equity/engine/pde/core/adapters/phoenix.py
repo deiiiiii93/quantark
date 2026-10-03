@@ -26,6 +26,10 @@ class PhoenixAdapter(SnowballAdapter):
         state = super().solve_state(product, env, request)
         # per-solve valuation-date readout state (_solve reset it after the preamble)
         self.solver._reset_t0_readout_state()
+        # W is per solve too: the terminal coupon stage runs before terminal() rebuilds it, and must
+        # discount to the terminal payment, not read the previous solve's W (a shorter note priced
+        # wrong, a longer one raised IndexError on a reused solver or PDEEngine)
+        self.solver._term_w0 = self.solver._term_w1 = None
         return state
 
     def statistics_family(self, prepared, streams):
