@@ -147,23 +147,41 @@ class SnowballStatistics(RollingStatistics):
         solver, product, env = self.solver, self.product, self.env
         tau_rem = self.tau - self.t[j]
         current = solver._total_tau - tau_rem
-        lo1, up1 = solver._boundary_rows_v1(j, tau_rem, product, env, self.s)
-        lo0, up0 = solver._boundary_rows_v0(j, tau_rem, product, env, self.s)
-        r_lo1, r_up1 = self._cash_row(lo1, "ki"), self._cash_row(up1, "ki")
-        r_up0 = self._cash_row(up0, "alive")
+        lo1, up1 = self._value_rows("v1", j, tau_rem)
+        lo0, up0 = self._value_rows("v0", j, tau_rem)
+        # the hstacked row pair, filled through per-surface views (surface 0 first, as the march stacks)
+        w = self.n_cols
+        lower, upper = np.zeros(2 * w), np.zeros(2 * w)
+        r_lo0, r_lo1, r_up0, r_up1 = lower[:w], lower[w:], upper[:w], upper[w:]
+        self._fill_cash(r_lo1, lo1, "ki")
+        self._fill_cash(r_up1, up1, "ki")
+        self._fill_cash(r_up0, up0, "alive")
         if lo0.copy_from_ki:
             # continuous KI: the value's alive lower row is the knocked-in row (copied, allocation and
             # all) -- or 0.0 on a family whose value never exposes that row (``_alive_lower_copies_ki``)
-            r_lo0 = r_lo1.copy() if self._alive_lower_copies_ki else np.zeros(self.n_cols)
+            if self._alive_lower_copies_ki:
+                r_lo0[:] = r_lo1
         else:
-            r_lo0 = self._cash_row(lo0, "alive")
+            self._fill_cash(r_lo0, lo0, "alive")
         if self.layout.kis is not None:
             self._ki_rows(current, r_lo0, r_up0, r_lo1, r_up1)
         self._probability_rows(j, current, (r_lo0, r_up0, r_lo1, r_up1), (lo0, up0, lo1, up1))
-        return np.concatenate([r_lo0, r_lo1]), np.concatenate([r_up0, r_up1])
+        return lower, upper
 
     #: SnowballAdapter.allocate exposes the knocked-in grid to the alive lower row (``solver._grid_v1``)
     _alive_lower_copies_ki = True
+
+    def _value_rows(self, which, j, tau_rem):
+        """The surface's EdgeRows at step ``j``: the very rows the value group set this step when it
+        marches alongside (the march advances the value groups before the statistics group, so the
+        stash is this step's), else the adapter's row function (decision 14)."""
+        solver = self.solver
+        if self.prepared.request.price:
+            stash = getattr(solver, f"_rows_{which}_stash", None)
+            if (stash is not None and stash[0] == j and stash[1] == tau_rem and stash[2] is self.product
+                    and stash[3] is self.env):
+                return stash[4], stash[5]
+        return getattr(solver, f"_boundary_rows_{which}")(j, tau_rem, self.product, self.env, self.s)
 
     def _ki_rows(self, current, r_lo0, r_up0, r_lo1, r_up1):
         """The knock-in columns' rows, in determination units ``DF(t, T)``, by edge (spec 3B §5.1).
@@ -191,13 +209,12 @@ class SnowballStatistics(RollingStatistics):
         """Family hook (Phoenix: the trigger rows; KO-reset: the maturity units). ``rows`` are the
         statistics rows ``(lo0, up0, lo1, up1)``, filled in place; ``edges`` the value's EdgeRows."""
 
-    def _cash_row(self, edge, surface):
-        row = np.zeros(self.n_cols)
+    def _fill_cash(self, row, edge, surface):
+        """Write an EdgeRow's cash terms into ``row`` (zeros), each in the column that pays it."""
         for term in edge.terms:
             if term.column == "KO" and term.record_time is None:
                 continue                                 # no knock-out ahead: the term's unit is 0.0
             row[self._column_of_term(term, surface)] = term.value
-        return row
 
     def _column_of_term(self, term, surface):
         if term.column == "M":
@@ -210,7 +227,7 @@ class SnowballStatistics(RollingStatistics):
         col = 0
         for name in self.group.surfaces:
             width = states[name].shape[1]
-            new = states[name].copy()
+            new = np.empty_like(states[name])                # every row is written below
             new[1:-1, :] = out[:, col:col + width]
             new[0, :] = lower[col:col + width]
             new[-1, :] = upper[col:col + width]

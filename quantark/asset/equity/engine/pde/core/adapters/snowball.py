@@ -274,11 +274,19 @@ class SnowballAdapter(FamilyAdapter):
         if product.has_ki_barrier and solver._ki_continuous:
             kib = float(solver._ki_barrier)
             s = spatial.s
+            # the breached nodes, once per schedule: on the ascending grid they are a prefix (a suffix on
+            # a reverse product), so the copy is a slice -- the same elements, without per-step masking
+            breached = np.flatnonzero((s >= kib) if is_reverse else (s <= kib))
+            whole = slice(int(breached[0]), int(breached[-1]) + 1) if breached.size else slice(0, 0)
+            contiguous = breached.size == whole.stop - whole.start
 
             def continuous(step, states, _b=kib, _rev=is_reverse):
-                mask = (s >= _b) if _rev else (s <= _b)
+                if contiguous and _b == kib and _rev == is_reverse:
+                    sel = whole
+                else:
+                    sel = (s >= _b) if _rev else (s <= _b)
                 alive = states["alive"].copy()
-                alive[mask] = states["ki"][mask]
+                alive[sel] = states["ki"][sel]
                 # FIRST_PASSAGE correction: restore the intra-step crossing
                 # mass the nodal jump cannot see (see _apply_ki_jump).
                 fp = solver._ki_fp

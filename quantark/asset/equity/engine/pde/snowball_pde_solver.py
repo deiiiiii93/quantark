@@ -1376,6 +1376,7 @@ class SnowballPDESolver(BasePDESolver):
     ) -> None:
         """Set boundary conditions for V0 surface."""
         lower, upper = self._boundary_rows_v0(t_idx, tau, product, pricing_env, s_vec)
+        self._rows_v0_stash = (t_idx, tau, product, pricing_env, lower, upper)   # for the statistics group
         grid[0, t_idx] = lower.value
         grid[-1, t_idx] = upper.value
 
@@ -1414,9 +1415,10 @@ class SnowballPDESolver(BasePDESolver):
             payoff = float(rec.payoff or 0.0) if rec is not None else 0.0
             unit = (self._cashflow_value_at_time(pricing_env=pricing_env, cashflow=1.0, current_time=current_time,
                                                  settlement_time=rec.settlement_time) if rec is not None else 0.0)
-            ko_payoff = self._get_ko_payoff_at_time(
-                product, pricing_env, current_time, t_idx
-            )
+            # _get_ko_payoff_at_time's cash from the record and unit already found: _cashflow_value_at_time
+            # returns float(cash) * df (or float(cash)) and the unit is that df (or 1.0), so the product is
+            # the same float -- one record scan and one discount per row
+            ko_payoff = payoff * unit if rec is not None else 0.0
             upper = EdgeRow(ko_payoff, "v0_upper_ko",
                             (RowTerm("KO", unit, None if rec is None else float(rec.observation_time), payoff),))
         else:
@@ -1459,6 +1461,7 @@ class SnowballPDESolver(BasePDESolver):
     ) -> None:
         """Set boundary conditions for V1 surface."""
         lower, upper = self._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
+        self._rows_v1_stash = (t_idx, tau, product, pricing_env, lower, upper)   # for the statistics group
         grid[0, t_idx] = lower.value
         grid[-1, t_idx] = upper.value
 
@@ -1746,26 +1749,20 @@ class SnowballPDESolver(BasePDESolver):
         current_time: float,
         t_idx: int,
     ) -> float:
-        """Get KO payoff for current time/index."""
-        ko_record = self._ko_observation_indices.get(t_idx)
-        if ko_record is not None:
-            payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
-            return self._cashflow_value_at_time(
-                pricing_env=pricing_env,
-                cashflow=payoff,
-                current_time=current_time,
-                settlement_time=ko_record.settlement_time,
-            )
+        """Get KO payoff for current time/index: the record observed there, else the next scheduled one
+        (past observations ignored), discounted from its settlement."""
+        return self._ko_payoff_of_record(
+            self._next_ko_record_at_time(product, pricing_env, current_time, t_idx), pricing_env, current_time)
 
-        # Boundary fallback: use next scheduled KO record (ignore past observations).
-        next_rec = self._next_ko_record_at_time(product, pricing_env, current_time, t_idx)
-        if next_rec is None:
+    def _ko_payoff_of_record(self, record, pricing_env: PricingEnvironment, current_time: float) -> float:
+        """A knock-out record's payoff (0.0 when unset or when there is no record) at ``current_time``."""
+        if record is None:
             return 0.0
         return self._cashflow_value_at_time(
             pricing_env=pricing_env,
-            cashflow=next_rec.payoff or 0.0,
+            cashflow=record.payoff if record.payoff is not None else 0.0,
             current_time=current_time,
-            settlement_time=next_rec.settlement_time,
+            settlement_time=record.settlement_time,
         )
 
     def _next_ko_record_at_time(
@@ -1776,23 +1773,34 @@ class SnowballPDESolver(BasePDESolver):
         t_idx: int,
     ) -> Optional[ResolvedObservationRecord]:
         """The knock-out record ``_get_ko_payoff_at_time`` pays at ``t_idx``: the record observed there,
-        else the next scheduled one (the last when none is ahead), else ``None``."""
+        else the next scheduled one (the last when none is ahead), else ``None``.
+
+        The scan is memoised per resolved record list (the cache's own object, so a new product or
+        market starts a new memo) and time: the boundary rows ask it every step, twice under the
+        value-mode statistics."""
         ko_record = self._ko_observation_indices.get(t_idx)
         if ko_record is not None:
             return ko_record
         ko_records = self._get_cached_ko_records(pricing_env, product)
+        memo = getattr(self, "_next_ko_memo", None)
+        if memo is None or memo[0] is not ko_records:
+            memo = self._next_ko_memo = (ko_records, {})
+        key = float(current_time)
+        if key in memo[1]:
+            return memo[1][key]
         future_records = [
             rec for rec in ko_records if self._record_is_non_negative_time(rec)
         ]
-        if not future_records:
-            return None
-
         next_rec: Optional[ResolvedObservationRecord] = None
-        for rec in future_records:
-            if is_greater_than_or_close(rec.observation_time, current_time):
-                next_rec = rec
-                break
-        return next_rec if next_rec is not None else future_records[-1]
+        if future_records:
+            for rec in future_records:
+                if is_greater_than_or_close(rec.observation_time, current_time):
+                    next_rec = rec
+                    break
+            if next_rec is None:
+                next_rec = future_records[-1]
+        memo[1][key] = next_rec
+        return next_rec
 
     # _df_between_times / _cashflow_value_at_time are inherited from
     # BasePDESolver.
