@@ -285,8 +285,11 @@ def prepare(solver, product, env, request, *, lifecycle_state=None, frozen=None,
         else:
             layout = resolve_bound_layout(solver.grid_binder, frozen, grid_request, market)
         adapter.observation_maps(product, env, layout, tau)               # step 6
-        # step 7: the value surfaces' events (a statistics-only request marches none)
-        events = adapter.prepare_events(product, env, layout, tau, request) if request.price else None
+        # step 7: the event stages -- for the value surfaces and for a statistics group alike (decision 14):
+        # the statistics-only path (an external pv, the 2D surrogate) marches no value group but needs them
+        marches_statistics = request.event_stats and adapter.supports_statistics_group
+        events = (adapter.prepare_events(product, env, layout, tau, request)
+                  if (request.price or marches_statistics) else None)
         samples = _lazy(lambda: adapter.samples(product, env, layout, tau))   # step 8
         coefficients = adapter.coefficients(product, env, layout, tau, samples, session)
         stepper = adapter.stepper(solver.params, product)                 # step 9

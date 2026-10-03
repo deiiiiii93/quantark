@@ -42,7 +42,9 @@ class PhoenixAdapter(SnowballAdapter):
     def prepare_events(self, product, env, layout, tau, request):
         # No event table: the vector surfaces take the inline path. The FIRST_PASSAGE
         # state and the termination surfaces are built in terminal(), after the
-        # terminal events, where the legacy march built them.
+        # terminal events, where the legacy march built them. The termination tables
+        # are built here too, so the statistics-only path has them (spec 3B decision 14).
+        self.solver._termination_tables(product, env, layout.time.t)
         return None
 
     def _max_k(self, product) -> int:

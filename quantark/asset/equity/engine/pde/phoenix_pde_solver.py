@@ -424,6 +424,35 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._term_df_next_ko = None
         self._term_next_ko_time = None
         self._term_next_ko_obs = None
+        # the tables are rebuilt for this solve (a bumped market on the same layout must not
+        # read another solve's discounts); they are a pure function of product, market and t
+        self._termination_tables(product, pricing_env, t_vec)
+        if self._term_df_maturity is None:
+            return None
+        num_t = len(t_vec)
+        df_maturity = self._term_df_maturity
+
+        w0 = np.zeros((num_x, num_t), dtype=float)
+        w1 = np.zeros((num_x, num_t), dtype=float)
+        # At maturity the note ends however it got there; one unit paid at
+        # termination is worth the discount from maturity to the RESOLVED
+        # terminal payment (exactly 1.0 when no settlement terms exist).
+        w0[:, -1] = df_maturity[-1]
+        w1[:, -1] = df_maturity[-1]
+
+        self._term_w0 = w0
+        self._term_w1 = w1
+        return w0, w1
+
+    def _termination_tables(self, product, pricing_env, t_vec: np.ndarray) -> None:
+        """W's boundary tables on ``t_vec`` (spec 3B decision 14: the statistics-only path builds them
+        too): the discount to maturity, to the next knock-out's settlement, that record's settlement
+        and observation times (NaN where no knock-out lies ahead), the reverse flag; all ``None``
+        when the termination surface is inactive."""
+        self._term_df_maturity = None
+        self._term_df_next_ko = None
+        self._term_next_ko_time = None
+        self._term_next_ko_obs = None
         if not self._termination_surface_active(product):
             return None
 
@@ -460,22 +489,12 @@ class PhoenixPDESolver(SnowballPDESolver):
                 next_ko_time[j] = next_settlement
                 next_ko_obs[j] = next_obs
 
-        w0 = np.zeros((num_x, num_t), dtype=float)
-        w1 = np.zeros((num_x, num_t), dtype=float)
-        # At maturity the note ends however it got there; one unit paid at
-        # termination is worth the discount from maturity to the RESOLVED
-        # terminal payment (exactly 1.0 when no settlement terms exist).
-        w0[:, -1] = df_maturity[-1]
-        w1[:, -1] = df_maturity[-1]
-
-        self._term_w0 = w0
-        self._term_w1 = w1
         self._term_df_maturity = df_maturity
         self._term_df_next_ko = df_next_ko
         self._term_next_ko_time = next_ko_time
         self._term_next_ko_obs = next_ko_obs
         self._term_is_reverse = bool(product.is_reverse)
-        return w0, w1
+        return None
 
     def _set_termination_boundary(self, grid: np.ndarray, t_idx: int) -> None:
         """Exact Dirichlet limits: the boundaries sit outside every barrier.
