@@ -141,6 +141,8 @@ def test_pde_engine_event_stats_match_the_solver_directly(
         "payment_dates",
         "expected_discounted_cashflows",
         "expected_undiscounted_cashflows",
+        # Implementation provenance (spec 3B §5.6).
+        "provenance",
     }, "AutocallableEventStats field set changed -- update this test's coverage"
 
     def _match_optional_array(a, b):

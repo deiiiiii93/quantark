@@ -12,6 +12,7 @@ import numpy as np
 from quantark.asset.equity.engine.event_stats import (
     AutocallableEventStats,
     PhoenixEventStats,
+    StatisticsProvenance,
 )
 from quantark.util.exceptions import NumericalError
 from quantark.util.numerical import Tolerance, almost_equal
@@ -60,6 +61,10 @@ class EventDistribution:
     path_dependent_payment_events: frozenset[EventType] = field(
         default_factory=frozenset
     )
+    # Per-outcome determination time of a scalar (terminal) outcome; an outcome
+    # absent here is determined at the last event time (spec 3B §5.4).
+    determination_times: Dict[EventType, float] = field(default_factory=dict)
+    provenance: Optional[StatisticsProvenance] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event_times", np.asarray(self.event_times, dtype=float))
@@ -105,6 +110,11 @@ class EventDistribution:
                     for event_type, payment_date in self.payment_dates.items()
                 },
             )
+        object.__setattr__(
+            self,
+            "determination_times",
+            {event_type: float(t) for event_type, t in self.determination_times.items()},
+        )
         self._validate_invariants()
 
     @classmethod
@@ -229,6 +239,7 @@ class EventDistribution:
                 and stats.coupon_payment_is_path_dependent
                 else frozenset()
             ),
+            provenance=getattr(stats, "provenance", None),
         )
         return dist.normalized()
 
@@ -293,6 +304,8 @@ class EventDistribution:
             payment_dates=self.payment_dates,
             mc_ko_times=self.mc_ko_times,
             path_dependent_payment_events=self.path_dependent_payment_events,
+            determination_times=self.determination_times,
+            provenance=self.provenance,
         )
 
     def _validate_invariants(self) -> None:
@@ -372,7 +385,7 @@ class EventDistribution:
                 )
             elif (
                 float(times) + Tolerance.PROBABILITY
-                < float(self.event_times[-1])
+                < float(self.determination_times.get(event_type, self.event_times[-1]))
             ):
                 raise NumericalError(
                     f"EventDistribution payment time {event_type.value} "

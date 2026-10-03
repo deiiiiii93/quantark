@@ -14,7 +14,7 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import PricingError, ValidationError
 
 
 _PAYMENT_AWARE_ARRAY_FIELDS = (
@@ -149,6 +149,26 @@ def payment_aware_cashflow_fields(
 
 
 @dataclass(frozen=True)
+class StatisticsProvenance:
+    """Which implementation produced the statistics and which the price (spec 3B §5.6, decision 8).
+
+    Implementation provenance only: it states nothing about the statistics' accuracy for a product
+    and market; the certificates are the only such statements.
+    """
+
+    statistics_model: str
+    price_model: str
+
+    @property
+    def surrogate(self) -> bool:
+        return self.statistics_model != self.price_model
+
+
+class StatisticsRefused(PricingError):
+    """A solver declines to report statistics it does not compute natively (spec 3B §5.6)."""
+
+
+@dataclass(frozen=True)
 class AutocallableEventStats:
     """
     Event probabilities and expected discounted cashflows.
@@ -179,6 +199,8 @@ class AutocallableEventStats:
             downside exposure / loss distribution (a path that knocks in and then
             recovers to autocall redeems at par, so it carries no KI loss). Equals
             ``ki_ever_probability`` minus P(KI AND KO). ``None`` if not computed.
+        provenance: Which implementation produced the statistics and which the price
+            (:class:`StatisticsProvenance`); ``None`` from a producer that does not say.
     """
 
     pv: float
@@ -206,6 +228,7 @@ class AutocallableEventStats:
     )
     determination_dates: Optional[tuple[datetime, ...]] = None
     payment_dates: Optional[tuple[datetime, ...]] = None
+    provenance: Optional[StatisticsProvenance] = None
 
     def __post_init__(self) -> None:
         _normalize_payment_aware_fields(self)
@@ -246,6 +269,21 @@ class KOResetEventStats(AutocallableEventStats):
         pre_ko_probability_total: Total probability of pre-KI KO.
         post_ko_probability_total: Total probability of post-KI KO.
         expected_discounted_post_ko_cashflow: Total expected discounted KO cashflow after KI.
+        pre_ko_payment_times, post_ko_payment_times: Settlement time of each pre- / post-KI
+            KO record, aligned with ``pre_ko_times`` / ``post_ko_times``. Filled by the PDE,
+            QUAD V2, legacy QUAD and ABSOLUTE-mode Monte Carlo; ``None`` from a producer
+            that does not say (the distribution converter then refuses).
+        expected_discounted_pre_maturity_cashflow, expected_discounted_post_maturity_cashflow:
+            Expected discounted maturity cash of the pre-schedule maturity (never knocked in)
+            and of the post-schedule maturity (knocked in). Filled by the PDE and QUAD V2;
+            ``None`` from a producer with no terminal buckets.
+        pre_maturity_probability, post_maturity_probability: Probability of each maturity
+            outcome (the PDE and QUAD V2).
+        pre_maturity_time, post_maturity_time: Determination time of each maturity outcome.
+        pre_maturity_payment_time, post_maturity_payment_time: Payment time of each
+            maturity outcome.
+        post_ko_times_are_offsets: True when ``post_ko_times`` are offsets from the knock-in
+            (Monte Carlo under ``PostKOScheduleMode.REBASED``), not absolute times.
     """
 
     pre_ko_times: np.ndarray = field(default_factory=lambda: np.array([]))
@@ -255,6 +293,26 @@ class KOResetEventStats(AutocallableEventStats):
     pre_ko_probability_total: float = 0.0
     post_ko_probability_total: float = 0.0
     expected_discounted_post_ko_cashflow: float = 0.0
+    pre_ko_payment_times: Optional[np.ndarray] = None
+    post_ko_payment_times: Optional[np.ndarray] = None
+    expected_discounted_pre_maturity_cashflow: Optional[float] = None
+    expected_discounted_post_maturity_cashflow: Optional[float] = None
+    pre_maturity_probability: Optional[float] = None
+    post_maturity_probability: Optional[float] = None
+    pre_maturity_time: Optional[float] = None
+    post_maturity_time: Optional[float] = None
+    pre_maturity_payment_time: Optional[float] = None
+    post_maturity_payment_time: Optional[float] = None
+    post_ko_times_are_offsets: bool = False
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        for name in ("pre_ko_payment_times", "post_ko_payment_times"):
+            value = getattr(self, name)
+            if value is not None:
+                frozen = np.array(value, dtype=float, copy=True)
+                frozen.setflags(write=False)
+                object.__setattr__(self, name, frozen)
 
 
 @dataclass(frozen=True)
@@ -318,5 +376,7 @@ __all__ = [
     "DCNEventStats",
     "KOResetEventStats",
     "PhoenixEventStats",
+    "StatisticsProvenance",
+    "StatisticsRefused",
     "payment_aware_cashflow_fields",
 ]
