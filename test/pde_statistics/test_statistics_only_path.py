@@ -19,7 +19,19 @@ PRODUCTS = {
     "phoenix_memory": lambda: (PhoenixPDESolver(PDEParams()), CASES["ph_memory"][0]()),
     "phoenix_expiry": lambda: (PhoenixPDESolver(PDEParams()),
                                make_phoenix(dict(PHOENIX, memory_coupon=True, coupon_pay_type="expiry"))),
+    "ko_reset": lambda: (KOResetSnowballPDESolver(PDEParams()), CASES["kr_cont"][0]()),
 }
+
+
+def test_statistics_only_ko_reset_seeds_its_staged_surface(value_mode):
+    """The staged seed index is the value terminal's; a statistics-only march sets it itself (decision 14)."""
+    value_mode("ko_reset")
+    solver, product = PRODUCTS["ko_reset"]()
+    own = solver.calculate_event_stats(product, env())
+    solver._v0_seed_idx = None
+    passed = solver.calculate_event_stats(product, env(), npv=float(own.pv))
+    assert passed.expected_discounted_pre_maturity_cashflow == own.expected_discounted_pre_maturity_cashflow
+    assert passed.pre_maturity_probability == own.pre_maturity_probability > 0.0
 
 
 def test_statistics_only_snowball_builds_its_event_schedule():
@@ -39,7 +51,7 @@ def test_statistics_only_expiry_phoenix_builds_its_termination_tables():
 @pytest.mark.parametrize("name", sorted(PRODUCTS))
 def test_supplied_npv_equal_to_the_price_changes_no_field(value_mode, name, mode):
     if mode == "value":
-        value_mode("snowball", "phoenix")      # KO-reset joins in Task 15
+        value_mode("snowball", "phoenix", "ko_reset")
     solver, product = PRODUCTS[name]()
     own = solver.calculate_event_stats(product, env())
     passed = solver.calculate_event_stats(product, env(), npv=float(own.pv))

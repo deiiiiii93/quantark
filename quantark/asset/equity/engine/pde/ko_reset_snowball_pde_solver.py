@@ -66,6 +66,15 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     def _constructor_kwargs(self) -> dict:
         return {"params": self.params}   # no enable_profiling argument
 
+    def _event_stats_product_type(self) -> type:
+        return KnockOutResetSnowballOption
+
+    def _make_event_stats(self, **fields):
+        from quantark.asset.equity.engine.event_stats import KOResetEventStats
+
+        fields.setdefault("provenance", self._native_provenance())
+        return KOResetEventStats(**fields)
+
     # price() / calculate_greeks() are SnowballPDESolver's; KOResetAdapter marches them.
 
     def calculate_event_stats(
@@ -76,6 +85,10 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         npv: Optional[float] = None,
         streams: Optional[frozenset] = None,
     ) -> Optional[object]:
+        # the value mode marches the statistics as the PDE group of the value's own march
+        # (spec 3B §5.4, decision 6); the legacy mode delegates to the QUAD engine below
+        if self.adapter.supports_statistics_group:
+            return SnowballPDESolver.calculate_event_stats(self, product, pricing_env, npv=npv, streams=streams)
         # streams is ignored: the KO-reset stats are QUAD-delegated (full
         # distribution), not a prunable PDE indicator sweep. npv, when supplied
         # by the single-pass price_with_events, is the PDE value used for the

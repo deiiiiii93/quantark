@@ -4,14 +4,16 @@ import itertools
 import numpy as np
 import pytest
 
+from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.param import PDEParams
 from quantark.cashleg.event_distribution import EventType
 from quantark.execution import OutputKind, PricingRequest, PricingSession
+from quantark.modelvalidation.builders.equity_ko_reset import make_ko_reset
 from quantark.modelvalidation.builders.equity_phoenix import make_phoenix
 from quantark.modelvalidation.builders.equity_snowball import make_snowball
-from pde_3a.products import PHOENIX, SNOWBALL, env
+from pde_3a.products import KO_RESET, PHOENIX, SNOWBALL, env
 from pde_statistics.cases import CASES, trading_clock_env
 
 BOUND = 1e-10
@@ -142,6 +144,34 @@ def test_local_vol_memory_phoenix_identity(value_mode, projection):
     product, e, lv = localvol_phoenix_case("crash", 1.0, "daily_ki_memory")
     solver = LocalVolPhoenixPDESolver(params=PDEParams(event_projection=projection), local_vol_surface=lv)
     _check(solver.calculate_event_stats(product, e))
+
+
+# --- KO-reset, both schedules and the staged pre-maturity (Task 15; spec 3B §5.4) ---------------------
+
+KO_RESET_CASES = {
+    "cont": (lambda: make_ko_reset(KO_RESET), {}),
+    "cont_knocked_in_by_spot": (lambda: make_ko_reset(KO_RESET), {"spot": 78.0}),
+    "discrete": (lambda: make_ko_reset(dict(KO_RESET, ki_continuous=False)), {}),
+}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case,env_name,accuracy,projection,streams,entry", [
+    p for p in itertools.product(sorted(KO_RESET_CASES), sorted(ENVS), ("standard", "high"),
+                                 (None, "nodal"), sorted(STREAMS), ("direct", "pwe", "session"))
+    if p[5] == "direct" or (p[2] == "standard" and p[4] == "all")], ids=_ids)
+def test_ko_reset_identity(value_mode, case, env_name, accuracy, projection, streams, entry):
+    value_mode("ko_reset")
+    make, over = KO_RESET_CASES[case]
+    solver = KOResetSnowballPDESolver(PDEParams(accuracy=accuracy, event_projection=projection))
+    _check(_entry(entry, solver, make(), ENVS[env_name](**over), STREAMS[streams]))
+
+
+@pytest.mark.parametrize("case", sorted(KO_RESET_CASES))
+def test_ko_reset_identity_fast(value_mode, case):
+    value_mode("ko_reset")
+    make, over = KO_RESET_CASES[case]
+    _check(KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(make(), env(**over)))
 
 
 @pytest.mark.parametrize("projection", [None, "nodal"])
