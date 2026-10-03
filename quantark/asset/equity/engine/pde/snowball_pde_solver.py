@@ -25,6 +25,7 @@ _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
 from quantark.asset.equity.engine.pde.core.adapters.snowball import SnowballAdapter
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
+from quantark.asset.equity.engine.pde.core.statistics.rows import EdgeRow, RowTerm
 from quantark.asset.equity.engine.pde.base_pde_solver import (
     GRID_CACHE_MAX_ENTRIES,
     _CACHE_KEYING,
@@ -1364,6 +1365,12 @@ class SnowballPDESolver(BasePDESolver):
         pricing_env: PricingEnvironment,
     ) -> None:
         """Set boundary conditions for V0 surface."""
+        lower, upper = self._boundary_rows_v0(t_idx, tau, product, pricing_env, s_vec)
+        grid[0, t_idx] = lower.value
+        grid[-1, t_idx] = upper.value
+
+    def _boundary_rows_v0(self, t_idx, tau, product, pricing_env, s_vec):
+        """V0's Dirichlet rows at ``t_idx`` with their allocation (spec 3B §5.1): ``(lower, upper)``."""
         current_time = self._total_tau - tau
         df_to_maturity = self._df_between_times(
             pricing_env, current_time, self._total_tau
@@ -1380,21 +1387,28 @@ class SnowballPDESolver(BasePDESolver):
         # Otherwise, discounted principal + rebate
         if self._ki_continuous and product.has_ki_barrier:
             # Will be overwritten by KI jump
-            grid[0, t_idx] = (
-                self._grid_v1[0, t_idx] if self._grid_v1 is not None else 0.0
+            lower = EdgeRow(
+                self._grid_v1[0, t_idx] if self._grid_v1 is not None else 0.0,
+                "v0_lower_copy_ki", copy_from_ki=True,
             )
         else:
-            grid[0, t_idx] = (principal + rebate) * df_to_maturity
+            v = (principal + rebate) * df_to_maturity
+            lower = EdgeRow(v, "v0_lower_principal_rebate", (RowTerm("M", v),))
 
         # Upper boundary (S -> ∞)
         # Check if above all KO barriers - if so, value is KO payoff
         max_ko_barrier = self._get_max_ko_barrier(product)
         if s_vec[-1] >= max_ko_barrier:
-            # Use current KO payoff
+            # Use current KO payoff, allocated to the knock-out unit of the record it pays
+            rec = self._next_ko_record_at_time(product, pricing_env, current_time, t_idx)
+            payoff = float(rec.payoff or 0.0) if rec is not None else 0.0
+            unit = (self._cashflow_value_at_time(pricing_env=pricing_env, cashflow=1.0, current_time=current_time,
+                                                 settlement_time=rec.settlement_time) if rec is not None else 0.0)
             ko_payoff = self._get_ko_payoff_at_time(
                 product, pricing_env, current_time, t_idx
             )
-            grid[-1, t_idx] = ko_payoff
+            upper = EdgeRow(ko_payoff, "v0_upper_ko",
+                            (RowTerm("KO", unit, None if rec is None else float(rec.observation_time), payoff),))
         else:
             if (
                 product.payoff_config.call_rebate_enabled
@@ -1412,13 +1426,16 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 participation *= tenor_factor
                 strike = product.payoff_config.call_strike
-                grid[-1, t_idx] = (
+                v = (
                     principal * df
                     + participation * (s_vec[-1] * df_div - strike * df)
                 )
+                upper = EdgeRow(v, "v0_upper_call_rebate", (RowTerm("M", v),))
             else:
                 # Deep OTM: principal + rebate (discounted)
-                grid[-1, t_idx] = (principal + rebate) * df_to_maturity
+                v = (principal + rebate) * df_to_maturity
+                upper = EdgeRow(v, "v0_upper_principal_rebate", (RowTerm("M", v),))
+        return lower, upper
 
     def _set_boundary_conditions_v1(
         self,
@@ -1431,6 +1448,12 @@ class SnowballPDESolver(BasePDESolver):
         pricing_env: PricingEnvironment,
     ) -> None:
         """Set boundary conditions for V1 surface."""
+        lower, upper = self._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
+        grid[0, t_idx] = lower.value
+        grid[-1, t_idx] = upper.value
+
+    def _boundary_rows_v1(self, t_idx, tau, product, pricing_env, s_vec):
+        """V1's Dirichlet rows at ``t_idx`` with their allocation (spec 3B §5.1): ``(lower, upper)``."""
         current_time = self._total_tau - tau
         df_to_maturity = self._df_between_times(
             pricing_env, current_time, self._total_tau
@@ -1448,7 +1471,8 @@ class SnowballPDESolver(BasePDESolver):
         # Deep ITM put for standard snowball: maximum loss
         if product.is_reverse:
             # Reverse: embedded call, S=0 means no loss
-            grid[0, t_idx] = principal * df_to_maturity
+            v = principal * df_to_maturity
+            lower = EdgeRow(v, "v1_lower_reverse", (RowTerm("M", v),))
         else:
             if (
                 product.payoff_config.protection_type == ProtectionType.NONE
@@ -1463,10 +1487,11 @@ class SnowballPDESolver(BasePDESolver):
                         effective_strike = airbag.airbag_strike
 
                 slope = effective_participation * product.contract_multiplier
-                grid[0, t_idx] = (
+                v = (
                     principal * df
                     + slope * (s_vec[0] * df_div - effective_strike * df)
                 )
+                lower = EdgeRow(v, "v1_lower_none_slope", (RowTerm("M", v),))
             else:
                 # Standard: embedded put, S=0 means maximum loss
                 # Loss = participation × (-K/S0) × N
@@ -1477,7 +1502,8 @@ class SnowballPDESolver(BasePDESolver):
                 elif product.payoff_config.protection_type.name == "PARTIAL":
                     floor = -product.payoff_config.protection_rate * principal_per_contract
                     max_loss = max(max_loss, floor)
-                grid[0, t_idx] = (principal + max_loss) * df_to_maturity
+                v = (principal + max_loss) * df_to_maturity
+                lower = EdgeRow(v, "v1_lower_max_loss", (RowTerm("M", v),))
 
         # Upper boundary (S -> ∞)
         # For standard: no loss (put is worthless)
@@ -1496,10 +1522,11 @@ class SnowballPDESolver(BasePDESolver):
                         effective_strike = airbag.airbag_strike
 
                 slope = participation * product.contract_multiplier
-                grid[-1, t_idx] = (
+                v = (
                     (principal + slope * effective_strike) * df
                     - slope * s_vec[-1] * df_div
                 )
+                upper = EdgeRow(v, "v1_upper_reverse_none", (RowTerm("M", v),))
             else:
                 if protection == ProtectionType.PARTIAL:
                     floor = (
@@ -1507,12 +1534,16 @@ class SnowballPDESolver(BasePDESolver):
                         * product.initial_price
                         * product.contract_multiplier
                     )
-                    grid[-1, t_idx] = (principal - floor) * df_to_maturity
+                    v = (principal - floor) * df_to_maturity
+                    upper = EdgeRow(v, "v1_upper_reverse_partial", (RowTerm("M", v),))
                 else:
-                    grid[-1, t_idx] = principal * df_to_maturity
+                    v = principal * df_to_maturity
+                    upper = EdgeRow(v, "v1_upper_reverse_full", (RowTerm("M", v),))
         else:
             # Put is worthless at high S
-            grid[-1, t_idx] = principal * df_to_maturity
+            v = principal * df_to_maturity
+            upper = EdgeRow(v, "v1_upper_principal", (RowTerm("M", v),))
+        return lower, upper
 
     def _apply_step_modifications_two_surface(
         self,
@@ -1717,25 +1748,41 @@ class SnowballPDESolver(BasePDESolver):
             )
 
         # Boundary fallback: use next scheduled KO record (ignore past observations).
-        ko_records = self._get_cached_ko_records(pricing_env, product)
-        future_records = [
-            rec for rec in ko_records if self._record_is_non_negative_time(rec)
-        ]
-        if not future_records:
+        next_rec = self._next_ko_record_at_time(product, pricing_env, current_time, t_idx)
+        if next_rec is None:
             return 0.0
-
-        next_rec: Optional[ResolvedObservationRecord] = None
-        for rec in future_records:
-            if is_greater_than_or_close(rec.observation_time, current_time):
-                next_rec = rec
-                break
-        next_rec = next_rec if next_rec is not None else future_records[-1]
         return self._cashflow_value_at_time(
             pricing_env=pricing_env,
             cashflow=next_rec.payoff or 0.0,
             current_time=current_time,
             settlement_time=next_rec.settlement_time,
         )
+
+    def _next_ko_record_at_time(
+        self,
+        product: SnowballOption,
+        pricing_env: PricingEnvironment,
+        current_time: float,
+        t_idx: int,
+    ) -> Optional[ResolvedObservationRecord]:
+        """The knock-out record ``_get_ko_payoff_at_time`` pays at ``t_idx``: the record observed there,
+        else the next scheduled one (the last when none is ahead), else ``None``."""
+        ko_record = self._ko_observation_indices.get(t_idx)
+        if ko_record is not None:
+            return ko_record
+        ko_records = self._get_cached_ko_records(pricing_env, product)
+        future_records = [
+            rec for rec in ko_records if self._record_is_non_negative_time(rec)
+        ]
+        if not future_records:
+            return None
+
+        next_rec: Optional[ResolvedObservationRecord] = None
+        for rec in future_records:
+            if is_greater_than_or_close(rec.observation_time, current_time):
+                next_rec = rec
+                break
+        return next_rec if next_rec is not None else future_records[-1]
 
     # _df_between_times / _cashflow_value_at_time are inherited from
     # BasePDESolver.

@@ -14,6 +14,7 @@ from quantark.asset.equity.engine.pde.grid.events import (
     project_piecewise_event,
 )
 from quantark.asset.equity.engine.pde.core.adapters.phoenix import PhoenixAdapter
+from quantark.asset.equity.engine.pde.core.statistics.rows import EdgeRow, RowTerm
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
@@ -51,6 +52,8 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._term_w1: Optional[np.ndarray] = None
         self._term_df_maturity: Optional[np.ndarray] = None
         self._term_df_next_ko: Optional[np.ndarray] = None
+        self._term_next_ko_time: Optional[np.ndarray] = None
+        self._term_next_ko_obs: Optional[np.ndarray] = None
         self._term_is_reverse: bool = False
 
     def _constructor_kwargs(self) -> dict:
@@ -409,13 +412,20 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._term_w1 = None
         self._term_df_maturity = None
         self._term_df_next_ko = None
+        self._term_next_ko_time = None
+        self._term_next_ko_obs = None
         if not self._termination_surface_active(product):
             return None
 
         num_t = len(t_vec)
         df_maturity = np.empty(num_t, dtype=float)
         df_next_ko = np.empty(num_t, dtype=float)
+        # the settlement (and observation) time of the record df_next_ko discounts to; NaN where
+        # no knock-out lies ahead and it is the maturity (spec 3B §5.3, the rows' allocation)
+        next_ko_time = np.full(num_t, np.nan)
+        next_ko_obs = np.full(num_t, np.nan)
         next_settlement = None
+        next_obs = None
         # The no-KO leg of W pays when the note survives to maturity, which is
         # the terminal determination — so it discounts to the RESOLVED terminal
         # payment (identical to _total_tau when no settlement terms exist).
@@ -430,11 +440,15 @@ class PhoenixPDESolver(SnowballPDESolver):
                     if rec.settlement_time is not None
                     else now
                 )
+                next_obs = float(rec.observation_time)
             df_next_ko[j] = (
                 self._df_between_times(pricing_env, now, next_settlement)
                 if next_settlement is not None
                 else df_maturity[j]
             )
+            if next_settlement is not None:
+                next_ko_time[j] = next_settlement
+                next_ko_obs[j] = next_obs
 
         w0 = np.zeros((num_x, num_t), dtype=float)
         w1 = np.zeros((num_x, num_t), dtype=float)
@@ -448,6 +462,8 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._term_w1 = w1
         self._term_df_maturity = df_maturity
         self._term_df_next_ko = df_next_ko
+        self._term_next_ko_time = next_ko_time
+        self._term_next_ko_obs = next_ko_obs
         self._term_is_reverse = bool(product.is_reverse)
         return w0, w1
 
@@ -459,14 +475,22 @@ class PhoenixPDESolver(SnowballPDESolver):
         out, so W is the discount to maturity. Which end is which flips for a
         reverse structure, whose knock-out is a down barrier.
         """
+        lower, upper = self._termination_rows(t_idx)
+        grid[0, t_idx] = lower.value
+        grid[-1, t_idx] = upper.value
+
+    def _termination_rows(self, t_idx: int):
+        """W's rows at ``t_idx`` with their allocation (spec 3B §5.1, §5.3): the never-knock-out edge is
+        a unit paid at maturity (``U``), the always-knock-out edge a unit paid at the next record's
+        settlement (``T`` of that record; ``U`` where no knock-out lies ahead)."""
         never_ko = float(self._term_df_maturity[t_idx])
         always_ko = float(self._term_df_next_ko[t_idx])
+        next_obs = float(self._term_next_ko_obs[t_idx])
+        never = (RowTerm("U", never_ko),)
+        always = (RowTerm("U", always_ko),) if np.isnan(next_obs) else (RowTerm("T", always_ko, next_obs),)
         if self._term_is_reverse:
-            grid[0, t_idx] = always_ko
-            grid[-1, t_idx] = never_ko
-        else:
-            grid[0, t_idx] = never_ko
-            grid[-1, t_idx] = always_ko
+            return EdgeRow(always_ko, "w_lower", always), EdgeRow(never_ko, "w_upper", never)
+        return EdgeRow(never_ko, "w_lower", never), EdgeRow(always_ko, "w_upper", always)
 
     def _apply_termination_ko(
         self, s_vec, t_idx, current_time, product, pricing_env, ko_record
