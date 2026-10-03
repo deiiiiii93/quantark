@@ -171,6 +171,7 @@ def main(argv=None) -> int:
                     maxdelta[k] = (d, row)
                 if d > tol:
                     bad.append(f"{row}.{k} beyond bound {tol} (delta {d:.3e})")
+                break                                   # the first matching bound applies
     for k, (d, row) in sorted(maxdelta.items()):
         print(f"MAXDELTA {k} {d:.3e} {row}")
     for row in sorted(exact - set(allowed)):

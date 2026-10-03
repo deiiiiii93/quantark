@@ -32,6 +32,19 @@ def test_bound_field_is_absolute_and_per_field(tmp_path):
     assert code == 1 and "beyond bound" in out
 
 
+def test_the_first_matching_bound_applies(tmp_path):
+    """Specific globs first, the catch-all last (Task 1): a row the specific glob covers is not also held
+    to the catch-all's tighter bound."""
+    base = {"r": {"stats_reconciliation_error": h(0.0)}}
+    branch = {"r": {"stats_reconciliation_error": h(0.25)}}
+    code, out = _run(tmp_path, base, branch, "--bound-field", "r:stats_reconciliation_error=10",
+                     "--bound-field", "*:stats_reconciliation_error=1e-10")
+    assert code == 0, out
+    code, out = _run(tmp_path, base, branch, "--bound-field", "*:stats_reconciliation_error=1e-10",
+                     "--bound-field", "r:stats_reconciliation_error=10")
+    assert code == 1 and "beyond bound 1e-10" in out
+
+
 def test_movable_fields_reject_a_price_move(tmp_path):
     base = {"r": {"stats_pv": h(1.0), "price": h(100.0)}}
     branch = {"r": {"stats_pv": h(1.5), "price": h(100.0 + 1e-13)}}
