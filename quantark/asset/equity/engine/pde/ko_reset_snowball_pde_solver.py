@@ -319,6 +319,14 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             barriers.append(post_barrier)
         return barriers
 
+    def _set_terminal_condition_v0(self, grid, x_vec, s_vec, product, pricing_env) -> None:
+        # the pre-KI contract tenor does not depend on spot: resolve its schedule once, not per node
+        tenor = product._resolve_pre_contract_tenor(pricing_env)
+        payoffs = np.array(
+            [product.get_maturity_payoff_v0(s, pricing_env, contract_tenor=tenor) for s in s_vec]
+        )
+        grid[:, -1] = payoffs * self._structured_terminal_delay_df
+
     def _apply_step_modifications_two_surface(
         self,
         grid_v0: np.ndarray,

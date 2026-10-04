@@ -175,3 +175,25 @@ def test_dated_post_schedule_lies_on_the_grid():
     post = [float(r.observation_time) for r in solver._get_cached_post_ko_records(env, product)
             if 0.0 < float(r.observation_time) < tau]
     assert post and all(any(is_close(t, g) for g in p.layout.time.t) for t in post)
+
+
+def test_v0_terminal_resolves_the_pre_contract_tenor_once(monkeypatch):
+    """The pre-KI contract tenor does not depend on spot: the terminal resolves it once per surface,
+    not once per node, and every node's payoff is the product's own to the bit."""
+    pricing_env = create_pricing_env()
+    product = create_ko_reset_snowball(
+        initial_price=100.0, strike=100.0, maturity_pre=1.0, maturity_post=2.0,
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE, ki_continuous=True,
+    )
+    s_vec = np.linspace(50.0, 150.0, 41)
+    expected = np.array([product.get_maturity_payoff_v0(s, pricing_env) for s in s_vec])
+    solver = KOResetSnowballPDESolver(PDEParams())
+    solver._structured_terminal_delay_df = 1.0
+    calls = []
+    resolve = type(product)._resolve_pre_contract_tenor
+    monkeypatch.setattr(type(product), "_resolve_pre_contract_tenor",
+                        lambda self, env: calls.append(1) or resolve(self, env))
+    grid = np.zeros((s_vec.size, 2))
+    solver._set_terminal_condition_v0(grid, np.log(s_vec), s_vec, product, pricing_env)
+    assert len(calls) == 1
+    np.testing.assert_array_equal(grid[:, -1], expected)

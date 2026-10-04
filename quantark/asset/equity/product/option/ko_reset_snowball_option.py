@@ -446,10 +446,14 @@ class KnockOutResetSnowballOption(SnowballOption):
         return max(base_maturity, pre_maturity, post_max)
 
     def get_maturity_payoff_v0(
-        self, spot: float, pricing_env: PricingEnv = None
+        self, spot: float, pricing_env: PricingEnv = None, *,
+        contract_tenor: Optional[float] = None,
     ) -> float:
         """
         KO-reset V0 payoff uses pre-KI contract tenor when annualized.
+
+        ``contract_tenor`` is ``_resolve_pre_contract_tenor(pricing_env)`` resolved by a caller that
+        prices many spots; it does not depend on spot. ``None`` resolves it here.
         """
         if spot < 0:
             raise ValidationError(f"Spot price must be non-negative, got {spot}")
@@ -459,7 +463,6 @@ class KnockOutResetSnowballOption(SnowballOption):
             if self.payoff_config.include_principal
             else 0.0
         )
-        contract_tenor: Optional[float] = None
 
         if (
             self.payoff_config.call_rebate_enabled
