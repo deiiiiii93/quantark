@@ -13,8 +13,11 @@ value's own groups: the value's boundary rows allocated per column, its θ rule,
 adapter's event stages. The maturity leg is a marched column, so on every native 1D
 route `pv = Σ knock-out cash + Σ coupon cash + maturity leg` to round-off and
 `reconciliation_error` is a real number. Every stage was checked against the 510-row PDE
-byte book with its declared movers. Three Phoenix contract fixes move prices; no other
-price moves. No certificate identity moves.
+byte book with its declared movers. Prices move where a contract was mispriced: the
+Phoenix release rule, the contractual coupon periods, the Phoenix knocked out at valuation
+on a later observation, and the valuation-date decisions (a carried knock-in under
+`disable_ko_after_ki`; a carried-knock-in KO-reset, which raised before). No certificate
+identity moves.
 
 ### Added
 - `AutocallableEventStats.reconciliation_error` is computed:
@@ -39,11 +42,12 @@ price moves. No certificate identity moves.
 - `test/pde_statistics/`: an exact two-state reference for flat GBM, with its guards and
   a Monte Carlo qualifier, banked as JSON; a 32,001-point QUAD reference for KO-reset;
   the identity, column and stage tests.
-- `PhoenixOption.active_ko_source_indices(env)`; `AccrualConfig.dropped_observations`.
+- `PhoenixOption.active_ko_source_indices(env)`; `AccrualConfig.first_period_start` (where the
+  first remaining coupon period started, recorded when an ageing drops an observation).
 
 ### Changed
 - **Statistics policy.** Boundary rows, θ and event stages are the value's. Snowball
-  probabilities move by ≤ 2.5e-8 on the byte book; the coupon-barrier smoothing moves
+  probabilities move by ≤ 7.3e-8 on the byte book; the coupon-barrier smoothing moves
   Phoenix ones by ≤ 1.8e-6.
 - **`expected_discounted_maturity_cashflow` is the marched leg**, not `pv − ΣKO cash`. It
   moves by the 0.8.0 residual (≤ 7.4e-6 on the byte book, 1.2e-4 on the study cases) and,
@@ -69,7 +73,20 @@ price moves. No certificate identity moves.
   the dated case moves 1.019178 → −0.674, against Monte Carlo's −0.664. A
   carried-knock-in KO-reset knocks out on its post schedule.
 - `PhoenixOption.get_coupon_period_year_fractions` takes the pricing environment; a list
-  or array argument raises `ValidationError` naming the 0.9.0 change.
+  or array argument raises `ValidationError` naming the 0.9.0 change. `accrual_factors` and
+  a list coupon barrier are read by the observation's ORIGINAL schedule position, in the
+  engines and in `decide_observations_at_valuation` (0.8.0 aligned them to the remaining
+  records).
+- An aged tenor Phoenix (no `initial_date`, a per-annum coupon) pays its first remaining
+  period from the last dropped observation (`AccrualConfig.first_period_start`). Where that
+  observation carries no time the period is unknown and a per-annum coupon raises
+  `ValidationError` naming `fixed_coupon_year_fraction` and `accrual_factors`. A theta clone
+  that crosses an observation is ex-coupon: on a 12 % tenor Phoenix one day before an
+  observation theta is about −0.98 (the coupon paid); 0.8.0's −0.017 came from an
+  over-accrued next period.
+- `EventDistribution.from_autocallable_stats` raises `NotImplementedError` on a
+  `KOResetEventStats` with `post_ko_times_are_offsets` (Monte Carlo under
+  `PostKOScheduleMode.REBASED`) and `ValidationError` on one without its payment times.
 - The legacy `ki_probability` on KO-reset PDE statistics is "settles knocked in", as on
   every PDE and QUAD route (the 0.8.0 QUAD delegation reported "ever"). The two explicit
   fields are unambiguous.
@@ -113,7 +130,11 @@ price moves. No certificate identity moves.
   It now returns the knock-out at its settlement, the same as `calculate_event_stats`.
 - **Phoenix knock-out coupon.** On a Phoenix knocked out at valuation, the coupon paid with
   the knock-out (1.019178 on the byte book) was in the maturity leg; it is now coupon cash
-  and the leg is 0, as QUAD V2.
+  and the leg is 0, as QUAD V2. The price and the statistics took the FIRST period's coupon
+  and barrier whatever the observation: on a dated Phoenix knocked out on its second
+  observation the PDE paid 1.019178 where the contract pays 1.052055, and with a list
+  barrier not met at that observation it paid a coupon the contract does not. Both now take
+  the product's own decision (`test_a_later_observation_knock_out_pays_the_decided_coupon`).
 - **Lifecycle-knocked-in `ki_survive`.** A product carrying the lifecycle knock-in flag
   reported `ki_survive_knocked_in_probability = 1` although most paths may knock out
   first. It is now the marched value: 0.277176 on the measured Snowball (1 − ΣKO =
@@ -122,8 +143,10 @@ price moves. No certificate identity moves.
   gave its first remaining period the fraction from the valuation date (0 on an
   observation date) in the PDE and Monte Carlo, while QUAD V2 used the contract. Byte
   book: observation-date pay +1.019178 and miss +0.7581, ten days in +0.4596 (101.683759 and
-  86.114188 against V2's 101.684019 and 86.114162). The deterministic control is exact. Tenor Phoenix theta moves
-  by up to 1.0e-2, because 0.8.0's theta clone truncated the first period.
+  86.114188 against V2's 101.684019 and 86.114162). The deterministic control is exact.
+  Tenor Phoenix theta moves by about one day of coupon, because 0.8.0's theta clone
+  truncated the first period: up to 1.0e-2 on the byte book, 3.3e-2 on a 12 % tenor
+  Phoenix (−0.01685 → +0.01595).
 - **Valuation-date regimes.** A carried knock-in's regime decides (above).
 - **Dated KO-reset `KeyError`.** A dated KO-reset valued on its first observation date
   raised `KeyError` (the post observation was not a grid node); both schedules' times are
@@ -139,9 +162,11 @@ price moves. No certificate identity moves.
   Phoenix upper row omits the next coupon. None of this is visible at the spot on the
   measured cases.
 - The 2D statistics are the flat-vol model's (surrogate only; native 2D is a later spec).
+- KO-reset maturity buckets against QUAD V2: the PDE's `M_pre` is −1.5e-2 (cash) from V2's
+  at spot 100 (−2.0e-2 at `high`; about 1.5e-4 in probability); the gate is 3e-2.
 
 ### Per-stage deltas (PDE byte book, 510 rows)
-- (a) Snowball value policy: 97 rows. Leg ≤ 7.4e-6, probabilities ≤ 2.5e-8, except
+- (a) Snowball value policy: 97 rows. Leg ≤ 7.4e-6, probabilities ≤ 7.3e-8, except
   `disable_ko_after_ki` (leg 3.45, `ki_survive` 3.1e-2: the fix above) and the 2D
   surrogate residual (0.26).
 - (b) Phoenix value policy: 60 rows. Coupon cash out of the leg (up to 6.49 on the
@@ -195,7 +220,7 @@ with bimodal efficiency-core times on a loaded machine.
 - **KO-reset statistics compare two algorithms.** 0.8.0 ran a 501-point QUAD next to the PDE
   price, with probability errors of up to 3.8e-3. 0.9.0 marches 15 columns per surface on
   the PDE, which cannot cost less than the PDE price it extends.
-- Memory and EXPIRY Phoenix carry 183 and 353 columns per surface (12 observations, 12
+- Memory and EXPIRY Phoenix carry 183 and 365 columns per surface (12 observations, 12
   memory states); 0.8.0 reported no coupon cash for them. Pruning `streams` does not reduce
   the count.
 
