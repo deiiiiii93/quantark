@@ -972,19 +972,19 @@
   "none": []
  },
  "3b|ko_reset_carried|obs1|greeks": {
-  "error": "KeyError",
+  "error": null,
   "none": []
  },
  "3b|ko_reset_carried|obs1|price": {
-  "error": "KeyError",
+  "error": null,
   "none": []
  },
  "3b|ko_reset_carried|obs1|pwe": {
-  "error": "KeyError",
+  "error": null,
   "none": []
  },
  "3b|ko_reset_carried|obs1|stats": {
-  "error": "KeyError",
+  "error": null,
   "none": []
  },
  "3b|ko_reset|below_ki|pwe": {

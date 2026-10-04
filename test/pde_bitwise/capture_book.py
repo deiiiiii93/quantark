@@ -1154,7 +1154,10 @@ def rows_3b(existing):
         extra = set()
         if rid in ("heston_snowball|stats", "slv_snowball|stats", "heston_phoenix|stats"):
             extra.add("twod_default")
-        if fnmatch.fnmatchcase(rid, "stats|snowball_knocked_in|*") or fnmatch.fnmatchcase(rid, "pwe|snowball_knocked_in|*"):
+        # the lifecycle-knocked-in rows and the immediate-knock-out distributions (spec 3B §7.1 stage (d))
+        if any(fnmatch.fnmatchcase(rid, g) for g in (
+                "stats|snowball_knocked_in|*", "pwe|snowball_knocked_in|*", "snowball_knocked_in|*",
+                "3a|fullstep|snowball_knocked_in|*", "3a|class|*|knocked_in", "terminal|immediate_ko|*|pwe")):
             extra.add("valuation_rules")
         if extra:
             out[rid] = dataclasses.replace(r, tags=r.tags | frozenset(extra))

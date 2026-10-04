@@ -58,25 +58,23 @@ class SnowballAdapter(FamilyAdapter):
             # solve_life_surface's raises, in its order
             if tau <= 0:
                 raise ValidationError("a life surface needs a product with time to maturity")
-            if solver._is_knocked_out_at_valuation(product, spot, env):
+            if self._valuation_decision(product, env).knocked_out:
                 raise ValidationError("a life surface needs a product that is alive at valuation")
             if any(t <= 0.0 or t >= tau for t in request.extra_times):
                 raise ValidationError(f"extra_times must lie strictly inside (0, {tau})")
             return None
         if op is Operation.EVENT_STATS:
-            # the statistics sweep's preamble: no statistics once expired, then the
-            # PDE compatibility check; a knock-out that fires at valuation is a terminal
-            # outcome with the legacy readout's numbers (spec 3B §10 step 3). Under NODAL the
-            # legacy readout still interpolates the post-event knock-in-ever column, so that
-            # path marches until stage 2 (d).
+            # the statistics sweep's preamble: no statistics once expired, then the PDE compatibility
+            # check; a knock-out the family's valuation-date decision fires is a terminal outcome under
+            # every projection (spec 3B §5.5, decisions 7, 15)
             if tau <= 0:
                 return TerminalOutcome("expired", None)
             solver._validate_product(product)
-            if (self.supports_statistics_group and solver._use_cell_average_events()
-                    and solver._is_knocked_out_at_valuation(product, spot, env)):
-                from ..statistics.terminal import knocked_out_statistics
-                return TerminalOutcome("knocked_out_at_valuation",
-                                       knocked_out_statistics(solver, product, env, request))
+            if self.supports_statistics_group:
+                decision = self._valuation_decision(product, env)
+                if decision.knocked_out:
+                    return TerminalOutcome("knocked_out_at_valuation",
+                                           self._knocked_out_statistics(product, env, request, decision))
             return None
         if op is Operation.SESSION_OUTPUTS and not request.short_circuit:
             # the spot curve's surface: the solve alone, no valuation-date short-circuit
@@ -84,10 +82,23 @@ class SnowballAdapter(FamilyAdapter):
         if tau <= 0:
             # Expired: return terminal payoff (Greeks zero)
             return self._outcome("expired", op, solver._calculate_terminal_value(product, spot, env))
-        # Check if knocked out at valuation (KO payoff is fixed, so delta and gamma are zero)
-        if solver._is_knocked_out_at_valuation(product, spot, env):
-            return self._outcome("knocked_out_at_valuation", op, solver._get_immediate_ko_payoff(product, env))
+        # Knocked out at valuation by the contract's own decision (the payoff is fixed: delta, gamma 0)
+        decision = self._valuation_decision(product, env)
+        if decision.knocked_out:
+            value = solver._knocked_out_value(product, env, decision)
+            if op is Operation.SESSION_OUTPUTS and request.event_stats and self.supports_statistics_group:
+                stats = self._knocked_out_statistics(product, env, request, decision, pv=value)
+                return TerminalOutcome("knocked_out_at_valuation", self._session_outputs(value, None, stats))
+            return self._outcome("knocked_out_at_valuation", op, value)
         return None
+
+    def _valuation_decision(self, product, env):
+        """The family's own decision at the valuation instant (spec 3B decision 15)."""
+        return self.solver._valuation_decision(product, env)
+
+    def _knocked_out_statistics(self, product, env, request, decision, pv=None):
+        from ..statistics.terminal import knocked_out_statistics
+        return knocked_out_statistics(self.solver, product, env, request, decision, pv=pv)
 
     def _outcome(self, reason, op, value):
         if op is Operation.GREEKS:

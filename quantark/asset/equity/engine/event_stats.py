@@ -198,7 +198,11 @@ class AutocallableEventStats:
             knocked-in state). This is the *economically relevant* quantity for
             downside exposure / loss distribution (a path that knocks in and then
             recovers to autocall redeems at par, so it carries no KI loss). Equals
-            ``ki_ever_probability`` minus P(KI AND KO). ``None`` if not computed.
+            ``ki_ever_probability`` minus P(KI AND KO): "knocked in AND survives", never
+            P(not knocked in). On a note already knocked in (the lifecycle flag) it is the
+            no-knock-out survival, ``1 - Σ ko_probability``; the PDE reports its marched
+            column, which carries the march's discrete discounting (3e-9 at r = 2.5 %).
+            ``None`` if not computed.
         provenance: Which implementation produced the statistics and which the price
             (:class:`StatisticsProvenance`); ``None`` from a producer that does not say.
     """

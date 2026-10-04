@@ -1,14 +1,17 @@
-"""Statistics of a product knocked out at valuation: a terminal outcome, no march (spec 3B §10 step 3).
+"""Statistics of a product knocked out at valuation: a terminal outcome, no march (spec 3B §5.5).
 
-Under the cell-average projection every column is decided at the spot when the valuation date's
-knock-out fires, so a march would contribute nothing. This builds the outcome without a layout and hands
-it to the shared readout tail: the knock-out's cash, the coupon paid with it, an empty maturity leg.
+The family's valuation-date decision (decision 15) fired a knock-out, so every column is decided at the
+spot and a march would contribute nothing, under every projection (decision 7). This builds the outcome
+from the decision without a layout: one knock-out of probability 1 at the decision's record (a pre or a
+post record on a KO-reset), its cash, the coupon paid with it, empty maturity legs.
 """
 from __future__ import annotations
 
 import numpy as np
 
+from quantark.asset.equity.engine.event_stats import payment_aware_cashflow_fields
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.util.enum import CouponPayType
 from quantark.util.numerical import is_close
@@ -18,50 +21,56 @@ from .readout import assemble_autocallable
 __all__ = ["knocked_out_statistics"]
 
 
-def knocked_out_statistics(solver, product, env, request):
-    """The statistics of a knock-out that fires at valuation, from ``request``'s streams
-    and pv (``external_pv``, else the immediate knock-out payoff)."""
+def _position(records, record):
+    """The decision's record in a resolved schedule (the one observed at the valuation instant)."""
+    t = float(record.observation_time)
+    return next(k for k, rec in enumerate(records) if is_close(float(rec.observation_time), t))
+
+
+def _wanted(request):
+    """Whether the request's streams report the coupon fields."""
+    if request.streams is None:
+        return True
+    from quantark.cashleg.event_distribution import EventType
+
+    return EventType.COUPON in request.streams
+
+
+def _ki_fields(product):
+    """A knocked-out note settles nothing knocked in: ``ki_probability`` (= ki_survive) is 0 whatever the
+    streams; a carried knock-in is ``ki_ever`` 1 at time 0, else no knock-in happened."""
+    if bool(getattr(product, "_otc_lifecycle_knocked_in", False)):
+        return (0.0, 1.0, np.array([0.0], dtype=float), np.array([1.0], dtype=float), np.array([0.0], dtype=float))
+    empty = np.array([], dtype=float)
+    return (0.0, 0.0, empty, empty, empty)
+
+
+def knocked_out_statistics(solver, product, env, request, decision, pv=None):
+    """The statistics of the knock-out ``decision`` fired at valuation, from ``request``'s streams; pv is
+    ``pv`` (the caller's knocked-out value), else ``external_pv``, else ``solver._knocked_out_value``."""
+    if pv is None:
+        pv = (request.external_pv if request.external_pv is not None
+              else solver._knocked_out_value(product, env, decision))
+    want_coupon = _wanted(request)
+    if isinstance(product, KnockOutResetSnowballOption):
+        return _ko_reset_statistics(solver, product, env, decision, float(pv))
     tau = float(product.get_maturity(env))
     ko_records = solver._filter_observations_by_tau(product.resolve_ko_observations(env), tau)
     n_ko = len(ko_records)
-    rec0_pos = next(k for k, rec in enumerate(ko_records) if is_close(float(rec.observation_time), 0.0))
+    rec0_pos = _position(ko_records, decision.ko_record)
     rec0 = ko_records[rec0_pos]
-
-    streams = request.streams
-    if streams is None:
-        want_ki = True
-        want_coupon = True
-    else:
-        from quantark.cashleg.event_distribution import EventType
-
-        want_ki = bool(streams & {EventType.KI, EventType.MATURITY_WITH_KI})
-        want_coupon = EventType.COUPON in streams
-
     # paid from the valuation instant (t = 0 on every layout)
     df_delay0 = solver._cashflow_value_at_time(
         pricing_env=env, cashflow=1.0, current_time=0.0, settlement_time=rec0.settlement_time,
     )
     ed_unit = np.array([df_delay0 if i == rec0_pos else 0.0 for i in range(n_ko)], dtype=float)
-
-    already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
-    if already_knocked_in:
-        ki = (1.0, 1.0, np.array([0.0], dtype=float), np.array([1.0], dtype=float),
-              np.array([0.0], dtype=float))
-    elif want_ki:
-        df_T = env.get_discount_factor(float(tau))
-        ki_probability = float(0.0 / df_T) if df_T > 0.0 else 0.0
-        ki = (ki_probability, ki_probability, np.array([], dtype=float), np.array([], dtype=float),
-              np.array([], dtype=float))
-    else:
-        ki = (0.0, 0.0, np.array([], dtype=float), np.array([], dtype=float), np.array([], dtype=float))
-
-    pv = request.external_pv if request.external_pv is not None else solver._get_immediate_ko_payoff(product, env)
     extra_fields, coupon_rows = {}, None
     if isinstance(product, PhoenixOption):
         extra_fields, coupon_rows = _knocked_out_coupon(solver, product, env, ko_records, rec0_pos, df_delay0,
                                                         want_coupon)
     return assemble_autocallable(solver, product, env, pv=pv, ko_records=ko_records, ed_unit=ed_unit,
-                                 ki=ki, extra_fields=extra_fields, maturity=0.0, coupon_rows=coupon_rows)
+                                 ki=_ki_fields(product), extra_fields=extra_fields, maturity=0.0,
+                                 coupon_rows=coupon_rows)
 
 
 def _knocked_out_coupon(solver, product, env, ko_records, rec0_pos, df_delay0, want_coupon):
@@ -92,3 +101,76 @@ def _knocked_out_coupon(solver, product, env, ko_records, rec0_pos, df_delay0, w
     if expiry:
         extra["coupon_payment_is_path_dependent"] = True
     return extra, coupon_rows
+
+
+def _ko_reset_statistics(solver, product, env, decision, pv):
+    """``KOResetEventStats`` with the decision's record in its schedule's fields (``decision.ko_regime``),
+    paid as ``_knocked_out_value`` pays it, and both maturity buckets 0 at their times."""
+    tau = float(product.get_maturity(env))
+    pre = solver._filter_observations_by_tau(solver._get_cached_pre_ko_records(env, product), tau)
+    post = solver._filter_observations_by_tau(solver._get_cached_post_ko_records(env, product), tau)
+    regime = pre if decision.ko_regime == "pre" else post
+    pos = _position(regime, decision.ko_record)
+    settle = solver._ko_settlement_time(product, env, decision.ko_record)
+    df = float(env.get_discount_factor(settle)) if settle is not None and settle > 0.0 else 1.0
+
+    def schedule(records, fired):
+        times = np.array([float(r.observation_time) for r in records], dtype=float)
+        pay = np.array([float(r.settlement_time if r.settlement_time is not None else r.observation_time)
+                        for r in records], dtype=float)
+        prob, cash = np.zeros(len(records)), np.zeros(len(records))
+        if fired:
+            prob[pos], cash[pos] = 1.0, float(decision.ko_record.payoff) * df
+            if settle is not None:
+                pay[pos] = float(settle)
+        return times, pay, prob, cash
+
+    pre_t, pre_pay, pre_prob, pre_cash = schedule(pre, decision.ko_regime == "pre")
+    post_t, post_pay, post_prob, post_cash = schedule(post, decision.ko_regime == "post")
+    terminal = resolve_terminal_timing(product, env)
+    delay = float(terminal.payment_time) - float(terminal.determination_time)
+    pre_maturity, post_maturity = float(product.get_pre_maturity_time(env)), tau
+    ledger = payment_aware_cashflow_fields(
+        env,
+        determination_times=[*pre_t, *post_t, pre_maturity, post_maturity],
+        payment_times=[*pre_pay, *post_pay, pre_maturity + delay, post_maturity + delay],
+        expected_discounted_cashflows=[*pre_cash, *post_cash, 0.0, 0.0],
+        determination_dates=[*(r.observation_date for r in pre), *(r.observation_date for r in post),
+                             None, terminal.determination_date],
+        payment_dates=[*(r.settlement_date for r in pre), *(r.settlement_date for r in post),
+                       None, terminal.payment_date],
+    )
+    ki_probability, ki_ever, ki_times, ki_event, ki_survival = _ki_fields(product)
+    return solver._make_event_stats(
+        pv=pv,
+        ko_times=pre_t,
+        ko_probability=pre_prob,
+        survival_probability=np.maximum(0.0, 1.0 - np.cumsum(pre_prob)),
+        expected_discounted_ko_cashflow=pre_cash,
+        ki_probability=ki_probability,
+        expected_discounted_maturity_cashflow=0.0,
+        reconciliation_error=float(pv - float(np.sum(pre_cash)) - float(np.sum(post_cash))),
+        ki_times=ki_times,
+        ki_event_probability=ki_event,
+        ki_survival_probability=ki_survival,
+        ki_ever_probability=ki_ever,
+        ki_survive_knocked_in_probability=ki_probability,
+        pre_ko_times=pre_t,
+        pre_ko_probability=pre_prob,
+        post_ko_times=post_t,
+        post_ko_probability=post_prob,
+        pre_ko_probability_total=float(np.sum(pre_prob)),
+        post_ko_probability_total=float(np.sum(post_prob)),
+        expected_discounted_post_ko_cashflow=float(np.sum(post_cash)),
+        pre_ko_payment_times=pre_pay,
+        post_ko_payment_times=post_pay,
+        expected_discounted_pre_maturity_cashflow=0.0,
+        expected_discounted_post_maturity_cashflow=0.0,
+        pre_maturity_probability=0.0,
+        post_maturity_probability=0.0,
+        pre_maturity_time=pre_maturity,
+        post_maturity_time=post_maturity,
+        pre_maturity_payment_time=pre_maturity + delay,
+        post_maturity_payment_time=post_maturity + delay,
+        **ledger,
+    )

@@ -271,9 +271,15 @@ class SnowballStatistics(RollingStatistics):
                                      maturity=at(L.maturity[0]))
 
     def _ki_fields(self, at):
-        """The legacy readout's knock-in branch (the lifecycle flag's override stays until stage 2 (d))."""
+        """``(ki_probability, ki_ever, ki_times, ki_event_probability, ki_survival_probability)``.
+
+        A lifecycle knock-in (spec 3B stage 2 (d)) is ``ki_ever`` 1 at time 0, and the marched KIS column of
+        the knocked-in surface is what settles knocked in; with the knock-in pair pruned it is reported 0,
+        as every pruned knock-in field is."""
         if self.already_knocked_in:
-            return (1.0, 1.0, np.array([0.0]), np.array([1.0]), np.array([0.0]))
+            df_T = self.env.get_discount_factor(float(self.tau))
+            kis = float(at(self.layout.kis) / df_T) if (self.layout.kis is not None and df_T > 0.0) else 0.0
+            return (kis, 1.0, np.array([0.0]), np.array([1.0]), np.array([0.0]))
         if self.layout.kis is None:
             return (0.0, 0.0, np.array([]), np.array([]), np.array([]))
         df_T = self.env.get_discount_factor(float(self.tau))

@@ -540,17 +540,10 @@ class SnowballPDESolver(BasePDESolver):
             return None
         if pricing_env is None:
             return None
-        # the value group marches alongside unless the caller supplied the npv. A product
-        # knocked out at valuation is the adapter's terminal outcome under the cell-average
-        # projection; under NODAL it still marches the statistics alone and reads price()'s
-        # immediate KO payoff, until stage 2 (d) moves that rule (spec 3B §10 step 3)
-        march_value = npv is None and not (
-            not self._use_cell_average_events()
-            and product.get_maturity(pricing_env) > 0
-            and self._is_knocked_out_at_valuation(product, pricing_env.spot, pricing_env)
-        )
+        # the value group marches alongside unless the caller supplied the npv; a product knocked
+        # out at valuation is the adapter's terminal outcome (spec 3B §5.5, decision 15)
         return self._run(product, pricing_env, OutputRequest(
-            Operation.EVENT_STATS, price=march_value, event_stats=True,
+            Operation.EVENT_STATS, price=npv is None, event_stats=True,
             external_pv=None if npv is None else float(npv), streams=streams))
 
     def price_with_events(
@@ -891,30 +884,15 @@ class SnowballPDESolver(BasePDESolver):
             return spot >= ki_record_0.barrier
         return spot <= ki_record_0.barrier
 
-    def _is_knocked_out_at_valuation(
-        self, product: SnowballOption, spot: float, pricing_env: PricingEnvironment
-    ) -> bool:
-        """
-        Determine KO state at valuation date (t=0).
+    def _valuation_decision(self, product, pricing_env: PricingEnvironment):
+        """The family's own decision at the valuation instant (spec 3B decision 15): the observations
+        scheduled at time zero applied to the known spot, from the carried knock-in state."""
+        carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        return product.decide_observations_at_valuation(pricing_env.spot, pricing_env, knocked_in=carried)
 
-        KO for SnowballOption is modeled as discrete in this solver; a KO breach at valuation
-        only matters if there is a KO observation scheduled at t=0.
-        """
-        if product.barrier_config.ko_observation_type != ObservationType.DISCRETE:
-            return False
-
-        ko_records = product.resolve_ko_observations(pricing_env)
-        ko_record_0 = self._find_record_at_time(ko_records, 0.0)
-        if ko_record_0 is None:
-            return False
-        if ko_record_0.barrier is None:
-            raise ValidationError(
-                "KO observation at valuation requires a barrier level."
-            )
-
-        if product.is_reverse:
-            return spot <= ko_record_0.barrier
-        return spot >= ko_record_0.barrier
+    def _knocked_out_value(self, product, pricing_env: PricingEnvironment, decision) -> float:
+        """The value of a knock-out the valuation-date decision fired (the immediate knock-out payoff)."""
+        return self._get_immediate_ko_payoff(product, pricing_env)
 
     def _get_immediate_ko_payoff(
         self, product: SnowballOption, pricing_env: PricingEnvironment

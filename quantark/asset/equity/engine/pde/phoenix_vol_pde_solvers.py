@@ -486,7 +486,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         T = float(product.get_maturity(pricing_env))
         if T <= 0.0 or is_zero(T):
             return self._calculate_terminal_value(product, spot, pricing_env)
-        if self._is_knocked_out_at_valuation(product, spot, pricing_env):
+        if self._valuation_decision(product, pricing_env).knocked_out:
             return self._get_immediate_ko_payoff(product, pricing_env)
         # Valuation-date readout state: events at t=0 are deterministic at the
         # known spot, so the readout uses the smooth 0+ surface captured by

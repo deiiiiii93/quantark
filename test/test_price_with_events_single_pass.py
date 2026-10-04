@@ -98,7 +98,21 @@ def test_npv_matches_price_normal():
 
 
 def test_npv_matches_price_immediate_ko():
-    # spot already above the KO barrier => immediate-KO short-circuit [§11.3]
+    # valued ON the first observation date with the spot above the KO barrier: the contract's decision
+    # knocks it out, and the distribution says so (spec 3B §5.5, decisions 7, 15)
+    from intraday.conftest import dated_snowball, flat_env
+    from quantark.util.calendar import CalendarType, create_calendar
+    product = dated_snowball(create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028)), datetime(2026, 3, 16))
+    env = flat_env(product.barrier_config.ko_observation_schedule.records[0].observation_date, spot=130.0)
+    solver = SnowballPDESolver(PDEParams())
+    res = solver.price_with_events(product, env)
+    assert abs(res.npv - solver.price(product, env)) < 1e-8
+    assert res.event_distribution.probabilities[EventType.KO][0] == 1.0
+    assert res.event_distribution.event_times[0] == 0.0
+
+
+def test_npv_matches_price_spot_above_ko_off_an_observation_date():
+    # spot above the KO barrier on a day with no observation: nothing is decided, the note marches
     solver = SnowballPDESolver(PDEParams())
     env = _env(spot=130.0)
     product = _snowball()

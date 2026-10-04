@@ -81,8 +81,14 @@ def _engine_factories():
     }
 
 
-def _assert_lifecycle_ki_event_stats(stats) -> None:
-    assert stats.ki_probability == pytest.approx(1.0)
+def _assert_lifecycle_ki_event_stats(stats, engine="quad") -> None:
+    if engine == "pde":
+        # spec 3B §5.5: ki_ever is 1; ki_probability (= ki_survive, knocked in AND reaching maturity
+        # without a knock-out) is the marched no-knock-out survival, up to the march's discounting
+        assert stats.ki_ever_probability == 1.0
+        assert stats.ki_probability == pytest.approx(1.0 - stats.ko_probability.sum(), abs=7e-9)
+    else:
+        assert stats.ki_probability == pytest.approx(1.0)
     assert stats.ki_times.shape == (1,)
     assert stats.ki_times[0] == pytest.approx(0.0)
     assert stats.ki_event_probability.shape == (1,)
@@ -152,7 +158,7 @@ def test_lifecycle_ki_event_stats_known_state_without_ki_barrier():
         stats = engine.calculate_event_stats(product, env)
 
         assert stats is not None
-        _assert_lifecycle_ki_event_stats(stats)
+        _assert_lifecycle_ki_event_stats(stats, name)
         if name == "mc":
             result = engine.get_last_result()
             assert result.v0_probability == pytest.approx(0.0)

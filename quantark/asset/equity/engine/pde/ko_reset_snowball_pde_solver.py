@@ -190,14 +190,29 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             spot, pricing_env, knocked_in=carried
         )
         if decision.knocked_out:
-            record = decision.ko_record
-            settlement_time = record.settlement_time
-            if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
-                settlement_time = self._terminal_payment_time(product, pricing_env)
-            if settlement_time is not None and settlement_time > 0.0:
-                return float(record.payoff) * float(pricing_env.get_discount_factor(settlement_time)), decision.knocked_in
-            return float(record.payoff), decision.knocked_in
+            return self._knocked_out_value(product, pricing_env, decision), decision.knocked_in
         return None, decision.knocked_in
+
+    def _valuation_decision(self, product, pricing_env):
+        """The decision of the schedule in force (spec 3B decision 15), on a contract still alive: one
+        past its first schedule and not knocked in has matured (``require_alive`` raises)."""
+        carried = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        product.require_alive(pricing_env, carried)
+        return product.decide_observations_at_valuation(pricing_env.spot, pricing_env, knocked_in=carried)
+
+    def _ko_settlement_time(self, product, pricing_env, record):
+        """A knock-out's payment time: its settlement, or the terminal payment under EXPIRY accrual."""
+        if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
+            return self._terminal_payment_time(product, pricing_env)
+        return record.settlement_time
+
+    def _knocked_out_value(self, product, pricing_env, decision) -> float:
+        """The knock-out the decision fired, pre or post schedule: its contractual cash at its payment."""
+        record = decision.ko_record
+        settlement_time = self._ko_settlement_time(product, pricing_env, record)
+        if settlement_time is not None and settlement_time > 0.0:
+            return float(record.payoff) * float(pricing_env.get_discount_factor(settlement_time))
+        return float(record.payoff)
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -258,7 +273,15 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         """
         out = []
         post_schedule = product.post_barrier_config.ko_observation_schedule
-        if post_schedule is not None:
+        if post_schedule is not None and post_schedule.uses_dates():
+            # a schedule stated in dates resolves through the prepared environment, as the pre schedule's
+            # does (_ko_coupon_align_times): its raw records carry no year fraction (spec 3B F11)
+            out += [
+                rec.observation_time
+                for rec in self._get_cached_post_ko_records(
+                    self._grid_request_environment("post knock-out"), product)
+            ]
+        elif post_schedule is not None:
             out += [
                 rec.observation_time
                 for rec in post_schedule.records

@@ -144,3 +144,34 @@ def test_ko_reset_pde_module_has_no_quad_import():
     import pathlib
     import quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver as mod
     assert "QuadEngine" not in pathlib.Path(mod.__file__).read_text()
+
+
+def test_dated_post_schedule_lies_on_the_grid():
+    # spec 3B F11: a post-KI schedule stated in dates resolves through the environment, as the pre one does
+    from datetime import datetime
+
+    from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare
+    from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
+    from quantark.asset.equity.param import PDEParams
+    from quantark.util.calendar import CalendarType, create_calendar
+    from quantark.util.numerical import is_close
+    from intraday.conftest import dated_ko_reset, flat_env
+
+    import dataclasses
+
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+
+    cal = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+    product = dated_ko_reset(cal, datetime(2026, 3, 16))
+    # the post dates three business days off the pre and knock-in dates: only the post schedule puts them on the grid
+    post = product.post_barrier_config
+    shifted = [ObservationRecord(observation_date=cal.add_business_days(r.observation_date, 3), barrier=r.barrier)
+               for r in post.ko_observation_schedule.records[:-1]]
+    product.post_barrier_config = dataclasses.replace(post, ko_observation_schedule=ObservationSchedule(records=shifted))
+    env = flat_env(datetime(2026, 4, 1))
+    solver = KOResetSnowballPDESolver(PDEParams())
+    p = prepare(solver, product, env, OutputRequest(Operation.PRICE))
+    tau = float(product.get_maturity(env))
+    post = [float(r.observation_time) for r in solver._get_cached_post_ko_records(env, product)
+            if 0.0 < float(r.observation_time) < tau]
+    assert post and all(any(is_close(t, g) for g in p.layout.time.t) for t in post)
