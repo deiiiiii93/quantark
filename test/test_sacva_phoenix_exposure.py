@@ -124,8 +124,7 @@ def _independent_cashflows(spots, spec, product, env, memory):
     maturity payoff is the spot-independent V0 base)."""
     n_paths, n_t = spots.shape
     obs_idx = spec.obs_idx
-    yf = product.get_coupon_period_year_fractions(
-        [float(spec.times[j]) for j in obs_idx])
+    yf = product.get_coupon_period_year_fractions(env)[:len(obs_idx)]
     coupon_amt = np.array([product.get_coupon_payoff(i, year_fraction=yf[i])
                            for i in range(len(obs_idx))])
     base_ko = np.array([product.get_ko_payoff(0.01, i, 0.0)  # spot below coupon -> no cur

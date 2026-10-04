@@ -206,9 +206,7 @@ class TestAutocallableLifecycleTracker:
         # The tracker books the amount an engine pays for that period: principal x rate
         # x the period's own fraction (monthly observations, annualized rate).
         assert almost_equal(coupon_events[0].cashflow, 100.0 * 0.01 * (1.0 / 12.0))
-        engine_fractions = phoenix.get_coupon_period_year_fractions(
-            [rec.observation_time for rec in phoenix.barrier_config.ko_observation_schedule.records]
-        )
+        engine_fractions = phoenix.get_coupon_period_year_fractions(env)
         assert almost_equal(
             coupon_events[0].cashflow,
             float(phoenix.get_coupon_payoff(0, year_fraction=engine_fractions[0])),

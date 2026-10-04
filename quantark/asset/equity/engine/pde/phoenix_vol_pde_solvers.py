@@ -703,7 +703,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
 
         ko_times = [rec.observation_time for rec in ko_records]
         period_year_fractions = np.array(
-            product.get_coupon_period_year_fractions(ko_times),
+            product.get_coupon_period_year_fractions(env)[:num_obs],
             dtype=float,
         )
         self._coupon_amounts = np.array(

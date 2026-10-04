@@ -235,7 +235,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         ko_times = np.array([rec.observation_time for rec in ko_records], dtype=float)
         period_year_fractions = np.array(
-            product.get_coupon_period_year_fractions(ko_times.tolist()),
+            product.get_coupon_period_year_fractions(pricing_env)[:len(ko_records)],
             dtype=float,
         )
         coupon_amounts = np.array(
@@ -788,7 +788,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         extraction and the forward readout."""
         n_ko = len(ko_records)
         ko_times = [float(rec.observation_time) for rec in ko_records]
-        period_yf = product.get_coupon_period_year_fractions(ko_times)
+        period_yf = product.get_coupon_period_year_fractions(pricing_env)[:n_ko]
         coupon_amounts = [
             float(product.get_coupon_payoff(i, year_fraction=period_yf[i]))
             for i in range(n_ko)

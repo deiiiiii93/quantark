@@ -386,7 +386,7 @@ def compile_contract(
                 for i in active
             ]
         else:
-            fractions = product.get_coupon_period_year_fractions([r[0] for r in pre])
+            fractions = product.get_coupon_period_year_fractions(env)[:len(pre)]
         coupon_amounts = [
             product.get_coupon_payoff(i, year_fraction=f)
             for i, f in enumerate(fractions)

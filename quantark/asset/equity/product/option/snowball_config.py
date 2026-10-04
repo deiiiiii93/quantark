@@ -277,6 +277,10 @@ class AccrualConfig:
     #: and is ignored wherever the accrual has a real anchor
     #: (``initial_date``, dated observations, or ``accrual_factors``).
     accrued_offset: float = 0.0
+    #: Knock-out observations an ageing (``time_shift``) took off the schedule's front. A tenor contract
+    #: with none dropped still knows its first remaining period (``accrued_offset`` + its observation
+    #: time); one with any dropped does not (spec 3B decision 13, F20).
+    dropped_observations: int = 0
 
     def shifted(self, time_bump: float, dropped_observations: int = 0) -> "AccrualConfig":
         """The accrual of the same contract after it has been aged.
@@ -301,6 +305,7 @@ class AccrualConfig:
             self,
             accrual_factors=factors,
             accrued_offset=float(self.accrued_offset) + float(time_bump),
+            dropped_observations=int(self.dropped_observations) + int(dropped_observations),
         )
 
     def __post_init__(self):

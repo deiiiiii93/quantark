@@ -323,8 +323,10 @@ class TestCouponPayoff:
             fixed_coupon_year_fraction=1.0 / 12.0,
         )
         phoenix = create_test_phoenix(coupon_config=coupon_config)
-        yfs = phoenix.get_coupon_period_year_fractions([0.1, 0.2, 0.35])
-        assert yfs == [1.0 / 12.0, 1.0 / 12.0, 1.0 / 12.0]
+        # one fraction per active record of the tenor schedule (spec 3B decision 13: the env API)
+        yfs = phoenix.get_coupon_period_year_fractions(None)
+        assert len(yfs) == phoenix.barrier_config.ko_observation_count
+        assert yfs == [1.0 / 12.0] * len(yfs)
 
     def test_external_accrual_factors_override_coupon_periods(self):
         """Test external accrual factors drive Phoenix periodic coupons."""
@@ -339,7 +341,7 @@ class TestCouponPayoff:
             accrual_config=accrual_config,
         )
 
-        yfs = phoenix.get_coupon_period_year_fractions([0.1, 0.2, 0.35, 0.5])
+        yfs = phoenix.get_coupon_period_year_fractions(None)
 
         assert yfs == [0.20, 0.35, 0.45, 0.60]
 
@@ -546,7 +548,8 @@ class TestKOPayoff:
         )
         assert phoenix.coupon_period_fraction(1) == 1.0
         assert phoenix.get_coupon_payoff(1) == get_principal(phoenix) * 0.01
-        assert phoenix.get_coupon_period_year_fractions([0.25, 0.5, 0.75, 1.0]) == [1.0] * 4
+        yfs = phoenix.get_coupon_period_year_fractions(None)
+        assert yfs == [1.0] * phoenix.barrier_config.ko_observation_count
 
     def test_a_per_period_rate_cannot_also_carry_an_accrual_fraction(self):
         with pytest.raises(ValidationError, match="is_annualized_coupon=False"):

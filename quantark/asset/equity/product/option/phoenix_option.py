@@ -553,6 +553,28 @@ class PhoenixOption(BaseEquityOption):
                     f"{name} observation dates must be strictly increasing"
                 )
 
+    def active_ko_source_indices(self, pricing_env) -> List[int]:
+        """The original schedule position of each record ``resolve_ko_observations`` keeps: not before the
+        valuation date, not at a negative time (spec 3B decision 13)."""
+        schedule = self.barrier_config.ko_observation_schedule
+        if schedule is None:
+            return []
+        return [
+            index
+            for index, record in enumerate(schedule.records)
+            if not (
+                (
+                    record.observation_time is not None
+                    and float(record.observation_time) < 0.0
+                )
+                or (
+                    record.observation_date is not None
+                    and pricing_env is not None
+                    and record.observation_date < pricing_env.valuation_date
+                )
+            )
+        ]
+
     def resolve_ko_observations(self, pricing_env) -> List[ResolvedObservationRecord]:
         """
         Resolve KO observation schedule to concrete times, barriers, and settlement times.
@@ -575,21 +597,7 @@ class PhoenixOption(BaseEquityOption):
             if isinstance(self.barrier_config.ko_barrier, list)
             else self.barrier_config.ko_barrier
         )
-        active_indices = [
-            index
-            for index, record in enumerate(schedule.records)
-            if not (
-                (
-                    record.observation_time is not None
-                    and float(record.observation_time) < 0.0
-                )
-                or (
-                    record.observation_date is not None
-                    and pricing_env is not None
-                    and record.observation_date < pricing_env.valuation_date
-                )
-            )
-        ]
+        active_indices = self.active_ko_source_indices(pricing_env)
         if not active_indices:
             return []
         active_schedule = ObservationSchedule(
@@ -781,9 +789,8 @@ class PhoenixOption(BaseEquityOption):
         """
         config = self.barrier_config
         records = self.resolve_ko_observations(pricing_env)
-        fractions = self.get_coupon_period_year_fractions(
-            [record.observation_time for record in records]
-        )
+        fractions = self.get_coupon_period_year_fractions(pricing_env)
+        active = self.active_ko_source_indices(pricing_env)
         arrears = (
             float(self.coupon_config.initial_coupon_arrears) if self.has_memory_coupon else 0.0
         )
@@ -795,7 +802,7 @@ class PhoenixOption(BaseEquityOption):
             if not at_valuation_instant(record.observation_time):
                 continue
             own = float(self.get_coupon_payoff(index, year_fraction=fractions[index]))
-            triggered = self.is_coupon_triggered(spot, index)
+            triggered = self.is_coupon_triggered(spot, active[index])      # the period's own barrier (F10)
             if triggered:
                 coupon, coupon_index, arrears = coupon + own + arrears, index, 0.0
             if ko_allowed and record.barrier is not None:
@@ -910,12 +917,21 @@ class PhoenixOption(BaseEquityOption):
                 )
             )
 
+        if int(self.accrual_config.dropped_observations) > 0:
+            # an aged tenor contract no longer knows where its first remaining period started
+            raise ValidationError(
+                f"coupon {observation_idx} is quoted per annum on a tenor schedule aged past "
+                f"{self.accrual_config.dropped_observations} observation(s): its contractual period is "
+                "unknown -- give the contract a fixed_coupon_year_fraction or accrual_factors "
+                "(or an initial_date with dated KO observations)"
+            )
         if observation_idx < len(records) and all(
             r.observation_time is not None for r in records[: observation_idx + 1]
         ):
             current = float(records[observation_idx].observation_time)
             if observation_idx == 0:
-                return current
+                # the elapsed part of the first period was banked by time_shift (accrued_offset)
+                return float(self.accrual_config.accrued_offset) + current
             return current - float(records[observation_idx - 1].observation_time)
 
         raise ValidationError(
@@ -982,41 +998,20 @@ class PhoenixOption(BaseEquityOption):
             start_date, end_date, self.coupon_config.day_count_convention
         )
 
-    def get_coupon_period_year_fractions(
-        self, observation_times: List[float]
-    ) -> List[float]:
+    def get_coupon_period_year_fractions(self, pricing_env) -> List[float]:
+        """Each active coupon's contractual period fraction, aligned with ``resolve_ko_observations``.
+
+        The period is the contract's own (``coupon_period_fraction`` by the record's ORIGINAL schedule
+        position, with the coupon's day count): never truncated at the valuation date (spec 3B decision
+        13). A tenor contract aged past an observation without ``fixed_coupon_year_fraction`` or
+        ``accrual_factors`` raises.
         """
-        Resolve coupon period accrual fractions for each observation.
-
-        A rate that is not annualized is the period's amount itself, so every
-        fraction is 1. Otherwise: accrual_factors if supplied, else
-        fixed_coupon_year_fraction for every period (e.g., 1/12 for equal monthly
-        coupons), else successive observation-time differences.
-        """
-        if not observation_times:
-            return []
-
-        if not self.is_coupon_rate_annualized:
-            return [1.0 for _ in observation_times]
-
-        accrual_factors = self.accrual_config.accrual_factors
-        if accrual_factors is not None:
-            if len(accrual_factors) != len(observation_times):
-                raise ValidationError(
-                    "accrual_factors length "
-                    f"({len(accrual_factors)}) must match observation_times length "
-                    f"({len(observation_times)})"
-                )
-            return [float(factor) for factor in accrual_factors]
-
-        fixed = self.coupon_config.fixed_coupon_year_fraction
-        if fixed is not None:
-            return [float(fixed) for _ in observation_times]
-
-        yfs: List[float] = [float(observation_times[0])]
-        for idx in range(1, len(observation_times)):
-            yfs.append(float(observation_times[idx] - observation_times[idx - 1]))
-        return yfs
+        if isinstance(pricing_env, (list, tuple)) or hasattr(pricing_env, "ndim"):
+            raise ValidationError(
+                "get_coupon_period_year_fractions takes the pricing environment (0.9.0); the fractions "
+                "are the contract's own periods, aligned with resolve_ko_observations(pricing_env)"
+            )
+        return [self.coupon_period_fraction(i) for i in self.active_ko_source_indices(pricing_env)]
 
     # ==================== KO/KI Barrier Methods ====================
 

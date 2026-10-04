@@ -846,7 +846,7 @@ class PhoenixMCEngine(BaseEngine):
             coupon_barriers = np.full(num_obs, float(coupon_barrier))
 
         period_year_fractions = np.array(
-            product.get_coupon_period_year_fractions(ko_times.tolist()),
+            product.get_coupon_period_year_fractions(pricing_env)[:num_obs],
             dtype=float,
         )
         coupon_amounts = np.array(
