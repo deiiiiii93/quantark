@@ -32,3 +32,27 @@ flip (f). No other case moved.
 The continuous-KI Snowball and local-vol Snowball moved at (d) only, and are
 bit-identical between the (d) and (f) trees: half-step damping does not reach a
 product with continuous knock-in (spec 3A decision 12).
+
+## 2026-10-04: PDE 1D event statistics (0.9.0)
+
+Spec: `docs/superpowers/specs/2026-10-03-pde-1d-event-statistics-design.md` §8.
+Regenerated: `pde_phase4_goldens.json` only (`freeze_goldens.py phase4`). `phase0_goldens.json` and
+`legacy_dask_phase6_goldens.json` are unchanged. No price, Greek or spot curve moved: only the
+`price_with_events` event distributions, whose statistics now march as a value-policy column group
+(stage 2 (a)-(c)); the Heston case is built with `statistics="flat_vol_surrogate"` (stage 2 (e)).
+
+| case | field | before | after | stage |
+|---|---|---|---|---|
+| SnowballPDESolver | MATURITY_WITH_KI | 0.13047357797372322 | 0.1304735716186375 | (a) |
+| SnowballPDESolver::refined | MATURITY_WITH_KI | 0.1304538691819851 | 0.1304538581729048 | (a) |
+| LocalVolSnowballPDESolver | MATURITY_WITH_KI | 0.1405793684576984 | 0.1405793623884317 | (a) |
+| HestonSnowballPDESolver (flat-vol surrogate) | MATURITY_WITH_KI | 0.14058071854906753 | 0.14058071248447548 | (a) |
+| PhoenixPDESolver | MATURITY_WITH_KI | 0.13045698067871522 | 0.13045697411556476 | (b) |
+| KOResetSnowballPDESolver | KO event times | the pre schedule (12) | both schedules merged (pre first at a tie) | (c) |
+| KOResetSnowballPDESolver | MATURITY_NO_KO | 0.14853804206324972 | 0.08031493486734011 (the pre-maturity bucket) | (c) |
+| KOResetSnowballPDESolver | MATURITY_WITH_KI | 0.1012128770787285 | 0.1010881124915345 (the post-maturity bucket) | (c) |
+
+The Snowball/Phoenix MATURITY splits move by <= 1.1e-8 and the knock-out probabilities by round-off
+(<= 2e-16): the knocked-in share now comes from the marched `ki_survive`. The KO-reset distribution
+carries both schedules and two maturity outcomes with their own determination times (it was the
+pre schedule with the post knock-outs folded into the maturity mass).

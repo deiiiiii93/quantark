@@ -159,3 +159,28 @@ rounds the moved delta to the same futures quantity on every day.
 
 **Execution goldens** (`test/execution/goldens/`, regenerated in the same
 commit): see `test/execution/goldens/PROVENANCE.md`.
+
+## 2026-10-04 regeneration: PDE 1D event statistics (0.9.0, spec 3B §8)
+
+The event statistics now march as a value-policy column group (allocated rows, the value's θ and
+stages, a marched maturity leg), and the lifecycle-knocked-in note reports its marched `ki_survive`
+(stage 2 (d)) instead of 1.0. Prices did not move. Four frames moved, the rest are byte-identical
+(every `book_*` frame included: `book` prices on QUAD):
+
+| file | largest per-column delta |
+|---|---|
+| `scalar_bsm_daily_event_summary.csv` | `ki_probability_to_maturity` 1.18e-3 (after the knock-in: 1.0 -> 0.998817); KO / survival 4.39e-9; cash 4.39e-5 |
+| `scalar_bsm_event_probabilities.csv` | KI `event_probability` 2.55e-6 (before the knock-in, stage (a)); KO 4.39e-9; cash 4.39e-5 |
+| `localvol_daily_event_summary.csv` | `ki_probability_to_maturity` 1.12e-4 (after the knock-in: 1.0 -> 0.999888); KO / survival 2.01e-10; cash 2.01e-6 |
+| `localvol_event_probabilities.csv` | KI `event_probability` 3.05e-6 (stage (a)); KO 2.03e-10; cash 2.01e-6 |
+
+Per stage: (a) moved the probabilities before a knock-in (KI 2.6e-6 / 3.1e-6, KO <= 2e-10 here);
+(d) moved `ki_survive` / `ki_probability_to_maturity` after one. `pv` is unchanged to the byte.
+
+```
+ test/replay_golden/data/localvol_daily_event_summary.csv   |  4 ++--
+ test/replay_golden/data/localvol_event_probabilities.csv   | 10 +++++-----
+ test/replay_golden/data/scalar_bsm_daily_event_summary.csv |  4 ++--
+ test/replay_golden/data/scalar_bsm_event_probabilities.csv | 10 +++++-----
+ 4 files changed, 14 insertions(+), 14 deletions(-)
+```
