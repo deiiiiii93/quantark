@@ -89,6 +89,40 @@ def test_expiry_buckets_match_v2(memory):
     assert abs(pde.expected_discounted_coupon_cashflow.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
 
 
+def _c105_at_start():
+    """The coupon barrier (105) above the knock-out barrier (103): a knock-out that misses the coupon releases
+    the arrears (spec 3B decision 4, the release rule)."""
+    from datetime import datetime
+    from quantark.util.calendar import CalendarType, create_calendar
+    from intraday.conftest import dated_phoenix, flat_env
+    t0 = datetime(2026, 3, 16)
+    product = dated_phoenix(create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028)), t0, coupon_barrier=105.0)
+    return product, flat_env(t0)
+
+
+@pytest.mark.slow
+def test_release_rule_product_against_v2():
+    product, env = _c105_at_start()
+    pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, env)
+    v2 = PhoenixQuadEngineV2().calculate_event_stats(product, env)
+    assert np.max(np.abs(pde.expected_discounted_coupon_cashflow - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
+    assert abs(pde.expected_discounted_coupon_cashflow.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
+    assert abs(pde.reconciliation_error) <= 1e-10
+
+
+@pytest.mark.slow
+def test_release_rule_product_price_against_monte_carlo():
+    """Eight independent 25,000-path runs (200,000 paths): the PDE price within three batch standard errors."""
+    from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+    from quantark.asset.equity.param import MCParams
+    product, env = _c105_at_start()
+    pde = PhoenixPDESolver(PDEParams()).price(product, env)
+    runs = np.array([PhoenixMCEngine(params=MCParams(num_paths=25_000, seed=seed)).price(product, env)
+                     for seed in range(1, 9)])
+    se = runs.std(ddof=1) / np.sqrt(runs.size)
+    assert abs(pde - runs.mean()) <= 3.0 * se, (pde, runs.mean(), se)
+
+
 def test_carried_arrears_add_less_than_their_discounted_face():
     """Review Focus 1: arrears carried in are paid at most once, with the first coupon that triggers."""
     env = CASES["ph_memory"][1]()

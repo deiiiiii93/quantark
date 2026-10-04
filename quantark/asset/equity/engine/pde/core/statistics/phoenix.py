@@ -224,7 +224,7 @@ class PhoenixStatistics(SnowballStatistics):
             self.breach.termination = False
 
     def _ko_stage(self, blocks, j, current_time, rec, terminal=False):
-        """``_apply_ko_jump_vector`` on statistics blocks, in place (the 0.8.0 forfeit rule), then under
+        """``_apply_ko_jump_vector`` on statistics blocks, in place (the release rule), then under
         EXPIRY ``_apply_termination_ko`` on T_j/U -- which the value skips at maturity (no ``W`` yet)."""
         solver, product, L, s = self.solver, self.product, self.layout, self.s
         rev, memory = product.is_reverse, product.has_memory_coupon
@@ -248,10 +248,10 @@ class PhoenixStatistics(SnowballStatistics):
             k, cb = self._k(obs_idx), float(solver._coupon_barriers[obs_idx])
             df_pay = self._trigger_unit(j, obs_idx)
 
-        def paid(cash):                       # the cash where the coupon pays with the knock-out, else 0
+        def paid(cash, without=0.0):          # the cash where the coupon pays with the knock-out, else `without`
             if projection:
-                return solver._ko_coupon_breach(s, cb, rev, 0.0, cash)
-            return np.where(pay_mask, cash, 0.0)
+                return solver._ko_coupon_breach(s, cb, rev, without, cash)
+            return np.where(pay_mask, cash, without)
 
         for X, name in zip(blocks, ("alive", "ki")):
             if name == "ki" and not solver._ko_survives_ki(product):
@@ -260,10 +260,11 @@ class PhoenixStatistics(SnowballStatistics):
             if obs_idx is not None:
                 target[:, L.trigger_cols[k]] = paid(df_pay)     # a coupon triggered on the knock-out date counts
                 for m in range(self.n_states):
-                    coupon_at_ko = (float(solver._coupon_amounts[obs_idx])
-                                    + (solver._accumulated_coupon_amount(obs_idx, min(m, max_m)) if memory else 0.0))
+                    arrears = solver._accumulated_coupon_amount(obs_idx, min(m, max_m)) if memory else 0.0
+                    coupon_at_ko = float(solver._coupon_amounts[obs_idx]) + arrears
                     if coupon_at_ko > 0.0:
-                        target[:, L.cash[k, m]] = paid(coupon_at_ko * df)
+                        # the release rule (decision 4): the arrears whatever the spot, the coupon on its barrier
+                        target[:, L.cash[k, m]] = paid(coupon_at_ko * df, arrears * df if arrears > 0.0 else 0.0)
                         if L.expiry:          # paid with the knock-out, at its settlement: bucket k
                             target[:, L.bucket[k, m]] = target[:, L.cash[k, m]]
             NT = self._NT
@@ -305,11 +306,12 @@ class PhoenixStatistics(SnowballStatistics):
                 lows, his, b_c_x, b_ko_x, trig_up, ko_here, True, f_ko_value, f_pay, f0, f0))
             for m in range(self.n_states):
                 in_fan = m <= max_m
-                coupon_at_ko = amt + (solver._accumulated_coupon_amount(obs_idx, min(m, max_m)) if memory else 0.0)
+                arrears = solver._accumulated_coupon_amount(obs_idx, min(m, max_m)) if memory else 0.0
+                coupon_at_ko = amt + arrears
 
-                def s_ko_value(m_pay, _c=coupon_at_ko, _w=len(S[m])):
+                def s_ko_value(m_pay, _c=coupon_at_ko, _a=arrears, _w=len(S[m])):
                     v = np.zeros((len(s), _w))
-                    v[:, k] = (_c if m_pay else 0.0) * df
+                    v[:, k] = (_c if m_pay else _a) * df       # the release rule (decision 4)
                     if L.expiry:              # bucket k: paid with the knock-out, at its settlement
                         v[:, L.n_ko + k] = v[:, k]
                     return v

@@ -795,16 +795,20 @@ class PhoenixOption(BaseEquityOption):
             if not at_valuation_instant(record.observation_time):
                 continue
             own = float(self.get_coupon_payoff(index, year_fraction=fractions[index]))
-            if self.is_coupon_triggered(spot, index):
+            triggered = self.is_coupon_triggered(spot, index)
+            if triggered:
                 coupon, coupon_index, arrears = coupon + own + arrears, index, 0.0
-            elif self.has_memory_coupon:
-                arrears += own
             if ko_allowed and record.barrier is not None:
                 breached = spot <= record.barrier if self.is_reverse else spot >= record.barrier
                 if breached:
+                    # the release rule (spec 3B decision 4): a knock-out pays the arrears carried into
+                    # this period whatever the spot; the period's own coupon only where it is triggered
+                    paid = coupon if triggered else coupon + arrears
                     return PhoenixObservationsAtValuation(
-                        True, knocked_in, record, index, coupon, coupon_index
+                        True, knocked_in, record, index, paid, coupon_index
                     )
+            if not triggered and self.has_memory_coupon:
+                arrears += own
         if not knocked_in and self.has_ki_barrier:
             knocked_in = knock_in_decided_at_valuation(self, spot, pricing_env)
         return PhoenixObservationsAtValuation(

@@ -1002,10 +1002,11 @@ class PhoenixMCEngine(BaseEngine):
             if ko_at_obs.any():
                 ko_coupon_hit = self._coupon_trigger_mask(product, spot_obs, obs_idx)
 
-                current_coupon_pay = current_coupon
+                # The release rule (spec 3B decision 4): a knock-out pays the accrued arrears
+                # whatever the spot, and the current coupon where its barrier is hit.
+                ko_coupon = np.where(ko_coupon_hit, current_coupon, 0.0)
                 if product.coupon_config.memory_coupon:
-                    current_coupon_pay = current_coupon + accrued
-                ko_coupon = np.where(ko_coupon_hit, current_coupon_pay, 0.0)
+                    ko_coupon = ko_coupon + accrued
 
                 payoffs[ko_at_obs] = ko_payoffs_schedule[obs_idx] + ko_coupon[ko_at_obs]
 

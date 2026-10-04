@@ -119,14 +119,11 @@ class PhoenixPDESolver(SnowballPDESolver):
         return float(payoff)
 
     def _immediate_ko_coupon(self, product: PhoenixOption, pricing_env: PricingEnvironment) -> float:
-        """The undiscounted coupon a knock-out at the valuation instant pays with its redemption."""
-        if not product.is_coupon_triggered(pricing_env.spot, 0):
-            return 0.0
-        coupon_payoff = product.get_coupon_payoff(0)
+        """The undiscounted coupon a knock-out at the valuation instant pays with its redemption: the period's
+        coupon where its barrier is met, plus the memory arrears whatever the spot (the release rule, spec 3B
+        decision 4 -- a knock-out is the arrears' last chance, on every carrier)."""
+        coupon_payoff = product.get_coupon_payoff(0) if product.is_coupon_triggered(pricing_env.spot, 0) else 0.0
         if product.has_memory_coupon:
-            # A knock-out is the memory arrears' last chance: Monte Carlo, QUAD V2 and the lifecycle
-            # tracker all release them with the period's coupon. Leaving them out paid a knock-out
-            # decided at the valuation instant short by every coupon owed.
             coupon_payoff += float(product.coupon_config.initial_coupon_arrears)
         return float(coupon_payoff)
 
@@ -823,7 +820,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         The contractual post-event value is piecewise in spot with thresholds
         at the coupon and KO barriers:
 
-            KO region:      (base + coupon_at_ko * 1_pay) * df
+            KO region:      (base + arrears + coupon * 1_pay) * df  (the release rule)
             survive & pay:  level-0 diffused value + coupon
             survive & miss: next memory level's value
 
@@ -876,8 +873,8 @@ class PhoenixPDESolver(SnowballPDESolver):
             ):
                 branches = self._joint_branches(
                     lows, his, b_c_x, b_ko_x, trig_up, ko_here, in_coupon_fan,
-                    ko_value=lambda m_pay, _c=coupon_at_ko: np.full(
-                        n, (base_payoff + (_c if m_pay else 0.0)) * df
+                    ko_value=lambda m_pay, _c=coupon_at_ko, _a=accumulated_ko: np.full(
+                        n, (base_payoff + (_c if m_pay else _a)) * df    # the release rule (decision 4)
                     ),
                     # `disc` is this regime's termination value under
                     # EXPIRY, a plain discount factor otherwise.
@@ -1018,9 +1015,12 @@ class PhoenixPDESolver(SnowballPDESolver):
                 coupon_at_ko = coupon_amt + accumulated_pay
                 if coupon_at_ko > 0.0 and obs_idx is not None:
                     coupon_barrier = float(self._coupon_barriers[obs_idx])
+                    # the release rule (spec 3B decision 4): a knock-out below the coupon barrier
+                    # still pays the arrears; the period's coupon needs its barrier
+                    miss = base_payoff * df + accumulated_pay * df if accumulated_pay > 0.0 else base_payoff * df
                     total_payoff = self._ko_coupon_breach(
                         s_vec, coupon_barrier, product.is_reverse,
-                        base_payoff * df, (base_payoff + coupon_at_ko) * df,
+                        miss, (base_payoff + coupon_at_ko) * df,
                     )
                 else:
                     total_payoff = np.full(len(s_vec), base_payoff * df)
@@ -1045,15 +1045,18 @@ class PhoenixPDESolver(SnowballPDESolver):
                 else 0.0
             )
 
-            # Memory semantics (matching the Phoenix Monte-Carlo engine's
-            # convention): accrued coupons are released ONLY when the current
-            # observation's coupon condition is met — a KO below the coupon
-            # barrier forfeits them along with the current coupon.
-            total_payoff = np.full_like(s_vec, base_payoff * df, dtype=float)
+            # The release rule (spec 3B decision 4; QUAD V2, Monte Carlo and the lifecycle tracker
+            # alike): a knock-out pays the accrued arrears whatever the spot, and the current coupon
+            # where its barrier is met. The pay nodes keep their expression (and their bits).
+            arrears = accumulated_pay
+            if arrears > 0.0:
+                total_payoff = np.full_like(s_vec, base_payoff * df + arrears * df, dtype=float)
+            else:
+                total_payoff = np.full_like(s_vec, base_payoff * df, dtype=float)
             coupon_at_ko = coupon_amt + accumulated_pay
             if coupon_at_ko > 0.0:
                 total_payoff = np.where(
-                    pay_mask, total_payoff + coupon_at_ko * df, total_payoff
+                    pay_mask, base_payoff * df + coupon_at_ko * df, total_payoff
                 )
 
             if ko_mask.any():

@@ -178,6 +178,13 @@ class AutocallableLifecycleTracker:
                         isinstance(product, PhoenixOption)
                         and idx not in self.lifecycle.observed_coupon_indices
                     ):
+                        # The release rule (spec 3B decision 4): a knock-out that misses this
+                        # period's coupon still pays the memorized arrears, at its settlement.
+                        released = self._release_phoenix_arrears(
+                            product, idx, rec, date, spot, valuation_point
+                        )
+                        if released is not None:
+                            events.append(released)
                         coupon_event = self._observe_phoenix_coupon(
                             product, idx, rec, date, spot, valuation_point
                         )
@@ -312,7 +319,6 @@ class AutocallableLifecycleTracker:
                 self.lifecycle.coupon_memory_count += 1
             return None
 
-        before = self._state_snapshot()
         memorized = (
             sorted(self.lifecycle.missed_coupon_indices)
             if product.has_memory_coupon
@@ -321,6 +327,41 @@ class AutocallableLifecycleTracker:
         payoff = float(product.get_coupon_payoff(idx)) + sum(
             float(product.get_coupon_payoff(i)) for i in memorized
         )
+        return self._book_phoenix_coupon(product, idx, rec, date, spot, valuation_point, payoff, memorized)
+
+    def _release_phoenix_arrears(
+        self,
+        product: Any,
+        idx: int,
+        rec: dict,
+        date: pd.Timestamp,
+        spot: float,
+        valuation_point: Any,
+    ) -> Optional[LifecycleEvent]:
+        """At a knock-out that misses period ``idx``'s coupon, pay the memorized arrears (the release rule,
+        spec 3B decision 4); ``None`` when the coupon triggers (it pays them itself) or nothing is owed."""
+        if not product.has_memory_coupon or product.is_coupon_triggered(spot, idx):
+            return None
+        memorized = sorted(self.lifecycle.missed_coupon_indices)
+        if not memorized:
+            return None
+        payoff = sum(float(product.get_coupon_payoff(i)) for i in memorized)
+        return self._book_phoenix_coupon(product, idx, rec, date, spot, valuation_point, payoff, memorized)
+
+    def _book_phoenix_coupon(
+        self,
+        product: Any,
+        idx: int,
+        rec: dict,
+        date: pd.Timestamp,
+        spot: float,
+        valuation_point: Any,
+        payoff: float,
+        memorized: list,
+    ) -> LifecycleEvent:
+        """Book one coupon entry ``coupon:{idx}`` of ``payoff`` per unit, settled with record ``rec``,
+        releasing ``memorized`` arrears periods."""
+        before = self._state_snapshot()
         coupon = self.quantity * payoff
         realized = self._record_cashflow(
             LifecycleEventType.COUPON,
