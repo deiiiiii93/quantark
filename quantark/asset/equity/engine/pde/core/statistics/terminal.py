@@ -81,7 +81,8 @@ def _knocked_out_coupon(solver, product, env, ko_records, rec0_pos, df_delay0, w
     cash = np.zeros(n_ko, dtype=float)
     cash[rec0_pos] = coupon * df_delay0
     coupon_probability = np.zeros(n_ko, dtype=float)
-    coupon_probability[rec0_pos] = 1.0 if product.is_coupon_triggered(env.spot, 0) else 0.0
+    # the decision's trigger: the knocked-out period's own coupon barrier (decision 13, F10)
+    coupon_probability[rec0_pos] = 1.0 if solver._valuation_decision(product, env).coupon_index is not None else 0.0
     det = [float(r.observation_time) for r in ko_records]
     pay = [float(r.settlement_time if r.settlement_time is not None else r.observation_time) for r in ko_records]
     det_dates, pay_dates = [r.observation_date for r in ko_records], [r.settlement_date for r in ko_records]

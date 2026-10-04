@@ -158,3 +158,26 @@ def test_lifecycle_flag_marches_ki_survive(rate, bound):
     assert stats.ki_ever_probability == 1.0
     assert abs(stats.ki_survive_knocked_in_probability - (1.0 - stats.ko_probability.sum())) <= bound
     assert stats.ki_probability == stats.ki_survive_knocked_in_probability     # settles knocked in
+
+
+@pytest.mark.parametrize("k, memory, barrier", [
+    (1, False, 80.0), (2, True, 80.0),
+    (2, False, [80.0, 80.0, 110.0] + [80.0] * 9),     # the period's own barrier is not met; period 0's is
+], ids=["obs1", "obs2_memory", "obs2_list_barrier_missed"])
+def test_a_later_observation_knock_out_pays_the_decided_coupon(k, memory, barrier):
+    """A Phoenix knocked out at valuation on observation k pays the coupon its own decision pays -- the
+    period's contractual amount and the period's own barrier (spec 3B §5.3, §5.5, decision 13) -- in the
+    price and in the statistics, not period 0's (final review finding 1)."""
+    p = dated_phoenix(CAL, T0, memory=memory, coupon_barrier=barrier)
+    env = flat_env(p.barrier_config.ko_observation_schedule.records[k].observation_date, spot=104.0)
+    decision = p.decide_observations_at_valuation(104.0, env)
+    assert decision.knocked_out
+    rec = decision.ko_record
+    df = env.get_discount_factor(rec.settlement_time) if rec.settlement_time else 1.0
+    solver = PhoenixPDESolver(PDEParams())
+    assert solver.price(p, env) == pytest.approx((float(rec.payoff or 0.0) + decision.coupon) * df, abs=1e-12)
+    stats = solver.calculate_event_stats(p, env)
+    assert float(np.sum(stats.expected_discounted_coupon_cashflow)) == pytest.approx(decision.coupon * df,
+                                                                                       abs=1e-12)
+    assert float(np.sum(stats.coupon_probability)) == (1.0 if decision.coupon_index is not None else 0.0)
+    assert abs(stats.reconciliation_error) <= 1e-10

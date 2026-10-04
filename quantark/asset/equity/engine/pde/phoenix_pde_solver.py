@@ -121,11 +121,10 @@ class PhoenixPDESolver(SnowballPDESolver):
     def _immediate_ko_coupon(self, product: PhoenixOption, pricing_env: PricingEnvironment) -> float:
         """The undiscounted coupon a knock-out at the valuation instant pays with its redemption: the period's
         coupon where its barrier is met, plus the memory arrears whatever the spot (the release rule, spec 3B
-        decision 4 -- a knock-out is the arrears' last chance, on every carrier)."""
-        coupon_payoff = product.get_coupon_payoff(0) if product.is_coupon_triggered(pricing_env.spot, 0) else 0.0
-        if product.has_memory_coupon:
-            coupon_payoff += float(product.coupon_config.initial_coupon_arrears)
-        return float(coupon_payoff)
+        decision 4 -- a knock-out is the arrears' last chance, on every carrier). The product's own decision
+        pays it: the knocked-out period's contractual amount and its own coupon barrier (decision 13, F10),
+        whichever observation of the schedule the valuation date is."""
+        return float(self._valuation_decision(product, pricing_env).coupon)
 
     def _calculate_terminal_value(
         self, product: PhoenixOption, spot: float, pricing_env: PricingEnvironment
