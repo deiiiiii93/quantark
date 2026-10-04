@@ -181,7 +181,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         grid_focus: str = "auto",
         pin_critical_spots: bool = False,
         v0_boundary: str = "degenerate_pde",
-        statistics: str = "flat_vol_surrogate",
+        statistics: str = "refuse",
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")

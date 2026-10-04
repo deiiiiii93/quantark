@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.event_stats import StatisticsRefused
 from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
 from quantark.asset.equity.market import IndexFuturesQuote
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
@@ -724,6 +725,10 @@ class ProductReplay:
         stats = None
         try:
             stats = self.event_stats_engine.calculate_event_stats(product, env)
+        except StatisticsRefused:
+            # a 2D solver's refusal is a configuration decision (spec 3B decision 8): the MC fallback
+            # would silently swap the model, so it never masks one
+            raise
         except Exception as exc:
             if mode != "mc":
                 raise

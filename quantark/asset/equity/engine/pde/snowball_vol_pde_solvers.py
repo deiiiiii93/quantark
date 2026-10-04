@@ -229,7 +229,7 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         greek_min_n_v: int = 0,
         greek_min_steps_per_year: int = 0,
         barrier_greek_min_n_x: int = 0,
-        statistics: str = "flat_vol_surrogate",
+        statistics: str = "refuse",
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")

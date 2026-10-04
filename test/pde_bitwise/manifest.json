@@ -1292,7 +1292,7 @@
   "none": []
  },
  "heston_phoenix|stats": {
-  "error": null,
+  "error": "StatisticsRefused",
   "none": []
  },
  "heston_snowball": {
@@ -1304,7 +1304,7 @@
   "none": []
  },
  "heston_snowball|stats": {
-  "error": null,
+  "error": "StatisticsRefused",
   "none": []
  },
  "intraday_snowball": {
@@ -1654,7 +1654,7 @@
   "none": []
  },
  "slv_snowball|stats": {
-  "error": null,
+  "error": "StatisticsRefused",
   "none": []
  },
  "snowball_cont|bus244": {

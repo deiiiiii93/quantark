@@ -3,6 +3,8 @@ from datetime import datetime
 import numpy as np
 import pytest
 
+from quantark.asset.equity.engine.event_stats import StatisticsRefused
+
 from quantark.asset.equity.engine.mc import (
     HestonPhoenixMCEngine,
     HestonSLVPhoenixMCEngine,
@@ -318,7 +320,7 @@ def test_phoenix_vol_model_pde_engines_calculate_event_stats():
 
     engines = [
         LocalVolPhoenixPDESolver(params),
-        HestonPhoenixPDESolver(hp, n_x=48, n_v=18, n_t=16, grid_style="uniform"),
+        HestonPhoenixPDESolver(hp, n_x=48, n_v=18, n_t=16, grid_style="uniform", statistics="flat_vol_surrogate"),
         HestonSLVPhoenixPDESolver(
             hp,
             _unit_leverage(),
@@ -326,8 +328,12 @@ def test_phoenix_vol_model_pde_engines_calculate_event_stats():
             n_v=18,
             n_t=16,
             grid_style="uniform",
+            statistics="flat_vol_surrogate",
         ),
     ]
+    # the 2D solvers report statistics only on request (spec 3B decision 8)
+    with pytest.raises(StatisticsRefused):
+        HestonPhoenixPDESolver(hp, n_x=48, n_v=18, n_t=16, grid_style="uniform").calculate_event_stats(product, env)
 
     for engine in engines:
         price = float(engine.price(product, env))

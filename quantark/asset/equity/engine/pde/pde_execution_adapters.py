@@ -462,6 +462,10 @@ class Heston2DAutocallableSessionAdapter(_EquityPDESessionBase):
             kwargs.update(
                 leverage_surface=engine.leverage_surface, eta=engine.eta
             )
+        if hasattr(engine, "_statistics"):
+            # the statistics option travels with the solver: a clone that dropped it would refuse
+            # what the caller opted into (spec 3B decision 8)
+            kwargs["statistics"] = engine._statistics
         return type(engine)(**kwargs)
 
     def prepare(self, engine, request, context) -> PreparedState:

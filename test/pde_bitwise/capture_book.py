@@ -604,7 +604,10 @@ def _vol_solver(name, params=None, surrogate=False):
     else:
         cls, args = HestonPhoenixPDESolver, (hp,)
     kw = dict(params=params, n_x=80, n_v=32, n_t=40)
-    if surrogate and "statistics" in inspect.signature(cls.__init__).parameters:
+    # the option sits on the 2D base's __init__ (an SLV subclass forwards **kwargs to it)
+    takes_option = any("statistics" in inspect.signature(c.__init__).parameters
+                       for c in cls.__mro__ if "__init__" in vars(c))
+    if surrogate and takes_option:
         kw["statistics"] = "flat_vol_surrogate"
     return cls(*args, **kw)
 
@@ -1137,7 +1140,9 @@ def rows_3b(existing):
     # 2D: the half-step scheme (the 2D price path already refuses it on fc569df1) and the surrogate option
     for name in ("heston_snowball", "slv_snowball"):
         out[f"3b|{name}|half_step|stats"] = _row(
-            lambda n=name: stats_only(_vol_solver(n, params=PDEParams(stepper=_cn(damping="half_step"))),
+            # the surrogate: a refusing solver never reaches the route check this row exercises
+            lambda n=name: stats_only(_vol_solver(n, params=PDEParams(stepper=_cn(damping="half_step")),
+                                                  surrogate=True),
                                       snowball(), env_flat()),
             error="ValidationError", tags={"twod_halfstep"})
     for name in ("heston_snowball", "slv_snowball", "heston_phoenix"):

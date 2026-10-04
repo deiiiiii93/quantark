@@ -41,3 +41,13 @@ def test_refuse_mode_refuses_from_both_entry_points():
         s.calculate_event_stats(snowball(), env_flat())
     with pytest.raises(StatisticsRefused):
         s.price_with_events(snowball(), env_flat())
+
+
+def test_default_refuses_but_a_plain_price_with_events_does_not():
+    from quantark.cashleg.event_distribution import EventType
+    s = HestonSnowballPDESolver(HP, **SMALL)
+    with pytest.raises(StatisticsRefused, match="flat_vol_surrogate"):
+        s.calculate_event_stats(snowball(), env_flat())
+    res = s.price_with_events(snowball(), env_flat(), emit_distribution=False)     # Review Focus 4
+    assert res.npv == s.price(snowball(), env_flat())
+    assert res.event_distribution.probabilities.keys() == {EventType.MATURITY_NO_KO}

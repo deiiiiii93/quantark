@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from datetime import datetime
 
+from quantark.asset.equity.engine.event_stats import StatisticsRefused
 from quantark.asset.equity.engine.mc import (
     HestonSLVSnowballMCEngine,
     HestonSLVQESnowballMCEngine,
@@ -768,11 +769,14 @@ def test_snowball_vol_model_pde_engines_calculate_event_stats():
     hp = _heston()
     params = PDEParams()
 
+    # the 2D solvers report statistics only on request (spec 3B decision 8): the flat-vol surrogate
     engines = [
         LocalVolSnowballPDESolver(params),
-        HestonSnowballPDESolver(hp, n_x=48, n_v=18, n_t=16),
-        HestonSLVSnowballPDESolver(hp, _unit_leverage(), n_x=48, n_v=18, n_t=16),
+        HestonSnowballPDESolver(hp, n_x=48, n_v=18, n_t=16, statistics="flat_vol_surrogate"),
+        HestonSLVSnowballPDESolver(hp, _unit_leverage(), n_x=48, n_v=18, n_t=16, statistics="flat_vol_surrogate"),
     ]
+    with pytest.raises(StatisticsRefused):
+        HestonSnowballPDESolver(hp, n_x=48, n_v=18, n_t=16).calculate_event_stats(product, env)
 
     for engine in engines:
         price = float(engine.price(product, env))
