@@ -130,19 +130,19 @@ class TestRichOutputs:
     def test_total_backward_march_parity_with_direct(self):
         """The session performs exactly as many banded backward sweeps as
         the direct price_with_events path — rich outputs add NO marches."""
-        # every banded solve of the core march (value and statistics groups)
+        # every banded solve of the core march (value and statistics groups): its gtsv call
         from quantark.asset.equity.engine.pde.core import backends as mod
 
         engine, product, env = _case("SnowballPDESolver")
 
         counts = {"n": 0}
-        original = mod.solve_banded
+        original = mod._tridiagonal_solve
 
         def counting(*args, **kwargs):
             counts["n"] += 1
             return original(*args, **kwargs)
 
-        mod.solve_banded = counting
+        mod._tridiagonal_solve = counting
         try:
             engine.price_with_events(product, env)
             direct_n = counts["n"]
@@ -157,7 +157,8 @@ class TestRichOutputs:
                 )
             session_n = counts["n"]
         finally:
-            mod.solve_banded = original
+            mod._tridiagonal_solve = original
+        assert direct_n > 0           # the patch reaches the march's solves
         assert session_n == direct_n
 
     def test_pv_events_matches_price_with_events_2d(self):
