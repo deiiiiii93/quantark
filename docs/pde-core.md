@@ -1,4 +1,4 @@
-# The 1D PDE core (0.8.0)
+# The 1D PDE core (0.9.0)
 
 Every shared-grid 1D PDE route prices through one path: European, American, the
 barrier family (single, double, one-touch, double one-touch, knock-in by composition),
@@ -7,7 +7,8 @@ Snowball, Phoenix, KO-reset, and the local-vol Snowball and Phoenix. The pieces 
 how to plug in a custom component, and what the core keeps from 0.6.0 on purpose.
 The design is `docs/superpowers/specs/2026-09-30-pde-1d-one-core-design.md`; 0.8.0's
 numerical policy (damping form, projection, grid day, cap, far-field rows) is
-`docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md`.
+`docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md`; 0.9.0's event
+statistics are `docs/superpowers/specs/2026-10-03-pde-1d-event-statistics-design.md`.
 
 DCN, the local-vol vanilla and barrier solvers, and the 2D Heston/SLV solvers are not
 on the core yet (sub-project 3). They take their damping counts and weights from
@@ -54,17 +55,65 @@ independently and composed as `vanilla − knock-out` for the price and for each
 | Knock-in barriers | two prepared problems (vanilla, knock-out); knocked in: the vanilla alone | sparse LU each |
 | Snowball, KO-reset, LV snowball | alive and knocked-in as one two-column group | banded, one `solve_banded` per step; LU with two one-column groups when the interior has two nodes or fewer |
 | Phoenix, LV phoenix | one group per (memory state, surface), plus the two termination surfaces under EXPIRY coupons, each one column | banded or LU per column |
-| Event statistics | one group of `2·n_cols` indicator columns | banded only |
+| Event statistics | one rolling group of `2·n_cols` columns (both surfaces hstacked) | banded only; all-zero columns skipped |
 
 | Policy | Boundary | θ | After events |
 |---|---|---|---|
 | value | the adapter's Dirichlet values, set before the solve | the schedule; θ=1 on zero-diffusion steps (every value group, Phoenix included since 0.8.0) | none |
-| statistics-legacy | the previous row carried into the right-hand side | the schedule, no zero-diffusion override | zero-slope copy (`v[0] = v[1]`, `v[-1] = v[-2]`) |
+
+Since 0.9.0 the statistics group takes the value policy too (`statistics-legacy`, the
+carried rows and the zero-slope copy are gone).
+
+## Event statistics (0.9.0)
 
 Event statistics are a column group of the price march: `calculate_event_stats` marches
-the value and statistics groups together and does not re-price. The statistics group
-keeps the thirteen 0.6.0 conventions listed in the spec (section 6) bit for bit; moving
-it onto the value policy is sub-project 3's "Level 2".
+the value and statistics groups together and does not re-price. The package is
+`core/statistics/`:
+
+- **`columns.py`, `ColumnLayout`** — the block per surface: knock-out units `KO_k` (the
+  pre schedule on KO-reset), the KO-reset post-schedule units, the Phoenix triggers
+  `P_k`, the knock-in pair `KIS` / `KIE`, then the maturity leg `M` (KO-reset: `M_pre`,
+  `M_post` and the maturity units `U_pre`, `U_post`), the Phoenix per-date coupon cash
+  per memory state, the EXPIRY payment buckets per state and the termination unit.
+  `streams` prunes columns; pruned fields read 0.
+- **`rows.py`, row allocation** — the value's Dirichlet rows are produced one code branch
+  per cash term (`RowTerm`); the statistics send each term to the column whose readout
+  multiplies it (`M`, a `KO` unit, a termination unit). The cash columns' rows therefore
+  sum to the value's rows bit for bit. Rows are allocated from the value, never designed.
+- **`breach.py`, the stages** — the adapter's event functions (knock-out, knock-in, the
+  Phoenix coupon / joint / termination stages, the KO-reset seed) take an optional
+  `breach`. The value passes `None` and writes its scalar cash; a statistics group passes
+  a `Breach` that returns the block's values where the event fires. The same function,
+  the same order (the tie rules included), the same cell-average projections — so the
+  Phoenix coupon-barrier smoothing reaches every column.
+- **`snowball.py` / `phoenix.py` / `ko_reset.py`** — the families' `RollingStatistics`
+  (`allocate`, `terminal`, `rows`, `step_events`, `store`, `read`); θ is the value
+  group's schedule (θ = 1 on zero-diffusion steps).
+- **`readout.py`** — interpolates the columns at the spot, applies the valuation-date
+  capture (a coupon decided today reads state 0 or, on a memory miss, state 1), and
+  assembles the dataclass and its ledger with the marched maturity leg as the terminal
+  row. `reconciliation_error = pv − Σ expected_discounted_cashflows` is round-off on
+  every native route (the suite bounds it at 1e-10).
+- **`terminal.py`** — a product knocked out at valuation (the family's
+  `decide_observations_at_valuation` with the carried knock-in state) is a terminal
+  outcome: deterministic statistics from the decision, no layout, no march.
+
+The statistics-only path (`external_pv`) prepares its own stages and termination tables
+and is the 2D solvers' surrogate. The 2D Heston / SLV solvers refuse statistics unless
+built with `statistics="flat_vol_surrogate"`; the result's `provenance` names both
+models.
+
+**The reference fixture.** `test/pde_statistics/reference.py` is an exact two-state
+(not knocked in / knocked in) Gauss–Legendre recursion for a flat-GBM Snowball or
+memory-free Phoenix. It uses no engine code. It refuses what it cannot represent:
+non-flat curves, non-constant barriers, EXPIRY coupons, memory, reverse products and
+an observation at the valuation date. It also checks the integration domain, mass
+conservation, settlement and terminal payment times, and finiteness. Its values are
+banked in `reference_values.json` with the quadrature error, the conservation defect
+and the Monte Carlo qualifier's z-scores. Regenerating the JSON (`build_reference.py`)
+is a deliberate act with provenance, as for the goldens. KO-reset is gated against a
+32,001-point QUAD in `ko_reset_reference.json`; the memory and EXPIRY Phoenix against
+QUAD V2.
 
 ## Adapters
 
@@ -246,14 +295,12 @@ would. The routes outside the core have no `explain`; the 2D solvers raise.
 The core reproduces these 0.6.0 behaviours bit for bit. Each is decided in a later
 sub-project, under re-certification, not here. (0.8.0 decided three former entries: Snowball
 `NODAL` masks interior events nodally, Phoenix takes θ = 1 on zero-diffusion steps, and under
-continuous KI the knocked-in boundary rows are written before the alive rows that read them.)
+continuous KI the knocked-in boundary rows are written before the alive rows that read them.
+0.9.0 decided four more: the statistics conventions, the Heston/SLV statistics (now refused
+unless the surrogate is requested), the KO-reset statistics from QUAD, and the knocked-out
+`price_with_events` distribution.)
 
-- The thirteen statistics conventions (spec section 6).
-- Heston/SLV statistics march in 1D on implied vol with the 2D price as residual.
-- KO-reset statistics come from QUAD, with the price difference in the maturity leg.
 - The life-surface pricer's node Greeks use its own three-point stencil.
-- On a product knocked out at valuation, `price_with_events` returns the trivial
-  distribution while `calculate_event_stats` marches and reports KO probability one.
 - A knock-in barrier's bump context freezes the knock-out layout but rebinds the vanilla
   on every bumped solve.
 - A single-step local-vol layout marches on the scalar Black-Scholes stencil (one unique

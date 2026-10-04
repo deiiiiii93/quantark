@@ -5,6 +5,200 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.9.0] - 2026-10-04
+
+PDE 1D event statistics (spec: `docs/superpowers/specs/2026-10-03-pde-1d-event-statistics-design.md`).
+The Snowball, Phoenix and KO-reset statistics (and their local-vol variants) march in the
+value's own groups: the value's boundary rows allocated per column, its θ rule, and the
+adapter's event stages. The maturity leg is a marched column, so on every native 1D
+route `pv = Σ knock-out cash + Σ coupon cash + maturity leg` to round-off and
+`reconciliation_error` is a real number. Every stage was checked against the 510-row PDE
+byte book with its declared movers. Three Phoenix contract fixes move prices; no other
+price moves. No certificate identity moves.
+
+### Added
+- `AutocallableEventStats.reconciliation_error` is computed:
+  `pv − Σ expected_discounted_cashflows`, round-off (≤ 1e-10) on native 1D routes.
+- `AutocallableEventStats.provenance: StatisticsProvenance(statistics_model, price_model)`,
+  `EventDistribution.provenance`, `EventDistribution.determination_times` (per maturity
+  outcome; defaults to the last event time, so existing distributions are unchanged), and
+  `StatisticsRefused` (a `PricingError`).
+- Phoenix: `expected_discounted_coupon_cashflow` for INSTANT memory coupons and for
+  EXPIRY coupons (per earning date, as QUAD V2). EXPIRY cash is also bucketed by payment
+  event in the ledger, with `coupon_payment_is_path_dependent = True`.
+- `KOResetEventStats`: `expected_discounted_pre_maturity_cashflow` /
+  `…_post_maturity_cashflow`, `pre_maturity_probability` / `post_maturity_probability`,
+  `pre_maturity_time` / `post_maturity_time`, their payment times, `pre_ko_payment_times` /
+  `post_ko_payment_times` and `post_ko_times_are_offsets`. The PDE and QUAD V2 fill the
+  buckets; legacy QUAD and Monte Carlo leave them `None`.
+- `EventDistribution.from_autocallable_stats` accepts a `KOResetEventStats`.
+- `KOResetSnowballPDESolver.calculate_event_stats` is native, and `streams` is honoured as
+  on the Snowball.
+- `PDEPlan.terminal["event_stats"]` can be `knocked_out_at_valuation`.
+- The 2D Heston / SLV solvers' `statistics="refuse" | "flat_vol_surrogate"` option.
+- `test/pde_statistics/`: an exact two-state reference for flat GBM, with its guards and
+  a Monte Carlo qualifier, banked as JSON; a 32,001-point QUAD reference for KO-reset;
+  the identity, column and stage tests.
+- `PhoenixOption.active_ko_source_indices(env)`; `AccrualConfig.dropped_observations`.
+
+### Changed
+- **Statistics policy.** Boundary rows, θ and event stages are the value's. Snowball
+  probabilities move by ≤ 2.5e-8 on the byte book; the coupon-barrier smoothing moves
+  Phoenix ones by ≤ 1.8e-6.
+- **`expected_discounted_maturity_cashflow` is the marched leg**, not `pv − ΣKO cash`. It
+  moves by the 0.8.0 residual (≤ 7.4e-6 on the byte book, 1.2e-4 on the study cases) and,
+  on memory, EXPIRY and immediate-knock-out Phoenix, by the coupon cash it no longer holds.
+- **2D statistics refuse by default.** `HestonSnowballPDESolver`,
+  `HestonSLVSnowballPDESolver` and the Phoenix pair raise `StatisticsRefused` from
+  `calculate_event_stats` / `price_with_events` unless built with
+  `statistics="flat_vol_surrogate"`. That option returns 0.8.0's flat-vol 1D statistics,
+  now with the 2D route check, the residual (the model difference, 0.26 on the book's
+  Heston Snowball) and the provenance. The replay's `event_stats_fallback="mc"` no longer
+  masks a refusal.
+- **Phoenix release rule (decision 4).** A knock-out pays the memory arrears whatever
+  the spot, plus the current coupon when its barrier is met, as QUAD V2 always did. This
+  applies to the PDE value and statistics, the immediate-knock-out payoff,
+  `decide_observations_at_valuation`, the lifecycle tracker and `PhoenixMCEngine`. A
+  price moves only under memory with the coupon barrier above the knock-out barrier: on
+  the study's dated product (coupon 105, knock-out 103) the PDE goes 97.811385 → 98.384223,
+  against V2's 98.384358. Certified products are bit-identical.
+- **Valuation-date decisions (decision 15).** The family's own
+  `decide_observations_at_valuation`, with the carried knock-in state, decides a
+  valuation-date observation on every entry point. The spot-versus-barrier shortcut is
+  gone. A carried knock-in with `disable_ko_after_ki` no longer knocks out at valuation:
+  the dated case moves 1.019178 → −0.674, against Monte Carlo's −0.664. A
+  carried-knock-in KO-reset knocks out on its post schedule.
+- `PhoenixOption.get_coupon_period_year_fractions` takes the pricing environment; a list
+  or array argument raises `ValidationError` naming the 0.9.0 change.
+- The legacy `ki_probability` on KO-reset PDE statistics is "settles knocked in", as on
+  every PDE and QUAD route (the 0.8.0 QUAD delegation reported "ever"). The two explicit
+  fields are unambiguous.
+
+### Removed
+| Removed | Replacement |
+|---|---|
+| `STATISTICS_LEGACY`, `GroupPolicy.zero_slope_after_events`, `GroupPolicy.dt_as_python_float`, `BoundaryPolicy.CARRY` | the `VALUE` policy; a rolling group supplies its rows |
+| `StatisticsLegacy` and `core/statistics/legacy.py` | `core/statistics/group.py` and the families' groups |
+| the Snowball / Phoenix statistics hooks (`_n_extra_event_cols`, `_set_extra_event_indicators`, `_extract_extra_event_stats`, `_t0_extra_indicator_overrides`) | the column layouts of `core/statistics/columns.py`, the adapter's stages, the valuation-date rules |
+| the KO-reset solver's QUAD import and its `grid_points=501` delegation | native KO-reset statistics |
+| `reconciliation_error = 0.0` hard-coded on the three PDE paths | the computed residual |
+| the 2D solvers' silent inherited statistics | `statistics="flat_vol_surrogate"` |
+| `_is_knocked_out_at_valuation` on the price and statistics paths | the family's `decide_observations_at_valuation` |
+| `PhoenixOption.get_coupon_period_year_fractions(observation_times)` | `get_coupon_period_year_fractions(pricing_env)` |
+
+### Fixed
+- **`disable_ko_after_ki` statistics at maturity.** 0.8.0's Snowball statistics let
+  knocked-in paths knock out on the final date. The last knock-out probability read
+  4.06e-2 instead of 2.26e-3 (continuous knock-in) and 2.42e-2 instead of 4.69e-3
+  (discrete), and `ki_survive_knocked_in_probability` was short by the same mass. Prices
+  were right. Now within 2.1e-5 / 2.6e-6 (knock-out) and 1.9e-4 / 2.0e-5 (`ki_survive`)
+  of QUAD V2 (`test/pde_statistics/test_disable_ko_after_ki.py`). Anyone who used 0.8.0
+  (or earlier) PDE statistics on a `disable_ko_after_ki` Snowball for knock-out timing,
+  expected life or the knocked-in loss probability should re-run them.
+- **KO-reset statistics and conversion.** 0.8.0 ran a 501-point QUAD and folded
+  `pde_pv − quad_pv` into the maturity leg. Pre-schedule knock-out probabilities were off
+  by 3.8e-3 / 2.0e-3 / 1.4e-3 (spots 100 / 90 / 101) against a 32,001-point QUAD; native,
+  they are within 1.3e-5 / 2.0e-5 / 6.9e-6, post-schedule within 3.8e-5, and the identity
+  holds to 7e-14. The event distribution read only the pre schedule, carrying a maturity
+  mass of 0.294 where 0.200 of the paths survive both. It now has both schedules as
+  knock-outs and the two maturity outcomes at their own determination times.
+- **Memory Phoenix coupon cash.** INSTANT memory coupons had no coupon cash; it sat in the
+  maturity leg. On the study's product the coupon cash went from not reported to
+  0.736235 (V2 0.736239) and the leg from −3.34829 to −4.084522 (V2 −4.084004); the identity holds to 9e-16.
+- **EXPIRY Phoenix coupon cash.** Deferred coupons are reported per earning date and
+  bucketed at each termination's payment time, with the path-dependent flag (no cash
+  leg reads the buckets yet; below).
+- **Knocked-out distribution.** `price_with_events` on a product knocked out at valuation
+  returned `{MATURITY_NO_KO: 1.0}` at maturity, so a cash leg treated the note as alive.
+  It now returns the knock-out at its settlement, the same as `calculate_event_stats`.
+- **Phoenix knock-out coupon.** On a Phoenix knocked out at valuation, the coupon paid with
+  the knock-out (1.019178 on the byte book) was in the maturity leg; it is now coupon cash
+  and the leg is 0, as QUAD V2.
+- **Lifecycle-knocked-in `ki_survive`.** A product carrying the lifecycle knock-in flag
+  reported `ki_survive_knocked_in_probability = 1` although most paths may knock out
+  first. It is now the marched value: 0.277176 on the measured Snowball (1 − ΣKO =
+  0.277176). With the knock-in streams pruned it reads 0.0, like every pruned field.
+- **Contractual coupon periods (decision 13).** A dated Phoenix valued after its start
+  gave its first remaining period the fraction from the valuation date (0 on an
+  observation date) in the PDE and Monte Carlo, while QUAD V2 used the contract. Byte
+  book: observation-date pay +1.019178 and miss +0.7581, ten days in +0.4596 (101.683759 and
+  86.114188 against V2's 101.684019 and 86.114162). The deterministic control is exact. Tenor Phoenix theta moves
+  by up to 1.0e-2, because 0.8.0's theta clone truncated the first period.
+- **Valuation-date regimes.** A carried knock-in's regime decides (above).
+- **Dated KO-reset `KeyError`.** A dated KO-reset valued on its first observation date
+  raised `KeyError` (the post observation was not a grid node); both schedules' times are
+  now in the grid request.
+
+### Known issues
+- EXPIRY coupon cash reaches no cash leg: `price_with_events` carries no ledger, and a leg
+  that needs path-dependent coupon timing raises as it does for QUAD V2.
+- `ki_ever` under continuous knock-in carries the first-passage correction's error
+  (1e-4 to 9e-4) and does not converge under time-only refinement.
+- `ki_ever` counts a breach after a knock-out, on every engine (a definition).
+- The value's far-field rows ignore the certain far-edge knock-in and knock-out, and the
+  Phoenix upper row omits the next coupon. None of this is visible at the spot on the
+  measured cases.
+- The 2D statistics are the flat-vol model's (surrogate only; native 2D is a later spec).
+
+### Per-stage deltas (PDE byte book, 510 rows)
+- (a) Snowball value policy: 97 rows. Leg ≤ 7.4e-6, probabilities ≤ 2.5e-8, except
+  `disable_ko_after_ki` (leg 3.45, `ki_survive` 3.1e-2: the fix above) and the 2D
+  surrogate residual (0.26).
+- (b) Phoenix value policy: 60 rows. Coupon cash out of the leg (up to 6.49 on the
+  observation-date memory row), probabilities ≤ 1.8e-6, 2D surrogate residual 0.36.
+- (c) native KO-reset: 33 rows. Probabilities up to 1.4e-1 on the legacy `ki_probability`
+  (its definition, above), post-schedule cash 5.7e-2, distribution payment times.
+- (d) valuation-date rules: 35 rows. `dkak_carried` price 1.693, the lifecycle
+  `ki_survive` (up to 0.96), the KO-reset immediate knock-out.
+- (e) 2D refusal: 3 rows, now `StatisticsRefused`.
+- (f) release rule: 9 rows. `phoenix_c105` +0.5728, `lu_fallback|phoenix` +6.1e-4 (one
+  dual cell spans both barriers on that 4-node grid).
+- (g) contractual periods: 63 rows. Dated Phoenix prices up to +1.019178, tenor Phoenix
+  theta ≤ 1.0e-2, `phoenix_c105` ≤ 1.3e-13.
+
+Goldens: the replay event frames (`scalar_bsm`, `localvol`) and the phase-4 execution
+event distributions were regenerated once (`test/replay_golden/README.md`,
+`test/execution/goldens/PROVENANCE.md`); the `book` (QUAD) frames are byte-identical.
+
+### Performance
+- The statistics block skips its all-zero columns (an observation the backward march has
+  not reached) and solves them once as a +0.0 template. The tridiagonal solve calls LAPACK
+  `gtsv` directly, without scipy's argument validation. The first-passage correction forms
+  only its one row on a block. The value rows are reused, not recomputed. The KO-reset
+  terminal resolves the pre-knock-in tenor once per surface, not per node. All are
+  bit-identical on the byte book.
+
+Timing gate (`test/pde_bitwise/timing.py`, 0.8.0 and 0.9.0 interleaved, ARM64 macOS with
+the `accel` extra; median ms over 15 rounds). The price families come from the full run
+(IQR ≤ 3 %). The statistics cases come from a rerun of the gated four alone
+(`--families`, three repetitions per process, IQR ≤ 8 %): the full run was inconclusive,
+with bimodal efficiency-core times on a loaded machine.
+
+| Case | Warm 0.8.0 | Warm 0.9.0 | Ratio | Cold ratio | Gate |
+|---|---|---|---|---|---|
+| Snowball price | 42.9 | 34.9 | 0.81× | 0.87× | |
+| Phoenix price (memory) | 652 | 455 | 0.70× | 0.71× | |
+| KO-reset price | 25.5 | 17.3 | 0.68× | 0.69× | |
+| Local-vol Snowball price | 117 | 107 | 0.91× | 0.93× | |
+| European / American / barrier price | | | 1.00× | 1.00× | |
+| Snowball statistics | 159 | 146 | 0.92× | 0.94× | pass |
+| Local-vol Snowball statistics | 248 | 225 | 0.91× | 0.91× | pass |
+| Phoenix statistics (no memory, INSTANT) | 230 | 247 | **1.075×** | 1.06× | **missed** (1.05× warm) |
+| KO-reset statistics | 40 | 72 | **1.79×** | 1.78× | **not comparable** (0.8.0 was a 501-point QUAD) |
+| Phoenix statistics (memory) | 877 | 1,279 | 1.46× | | recorded |
+| Phoenix statistics (EXPIRY, memory) | 972 | 2,348 | 2.42× | | recorded |
+
+- **Phoenix statistics miss the 1.05× gate by 2.5 points (+17 ms).** The coupon cash is a
+  marched column (spec §5.3) where 0.8.0 multiplied the trigger probability. That is 39
+  columns per surface instead of 26; the solve cost is linear in the column count, and
+  the faster solve absorbs most but not all of it.
+- **KO-reset statistics compare two algorithms.** 0.8.0 ran a 501-point QUAD next to the PDE
+  price, with probability errors of up to 3.8e-3. 0.9.0 marches 15 columns per surface on
+  the PDE, which cannot cost less than the PDE price it extends.
+- Memory and EXPIRY Phoenix carry 183 and 353 columns per surface (12 observations, 12
+  memory states); 0.8.0 reported no coupon cash for them. Pruning `streams` does not reduce
+  the count.
+
 ## [0.8.0] - 2026-10-03
 
 PDE 1D numerical policy (spec: `docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md`).

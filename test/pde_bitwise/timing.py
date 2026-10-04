@@ -29,7 +29,10 @@ if str(HERE) not in sys.path:
 import capture_book as cb  # noqa: E402
 
 FAMILIES = ("european", "american", "barrier", "snowball", "phoenix", "ko_reset", "lv_snowball",
-            "statistics")
+            "statistics", "statistics_phoenix", "statistics_phoenix_memory",
+            "statistics_phoenix_expiry", "statistics_ko_reset", "statistics_lv")
+# memory and EXPIRY Phoenix statistics have no 0.8.0 baseline worth gating (spec 3B §7.3)
+UNGATED = ("statistics_phoenix_memory", "statistics_phoenix_expiry")
 
 
 def _case(family):
@@ -49,9 +52,17 @@ def _case(family):
         "ko_reset": (pde.KOResetSnowballPDESolver, cb.make_ko_reset(cb.KO_RESET), flat),
         "lv_snowball": (LocalVolSnowballPDESolver, cb.snowball(), cb.env_grid_vol()),
         "statistics": (pde.SnowballPDESolver, cb.snowball(), flat),
+        "statistics_phoenix": (pde.PhoenixPDESolver,
+                               cb.make_phoenix(dict(cb.PHOENIX, memory_coupon=False)), flat),
+        "statistics_phoenix_memory": (pde.PhoenixPDESolver, cb.make_phoenix(cb.PHOENIX), flat),
+        "statistics_phoenix_expiry": (pde.PhoenixPDESolver,
+                                      cb.make_phoenix(dict(cb.PHOENIX, coupon_pay_type="expiry")),
+                                      flat),
+        "statistics_ko_reset": (pde.KOResetSnowballPDESolver, cb.make_ko_reset(cb.KO_RESET), flat),
+        "statistics_lv": (LocalVolSnowballPDESolver, cb.snowball(), cb.env_grid_vol()),
     }
     cls, product, env = table[family]
-    if family == "statistics":
+    if family.startswith("statistics"):
         return (lambda: cls(params=PDEParams())), (lambda s: s.calculate_event_stats(product, env))
     return (lambda: cls(params=PDEParams())), (lambda s: s.price(product, env))
 
@@ -85,9 +96,9 @@ def _peak_rss(family) -> int:
     return int(out.stdout.strip().splitlines()[-1])
 
 
-def measure(reps: int) -> dict:
+def measure(reps: int, families=FAMILIES) -> dict:
     result = {}
-    for family in FAMILIES:
+    for family in families:
         _once(family)                                    # warm-up
         cold, warm = zip(*(_once(family) for _ in range(reps)))
         result[family] = {"cold": statistics.median(cold), "warm": statistics.median(warm),
@@ -98,15 +109,15 @@ def measure(reps: int) -> dict:
 def compare(base_path, branch_path, limit=0.10) -> int:
     base, branch = (json.loads(Path(p).read_text()) for p in (base_path, branch_path))
     worst = 0
-    for family in FAMILIES:
+    for family in base:
         b, n = base[family], branch[family]
         row = []
         for key in ("cold", "warm", "peak_rss"):
             ratio = n[key] / b[key]
             row.append(f"{key} {ratio:5.3f}")
-            if ratio > 1.0 + limit:
+            if ratio > 1.0 + limit and family not in UNGATED:
                 worst = 1
-        print(f"{family:12s} " + "  ".join(row))
+        print(f"{family:26s} " + "  ".join(row))
     print("PASS" if worst == 0 else f"REGRESSION (> {limit:.0%})")
     return worst
 
@@ -117,6 +128,8 @@ def main(argv=None) -> int:
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--memory-family")
     ap.add_argument("--compare", nargs=2)
+    # a subset keeps one family's allocations from disturbing the next (the 3B statistics gate)
+    ap.add_argument("--families", nargs="+", choices=FAMILIES, default=FAMILIES)
     args = ap.parse_args(argv)
     if args.memory_family:
         _once(args.memory_family)
@@ -124,7 +137,7 @@ def main(argv=None) -> int:
         return 0
     if args.compare:
         return compare(*args.compare)
-    Path(args.out).write_text(json.dumps(measure(args.reps), indent=2) + "\n")
+    Path(args.out).write_text(json.dumps(measure(args.reps, args.families), indent=2) + "\n")
     return 0
 
 

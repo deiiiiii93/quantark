@@ -409,6 +409,28 @@ Names removed in 0.8.0:
 The names removed in 0.6.0 and 0.7.0 are listed in `CHANGELOG.md`. How the solvers share
 one core, and how to write a custom component, is in `docs/pde-core.md`.
 
+### PDE event statistics (0.9.0)
+
+The 1D Snowball, Phoenix and KO-reset solvers (and their local-vol variants) march the
+statistics in the price's own groups, so the cashflows add up to the price:
+
+```python
+from quantark.asset.equity.engine.pde import SnowballPDESolver, HestonSnowballPDESolver
+
+stats = SnowballPDESolver(PDEParams()).calculate_event_stats(snowball, env)
+# pv = Σ knock-out cash + Σ coupon cash + the marched maturity leg, to round-off
+assert abs(stats.reconciliation_error) <= 1e-10
+stats.provenance          # StatisticsProvenance(statistics_model='flat_vol_1d', price_model='flat_vol_1d')
+
+# 2D Heston / SLV solvers have no native statistics: they raise StatisticsRefused unless asked
+# for the flat-vol 1D surrogate, whose provenance names both models
+heston = HestonSnowballPDESolver(heston_params, params=PDEParams(), statistics="flat_vol_surrogate")
+```
+
+Field semantics (the knock-in fields, the Phoenix memory and EXPIRY coupon cash, the
+KO-reset maturity buckets, the valuation-date rules) are in
+`quantark/asset/equity/engine/docs/autocallable_event_stats_api.md`.
+
 ## RQMC Target Std Scaling (MC Benchmarking)
 
 Randomized QMC uses a target standard error for adaptive batching. For large
