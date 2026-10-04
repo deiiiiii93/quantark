@@ -182,6 +182,29 @@ def test_explicit_accrual_factors_may_only_lose_a_prefix():
         check_contract_roll(p0, altered, calendar_days=100)
 
 
+def test_the_first_period_anchor_may_only_advance():
+    """A roll past an observation records where the first remaining period started (0.9.0); that is
+    bookkeeping of the same contract, so it rolls -- but it never moves back, and a known anchor is never
+    invented from an unknown one."""
+    from dataclasses import replace
+
+    p0 = _snowball()
+    p1 = deepcopy(p0)
+    env = _env(date=D0 + timedelta(days=100))
+    p1.time_shift(100 / 365, env.valuation_date, env)
+    assert p1.accrual_config.first_period_start > 0.0
+    check_contract_roll(p0, p1, calendar_days=100)
+
+    backwards = deepcopy(p1)
+    backwards.accrual_config = replace(backwards.accrual_config, first_period_start=-0.5)
+    with pytest.raises(ValidationError):
+        check_contract_roll(p0, backwards, calendar_days=100)
+    unknown = deepcopy(p0)
+    unknown.accrual_config = replace(unknown.accrual_config, first_period_start=None)
+    with pytest.raises(ValidationError):
+        check_contract_roll(unknown, p1, calendar_days=100)
+
+
 def test_value_rejects_non_finite_price():
     class NanEngine:
         def price(self, product, env):

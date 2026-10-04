@@ -592,6 +592,7 @@ class SnowballOption(BaseEquityOption):
             return True
 
         before = self._ko_observation_count()
+        schedule = None if self.barrier_config is None else self.barrier_config.ko_observation_schedule
         if self.barrier_config is not None:
             new_config, dropped_all = self.barrier_config.time_shift(
                 time_bump, bumped_date, pricing_env
@@ -601,7 +602,7 @@ class SnowballOption(BaseEquityOption):
         # The schedule has just lost the observations that are now behind
         # the valuation date; the accrual has to follow it.
         self.accrual_config = self.accrual_config.shifted(
-            time_bump, before - self._ko_observation_count()
+            time_bump, before - self._ko_observation_count(), schedule
         )
         return dropped_all
 

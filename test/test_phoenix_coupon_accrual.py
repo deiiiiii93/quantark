@@ -67,12 +67,25 @@ def _tenor():
     return p
 
 
-def test_aged_tenor_product_past_an_observation_refuses():
+def test_aged_tenor_product_past_an_observation_keeps_the_contractual_period():
+    """The user's ruling (2026-10-04, amending decision 13): ageing records where the first remaining period
+    started (the last dropped observation), so an aged tenor contract -- a theta clone the day before an
+    observation, a lifecycle-aged note -- is paid its contractual period, not refused."""
     p, e = _tenor(), env()
-    t1 = float(p.resolve_ko_observations(e)[0].observation_time)
-    bump = t1 + 1.0 / 365.0
+    times = [float(r.observation_time) for r in p.resolve_ko_observations(e)]
+    before = p.get_coupon_period_year_fractions(e)
+    bump = times[0] + 1.0 / 365.0
     p.time_shift(bump, e.valuation_date + timedelta(days=int(np.ceil(bump * 365.0))), e)
-    assert p.accrual_config.dropped_observations == 1
+    assert p.accrual_config.first_period_start == pytest.approx(times[0], abs=1e-15)
+    after = p.get_coupon_period_year_fractions(e)
+    assert len(after) == len(before) - 1
+    assert after[0] == pytest.approx(times[1] - times[0], abs=1e-12)
+    assert after == pytest.approx(before[1:], abs=1e-12)
+
+
+def test_aged_tenor_product_with_an_unknown_period_start_refuses():
+    p, e = _tenor(), env()
+    p.accrual_config = dataclasses.replace(p.accrual_config, first_period_start=None)
     with pytest.raises(ValidationError, match="fixed_coupon_year_fraction.*accrual_factors"):
         p.get_coupon_period_year_fractions(e)
 
@@ -81,20 +94,24 @@ def test_theta_bump_inside_the_first_period_keeps_the_contractual_fraction():
     p, e = _tenor(), env()
     before = p.get_coupon_period_year_fractions(e)
     p.time_shift(1.0 / 365.0, e.valuation_date + timedelta(days=1), e)
-    assert p.accrual_config.dropped_observations == 0
+    assert p.accrual_config.first_period_start == 0.0
     assert p.get_coupon_period_year_fractions(e) == pytest.approx(before, abs=1e-15)
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("when", ["observation_date", "ten_days_in"])
 def test_three_engines_agree(when):
-    """PDE and V2 within 2e-4; Monte Carlo within three batch standard errors of eight 25,000-path runs."""
+    """PDE and V2 within 6e-4; Monte Carlo within three batch standard errors of eight 25,000-path runs.
+
+    The PDE-V2 bound is twice the measured gap (2.84e-4 / 2.52e-4 on 2026-10-04, standard accuracy): the
+    two engines' own discretization difference, the 2.85e-4 that spec 3B §4.7 measured on the
+    fixed-fraction twin before any accrual change. The plan's 2e-4 was never run (a slow test)."""
     p = dated_phoenix(CAL, T0, memory=False)
     day = _obs(p, 0) if when == "observation_date" else CAL.add_business_days(T0, 10)
     env_ = flat_env(day, spot=95.0)
     pde = PhoenixPDESolver(PDEParams()).price(p, env_)
     v2 = PhoenixQuadEngineV2().price(p, env_)
-    assert abs(pde - v2) <= 2e-4
+    assert abs(pde - v2) <= 6e-4
     runs = np.array([PhoenixMCEngine(params=MCParams(num_paths=25_000, seed=seed)).price(p, env_)
                      for seed in range(1, 9)])
     se = runs.std(ddof=1) / np.sqrt(runs.size)

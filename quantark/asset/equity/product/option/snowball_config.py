@@ -277,12 +277,15 @@ class AccrualConfig:
     #: and is ignored wherever the accrual has a real anchor
     #: (``initial_date``, dated observations, or ``accrual_factors``).
     accrued_offset: float = 0.0
-    #: Knock-out observations an ageing (``time_shift``) took off the schedule's front. A tenor contract
-    #: with none dropped still knows its first remaining period (``accrued_offset`` + its observation
-    #: time); one with any dropped does not (spec 3B decision 13, F20).
-    dropped_observations: int = 0
+    #: Where the first remaining coupon period started, as time since the contract's origin: 0.0 until
+    #: an ageing (``time_shift``) drops an observation, then the last dropped observation's time. A tenor
+    #: contract's first remaining period is ``accrued_offset`` + its observation time minus this.
+    #: ``None`` when an ageing dropped an observation that carries no time: the period start is unknown
+    #: and a per-annum coupon refuses (spec 3B decision 13, as amended by the user 2026-10-04).
+    first_period_start: Optional[float] = 0.0
 
-    def shifted(self, time_bump: float, dropped_observations: int = 0) -> "AccrualConfig":
+    def shifted(self, time_bump: float, dropped_observations: int = 0,
+                schedule=None) -> "AccrualConfig":
         """The accrual of the same contract after it has been aged.
 
         Two things move.  ``accrued_offset`` banks the elapsed period, so
@@ -297,15 +300,25 @@ class AccrualConfig:
         shift removes: a schedule is ordered by observation time (its own
         validation enforces that, and an unordered one cannot resolve), so
         the records that fall behind the valuation date are a prefix.
+
+        ``schedule`` is the knock-out schedule BEFORE the shift: its last dropped record is where the
+        first remaining period now starts (``first_period_start``).
         """
         factors = self.accrual_factors
-        if factors is not None and int(dropped_observations) > 0:
-            factors = list(factors[int(dropped_observations):])
+        start = self.first_period_start
+        dropped = int(dropped_observations)
+        if dropped > 0:
+            if factors is not None:
+                factors = list(factors[dropped:])
+            records = schedule.records if schedule is not None else []
+            last = records[dropped - 1].observation_time if dropped <= len(records) else None
+            start = (None if start is None or last is None
+                     else float(self.accrued_offset) + float(last))
         return replace(
             self,
             accrual_factors=factors,
             accrued_offset=float(self.accrued_offset) + float(time_bump),
-            dropped_observations=int(self.dropped_observations) + int(dropped_observations),
+            first_period_start=start,
         )
 
     def __post_init__(self):

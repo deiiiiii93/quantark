@@ -494,6 +494,7 @@ class PhoenixOption(BaseEquityOption):
             return True
 
         before = self._ko_observation_count()
+        schedule = None if self.barrier_config is None else self.barrier_config.ko_observation_schedule
         if self.barrier_config is not None:
             new_config, dropped_all = self.barrier_config.time_shift(
                 time_bump, bumped_date, pricing_env
@@ -503,7 +504,7 @@ class PhoenixOption(BaseEquityOption):
         # The schedule has just lost the observations that are now behind
         # the valuation date; the accrual has to follow it.
         self.accrual_config = self.accrual_config.shifted(
-            time_bump, before - self._ko_observation_count()
+            time_bump, before - self._ko_observation_count(), schedule
         )
         return dropped_all
 
@@ -917,21 +918,22 @@ class PhoenixOption(BaseEquityOption):
                 )
             )
 
-        if int(self.accrual_config.dropped_observations) > 0:
-            # an aged tenor contract no longer knows where its first remaining period started
-            raise ValidationError(
-                f"coupon {observation_idx} is quoted per annum on a tenor schedule aged past "
-                f"{self.accrual_config.dropped_observations} observation(s): its contractual period is "
-                "unknown -- give the contract a fixed_coupon_year_fraction or accrual_factors "
-                "(or an initial_date with dated KO observations)"
-            )
         if observation_idx < len(records) and all(
             r.observation_time is not None for r in records[: observation_idx + 1]
         ):
             current = float(records[observation_idx].observation_time)
             if observation_idx == 0:
-                # the elapsed part of the first period was banked by time_shift (accrued_offset)
-                return float(self.accrual_config.accrued_offset) + current
+                # the elapsed part of the first period was banked by time_shift (accrued_offset); an
+                # ageing past an observation recorded where the period started (first_period_start)
+                start = self.accrual_config.first_period_start
+                if start is None:
+                    raise ValidationError(
+                        f"coupon {observation_idx} is quoted per annum on a tenor schedule aged past an "
+                        "observation with no time: its contractual period is unknown -- give the contract "
+                        "a fixed_coupon_year_fraction or accrual_factors (or an initial_date with dated KO "
+                        "observations)"
+                    )
+                return float(self.accrual_config.accrued_offset) + current - float(start)
             return current - float(records[observation_idx - 1].observation_time)
 
         raise ValidationError(

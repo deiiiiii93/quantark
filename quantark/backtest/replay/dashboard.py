@@ -285,7 +285,7 @@ class AutocallableBacktestDashboard:
                 # onto observations that have already paid.
                 accrual = getattr(product, "accrual_config", None)
                 if accrual is not None and hasattr(accrual, "shifted"):
-                    product.accrual_config = accrual.shifted(elapsed, dropped)
+                    product.accrual_config = accrual.shifted(elapsed, dropped, barrier_config.ko_observation_schedule)
         return product
 
     def _risk_warnings(

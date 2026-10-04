@@ -253,6 +253,13 @@ def _rolled_equal(a: Any, b: Any) -> bool:
             va, vb = _float_leaf(oa), _float_leaf(ob)
             if va is None or vb is None or vb < va - ROLL_TOL:
                 return False
+        # where the first remaining coupon period started (0.9.0): it advances with the dropped
+        # observations; a known start is never re-derived from an unknown one
+        sa, sb = fa.pop("first_period_start", _MISSING), fb.pop("first_period_start", _MISSING)
+        if sa is not _MISSING or sb is not _MISSING:
+            va, vb = _float_leaf(sa), _float_leaf(sb)
+            if vb is not None and (va is None or vb < va - ROLL_TOL):
+                return False
         if not _rolled_suffix(fa.pop("accrual_factors", None), fb.pop("accrual_factors", None)):
             return False
         return fa == fb
