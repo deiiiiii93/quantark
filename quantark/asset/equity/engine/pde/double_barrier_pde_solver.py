@@ -87,6 +87,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
         else:
             payoff = np.maximum(K - s_vec, 0.0)
         payoff *= terminal_delay_df
+        payoff *= self._multiplier(product)
 
         # Apply the corridor check at maturity only for continuous monitoring
         # or when the discrete schedule actually observes at t=T; otherwise
@@ -134,7 +135,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
             pricing_env,
             current_time,
             self._terminal_payment_time(product, pricing_env),
-        )
+        ) * self._multiplier(product)
 
         # Continuous monitoring: edges sit AT the barriers (absorbing).
         # Discrete monitoring: edges sit >=5 sigma outside the corridor
@@ -193,6 +194,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
         ):
             upper = rec.upper_barrier if rec is not None and rec.upper_barrier is not None else product.upper_barrier
             lower = rec.lower_barrier if rec is not None and rec.lower_barrier is not None else product.lower_barrier
+            cashflow_value = cashflow_value * self._multiplier(product)
             if rec is not None and accumulate:
                 out.append(EventRecord(lower, upper, cashflow_value, EventOp.ADD))
             else:
@@ -211,13 +213,13 @@ class DoubleBarrierPDESolver(BasePDESolver):
                 lower = rec.lower_barrier if rec.lower_barrier is not None else product.lower_barrier
                 value = self._cashflow_value_at_time(
                     pricing_env=pricing_env, cashflow=rec.payoff, current_time=current_time,
-                    settlement_time=self._terminal_payment_time(product, pricing_env))
+                    settlement_time=self._terminal_payment_time(product, pricing_env)) * self._multiplier(product)
                 out.append(EventRecord(lower, upper, value, EventOp.ADD if accumulate else EventOp.SET))
                 if not accumulate:
                     break
             return DiscreteEvent(tuple(out))
         discounted_rebate = product.rebate * self._df_between_times(
-            pricing_env, current_time, self._terminal_payment_time(product, pricing_env))
+            pricing_env, current_time, self._terminal_payment_time(product, pricing_env)) * self._multiplier(product)
         return DiscreteEvent((EventRecord(product.lower_barrier, product.upper_barrier, discounted_rebate,
                                           EventOp.SET),))
 

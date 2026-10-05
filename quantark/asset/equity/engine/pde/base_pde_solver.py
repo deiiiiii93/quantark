@@ -1090,6 +1090,11 @@ class BasePDESolver(BaseEngine):
         """Return the payment time for the terminal determination."""
         return float(self._terminal_timing(product, pricing_env).payment_time)
 
+    @staticmethod
+    def _multiplier(product) -> float:
+        """Underlying units per contract (spec 3C decision 24): the base family's solves are per contract."""
+        return float(getattr(product, "contract_multiplier", 1.0))
+
     def _terminal_delay_df(
         self,
         product: BaseEquityProduct,

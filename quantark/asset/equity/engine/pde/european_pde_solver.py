@@ -111,11 +111,12 @@ class EuropeanPDESolver(BasePDESolver):
         """
         K = product.strike
         delay_df = self._terminal_timing(product, pricing_env).delay_df
+        m = self._multiplier(product)
         
         if product.is_call():
-            grid[:, -1] = np.maximum(s_vec - K, 0.0) * delay_df
+            grid[:, -1] = np.maximum(s_vec - K, 0.0) * delay_df * m
         else:  # put
-            grid[:, -1] = np.maximum(K - s_vec, 0.0) * delay_df
+            grid[:, -1] = np.maximum(K - s_vec, 0.0) * delay_df * m
     
     def set_boundary_conditions(
         self,
@@ -155,18 +156,19 @@ class EuropeanPDESolver(BasePDESolver):
         df = self._df_between_times(pricing_env, current_time, total_tau)
         df_div = self._carry_df_between_times(pricing_env, current_time, total_tau)
         delay_df = self._terminal_timing(product, pricing_env).delay_df
+        m = self._multiplier(product)
         
         if product.is_call():
             # Lower boundary: call worth 0 when S = 0
             grid[0, t_idx] = 0.0
             # Upper boundary: call worth approximately S*exp(-q*tau) - K*exp(-r*tau)
             grid[-1, t_idx] = (
-                max(s_vec[-1] * df_div - K * df, 0.0) * delay_df
+                max(s_vec[-1] * df_div - K * df, 0.0) * delay_df * m
             )
         else:  # put
             # Lower boundary: the put at the grid's finite lower edge, forward over [t, T]
             # (spec 3A §5.10): K DF(t,T) - S_min CF(t,T), not its S -> 0 limit K DF(t,T)
-            grid[0, t_idx] = max(K * df - s_vec[0] * df_div, 0.0) * delay_df
+            grid[0, t_idx] = max(K * df - s_vec[0] * df_div, 0.0) * delay_df * m
             # Upper boundary: put worth 0 when S is very large
             grid[-1, t_idx] = 0.0
     

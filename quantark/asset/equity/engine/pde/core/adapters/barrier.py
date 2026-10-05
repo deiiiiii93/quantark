@@ -177,6 +177,7 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
             settlement_convention=product.settlement_convention,
+            contract_multiplier=product.contract_multiplier,
         )
 
     def _knock_out_product(self, product):
@@ -215,7 +216,7 @@ class BarrierAdapter(_KnockInAdapter):
             cashflow=product.rebate,
             current_time=0.0,
             settlement_time=settlement_time,
-        )
+        ) * solver._multiplier(product)
 
     def _hit_price(self, product, env):
         return self._rebate_at_valuation(product, env) if product.is_knock_out else None
@@ -267,6 +268,7 @@ class BarrierAdapter(_KnockInAdapter):
             observation_dates=product.observation_dates,
             observation_schedule=product.observation_schedule,
             settlement_convention=product.settlement_convention,
+            contract_multiplier=product.contract_multiplier,
         )
 
     def _participation(self, product):
@@ -289,13 +291,13 @@ class DoubleBarrierAdapter(_KnockInAdapter):
             product.rebate,
             0.0,
             solver._event_payment_time(product, env, 0.0),
-        )
+        ) * solver._multiplier(product)
 
     def _hit_greeks(self, product, env):
         # Already knocked out: rebate is constant, so delta=gamma=0 (undiscounted, as today)
         if not product.is_knock_out:
             return None
-        return {"price": product.rebate, "delta": 0.0, "gamma": 0.0}
+        return {"price": product.rebate * self.solver._multiplier(product), "delta": 0.0, "gamma": 0.0}
 
     def _knock_out_product(self, product):
         from quantark.asset.equity.product.option.double_barrier_option import DoubleBarrierOption
@@ -315,6 +317,7 @@ class DoubleBarrierAdapter(_KnockInAdapter):
             observation_dates=product.observation_dates,
             observation_schedule=product.observation_schedule,
             settlement_convention=product.settlement_convention,
+            contract_multiplier=product.contract_multiplier,
         )
 
     def _participation(self, product):

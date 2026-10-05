@@ -1173,6 +1173,28 @@ def rows_3c(existing):
     """The 3C rows (spec 3C §7.1), each added by the task that makes it priceable."""
     out = {}
     # Task 2: nothing priceable is new at stage 0; later tasks extend this function.
+
+    # Task 5: the multiplier (spec 3C §7.1 (e))
+    from quantark.asset.equity.engine.pde import BarrierPDESolver, DoubleBarrierPDESolver, EuropeanPDESolver
+
+    def at10(product):
+        product.contract_multiplier = 10.0          # the products are built fresh per call (as _aged_to_maturity)
+        return product
+
+    def rebate5(product):
+        product.rebate = 5.0
+        return product
+
+    mult10 = {
+        "european": (EuropeanPDESolver, lambda: at10(european())),
+        "barrier_rebate": (BarrierPDESolver, lambda: at10(rebate5(barrier(ObservationType.CONTINUOUS)))),
+        "double_barrier": (DoubleBarrierPDESolver, lambda: at10(double_barrier())),
+        "knock_in": (BarrierPDESolver, lambda: at10(knock_in_products()["up_in_call"][0])),
+        "double_knock_in": (DoubleBarrierPDESolver, lambda: at10(knock_in_products()["double_in"][0])),
+    }
+    for name, (cls, make) in mult10.items():
+        out[f"3c|mult10|{name}"] = _row(
+            lambda c=cls, m=make: solver_price_greeks(c(params=p_default()), m(), env_flat()))
     return out
 
 

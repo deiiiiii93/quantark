@@ -88,7 +88,7 @@ class BarrierPDESolver(BasePDESolver):
         else:
             payoff = np.maximum(K - s_vec, 0.0)
         terminal_delay_df = self._terminal_delay_df(product, pricing_env)
-        payoff = payoff * participation * terminal_delay_df
+        payoff = payoff * participation * terminal_delay_df * self._multiplier(product)
 
         apply_terminal_barrier = product.observation_type != ObservationType.DISCRETE
         apply_terminal_barrier = (
@@ -139,6 +139,7 @@ class BarrierPDESolver(BasePDESolver):
         # forward carry over [t, T] (spec 3A §5.10): exp(-(q(T) T - q(t) t)), never exp(-q(tau) tau)
         df_div = self._carry_df_between_times(pricing_env, current_time, total_tau)
         participation = product.participation_rate
+        m = self._multiplier(product)
 
         if product.observation_type == ObservationType.DISCRETE:
             if product.is_call():
@@ -147,12 +148,14 @@ class BarrierPDESolver(BasePDESolver):
                     max(s_vec[-1] * df_div - K * df_to_maturity, 0.0)
                     * participation
                     * terminal_delay_df
+                    * m
                 )
             else:
                 grid[0, t_idx] = (
                     max(K * df_to_maturity - s_vec[0] * df_div, 0.0)
                     * participation
                     * terminal_delay_df
+                    * m
                 )
                 grid[-1, t_idx] = 0.0
             return
@@ -167,7 +170,7 @@ class BarrierPDESolver(BasePDESolver):
             cashflow=product.rebate,
             current_time=current_time,
             settlement_time=settlement_time,
-        )
+        ) * m
 
         if product.is_up_barrier:
             if product.is_call():
@@ -177,6 +180,7 @@ class BarrierPDESolver(BasePDESolver):
                     max(K * df_to_maturity - s_vec[0] * df_div, 0.0)
                     * participation
                     * terminal_delay_df
+                    * m
                 )
             grid[-1, t_idx] = rebate_value
         else:
@@ -186,6 +190,7 @@ class BarrierPDESolver(BasePDESolver):
                     max(s_vec[-1] * df_div - K * df_to_maturity, 0.0)
                     * participation
                     * terminal_delay_df
+                    * m
                 )
             else:
                 grid[-1, t_idx] = 0.0
@@ -247,13 +252,13 @@ class BarrierPDESolver(BasePDESolver):
                 value = self._cashflow_value_at_time(
                     pricing_env=pricing_env, cashflow=rec.payoff, current_time=self._total_tau,
                     settlement_time=(rec.settlement_time if product.pay_at_hit
-                                     else self._terminal_payment_time(product, pricing_env)))
+                                     else self._terminal_payment_time(product, pricing_env))) * self._multiplier(product)
                 out.append(EventRecord(*self._sides(product, rec_barrier), value,
                                        EventOp.ADD if accumulate else EventOp.SET))
                 if not accumulate:
                     break                                   # stop-first-hit: the first record only
             return DiscreteEvent(tuple(out))
-        rebate_value = product.rebate * self._terminal_delay_df(product, pricing_env)
+        rebate_value = product.rebate * self._terminal_delay_df(product, pricing_env) * self._multiplier(product)
         return DiscreteEvent((EventRecord(*self._sides(product, product.barrier), rebate_value, EventOp.SET),))
 
     def _step_event(self, product, pricing_env, t_idx, current_time) -> DiscreteEvent:
@@ -267,7 +272,7 @@ class BarrierPDESolver(BasePDESolver):
                 value = self._cashflow_value_at_time(
                     pricing_env=pricing_env, cashflow=rec.payoff, current_time=current_time,
                     settlement_time=(rec.settlement_time if product.pay_at_hit
-                                     else self._terminal_payment_time(product, pricing_env)))
+                                     else self._terminal_payment_time(product, pricing_env))) * self._multiplier(product)
                 out.append(EventRecord(*self._sides(product, barrier), value,
                                        EventOp.ADD if accumulate else EventOp.SET))
                 if not accumulate:
@@ -280,7 +285,7 @@ class BarrierPDESolver(BasePDESolver):
         )
         rebate_value = self._cashflow_value_at_time(
             pricing_env=pricing_env, cashflow=product.rebate, current_time=current_time,
-            settlement_time=settlement_time)
+            settlement_time=settlement_time) * self._multiplier(product)
         return DiscreteEvent((EventRecord(*self._sides(product, product.barrier), rebate_value, EventOp.SET),))
 
     def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
