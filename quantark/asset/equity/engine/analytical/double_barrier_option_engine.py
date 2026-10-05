@@ -42,6 +42,7 @@ from quantark.util.numerical import (
 )
 
 from .black_scholes_engine import BlackScholesEngine
+from .double_no_touch import double_no_touch
 
 
 class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
@@ -145,18 +146,19 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         if is_zero(sigma):
             return self._price_zero_vol(product, S, T, r, q, multiplier)
 
-        # Spot already outside barriers
+        obs_type = product.observation_type
+
+        # EXPIRY: nothing is observed before maturity, and the closed form holds from any spot (spec 3C §5.8)
+        if obs_type == ObservationType.EXPIRY:
+            return self._price_expiry(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
+
+        # Spot already outside barriers (continuous and discrete monitoring; spec 3C §9)
         if product.is_barrier_hit(S):
             if product.is_knock_out:
                 return product.rebate * multiplier
             # Knock-in: already activated, price as vanilla
             vanilla = self._create_vanilla(product)
             return self._bs_engine.price(vanilla, pricing_env) * multiplier
-
-        obs_type = product.observation_type
-
-        if obs_type == ObservationType.EXPIRY:
-            return self._price_expiry(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
 
         if obs_type == ObservationType.DISCRETE:
             return self._price_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
@@ -238,15 +240,20 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         )
 
         if product.is_knock_out:
-            price = max(ko_price, 0.0) + product.rebate * float(safe_exp(-r * T))
+            price = max(ko_price, 0.0)
+            if not is_zero(product.rebate):
+                # the rebate is paid only if a barrier is hit (spec 3C decision 28)
+                p_inside = double_no_touch(S, T, r, q, sigma, L, U)
+                price += product.rebate * float(safe_exp(-r * T)) * (1.0 - p_inside)
             return price * multiplier
 
         # Knock-in via parity
         vanilla = self._create_vanilla(product)
         vanilla_price = self._bs_engine.price(vanilla, pricing_env)
-        ki_price = max(vanilla_price - max(ko_price, 0.0), 0.0)
-        prob_inside = float(self._prob_inside_at_expiry(S, T, r, q, sigma, L, U))
-        price = ki_price + product.rebate * float(safe_exp(-r * T)) * prob_inside
+        price = max(vanilla_price - max(ko_price, 0.0), 0.0)
+        if not is_zero(product.rebate):
+            # a knock-in's rebate is paid if the corridor is never left
+            price += product.rebate * float(safe_exp(-r * T)) * double_no_touch(S, T, r, q, sigma, L, U)
         return float(price * multiplier)
 
     def _price_discrete(
@@ -437,16 +444,6 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             price = K * df_riskfree * strike_sum - S * df_carry * asset_sum
 
         return float(price)
-
-    def _prob_inside_at_expiry(
-        self, S: float, T: float, r: float, q: float, sigma: float, L: float, U: float
-    ) -> float:
-        """Risk-neutral probability that spot is inside [L, U] at expiry."""
-        sqrt_t = float(safe_sqrt(T))
-        drift_adj = float((r - q - 0.5 * sigma * sigma) * T)
-        d2_u = float((float(safe_log(S / U)) + drift_adj) / (sigma * sqrt_t))
-        d2_l = float((float(safe_log(S / L)) + drift_adj) / (sigma * sqrt_t))
-        return float(stats.norm.cdf(d2_l) - stats.norm.cdf(d2_u))
 
     def _create_vanilla(self, product: DoubleBarrierOption) -> EuropeanVanillaOption:
         """Create a vanilla option with same terms as the double barrier."""

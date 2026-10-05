@@ -43,6 +43,7 @@ from quantark.util.numerical import (
 )
 
 from .double_barrier_option_engine import DoubleBarrierOptionAnalyticalEngine
+from .double_no_touch import double_no_touch
 
 
 class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
@@ -51,13 +52,13 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
 
     Expiry-only monitoring is priced from truncated lognormal probabilities.
     Continuous monitoring uses the Ikeda-Kunitomo double-barrier option engine
-    for the participation leg and a killed log-price density series for cash
-    survival legs. Discrete monitoring applies a BGK barrier shift.
+    for the participation leg and the error-controlled double no-touch
+    probability (``double_no_touch``) for the cash survival legs. Discrete monitoring applies a BGK barrier shift.
     """
 
     engine_type = EngineType.ANALYTICAL
     # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
-    MODEL_FINGERPRINT_ATTRS = ('params', 'max_terms', 'quad_points', '_double_barrier_engine')
+    MODEL_FINGERPRINT_ATTRS = ('params', 'quad_points', '_double_barrier_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
@@ -65,33 +66,23 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
     MIN_VOL = 0.001
     MAX_VOL = 5.0
     MAX_MATURITY = 50.0
-    DEFAULT_MAX_TERMS = 80
     DEFAULT_QUAD_POINTS = 48
 
-    def __init__(
-        self,
-        params: Optional[EngineParams] = None,
-        max_terms: int = DEFAULT_MAX_TERMS,
-        quad_points: int = DEFAULT_QUAD_POINTS,
-    ):
+    def __init__(self, params: Optional[EngineParams] = None, *, quad_points: int = DEFAULT_QUAD_POINTS):
         """
         Initialize double sharkfin analytical engine.
 
         Args:
             params: Engine configuration parameters.
-            max_terms: Terms in the double-barrier survival series.
-            quad_points: Gauss-Legendre nodes for pay-at-hit integration.
+            quad_points: Gauss-Legendre nodes for pay-at-hit integration (keyword-only: a second positional
+                argument once meant ``max_terms``, removed in 0.10.0).
 
         Raises:
             ValidationError: If engine controls are invalid.
         """
         super().__init__(params)
-        if max_terms <= 0:
-            raise ValidationError(f"max_terms must be positive, got {max_terms}")
         if quad_points <= 0:
             raise ValidationError(f"quad_points must be positive, got {quad_points}")
-
-        self.max_terms = int(max_terms)
         self.quad_points = int(quad_points)
         self._double_barrier_engine = DoubleBarrierOptionAnalyticalEngine(params)
 
@@ -266,7 +257,8 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         vol: float,
         pricing_env: PricingEnvironment,
     ) -> float:
-        """Probability that neither double sharkfin barrier is hit."""
+        """Probability that neither double sharkfin barrier is hit (spec 3C §5.8: the no-touch probability
+        carries its own error bound and is not clipped; a ``NumericalError`` from it propagates)."""
         if product.observation_type == ObservationType.EXPIRY:
             prob = self._prob_inside_at_expiry(
                 spot=pricing_env.spot,
@@ -277,35 +269,18 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 lower_barrier=product.lower_barrier,
                 upper_barrier=product.upper_barrier,
             )
-        elif product.observation_type == ObservationType.CONTINUOUS:
-            prob = self._survival_probability_continuous(
-                spot=pricing_env.spot,
-                maturity=maturity,
-                rate=rate,
-                div=div,
-                vol=vol,
-                lower_barrier=product.lower_barrier,
-                upper_barrier=product.upper_barrier,
-            )
-        elif product.observation_type == ObservationType.DISCRETE:
+            return min(max(float(prob), 0.0), 1.0)
+        if product.observation_type == ObservationType.CONTINUOUS:
+            return double_no_touch(pricing_env.spot, maturity, rate, div, vol,
+                                   product.lower_barrier, product.upper_barrier)
+        if product.observation_type == ObservationType.DISCRETE:
             lower_barrier, upper_barrier = self._shift_discrete_barriers(
                 product, vol
             )
-            prob = self._survival_probability_continuous(
-                spot=pricing_env.spot,
-                maturity=maturity,
-                rate=rate,
-                div=div,
-                vol=vol,
-                lower_barrier=lower_barrier,
-                upper_barrier=upper_barrier,
-            )
-        else:
-            raise PricingError(
-                f"Unsupported observation type: {product.observation_type}"
-            )
-
-        return min(max(float(prob), 0.0), 1.0)
+            return double_no_touch(pricing_env.spot, maturity, rate, div, vol, lower_barrier, upper_barrier)
+        raise PricingError(
+            f"Unsupported observation type: {product.observation_type}"
+        )
 
     def _price_knock_out_cash_leg(
         self,
@@ -391,15 +366,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         hit_discount_factor = 0.0
         for record in resolved:
             current_time = min(float(record.observation_time), maturity)
-            current_survival = self._survival_probability_continuous(
-                spot=spot,
-                maturity=current_time,
-                rate=rate,
-                div=div,
-                vol=vol,
-                lower_barrier=lower_barrier,
-                upper_barrier=upper_barrier,
-            )
+            current_survival = double_no_touch(spot, current_time, rate, div, vol, lower_barrier, upper_barrier)
             first_hit_prob = max(previous_survival - current_survival, 0.0)
             hit_discount_factor += (
                 first_hit_prob
@@ -430,15 +397,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         times = 0.5 * maturity * (nodes + 1.0)
         integral = 0.0
         for time_value, weight in zip(times, weights):
-            survival = self._survival_probability_continuous(
-                spot=spot,
-                maturity=float(time_value),
-                rate=rate,
-                div=div,
-                vol=vol,
-                lower_barrier=lower_barrier,
-                upper_barrier=upper_barrier,
-            )
+            survival = double_no_touch(spot, float(time_value), rate, div, vol, lower_barrier, upper_barrier)
             integral += float(weight) * safe_exp(-rate * float(time_value)) * survival
         integral *= 0.5 * maturity
 
@@ -502,53 +461,6 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         d2_upper = (safe_log(spot / upper_barrier) + drift_adj) / (vol * sqrt_t)
         d2_lower = (safe_log(spot / lower_barrier) + drift_adj) / (vol * sqrt_t)
         return float(stats.norm.cdf(float(d2_lower)) - stats.norm.cdf(float(d2_upper)))
-
-    def _survival_probability_continuous(
-        self,
-        spot: float,
-        maturity: float,
-        rate: float,
-        div: float,
-        vol: float,
-        lower_barrier: float,
-        upper_barrier: float,
-    ) -> float:
-        """Double-barrier no-touch probability from killed log-price density."""
-        if maturity <= self.MIN_MATURITY:
-            return 0.0 if spot <= lower_barrier or spot >= upper_barrier else 1.0
-        if spot <= lower_barrier or spot >= upper_barrier:
-            return 0.0
-
-        x0 = safe_log(spot)
-        lower = safe_log(lower_barrier)
-        upper = safe_log(upper_barrier)
-        width = upper - lower
-        drift = rate - div - 0.5 * vol * vol
-        alpha = drift / (vol * vol)
-        alpha_shift = alpha * (lower - x0)
-        decay_base = -drift * drift * maturity / (2.0 * vol * vol)
-        z0 = x0 - lower
-
-        total = 0.0
-        for n in range(1, self.max_terms + 1):
-            lambda_n = n * np.pi / width
-            eigen_decay = safe_exp(-0.5 * vol * vol * lambda_n * lambda_n * maturity)
-            integral = self._weighted_sine_integral(alpha, lambda_n, width)
-            total += float(np.sin(lambda_n * z0) * eigen_decay * integral)
-
-        survival = safe_exp(decay_base) * (2.0 / width) * safe_exp(alpha_shift) * total
-        return min(max(float(survival), 0.0), 1.0)
-
-    def _weighted_sine_integral(
-        self, alpha: float, lambda_n: float, width: float
-    ) -> float:
-        """Return int_0^width exp(alpha z) sin(lambda_n z) dz."""
-        denominator = alpha * alpha + lambda_n * lambda_n
-        return float(
-            lambda_n
-            * (1.0 - safe_exp(alpha * width) * np.cos(lambda_n * width))
-            / denominator
-        )
 
     def _validate_inputs(
         self,
