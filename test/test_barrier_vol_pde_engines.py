@@ -61,74 +61,80 @@ def test_heston_slv_barrier_pde_run_and_reject():
         HestonBarrierPDESolver(hp).price(EuropeanVanillaOption(strike=100., option_type=OptionType.CALL, maturity=1.0), _env())
 
 
-@pytest.mark.parametrize("params", [
-    PDEParams(stepper=CrankNicolson(terminal_damping_steps=2)),
-    PDEParams(stepper=CrankNicolson(event_damping_steps=1)),
-    PDEParams(stepper=CrankNicolson(event_theta=0.7)),
-    PDEParams(event_projection="nodal"),
-    PDEParams(event_projection="cell_average"),
-    PDEParams(grid=GridConfig(eps_crit=0.001)),
-    PDEParams(grid=GridConfig(bounds=(None, 500.0))),
-])
-def test_lv_barrier_rejects_inapplicable_and_rejected_fields(params):
-    with pytest.raises(ValidationError, match="local-vol barrier"):
-        LocalVolBarrierPDESolver(params).price(_uo_call(), _env())
-
-
-def test_lv_barrier_points_budget_and_theta_reach_the_kernel(monkeypatch):
-    import quantark.asset.equity.engine.pde.barrier_vol_pde_solvers as mod
-    seen = {}
-    real = mod.price_barrier_lv_pde
-
-    def spy(*a, **kw):
-        seen.update(kw, step_dt=a[5])
-        return real(*a, **kw)
-
-    monkeypatch.setattr(mod, "price_barrier_lv_pde", spy)
-    LocalVolBarrierPDESolver(PDEParams(
-        stepper=CrankNicolson(theta=0.6), cache_enabled=False,
-        grid=GridConfig(points=300, time_steps=120)
-    )).price(_uo_call(), _env())
-    assert seen["n_s"] == 300 and len(seen["step_dt"]) == 120 and seen["theta"] == 0.6
-
-
 def _disc_call(dates):
     return BarrierOption(strike=100., maturity=1.0, option_type=OptionType.CALL, barrier=130.,
                          barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.DISCRETE,
                          observation_dates=dates)
 
 
-def test_lv_discrete_observation_dates_are_exact_nodes(monkeypatch):
-    import quantark.asset.equity.engine.pde.barrier_vol_pde_solvers as mod
-    seen = {}
-    real = mod.price_barrier_lv_pde
+def _monthly():
+    return _disc_call([k / 12.0 for k in range(1, 13)])
 
-    def spy(*a, **kw):
-        seen["t"] = np.concatenate([[0.0], np.cumsum(a[5])])
-        seen["obs"] = kw["observe_steps"]
-        return real(*a, **kw)
 
-    monkeypatch.setattr(mod, "price_barrier_lv_pde", spy)
+# spec 3C §5.3: the local-vol barrier is a core product - the kernel route's refusals are honoured. Measured on the
+# monthly up-and-out call (Task 18): each non-default field moves the price; event_damping_steps=1 and the cell
+# average are the core's defaults and leave it unchanged.
+@pytest.mark.parametrize("params,moves", [
+    (PDEParams(stepper=CrankNicolson(terminal_damping_steps=2)), True),     # +1.3e-6
+    (PDEParams(stepper=CrankNicolson(event_damping_steps=1)), False),       # the core default
+    (PDEParams(stepper=CrankNicolson(event_theta=0.7)), True),              # -4.0e-6
+    (PDEParams(event_projection="nodal"), True),                            # -3.4e-2
+    (PDEParams(event_projection="cell_average"), False),                    # the core default
+    (PDEParams(grid=GridConfig(eps_crit=0.001)), True),                     # +1.1e-5
+    (PDEParams(grid=GridConfig(bounds=(None, 500.0))), True),               # +1.9e-5
+])
+def test_lv_barrier_honours_the_fields_the_kernel_refused(params, moves):
+    base = LocalVolBarrierPDESolver().price(_monthly(), _env())
+    assert (LocalVolBarrierPDESolver(params).price(_monthly(), _env()) != base) is moves
+
+
+def test_lv_barrier_explicit_bound_inside_a_continuous_barrier_is_the_cores_refusal():
+    # a continuous barrier is a hard domain edge; an explicit far bound conflicts with it (the core's own rule)
+    with pytest.raises(ValidationError, match="hard_upper"):
+        LocalVolBarrierPDESolver(PDEParams(grid=GridConfig(bounds=(None, 500.0)))).price(_uo_call(), _env())
+
+
+def _layout(params, product):
+    from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, bind_layout
+    solver, env = LocalVolBarrierPDESolver(params), _env()
+    return solver._with_surface(env, lambda: bind_layout(solver, product, env, OutputRequest(Operation.PRICE)))
+
+
+def test_lv_barrier_prices_on_the_core_march(monkeypatch):
+    import quantark.asset.equity.engine.pde.core.prepare as core_prepare
+    calls = []
+    real = core_prepare.march
+
+    def spy(problem):
+        calls.append(problem)
+        return real(problem)
+
+    monkeypatch.setattr(core_prepare, "march", spy)
+    LocalVolBarrierPDESolver().price(_uo_call(), _env())
+    assert len(calls) == 1
+
+
+def test_lv_barrier_points_budget_and_theta_reach_the_core():
+    layout = _layout(PDEParams(grid=GridConfig(points=300, time_steps=120)), _uo_call())
+    assert len(layout.spatial.x) == 300 and layout.time.requested_steps == 120
+    base = LocalVolBarrierPDESolver().price(_uo_call(), _env())
+    assert LocalVolBarrierPDESolver(PDEParams(stepper=CrankNicolson(theta=0.6))).price(_uo_call(), _env()) != base
+
+
+def test_lv_discrete_observation_dates_are_exact_nodes():
     dates = [0.1234, 0.5, 0.7771]
-    LocalVolBarrierPDESolver(PDEParams()).price(_disc_call(dates), _env())
-    for d, k in zip(dates, seen["obs"]):
-        assert seen["t"][k] == pytest.approx(d, abs=1e-12)
+    t = _layout(PDEParams(), _disc_call(dates)).time.t
+    for d in dates:
+        assert np.min(np.abs(t - d)) <= 1e-12
 
 
-def test_lv_discrete_endpoint_dates_keep_todays_indices(monkeypatch):
-    # Review Focus 4: valuation-date and maturity observations are not interior events
-    import quantark.asset.equity.engine.pde.barrier_vol_pde_solvers as mod
-    seen = {}
-    real = mod.price_barrier_lv_pde
-
-    def spy(*a, **kw):
-        seen["n"] = len(a[5])
-        seen["obs"] = kw["observe_steps"]
-        return real(*a, **kw)
-
-    monkeypatch.setattr(mod, "price_barrier_lv_pde", spy)
-    LocalVolBarrierPDESolver(PDEParams()).price(_disc_call([0.0, 0.5, 1.0]), _env())
-    assert seen["obs"][0] == 0 and seen["obs"][-1] == seen["n"]
+def test_lv_discrete_endpoint_dates_price_against_the_recursion():
+    # Review Focus 4 (valuation-date and maturity observations): on the core both are the readout's and the terminal's
+    # decision (spec 3C decisions 25, 30); the price is the exact recursion's on the constant surface
+    from pde_routes.barrier_reference import barrier_reference
+    exact = barrier_reference(kind="UO", call=True, strike=100.0, level=130.0, rebate=0.0, at_hit=False,
+                              obs=[0.5, 1.0], spots=[100.0], vol=0.20, r=0.03, q=0.01)[100.0][0]
+    assert abs(LocalVolBarrierPDESolver().price(_disc_call([0.0, 0.5, 1.0]), _env()) - exact) <= 1e-3
 
 
 def test_lv_discrete_barrier_matches_analytic_oracle():

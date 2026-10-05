@@ -326,8 +326,8 @@ def test_local_vol_vanilla_honours_the_damping_form():
     assert prices["full_step"] != prices["half_step"]
 
 
-@pytest.mark.parametrize("form", ["full_step", "half_step"])
-def test_local_vol_barrier_has_no_damping_to_set(form):
+def test_local_vol_barrier_honours_the_damping_form():
+    # spec 3C §5.3: the local-vol barrier is a core product - both damping forms apply (the kernel had none)
     from datetime import datetime
 
     import numpy as np
@@ -346,9 +346,9 @@ def test_local_vol_barrier_has_no_damping_to_set(form):
                                                         np.full((6, 9), 0.22)))
     product = BarrierOption(strike=100.0, maturity=1.0, option_type=OptionType.CALL, barrier=130.0,
                             barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.CONTINUOUS)
-    # the route is checked where the route config resolves: at price
-    with pytest.raises(ValidationError, match="inapplicable"):
-        LocalVolBarrierPDESolver(PDEParams(stepper=CrankNicolson(damping=form))).price(product, env)
+    prices = {form: LocalVolBarrierPDESolver(PDEParams(stepper=CrankNicolson(damping=form))).price(product, env)
+              for form in ("full_step", "half_step")}
+    assert prices["full_step"] != prices["half_step"]
 
 
 def test_dcn_rejects_full_step_damping():

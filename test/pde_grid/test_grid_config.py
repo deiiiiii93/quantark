@@ -118,8 +118,15 @@ import dataclasses  # noqa: E402
 from quantark.asset.equity.engine.pde.grid.config import (  # noqa: E402
     ACCURACY_PROFILES,
     DCN_ACCURACY_PROFILES,
-    LV_UNIFORM_ACCURACY_PROFILES,
 )
+
+#: A budget-basis preset table (time_steps, no steps_per_day), the shape the local-vol kernel routes used until
+#: spec 3C Task 18: resolve_config's budget semantics are exercised on it.
+BUDGET_PROFILES = {
+    "fast": dict(points=200, time_steps=200, eps_crit=0.003),
+    "standard": dict(points=400, time_steps=200, eps_crit=0.003),
+    "high": dict(points=800, time_steps=400, eps_crit=0.002),
+}
 from quantark.modelvalidation.engine_config import engine_config  # noqa: E402
 
 
@@ -177,7 +184,7 @@ def test_overlay_time_steps_clears_preset_density():
 
 def test_overlay_density_clears_route_budget():
     cfg = resolve_config(
-        "standard", GridConfig(steps_per_day=2.0), profiles=LV_UNIFORM_ACCURACY_PROFILES
+        "standard", GridConfig(steps_per_day=2.0), profiles=BUDGET_PROFILES
     )
     assert cfg.steps_per_day == 2.0 and cfg.time_steps is None
 
@@ -193,7 +200,7 @@ def test_overlay_day_count_with_budget_raises():
     with pytest.raises(ValidationError, match="day_count"):
         # the route's basis is the budget: a day basis has nothing to act on
         resolve_config(
-            "standard", GridConfig(day_count=244), profiles=LV_UNIFORM_ACCURACY_PROFILES
+            "standard", GridConfig(day_count=244), profiles=BUDGET_PROFILES
         )
 
 
@@ -202,11 +209,18 @@ def test_explicit_budget_over_cap_raises():
         resolve_config("standard", GridConfig(time_steps=13000))  # the 0.8.0 cap is 12000
 
 
-def test_lv_table():
+def test_budget_table():
     expected = {"fast": (200, 200), "standard": (400, 200), "high": (800, 400)}
     for acc, (pts, n) in expected.items():
-        cfg = resolve_config(acc, None, profiles=LV_UNIFORM_ACCURACY_PROFILES)
+        cfg = resolve_config(acc, None, profiles=BUDGET_PROFILES)
         assert (cfg.points, cfg.time_steps, cfg.steps_per_day) == (pts, n, None)
+
+
+def test_the_local_vol_kernel_rows_are_gone():
+    # spec 3C §5.3: the local-vol routes are core products - no route table, no damping row of their own
+    import quantark.asset.equity.engine.pde.grid.config as config
+    assert "local-vol" not in DAMPING_DEFAULTS
+    assert not hasattr(config, "LV_UNIFORM_ACCURACY_PROFILES")
 
 
 def test_dcn_table_standard_is_todays_plan():
@@ -255,10 +269,9 @@ def test_resolving_twice_equals_resolving_once(table, overlay):
     from quantark.asset.equity.engine.pde.grid.config import (
         ACCURACY_PROFILES,
         DCN_ACCURACY_PROFILES,
-        LV_UNIFORM_ACCURACY_PROFILES,
     )
 
-    profiles = {"shared": ACCURACY_PROFILES, "lv": LV_UNIFORM_ACCURACY_PROFILES,
+    profiles = {"shared": ACCURACY_PROFILES, "lv": BUDGET_PROFILES,
                 "dcn": DCN_ACCURACY_PROFILES}[table]
     once = resolve_config("standard", overlay, profiles=profiles)
     assert resolve_config("standard", once, profiles=profiles) == once

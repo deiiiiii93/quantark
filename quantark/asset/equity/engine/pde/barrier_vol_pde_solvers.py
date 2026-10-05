@@ -1,10 +1,10 @@
 """PDE barrier solvers under the vol-model processes (Local Vol / Heston / SLV).
 
-Thin wrappers over the ``quantark.volmodels`` barrier PDE kernels — the 1D Crank-Nicolson LV
-kernel and the 2D ADI Heston/SLV kernels — pricing the existing ``BarrierOption``. Continuous
-monitoring is exact (barrier on the domain boundary for LV; per-step injection for the 2D ADI);
-discrete monitoring enforces the knock-out at the observation nodes. ``participation_rate`` is
-applied once; ``observation_schedule`` is rejected (v1). Deterministic — no MC inside PDE.
+``LocalVolBarrierPDESolver`` marches on the shared 1D core (spec 3C §5.3). The Heston and SLV
+solvers are thin wrappers over the ``quantark.volmodels`` 2D ADI barrier kernels, pricing the
+existing ``BarrierOption``: continuous monitoring by per-step injection, discrete monitoring at the
+observation nodes; ``participation_rate`` is applied once; a per-observation
+``observation_schedule`` is rejected (v1). Deterministic — no MC inside PDE.
 """
 from __future__ import annotations
 
@@ -13,19 +13,10 @@ from typing import Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
-from quantark.asset.equity.engine.pde.core.components import resolve_stepper
-from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.pde.grid.config import (
-    LV_UNIFORM_ACCURACY_PROFILES,
-    GridConfig,
-    resolve_config,
-)
-from quantark.asset.equity.engine.pde.grid.request import GridRequest
-from quantark.asset.equity.engine.pde.grid.time import build_time
-from quantark.asset.equity.engine.pde.route_applicability import (
-    check_route_applicability,
-)
+from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver
+from quantark.asset.equity.engine.pde.core.adapters.local_vol import LocalVolBarrierAdapter
+from quantark.asset.equity.engine.pde.local_vol_surface import LocalVolSurfaceMixin
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
@@ -34,21 +25,15 @@ from quantark.asset.equity.param.pde_removed_names import reject_removed_kwargs
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
 from quantark.execution.errors import CapabilityError
-from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment, TermMarketContext
 from quantark.util.enum import OptionType, ObservationType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_close
-from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
-from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde
+from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.heston.pde_kernel import price_barrier_heston_pde
 from quantark.volmodels.slv.leverage import LeverageSurface
 from quantark.volmodels.slv.slv_pde_kernel import price_barrier_slv_pde
-
-ROUTE_B = "local-vol barrier"
-
 
 def _check(name, product):
     if not isinstance(product, BarrierOption):
@@ -127,85 +112,42 @@ def _settlement_scale(engine, product, env) -> float:
     return float(terminal_timing.delay_df)
 
 
-class LocalVolBarrierPDESolver(BaseEngine):
-    """1D Crank-Nicolson barrier PDE under a Dupire local-volatility surface."""
+class LocalVolBarrierPDESolver(LocalVolSurfaceMixin, BarrierPDESolver):
+    """Single barriers under a Dupire local-volatility surface, marched on the core (spec 3C §5.3): EXPIRY, knock-in
+    rebates, per-observation schedules, lagged pay-at-hit rebates, bump contexts and session grids are the base
+    family's. Greeks: price, delta, gamma from the grid (decision 21)."""
 
-    engine_type = EngineType.PDE
-    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    _adapter_class = LocalVolBarrierAdapter
 
-    def __init__(self, params: Optional[PDEParams] = None,
-                 local_vol_surface: Optional[LocalVolSurface] = None, **removed):
+    def __init__(self, params: Optional[PDEParams] = None, local_vol_surface: Optional[LocalVolSurface] = None,
+                 **removed):
         reject_removed_kwargs(type(self).__name__, removed)
-        super().__init__(params or PDEParams())
-        self._prebuilt = local_vol_surface
+        super().__init__(params)
+        self._init_local_vol(local_vol_surface)
 
-    def _route_config(self) -> GridConfig:
-        """PDEParams over the local-vol route table (spec §6.1)."""
-        check_route_applicability(self.params, ROUTE_B)
-        return resolve_config(
-            self.params.accuracy, self.params.grid,
-            profiles=LV_UNIFORM_ACCURACY_PROFILES,
-        )
+    def price(self, product, pricing_env):
+        return self._with_surface(pricing_env, lambda: BarrierPDESolver.price(self, product, pricing_env))
 
-    def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
-        _check("LocalVolBarrierPDESolver", product)
-        settlement_scale = _settlement_scale(self, product, env)
-        T = float(product.get_maturity(env))
-        config = self._route_config()
-        spot, strike = float(env.spot), float(product.strike)
-        continuous, dates = _obs_dates(product, T)
-        # Every interior observation date is an exact node, the budget spread
-        # over the intervals between them (spec §6.1). Continuous and EXPIRY
-        # monitoring have no interior dates: linspace(0, T, time_steps + 1).
-        interior = () if continuous else tuple(
-            float(d) for d in dates
-            if 0.0 < float(d) < T
-            and not is_close(float(d), 0.0)
-            and not is_close(float(d), T)
-        )
-        layout = build_time(GridRequest(
-            tau=T, bound_anchors=(spot,), critical_prices=(spot, strike),
-            hard_lower=None, hard_upper=None, event_times=interior,
-            day_count=int(env.bus_days_in_year),
-        ), config)
-        t_grid = layout.t
-        market = TermMarketContext.from_env(env, t_grid, ref_strike=strike)
-        r_fwd = market.fwd_rates
-        carry_fwd = market.fwd_carry
-        lv = self._prebuilt
-        if lv is None:
-            if not isinstance(env.vol_surface, GridVolSurface):
-                raise PricingError("LocalVolBarrierPDESolver needs a GridVolSurface or a prebuilt LocalVolSurface")
-            lv = build_dupire_local_vol(env.vol_surface, spot=env.spot, rate_curve=env.rate_curve,
-                                        div_yield=env.get_div_yield)
-        n_last = len(t_grid) - 1
+    def calculate_greeks(self, product, pricing_env):
+        return self._with_surface(pricing_env, lambda: BarrierPDESolver.calculate_greeks(self, product, pricing_env))
 
-        def _obs_index(d: float) -> int:
-            # Valuation-date and maturity observations keep today's index
-            # handling; every interior date is an exact node.
-            if d <= 0.0 or is_close(d, 0.0):
-                return 0
-            if d >= T or is_close(d, T):
-                return n_last
-            return layout.step_at(d)
+    def _session_outputs(self, product, pricing_env, **kwargs):
+        return self._with_surface(pricing_env, lambda: BarrierPDESolver._session_outputs(
+            self, product, pricing_env, **kwargs))
 
-        observe_steps = None if continuous else [_obs_index(float(d)) for d in dates]
-        is_call = product.option_type == OptionType.CALL
-        st = resolve_stepper(self.params, DAMPING_DEFAULTS["local-vol"])
+    def calculate_spot_greeks_curve(self, product, pricing_env, spot_levels):
+        return self._with_surface(pricing_env, lambda: BarrierPDESolver.calculate_spot_greeks_curve(
+            self, product, pricing_env, spot_levels))
 
-        def price_of_rebate(reb):
-            return price_barrier_lv_pde(float(env.spot), float(product.strike), is_call, T, lv,
-                                        np.diff(t_grid), r_fwd, carry_fwd, rebate=reb,
-                                        continuous=continuous, observe_steps=observe_steps,
-                                        n_s=int(config.points), theta=float(st.theta),
-                                        **_bkw(product))
+    def _vanilla_solver(self):
+        """The knock-in's vanilla part on the same surface object (spec 3C §5.3)."""
+        from .local_vol_pde_solver import LocalVolPDESolver
+        surface = self._active_lv_surface if self._active_lv_surface is not None else self._prebuilt
+        return LocalVolPDESolver(self.params, local_vol_surface=surface)
 
-        unit = _apply_participation(product, price_of_rebate)
-        return (
-            unit
-            * float(getattr(product, "contract_multiplier", 1.0))
-            * settlement_scale
-        )
+    def create_bump_context(self, product, pricing_env):
+        # the parts' layouts are bound with this solve's surface in scope (bump_parts reads _vanilla_solver)
+        return self._with_surface(pricing_env, lambda: BarrierPDESolver.create_bump_context(self, product, pricing_env))
 
 
 class _Heston2DBarrierBase(BaseEngine):

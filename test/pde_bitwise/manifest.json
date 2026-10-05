@@ -1355,6 +1355,14 @@
   "error": "CapabilityError",
   "none": []
  },
+ "3c|lv_barrier|greeks|book": {
+  "error": null,
+  "none": []
+ },
+ "3c|lv_barrier|ki_rebate|const": {
+  "error": null,
+  "none": []
+ },
  "3c|lv_vanilla|greeks|book": {
   "error": null,
   "none": []

@@ -1252,6 +1252,24 @@ def rows_3c(existing):
             lambda t=tag: solver_price_greeks(*lv_vanilla(t)[:1], lv_vanilla_product(), lv_vanilla(t)[1]))
     out["3c|lv_vanilla|one_step|book"] = _row(lambda: solver_price(
         lv_vanilla("book", PDEParams(grid=GridConfig(time_steps=1)))[0], lv_vanilla_product(), lv_vanilla("book")[1]))
+
+    # Task 18: the local-vol barrier on the core (spec 3C §7.1, §5.3): a knock-in rebate on a constant surface, and
+    # the three grid Greeks on the book surface (decision 21)
+    def lv_barrier(surface_env):
+        from pde_routes.cases import dupire, env_book, env_const, surface_const
+        from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import LocalVolBarrierPDESolver
+        env = env_const() if surface_env == "const" else env_book()
+        surface = surface_const() if surface_env == "const" else dupire(env)
+        return LocalVolBarrierPDESolver(local_vol_surface=surface), env
+
+    def lv_barrier_product(kind, rebate):
+        from pde_routes.cases import barrier
+        return barrier(kind, True, 130.0, rebate=rebate)
+
+    out["3c|lv_barrier|ki_rebate|const"] = _row(
+        lambda: solver_price_greeks(lv_barrier("const")[0], lv_barrier_product("UI", 5.0), lv_barrier("const")[1]))
+    out["3c|lv_barrier|greeks|book"] = _row(
+        lambda: solver_price_greeks(lv_barrier("book")[0], lv_barrier_product("UO", 0.0), lv_barrier("book")[1]))
     return out
 
 

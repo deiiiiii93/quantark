@@ -9,7 +9,6 @@ from quantark.asset.equity.engine.pde import (
     BarrierPDESolver,
     LocalVolBarrierPDESolver,
 )
-from quantark.asset.equity.engine.pde import barrier_vol_pde_solvers
 from quantark.asset.equity.engine.quad import DiscreteQuadEngine
 from quantark.asset.equity.engine.quad.quad_adapters import (
     BarrierQuadInputAdapter,
@@ -249,18 +248,10 @@ def test_no_touch_quad_uses_terminal_payment_timing(env):
     )
 
 
-def test_vol_model_barrier_pde_scales_terminal_kernel_value(
-    env, monkeypatch
-):
-    monkeypatch.setattr(
-        barrier_vol_pde_solvers,
-        "price_barrier_lv_pde",
-        lambda *_args, **_kwargs: 8.0,
-    )
-    engine = LocalVolBarrierPDESolver(
-        params=PDEParams(grid=GridConfig(points=51, time_steps=4)),
-        local_vol_surface=object(),
-    )
+def test_vol_model_barrier_pde_scales_terminal_kernel_value(env):
+    # spec 3C §5.3: the local-vol barrier marches on the core; a terminal lag scales the whole terminal value
+    from pde_routes.cases import surface_const
+    engine = LocalVolBarrierPDESolver(local_vol_surface=surface_const(0.20))
 
     def _product(convention):
         return BarrierOption(
@@ -281,5 +272,23 @@ def test_vol_model_barrier_pde_scales_terminal_kernel_value(
     assert delayed == pytest.approx(
         immediate
         * env.get_discount_factor(MATURITY + LAG)
-        / env.get_discount_factor(MATURITY)
+        / env.get_discount_factor(MATURITY),
+        rel=1e-12,                                                   # measured 6.7e-16
     )
+
+
+def test_local_vol_barrier_prices_a_lagged_pay_at_hit_rebate():
+    """The kernel refused a lagged first-hit cashflow (CapabilityError); the core pays it at hit + lag. On a flat
+    rate the lag scales every cashflow by exp(-r L): the reference is exp(-r L) x the exact recursion."""
+    import math
+
+    from pde_routes.barrier_reference import knock_out
+    from pde_routes.cases import CONST, barrier, env_const, obs_dates, surface_const
+
+    product = barrier("UO", True, 130.0, obs="monthly", rebate=5.0, at_hit=True)
+    product.settlement_convention = _lagged()
+    got = LocalVolBarrierPDESolver(local_vol_surface=surface_const()).price(product, env_const())
+    ref = knock_out(payoff="call", strike=100.0, lower=None, upper=130.0, cash=5.0, at_hit=True,
+                    obs=obs_dates("monthly"), spots=[100.0], vol=CONST["vol"], r=CONST["rate"],
+                    q=CONST["div"])[0][100.0][0] * math.exp(-CONST["rate"] * LAG)
+    assert abs(got - ref) <= 1e-3                                    # measured 2.5e-4; ignoring the lag: 1.3e-2

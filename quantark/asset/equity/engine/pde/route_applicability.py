@@ -70,20 +70,6 @@ _DCN_CADENCE = (
 )
 
 ROUTE_RULES = {
-    "local-vol barrier": _LV_DOMAIN
-    + (
-        Rule("stepper.damping", INAPPLICABLE, _NO_DAMPING),
-        Rule("stepper.terminal_damping_steps", INAPPLICABLE, _NO_DAMPING),
-        Rule("stepper.event_damping_steps", INAPPLICABLE, _NO_DAMPING),
-        Rule("stepper.event_theta", INAPPLICABLE, _NO_DAMPING),
-        Rule(
-            "event_projection",
-            REJECTED,
-            "the route's event treatment is a mid-cell-aligned nodal mask; leave "
-            "event_projection=None",
-        ),
-    )
-    + _COMPONENTS,
     "DCN": (
         Rule("grid.steps_per_day", REJECTED, _DCN_CADENCE),
         Rule("grid.time_steps", REJECTED, _DCN_CADENCE),

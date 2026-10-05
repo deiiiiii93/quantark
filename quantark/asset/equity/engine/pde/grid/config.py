@@ -33,26 +33,14 @@ _SHARED_DEFAULTS = dict(
 #: The built-in stepper's route defaults, ``(form, terminal count, event count)`` (spec 3A §5.3):
 #: a ``None`` on ``CrankNicolson`` resolves to its route's row. The core has two rows chosen by the
 #: contract alone (decision 12): a product whose knock-in is monitored continuously keeps
-#: full-step; every other core product takes "core". DCN, the local-vol kernels and the 2D solvers
-#: have their own rows, so a core flip cannot reach them. The local-vol vanilla kernel reads only
-#: ``terminal > 0`` (one two-half-step startup); the barrier kernel reads none of them.
+#: full-step; every other core product takes "core". DCN and the 2D solvers have their own rows, so a
+#: core flip cannot reach them; the local-vol routes are core products (spec 3C §5.3).
 #: flip (f): half-step, one interval at the terminal node and at each event (spec 3A §4.2).
 DAMPING_DEFAULTS = {
     "core": ("half_step", 1, 1),
     "core-continuous-ki": ("full_step", 1, 2),
     "DCN": ("half_step", 2, 2),
-    "local-vol": ("half_step", 1, 2),
     "2D": ("full_step", 1, 2),
-}
-
-#: Local-vol vanilla/barrier routes (spec §4.2, decision 16): today's plan at
-#: standard (400 points, a 200-step budget); fast/high are new resolution
-#: choices with no banked evidence. eps_crit only satisfies validation -- the
-#: routes' kernels have no concentration (route applicability, spec §4.1).
-LV_UNIFORM_ACCURACY_PROFILES = {
-    "fast": dict(points=200, time_steps=200, eps_crit=0.003),
-    "standard": dict(points=400, time_steps=200, eps_crit=0.003),
-    "high": dict(points=800, time_steps=400, eps_crit=0.002),
 }
 
 #: DCN route (spec §4.2, decision 8): one fill step per observation interval

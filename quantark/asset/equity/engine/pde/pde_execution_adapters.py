@@ -321,11 +321,8 @@ class EquityPDEAutocallableSessionAdapter(_EquityPDESessionBase):
 
 
 class EquityLVPDESessionAdapter(_EquityPDESessionBase):
-    """LocalVolPDESolver / LocalVolBarrierPDESolver: cached Dupire surface,
-    prebuilt-surface clone; these engines discretize inside the volmodels
-    kernel, so there are no grid/coefficient artifacts to inject."""
-
-    _GRID_CAPABLE = False
+    """LocalVolPDESolver / LocalVolBarrierPDESolver on the core: the cached Dupire surface, a prebuilt-surface
+    clone, and the full 1D artefact chain (grids, per-step local-vol coefficient sets, factorization packs)."""
 
     def _clone_engine(self, engine):
         raise NotImplementedError("LV adapters clone inside prepare()")
@@ -361,25 +358,6 @@ class EquityLVPDESessionAdapter(_EquityPDESessionBase):
 
     def _clone_with_surface(self, engine, surface):
         return type(engine)(params=engine.params, local_vol_surface=surface)
-
-    def prepare(self, engine, request, context) -> PreparedState:
-        surface_state = self._surface_state(engine, request.pricing_env, context)
-        clone = self._clone_with_surface(engine, surface_state.payload)
-        return PreparedState(
-            payload=_PreparedPDE(clone=clone, capture=self._capture(request)),
-            descriptors=surface_state.descriptors,
-            fingerprint=surface_state.fingerprint,
-            byte_estimate=surface_state.byte_estimate,
-            handles=surface_state.handles,
-        )
-
-
-class EquityLVGridSessionAdapter(EquityLVPDESessionAdapter):
-    """Local-vol engines on the core: the Dupire surface plus the full 1D artefact chain (grids, per-step
-    local-vol coefficient sets, factorization packs). Transitional (spec 3C §5.6): Task 18 folds it into
-    EquityLVPDESessionAdapter once no kernel engine is registered there."""
-
-    _GRID_CAPABLE = True
 
     def prepare(self, engine, request, context) -> PreparedState:
         surface_state = self._surface_state(engine, request.pricing_env, context)
@@ -426,7 +404,7 @@ class EquityLVGridSessionAdapter(EquityLVPDESessionAdapter):
         )
 
 
-class EquityLVAutocallableSessionAdapter(EquityLVGridSessionAdapter):
+class EquityLVAutocallableSessionAdapter(EquityLVPDESessionAdapter):
     """LocalVolSnowball/LocalVolPhoenix: adds one-solve event outputs."""
 
     _EVENTS_CAPABLE = True
