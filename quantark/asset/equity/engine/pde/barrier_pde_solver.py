@@ -92,6 +92,11 @@ class BarrierPDESolver(BasePDESolver):
                 nodal=product.observation_type != ObservationType.DISCRETE)
         grid[:, -1] = payoff
 
+    def _vanilla_solver(self):
+        """The solver of a knock-in's vanilla part (spec 3C §5.3: the local-vol barrier overrides it)."""
+        from .european_pde_solver import EuropeanPDESolver
+        return EuropeanPDESolver(self.params)
+
     def _terminal_payoff(self, product, pricing_env, s_vec):
         """The payoff the march starts from, before the maturity event (spec 3C decision 30): per contract, with
         the participation and the terminal payment discount. ``(value, slope)`` on ``s_vec``."""

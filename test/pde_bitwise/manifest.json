@@ -1091,6 +1091,414 @@
   "error": null,
   "none": []
  },
+ "3c|mat|american|lag|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ki|cont_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ki|cont_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ki|cont_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ki|cont_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ki|cont|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ki|cont|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ki|cont|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ki|cont|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ko|cont_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ko|cont_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ko|cont_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ko|cont_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ko|cont|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ko|cont|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ko|cont|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_ko|cont|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|acc|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|acc|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|acc|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|acc|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|cont_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|cont_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|cont_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|cont_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|cont|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|cont|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|cont|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_no_touch|cont|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|acc|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|acc|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|acc|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|acc|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|cont_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|cont_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|cont_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|cont_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|cont|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|cont|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|cont|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|double_one_touch|cont|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|european|lag|session": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|acc|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|acc|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|acc|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|acc|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|cont_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|cont_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|cont_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|cont_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|cont|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|cont|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|cont|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|no_touch|cont|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|acc|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|acc|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|acc|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|acc|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|cont_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|cont_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|cont_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|cont_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|cont|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|cont|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|cont|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|one_touch|cont|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|cont_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|cont_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|cont_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|cont_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|cont|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|cont|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|cont|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|cont|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|rec_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|rec_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|rec_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|rec_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|rec|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|rec|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|rec|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ki|rec|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|cont_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|cont_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|cont_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|cont_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|cont|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|cont|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|cont|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|cont|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|part05|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|part05|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|part05|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|part05|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|rec_lag|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|rec_lag|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|rec_lag|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|rec_lag|nohit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|rec|hit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|rec|hit|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|rec|nohit|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|mat|single_ko|rec|nohit|price": {
+  "error": null,
+  "none": []
+ },
  "3c|mult10|barrier_rebate": {
   "error": null,
   "none": []

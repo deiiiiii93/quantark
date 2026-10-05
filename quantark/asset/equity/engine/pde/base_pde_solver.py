@@ -331,6 +331,18 @@ class BasePDESolver(BaseEngine):
                     idx = int(np.argmin(np.abs(t_vec - obs_time)))
                     self._observation_indices.add(idx)
 
+    def _setup_maturity_observation(self, product, pricing_env, resolve_kwargs) -> None:
+        """The observation state at maturity (tau <= 0; spec 3C decision 30): the records observed at the valuation
+        instant ARE the maturity records, filed as ``_setup_observation_indices`` files a terminal observation, so
+        ``_terminal_event`` builds them exactly as the march's last node does."""
+        self._setup_observation_indices(product, pricing_env, 0.0, np.array([0.0]), resolve_kwargs)
+        records = list(self._schedule_records.pop(0, []))
+        dated = 0 in self._observation_indices
+        self._observation_indices.discard(0)
+        self._terminal_schedule_records = records
+        self._has_terminal_observation = bool(records) or dated
+        self._total_tau = 0.0
+
     def _valuation_instant_records(self, product, pricing_env, resolve_kwargs):
         """The records observed at the valuation instant, exactly those ``_setup_observation_indices`` files under
         time index 0 (spec 3C decision 25, P5), found without a time grid: None when nothing is observed then;

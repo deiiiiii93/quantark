@@ -10,6 +10,8 @@ did.
 """
 from __future__ import annotations
 
+import numpy as np
+
 from quantark.asset.equity.engine.pde.grid.events import DiscreteEvent, EventOp, EventRecord, fold_decision
 from quantark.util.enum import ObservationAggregation, ObservationType
 from quantark.util.exceptions import PricingError
@@ -20,6 +22,7 @@ from .base import FamilyAdapter
 __all__ = ["BaseFamilyEvents", "BarrierAdapter", "DoubleBarrierAdapter", "OneTouchAdapter", "DoubleOneTouchAdapter"]
 
 _FACADE = (Operation.PRICE, Operation.GREEKS)
+_MATURITY_OPS = (Operation.PRICE, Operation.GREEKS, Operation.SESSION_OUTPUTS)
 _GREEK_KEYS = ("price", "delta", "gamma")
 
 
@@ -83,12 +86,35 @@ class _BarrierFamilyAdapter(FamilyAdapter):
         """``fold_decision`` of the valuation instant's event at ``spot`` (spec 3C decision 25)."""
         return fold_decision(self.valuation_event(product, env), spot, price, delta, gamma)
 
+    def _maturity_event(self, product, env):
+        """The decision at maturity (spec 3C decision 30): continuous monitoring, the hit outcome of any other
+        instant; a schedule (EXPIRY: one record at maturity), the maturity records as the march's ``_terminal_event``
+        builds them; a DISCRETE schedule with no maturity record, none."""
+        if product.observation_type == ObservationType.CONTINUOUS:
+            return DiscreteEvent((self._continuous_hit_record(product, env),))
+        solver = self.solver
+        solver._setup_maturity_observation(product, env, solver._observation_resolve_kwargs(product))
+        if product.observation_type == ObservationType.DISCRETE and not solver._has_terminal_observation:
+            return None
+        return solver._terminal_event(product, env)
+
+    def maturity_value(self, product, env, spot):
+        """(price, delta, gamma) at maturity: the solver's terminal payoff at ``spot`` (the continuation), then the
+        decision there (spec 3C decision 30). Gamma is zero."""
+        value, slope = self.solver._terminal_payoff(product, env, np.array([float(spot)]))
+        price, delta, gamma, _ = fold_decision(self._maturity_event(product, env), spot, float(value[0]),
+                                               float(slope[0]), 0.0)
+        return price, delta, gamma
+
     def terminal_outcome(self, product, env, request, lifecycle_state):
         op = request.operation
-        if op is Operation.GREEKS:
-            expired = FamilyAdapter.terminal_outcome(self, product, env, request, lifecycle_state)
-            if expired is not None:                               # calculate_greeks: expiry first (Task 8 replaces it)
-                return expired
+        if op in _MATURITY_OPS and product.get_maturity(env) <= 0:
+            price, delta, gamma = self.maturity_value(product, env, env.spot)
+            if op is Operation.GREEKS:
+                return TerminalOutcome("expired", {"price": price, "delta": delta, "gamma": gamma})
+            if op is Operation.SESSION_OUTPUTS:
+                return TerminalOutcome("expired", self._session_outputs(price, None))
+            return TerminalOutcome("expired", price)
         if op in _FACADE and not getattr(product, "is_knock_in", False):
             price, delta, gamma, fired = self.decision_at(product, env, env.spot)
             if fired:                                             # a SET record fires at the spot: nothing is marched
@@ -143,16 +169,37 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
             return None
         if product.is_knock_out:
             return None
-        if op is Operation.GREEKS and product.get_maturity(env) <= 0:
-            return None                          # calculate_greeks: expiry is tested first (Task 8: every operation)
+        if product.get_maturity(env) <= 0:
+            return None                          # maturity is read before any composite is built (decision 30, P1)
         knocked_in = self.decision_at(product, env, env.spot)[3]      # a SET record fires at the spot (decision 25)
         return self._compose(product, env, request, knock_out=not knocked_in)
 
-    def _compose(self, product, env, request, *, knock_out):
-        from quantark.asset.equity.engine.pde.european_pde_solver import EuropeanPDESolver
-
+    def _rebate_constant(self, product, env) -> float:
+        """R x DF(0, T_pay), per contract: the cash a knock-in pays at the terminal payment time when it never
+        knocks in (spec 3C §5.2 (a))."""
         solver = self.solver
-        vanilla_solver = EuropeanPDESolver(solver.params)    # fresh on every call, as today: no frozen layout
+        return solver._cashflow_value_at_time(env, product.rebate, 0.0,
+                                              solver._terminal_payment_time(product, env)) * solver._multiplier(product)
+
+    def maturity_value(self, product, env, spot):
+        """Repair (a)'s identity on terminal values (spec 3C decision 30 table): knocked in, participation x the
+        payoff x the terminal payment discount (delta likewise); otherwise the rebate x that discount, delta 0. No
+        part product is constructed (a product cannot be built with zero maturity, §4.11). A knock-out takes the
+        family's rule."""
+        if not product.is_knock_in:
+            return super().maturity_value(product, env, spot)
+        value, slope = self.solver._vanilla_solver()._terminal_payoff(product, env, np.array([float(spot)]))
+        pr = self._participation(product)
+        van, dvan = float(value[0]), float(slope[0])
+        if pr is not None:
+            van, dvan = pr * van, pr * dvan
+        if fold_decision(self._maturity_event(product, env), spot, 0.0)[3]:
+            return van, dvan, 0.0
+        return self._rebate_constant(product, env), 0.0, 0.0
+
+    def _compose(self, product, env, request, *, knock_out):
+        solver = self.solver
+        vanilla_solver = solver._vanilla_solver()            # fresh on every call, as today: no frozen layout
         parts = [prepare(vanilla_solver, self._vanilla_product(product), env, request)]
         if knock_out:
             ko = self._knock_out_product(product)

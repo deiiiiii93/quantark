@@ -29,6 +29,12 @@ class EuropeanAdapter(FamilyAdapter):
         validate_settlement_capability(self.solver, product, lifecycle_state)
 
     def terminal_outcome(self, product, env, request, lifecycle_state):
+        if request.operation is Operation.SESSION_OUTPUTS and product.get_maturity(env) <= 0.0:
+            # the expired value is the facade's under every operation (spec 3C §5.2 (f), §5.6)
+            from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+            timing = resolve_terminal_timing(product, env)
+            return TerminalOutcome("expired", self._session_outputs(
+                self.solver._calculate_intrinsic(product, env.spot) * timing.delay_df, None))
         if request.operation not in _FACADE:
             return super().terminal_outcome(product, env, request, lifecycle_state)
         from quantark.asset.equity.engine.settlement_support import (pending_receivable_pv,

@@ -1198,6 +1198,102 @@ def rows_3c(existing):
 
     # Task 7: the decision at the valuation instant (spec 3C §7.1 (f))
     out.update(_rows_3c_valuation_decision())
+
+    # Task 8: maturity (spec 3C §7.1 (f))
+    out.update(_rows_3c_maturity())
+    return out
+
+
+def _rows_3c_maturity():
+    """Spec 3C §7.1 (f), at maturity: each family hit and not hit, continuous and with a maturity record, with and
+    without a 0.25-year terminal lag, participation 0.5, the touch families under ACCUMULATE, an expired European's
+    session npv and an expired American's Greeks under the lag (P10). Products aged as ``_aged_to_maturity`` does."""
+    from quantark.asset.equity.engine.pde import (AmericanPDESolver, BarrierPDESolver, DoubleBarrierPDESolver,
+                                                  DoubleOneTouchPDESolver, EuropeanPDESolver, OneTouchPDESolver)
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+    from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+    from quantark.util.enum import ObservationAggregation
+
+    cont, disc = ObservationType.CONTINUOUS, ObservationType.DISCRETE
+
+    def aged(make, obs, *, lag=0.0, mode=None):
+        def build():
+            kw = dict(maturity=1.0, observation_type=obs)
+            if lag:
+                kw["settlement_convention"] = SettlementConvention(lag=lag, lag_unit=SettlementLagUnit.YEAR_FRACTION)
+            if obs is disc:
+                kw["observation_dates"] = [1.0]          # the product validates them at construction (w2b)
+            p = make(kw)
+            if obs is disc:
+                own = (dict(upper_barrier=p.upper_barrier, lower_barrier=p.lower_barrier, payoff=p.rebate)
+                       if hasattr(p, "upper_barrier") else dict(barrier=p.barrier, payoff=p.rebate))
+                sched = dict(records=[ObservationRecord(observation_time=0.0, **own)])
+                if mode is not None:
+                    sched["aggregation_mode"] = mode
+                p.observation_schedule = ObservationSchedule(**sched)
+                if getattr(p, "observation_dates", None) is not None:
+                    p.observation_dates = [0.0]
+            return _aged_to_maturity(p)
+        return build
+
+    def single(bt, participation=1.0):
+        return lambda kw: BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=bt,
+                                        rebate=5.0, participation_rate=participation, **kw)
+
+    def double(bt):
+        return lambda kw: DoubleBarrierOption(100.0, OptionType.CALL, 130.0, 80.0, bt, rebate=5.0, **kw)
+
+    def touch(tt):
+        return lambda kw: OneTouchOption(barrier=130.0, barrier_direction=BarrierDirection.UP, rebate=10.0,
+                                         payment_at_hit=False, touch_type=tt, **kw)
+
+    def touch2(tt):
+        return lambda kw: DoubleOneTouchOption(upper_barrier=130.0, lower_barrier=80.0, rebate=10.0,
+                                               payment_at_hit=False, touch_type=tt, **kw)
+
+    families = {
+        "single_ko": (BarrierPDESolver, single(BarrierType.UP_OUT), (cont, disc)),
+        "single_ki": (BarrierPDESolver, single(BarrierType.UP_IN), (cont, disc)),
+        "double_ko": (DoubleBarrierPDESolver, double(DoubleBarrierType.KNOCK_OUT), (cont,)),
+        "double_ki": (DoubleBarrierPDESolver, double(DoubleBarrierType.KNOCK_IN), (cont,)),
+        "one_touch": (OneTouchPDESolver, touch(TouchType.ONE_TOUCH), (cont,)),
+        "no_touch": (OneTouchPDESolver, touch(TouchType.NO_TOUCH), (cont,)),
+        "double_one_touch": (DoubleOneTouchPDESolver, touch2(TouchType.DOUBLE_ONE_TOUCH), (cont,)),
+        "double_no_touch": (DoubleOneTouchPDESolver, touch2(TouchType.DOUBLE_NO_TOUCH), (cont,)),
+    }
+    cells = {}
+    for fam, (cls, make, obs_types) in families.items():
+        for obs in obs_types:
+            tag = "cont" if obs is cont else "rec"
+            for lag in (0.0, 0.25):
+                case = tag + ("_lag" if lag else "")
+                for side, spot in (("hit", 135.0), ("nohit", 125.0)):
+                    cells[f"3c|mat|{fam}|{case}|{side}"] = (cls, aged(make, obs, lag=lag), spot)
+    for side, spot in (("hit", 135.0), ("nohit", 125.0)):
+        cells[f"3c|mat|single_ko|part05|{side}"] = (BarrierPDESolver, aged(single(BarrierType.UP_OUT, 0.5), cont), spot)
+        for fam in ("one_touch", "no_touch", "double_one_touch", "double_no_touch"):
+            cls, make, _ = families[fam]
+            cells[f"3c|mat|{fam}|acc|{side}"] = (cls, aged(make, disc, mode=ObservationAggregation.ACCUMULATE), spot)
+    out = {}
+    for rid, (cls, make, spot) in cells.items():
+        out[rid + "|price"] = _row(lambda c=cls, m=make, s=spot: solver_price(c(params=p_default()), m(),
+                                                                              env_with_spot(env_flat(), s)))
+        out[rid + "|greeks"] = _row(lambda c=cls, m=make, s=spot: solver_price_greeks(c(params=p_default()), m(),
+                                                                                      env_with_spot(env_flat(), s)))
+
+    def european_session():
+        p = aged(lambda kw: EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL,
+                                                  **{k: v for k, v in kw.items() if k != "observation_type"}),
+                 cont, lag=0.25)()
+        return {"npv": _hex(EuropeanPDESolver(params=p_default())._session_outputs(p, env_with_spot(env_flat(), 125.0)).npv)}
+
+    def american_greeks():
+        p = aged(lambda kw: AmericanOption(100.0, OptionType.CALL, **{k: v for k, v in kw.items()
+                                                                       if k != "observation_type"}), cont, lag=0.25)()
+        return solver_price_greeks(AmericanPDESolver(params=p_default()), p, env_with_spot(env_flat(), 125.0))
+
+    out["3c|mat|european|lag|session"] = _row(european_session)
+    out["3c|mat|american|lag|greeks"] = _row(american_greeks)
     return out
 
 

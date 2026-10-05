@@ -31,8 +31,21 @@ class AmericanAdapter(FamilyAdapter):
         # price() resolved the exercise dates before reading maturity; every
         # operation does now (Review Focus 2), so solve_state does not repeat it
         self.solver._prepare_solve_state(product, env)
+        if request.operation in (Operation.GREEKS, Operation.SESSION_OUTPUTS):
+            # the expired value carries the price's payment discount (spec 3C decision 30, P10: kept by the user)
+            if product.get_maturity(env) > 0.0:
+                return None
+            from quantark.asset.equity.engine.settlement_support import resolve_american_exercise_timings
+            timings = resolve_american_exercise_timings(product, env, np.array([0.0]),
+                                                        exercise_dates=self.solver._exercise_dates)
+            delay = timings.delay_dfs[0]
+            price = product.get_payoff(env.spot) * delay
+            if request.operation is Operation.GREEKS:
+                return TerminalOutcome("expired", {"price": price,
+                                                   "delta": self.solver._intrinsic_delta(product, env.spot) * delay,
+                                                   "gamma": 0.0})
+            return TerminalOutcome("expired", self._session_outputs(price, None))
         if request.operation is not Operation.PRICE:
-            # calculate_greeks and the session seam: the base intrinsic, no delay factor
             return super().terminal_outcome(product, env, request, lifecycle_state)
         from quantark.asset.equity.engine.settlement_support import resolve_american_exercise_timings
 
