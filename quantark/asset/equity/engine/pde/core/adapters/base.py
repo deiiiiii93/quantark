@@ -176,7 +176,10 @@ class FamilyAdapter:
         flat = solver._calculate_coefficients(r, q, sigma, dx, num_x)
         sc = solver._flat_exact_step_coefficients(sc, r, q, sigma, dx, num_x)
         validate_coefficients(sc, len(layout.time.dt), num_x, CentralDifference())
-        return CoefficientsInForce(flat=flat, sets=None if sc.n_unique == 1 else sc, num_x=num_x)
+        # nodal (local-vol) samples always keep their per-step sets: with one time step a nodal solve would
+        # otherwise collapse to the flat-vol stencil (spec 3C decision 11)
+        collapse = sc.n_unique == 1 and self.sample_kind is SampleKind.SCALAR
+        return CoefficientsInForce(flat=flat, sets=None if collapse else sc, num_x=num_x)
 
     def damping_key(self, product) -> str:
         """The ``DAMPING_DEFAULTS`` row this product's solves resolve against (decision 12)."""
