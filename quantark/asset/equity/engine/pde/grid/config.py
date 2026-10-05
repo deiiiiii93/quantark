@@ -90,20 +90,19 @@ class GridConfig:
         return replace(self, time_steps=time_steps, steps_per_day=None)
 
 
-def resolve_config(
-    accuracy: str, override: Optional[GridConfig], profiles=ACCURACY_PROFILES
-) -> GridConfig:
-    """Merge a route's preset with an explicit overlay and validate (spec §4.2).
+def resolve_config(accuracy: str, override: Optional[GridConfig]) -> GridConfig:
+    """Merge the shared accuracy preset with an explicit overlay and validate (spec §4.2).
 
-    Authority: explicit overlay > route preset > shared defaults. The overlay
-    chooses the time basis: setting one basis clears the other.
+    Authority: explicit overlay > preset > shared defaults. The overlay
+    chooses the time basis: setting one basis clears the other. Every 1D
+    route takes the shared presets (spec 3C §5.3, §5.4).
     """
-    if accuracy not in profiles:
+    if accuracy not in ACCURACY_PROFILES:
         raise ValidationError(
-            f"accuracy must be one of {sorted(profiles)}, got {accuracy!r}"
+            f"accuracy must be one of {sorted(ACCURACY_PROFILES)}, got {accuracy!r}"
         )
     merged = dict(_SHARED_DEFAULTS)
-    merged.update(profiles[accuracy])
+    merged.update(ACCURACY_PROFILES[accuracy])
     if override is not None:
         if override.steps_per_day is not None and override.time_steps is not None:
             raise ValidationError(

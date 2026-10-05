@@ -1,19 +1,18 @@
-"""Per-route applicability of the shared PDEParams surface (spec §4.1).
+"""Per-route applicability of the shared PDEParams surface (spec §4.1; spec 3C §5.7).
 
-One params object, four route contracts. Shared-grid solvers honour every
-field (no entry here). Every other route lists the fields it cannot honour:
+One params object. Every 1D solver marches on the shared core and honours
+every field (no entry here). One route keeps a contract: the 2D ADI solvers
+(``route = "2D"``), which list the fields they cannot honour:
 
-- INAPPLICABLE: the route's kernel has no such control. The preset default
-  is accepted with no effect; an explicit override raises.
+- INAPPLICABLE: the route has no such control. The preset default is
+  accepted with no effect; an explicit override raises.
 - REJECTED: an explicit value always raises (``allowed`` lists explicit
-  values the route does honour, e.g. DCN's NODAL).
+  values the route does honour).
 
-A field not listed for a route is honoured or vacuous there. "Explicit" is a
-non-None ``grid.*`` overlay field, a ``stepper.*`` setting away from the
-built-in ``CrankNicolson()``'s, a ``component.*`` slot holding anything but
-the built-in, or a scalar away from its dataclass default. The check runs
-once, before any grid is built. Review note: this table is compared verbatim
-against spec §4.1 (spec 2 §4.5 for the stepper and component rows).
+A field not listed is honoured or vacuous there. "Explicit" is a non-None
+``grid.*`` overlay field, a ``stepper.*`` setting away from the built-in
+``CrankNicolson()``'s, or a scalar away from its dataclass default. The check
+runs once, before any grid is built.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from quantark.util.exceptions import ValidationError
 
 INAPPLICABLE = "inapplicable"
 REJECTED = "rejected"
-_LIFT = "sub-project 3 moves this route onto the shared core and lifts the limit"
+_LIFT = "These are the 2D route's limits; no spec is committed to moving this route onto the shared core"
 
 
 @dataclass(frozen=True)
@@ -38,31 +37,6 @@ class Rule:
     reason: str
     allowed: Tuple[Any, ...] = ()
 
-
-_LV_DOMAIN = (
-    Rule("grid.eps_crit", INAPPLICABLE, "the kernel's S-grid is uniform (no concentration)"),
-    Rule(
-        "grid.num_std",
-        INAPPLICABLE,
-        "the kernel sets its own domain, [0, 4 x max(spot, strike)]",
-    ),
-    Rule(
-        "grid.bounds",
-        REJECTED,
-        "the kernel pins 0 below and grows the top by strike/barrier alignment, "
-        "so there is no hard edge to honour",
-    ),
-)
-_NO_DAMPING = "the local-vol barrier kernel has no damping schedule"
-_HALF_STEP_KERNEL = (
-    "the kernel damps every damped interval in two half-steps; damping='full_step' cannot be applied"
-)
-_NO_SEAM = "no core seam until sub-project 3"
-_COMPONENTS = (
-    Rule("component.stepper_class", REJECTED, _NO_SEAM),
-    Rule("component.operator", REJECTED, _NO_SEAM),
-    Rule("component.readout", REJECTED, _NO_SEAM),
-)
 
 ROUTE_RULES = {
     "2D": (
@@ -78,23 +52,13 @@ ROUTE_RULES = {
 
 def _explicit(params, field: str):
     """The explicit value of ``field`` on ``params``, or None when not set."""
-    from quantark.asset.equity.engine.pde.core.components import (
-        CentralDifference,
-        CrankNicolson,
-        StandardReadout,
-    )
+    from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 
-    if field == "component.stepper_class":
-        return None if type(params.stepper) is CrankNicolson else type(params.stepper).__name__
-    if field.startswith("component."):
-        builtin = {"operator": CentralDifference(), "readout": StandardReadout()}[field[len("component."):]]
-        component = getattr(params, field[len("component."):])
-        return None if component == builtin else type(component).__name__
     if field.startswith("stepper."):
         name = field[len("stepper."):]
         stepper = params.stepper
         if type(stepper) is not CrankNicolson:
-            return None      # a custom stepper is the component.stepper_class rule's
+            return None      # a custom stepper is used as given
         value = getattr(stepper, name)
         return None if value == getattr(CrankNicolson(), name) else value
     if field.startswith("grid."):

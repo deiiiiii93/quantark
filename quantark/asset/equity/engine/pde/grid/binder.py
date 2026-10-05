@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from quantark.asset.equity.engine.pde.grid.config import (
-    ACCURACY_PROFILES,
     GridConfig,
     resolve_config,
 )
@@ -149,11 +148,10 @@ class GridBinder:
         accuracy: str,
         override: Optional[GridConfig],
         *,
-        profiles=ACCURACY_PROFILES,
         cache_enabled: bool = True,
         cache_max_entries: int = 128,
     ):
-        self.config = resolve_config(accuracy, override, profiles=profiles)
+        self.config = resolve_config(accuracy, override)
         self._cache_enabled = bool(cache_enabled)
         self._cache_max = int(cache_max_entries)
         self._cache: "OrderedDict[tuple, Layout]" = OrderedDict()

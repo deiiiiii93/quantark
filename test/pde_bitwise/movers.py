@@ -47,6 +47,7 @@ STAGE_3C = {
     "2b": ("lv_barrier_cont|*", "lv_barrier_expiry|*", "lv_barrier_discrete|*"),
     "2c": ("dcn|*",),
     "2d": ("lv_dcn|*",),
+    "2e": ("3b|heston_snowball|half_step|stats", "3b|slv_snowball|half_step|stats"),   # the 2D refusal's reworded text
     "3": ("3a|class|phoenix|disc|alive", "3a|d16|calm|phoenix|coupon_*", "3a|d16|crash|phoenix|coupon_*",
           "3b|dated_phoenix|mid10|fixed|*",
           "intraday_snowball", "snowball_monthly|term|fast", "3c|eki|*"),

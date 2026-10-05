@@ -118,14 +118,6 @@ import dataclasses  # noqa: E402
 from quantark.asset.equity.engine.pde.grid.config import (  # noqa: E402
     ACCURACY_PROFILES,
 )
-
-#: A budget-basis preset table (time_steps, no steps_per_day), the shape the local-vol kernel routes used until
-#: spec 3C Task 18: resolve_config's budget semantics are exercised on it.
-BUDGET_PROFILES = {
-    "fast": dict(points=200, time_steps=200, eps_crit=0.003),
-    "standard": dict(points=400, time_steps=200, eps_crit=0.003),
-    "high": dict(points=800, time_steps=400, eps_crit=0.002),
-}
 from quantark.modelvalidation.engine_config import engine_config  # noqa: E402
 
 
@@ -181,13 +173,6 @@ def test_overlay_time_steps_clears_preset_density():
     assert cfg.time_steps == 500 and cfg.steps_per_day is None
 
 
-def test_overlay_density_clears_route_budget():
-    cfg = resolve_config(
-        "standard", GridConfig(steps_per_day=2.0), profiles=BUDGET_PROFILES
-    )
-    assert cfg.steps_per_day == 2.0 and cfg.time_steps is None
-
-
 def test_overlay_with_both_bases_raises():
     with pytest.raises(ValidationError, match="both"):
         resolve_config("standard", GridConfig(steps_per_day=4.0, time_steps=100))
@@ -196,11 +181,6 @@ def test_overlay_with_both_bases_raises():
 def test_overlay_day_count_with_budget_raises():
     with pytest.raises(ValidationError, match="day_count"):
         resolve_config("standard", GridConfig(day_count=244, time_steps=100))
-    with pytest.raises(ValidationError, match="day_count"):
-        # the route's basis is the budget: a day basis has nothing to act on
-        resolve_config(
-            "standard", GridConfig(day_count=244), profiles=BUDGET_PROFILES
-        )
 
 
 def test_explicit_budget_over_cap_raises():
@@ -208,35 +188,11 @@ def test_explicit_budget_over_cap_raises():
         resolve_config("standard", GridConfig(time_steps=13000))  # the 0.8.0 cap is 12000
 
 
-#: A density-basis preset table with a per-preset max_points, the shape the DCN route used until spec 3C Task 19.
-DENSITY_CAP_PROFILES = {
-    name: dict(points=pts, steps_per_day=0.1, eps_crit=ACCURACY_PROFILES[name]["eps_crit"], max_points=max(2000, pts))
-    for name, pts in (("fast", 401), ("standard", 801), ("high", 1601))
-}
-
-
-def test_budget_table():
-    expected = {"fast": (200, 200), "standard": (400, 200), "high": (800, 400)}
-    for acc, (pts, n) in expected.items():
-        cfg = resolve_config(acc, None, profiles=BUDGET_PROFILES)
-        assert (cfg.points, cfg.time_steps, cfg.steps_per_day) == (pts, n, None)
-
-
 def test_the_local_vol_kernel_rows_are_gone():
     # spec 3C §5.3: the local-vol routes are core products - no route table, no damping row of their own
     import quantark.asset.equity.engine.pde.grid.config as config
     assert "local-vol" not in DAMPING_DEFAULTS
     assert not hasattr(config, "LV_UNIFORM_ACCURACY_PROFILES")
-
-
-def test_density_cap_table():
-    cfg = resolve_config("standard", None, profiles=DENSITY_CAP_PROFILES)
-    assert (cfg.points, cfg.steps_per_day, cfg.max_points) == (801, 0.1, 2000)
-    assert (cfg.eps_crit, cfg.num_std, cfg.max_steps) == (0.003, 4.0, 12000)
-    assert [
-        resolve_config(a, None, profiles=DENSITY_CAP_PROFILES).points
-        for a in ("fast", "standard", "high")
-    ] == [401, 801, 1601]
 
 
 def test_the_dcn_route_rows_are_gone():
@@ -272,21 +228,13 @@ def test_with_steps_per_day_clears_budget():
     ("shared", GridConfig(time_steps=500)),
     ("shared", None),
     ("shared", GridConfig(points=300, steps_per_day=2.0)),
-    ("lv", None),
-    ("lv", GridConfig(points=300, time_steps=150)),
-    ("dcn", None),
 ])
 def test_resolving_twice_equals_resolving_once(table, overlay):
-    """A resolved config fed back as an overlay re-resolves to itself on every
-    preset table (Review Focus 3), including the budget basis."""
-    from quantark.asset.equity.engine.pde.grid.config import (
-        ACCURACY_PROFILES,
-    )
-
-    profiles = {"shared": ACCURACY_PROFILES, "lv": BUDGET_PROFILES,
-                "dcn": DENSITY_CAP_PROFILES}[table]
-    once = resolve_config("standard", overlay, profiles=profiles)
-    assert resolve_config("standard", once, profiles=profiles) == once
+    """A resolved config fed back as an overlay re-resolves to itself on the
+    shared presets (Review Focus 3), including the budget basis."""
+    assert table == "shared"          # one preset table since spec 3C (no route tables)
+    once = resolve_config("standard", overlay)
+    assert resolve_config("standard", once) == once
 
 
 def test_pinned_resolved_budget_grid_round_trips_through_pdeparams():

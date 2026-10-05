@@ -1290,6 +1290,37 @@ def rows_3c(existing):
         return LocalVolDCNPDEEngine(local_vol_surface=dcn_skew_surface())
 
     out["3c|lv_dcn|greeks|skew"] = _row(lambda: solver_price_greeks(lv_dcn_skew(), *dcn_a()))
+
+    # Task 21: the European-knock-in rows (spec 3C §7.1 stage 2), captured under today's row so that stage 3's diff
+    # shows them move; the builders' ki_monitoring="european" (the certified european_ki cases)
+    out.update(_rows_3c_european_knock_in())
+    return out
+
+
+def _rows_3c_european_knock_in():
+    import dataclasses
+
+    from quantark.asset.equity.engine.pde import KOResetSnowballPDESolver, PhoenixPDESolver, SnowballPDESolver
+
+    def phoenix_ki_at_maturity():
+        # the Phoenix builder has no "european" mode: its discrete knock-in observed at maturity only
+        p = make_phoenix(dict(PHOENIX, ki_monitoring="discrete"))
+        p.barrier_config = dataclasses.replace(p.barrier_config, ki_observation_dates=[float(PHOENIX["maturity"])])
+        return p
+
+    products = {
+        "snowball": (SnowballPDESolver, lambda: make_snowball(dict(SNOWBALL, ki_monitoring="european"))),
+        "phoenix": (PhoenixPDESolver, phoenix_ki_at_maturity),
+        "ko_reset": (KOResetSnowballPDESolver, lambda: make_ko_reset(dict(KO_RESET, ki_monitoring="european"))),
+        "reverse_snowball": (SnowballPDESolver, lambda: make_snowball(
+            dict(SNOWBALL, is_reverse=True, ko_barrier=97.0, ki_barrier=115.0, ki_monitoring="european"))),
+    }
+    out = {}
+    for name, (cls, make) in products.items():
+        out[f"3c|eki|{name}|price"] = _row(lambda c=cls, m=make: solver_price_greeks(c(params=p_default()), m(),
+                                                                                     env_flat()))
+        out[f"3c|eki|{name}|stats"] = _row(lambda m=make: facade_outputs(m(), env_flat(), p_default(),
+                                                                        event_stats=True))
     return out
 
 
