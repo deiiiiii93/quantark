@@ -27,7 +27,6 @@ from quantark.util.enum import (
     OptionType,
     TouchType,
 )
-from quantark.util.exceptions import PricingError
 
 
 def _pricing_env(spot: float = 100.0) -> PricingEnvironment:
@@ -247,7 +246,8 @@ def test_participation_scales_payoff_not_rebate():
     assert price_scaled == pytest.approx(expected_scaled, rel=1e-10, abs=1e-10)
 
 
-def test_barrier_pde_engine_rejects_expiry_observation():
+def test_barrier_pde_engine_prices_expiry_observation():
+    # spec 3C decision 9: EXPIRY is one observation at maturity (refused before 0.10.0); measured 1.0e-5 off
     env = _pricing_env()
     option = BarrierOption(
         strike=100.0,
@@ -258,6 +258,5 @@ def test_barrier_pde_engine_rejects_expiry_observation():
         rebate=0.0,
         observation_type=ObservationType.EXPIRY,
     )
-    engine = PDEEngine()
-    with pytest.raises(PricingError):
-        engine.price(option, env)
+    exact = BarrierAnalyticalEngine().price(option, env)
+    assert abs(PDEEngine().price(option, env) - exact) <= 1e-3
