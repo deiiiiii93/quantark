@@ -1,0 +1,397 @@
+{
+ "provenance": {
+  "source": [
+   "l2d_final_book.json",
+   "d6_localvol.json"
+  ],
+  "tree": "b4d32427c5d25dfe88c763107e01124ac1eb2731",
+  "date": "2026-10-05",
+  "numpy": "2.4.6",
+  "mpmath": "1.4.1"
+ },
+ "lv_book": [
+  {
+   "family": "vanilla",
+   "value": 20.432280960120707,
+   "spot": 100.0,
+   "call": true,
+   "strike": 80.0,
+   "T": 0.25
+  },
+  {
+   "family": "vanilla",
+   "value": 22.818959963112736,
+   "spot": 100.0,
+   "call": true,
+   "strike": 80.0,
+   "T": 1.0
+  },
+  {
+   "family": "vanilla",
+   "value": 25.878373121795345,
+   "spot": 100.0,
+   "call": true,
+   "strike": 80.0,
+   "T": 2.0
+  },
+  {
+   "family": "vanilla",
+   "value": 4.639634234271579,
+   "spot": 100.0,
+   "call": true,
+   "strike": 100.0,
+   "T": 0.25
+  },
+  {
+   "family": "vanilla",
+   "value": 9.663119111832364,
+   "spot": 100.0,
+   "call": true,
+   "strike": 100.0,
+   "T": 1.0
+  },
+  {
+   "family": "vanilla",
+   "value": 13.994637534224685,
+   "spot": 100.0,
+   "call": true,
+   "strike": 100.0,
+   "T": 2.0
+  },
+  {
+   "family": "vanilla",
+   "value": 0.3057696508887246,
+   "spot": 100.0,
+   "call": true,
+   "strike": 120.0,
+   "T": 0.25
+  },
+  {
+   "family": "vanilla",
+   "value": 3.3479752890856136,
+   "spot": 100.0,
+   "call": true,
+   "strike": 120.0,
+   "T": 1.0
+  },
+  {
+   "family": "vanilla",
+   "value": 7.198841552990906,
+   "spot": 100.0,
+   "call": true,
+   "strike": 120.0,
+   "T": 2.0
+  },
+  {
+   "family": "vanilla",
+   "value": 0.08421310590128434,
+   "spot": 100.0,
+   "call": false,
+   "strike": 80.0,
+   "T": 0.25
+  },
+  {
+   "family": "vanilla",
+   "value": 1.4496192720414662,
+   "spot": 100.0,
+   "call": false,
+   "strike": 80.0,
+   "T": 1.0
+  },
+  {
+   "family": "vanilla",
+   "value": 3.199668477797444,
+   "spot": 100.0,
+   "call": false,
+   "strike": 80.0,
+   "T": 2.0
+  },
+  {
+   "family": "vanilla",
+   "value": 4.1421274764383815,
+   "spot": 100.0,
+   "call": false,
+   "strike": 100.0,
+   "T": 0.25
+  },
+  {
+   "family": "vanilla",
+   "value": 7.702689091761672,
+   "spot": 100.0,
+   "call": false,
+   "strike": 100.0,
+   "T": 1.0
+  },
+  {
+   "family": "vanilla",
+   "value": 10.151223561965901,
+   "spot": 100.0,
+   "call": false,
+   "strike": 100.0,
+   "T": 2.0
+  },
+  {
+   "family": "vanilla",
+   "value": 19.65882398944043,
+   "spot": 100.0,
+   "call": false,
+   "strike": 120.0,
+   "T": 0.25
+  },
+  {
+   "family": "vanilla",
+   "value": 20.796455940005444,
+   "spot": 100.0,
+   "call": false,
+   "strike": 120.0,
+   "T": 1.0
+  },
+  {
+   "family": "vanilla",
+   "value": 22.19071825243765,
+   "spot": 100.0,
+   "call": false,
+   "strike": 120.0,
+   "T": 2.0
+  },
+  {
+   "family": "continuous",
+   "value": 2.4887508515740677,
+   "spot": 100.0,
+   "obs": "cont",
+   "kind": "UO",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "continuous",
+   "value": 0.5211877160775074,
+   "spot": 126.1,
+   "obs": "cont",
+   "kind": "UO",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "continuous",
+   "value": 1.936774919154087,
+   "spot": 100.0,
+   "obs": "cont",
+   "kind": "DO",
+   "call": false,
+   "level": 85.0,
+   "rebate": 3.0
+  },
+  {
+   "family": "continuous",
+   "value": 2.7389896362946415,
+   "spot": 87.55,
+   "obs": "cont",
+   "kind": "DO",
+   "call": false,
+   "level": 85.0,
+   "rebate": 3.0
+  },
+  {
+   "family": "continuous",
+   "value": 7.132155209650938,
+   "spot": 100.0,
+   "obs": "cont",
+   "kind": "DI",
+   "call": false,
+   "level": 85.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "continuous",
+   "value": 14.25068071461133,
+   "spot": 87.55,
+   "obs": "cont",
+   "kind": "DI",
+   "call": false,
+   "level": 85.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "continuous",
+   "value": 7.174368260258295,
+   "spot": 100.0,
+   "obs": "cont",
+   "kind": "UI",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "continuous",
+   "value": 28.938511604315977,
+   "spot": 126.1,
+   "obs": "cont",
+   "kind": "UI",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "monthly",
+   "value": 3.3522797215998956,
+   "spot": 100.0,
+   "obs": "monthly",
+   "kind": "UO",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "monthly",
+   "value": 1.6656556315200064,
+   "spot": 126.1,
+   "obs": "monthly",
+   "kind": "UO",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "monthly",
+   "value": 2.11152962073156,
+   "spot": 100.0,
+   "obs": "monthly",
+   "kind": "DO",
+   "call": false,
+   "level": 85.0,
+   "rebate": 3.0
+  },
+  {
+   "family": "monthly",
+   "value": 2.6902490963774035,
+   "spot": 87.55,
+   "obs": "monthly",
+   "kind": "DO",
+   "call": false,
+   "level": 85.0,
+   "rebate": 3.0
+  },
+  {
+   "family": "monthly",
+   "value": 6.685950793717942,
+   "spot": 100.0,
+   "obs": "monthly",
+   "kind": "DI",
+   "call": false,
+   "level": 85.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "monthly",
+   "value": 13.890515096687494,
+   "spot": 87.55,
+   "obs": "monthly",
+   "kind": "DI",
+   "call": false,
+   "level": 85.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "daily",
+   "value": 2.6933227145628678,
+   "spot": 100.0,
+   "obs": "daily",
+   "kind": "UO",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "daily",
+   "value": 0.7220809561834919,
+   "spot": 126.1,
+   "obs": "daily",
+   "kind": "UO",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "daily",
+   "value": 1.9671245141345592,
+   "spot": 100.0,
+   "obs": "daily",
+   "kind": "DO",
+   "call": false,
+   "level": 85.0,
+   "rebate": 3.0
+  },
+  {
+   "family": "daily",
+   "value": 2.7124500500044575,
+   "spot": 87.55,
+   "obs": "daily",
+   "kind": "DO",
+   "call": false,
+   "level": 85.0,
+   "rebate": 3.0
+  },
+  {
+   "family": "daily",
+   "value": 7.036506525783454,
+   "spot": 100.0,
+   "obs": "daily",
+   "kind": "DI",
+   "call": false,
+   "level": 85.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "daily",
+   "value": 14.191829823675684,
+   "spot": 87.55,
+   "obs": "daily",
+   "kind": "DI",
+   "call": false,
+   "level": 85.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "expiry",
+   "value": 4.472246382770339,
+   "spot": 100.0,
+   "obs": "expiry",
+   "kind": "UO",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  },
+  {
+   "family": "expiry",
+   "value": 6.035920532241589,
+   "spot": 126.1,
+   "obs": "expiry",
+   "kind": "UO",
+   "call": true,
+   "level": 130.0,
+   "rebate": 0.0
+  }
+ ],
+ "dcn_skew_finest": {
+  "A": [
+   {
+    "moneyness": 0.76,
+    "value": -423268.82890847593,
+    "uncertainty_bp": 0.00043176922772545365
+   },
+   {
+    "moneyness": 1.0,
+    "value": -93773.74725849435,
+    "uncertainty_bp": 0.002231295987730846
+   },
+   {
+    "moneyness": 1.05,
+    "value": -46994.632630423854,
+    "uncertainty_bp": 0.0192061491664208
+   }
+  ]
+ }
+}
