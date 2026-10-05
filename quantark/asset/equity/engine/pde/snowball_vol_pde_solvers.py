@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 from copy import deepcopy
-from contextlib import contextmanager
 from typing import Dict, Optional
 
 import numpy as np
@@ -13,15 +12,10 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import StatisticsProvenance, StatisticsRefused
 from quantark.asset.equity.engine.pde.core.components import resolve_stepper
 from quantark.asset.equity.engine.pde.grid.config import DAMPING_DEFAULTS
-from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
-from quantark.asset.equity.engine.pde.core.components import CentralDifference, nodal_stencil
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
 from quantark.asset.equity.engine.pde._legacy_bump import LegacyBumpCloneMixin
-from quantark.asset.equity.engine.pde.core.samples import (
-    _validated_local_vol_row,
-    sample_local_vol,
-)
 from quantark.asset.equity.engine.pde.core.adapters.snowball import Heston2DSnowballAdapter, LocalVolSnowballAdapter
+from quantark.asset.equity.engine.pde.local_vol_surface import LocalVolSurfaceMixin
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.pde.vol_continuous_ki import (
     Heston2DBarrierCrossingMixin,
@@ -31,7 +25,6 @@ from quantark.asset.equity.engine.pde.vol_continuous_ki import (
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
-from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment, TermMarketContext
 from quantark.priceenv.term_sampling import TermCoefficients
 from quantark.util.enum import ObservationType
@@ -40,7 +33,7 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close, is_zero
 from quantark.volmodels.adi_core import HestonSLVADICore
 from quantark.volmodels.heston import HestonParams
-from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
+from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
@@ -75,7 +68,7 @@ def event_damped_step_keys(stepper, event_maps, n_t: int):
     return keys or None
 
 
-class LocalVolSnowballPDESolver(LocalVolBarrierCrossingMixin, SnowballPDESolver):
+class LocalVolSnowballPDESolver(LocalVolSurfaceMixin, LocalVolBarrierCrossingMixin, SnowballPDESolver):
 
     """Two-surface Snowball PDE with Dupire local volatility on the S grid."""
 
@@ -90,40 +83,7 @@ class LocalVolSnowballPDESolver(LocalVolBarrierCrossingMixin, SnowballPDESolver)
         enable_profiling: bool = False,
     ):
         super().__init__(params=params, enable_profiling=enable_profiling)
-        self._prebuilt = local_vol_surface
-        self._active_lv_surface: Optional[LocalVolSurface] = None
-        # The environment the active surface was built for (a direct prepare
-        # builds its own when it differs; see LocalVolSnowballAdapter.scope).
-        self._active_lv_env: Optional[PricingEnvironment] = None
-        self._active_s_vec: Optional[np.ndarray] = None
-
-    def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
-        if self._prebuilt is not None:
-            return self._prebuilt
-        if not isinstance(env.vol_surface, GridVolSurface):
-            raise PricingError(
-                "LocalVolSnowballPDESolver needs a GridVolSurface or a prebuilt LocalVolSurface"
-            )
-        return build_dupire_local_vol(
-            env.vol_surface,
-            spot=env.spot,
-            rate_curve=env.rate_curve,
-            div_yield=env.get_div_yield,
-        )
-
-    @contextmanager
-    def _surface_scope(self, env: PricingEnvironment):
-        previous = (self._active_lv_surface, self._active_lv_env)
-        self._active_lv_surface = self._build_surface(env)
-        self._active_lv_env = env
-        try:
-            yield
-        finally:
-            self._active_lv_surface, self._active_lv_env = previous
-
-    def _with_surface(self, env: PricingEnvironment, fn):
-        with self._surface_scope(env):
-            return fn()
+        self._init_local_vol(local_vol_surface)
 
     def price(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> float:
         return self._with_surface(
@@ -154,33 +114,6 @@ class LocalVolSnowballPDESolver(LocalVolBarrierCrossingMixin, SnowballPDESolver)
                 self, product, pricing_env, **kwargs
             ),
         )
-
-    def _constructor_kwargs(self) -> dict:
-        return {**super()._constructor_kwargs(), "local_vol_surface": self._prebuilt}
-
-    def _build_step_coefficients(
-        self,
-        pricing_env: PricingEnvironment,
-        ref_strike: float,
-        t_vec: np.ndarray,
-        dx_vec: np.ndarray,
-        num_x: int,
-    ) -> StepCoefficients:
-        # The route's model samples (a local-vol row per step at the interval
-        # midpoint); the built-in operator builds the stencil (spec 2 §5.2 step 8).
-        samples = sample_local_vol(
-            pricing_env, t_vec, self._active_s_vec, self._active_lv_surface,
-            ref_strike=ref_strike,
-        )
-        return CentralDifference().assemble_sets(samples, dx_vec, num_x)
-
-    def _flat_exact_step_coefficients(self, sc, r, q, sigma, dx_vec, num_x):
-        return sc
-
-    @staticmethod
-    def _local_vol_coefficients(r, q, sigma_vec, dx_vec, num_x):
-        return nodal_stencil(r, q, _validated_local_vol_row(sigma_vec, num_x), dx_vec, num_x)
-
 
 
 class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin, SnowballPDESolver):
