@@ -234,11 +234,7 @@ class BarrierAdapter(_KnockInAdapter):
             env,
             tau,
             layout.time.t,
-            resolve_kwargs={
-                "default_barrier": product.barrier,
-                "default_payoff": product.rebate,
-                "require_single": True,
-            },
+            resolve_kwargs=self.solver._observation_resolve_kwargs(product),
         )
 
     def _knock_out_product(self, product):

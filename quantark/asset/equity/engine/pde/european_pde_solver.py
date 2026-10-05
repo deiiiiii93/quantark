@@ -109,15 +109,18 @@ class EuropeanPDESolver(BasePDESolver):
             product: European vanilla option
             pricing_env: Pricing environment
         """
+        grid[:, -1], _ = self._terminal_payoff(product, pricing_env, s_vec)
+
+    def _terminal_payoff(self, product, pricing_env, s_vec):
+        """The payoff the march starts from (spec 3C decision 30): per contract, with the terminal payment
+        discount. ``(value, slope)`` on ``s_vec``."""
         K = product.strike
         delay_df = self._terminal_timing(product, pricing_env).delay_df
         m = self._multiplier(product)
-        
         if product.is_call():
-            grid[:, -1] = np.maximum(s_vec - K, 0.0) * delay_df * m
-        else:  # put
-            grid[:, -1] = np.maximum(K - s_vec, 0.0) * delay_df * m
-    
+            return np.maximum(s_vec - K, 0.0) * delay_df * m, np.where(s_vec > K, 1.0, 0.0) * delay_df * m
+        return np.maximum(K - s_vec, 0.0) * delay_df * m, np.where(s_vec < K, -1.0, 0.0) * delay_df * m
+
     def set_boundary_conditions(
         self,
         grid: np.ndarray,

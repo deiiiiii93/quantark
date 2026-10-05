@@ -84,15 +84,8 @@ class DoubleOneTouchPDESolver(BasePDESolver):
             product: Double one-touch option
             pricing_env: Pricing environment
         """
-        rebate = product.rebate
-
         # Base terminal value assuming no touch happens exactly at maturity.
-        if product.is_double_one_touch:
-            grid[:, -1] = 0.0
-        else:
-            grid[:, -1] = rebate * self._terminal_delay_df(
-                product, pricing_env
-            )
+        grid[:, -1], _ = self._terminal_payoff(product, pricing_env, s_vec)
 
         # Apply the touch check at maturity only for continuous monitoring or
         # when the discrete schedule actually observes at t=T; otherwise this
@@ -107,6 +100,23 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         grid[:, -1] = self._apply_discrete_event(
             grid[:, -1], x_vec, s_vec, self._terminal_event(product, pricing_env),
             nodal=product.observation_type != ObservationType.DISCRETE)
+
+    def _terminal_payoff(self, product, pricing_env, s_vec):
+        """The value the march starts from, before the maturity event (spec 3C decision 30): nothing for a
+        paying touch, the rebate with its terminal payment discount otherwise. ``(value, slope)``."""
+        if product.is_double_one_touch:
+            return np.zeros_like(s_vec), np.zeros_like(s_vec)
+        return (np.full_like(s_vec, product.rebate * self._terminal_delay_df(product, pricing_env), dtype=float),
+                np.zeros_like(s_vec))
+
+    def _observation_resolve_kwargs(self, product) -> dict:
+        """The ``resolve_kwargs`` of this solver's observation maps."""
+        return {
+            "default_upper": product.upper_barrier,
+            "default_lower": product.lower_barrier,
+            "default_payoff": product.rebate,
+            "require_double": True,
+        }
 
     def set_boundary_conditions(
         self,
@@ -227,11 +237,18 @@ class DoubleOneTouchPDESolver(BasePDESolver):
 
     def _step_event(self, product, pricing_env, t_idx, current_time) -> DiscreteEvent:
         """The interior observation's records and operations at node ``t_idx`` (spec 3A §5.4 table)."""
+        return self._event_for_records(product, pricing_env, self._schedule_records.get(t_idx), current_time)
+
+    def _event_for_records(self, product, pricing_env, records, current_time, aggregation=None) -> DiscreteEvent:
+        """The event of one observation from its resolved ``records`` at ``current_time``; empty or ``None``
+        records give the default record (spec 3C decision 25: one builder for the march and the decision).
+        ``aggregation=None`` reads the solver's schedule aggregation."""
         terminal_df = self._df_between_times(
             pricing_env, current_time, self._terminal_payment_time(product, pricing_env))
-        schedule_records = self._schedule_records.get(t_idx)
+        schedule_records = records
         if schedule_records:
-            accumulate = self._schedule_aggregation == ObservationAggregation.ACCUMULATE
+            accumulate = (self._schedule_aggregation if aggregation is None
+                          else aggregation) == ObservationAggregation.ACCUMULATE
             out = []
             for rec in schedule_records:
                 upper = rec.upper_barrier if rec.upper_barrier is not None else product.upper_barrier
@@ -281,12 +298,7 @@ class DoubleOneTouchPDESolver(BasePDESolver):
             pricing_env,
             tau,
             layout.time.t,
-            resolve_kwargs={
-                "default_upper": product.upper_barrier,
-                "default_lower": product.lower_barrier,
-                "default_payoff": product.rebate,
-                "require_double": True,
-            },
+            resolve_kwargs=self._observation_resolve_kwargs(product),
         )
 
     def get_critical_points(

@@ -79,16 +79,7 @@ class BarrierPDESolver(BasePDESolver):
             product: Barrier option
             pricing_env: Pricing environment
         """
-        K = product.strike
-        participation = product.participation_rate
-
-        # Calculate base payoff
-        if product.is_call():
-            payoff = np.maximum(s_vec - K, 0.0)
-        else:
-            payoff = np.maximum(K - s_vec, 0.0)
-        terminal_delay_df = self._terminal_delay_df(product, pricing_env)
-        payoff = payoff * participation * terminal_delay_df * self._multiplier(product)
+        payoff, _ = self._terminal_payoff(product, pricing_env, s_vec)
 
         apply_terminal_barrier = product.observation_type != ObservationType.DISCRETE
         apply_terminal_barrier = (
@@ -100,6 +91,23 @@ class BarrierPDESolver(BasePDESolver):
                 payoff, x_vec, s_vec, self._terminal_event(product, pricing_env),
                 nodal=product.observation_type != ObservationType.DISCRETE)
         grid[:, -1] = payoff
+
+    def _terminal_payoff(self, product, pricing_env, s_vec):
+        """The payoff the march starts from, before the maturity event (spec 3C decision 30): per contract, with
+        the participation and the terminal payment discount. ``(value, slope)`` on ``s_vec``."""
+        K = product.strike
+        participation = product.participation_rate
+        terminal_delay_df = self._terminal_delay_df(product, pricing_env)
+        m = self._multiplier(product)
+        if product.is_call():
+            payoff, slope = np.maximum(s_vec - K, 0.0), np.where(s_vec > K, 1.0, 0.0)
+        else:
+            payoff, slope = np.maximum(K - s_vec, 0.0), np.where(s_vec < K, -1.0, 0.0)
+        return payoff * participation * terminal_delay_df * m, slope * participation * terminal_delay_df * m
+
+    def _observation_resolve_kwargs(self, product) -> dict:
+        """The ``resolve_kwargs`` of this solver's observation maps."""
+        return {"default_barrier": product.barrier, "default_payoff": product.rebate, "require_single": True}
 
     def set_boundary_conditions(
         self,
@@ -263,9 +271,16 @@ class BarrierPDESolver(BasePDESolver):
 
     def _step_event(self, product, pricing_env, t_idx, current_time) -> DiscreteEvent:
         """The interior observation's records and operations at node ``t_idx`` (spec 3A §5.4 table)."""
-        schedule_records = self._schedule_records.get(t_idx)
+        return self._event_for_records(product, pricing_env, self._schedule_records.get(t_idx), current_time)
+
+    def _event_for_records(self, product, pricing_env, records, current_time, aggregation=None) -> DiscreteEvent:
+        """The event of one observation from its resolved ``records`` at ``current_time``; empty or ``None``
+        records give the default record (spec 3C decision 25: one builder for the march and the decision).
+        ``aggregation=None`` reads the solver's schedule aggregation."""
+        schedule_records = records
         if schedule_records:
-            accumulate = self._schedule_aggregation == ObservationAggregation.ACCUMULATE
+            accumulate = (self._schedule_aggregation if aggregation is None
+                          else aggregation) == ObservationAggregation.ACCUMULATE
             out = []
             for rec in schedule_records:
                 barrier = rec.barrier if rec.barrier is not None else product.barrier
