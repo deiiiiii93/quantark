@@ -138,9 +138,8 @@ class _BarrierFamilyAdapter(FamilyAdapter):
         raise NotImplementedError
 
     def prepare_events(self, product, env, layout, tau, request):
-        from quantark.util.enum import ObservationType
         solver = self.solver
-        if getattr(product, "observation_type", None) != ObservationType.DISCRETE:
+        if getattr(product, "observation_type", None) == ObservationType.CONTINUOUS:
             return ()                                   # continuous: the barrier is the domain edge
         t, projection = layout.time.t, solver._base_family_projection()
         total = solver._total_tau if solver._total_tau > 0 else tau
@@ -154,7 +153,7 @@ class _BarrierFamilyAdapter(FamilyAdapter):
             event = solver._step_event(product, env, idx, current)
             rows.append(("observation", int(idx), float(t[idx]),
                          "nodal" if idx == 0 else projection.value, event.evidence()))
-        if solver._has_terminal_observation:
+        if solver._has_terminal_observation or product.observation_type == ObservationType.EXPIRY:
             rows.append(("maturity", len(t) - 1, float(t[-1]), projection.value,
                          solver._terminal_event(product, env).evidence()))
         return BaseFamilyEvents(tuple(rows), projection)
@@ -267,15 +266,6 @@ class BarrierAdapter(_KnockInAdapter):
         from quantark.asset.equity.product.option.barrier_option import BarrierOption
         return BarrierOption
 
-    def _validate_observation(self, product) -> None:
-        from quantark.util.enum import ObservationType
-
-        if getattr(product, "observation_type", None) == ObservationType.EXPIRY:
-            raise PricingError(
-                "BarrierPDESolver does not support EXPIRY observation_type. "
-                "Use BarrierAnalyticalEngine for expiry-only monitoring."
-            )
-
     def _rebate_at_valuation(self, product, env):
         solver = self.solver
         maturity = product.get_maturity(env)  # noqa: F841  (read as price() did: an expired dated product raises)
@@ -307,6 +297,8 @@ class BarrierAdapter(_KnockInAdapter):
             layout.time.t,
             resolve_kwargs=self.solver._observation_resolve_kwargs(product),
         )
+        # the far-field row's observations (spec 3C decision 9): after the valuation instant, in time order
+        self.solver._far_field_timeline = self.solver._observation_timeline(product, env)
 
     def _knock_out_product(self, product):
         # _price_knock_out / _calculate_greeks_knock_out, verbatim

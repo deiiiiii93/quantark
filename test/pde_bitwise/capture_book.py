@@ -1201,6 +1201,24 @@ def rows_3c(existing):
 
     # Task 8: maturity (spec 3C §7.1 (f))
     out.update(_rows_3c_maturity())
+
+    # Task 9: EXPIRY monitoring and the certain-knock-out far-field row (spec 3C §7.1 (b))
+    from quantark.asset.equity.engine.pde import BarrierPDESolver
+
+    def expiry(kind):
+        if kind == "uo_call_130":
+            return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0,
+                                 barrier_type=BarrierType.UP_OUT, maturity=1.0, observation_type=ObservationType.EXPIRY)
+        return BarrierOption(strike=100.0, option_type=OptionType.PUT, barrier=85.0, barrier_type=BarrierType.DOWN_IN,
+                             maturity=1.0, observation_type=ObservationType.EXPIRY)
+
+    for kind, beyond in (("uo_call_130", 135.0), ("di_put_85", 80.0)):
+        for tag, spot in (("100", 100.0), ("beyond", beyond)):
+            out[f"3c|expiry|{kind}|{tag}"] = _row(lambda k=kind, s=spot: solver_price_greeks(
+                BarrierPDESolver(params=p_default()), expiry(k), env_with_spot(env_flat(), s)))
+    out["3c|bounds|uo_call_130|monthly|140"] = _row(lambda: solver_price_greeks(
+        BarrierPDESolver(params=PDEParams(grid=GridConfig(bounds=(None, 140.0)))), barrier(ObservationType.DISCRETE),
+        env_flat()))
     return out
 
 

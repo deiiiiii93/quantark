@@ -15,6 +15,7 @@ from quantark.asset.equity.product.option.barrier_option import BarrierOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.exceptions import PricingError
+from quantark.util.numerical import is_close, is_greater_than_or_close
 
 from .base_pde_solver import BasePDESolver
 from .core.adapters.barrier import BarrierAdapter
@@ -81,15 +82,15 @@ class BarrierPDESolver(BasePDESolver):
         """
         payoff, _ = self._terminal_payoff(product, pricing_env, s_vec)
 
-        apply_terminal_barrier = product.observation_type != ObservationType.DISCRETE
-        apply_terminal_barrier = (
-            apply_terminal_barrier or self._has_terminal_observation
-        )
+        # continuous monitoring, EXPIRY (its one observation is maturity), a schedule that observes at maturity
+        apply_terminal_barrier = (self._monitored_continuously(product)
+                                  or product.observation_type == ObservationType.EXPIRY
+                                  or self._has_terminal_observation)
 
         if apply_terminal_barrier:
             payoff = self._apply_discrete_event(
                 payoff, x_vec, s_vec, self._terminal_event(product, pricing_env),
-                nodal=product.observation_type != ObservationType.DISCRETE)
+                nodal=self._monitored_continuously(product))
         grid[:, -1] = payoff
 
     def _vanilla_solver(self):
@@ -109,6 +110,60 @@ class BarrierPDESolver(BasePDESolver):
         else:
             payoff, slope = np.maximum(K - s_vec, 0.0), np.where(s_vec < K, -1.0, 0.0)
         return payoff * participation * terminal_delay_df * m, slope * participation * terminal_delay_df * m
+
+    @staticmethod
+    def _monitored_continuously(product) -> bool:
+        """Continuous monitoring: the barrier is the domain edge. DISCRETE and EXPIRY observe on dates (P6)."""
+        return product.observation_type == ObservationType.CONTINUOUS
+
+    def _observation_timeline(self, product, pricing_env):
+        """(time, level, cash, settlement time) of each observation after the valuation instant, in time order: the
+        first record of a node (stop-first-hit), a bare observation date's product defaults, EXPIRY's one record at
+        maturity (spec 3C decision 9, P7, P15)."""
+        terminal_pay = self._terminal_payment_time(product, pricing_env)
+        out = []
+        if product.observation_type == ObservationType.EXPIRY:
+            out.append((self._total_tau, product.barrier, product.rebate, terminal_pay))
+            return tuple(out)
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            nodes = [recs[0] for idx, recs in sorted(self._schedule_records.items()) if idx != 0 and recs]
+            if self._terminal_schedule_records:
+                nodes.append(self._terminal_schedule_records[0])
+            for rec in nodes:
+                level = rec.barrier if rec.barrier is not None else product.barrier
+                settle = rec.settlement_time if product.pay_at_hit else terminal_pay
+                out.append((float(rec.observation_time), float(level), float(rec.payoff), float(settle)))
+            return tuple(sorted(out))
+        for t in sorted(float(x) for x in (getattr(product, "observation_dates", None) or ())):
+            if is_close(t, 0.0) or t < 0.0 or (t > self._total_tau and not is_close(t, self._total_tau)):
+                continue
+            settle = self._event_payment_time(product, pricing_env, t) if product.pay_at_hit else terminal_pay
+            out.append((t, float(product.barrier), float(product.rebate), float(settle)))
+        return tuple(out)
+
+    def _next_observation(self, current_time):
+        """(level, cash, settlement time) of the first observation at or after ``current_time``, else None."""
+        for t, level, cash, settle in getattr(self, "_far_field_timeline", ()):
+            if is_greater_than_or_close(t, current_time):
+                return level, cash, settle
+        return None
+
+    def _certain_knock_out_row(self, grid, s_vec, t_idx, current_time, product, pricing_env) -> None:
+        """Beyond a discretely monitored barrier the knock-out at the next observation is certain (spec 3C §5.2 (b)):
+        the row on the barrier's side is that record's cash from its payment time, per contract, when the edge lies
+        at or beyond its level. First-hit only: under ACCUMULATE nothing knocks out and the row stays today's."""
+        if not product.is_knock_out or self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
+            return
+        nxt = self._next_observation(current_time)
+        if nxt is None:
+            return
+        level, cash, settle = nxt
+        value = self._cashflow_value_at_time(pricing_env, cash, current_time, settle) * self._multiplier(product)
+        if product.is_up_barrier and s_vec[-1] >= level:
+            grid[-1, t_idx] = value
+        elif not product.is_up_barrier and s_vec[0] <= level:
+            grid[0, t_idx] = value
 
     def _observation_resolve_kwargs(self, product) -> dict:
         """The ``resolve_kwargs`` of this solver's observation maps."""
@@ -154,7 +209,7 @@ class BarrierPDESolver(BasePDESolver):
         participation = product.participation_rate
         m = self._multiplier(product)
 
-        if product.observation_type == ObservationType.DISCRETE:
+        if not self._monitored_continuously(product):
             if product.is_call():
                 grid[0, t_idx] = 0.0
                 grid[-1, t_idx] = (
@@ -171,6 +226,7 @@ class BarrierPDESolver(BasePDESolver):
                     * m
                 )
                 grid[-1, t_idx] = 0.0
+            self._certain_knock_out_row(grid, s_vec, t_idx, current_time, product, pricing_env)
             return
 
         settlement_time = (
@@ -235,10 +291,11 @@ class BarrierPDESolver(BasePDESolver):
         """
         # For continuous monitoring, always apply barrier
         # For discrete, only at observation times
-        if product.observation_type == ObservationType.DISCRETE:
-            # index 0 is the valuation instant: its observation is the readout's decision, never written into the
-            # nodes (spec 3C decision 25); the surface at t = 0 is the continuation
-            if t_idx == 0 or t_idx not in self._observation_indices:
+        if not self._monitored_continuously(product):
+            # EXPIRY observes at maturity only (the terminal); DISCRETE at its nodes; index 0 is the decision (the
+            # valuation instant's observation is never written into the nodes, spec 3C decision 25)
+            if (product.observation_type == ObservationType.EXPIRY or t_idx == 0
+                    or t_idx not in self._observation_indices):
                 return
 
         total_tau = (
@@ -250,7 +307,7 @@ class BarrierPDESolver(BasePDESolver):
         event = self._step_event(product, pricing_env, t_idx, current_time)
         self._apply_discrete_event_at(
             grid, t_idx, x_vec, s_vec, event,
-            nodal=product.observation_type != ObservationType.DISCRETE or t_idx == 0)
+            nodal=self._monitored_continuously(product))
 
     @staticmethod
     def _sides(product, barrier):

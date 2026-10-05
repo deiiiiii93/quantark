@@ -128,10 +128,18 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
     # flip (g) moves every put's far-field row (forward over [t, T], spec 3A §5.10): a put keeps its
     # 0.7.0 event semantics (the ops below) but not its 0.7.0 values
     put = "_put" in name
-    if not put:
+    # spec 3C decision 9: a discretely monitored single knock-out's far-field row beyond its barrier is the certain
+    # knock-out at the next observation. It moves these 0.7.0 values, toward the exact recursion: '|dates' by
+    # -4.3e-8 / -4.3e-9 / -2.6e-10 (price / delta / gamma), '|stop' (next observation half a year away) by
+    # -1.94e-4 / -1.86e-5 / -8.8e-7 (0.7.0 +2.225e-2 off exact, now +2.206e-2: the nodal stepper's own error)
+    far_field = {"barrier_uo_call|dates": (1e-7, 1e-8, 1e-9), "barrier_uo_call|stop": (3e-4, 3e-5, 2e-6)}.get(name)
+    if far_field:
+        for k, bound in zip(("price", "delta", "gamma"), far_field):
+            assert abs(g[k] - banked[k]) <= bound, (k, g[k], banked[k])
+    elif not put:
         assert_close({"price": g["price"], "delta": g["delta"], "gamma": g["gamma"]},
                      {k: banked[k] for k in ("price", "delta", "gamma")})
-    if "column" in banked and not put:
+    if "column" in banked and not put and not far_field:      # the far-field row reshapes the surface's edge
         out = run(prepare(cls(PDEParams(event_projection="nodal", stepper=V070_STEPPER)), factory(), env,
                           OutputRequest(Operation.SESSION_OUTPUTS, grid=True)))
         live, golden = list(map(float, out.solution.solution_vec)), [float.fromhex(h) for h in banked["column"]]

@@ -37,7 +37,8 @@ STAGE_3C = {
     "f_pre": ("3a|farfield|di_put_85|*|80|*", "3a|farfield|do_call_85|*|80|*"),
     "f_mat": (),
     "b": ("barrier_disc|*", "3a|fullstep|barrier_disc|*", "3a|farfield|di_put_85|*", "3a|farfield|do_call_85|*",
-          "3a|farfield|uo_put_130|*"),
+          "3a|farfield|uo_put_130|*",
+          "3c|vdec|uo_late|*", "3c|vrec|uo|*"),        # Task 7's single knock-outs with a distant next observation
     "g": (),
     "a": (),
     "c": ("knock_in|*|bump",),
