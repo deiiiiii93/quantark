@@ -21,7 +21,7 @@ from .base import FamilyAdapter
 
 __all__ = ["BaseFamilyEvents", "BarrierAdapter", "DoubleBarrierAdapter", "OneTouchAdapter", "DoubleOneTouchAdapter"]
 
-_FACADE = (Operation.PRICE, Operation.GREEKS)
+_FACADE = (Operation.PRICE, Operation.GREEKS, Operation.SESSION_OUTPUTS)
 _MATURITY_OPS = (Operation.PRICE, Operation.GREEKS, Operation.SESSION_OUTPUTS)
 _GREEK_KEYS = ("price", "delta", "gamma")
 
@@ -106,20 +106,22 @@ class _BarrierFamilyAdapter(FamilyAdapter):
                                                float(slope[0]), 0.0)
         return price, delta, gamma
 
+    def _outputs(self, op, price, delta, gamma):
+        """A value known without a march, in the operation's own form (no grid: decided at the base spot)."""
+        if op is Operation.GREEKS:
+            return {"price": price, "delta": delta, "gamma": gamma}
+        if op is Operation.SESSION_OUTPUTS:
+            return self._session_outputs(price, None)
+        return price
+
     def terminal_outcome(self, product, env, request, lifecycle_state):
         op = request.operation
         if op in _MATURITY_OPS and product.get_maturity(env) <= 0:
-            price, delta, gamma = self.maturity_value(product, env, env.spot)
-            if op is Operation.GREEKS:
-                return TerminalOutcome("expired", {"price": price, "delta": delta, "gamma": gamma})
-            if op is Operation.SESSION_OUTPUTS:
-                return TerminalOutcome("expired", self._session_outputs(price, None))
-            return TerminalOutcome("expired", price)
+            return TerminalOutcome("expired", self._outputs(op, *self.maturity_value(product, env, env.spot)))
         if op in _FACADE and not getattr(product, "is_knock_in", False):
             price, delta, gamma, fired = self.decision_at(product, env, env.spot)
             if fired:                                             # a SET record fires at the spot: nothing is marched
-                outputs = {"price": price, "delta": delta, "gamma": gamma} if op is Operation.GREEKS else price
-                return TerminalOutcome("barrier_hit", outputs)
+                return TerminalOutcome("barrier_hit", self._outputs(op, price, delta, gamma))
         return FamilyAdapter.terminal_outcome(self, product, env, request, lifecycle_state)
 
     def read(self, prepared, result):
@@ -128,6 +130,10 @@ class _BarrierFamilyAdapter(FamilyAdapter):
         if op not in _FACADE:
             return out
         event, spot = self.valuation_event(prepared.product, prepared.env), prepared.env.spot
+        if op is Operation.SESSION_OUTPUTS:
+            npv = fold_decision(event, spot, out.npv)[0]
+            solution = out.solution if out.solution is None else out.solution._replace(decision=event)
+            return self._session_outputs(npv, solution)
         if op is Operation.GREEKS:
             price, delta, gamma, _ = fold_decision(event, spot, out["price"], out["delta"], out["gamma"])
             return {"price": price, "delta": delta, "gamma": gamma}
@@ -173,6 +179,11 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         knocked_in = self.decision_at(product, env, env.spot)[3]      # a SET record fires at the spot (decision 25)
         return self._compose(product, env, request, knock_out=not knocked_in)
 
+    def _composition(self, product, env):
+        """(participation, constant) of knock-in = participation x vanilla + constant - knock-out (spec 3C §5.2 (a));
+        the constant is R x DF(0, T_pay) from repair (a) on."""
+        return self._participation(product), 0.0
+
     def _rebate_constant(self, product, env) -> float:
         """R x DF(0, T_pay), per contract: the cash a knock-in pays at the terminal payment time when it never
         knocks in (spec 3C §5.2 (a))."""
@@ -207,9 +218,25 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
             # layout, so the leg binds its own in a session. A bump context's frozen
             # layout is handed on and raises on the bound mismatch (as in 0.6.0).
             parts.append(prepare(solver, ko, env, request, frozen=solver._frozen_base_layout))
-        pr = self._participation(product)
-        greeks = request.operation is Operation.GREEKS
-        if greeks:
+        pr, constant = self._composition(product, env)
+        op = request.operation
+        if op is Operation.SESSION_OUTPUTS:
+            from quantark.asset.equity.engine.pde.base_pde_solver import CompositeSolution
+            decision = self.valuation_event(product, env)
+
+            def compose(outs):
+                van = outs[0]
+                vnpv = van.npv if pr is None else pr * van.npv
+                if not knock_out:                                   # knocked in: no grid (decided at the base spot)
+                    return self._session_outputs(vnpv, None)
+                leg = outs[1]
+                solution = None
+                if request.grid:
+                    solution = CompositeSolution(vanilla=van.solution, leg=leg.solution, participation=pr,
+                                                 constant=constant, decision=decision)
+                npv = vnpv + constant - leg.npv if constant else vnpv - leg.npv
+                return self._session_outputs(npv, solution)
+        elif op is Operation.GREEKS:
             if pr is None:
                 scale = lambda g: g                                            # noqa: E731
             else:
@@ -217,7 +244,10 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
             if knock_out:
                 def compose(outs):
                     v = scale(outs[0])
-                    return {k: v[k] - outs[1][k] for k in _GREEK_KEYS}
+                    out = {k: v[k] - outs[1][k] for k in _GREEK_KEYS}
+                    if constant:
+                        out["price"] = v["price"] + constant - outs[1]["price"]
+                    return out
             else:
                 def compose(outs):
                     return scale(outs[0])
@@ -228,6 +258,8 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
                 scale = lambda p: pr * p                                       # noqa: E731
             if knock_out:
                 def compose(outs):
+                    if constant:
+                        return scale(outs[0]) + constant - outs[1]
                     return scale(outs[0]) - outs[1]
             else:
                 def compose(outs):

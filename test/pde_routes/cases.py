@@ -186,6 +186,21 @@ def kinked(spot, vol=VOL, rates=RATES, yields=YIELDS, valuation_date=VAL_DATE):
                               div_yield=TermStructureDividendYield(times=list(TIMES), yields=list(yields)))
 
 
+# --- the valuation-date record product of test_valuation_decision.py (spec 3C §4.11) --------------------------
+
+def record_product():
+    """A record on the valuation date at 120 paying 7 at 0.25, then records at 0.5 and 1 on the defaults."""
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord
+    from quantark.util.enum import ObservationAggregation
+
+    sch = ObservationSchedule(records=[ObservationRecord(observation_time=0.0, barrier=120.0, payoff=7.0, settlement_time=0.25),
+                                       ObservationRecord(observation_time=0.5), ObservationRecord(observation_time=1.0)],
+                              aggregation_mode=ObservationAggregation.STOP_FIRST_HIT)
+    return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
+                         maturity=1.0, rebate=5.0, pay_at_hit=True, observation_type=ObservationType.DISCRETE,
+                         observation_schedule=sch)
+
+
 # --- observation schedules (w3b_valuation_event.py, levels as arguments) -------------------------
 
 def schedule(times, mode, *, double=False, barrier=130.0, payoff=5.0, lower=80.0):

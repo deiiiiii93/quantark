@@ -1095,6 +1095,78 @@
   "error": null,
   "none": []
  },
+ "3c|curve|dki|cont": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|dki|monthly": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|dki|semi": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|dki|vrec": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|european": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ki|cont": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ki|monthly": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ki|semi": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ki|vrec": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ko|cont": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ko|decided": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ko|monthly": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ko|semi": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ko|vrec": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ot|cont": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ot|monthly": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ot|semi": {
+  "error": null,
+  "none": []
+ },
+ "3c|curve|ot|vrec": {
+  "error": null,
+  "none": []
+ },
  "3c|expiry|di_put_85|100": {
   "error": null,
   "none": []
@@ -1108,6 +1180,98 @@
   "none": []
  },
  "3c|expiry|uo_call_130|beyond": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|dki|cont|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|dki|cont|nodes": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|dki|monthly|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|dki|semi|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|dki|vrec|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|european|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|european|nodes": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ki|cont|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ki|cont|nodes": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ki|monthly|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ki|semi|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ki|vrec|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ko|cont|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ko|cont|nodes": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ko|decided": {
+  "error": "CapabilityError",
+  "none": []
+ },
+ "3c|grid|ko|monthly|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ko|semi|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ko|vrec|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ot|cont|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ot|cont|nodes": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ot|monthly|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ot|semi|levels": {
+  "error": null,
+  "none": []
+ },
+ "3c|grid|ot|vrec|levels": {
   "error": null,
   "none": []
  },

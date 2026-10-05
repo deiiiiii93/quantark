@@ -53,6 +53,7 @@ from quantark.asset.equity.engine.pde.grid import (
     Nodes,
     TimeRefinement,
     apply_discrete_event,
+    fold_decision,
     fold_nodal,
     validate_external_layout,
 )
@@ -164,6 +165,45 @@ class PDESolutionResult(NamedTuple):
     spot_log: float
     readout_vec: Optional[np.ndarray] = None
     readout_override: Optional[float] = None
+    #: the valuation instant's event, folded at each level of a projection (spec 3C decision 26)
+    decision: Optional[DiscreteEvent] = None
+    #: a spot-independent receivable added to each projected price (spec 3C decision 29)
+    cash: float = 0.0
+
+
+def _project_rows(result, spot_levels):
+    """(price, delta, gamma) per level, interpolated from one solved surface (no decision, no cash)."""
+    prices = np.asarray(result.solution_vec, dtype=float)
+    deltas = np.gradient(prices, result.s_vec, edge_order=2)
+    gammas = np.gradient(deltas, result.s_vec, edge_order=2)
+    return [(float(np.interp(s, result.s_vec, prices)), float(np.interp(s, result.s_vec, deltas)),
+             float(np.interp(s, result.s_vec, gammas))) for s in spot_levels]
+
+
+class CompositeSolution(NamedTuple):
+    """A knock-in's solved parts (spec 3C decision 26): each projected on its own grid, the rows composed level by
+    level by the facade's rule, the knock-in's own decision deciding whether a level is a hit."""
+
+    vanilla: PDESolutionResult
+    leg: PDESolutionResult
+    participation: Optional[float]
+    constant: float
+    decision: Optional[DiscreteEvent]
+
+    def rows(self, spot_levels=None):
+        levels = [float(s) for s in (self.vanilla.s_vec if spot_levels is None else spot_levels)]
+        vanilla, leg = _project_rows(self.vanilla, levels), _project_rows(self.leg, levels)
+        out = []
+        for spot, (pv, dv, gv), (pl, dl, gl) in zip(levels, vanilla, leg):
+            if self.participation is not None:
+                pv, dv, gv = self.participation * pv, self.participation * dv, self.participation * gv
+            if fold_decision(self.decision, spot, 0.0)[3]:          # a hit: participation x vanilla
+                price, delta, gamma = pv, dv, gv
+            else:
+                price, delta, gamma = pv + self.constant - pl, dv - dl, gv - gl
+            out.append({"spot": spot, "price": float(price), "delta": float(delta), "gamma": float(gamma),
+                        "calculation_mode": "engine_grid"})
+        return out
 
 
 class LifeSurfaceSolution(NamedTuple):
@@ -811,6 +851,8 @@ class BasePDESolver(BaseEngine):
             return super().calculate_spot_greeks_curve(product, pricing_env, spots)
 
         result = self._spot_curve_solution(product, pricing_env)
+        if result is None:          # decided at the base spot (spec 3C §5.2 (g)): point Greeks, ``reprice`` rows
+            return super().calculate_spot_greeks_curve(product, pricing_env, spots)
         return self._grid_projection_from_solution(result, spots)
 
     def _spot_curve_solution(
@@ -825,25 +867,22 @@ class BasePDESolver(BaseEngine):
         result: PDESolutionResult,
         spot_levels: Optional[Sequence[float]] = None,
     ) -> list[dict[str, float | str]]:
-        """Project price/delta/gamma from one solved surface (native session
-        seam shared with ``calculate_spot_greeks_curve``). ``spot_levels``
-        None projects at the grid nodes themselves."""
-        prices = np.asarray(result.solution_vec, dtype=float)
-        deltas = np.gradient(prices, result.s_vec, edge_order=2)
-        gammas = np.gradient(deltas, result.s_vec, edge_order=2)
-        spots = np.asarray(
-            result.s_vec if spot_levels is None else spot_levels, dtype=float
-        )
-        return [
-            {
-                "spot": float(spot),
-                "price": float(np.interp(spot, result.s_vec, prices)),
-                "delta": float(np.interp(spot, result.s_vec, deltas)),
-                "gamma": float(np.interp(spot, result.s_vec, gammas)),
-                "calculation_mode": "engine_grid",
-            }
-            for spot in spots
-        ]
+        """Project price/delta/gamma from a solve's carrier (the session's GRID and the public curve, spec 3C
+        decision 26): a composite or branch carrier projects itself; a surface is read at each level within the
+        branch alive there, then the valuation instant's decision is folded at that level and the receivable added.
+        ``spot_levels`` None projects at the grid nodes themselves."""
+        if hasattr(result, "rows"):
+            return result.rows(spot_levels)
+        spots = [float(s) for s in np.asarray(result.s_vec if spot_levels is None else spot_levels, dtype=float)]
+        out = []
+        for spot, (price, delta, gamma) in zip(spots, _project_rows(result, spots)):
+            if result.decision is not None:
+                price, delta, gamma, _ = fold_decision(result.decision, spot, price, delta, gamma)
+            if result.cash:
+                price = price + result.cash
+            out.append({"spot": spot, "price": price, "delta": delta, "gamma": gamma,
+                        "calculation_mode": "engine_grid"})
+        return out
 
     def _build_step_coefficients(
         self,

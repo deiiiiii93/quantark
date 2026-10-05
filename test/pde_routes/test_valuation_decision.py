@@ -32,13 +32,7 @@ def p_above(spot, level, t):
 
 # --- (i) a record on the valuation date with its own level, cash and payment time (§4.11) -------------------
 
-def record_product():
-    sch = ObservationSchedule(records=[ObservationRecord(observation_time=0.0, barrier=120.0, payoff=7.0, settlement_time=0.25),
-                                       ObservationRecord(observation_time=0.5), ObservationRecord(observation_time=1.0)],
-                              aggregation_mode=FIRST)
-    return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
-                         maturity=1.0, rebate=5.0, pay_at_hit=True, observation_type=ObservationType.DISCRETE,
-                         observation_schedule=sch)
+from pde_routes.cases import record_product                                                  # noqa: E402,F401
 
 
 @pytest.mark.parametrize("spot", [119.9, 119.99, 120.0, 125.0, 129.99, 130.0, 135.0])

@@ -1219,6 +1219,97 @@ def rows_3c(existing):
     out["3c|bounds|uo_call_130|monthly|140"] = _row(lambda: solver_price_greeks(
         BarrierPDESolver(params=PDEParams(grid=GridConfig(bounds=(None, 140.0)))), barrier(ObservationType.DISCRETE),
         env_flat()))
+
+    # Task 10: session outputs and the public curve (spec 3C §7.1 (g))
+    out.update(_rows_3c_session_grid())
+    return out
+
+
+def session_grid_row(engine_cls, product, env, levels):
+    """A prepared session's PV + GRID: the hex of ``pv`` and of every row field (spec 3C §7.1 (g))."""
+    from quantark.execution import PricingRequest, PricingSession
+    from quantark.execution.contracts import OutputKind
+    options = () if levels is None else (("grid_spot_levels", tuple(float(x) for x in levels)),)
+    with PricingSession() as s:
+        res = s.execute(engine_cls(params=p_default()), PricingRequest(
+            product=product, pricing_env=env, outputs=frozenset({OutputKind.PV, OutputKind.GRID}),
+            operation_options=options))
+    value = res.value
+    out = {"pv": _hex(value.pv)}
+    for i, row in enumerate(value.grid):
+        for k in ("spot", "price", "delta", "gamma"):
+            out[f"grid_{i}_{k}"] = _hex(row[k])
+    return out
+
+
+def curve_row(engine_cls, product, env, levels):
+    """The public ``calculate_spot_greeks_curve``: the hex of every row field and its mode."""
+    out = {}
+    for i, row in enumerate(engine_cls(params=p_default()).calculate_spot_greeks_curve(product, env, levels)):
+        for k in ("spot", "price", "delta", "gamma"):
+            out[f"curve_{i}_{k}"] = _hex(row[k])
+        out[f"curve_{i}_mode_reprice"] = _hex(1.0 if row["calculation_mode"] == "reprice" else 0.0)
+    return out
+
+
+def _rows_3c_session_grid():
+    """Spec 3C §7.1 (g): PV + GRID and the curve for a European, a knock-out, a one-touch, a single and a double
+    knock-in, on continuous, monthly and semiannual monitoring and with a valuation-date record; a product decided at
+    the base spot (the declared CapabilityError and the curve's reprice rows)."""
+    from quantark.asset.equity.engine.pde import (BarrierPDESolver, DoubleBarrierPDESolver, EuropeanPDESolver,
+                                                  OneTouchPDESolver)
+    from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
+    from quantark.util.enum import ObservationAggregation
+
+    levels = (80.0, 100.0, 125.0, 129.99, 135.0, 150.0)
+    monthly, semi = [k / 12.0 for k in range(1, 13)], [0.5, 1.0]
+
+    def obs_kw(obs):
+        if obs == "cont":
+            return dict(observation_type=ObservationType.CONTINUOUS)
+        if obs == "vrec":
+            return dict(observation_type=ObservationType.DISCRETE, observation_schedule=ObservationSchedule.from_legacy(
+                observation_dates=[0.0, 0.5, 1.0], default_barrier=130.0, default_payoff=0.0,
+                aggregation_mode=ObservationAggregation.STOP_FIRST_HIT))
+        return dict(observation_type=ObservationType.DISCRETE, observation_dates=monthly if obs == "monthly" else semi)
+
+    def ko(obs):
+        return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
+                             maturity=1.0, rebate=5.0, **obs_kw(obs))
+
+    def ki(obs):
+        return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_IN,
+                             maturity=1.0, **obs_kw(obs))
+
+    def dki(obs):
+        kw = obs_kw(obs) if obs != "vrec" else dict(observation_type=ObservationType.DISCRETE,
+                                                     observation_dates=[0.0, 0.5, 1.0])
+        return DoubleBarrierOption(100.0, OptionType.CALL, 130.0, 80.0, DoubleBarrierType.KNOCK_IN, maturity=1.0, **kw)
+
+    def ot(obs):
+        kw = obs_kw(obs) if obs != "vrec" else dict(observation_type=ObservationType.DISCRETE,
+                                                     observation_dates=[0.0, 0.5, 1.0])
+        return OneTouchOption(barrier=130.0, barrier_direction=BarrierDirection.UP, maturity=1.0, rebate=1.0,
+                              payment_at_hit=False, touch_type=TouchType.ONE_TOUCH, **kw)
+
+    out = {}
+    out["3c|grid|european|levels"] = _row(lambda: session_grid_row(EuropeanPDESolver, european(), env_flat(), levels))
+    out["3c|grid|european|nodes"] = _row(lambda: session_grid_row(EuropeanPDESolver, european(), env_flat(), None))
+    out["3c|curve|european"] = _row(lambda: curve_row(EuropeanPDESolver, european(), env_flat(), levels))
+    families = {"ko": (BarrierPDESolver, ko), "ot": (OneTouchPDESolver, ot), "ki": (BarrierPDESolver, ki),
+                "dki": (DoubleBarrierPDESolver, dki)}
+    for fam, (cls, make) in families.items():
+        for obs in ("cont", "monthly", "semi", "vrec"):
+            out[f"3c|grid|{fam}|{obs}|levels"] = _row(
+                lambda c=cls, m=make, o=obs: session_grid_row(c, m(o), env_flat(), levels))
+            out[f"3c|curve|{fam}|{obs}"] = _row(lambda c=cls, m=make, o=obs: curve_row(c, m(o), env_flat(), levels))
+        out[f"3c|grid|{fam}|cont|nodes"] = _row(lambda c=cls, m=make: session_grid_row(c, m("cont"), env_flat(), None))
+    # decided at the base spot: a session's grid fails closed; the curve reprices
+    out["3c|grid|ko|decided"] = _row(lambda: session_grid_row(BarrierPDESolver, ko("cont"),
+                                                              env_with_spot(env_flat(), 135.0), levels),
+                                     error="CapabilityError")
+    out["3c|curve|ko|decided"] = _row(lambda: curve_row(BarrierPDESolver, ko("cont"), env_with_spot(env_flat(), 135.0),
+                                                        (120.0, 135.0)))
     return out
 
 
