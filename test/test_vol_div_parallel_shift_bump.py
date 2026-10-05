@@ -283,9 +283,15 @@ def test_numerical_vega_on_a_local_vol_engine_shifts_the_grid():
     product = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
     engine = LocalVolPDESolver(PDEParams())
     base = engine.price(product, env)
-    up = engine.price(product, _env(_grid().parallel_shifted(BUMP)))
+    bumped = _env(_grid().parallel_shifted(BUMP))
     vega = GreeksCalculator().calculate_numerical_vega(product, env, engine, vol_bump=BUMP)
-    assert vega == pytest.approx(up - base, rel=1e-9)             # one-sided: P&L per bump
+    # spec 3C §5.3: the local-vol vanilla is a core solver, so the calculator re-prices the shifted surface on its
+    # bump context's frozen base layout (one-sided: P&L per bump), exactly
+    ctx = engine.create_bump_context(product, env)
+    assert vega == pytest.approx(ctx.price(product, bumped) - base, rel=1e-12)
+    # and it is the parallel shift of the surface: a fresh grid under the shifted surface differs only by the
+    # layout's own movement (measured 1.6e-5 relative)
+    assert vega == pytest.approx(engine.price(product, bumped) - base, rel=1e-4)
 
 
 def test_position_trade_greeks_vega_on_a_grid_is_a_parallel_shift():
