@@ -1169,6 +1169,13 @@ def rows_3b(existing):
     return out
 
 
+def rows_3c(existing):
+    """The 3C rows (spec 3C §7.1), each added by the task that makes it priceable."""
+    out = {}
+    # Task 2: nothing priceable is new at stage 0; later tasks extend this function.
+    return out
+
+
 def rows():
     out = {rid: Row(fn) for rid, fn in book().items()}
     for env_name, env in (("flat", env_flat), ("term", env_term)):
@@ -1279,6 +1286,7 @@ def rows():
     out = {rid: dataclasses.replace(r, tags=r.tags | _existing_tags(rid)) for rid, r in out.items()}
     out.update(rows_3a(out))
     out.update(rows_3b(out))
+    out.update(rows_3c(out))
     return out
 
 
