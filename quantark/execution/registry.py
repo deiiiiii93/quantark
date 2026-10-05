@@ -205,12 +205,15 @@ def build_default_registry() -> AdapterRegistry:
         "quantark.asset.equity.engine.pde.phoenix_pde_solver.PhoenixPDESolver",
     ):
         registry.register(pde_autocall, _equity_pde_autocall_adapter, exact=True)
-    for pde_lv in (
+    registry.register(
         "quantark.asset.equity.engine.pde.local_vol_pde_solver.LocalVolPDESolver",
+        _equity_pde_lv_grid_adapter, exact=True,
+    )
+    registry.register(
         "quantark.asset.equity.engine.pde.barrier_vol_pde_solvers."
         "LocalVolBarrierPDESolver",
-    ):
-        registry.register(pde_lv, _equity_pde_lv_adapter, exact=True)
+        _equity_pde_lv_adapter, exact=True,
+    )
     for pde_lv_autocall in (
         "quantark.asset.equity.engine.pde.snowball_vol_pde_solvers."
         "LocalVolSnowballPDESolver",
@@ -324,6 +327,14 @@ def _equity_pde_lv_adapter():
     )
 
     return EquityLVPDESessionAdapter()
+
+
+def _equity_pde_lv_grid_adapter():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        EquityLVGridSessionAdapter,
+    )
+
+    return EquityLVGridSessionAdapter()
 
 
 def _equity_pde_lv_autocall_adapter():

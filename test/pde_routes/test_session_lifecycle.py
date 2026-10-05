@@ -24,20 +24,32 @@ def state(terminal):
 VAN = lambda: EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)   # noqa: E731
 
 
+def _local_vol():
+    from pde_routes.cases import surface_const
+    from quantark.asset.equity.engine.pde.local_vol_pde_solver import LocalVolPDESolver
+    return LocalVolPDESolver(local_vol_surface=surface_const())
+
+
+# Task 17: the local-vol European is grid-capable on the core and carries the state alike (spec 3C §5.3, §5.6)
+ENGINES = {"european": EuropeanPDESolver, "local_vol": _local_vol}
+
+
+@pytest.mark.parametrize("engine", sorted(ENGINES))
 @pytest.mark.parametrize("terminal", [True, False])
-def test_european_session_pv_and_rows_follow_the_state(terminal):
+def test_european_session_pv_and_rows_follow_the_state(terminal, engine):
+    make = ENGINES[engine]
     env = env_const(100.0)
     st = state(terminal)
-    direct = EuropeanPDESolver().price(VAN(), env, lifecycle_state=st)
-    assert session(EuropeanPDESolver(), VAN(), env, {PV}, lifecycle_state=st) == direct
+    direct = make().price(VAN(), env, lifecycle_state=st)
+    assert session(make(), VAN(), env, {PV}, lifecycle_state=st) == direct
     if terminal:
         with pytest.raises(CapabilityError):                      # a terminated claim has no grid (today 9.60)
-            session(EuropeanPDESolver(), VAN(), env, {PV, GRID}, lifecycle_state=st)
+            session(make(), VAN(), env, {PV, GRID}, lifecycle_state=st)
         return
-    out = session(EuropeanPDESolver(), VAN(), env, {PV, GRID}, lifecycle_state=st, levels=[90.0, 110.0])
+    out = session(make(), VAN(), env, {PV, GRID}, lifecycle_state=st, levels=[90.0, 110.0])
     assert out.pv == direct                                       # 16.549649; today 9.601810
     for row in out.grid:
-        g = EuropeanPDESolver().calculate_greeks(VAN(), env_const(row["spot"]), lifecycle_state=st)
+        g = make().calculate_greeks(VAN(), env_const(row["spot"]), lifecycle_state=st)
         assert abs(row["price"] - g["price"]) <= 1e-3 and abs(row["delta"] - g["delta"]) <= 2e-4
 
 

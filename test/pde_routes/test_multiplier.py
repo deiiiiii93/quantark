@@ -35,7 +35,14 @@ CASES = [
     ("double_out", DoubleBarrierPDESolver, double, 100.0),
     ("double_in", DoubleBarrierPDESolver, lambda m: double(m, DoubleBarrierType.KNOCK_IN), 100.0),
     ("up_out_hit", BarrierPDESolver, barrier, 135.0),                      # already hit: the rebate scales
+    ("local_vol_european", lambda: _local_vol(), european, 100.0),          # Task 17 (spec 3C §5.3)
 ]
+
+
+def _local_vol():
+    from pde_routes.cases import surface_const
+    from quantark.asset.equity.engine.pde.local_vol_pde_solver import LocalVolPDESolver
+    return LocalVolPDESolver(local_vol_surface=surface_const())
 
 
 def _ratio_ok(a, b):

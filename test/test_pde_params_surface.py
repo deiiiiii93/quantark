@@ -291,8 +291,12 @@ def test_stepper_is_honoured_on_dcn_as_counts_and_rejected_as_a_class():
 
     with pytest.raises(ValidationError, match="sub-project 3"):
         DCNPDEEngine(params=PDEParams(stepper=Custom()))
-    with pytest.raises(ValidationError, match="sub-project 3"):
-        LocalVolPDESolver(params=PDEParams(operator=ShiftedOperatorStub()))
+    # spec 3C §5.3: the local-vol vanilla is on the core - a custom operator is honoured, not refused
+    from pde_routes.cases import env_const, surface_const, vanilla
+    base = LocalVolPDESolver(local_vol_surface=surface_const()).price(vanilla(), env_const())
+    shifted = LocalVolPDESolver(params=PDEParams(operator=ShiftedOperatorStub(shift=1e-4)),
+                                local_vol_surface=surface_const()).price(vanilla(), env_const())
+    assert shifted != base
 
 
 def test_a_component_missing_its_methods_is_rejected():
@@ -312,11 +316,14 @@ def test_crank_nicolson_rejects_an_unknown_damping_form():
         CrankNicolson(damping="halfstep")
 
 
-def test_local_vol_vanilla_rejects_full_step_damping():
+def test_local_vol_vanilla_honours_the_damping_form():
+    # spec 3C §5.3: on the core both damping forms are applied (the kernel refused full_step)
+    from pde_routes.cases import env_const, surface_const, vanilla
     from quantark.asset.equity.engine.pde import LocalVolPDESolver
-    with pytest.raises(ValidationError, match="stepper.damping"):
-        LocalVolPDESolver(params=PDEParams(stepper=CrankNicolson(damping="full_step")))
-    LocalVolPDESolver(params=PDEParams(stepper=CrankNicolson(damping="half_step")))   # its own form
+    prices = {form: LocalVolPDESolver(params=PDEParams(stepper=CrankNicolson(damping=form)),
+                                      local_vol_surface=surface_const()).price(vanilla(), env_const())
+              for form in ("full_step", "half_step")}
+    assert prices["full_step"] != prices["half_step"]
 
 
 @pytest.mark.parametrize("form", ["full_step", "half_step"])

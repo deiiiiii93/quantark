@@ -190,12 +190,12 @@ def test_a_settlement_lag_splits_only_the_problem():
 
 
 def test_routes_without_explain():
-    from quantark.asset.equity.engine.pde import LocalVolPDESolver
+    # the local-vol vanilla is on the core from spec 3C Task 17 (test/pde_routes/test_lv_vanilla.py runs explain)
     from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import LocalVolBarrierPDESolver
     from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
     from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import LocalVolDCNPDEEngine
 
-    for cls in (DCNPDEEngine, LocalVolDCNPDEEngine, LocalVolPDESolver, LocalVolBarrierPDESolver):
+    for cls in (DCNPDEEngine, LocalVolDCNPDEEngine, LocalVolBarrierPDESolver):
         assert not hasattr(cls, "explain"), cls.__name__
 
 

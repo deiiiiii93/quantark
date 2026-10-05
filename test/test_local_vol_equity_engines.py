@@ -13,7 +13,8 @@ from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.asset.equity.engine.pde.grid.config import GridConfig
-import quantark.asset.equity.engine.pde.local_vol_pde_solver as lv_mod
+import quantark.asset.equity.engine.pde.core.prepare as core_prepare
+from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, bind_layout
 
 
 def _env(vol=0.2, r=0.03, q=0.01):
@@ -75,7 +76,7 @@ def test_equity_lv_pde_does_not_invoke_mc(monkeypatch):
 
 def test_equity_lv_prebuilt_surface_used(monkeypatch):
     env = _env()
-    import quantark.asset.equity.engine.pde.local_vol_pde_solver as mod
+    import quantark.asset.equity.engine.pde.local_vol_surface as mod      # the surface members' module (3C §5.1)
 
     def _boom(*a, **k):
         raise AssertionError("should not rebuild Dupire when prebuilt surface supplied")
@@ -101,48 +102,49 @@ def test_equity_lv_rho_matches_analytic_magnitude():
     assert g["theta"] < 0  # long call decays
 
 
-def _capture(monkeypatch):
-    seen = {}
-    real = lv_mod.price_european_lv_pde
+def _layout(params):
+    solver, env = LocalVolPDESolver(params=params), _env()
+    return solver._with_surface(env, lambda: bind_layout(solver, _call(), env, OutputRequest(Operation.PRICE)))
 
-    def spy(**kw):
-        seen.update(kw)
-        return real(**kw)
 
-    monkeypatch.setattr(lv_mod, "price_european_lv_pde", spy)
-    return seen
+def test_lv_vanilla_prices_on_the_core_march(monkeypatch):
+    # spec 3C §5.3: the kernel route is gone; each price is one march of the shared core
+    calls = []
+    real = core_prepare.march
+
+    def spy(problem):
+        calls.append(problem)
+        return real(problem)
+
+    monkeypatch.setattr(core_prepare, "march", spy)
+    LocalVolPDESolver().price(_call(), _env())
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("grid,points,steps", [
-    (None, 400, 200),                                        # route default = today's plan
     (GridConfig(points=300, time_steps=150), 300, 150),
-    (GridConfig(steps_per_day=1.0), 400, 252),               # explicit density clears the budget
+    (GridConfig(points=500, time_steps=250), 500, 250),
 ])
-def test_lv_vanilla_time_and_space_reach_the_kernel(monkeypatch, grid, points, steps):
-    seen = _capture(monkeypatch)
-    LocalVolPDESolver(params=PDEParams(grid=grid)).price(_call(), _env())
-    assert seen["n_s"] == points and len(seen["step_dt"]) == steps
+def test_lv_vanilla_time_and_space_reach_the_layout(grid, points, steps):
+    layout = _layout(PDEParams(grid=grid))
+    # the half-step damping splits the first interval: the layout records the requested count (spec 3A §5.3)
+    assert len(layout.spatial.x) == points and layout.time.requested_steps == steps
 
 
-def test_lv_vanilla_theta_and_damping(monkeypatch):
-    seen = _capture(monkeypatch)
-    LocalVolPDESolver(params=PDEParams(stepper=CrankNicolson(theta=1.0))).price(_call(), _env())
-    assert seen["theta"] == 1.0 and seen["rannacher"] is True
-    LocalVolPDESolver(
-        params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=0))
-    ).price(_call(), _env())
-    assert seen["rannacher"] is False
-    with pytest.raises(ValidationError, match="terminal_damping_steps"):
-        LocalVolPDESolver(
-            params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=2))
-        ).price(_call(), _env())
+@pytest.mark.parametrize("stepper", [CrankNicolson(theta=1.0), CrankNicolson(terminal_damping_steps=0),
+                                     CrankNicolson(terminal_damping_steps=2), CrankNicolson(damping="full_step")])
+def test_lv_vanilla_honours_the_stepper(stepper):
+    # the kernel refused counts of 2 or more and full-step damping; on the core every setting is applied
+    base = LocalVolPDESolver().price(_call(), _env())
+    assert LocalVolPDESolver(params=PDEParams(stepper=stepper)).price(_call(), _env()) != base
 
 
 @pytest.mark.parametrize("grid", [GridConfig(eps_crit=0.001), GridConfig(num_std=6.0),
                                   GridConfig(bounds=(None, 400.0))])
-def test_lv_vanilla_rejects_explicit_domain_fields(grid):
-    with pytest.raises(ValidationError, match="sub-project 3"):
-        LocalVolPDESolver(params=PDEParams(grid=grid)).price(_call(), _env())
+def test_lv_vanilla_honours_explicit_domain_fields(grid):
+    base = _layout(PDEParams())
+    layout = _layout(PDEParams(grid=grid))
+    assert not np.array_equal(layout.spatial.x, base.spatial.x)
 
 
 def test_lv_vanilla_vacuous_and_noop_fields_accepted():

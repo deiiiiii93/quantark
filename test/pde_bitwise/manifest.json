@@ -1355,6 +1355,18 @@
   "error": "CapabilityError",
   "none": []
  },
+ "3c|lv_vanilla|greeks|book": {
+  "error": null,
+  "none": []
+ },
+ "3c|lv_vanilla|greeks|const": {
+  "error": null,
+  "none": []
+ },
+ "3c|lv_vanilla|one_step|book": {
+  "error": null,
+  "none": []
+ },
  "3c|mat|american|lag|greeks": {
   "error": null,
   "none": []

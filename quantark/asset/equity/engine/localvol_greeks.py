@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import timedelta
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 from quantark.param.rrf import ParallelShiftRateCurve
 from quantark.util.numerical.constants import Tolerance
@@ -39,12 +39,25 @@ def local_vol_model_greeks(
     greeks["delta"] = (price_up - price_dn) / (2.0 * spot * spot_bump)
     greeks["gamma"] = (price_up - 2.0 * base + price_dn) / (spot * spot_bump) ** 2
 
+    greeks.update(local_vol_rho_theta(price_with_surface, product, pricing_env, lv_surface,
+                                      rate_bump=rate_bump, theta_days=theta_days, base=base))
+    return greeks
+
+
+def local_vol_rho_theta(price_with_surface: Callable, product, pricing_env, lv_surface,
+                        rate_bump: float = Tolerance.BUMP_RATE, theta_days: int = 1,
+                        base: Optional[float] = None) -> Dict[str, float]:
+    """Rho (per 1 %, central parallel shift) and theta (per day) with the local-vol surface held fixed (spec 3C
+    decision 7). ``base`` is the unbumped price when the caller has it."""
+    if base is None:
+        base = price_with_surface(product, pricing_env, lv_surface)
+    out: Dict[str, float] = {}
     env_ru = deepcopy(pricing_env)
     env_ru.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, rate_bump)
     env_rd = deepcopy(pricing_env)
     env_rd.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, -rate_bump)
     # Repository convention: rho reported per 1% rate move (dV/dr / 100).
-    greeks["rho"] = (
+    out["rho"] = (
         price_with_surface(product, env_ru, lv_surface)
         - price_with_surface(product, env_rd, lv_surface)
     ) / (2.0 * rate_bump) / 100.0
@@ -58,11 +71,11 @@ def local_vol_model_greeks(
         shifted = deepcopy(product)
         shifted.maturity = maturity - eff
         future = price_with_surface(shifted, pricing_env, lv_surface)
-        greeks["theta"] = (future - base) / (eff * 365.0)
+        out["theta"] = (future - base) / (eff * 365.0)
     else:
         env_fut = deepcopy(pricing_env)
         env_fut.valuation_date = pricing_env.valuation_date + timedelta(days=theta_days)
         future = price_with_surface(product, env_fut, lv_surface)
-        greeks["theta"] = (future - base) / theta_days
+        out["theta"] = (future - base) / theta_days
 
-    return greeks
+    return out

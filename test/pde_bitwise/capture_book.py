@@ -1233,6 +1233,25 @@ def rows_3c(existing):
                              observation_dates=[k / 12.0 for k in range(1, 13)])
 
     out["3c|ki_bump|monthly_ui_call"] = _row(lambda: engine_bump_greeks(monthly_ui_call(), env_flat(), p_default()))
+
+    # Task 17: the local-vol vanilla on the core (spec 3C §7.1, §5.3): five Greeks on a constant and a book surface,
+    # and a one-step solve that marches its nodal sets (decision 11)
+    def lv_vanilla(surface_env, params=None):
+        from pde_routes.cases import dupire, env_book, env_const, surface_const
+        from quantark.asset.equity.engine.pde.local_vol_pde_solver import LocalVolPDESolver
+        env = env_const() if surface_env == "const" else env_book()
+        surface = surface_const() if surface_env == "const" else dupire(env)
+        return LocalVolPDESolver(params, local_vol_surface=surface), env
+
+    def lv_vanilla_product():
+        from pde_routes.cases import vanilla
+        return vanilla(True, 100.0, 1.0)
+
+    for tag in ("const", "book"):
+        out[f"3c|lv_vanilla|greeks|{tag}"] = _row(
+            lambda t=tag: solver_price_greeks(*lv_vanilla(t)[:1], lv_vanilla_product(), lv_vanilla(t)[1]))
+    out["3c|lv_vanilla|one_step|book"] = _row(lambda: solver_price(
+        lv_vanilla("book", PDEParams(grid=GridConfig(time_steps=1)))[0], lv_vanilla_product(), lv_vanilla("book")[1]))
     return out
 
 

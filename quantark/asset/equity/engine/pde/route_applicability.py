@@ -70,18 +70,6 @@ _DCN_CADENCE = (
 )
 
 ROUTE_RULES = {
-    "local-vol vanilla": _LV_DOMAIN
-    + (
-        Rule(
-            "stepper.terminal_damping_steps",
-            REJECTED,
-            "the kernel damps with one two-half-step startup (1) or none (0); a "
-            "count of 2 or more cannot be applied",
-            allowed=(0, 1),
-        ),
-        Rule("stepper.damping", REJECTED, _HALF_STEP_KERNEL, allowed=("half_step",)),
-    )
-    + _COMPONENTS,
     "local-vol barrier": _LV_DOMAIN
     + (
         Rule("stepper.damping", INAPPLICABLE, _NO_DAMPING),
