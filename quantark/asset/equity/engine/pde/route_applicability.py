@@ -22,7 +22,6 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, Tuple
 
-from quantark.util.enum.engine_enums import EventProjectionMode
 from quantark.util.exceptions import ValidationError
 
 INAPPLICABLE = "inapplicable"
@@ -64,24 +63,8 @@ _COMPONENTS = (
     Rule("component.operator", REJECTED, _NO_SEAM),
     Rule("component.readout", REJECTED, _NO_SEAM),
 )
-_DCN_CADENCE = (
-    "DCN's time resolution is its observation schedule (one step per "
-    "observation interval)"
-)
 
 ROUTE_RULES = {
-    "DCN": (
-        Rule("grid.steps_per_day", REJECTED, _DCN_CADENCE),
-        Rule("grid.time_steps", REJECTED, _DCN_CADENCE),
-        Rule(
-            "event_projection",
-            REJECTED,
-            "DCN's events are nodal masks",
-            allowed=(EventProjectionMode.NODAL,),
-        ),
-        Rule("stepper.damping", REJECTED, "DCN " + _HALF_STEP_KERNEL[4:], allowed=("half_step",)),
-    )
-    + _COMPONENTS,
     "2D": (
         Rule(
             "stepper.damping",

@@ -33,29 +33,13 @@ _SHARED_DEFAULTS = dict(
 #: The built-in stepper's route defaults, ``(form, terminal count, event count)`` (spec 3A §5.3):
 #: a ``None`` on ``CrankNicolson`` resolves to its route's row. The core has two rows chosen by the
 #: contract alone (decision 12): a product whose knock-in is monitored continuously keeps
-#: full-step; every other core product takes "core". DCN and the 2D solvers have their own rows, so a
-#: core flip cannot reach them; the local-vol routes are core products (spec 3C §5.3).
+#: full-step; every other core product takes "core". The 2D solvers have their own row, so a core flip
+#: cannot reach them; the local-vol routes and the DCN are core products (spec 3C §5.3, §5.4).
 #: flip (f): half-step, one interval at the terminal node and at each event (spec 3A §4.2).
 DAMPING_DEFAULTS = {
     "core": ("half_step", 1, 1),
     "core-continuous-ki": ("full_step", 1, 2),
-    "DCN": ("half_step", 2, 2),
     "2D": ("full_step", 1, 2),
-}
-
-#: DCN route (spec §4.2, decision 8): one fill step per observation interval
-#: (steps_per_day=0.1 rounds every realistic calendar gap to one step);
-#: accuracy scales spatial resolution only. Standard is today's plan exactly.
-#: max_points is max(2000, points); the DCN engine derives it the same way
-#: for an explicit points overlay.
-DCN_ACCURACY_PROFILES = {
-    name: dict(
-        points=pts,
-        steps_per_day=0.1,
-        eps_crit=ACCURACY_PROFILES[name]["eps_crit"],
-        max_points=max(2000, pts),
-    )
-    for name, pts in (("fast", 401), ("standard", 801), ("high", 1601))
 }
 
 

@@ -59,7 +59,6 @@ __all__ = [
     "DCNCoupledCoarseHestonBatchMCAdapter",
     "DCNHestonBatchMCAdapter",
     "DCNLocalVolMCAdapter",
-    "DCNLocalVolPDEAdapter",
     "DCNQEBatchMCAdapter",
 ]
 
@@ -656,11 +655,6 @@ class DCNLocalVolMCAdapter(_DCNBatchMixin, _DCNLocalVolAdapterBase):
             num_batches=engine.num_batches,
             num_workers=1,  # framework owns threading; nested execution off
         )
-
-
-class DCNLocalVolPDEAdapter(_DCNLocalVolAdapterBase):
-    def _clone_with_surface(self, engine, surface):
-        return type(engine)(local_vol_surface=surface, params=engine.params)
 
 
 # ---------------------------------------------------------------------------

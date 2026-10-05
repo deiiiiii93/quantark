@@ -84,7 +84,7 @@ Exported engines inventoried: **74**
 | `HestonPhoenixPDESolver` | heston | phoenix | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (12) | `bitwise-vs-direct/v1` |
 | `HestonSLVPhoenixPDESolver` | slv | phoenix | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (12) | `bitwise-vs-direct/v1` |
 | `DCNPDEEngine` | bsm | dcn | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (10) | `bitwise-vs-direct/v1` |
-| `LocalVolDCNPDEEngine` | lv | dcn | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (7) | `bitwise-vs-direct/v1` |
+| `LocalVolDCNPDEEngine` | lv | dcn | fixed | engine | `supported` | `not_applicable` (9) | `not_applicable` (4) | `prepared_capable` (10) | `bitwise-vs-direct/v1` |
 | `HestonDCNPDESolver` | heston | dcn | fixed | engine | `temporary_legacy` | `not_applicable` (9) | `not_applicable` (4) | `temporary_legacy` (11) | — |
 | `PDEEngine` | dispatch | any | fixed | facade | `temporary_legacy` | `not_applicable` (13) | `not_applicable` (4) | `temporary_legacy` (14) | — |
 

@@ -415,10 +415,7 @@ ENGINE_INVENTORY = (
             prepared_rationale=_PREPARED_PDE_2D,
             validation_profile=_PROFILE_BITWISE),
     _eq_pde_prepared("DCNPDEEngine", "bsm", "dcn"),
-    _eq_pde("LocalVolDCNPDEEngine", "lv", "dcn", adoption_state="supported",
-            prepared_state="prepared_capable",
-            prepared_rationale=_PREPARED_LV_MC,
-            validation_profile=_PROFILE_BITWISE),
+    _eq_pde_prepared("LocalVolDCNPDEEngine", "lv", "dcn"),
     _eq_pde("HestonDCNPDESolver", "heston", "dcn",
             prepared_rationale=_PREPARED_ADI),
     # --- Equity facade ---

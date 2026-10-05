@@ -170,6 +170,19 @@ def dcn_case(name: str, **overrides):
     return fx.make_dcn(contract, **overrides), fx.flat_env(**market, spot=spot)
 
 
+# --- the local-vol DCN surfaces ($E/d6_localvol.py:20-26, verbatim) -----------------------------
+
+def dcn_flat_surface(s0=6000.0):
+    strikes, times = s0 * np.linspace(0.2, 3.0, 141), np.array([0.0, 1.0, 2.0, 3.0])
+    return LocalVolSurface(strikes, times, np.full((times.size, strikes.size), 0.184))
+
+
+def dcn_skew_surface(s0=6000.0):
+    """0.184 S0 / S, clipped to 8 % - 60 % (§4.2)."""
+    strikes, times = s0 * np.linspace(0.2, 3.0, 141), np.array([0.0, 1.0, 2.0, 3.0])
+    return LocalVolSurface(strikes, times, np.tile(np.clip(0.184 * s0 / strikes, 0.08, 0.60), (times.size, 1)))
+
+
 # --- kinked term curves (x6_term_structure.py; test/term_structure_benchmarks.py "kinked") ---------
 
 VOL = CONST["vol"]

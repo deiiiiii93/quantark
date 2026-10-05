@@ -112,20 +112,17 @@ def build_default_registry() -> AdapterRegistry:
             f"quantark.asset.equity.engine.quad.v2.engine.{name}",
             _quad_v2_adapter, exact=True,
         )
-    # Specialized exact-class adapters (lazy factory import at resolve time —
+    # Specialized exact-class adapter (lazy factory import at resolve time —
     # this module keeps zero static asset-code dependencies).
-    # exact=True on both (code-gate finding 2026-07-16): these adapters
-    # clone the engine around a cached surface with a fixed constructor
-    # signature; subclasses (e.g. the frozen quant-mini-project
-    # SurfaceAwareLVDCNEngine) keep the plain legacy adapter and their
-    # direct-path hooks (spec section 17.1).
+    # exact=True (code-gate finding 2026-07-16): the adapter clones the
+    # engine around a cached surface with a fixed constructor signature;
+    # subclasses (e.g. the frozen quant-mini-project SurfaceAwareLVDCNEngine)
+    # keep the plain legacy adapter and their direct-path hooks (spec
+    # section 17.1). The local-vol DCN PDE is on the core local-vol session
+    # adapter (spec 3C §5.4).
     registry.register(
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.LocalVolDCNMCEngine",
         _dcn_mc_adapter, exact=True,
-    )
-    registry.register(
-        "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
-        _dcn_pde_adapter, exact=True,
     )
     # Phase 2: fixed-batch capability for the plain GBM DCN MC engine.
     # exact=True: the batch adapters reconstruct engines from the exact
@@ -210,6 +207,7 @@ def build_default_registry() -> AdapterRegistry:
         "quantark.asset.equity.engine.pde.local_vol_pde_solver.LocalVolPDESolver",
         "quantark.asset.equity.engine.pde.barrier_vol_pde_solvers."
         "LocalVolBarrierPDESolver",
+        "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
     ):
         registry.register(pde_lv, _equity_pde_lv_adapter, exact=True)
     for pde_lv_autocall in (
@@ -253,14 +251,6 @@ def _dcn_mc_adapter():
     )
 
     return DCNLocalVolMCAdapter()
-
-
-def _dcn_pde_adapter():
-    from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
-        DCNLocalVolPDEAdapter,
-    )
-
-    return DCNLocalVolPDEAdapter()
 
 
 def _dcn_batch_mc_adapter():

@@ -189,12 +189,16 @@ def test_a_settlement_lag_splits_only_the_problem():
     _split(make_snowball(SB), lagged, env_flat(), env_flat())
 
 
-def test_routes_without_explain():
-    # the local-vol vanilla and barrier and the DCN are on the core from spec 3C Tasks 17-19
+def test_the_former_kernel_routes_explain_on_the_core():
+    # spec 3C stage 2: the local-vol vanilla and barrier, the DCN and the local-vol DCN are core solvers
+    from quantark.asset.equity.engine.pde import LocalVolPDESolver
+    from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import LocalVolBarrierPDESolver
+    from quantark.asset.equity.engine.pde.base_pde_solver import BasePDESolver
+    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
     from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import LocalVolDCNPDEEngine
 
-    for cls in (LocalVolDCNPDEEngine,):
-        assert not hasattr(cls, "explain"), cls.__name__
+    for cls in (LocalVolPDESolver, LocalVolBarrierPDESolver, DCNPDEEngine, LocalVolDCNPDEEngine):
+        assert issubclass(cls, BasePDESolver) and callable(cls.explain), cls.__name__
 
 
 def test_the_2d_solvers_refuse_explain():

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from ..groups import VALUE, Backend, ColumnGroup
 from .barrier import BarrierAdapter
+from .dcn import DCNAdapter
 from .european import EuropeanAdapter
 from .snowball import LocalVolAdapterMixin
 
-__all__ = ["LocalVolEuropeanAdapter", "LocalVolBarrierAdapter"]
+__all__ = ["LocalVolEuropeanAdapter", "LocalVolBarrierAdapter", "LocalVolDCNAdapter"]
 
 
 class _LocalVolCoreAdapter(LocalVolAdapterMixin):
@@ -24,4 +25,8 @@ class LocalVolEuropeanAdapter(_LocalVolCoreAdapter, EuropeanAdapter):
 
 
 class LocalVolBarrierAdapter(_LocalVolCoreAdapter, BarrierAdapter):
-    """``LocalVolBarrierPDESolver`` (Task 18)."""
+    """``LocalVolBarrierPDESolver``."""
+
+
+class LocalVolDCNAdapter(LocalVolAdapterMixin, DCNAdapter):
+    """``LocalVolDCNPDEEngine``: two surfaces, banded (``DCNAdapter.groups``)."""

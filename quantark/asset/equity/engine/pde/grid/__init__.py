@@ -28,7 +28,6 @@ from quantark.asset.equity.engine.pde.grid.events import (
 )
 from quantark.asset.equity.engine.pde.grid.binder import (
     GridBinder,
-    GridLayerMixin,
     Layout,
     resolve_bound_layout,
     validate_external_layout,
@@ -36,7 +35,6 @@ from quantark.asset.equity.engine.pde.grid.binder import (
 
 __all__ = [
     "GridBinder",
-    "GridLayerMixin",
     "Layout",
     "resolve_bound_layout",
     "validate_external_layout",

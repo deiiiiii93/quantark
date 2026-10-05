@@ -1282,6 +1282,14 @@ def rows_3c(existing):
     out["3c|dcn|nodal|A"] = _row(lambda: solver_price(DCNPDEEngine(PDEParams(event_projection="nodal")), *dcn_a()))
     out["3c|dcn|session_grid|A"] = _row(lambda: session_grid_row(
         DCNPDEEngine, *dcn_a(), [m * dcn_a()[0].initial_price for m in (0.7, 0.8, 1.0, 1.1)]))
+
+    # Task 20: the local-vol DCN on the core (spec 3C §7.1, §5.4): grid Greeks on the skewed surface
+    def lv_dcn_skew():
+        from pde_routes.cases import dcn_skew_surface
+        from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import LocalVolDCNPDEEngine
+        return LocalVolDCNPDEEngine(local_vol_surface=dcn_skew_surface())
+
+    out["3c|lv_dcn|greeks|skew"] = _row(lambda: solver_price_greeks(lv_dcn_skew(), *dcn_a()))
     return out
 
 

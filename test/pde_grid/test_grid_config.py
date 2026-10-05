@@ -117,7 +117,6 @@ import dataclasses  # noqa: E402
 
 from quantark.asset.equity.engine.pde.grid.config import (  # noqa: E402
     ACCURACY_PROFILES,
-    DCN_ACCURACY_PROFILES,
 )
 
 #: A budget-basis preset table (time_steps, no steps_per_day), the shape the local-vol kernel routes used until
@@ -209,6 +208,13 @@ def test_explicit_budget_over_cap_raises():
         resolve_config("standard", GridConfig(time_steps=13000))  # the 0.8.0 cap is 12000
 
 
+#: A density-basis preset table with a per-preset max_points, the shape the DCN route used until spec 3C Task 19.
+DENSITY_CAP_PROFILES = {
+    name: dict(points=pts, steps_per_day=0.1, eps_crit=ACCURACY_PROFILES[name]["eps_crit"], max_points=max(2000, pts))
+    for name, pts in (("fast", 401), ("standard", 801), ("high", 1601))
+}
+
+
 def test_budget_table():
     expected = {"fast": (200, 200), "standard": (400, 200), "high": (800, 400)}
     for acc, (pts, n) in expected.items():
@@ -223,15 +229,22 @@ def test_the_local_vol_kernel_rows_are_gone():
     assert not hasattr(config, "LV_UNIFORM_ACCURACY_PROFILES")
 
 
-def test_dcn_table_standard_is_todays_plan():
-    cfg = resolve_config("standard", None, profiles=DCN_ACCURACY_PROFILES)
+def test_density_cap_table():
+    cfg = resolve_config("standard", None, profiles=DENSITY_CAP_PROFILES)
     assert (cfg.points, cfg.steps_per_day, cfg.max_points) == (801, 0.1, 2000)
-    assert DAMPING_DEFAULTS["DCN"] == ("half_step", 2, 2)
     assert (cfg.eps_crit, cfg.num_std, cfg.max_steps) == (0.003, 4.0, 12000)
     assert [
-        resolve_config(a, None, profiles=DCN_ACCURACY_PROFILES).points
+        resolve_config(a, None, profiles=DENSITY_CAP_PROFILES).points
         for a in ("fast", "standard", "high")
     ] == [401, 801, 1601]
+
+
+def test_the_dcn_route_rows_are_gone():
+    # spec 3C §5.4: the DCN is a core product - the shared presets and damping rows
+    import quantark.asset.equity.engine.pde.grid.config as config
+    from quantark.asset.equity.engine.pde.route_applicability import ROUTE_RULES
+    assert "DCN" not in DAMPING_DEFAULTS and "DCN" not in ROUTE_RULES
+    assert not hasattr(config, "DCN_ACCURACY_PROFILES")
 
 
 def test_resolved_density_config_reresolves_to_itself():
@@ -268,11 +281,10 @@ def test_resolving_twice_equals_resolving_once(table, overlay):
     preset table (Review Focus 3), including the budget basis."""
     from quantark.asset.equity.engine.pde.grid.config import (
         ACCURACY_PROFILES,
-        DCN_ACCURACY_PROFILES,
     )
 
     profiles = {"shared": ACCURACY_PROFILES, "lv": BUDGET_PROFILES,
-                "dcn": DCN_ACCURACY_PROFILES}[table]
+                "dcn": DENSITY_CAP_PROFILES}[table]
     once = resolve_config("standard", overlay, profiles=profiles)
     assert resolve_config("standard", once, profiles=profiles) == once
 
