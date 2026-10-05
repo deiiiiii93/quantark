@@ -64,6 +64,11 @@ class FamilyAdapter:
     def composite(self, product, env, request, lifecycle_state):
         return None
 
+    def bump_parts(self, product, env):
+        """``{part: (solver, product)}`` a bump context freezes one layout for each (spec 3C decision 10);
+        ``None``, a single layout for the product itself."""
+        return None
+
     def scope(self, product, env):
         """A context held around preparation (the local-vol routes build their surface in it)."""
         return nullcontext()

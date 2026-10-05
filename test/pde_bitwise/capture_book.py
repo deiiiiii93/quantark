@@ -1225,6 +1225,14 @@ def rows_3c(existing):
 
     # Task 12: a knock-in's rebate (spec 3C §7.1 (a), decision 8)
     out.update(_rows_3c_knock_in_rebate())
+
+    # Task 13: a bump context freezes one layout per composite part (spec 3C §7.1 (c), decision 10)
+    def monthly_ui_call():
+        return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_IN,
+                             maturity=1.0, observation_type=ObservationType.DISCRETE,
+                             observation_dates=[k / 12.0 for k in range(1, 13)])
+
+    out["3c|ki_bump|monthly_ui_call"] = _row(lambda: engine_bump_greeks(monthly_ui_call(), env_flat(), p_default()))
     return out
 
 
@@ -1600,10 +1608,10 @@ def rows():
     out["bump|frozen_vs_fresh|snowball"] = _row(bump_frozen_vs_fresh)
     out["lv_snowball|prebuilt"] = _row(lv_snowball_prebuilt)
 
-    # Knock-in bump Greeks raise on base whenever a bumped state needs the
-    # knock-out leg: the bump context freezes the knock-in request's layout
-    # (no hard bounds) and the knock-out solve refuses it. Recorded as
-    # declared failures; price and solver Greeks are their own rows.
+    # Knock-in bump Greeks: before 3C the bump context froze the knock-in
+    # request's layout (no hard bounds) and the knock-out leg refused it
+    # (declared PricingError); spec 3C decision 10 freezes one layout per
+    # part. Price and solver Greeks are their own rows.
     def knocked_in_env(n):
         return env_with_spot(env_flat(), knock_in_products(True)[n][1])
 
@@ -1612,15 +1620,13 @@ def rows():
             out[f"knock_in|{name}|{env_name}|standard"] = _row(
                 lambda n=name, e=env: engine_price_greeks(knock_in_products()[n][0], e(), p_default()))
             out[f"knock_in|{name}|{env_name}|standard|bump"] = _row(
-                lambda n=name, e=env: engine_bump_greeks(knock_in_products()[n][0], e(), p_default()),
-                error="PricingError")
+                lambda n=name, e=env: engine_bump_greeks(knock_in_products()[n][0], e(), p_default()))
         out[f"knock_in|{name}|knocked_in"] = _row(
             lambda n=name: engine_price_greeks(knock_in_products(True)[n][0], knocked_in_env(n), p_default()))
         # down_in_put at 79 stays knocked in under both 1% spot bumps; the
         # other two cross back inside their barriers on one of them.
         out[f"knock_in|{name}|knocked_in|bump"] = _row(
-            lambda n=name: engine_bump_greeks(knock_in_products(True)[n][0], knocked_in_env(n), p_default()),
-            error=None if name == "down_in_put" else "PricingError")
+            lambda n=name: engine_bump_greeks(knock_in_products(True)[n][0], knocked_in_env(n), p_default()))
 
     def lu_params():
         return PDEParams(grid=GridConfig(points=4, eps_crit=1.0))

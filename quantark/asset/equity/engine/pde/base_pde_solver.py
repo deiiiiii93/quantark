@@ -285,6 +285,8 @@ class BasePDESolver(BaseEngine):
         # Frozen base-market layout held by create_bump_context instances: every
         # bumped re-solve reuses it (theta rolls rebind time only, §4.8).
         self._frozen_base_layout = None
+        # A composite's bump context: one frozen base-market layout per part (spec 3C decision 10).
+        self._frozen_parts: dict = {}
         # Discrete-monitoring state shared by the barrier-family solvers
         # (populated by _setup_observation_indices).
         self._observation_indices: set = set()
@@ -458,16 +460,25 @@ class BasePDESolver(BaseEngine):
         Spot/vol/rate/div bumps reuse the layout by identity; calendar (theta)
         bumps rebuild only the time layout (``rebind_time``). A request with a
         terminal outcome freezes nothing: bumping re-prices the short-circuit.
+        A composite freezes one layout per part instead (spec 3C decision 10).
         """
         if not self._uses_grid_layer():
             raise NotImplementedError(
                 "legacy params-freeze bump contexts were removed with the "
                 "declarative grid layer (0.4.0)"
             )
+        parts = self.adapter.bump_parts(product, pricing_env)
+        clone = type(self)(**self._constructor_kwargs())
+        if parts is not None:
+            # a composite freezes one layout per part (spec 3C decision 10); a part with no base-market solve
+            # binds fresh under the bumped market
+            request = OutputRequest(Operation.PRICE)
+            clone._frozen_parts = {name: layout for name, (solver, part) in parts.items()
+                                   if (layout := bind_layout(solver, part, pricing_env, request)) is not None}
+            return clone
         layout = bind_layout(self, product, pricing_env, OutputRequest(Operation.PRICE))
         if layout is None:
             return self
-        clone = type(self)(**self._constructor_kwargs())
         clone._frozen_base_layout = layout
         return clone
 

@@ -197,6 +197,15 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         knocked_in = self.decision_at(product, env, env.spot)[3]      # a SET record fires at the spot (decision 25)
         return self._compose(product, env, request, knock_out=not knocked_in)
 
+    def bump_parts(self, product, env):
+        if product.is_knock_out:
+            return None
+        solver = self.solver
+        parts = {"vanilla": (solver._vanilla_solver(), self._vanilla_product(product))}
+        if not self.decision_at(product, env, env.spot)[3]:
+            parts["knock_out"] = (solver, self._knock_out_product(product))
+        return parts
+
     def _composition(self, product, env):
         """(participation, constant) of knock-in = participation x vanilla + constant - knock-out (spec 3C §5.2 (a));
         the constant is R x DF(0, T_pay), per contract."""
@@ -227,15 +236,15 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
 
     def _compose(self, product, env, request, *, knock_out):
         solver = self.solver
-        vanilla_solver = solver._vanilla_solver()            # fresh on every call, as today: no frozen layout
-        parts = [prepare(vanilla_solver, self._vanilla_product(product), env, request)]
+        # A session's artefacts belong to the knock-in product's own request (its automatic domain); each part's
+        # domain is another layout, so a part binds its own in a session. A bump context freezes one layout per
+        # part at the base market (spec 3C decision 10); a part with none binds fresh.
+        frozen = solver._frozen_parts
+        vanilla_solver = solver._vanilla_solver()
+        parts = [prepare(vanilla_solver, self._vanilla_product(product), env, request, frozen=frozen.get("vanilla"))]
         if knock_out:
             ko = self._knock_out_product(product)
-            # A session's artefacts belong to the knock-in product's own request (its
-            # automatic domain); the knock-out leg's hard-edged domain is another
-            # layout, so the leg binds its own in a session. A bump context's frozen
-            # layout is handed on and raises on the bound mismatch (as in 0.6.0).
-            parts.append(prepare(solver, ko, env, request, frozen=solver._frozen_base_layout))
+            parts.append(prepare(solver, ko, env, request, frozen=frozen.get("knock_out")))
         pr, constant = self._composition(product, env)
         op = request.operation
         if op is Operation.SESSION_OUTPUTS:

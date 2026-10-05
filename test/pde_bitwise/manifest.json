@@ -1275,6 +1275,10 @@
   "error": null,
   "none": []
  },
+ "3c|ki_bump|monthly_ui_call": {
+  "error": null,
+  "none": []
+ },
  "3c|ki_rebate|dki_call|curve": {
   "error": null,
   "none": []
@@ -2088,7 +2092,7 @@
   "none": []
  },
  "knock_in|double_in|flat|standard|bump": {
-  "error": "PricingError",
+  "error": null,
   "none": []
  },
  "knock_in|double_in|knocked_in": {
@@ -2096,7 +2100,7 @@
   "none": []
  },
  "knock_in|double_in|knocked_in|bump": {
-  "error": "PricingError",
+  "error": null,
   "none": []
  },
  "knock_in|double_in|term|standard": {
@@ -2104,7 +2108,7 @@
   "none": []
  },
  "knock_in|double_in|term|standard|bump": {
-  "error": "PricingError",
+  "error": null,
   "none": []
  },
  "knock_in|down_in_put|flat|standard": {
@@ -2112,7 +2116,7 @@
   "none": []
  },
  "knock_in|down_in_put|flat|standard|bump": {
-  "error": "PricingError",
+  "error": null,
   "none": []
  },
  "knock_in|down_in_put|knocked_in": {
@@ -2128,7 +2132,7 @@
   "none": []
  },
  "knock_in|down_in_put|term|standard|bump": {
-  "error": "PricingError",
+  "error": null,
   "none": []
  },
  "knock_in|up_in_call|flat|standard": {
@@ -2136,7 +2140,7 @@
   "none": []
  },
  "knock_in|up_in_call|flat|standard|bump": {
-  "error": "PricingError",
+  "error": null,
   "none": []
  },
  "knock_in|up_in_call|knocked_in": {
@@ -2144,7 +2148,7 @@
   "none": []
  },
  "knock_in|up_in_call|knocked_in|bump": {
-  "error": "PricingError",
+  "error": null,
   "none": []
  },
  "knock_in|up_in_call|term|standard": {
@@ -2152,7 +2156,7 @@
   "none": []
  },
  "knock_in|up_in_call|term|standard|bump": {
-  "error": "PricingError",
+  "error": null,
   "none": []
  },
  "ko_reset|flat|fast": {

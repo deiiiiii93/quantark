@@ -41,7 +41,7 @@ STAGE_3C = {
           "3c|vdec|uo_late|*", "3c|vrec|uo|*"),        # Task 7's single knock-outs with a distant next observation
     "g": (),
     "a": (),
-    "c": ("knock_in|*|bump",),
+    "c": ("knock_in|*|bump", "3a|base6|di_put|*"),           # the monthly down-in put: bump Greeks only (m1 evidence)
     "d": (),
     "2a": ("lv_vanilla|*",),
     "2b": ("lv_barrier_cont|*", "lv_barrier_expiry|*", "lv_barrier_discrete|*"),
