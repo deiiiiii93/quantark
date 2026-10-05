@@ -1275,6 +1275,18 @@
   "error": null,
   "none": []
  },
+ "3c|lifecycle|barrier|alive|pv_grid": {
+  "error": "CapabilityError",
+  "none": []
+ },
+ "3c|lifecycle|european|alive|pv_grid": {
+  "error": null,
+  "none": []
+ },
+ "3c|lifecycle|european|terminated|pv_grid": {
+  "error": "CapabilityError",
+  "none": []
+ },
  "3c|mat|american|lag|greeks": {
   "error": null,
   "none": []

@@ -129,12 +129,12 @@ def _packs_nbytes(value) -> int:
     return total + 1024
 
 
-def grid_state(engine, product, pricing_env, context) -> ArtifactState:
+def grid_state(engine, product, pricing_env, context, *, lifecycle_state=None) -> ArtifactState:
     """The Layout a march binds (``bind_layout``) behind a descriptor; the value
     is ``None`` for a request with a terminal outcome (nothing to prepare)."""
 
     def build():
-        return bind_layout(engine, product, pricing_env, _PRICE)
+        return bind_layout(engine, product, pricing_env, _PRICE, lifecycle_state=lifecycle_state)
 
     cache = getattr(context, "artifact_cache", None)
     if not engine._is_cache_enabled() or cache is None:
@@ -145,7 +145,7 @@ def grid_state(engine, product, pricing_env, context) -> ArtifactState:
     def key_fp():
         # the grid request after the solve state it depends on (a knocked-in
         # product drops the discrete-KI interior nodes): prepare steps 0-4
-        geometry = request_geometry(engine, product, pricing_env, _PRICE)
+        geometry = request_geometry(engine, product, pricing_env, _PRICE, lifecycle_state=lifecycle_state)
         if geometry is None:
             return None
         grid_request, market = geometry

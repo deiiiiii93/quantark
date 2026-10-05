@@ -823,11 +823,15 @@ class BasePDESolver(BaseEngine):
         want_events: bool = False,
         want_grid: bool = False,
         streams: Optional[frozenset] = None,
+        *,
+        lifecycle_state=None,
     ) -> PDESessionOutputs:
         """One value solve serving PV (+ grid projection). Event fields are
-        autocallable-only; the base family always returns them as None."""
+        autocallable-only; the base family always returns them as None. A
+        lifecycle state reaches the adapters as ``price``'s does (spec 3C decision 29)."""
         return self._run(product, pricing_env,
-                         OutputRequest(Operation.SESSION_OUTPUTS, grid=want_grid))
+                         OutputRequest(Operation.SESSION_OUTPUTS, grid=want_grid),
+                         lifecycle_state=lifecycle_state)
 
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

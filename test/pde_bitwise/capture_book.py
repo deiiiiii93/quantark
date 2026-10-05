@@ -1225,7 +1225,7 @@ def rows_3c(existing):
     return out
 
 
-def session_grid_row(engine_cls, product, env, levels):
+def session_grid_row(engine_cls, product, env, levels, lifecycle_state=None):
     """A prepared session's PV + GRID: the hex of ``pv`` and of every row field (spec 3C §7.1 (g))."""
     from quantark.execution import PricingRequest, PricingSession
     from quantark.execution.contracts import OutputKind
@@ -1233,7 +1233,7 @@ def session_grid_row(engine_cls, product, env, levels):
     with PricingSession() as s:
         res = s.execute(engine_cls(params=p_default()), PricingRequest(
             product=product, pricing_env=env, outputs=frozenset({OutputKind.PV, OutputKind.GRID}),
-            operation_options=options))
+            operation_options=options, lifecycle_state=lifecycle_state))
     value = res.value
     out = {"pv": _hex(value.pv)}
     for i, row in enumerate(value.grid):
@@ -1310,6 +1310,25 @@ def _rows_3c_session_grid():
                                      error="CapabilityError")
     out["3c|curve|ko|decided"] = _row(lambda: curve_row(BarrierPDESolver, ko("cont"), env_with_spot(env_flat(), 135.0),
                                                         (120.0, 135.0)))
+
+    # Task 11: a prepared session's rich outputs carry the lifecycle state (spec 3C §7.1 (g), decision 29)
+    def state(terminal):
+        from datetime import timedelta
+        from quantark.asset.equity.lifecycle import (BarrierLifecycleState, LifecycleCashflowLedger,
+                                                     LifecycleEventType, RealizedCashflow, ValuationPoint)
+        day = env_flat().valuation_date
+        cash = RealizedCashflow(cashflow_id="claim:expiry", event_type=LifecycleEventType.EXPIRY, amount=7.0,
+                                determination_date=day - timedelta(days=1), payment_date=day + timedelta(days=91))
+        return BarrierLifecycleState(alive=not terminal, expired=terminal, valuation_point=ValuationPoint(date=day),
+                                     ledger=LifecycleCashflowLedger([cash]))
+
+    for tag, terminal in (("terminated", True), ("alive", False)):
+        out[f"3c|lifecycle|european|{tag}|pv_grid"] = _row(
+            lambda t=terminal: session_grid_row(EuropeanPDESolver, european(), env_flat(), (90.0, 110.0), state(t)),
+            error="CapabilityError" if terminal else None)
+    out["3c|lifecycle|barrier|alive|pv_grid"] = _row(
+        lambda: session_grid_row(BarrierPDESolver, ko("cont"), env_flat(), (90.0, 110.0), state(False)),
+        error="CapabilityError")
     return out
 
 

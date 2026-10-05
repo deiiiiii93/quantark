@@ -226,7 +226,7 @@ def _session_layout(solver, stored, grid_request):
     return Layout(spatial=spatial, time=time_layout, request=grid_request, config_key=config.key)
 
 
-def request_geometry(solver, product, env, request):
+def request_geometry(solver, product, env, request, *, lifecycle_state=None):
     """``prepare`` steps 0-4 for the product itself: (grid request, market snapshot),
     or ``None`` when the request has a terminal outcome.
 
@@ -234,8 +234,8 @@ def request_geometry(solver, product, env, request):
     leg then reuses (frozen) or is assembled around (session), as before.
     """
     adapter = solver.adapter
-    adapter.validate(product, env, request, None)
-    if adapter.terminal_outcome(product, env, request, None) is not None:
+    adapter.validate(product, env, request, lifecycle_state)
+    if adapter.terminal_outcome(product, env, request, lifecycle_state) is not None:
         return None
     tau = float(product.get_maturity(env))
     adapter.check_route(solver.params)
@@ -244,11 +244,11 @@ def request_geometry(solver, product, env, request):
     return grid_request, market
 
 
-def bind_layout(solver, product, env, request, *, frozen=None):
+def bind_layout(solver, product, env, request, *, frozen=None, lifecycle_state=None):
     """``prepare`` steps 0-5: the Layout a march of ``request`` binds, or ``None``
     when the request is terminal (spec 2 §5.10). Bump contexts freeze it; sessions
     store it."""
-    geometry = request_geometry(solver, product, env, request)
+    geometry = request_geometry(solver, product, env, request, lifecycle_state=lifecycle_state)
     if geometry is None:
         return None
     grid_request, market = geometry

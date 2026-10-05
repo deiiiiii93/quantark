@@ -189,7 +189,8 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
                 tau = 0.0  # let the execute path surface the native error
             if tau > 0.0:
                 self._prepare_artifacts(
-                    clone, product, env, context, handles, descriptors, fps
+                    clone, product, env, context, handles, descriptors, fps,
+                    lifecycle_state=request.lifecycle_state,
                 )
         except BaseException:
             for handle in handles:
@@ -216,11 +217,12 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
 
     def _prepare_artifacts(
         self, clone, product, env, context, handles, descriptors, fps,
-        lv_surface_fp=None,
+        lv_surface_fp=None, lifecycle_state=None,
     ) -> None:
         # The one preparation path (spec 2 §5.10): the Layout, the step sets on
         # it, the march's warmed factorizations; injected as _session_artefacts.
-        grid = grid_state(clone, product, env, context)
+        # A terminated claim prepares no layout, as an expired one (spec 3C decision 29).
+        grid = grid_state(clone, product, env, context, lifecycle_state=lifecycle_state)
         self._track(grid, handles, descriptors, fps)
         if grid.value is None:
             return   # a terminal outcome at valuation: nothing is marched
@@ -262,6 +264,12 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
             )
             return value, (("pv", float(value)),)
 
+        if request.lifecycle_state is not None:
+            # the facade's own guard first (spec 3C decision 29): an engine without lifecycle support refuses a
+            # stateful rich-output request as it refuses one for PV
+            from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
+            validate_settlement_capability(clone, product, request.lifecycle_state)
+        session_kw = {} if request.lifecycle_state is None else {"lifecycle_state": request.lifecycle_state}
         want_events = OutputKind.EVENT_STATS in request.outputs
         want_grid = OutputKind.GRID in request.outputs
         streams_opt = _option(request, "event_streams")
@@ -269,6 +277,7 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
         out = clone._session_outputs(
             product, env,
             want_events=want_events, want_grid=want_grid, streams=streams,
+            **session_kw,
         )
         grid_rows: tuple = ()
         if want_grid:
