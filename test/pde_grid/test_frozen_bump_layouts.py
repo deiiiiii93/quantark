@@ -3,7 +3,7 @@
 Per bump family, PROVE by object identity which layout parts are reused:
 spot/vol/rate/div bumps reuse the whole Layout; a calendar (theta) roll
 keeps the spatial object and rebuilds time; schedules rebuild per solve.
-DCN (GridLayerMixin) is a first-class row.
+DCN (on the core since spec 3C §5.4) is a first-class row.
 """
 
 from datetime import datetime
@@ -213,11 +213,9 @@ def test_dcn_bump_context_identity_matrix():
     frozen = ctx._frozen_base_layout
     assert frozen is not None
 
+    # the DCN is on the core (spec 3C §5.4): a bumped solve reuses the frozen layout by identity
     bumped = flat_env(**FLAT, spot=DCN_A["initial_price"] * 1.01)
-    r = ctx.price_detailed(product, bumped)
-    assert r is not None
-    # identical geometry request -> frozen reuse (observable via binder cache
-    # being bypassed: _bound_layout_for_solve returns the frozen object)
-    market = ctx.market_snapshot(product, bumped)
-    req = ctx.grid_request(product, market, frozen.request.tau)
-    assert ctx._bound_layout_for_solve(req, market) is frozen
+    assert ctx.price_detailed(product, bumped) is not None
+    plan = ctx.explain(product, bumped)
+    assert plan.identity["layout"] == frozen.fingerprint
+    assert plan.to_dict()["space"]["x"] is frozen.spatial.x

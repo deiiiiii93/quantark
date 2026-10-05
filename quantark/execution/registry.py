@@ -196,6 +196,7 @@ def build_default_registry() -> AdapterRegistry:
         "quantark.asset.equity.engine.pde.one_touch_pde_solver.OneTouchPDESolver",
         "quantark.asset.equity.engine.pde.double_one_touch_pde_solver."
         "DoubleOneTouchPDESolver",
+        "quantark.asset.equity.engine.pde.dcn_pde_solver.DCNPDEEngine",
     ):
         registry.register(pde_1d, _equity_pde_1d_adapter, exact=True)
     for pde_autocall in (

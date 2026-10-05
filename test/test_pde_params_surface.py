@@ -278,19 +278,27 @@ def test_crank_nicolson_validates_its_four_settings():
             CrankNicolson(**bad)
 
 
-def test_stepper_is_honoured_on_dcn_as_counts_and_rejected_as_a_class():
+def test_stepper_is_honoured_on_dcn_as_counts_and_as_a_class():
+    # spec 3C §5.4: the DCN is a core product - counts and a stepper class are applied as on every core route
+    from dcn_fixtures import DCN_A, FLAT, flat_env, make_dcn
     from quantark.asset.equity.engine.pde import LocalVolPDESolver
     from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
 
     from pde_core.components_fixtures import ShiftedOperatorStub
 
-    DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=3)))   # honoured
+    env, p = flat_env(**FLAT, spot=DCN_A["initial_price"]), make_dcn(DCN_A)
+    base = DCNPDEEngine().price(p, env)
+    assert DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(terminal_damping_steps=3))).price(p, env) != base
 
     class Custom(CrankNicolson):
         pass
 
-    with pytest.raises(ValidationError, match="sub-project 3"):
-        DCNPDEEngine(params=PDEParams(stepper=Custom()))
+    # a subclass is used as given: with the default settings spelled out it is today's price (measured 0.0) ...
+    as_given = Custom(damping="half_step", terminal_damping_steps=1, event_damping_steps=1)
+    assert DCNPDEEngine(params=PDEParams(stepper=as_given)).price(p, env) == base
+    # ... and it does not take the route's defaults for fields left None (the core's own rule)
+    with pytest.raises(ValidationError, match="set damping"):
+        DCNPDEEngine(params=PDEParams(stepper=Custom())).price(p, env)
     # spec 3C §5.3: the local-vol vanilla is on the core - a custom operator is honoured, not refused
     from pde_routes.cases import env_const, surface_const, vanilla
     base = LocalVolPDESolver(local_vol_surface=surface_const()).price(vanilla(), env_const())
@@ -351,11 +359,14 @@ def test_local_vol_barrier_honours_the_damping_form():
     assert prices["full_step"] != prices["half_step"]
 
 
-def test_dcn_rejects_full_step_damping():
+def test_dcn_honours_the_damping_form():
+    # spec 3C §5.4: both forms apply on the core (the route refused full_step); measured 9.9 apart
+    from dcn_fixtures import DCN_A, FLAT, flat_env, make_dcn
     from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
-    with pytest.raises(ValidationError, match="stepper.damping"):
-        DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(damping="full_step")))
-    DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(damping="half_step")))
+    env, p = flat_env(**FLAT, spot=DCN_A["initial_price"]), make_dcn(DCN_A)
+    prices = {form: DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(damping=form))).price(p, env)
+              for form in ("full_step", "half_step")}
+    assert prices["full_step"] != prices["half_step"]
 
 
 def test_the_2d_solvers_reject_half_step_damping():

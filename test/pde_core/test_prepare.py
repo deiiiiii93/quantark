@@ -190,11 +190,10 @@ def test_a_settlement_lag_splits_only_the_problem():
 
 
 def test_routes_without_explain():
-    # the local-vol vanilla and barrier are on the core from spec 3C Tasks 17-18 (their test_lv_* run explain)
-    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+    # the local-vol vanilla and barrier and the DCN are on the core from spec 3C Tasks 17-19
     from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import LocalVolDCNPDEEngine
 
-    for cls in (DCNPDEEngine, LocalVolDCNPDEEngine):
+    for cls in (LocalVolDCNPDEEngine,):
         assert not hasattr(cls, "explain"), cls.__name__
 
 

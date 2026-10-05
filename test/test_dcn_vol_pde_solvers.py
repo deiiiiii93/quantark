@@ -87,7 +87,8 @@ def test_heston_pde_degenerate_params_match_flat_pde():
         v0=FLAT["sigma"] ** 2, kappa=1.0, theta=FLAT["sigma"] ** 2,
         sigma=1e-6, rho=0.0,
     )
-    flat = DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401))).price_detailed(p, env)
+    # an explicit 2401 points: the shared presets cap at 2000 (spec 3C §5.4)
+    flat = DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401, max_points=2401))).price_detailed(p, env)
     heston = HestonDCNPDESolver(
         params, n_x=501, n_v=201
     ).price_detailed(p, env)

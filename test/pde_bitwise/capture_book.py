@@ -1270,6 +1270,18 @@ def rows_3c(existing):
         lambda: solver_price_greeks(lv_barrier("const")[0], lv_barrier_product("UI", 5.0), lv_barrier("const")[1]))
     out["3c|lv_barrier|greeks|book"] = _row(
         lambda: solver_price_greeks(lv_barrier("book")[0], lv_barrier_product("UO", 0.0), lv_barrier("book")[1]))
+
+    # Task 19: the DCN on the core (spec 3C §7.1, §5.4): grid Greeks, the legacy masks (decision 23) and a prepared
+    # session's PV + GRID read per branch (P8)
+    def dcn_a():
+        from pde_routes.cases import dcn_case
+        return dcn_case("A")
+
+    from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+    out["3c|dcn|greeks|A"] = _row(lambda: solver_price_greeks(DCNPDEEngine(), *dcn_a()))
+    out["3c|dcn|nodal|A"] = _row(lambda: solver_price(DCNPDEEngine(PDEParams(event_projection="nodal")), *dcn_a()))
+    out["3c|dcn|session_grid|A"] = _row(lambda: session_grid_row(
+        DCNPDEEngine, *dcn_a(), [m * dcn_a()[0].initial_price for m in (0.7, 0.8, 1.0, 1.1)]))
     return out
 
 

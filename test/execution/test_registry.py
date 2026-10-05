@@ -124,6 +124,7 @@ def test_default_registry_covers_engine_family_roots():
         "quantark.asset.equity.engine.pde.one_touch_pde_solver.OneTouchPDESolver",
         "quantark.asset.equity.engine.pde.double_one_touch_pde_solver."
         "DoubleOneTouchPDESolver",
+        "quantark.asset.equity.engine.pde.dcn_pde_solver.DCNPDEEngine",       # spec 3C §5.4
         "quantark.asset.equity.engine.pde.snowball_pde_solver.SnowballPDESolver",
         "quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver."
         "KOResetSnowballPDESolver",

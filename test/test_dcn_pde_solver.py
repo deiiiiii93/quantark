@@ -2,23 +2,15 @@
 ordering, and the MC<->PDE cross-validation gate (acceptance criterion #3)."""
 import numpy as np
 import pytest
-from scipy.stats import norm
 
 from quantark.asset.equity.engine.mc.dcn_mc_engine import DCNMCEngine
 from quantark.asset.equity.engine.pde.core.components import CrankNicolson
 from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     DCNPDEEngine,
-    _operator_coeffs,
-    _sinh_grid,
-    _theta_step,
     apply_dcn_events,
 )
 from quantark.asset.equity.product.option.dcn_option import DCNDirection
-from quantark.asset.equity.engine.pde.grid.config import (
-    DCN_ACCURACY_PROFILES,
-    GridConfig,
-    resolve_config,
-)
+from quantark.asset.equity.engine.pde.grid.config import GridConfig
 from quantark.asset.equity.param import PDEParams
 from quantark.util.exceptions import ValidationError
 
@@ -37,32 +29,14 @@ from dcn_fixtures import (
 GATE_SETTINGS = {"DCN-A": (2 ** 20, 16), "DCN-B": (2 ** 21, 32)}
 
 
-def _bs_put(s, k, t, r, q, sigma):
-    d1 = (np.log(s / k) + (r - q + 0.5 * sigma * sigma) * t) / (sigma * np.sqrt(t))
-    d2 = d1 - sigma * np.sqrt(t)
-    return k * np.exp(-r * t) * norm.cdf(-d2) - s * np.exp(-q * t) * norm.cdf(-d1)
-
-
-def test_theta_scheme_prices_european_put():
-    # bare solver loop, no events: must reproduce Black-Scholes (with q)
-    r, q, sigma = FLAT["r"], FLAT["q"], FLAT["sigma"]
-    s0, k, t_mat = 6000.0, 6600.0, 2.0
-    n_steps = 500
-    x = _sinh_grid(np.log(0.05 * s0), np.log(4.0 * s0), np.log(0.75 * s0),
-                   801, 0.15)
-    s_grid = np.exp(x)
-    v = np.maximum(k - s_grid, 0.0)
-    dt = t_mat / n_steps
-    lo, mid, hi = _operator_coeffs(x, r, q, sigma)
-    for i in range(n_steps):
-        if i < 2:  # Rannacher start
-            v = _theta_step(v, lo, mid, hi, dt / 2.0, 1.0)
-            v = _theta_step(v, lo, mid, hi, dt / 2.0, 1.0)
-        else:
-            v = _theta_step(v, lo, mid, hi, dt, 0.5)
-    pde = float(np.interp(np.log(s0), x, v))
-    ref = _bs_put(s0, k, t_mat, r, q, sigma)
-    assert pde == pytest.approx(ref, rel=1e-3)
+def test_core_engine_prices_against_the_exact_recursion():
+    # spec 3C §5.4: the hand-rolled stencil and theta step are gone; the core engine is checked against the
+    # deterministic DCN recursion (the full cell sweep is test/pde_routes/test_dcn.py)
+    from pde_routes.cases import dcn_case
+    from pde_routes.dcn_reference import dcn_exact
+    product, env = dcn_case("A")
+    want = dcn_exact(product, env, spots=[float(env.spot)])["pv"][0]
+    assert 1e4 * abs(DCNPDEEngine().price(product, env) - want) / product.notional <= 1.0   # bp
 
 
 def test_event_operator_ordering():
@@ -98,7 +72,8 @@ def test_mc_pde_cross_validation_gate(contract, ident, direction):
     mc = DCNMCEngine(
         num_paths=paths, num_batches=batches, seed=42
     ).price_detailed(p, env)
-    pde = DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401))).price(p, env)
+    # an explicit 2401 points: the shared presets cap at 2000 (spec 3C §5.4)
+    pde = DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401, max_points=2401))).price(p, env)
     notional = contract["notional"]
     assert mc.std_error < 2e-4 * notional, "stderr gate: raise paths, not tolerance"
     gate = max(3.0 * mc.std_error, 5e-4 * notional)
@@ -138,52 +113,40 @@ def test_pde_deterministic():
 
 
 def _cfg(engine):
-    return engine._grid_layer_binder().config
+    return engine.grid_binder.config
 
 
-def test_dcn_defaults_equal_todays_plan():
-    assert _cfg(DCNPDEEngine()) == resolve_config(
-        "standard", None, profiles=DCN_ACCURACY_PROFILES
-    )
-    assert _cfg(DCNPDEEngine()).points == 801
+def test_dcn_takes_the_shared_presets():
+    # spec 3C §5.4 (decision 20): 200 / 400 / 800 points, 4 / 4 / 8 steps per day
+    got = {a: _cfg(DCNPDEEngine(params=PDEParams(accuracy=a))) for a in ("fast", "standard", "high")}
+    assert {a: (c.points, c.steps_per_day) for a, c in got.items()} == {
+        "fast": (200, 4.0), "standard": (400, 4.0), "high": (800, 8.0)}
 
 
-def test_dcn_accuracy_scales_space_only():
-    assert _cfg(DCNPDEEngine(params=PDEParams(accuracy="high"))).points == 1601
-    assert _cfg(DCNPDEEngine(params=PDEParams(accuracy="high"))).steps_per_day == 0.1
-
-
-def test_dcn_explicit_points_above_2000_resolve():
-    # Review Focus 5: the MC gate uses 2401 with no max_points
-    assert _cfg(
-        DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401)))
-    ).max_points == 2401
+def test_dcn_explicit_points_above_2000_need_max_points():
     with pytest.raises(ValidationError, match="max_points"):
-        DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401, max_points=2100)))
+        DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401))).price(make_dcn(DCN_A), flat_env(**FLAT))
+    assert _cfg(DCNPDEEngine(params=PDEParams(grid=GridConfig(points=2401, max_points=2401)))).points == 2401
 
 
-@pytest.mark.parametrize("params", [PDEParams(grid=GridConfig(steps_per_day=1.0)),
-                                    PDEParams(grid=GridConfig(time_steps=100)),
-                                    PDEParams(event_projection="cell_average")])
-def test_dcn_rejects_time_basis_and_cell_average(params):
-    with pytest.raises(ValidationError, match="DCN"):
-        DCNPDEEngine(params=params)
-
-
-def test_dcn_accepts_nodal_and_honours_counts_and_theta():
+@pytest.mark.parametrize("params,moves", [
+    (PDEParams(grid=GridConfig(steps_per_day=1.0)), True),                    # +1.6e2
+    (PDEParams(grid=GridConfig(time_steps=100)), True),                       # +3.6e2
+    (PDEParams(event_projection="cell_average"), False),                      # the core default
+    (PDEParams(event_projection="nodal"), True),                              # +8.5e2: the legacy masks (decision 23)
+    (PDEParams(stepper=CrankNicolson(terminal_damping_steps=1, event_damping_steps=1)), False),   # the defaults
+    (PDEParams(stepper=CrankNicolson(terminal_damping_steps=2, event_damping_steps=2)), True),    # +1.1e1
+    (PDEParams(stepper=CrankNicolson(theta=1.0)), True),                      # +9.6e1
+])
+def test_dcn_honours_the_fields_the_route_refused(params, moves):
+    # spec 3C §5.4: the DCN is a core product - its route table and refusals are gone
     env = flat_env(**FLAT, spot=DCN_A["initial_price"])
     p = make_dcn(DCN_A)
     base = DCNPDEEngine().price(p, env)
-    assert DCNPDEEngine(params=PDEParams(event_projection="nodal")).price(p, env) == base
-    one = DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(
-        terminal_damping_steps=1, event_damping_steps=1
-    ))).price(p, env)
-    assert one != base                                     # counts applied, not "> 0"
-    assert DCNPDEEngine(params=PDEParams(stepper=CrankNicolson(theta=1.0))).price(p, env) != base
+    assert (DCNPDEEngine(params=params).price(p, env) != base) is moves
 
 
-def test_dcn_points_floor_and_removed_names():
-    with pytest.raises(ValidationError, match="201"):
-        DCNPDEEngine(params=PDEParams(grid=GridConfig(points=150)))
+def test_dcn_removed_names():
+    # the route's 201-point floor is gone with its table: the shared fast preset is 200 points
     with pytest.raises(ValidationError, match="GridConfig\\(points"):
         DCNPDEEngine(num_space_nodes=801)

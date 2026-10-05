@@ -206,6 +206,31 @@ class CompositeSolution(NamedTuple):
         return out
 
 
+class BranchSolution(NamedTuple):
+    """A two-surface solve read per level from the branch its readout takes at that spot (P8): the knocked-in
+    surface at or below the knock-in barrier or when the contract is flagged knocked in, else the alive one; each
+    row is differentiated within its own surface."""
+
+    alive: np.ndarray
+    ki: np.ndarray
+    x_vec: np.ndarray
+    s_vec: np.ndarray
+    ki_barrier: float
+    knocked_in: bool
+
+    def rows(self, spot_levels=None):
+        levels = [float(s) for s in (self.s_vec if spot_levels is None else spot_levels)]
+        log = float(np.log(levels[0])) if levels else 0.0
+        surfaces = {name: PDESolutionResult(vec, self.x_vec, self.s_vec, log) for name, vec in
+                    (("alive", self.alive), ("ki", self.ki))}
+        out = []
+        for spot in levels:
+            branch = "ki" if (self.knocked_in or spot <= self.ki_barrier) else "alive"
+            price, delta, gamma = _project_rows(surfaces[branch], [spot])[0]
+            out.append({"spot": spot, "price": price, "delta": delta, "gamma": gamma, "calculation_mode": "engine_grid"})
+        return out
+
+
 class LifeSurfaceSolution(NamedTuple):
     """Both value surfaces of one solve on every time node (life-surface readout).
 

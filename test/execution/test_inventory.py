@@ -230,6 +230,8 @@ _PHASE4_PREPARED_NAMES = {
     "EuropeanPDESolver", "AmericanPDESolver", "BarrierPDESolver",
     "DoubleBarrierPDESolver", "OneTouchPDESolver", "DoubleOneTouchPDESolver",
     "SnowballPDESolver", "KOResetSnowballPDESolver", "PhoenixPDESolver",
+    # the DCN on the core (spec 3C §5.4)
+    "DCNPDEEngine",
     # LV family
     "LocalVolPDESolver", "LocalVolBarrierPDESolver",
     "LocalVolSnowballPDESolver", "LocalVolPhoenixPDESolver",
