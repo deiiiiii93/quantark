@@ -414,6 +414,22 @@ def fold_nodal(out: np.ndarray, s: np.ndarray, event: DiscreteEvent) -> None:
             out[mask] += rec.value
 
 
+def fold_decision(event, spot, price, delta=0.0, gamma=0.0):
+    """The nodal fold at one point on (price, delta, gamma) (spec 3C decision 25): for each record of ``event``
+    breached at ``spot``, in order, SET replaces the value by the record's and the slopes by zero, ADD adds the
+    record's value to the price. Returns ``(price, delta, gamma, set_fired)``; ``event`` None folds nothing."""
+    fired = False
+    if event is not None:
+        s = np.array([float(spot)])
+        for rec in event.records:
+            if bool(rec.breached(s)[0]):
+                if rec.op is EventOp.SET:
+                    price, delta, gamma, fired = float(rec.value), 0.0, 0.0, True
+                else:
+                    price = price + float(rec.value)
+    return price, delta, gamma, fired
+
+
 def apply_discrete_event(spatial, column: np.ndarray, event: DiscreteEvent, projection) -> np.ndarray:
     """One observation's records applied to ``column``; returns a new column (spec 3A §5.4).
 

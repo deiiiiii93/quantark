@@ -10,6 +10,8 @@ did.
 """
 from __future__ import annotations
 
+from quantark.asset.equity.engine.pde.grid.events import DiscreteEvent, EventOp, EventRecord, fold_decision
+from quantark.util.enum import ObservationAggregation, ObservationType
 from quantark.util.exceptions import PricingError
 
 from ..prepare import CompositeProblem, Operation, TerminalOutcome, prepare
@@ -24,7 +26,8 @@ _GREEK_KEYS = ("price", "delta", "gamma")
 class BaseFamilyEvents:
     """The base family's discrete observations as ``explain`` reports them (spec 3A §5.4): per
     observation node its records and the projection in force. Evidence only; the march applies
-    events through the solver (``_apply_step_modifications``)."""
+    events through the solver (``_apply_step_modifications``). The valuation instant's observation
+    is not marched: it is reported as the readout's decision (spec 3C decision 25)."""
 
     def __init__(self, rows: tuple, projection):
         self.rows, self.projection = rows, projection
@@ -58,32 +61,54 @@ class _BarrierFamilyAdapter(FamilyAdapter):
 
     # --- the outcomes known at valuation --------------------------------------
 
-    def terminal_outcome(self, product, env, request, lifecycle_state):
-        op = request.operation
-        if op is Operation.PRICE:
-            # price(): the hit test comes first
-            if product.is_barrier_hit(env.spot):
-                hit = self._hit_price(product, env)
-                if hit is not None:
-                    return TerminalOutcome("barrier_hit", hit)
-            return super().terminal_outcome(product, env, request, lifecycle_state)
-        if op is Operation.GREEKS:
-            # calculate_greeks(): expiry first, then the hit test
-            expired = super().terminal_outcome(product, env, request, lifecycle_state)
-            if expired is not None:
-                return expired
-            if product.is_barrier_hit(env.spot):
-                hit = self._hit_greeks(product, env)
-                if hit is not None:
-                    return TerminalOutcome("barrier_hit", hit)
-            return None
-        return super().terminal_outcome(product, env, request, lifecycle_state)
-
-    def _hit_price(self, product, env):
-        """The value once the barrier is hit at valuation; None = the knock-in composite."""
+    def _continuous_hit_record(self, product, env) -> EventRecord:
+        """The hit outcome at valuation under continuous monitoring, as one SET record (spec 3C decision 25)."""
         raise NotImplementedError
 
-    def _hit_greeks(self, product, env):
+    def valuation_event(self, product, env):
+        """The valuation instant's event as the march would build it (spec 3C decision 25): under continuous
+        monitoring the barrier's SET record; under a schedule the records observed now, built by the march's own
+        helper with their level, cash from their own payment time and operation; else None."""
+        if getattr(product, "observation_type", None) == ObservationType.CONTINUOUS:
+            return DiscreteEvent((self._continuous_hit_record(product, env),))
+        solver = self.solver
+        records = solver._valuation_instant_records(product, env, solver._observation_resolve_kwargs(product))
+        if records is None:
+            return None
+        schedule = getattr(product, "observation_schedule", None)
+        aggregation = schedule.aggregation_mode if schedule is not None else ObservationAggregation.STOP_FIRST_HIT
+        return solver._event_for_records(product, env, records, 0.0, aggregation)
+
+    def decision_at(self, product, env, spot, price=0.0, delta=0.0, gamma=0.0):
+        """``fold_decision`` of the valuation instant's event at ``spot`` (spec 3C decision 25)."""
+        return fold_decision(self.valuation_event(product, env), spot, price, delta, gamma)
+
+    def terminal_outcome(self, product, env, request, lifecycle_state):
+        op = request.operation
+        if op is Operation.GREEKS:
+            expired = FamilyAdapter.terminal_outcome(self, product, env, request, lifecycle_state)
+            if expired is not None:                               # calculate_greeks: expiry first (Task 8 replaces it)
+                return expired
+        if op in _FACADE and not getattr(product, "is_knock_in", False):
+            price, delta, gamma, fired = self.decision_at(product, env, env.spot)
+            if fired:                                             # a SET record fires at the spot: nothing is marched
+                outputs = {"price": price, "delta": delta, "gamma": gamma} if op is Operation.GREEKS else price
+                return TerminalOutcome("barrier_hit", outputs)
+        return FamilyAdapter.terminal_outcome(self, product, env, request, lifecycle_state)
+
+    def read(self, prepared, result):
+        out = super().read(prepared, result)
+        op = prepared.request.operation
+        if op not in _FACADE:
+            return out
+        event, spot = self.valuation_event(prepared.product, prepared.env), prepared.env.spot
+        if op is Operation.GREEKS:
+            price, delta, gamma, _ = fold_decision(event, spot, out["price"], out["delta"], out["gamma"])
+            return {"price": price, "delta": delta, "gamma": gamma}
+        return fold_decision(event, spot, out)[0]
+
+    def _hit_price(self, product, env):
+        """The knock-out's value once its barrier is hit at valuation."""
         raise NotImplementedError
 
     def prepare_events(self, product, env, layout, tau, request):
@@ -94,7 +119,11 @@ class _BarrierFamilyAdapter(FamilyAdapter):
         t, projection = layout.time.t, solver._base_family_projection()
         total = solver._total_tau if solver._total_tau > 0 else tau
         rows = []
+        if 0 in solver._observation_indices:                            # the readout's decision, not marched
+            rows.append(("valuation_decision", 0, 0.0, "readout", self.valuation_event(product, env).evidence()))
         for idx in sorted(solver._observation_indices):
+            if idx == 0:
+                continue
             current = solver._current_time(total, tau - t[idx])         # as _apply_step_modifications
             event = solver._step_event(product, env, idx, current)
             rows.append(("observation", int(idx), float(t[idx]),
@@ -112,15 +141,12 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         op = request.operation
         if op not in _FACADE:
             return None
+        if product.is_knock_out:
+            return None
         if op is Operation.GREEKS and product.get_maturity(env) <= 0:
-            return None                          # calculate_greeks: expiry is tested first
-        if product.is_barrier_hit(env.spot):
-            if product.is_knock_out:
-                return None                      # the rebate (terminal_outcome)
-            return self._compose(product, env, request, knock_out=False)   # knocked in: the vanilla
-        if product.is_knock_in:
-            return self._compose(product, env, request, knock_out=True)
-        return None
+            return None                          # calculate_greeks: expiry is tested first (Task 8: every operation)
+        knocked_in = self.decision_at(product, env, env.spot)[3]      # a SET record fires at the spot (decision 25)
+        return self._compose(product, env, request, knock_out=not knocked_in)
 
     def _compose(self, product, env, request, *, knock_out):
         from quantark.asset.equity.engine.pde.european_pde_solver import EuropeanPDESolver
@@ -221,11 +247,9 @@ class BarrierAdapter(_KnockInAdapter):
     def _hit_price(self, product, env):
         return self._rebate_at_valuation(product, env) if product.is_knock_out else None
 
-    def _hit_greeks(self, product, env):
-        # Knocked out: return rebate Greeks (rebate is constant, so delta=gamma=0)
-        if not product.is_knock_out:
-            return None
-        return {"price": self._rebate_at_valuation(product, env), "delta": 0.0, "gamma": 0.0}
+    def _continuous_hit_record(self, product, env) -> EventRecord:
+        return EventRecord(*self.solver._sides(product, product.barrier),
+                           self._rebate_at_valuation(product, env) if product.is_knock_out else 0.0, EventOp.SET)
 
     def observation_maps(self, product, env, layout, tau) -> None:
         # Discrete-monitoring indices on the bound layout (the 0.6.0 grid-build override)
@@ -289,11 +313,9 @@ class DoubleBarrierAdapter(_KnockInAdapter):
             solver._event_payment_time(product, env, 0.0),
         ) * solver._multiplier(product)
 
-    def _hit_greeks(self, product, env):
-        # Already knocked out: rebate is constant, so delta=gamma=0 (undiscounted, as today)
-        if not product.is_knock_out:
-            return None
-        return {"price": product.rebate * self.solver._multiplier(product), "delta": 0.0, "gamma": 0.0}
+    def _continuous_hit_record(self, product, env) -> EventRecord:
+        return EventRecord(product.lower_barrier, product.upper_barrier,
+                           self._hit_price(product, env) if product.is_knock_out else 0.0, EventOp.SET)
 
     def _knock_out_product(self, product):
         from quantark.asset.equity.product.option.double_barrier_option import DoubleBarrierOption
@@ -340,15 +362,6 @@ class _TouchAdapter(_BarrierFamilyAdapter):
             settlement_time,
         )
 
-    def _hit_price(self, product, env):
-        # No-touch already failed: 0.0
-        return self._touched_value(product, env) if self._is_touch_paying(product) else 0.0
-
-    def _hit_greeks(self, product, env):
-        # Already touched, fixed rebate (delta=gamma=0); no-touch already failed
-        if self._is_touch_paying(product):
-            return {"price": self._touched_value(product, env), "delta": 0.0, "gamma": 0.0}
-        return {"price": 0.0, "delta": 0.0, "gamma": 0.0}
 
 
 class OneTouchAdapter(_TouchAdapter):
@@ -361,6 +374,10 @@ class OneTouchAdapter(_TouchAdapter):
     def _is_touch_paying(self, product) -> bool:
         return product.is_one_touch
 
+    def _continuous_hit_record(self, product, env) -> EventRecord:
+        return EventRecord(*self.solver._sides(product, product.barrier),
+                           self._touched_value(product, env) if product.is_one_touch else 0.0, EventOp.SET)
+
 
 class DoubleOneTouchAdapter(_TouchAdapter):
     """``double_one_touch_pde_solver.py``."""
@@ -371,3 +388,7 @@ class DoubleOneTouchAdapter(_TouchAdapter):
 
     def _is_touch_paying(self, product) -> bool:
         return product.is_double_one_touch
+
+    def _continuous_hit_record(self, product, env) -> EventRecord:
+        return EventRecord(product.lower_barrier, product.upper_barrier,
+                           self._touched_value(product, env) if product.is_double_one_touch else 0.0, EventOp.SET)

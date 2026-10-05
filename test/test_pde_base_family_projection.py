@@ -134,7 +134,14 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
     if "column" in banked and not put:
         out = run(prepare(cls(PDEParams(event_projection="nodal", stepper=V070_STEPPER)), factory(), env,
                           OutputRequest(Operation.SESSION_OUTPUTS, grid=True)))
-        assert_close(list(map(float, out.solution.solution_vec)), [float.fromhex(h) for h in banked["column"]])
+        live, golden = list(map(float, out.solution.solution_vec)), [float.fromhex(h) for h in banked["column"]]
+        if name == "valuation_date_only":
+            # spec 3C decision 25: the valuation-date observation is the readout's decision, never written into
+            # the nodes; the surface is the continuation, equal to 0.7.0's where its record is not breached
+            keep = out.solution.s_vec < factory().barrier
+            live = [v for v, k in zip(live, keep) if k]
+            golden = [v for v, k in zip(golden, keep) if k]
+        assert_close(live, golden)
     if ops is not None:
         terminal, interior = seen[0], seen[1]          # set_terminal_condition runs first, then the 0.5 node
         assert set(terminal) == {ops[1]} and set(interior) == {ops[0]}

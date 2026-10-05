@@ -1195,7 +1195,82 @@ def rows_3c(existing):
     for name, (cls, make) in mult10.items():
         out[f"3c|mult10|{name}"] = _row(
             lambda c=cls, m=make: solver_price_greeks(c(params=p_default()), m(), env_flat()))
+
+    # Task 7: the decision at the valuation instant (spec 3C §7.1 (f))
+    out.update(_rows_3c_valuation_decision())
     return out
+
+
+def _rows_3c_valuation_decision():
+    """Spec 3C §7.1 (f): future-only observations on both sides of each barrier, a late-start and an ACCUMULATE
+    schedule beyond its level, and valuation-date records (the products of test_valuation_decision.py)."""
+    from quantark.asset.equity.engine.pde import (BarrierPDESolver, DoubleBarrierPDESolver, DoubleOneTouchPDESolver,
+                                                  OneTouchPDESolver)
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+    from quantark.util.enum import ObservationAggregation
+
+    first, acc = ObservationAggregation.STOP_FIRST_HIT, ObservationAggregation.ACCUMULATE
+    monthly, late = [k / 12.0 for k in range(1, 13)], [k / 12.0 for k in range(7, 13)]
+    disc = dict(observation_type=ObservationType.DISCRETE)
+
+    def sch(times, mode=first, *, double=False, payoff=5.0, level=130.0):
+        kw = dict(upper_barrier=130.0, lower_barrier=80.0) if double else {}
+        return ObservationSchedule.from_legacy(observation_dates=list(times), default_barrier=None if double else level,
+                                               default_payoff=payoff, aggregation_mode=mode, **kw)
+
+    def uo(dates=monthly, mode=first, schedule=None):
+        kw = dict(observation_schedule=schedule) if schedule is not None else (
+            dict(observation_dates=list(dates)) if mode is first else dict(observation_schedule=sch(dates, mode)))
+        return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
+                             maturity=1.0, rebate=5.0, **disc, **kw)
+
+    def do():
+        return BarrierOption(strike=100.0, option_type=OptionType.PUT, barrier=85.0, barrier_type=BarrierType.DOWN_OUT,
+                             maturity=1.0, rebate=3.0, observation_dates=monthly, **disc)
+
+    def dko(schedule=None):
+        kw = dict(observation_schedule=schedule) if schedule is not None else dict(observation_dates=monthly)
+        return DoubleBarrierOption(100.0, OptionType.CALL, 130.0, 80.0, DoubleBarrierType.KNOCK_OUT, maturity=1.0,
+                                   rebate=5.0, **disc, **kw)
+
+    def ot(schedule=None, rebate=1.0):
+        kw = dict(observation_schedule=schedule) if schedule is not None else dict(observation_dates=monthly)
+        return OneTouchOption(barrier=130.0, barrier_direction=BarrierDirection.UP, maturity=1.0, rebate=rebate,
+                              payment_at_hit=False, touch_type=TouchType.ONE_TOUCH, **disc, **kw)
+
+    def dot(schedule):
+        return DoubleOneTouchOption(upper_barrier=130.0, lower_barrier=80.0, maturity=1.0, rebate=5.0,
+                                    payment_at_hit=False, touch_type=TouchType.DOUBLE_ONE_TOUCH,
+                                    observation_schedule=schedule, **disc)
+
+    def record_product():
+        s = ObservationSchedule(records=[ObservationRecord(observation_time=0.0, barrier=120.0, payoff=7.0,
+                                                           settlement_time=0.25),
+                                         ObservationRecord(observation_time=0.5), ObservationRecord(observation_time=1.0)],
+                                aggregation_mode=first)
+        return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
+                             maturity=1.0, rebate=5.0, pay_at_hit=True, observation_schedule=s, **disc)
+
+    now = [0.0, 0.5, 1.0]
+    cells = {
+        "3c|vdec|uo|inside": (BarrierPDESolver, uo, 100.0), "3c|vdec|uo|beyond": (BarrierPDESolver, uo, 135.0),
+        "3c|vdec|do|inside": (BarrierPDESolver, do, 100.0), "3c|vdec|do|beyond": (BarrierPDESolver, do, 80.0),
+        "3c|vdec|dko|inside": (DoubleBarrierPDESolver, dko, 100.0),
+        "3c|vdec|dko|beyond": (DoubleBarrierPDESolver, dko, 135.0),
+        "3c|vdec|ot|inside": (OneTouchPDESolver, ot, 100.0), "3c|vdec|ot|beyond": (OneTouchPDESolver, ot, 135.0),
+        "3c|vdec|uo_late|beyond": (BarrierPDESolver, lambda: uo(late), 135.0),
+        "3c|vdec|accumulate|beyond": (BarrierPDESolver, lambda: uo(monthly, acc), 135.0),
+    }
+    for s in (119.99, 120.0, 135.0):
+        cells[f"3c|vrec|uo|{s}"] = (BarrierPDESolver, record_product, s)
+    for side, s in (("in", 129.99), ("out", 130.01)):
+        cells[f"3c|vrec|dko|{side}"] = (DoubleBarrierPDESolver, lambda: dko(sch(now, double=True)), s)
+        cells[f"3c|vrec|ot|{side}"] = (OneTouchPDESolver, lambda: ot(sch(now), rebate=5.0), s)
+        cells[f"3c|vrec|dot|{side}"] = (DoubleOneTouchPDESolver, lambda: dot(sch(now, double=True)), s)
+        cells[f"3c|vrec|acc|{side}"] = (BarrierPDESolver, lambda: uo(schedule=sch(now, acc)), s)
+    return {rid: _row(lambda c=cls, m=make, s=spot: solver_price_greeks(c(params=p_default()), m(),
+                                                                       env_with_spot(env_flat(), s)))
+            for rid, (cls, make, spot) in cells.items()}
 
 
 def rows():

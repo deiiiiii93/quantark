@@ -331,6 +331,24 @@ class BasePDESolver(BaseEngine):
                     idx = int(np.argmin(np.abs(t_vec - obs_time)))
                     self._observation_indices.add(idx)
 
+    def _valuation_instant_records(self, product, pricing_env, resolve_kwargs):
+        """The records observed at the valuation instant, exactly those ``_setup_observation_indices`` files under
+        time index 0 (spec 3C decision 25, P5), found without a time grid: None when nothing is observed then;
+        ``[]`` for a bare observation date at 0 (the product's default record); else the resolved records."""
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            if schedule.aggregation_mode in (ObservationAggregation.BEST, ObservationAggregation.WORST):
+                raise PricingError(f"PDE solver does not support aggregation mode {schedule.aggregation_mode.value}")
+            kwargs = dict(resolve_kwargs or {})
+            kwargs.setdefault("product", product)
+            records = [rec for rec in schedule.resolve(pricing_env=pricing_env, **kwargs)
+                       if is_close(rec.observation_time, 0.0)]
+            return records or None
+        if (getattr(product, "observation_type", None) == ObservationType.DISCRETE
+                and getattr(product, "observation_dates", None) is not None):
+            return [] if any(is_close(t, 0.0) for t in product.observation_dates) else None
+        return None
+
     def _resolved_terminal_payoffs(
         self,
         product: BaseEquityProduct,

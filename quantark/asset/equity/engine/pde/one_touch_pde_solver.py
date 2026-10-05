@@ -203,7 +203,9 @@ class OneTouchPDESolver(BasePDESolver):
         """
         # For discrete monitoring, only check at observation times
         if product.observation_type == ObservationType.DISCRETE:
-            if t_idx not in self._observation_indices:
+            # index 0 is the valuation instant: its observation is the readout's decision, never written into the
+            # nodes (spec 3C decision 25); the surface at t = 0 is the continuation
+            if t_idx == 0 or t_idx not in self._observation_indices:
                 return
 
         current_time = self._current_time(self._total_tau, tau)

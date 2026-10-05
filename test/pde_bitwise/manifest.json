@@ -1111,6 +1111,90 @@
   "error": null,
   "none": []
  },
+ "3c|vdec|accumulate|beyond": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|dko|beyond": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|dko|inside": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|do|beyond": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|do|inside": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|ot|beyond": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|ot|inside": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|uo_late|beyond": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|uo|beyond": {
+  "error": null,
+  "none": []
+ },
+ "3c|vdec|uo|inside": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|acc|in": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|acc|out": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|dko|in": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|dko|out": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|dot|in": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|dot|out": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|ot|in": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|ot|out": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|uo|119.99": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|uo|120.0": {
+  "error": null,
+  "none": []
+ },
+ "3c|vrec|uo|135.0": {
+  "error": null,
+  "none": []
+ },
  "american_dated|flat|fast": {
   "error": null,
   "none": []

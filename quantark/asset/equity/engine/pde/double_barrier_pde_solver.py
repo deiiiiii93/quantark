@@ -186,7 +186,9 @@ class DoubleBarrierPDESolver(BasePDESolver):
         """
         # For discrete monitoring, only check at observation times
         if product.observation_type == ObservationType.DISCRETE:
-            if t_idx not in self._observation_indices:
+            # index 0 is the valuation instant: its observation is the readout's decision, never written into the
+            # nodes (spec 3C decision 25); the surface at t = 0 is the continuation
+            if t_idx == 0 or t_idx not in self._observation_indices:
                 return
 
         # _setup_observation_indices (the adapter's observation maps) always sets _total_tau

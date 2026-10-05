@@ -231,7 +231,9 @@ class BarrierPDESolver(BasePDESolver):
         # For continuous monitoring, always apply barrier
         # For discrete, only at observation times
         if product.observation_type == ObservationType.DISCRETE:
-            if t_idx not in self._observation_indices:
+            # index 0 is the valuation instant: its observation is the readout's decision, never written into the
+            # nodes (spec 3C decision 25); the surface at t = 0 is the continuation
+            if t_idx == 0 or t_idx not in self._observation_indices:
                 return
 
         total_tau = (
