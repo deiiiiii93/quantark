@@ -39,7 +39,9 @@ def one_sided(f, s, barriers, h=1e-4):
 
 
 def reference(name, s):
-    """(price, delta, gamma) of the six knock-ins of §4.10 without a rebate (Task 12 adds the rebate cells)."""
+    """(price, delta, gamma) of the knock-ins of §4.10, with and without a rebate of 5."""
+    if name.endswith("_rb5"):
+        return reference_rebate(name, s)
     if name == "cont_ui_call_130":
         f = lambda x: BarrierAnalyticalEngine().price(barrier("UI", True, 130.0), env_const(x))     # noqa: E731
         return one_sided(f, s, [130.0])
@@ -58,6 +60,22 @@ def reference(name, s):
     return bs[0] - ko[0], bs[1] - ko[1], bs[2] - ko[2]
 
 
+def reference_rebate(name, s):
+    """The three rebate cells of §4.10: the closed forms price the rebate; the monthly cell adds 5 x survival."""
+    if name == "cont_ui_call_130_rb5":
+        f = lambda x: BarrierAnalyticalEngine().price(barrier("UI", True, 130.0, rebate=5.0), env_const(x))  # noqa: E731
+        return one_sided(f, s, [130.0])
+    if name == "cont_dki_call_rb5":
+        p = DoubleBarrierOption(100.0, OptionType.CALL, 130.0, 80.0, DoubleBarrierType.KNOCK_IN, maturity=1.0, rebate=5.0,
+                                observation_type=ObservationType.CONTINUOUS)
+        f = lambda x: DoubleBarrierOptionAnalyticalEngine().price(p, env_const(x))                      # noqa: E731
+        return one_sided(f, s, [80.0, 130.0])
+    p, d, g = reference("monthly_ui_call_130", s)                                                       # monthly
+    surv = knock_out(payoff="one", strike=100.0, lower=None, upper=130.0, cash=0.0, at_hit=False,
+                     obs=obs_dates("monthly"), spots=[s], **M)[0][s]
+    return p + 5.0 * surv[0], d + 5.0 * surv[1], g + 5.0 * surv[2]
+
+
 PRODUCTS = {
     "cont_ui_call_130": (BarrierPDESolver, lambda: barrier("UI", True, 130.0), [80, 100, 120, 129, 131, 150]),
     "cont_di_put_85": (BarrierPDESolver, lambda: barrier("DI", False, 85.0), [70, 84, 86, 100, 120]),
@@ -67,6 +85,14 @@ PRODUCTS = {
                       lambda: DoubleBarrierOption(100.0, OptionType.CALL, 130.0, 80.0, DoubleBarrierType.KNOCK_IN,
                                                   maturity=1.0, observation_type=ObservationType.CONTINUOUS),
                       [70, 79, 82, 100, 129, 131]),
+    # Task 12: the rebate cells of §4.10
+    "cont_ui_call_130_rb5": (BarrierPDESolver, lambda: barrier("UI", True, 130.0, rebate=5.0), [80, 100, 120, 129, 131, 150]),
+    "monthly_ui_call_130_rb5": (BarrierPDESolver, lambda: barrier("UI", True, 130.0, obs="monthly", rebate=5.0),
+                                [80, 100, 120, 135, 150]),
+    "cont_dki_call_rb5": (DoubleBarrierPDESolver,
+                          lambda: DoubleBarrierOption(100.0, OptionType.CALL, 130.0, 80.0, DoubleBarrierType.KNOCK_IN,
+                                                      maturity=1.0, rebate=5.0, observation_type=ObservationType.CONTINUOUS),
+                          [70, 79, 82, 100, 129, 131]),
 }
 
 

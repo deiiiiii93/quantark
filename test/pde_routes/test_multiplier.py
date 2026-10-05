@@ -79,3 +79,19 @@ def test_multiplier_one_is_bit_identical_to_the_unit_solve():
     plain = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
                           maturity=1.0, rebate=5.0, observation_type=ObservationType.CONTINUOUS)
     assert BarrierPDESolver().price(plain, env).hex() == BarrierPDESolver().price(barrier(1.0), env).hex()
+
+
+# --- Task 12: a knock-in with a rebate per contract (spec 3C decision 8) ------------------------------------------
+
+@pytest.mark.parametrize("cls,make,spot", [
+    (BarrierPDESolver, lambda m: barrier(m, BarrierType.UP_IN, 5.0), 100.0),
+    (DoubleBarrierPDESolver, lambda m: double(m, DoubleBarrierType.KNOCK_IN, 5.0), 100.0),
+    (BarrierPDESolver, lambda m: barrier(m, BarrierType.UP_IN, 5.0), 135.0),        # knocked in: the rebate is forfeited
+], ids=["up_in_rebate", "double_in_rebate", "up_in_rebate_knocked_in"])
+def test_knock_in_with_rebate_scales(cls, make, spot):
+    env = env_const(spot)
+    one, ten = make(1.0), make(10.0)
+    assert _ratio_ok(cls().price(one, env), cls().price(ten, env))
+    g1, g10 = cls().calculate_greeks(one, env), cls().calculate_greeks(ten, env)
+    for k in ("price", "delta", "gamma"):
+        assert _ratio_ok(g1[k], g10[k]), k

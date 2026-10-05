@@ -14,7 +14,8 @@ import numpy as np
 
 from quantark.asset.equity.engine.pde.grid.events import DiscreteEvent, EventOp, EventRecord, fold_decision
 from quantark.util.enum import ObservationAggregation, ObservationType
-from quantark.util.exceptions import PricingError
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import is_close
 
 from ..prepare import CompositeProblem, Operation, TerminalOutcome, prepare
 from .base import FamilyAdapter
@@ -166,7 +167,24 @@ class _BarrierFamilyAdapter(FamilyAdapter):
 
 
 class _KnockInAdapter(_BarrierFamilyAdapter):
-    """Barrier and double barrier: knock-in = participation × vanilla − knock-out."""
+    """Barrier and double barrier: knock-in = participation × vanilla + R DF(T_pay) − knock-out(R)."""
+
+    def validate(self, product, env, request, lifecycle_state) -> None:
+        super().validate(product, env, request, lifecycle_state)
+        if request.operation not in _FACADE or not getattr(product, "is_knock_in", False):
+            return
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is None:
+            return
+        if schedule.aggregation_mode != ObservationAggregation.STOP_FIRST_HIT:
+            raise ValidationError(
+                "a knock-in is priced as participation x vanilla + rebate - knock-out, which holds only under "
+                f"first-hit monitoring; aggregation {schedule.aggregation_mode.value} is refused (spec 3C decision 8)")
+        for rec in schedule.records:
+            if rec.payoff is not None and not is_close(rec.payoff, product.rebate):
+                raise ValidationError(
+                    f"a knock-in has one rebate ({product.rebate}); a schedule record pays {rec.payoff} "
+                    "(spec 3C §5.2 (a))")
 
     def composite(self, product, env, request, lifecycle_state):
         op = request.operation
@@ -181,8 +199,8 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
 
     def _composition(self, product, env):
         """(participation, constant) of knock-in = participation x vanilla + constant - knock-out (spec 3C §5.2 (a));
-        the constant is R x DF(0, T_pay) from repair (a) on."""
-        return self._participation(product), 0.0
+        the constant is R x DF(0, T_pay), per contract."""
+        return self._participation(product), self._rebate_constant(product, env)
 
     def _rebate_constant(self, product, env) -> float:
         """R x DF(0, T_pay), per contract: the cash a knock-in pays at the terminal payment time when it never
@@ -344,6 +362,13 @@ class BarrierAdapter(_KnockInAdapter):
         else:
             ko_type = product.barrier_type
 
+        schedule = product.observation_schedule
+        if schedule is not None:
+            # the leg pays the knock-in's one rebate on every record (validate refused any other payoff)
+            import dataclasses
+            from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
+            schedule = ObservationSchedule(records=[dataclasses.replace(r, payoff=product.rebate) for r in schedule.records],
+                                           aggregation_mode=schedule.aggregation_mode, frequency=schedule.frequency)
         return BarrierOption(
             strike=product.strike,
             option_type=product.option_type,
@@ -352,12 +377,12 @@ class BarrierAdapter(_KnockInAdapter):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
-            rebate=0.0,  # Zero rebate for decomposition
+            rebate=product.rebate,          # the leg carries R, paid at maturity: a knock-in's rebate is known then
             participation_rate=product.participation_rate,
-            pay_at_hit=product.pay_at_hit,
+            pay_at_hit=False,
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
-            observation_schedule=product.observation_schedule,
+            observation_schedule=schedule,
             settlement_convention=product.settlement_convention,
             contract_multiplier=product.contract_multiplier,
         )
@@ -401,7 +426,7 @@ class DoubleBarrierAdapter(_KnockInAdapter):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
-            rebate=0.0,  # Zero rebate for decomposition
+            rebate=product.rebate,          # the leg carries R, paid at maturity (spec 3C §5.2 (a))
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
             observation_schedule=product.observation_schedule,

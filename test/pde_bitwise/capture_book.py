@@ -1222,6 +1222,39 @@ def rows_3c(existing):
 
     # Task 10: session outputs and the public curve (spec 3C §7.1 (g))
     out.update(_rows_3c_session_grid())
+
+    # Task 12: a knock-in's rebate (spec 3C §7.1 (a), decision 8)
+    out.update(_rows_3c_knock_in_rebate())
+    return out
+
+
+def _rows_3c_knock_in_rebate():
+    """Spec 3C §7.1 (a): single and double knock-ins with a rebate of 5 - price, Greeks, session grid and curve."""
+    from quantark.asset.equity.engine.pde import BarrierPDESolver, DoubleBarrierPDESolver
+
+    def ui_call(obs):
+        kw = (dict(observation_type=ObservationType.CONTINUOUS) if obs == "cont" else
+              dict(observation_type=ObservationType.DISCRETE, observation_dates=[k / 12.0 for k in range(1, 13)]))
+        return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_IN,
+                             maturity=1.0, rebate=5.0, **kw)
+
+    def dki(option_type):
+        return DoubleBarrierOption(100.0, option_type, 130.0, 80.0, DoubleBarrierType.KNOCK_IN, maturity=1.0,
+                                   rebate=5.0, observation_type=ObservationType.CONTINUOUS)
+
+    cells = {"ui_call_cont": (BarrierPDESolver, lambda: ui_call("cont")),
+             "ui_call_monthly": (BarrierPDESolver, lambda: ui_call("monthly")),
+             "dki_call": (DoubleBarrierPDESolver, lambda: dki(OptionType.CALL)),
+             "dki_put": (DoubleBarrierPDESolver, lambda: dki(OptionType.PUT))}
+    levels = (80.0, 100.0, 125.0, 135.0)
+    out = {}
+    for name, (cls, make) in cells.items():
+        out[f"3c|ki_rebate|{name}|price"] = _row(lambda c=cls, m=make: solver_price(c(params=p_default()), m(),
+                                                                                   env_flat()))
+        out[f"3c|ki_rebate|{name}|greeks"] = _row(lambda c=cls, m=make: solver_price_greeks(
+            c(params=p_default()), m(), env_flat()))
+        out[f"3c|ki_rebate|{name}|grid"] = _row(lambda c=cls, m=make: session_grid_row(c, m(), env_flat(), levels))
+        out[f"3c|ki_rebate|{name}|curve"] = _row(lambda c=cls, m=make: curve_row(c, m(), env_flat(), levels))
     return out
 
 

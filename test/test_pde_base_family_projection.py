@@ -14,6 +14,7 @@ from quantark.asset.equity.engine.pde.grid import DiscreteEvent, EventOp, EventR
 from quantark.asset.equity.engine.pde.grid.events import _dual_cell_edges
 from quantark.asset.equity.param import PDEParams
 from quantark.util.enum.engine_enums import EventProjectionMode as P
+from quantark.util.exceptions import ValidationError
 
 from pde_3a.semantics import cases
 from term_structure_benchmarks import make_term_env
@@ -123,6 +124,12 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
     monkeypatch.setattr(BasePDESolver, "_apply_discrete_event", spy)
     monkeypatch.setattr(BasePDESolver, "_apply_discrete_event_at", spy_at)
     solver = cls(PDEParams(event_projection="nodal", stepper=V070_STEPPER))
+    if name.startswith(("barrier_di_put|", "double_ki|")):
+        # spec 3C decision 8: a knock-in has one rebate and first-hit monitoring; these 0.7.0 knock-ins carry per-record
+        # payoffs on a rebate of 0 (and '|acc' accumulates), so they are refused rather than priced
+        with pytest.raises(ValidationError):
+            solver.calculate_greeks(factory(), env)
+        return
     g = solver.calculate_greeks(factory(), env)
     banked = V070[name]
     # flip (g) moves every put's far-field row (forward over [t, T], spec 3A §5.10): a put keeps its

@@ -1275,6 +1275,70 @@
   "error": null,
   "none": []
  },
+ "3c|ki_rebate|dki_call|curve": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|dki_call|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|dki_call|grid": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|dki_call|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|dki_put|curve": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|dki_put|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|dki_put|grid": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|dki_put|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|ui_call_cont|curve": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|ui_call_cont|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|ui_call_cont|grid": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|ui_call_cont|price": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|ui_call_monthly|curve": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|ui_call_monthly|greeks": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|ui_call_monthly|grid": {
+  "error": null,
+  "none": []
+ },
+ "3c|ki_rebate|ui_call_monthly|price": {
+  "error": null,
+  "none": []
+ },
  "3c|lifecycle|barrier|alive|pv_grid": {
   "error": "CapabilityError",
   "none": []
