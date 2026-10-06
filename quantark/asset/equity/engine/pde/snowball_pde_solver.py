@@ -23,6 +23,7 @@ from scipy.special import ndtr
 
 _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
+from quantark.asset.equity.engine.pde.core.adapters.base import continuous_knock_in
 from quantark.asset.equity.engine.pde.core.adapters.snowball import SnowballAdapter
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest
 from quantark.asset.equity.engine.pde.core.statistics.rows import EdgeRow, RowTerm
@@ -1442,6 +1443,28 @@ class SnowballPDESolver(BasePDESolver):
                 # Deep OTM: principal + rebate (discounted)
                 v = (principal + rebate) * df_to_maturity
                 upper = EdgeRow(v, "v0_upper_principal_rebate", (RowTerm("M", v),))
+        return self._knock_in_side_row(t_idx, tau, product, pricing_env, s_vec, lower, upper)
+
+    def _knock_in_side_row(self, t_idx, tau, product, pricing_env, s_vec, lower, upper):
+        """Under discretely observed knock-in (European included), keyed on the contract, the not-knocked-in row on
+        the knock-in side takes the knocked-in surface's row and its allocation (spec 3C §5.5, decision 15): the
+        lower row of a standard product, the upper row of a reverse one, where that edge lies beyond every knock-in
+        level - and only while a knock-in observation remains at or after the row's time, read from the product's
+        resolved observation times (never a solver's index set, which the 2D solvers never fill)."""
+        if not product.has_ki_barrier or continuous_knock_in(product):
+            return lower, upper
+        now = self._total_tau - tau
+        times = self._get_cached_ki_profile(pricing_env, product)["observation_times"]
+        if not any(t is not None and is_greater_than_or_close(float(t), now) for t in times):
+            return lower, upper
+        barrier = product.barrier_config.ki_barrier
+        levels = [float(b) for b in barrier] if isinstance(barrier, (list, tuple)) else [float(barrier)]
+        if not product.is_reverse and float(s_vec[0]) < min(levels):
+            v1_lower, _ = self._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
+            lower = EdgeRow(v1_lower.value, "v0_lower_certain_ki", v1_lower.terms)
+        elif product.is_reverse and float(s_vec[-1]) > max(levels):
+            _, v1_upper = self._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
+            upper = EdgeRow(v1_upper.value, "v0_upper_certain_ki", v1_upper.terms)
         return lower, upper
 
     def _set_boundary_conditions_v1(

@@ -1298,15 +1298,20 @@ def rows_3c(existing):
 
 
 def _rows_3c_european_knock_in():
-    import dataclasses
-
     from quantark.asset.equity.engine.pde import KOResetSnowballPDESolver, PhoenixPDESolver, SnowballPDESolver
 
     def phoenix_ki_at_maturity():
-        # the Phoenix builder has no "european" mode: its discrete knock-in observed at maturity only
-        p = make_phoenix(dict(PHOENIX, ki_monitoring="discrete"))
-        p.barrier_config = dataclasses.replace(p.barrier_config, ki_observation_dates=[float(PHOENIX["maturity"])])
-        return p
+        # the Phoenix builder has no "european" mode: its discrete knock-in observed at maturity only, built as
+        # $E/r1_ki_row_followups.py:37-46 builds it (replacing ki_observation_dates after construction leaves the
+        # builder's monthly ki_observation_schedule in force - the monthly Phoenix again)
+        from quantark.modelvalidation.builders import equity_phoenix
+        orig = equity_phoenix._ki_kwargs
+        equity_phoenix._ki_kwargs = lambda s: {"ki_continuous": False, "ki_observation_type": ObservationType.DISCRETE,
+                                               "ki_observation_dates": [float(s["maturity"])]}
+        try:
+            return make_phoenix(dict(PHOENIX, ki_monitoring="discrete"))
+        finally:
+            equity_phoenix._ki_kwargs = orig
 
     products = {
         "snowball": (SnowballPDESolver, lambda: make_snowball(dict(SNOWBALL, ki_monitoring="european"))),
