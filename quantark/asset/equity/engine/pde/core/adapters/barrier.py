@@ -55,6 +55,7 @@ class _BarrierFamilyAdapter(FamilyAdapter):
                 f"got {type(product).__name__}"
             )
         self._validate_observation(product)
+        self._validate_expiry_march(product, env)
         # The lifecycle wrapper's check on every price / calculate_greeks call
         # (the knock-out leg of a composite went through it as super().price).
         from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
@@ -62,6 +63,21 @@ class _BarrierFamilyAdapter(FamilyAdapter):
 
     def _validate_observation(self, product) -> None:
         pass
+
+    def _validate_expiry_march(self, product, env) -> None:
+        """Only the single barrier marches EXPIRY monitoring (one record at maturity, its far-field row; spec 3C
+        §5.2 (b)). The double barrier and the touch products have no such row (§9), and their march applied the
+        barrier at every step: before maturity they refuse EXPIRY. At maturity it is decision 30's terminal value."""
+        if self._marches_expiry or getattr(product, "observation_type", None) != ObservationType.EXPIRY:
+            return
+        if product.get_maturity(env) > 0:
+            raise ValidationError(
+                f"{type(self.solver).__name__} does not march EXPIRY monitoring before maturity: it has no far-field "
+                "row for a barrier observed only at maturity. Use the analytic engine, or DISCRETE monitoring with "
+                "one observation at maturity")
+
+    #: whether the family marches EXPIRY before maturity (the single barrier does; spec 3C §5.2 (b))
+    _marches_expiry = False
 
     # --- the outcomes known at valuation --------------------------------------
 
@@ -198,8 +214,8 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         return self._compose(product, env, request, knock_out=not knocked_in)
 
     def bump_parts(self, product, env):
-        if product.is_knock_out:
-            return None
+        if product.is_knock_out or product.get_maturity(env) <= 0:
+            return None                          # at maturity no part product is built (decision 30), nothing to freeze
         solver = self.solver
         parts = {"vanilla": (solver._vanilla_solver(), self._vanilla_product(product))}
         if not self.decision_at(product, env, env.spot)[3]:
@@ -320,6 +336,8 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
 
 class BarrierAdapter(_KnockInAdapter):
     """``barrier_pde_solver.py``."""
+
+    _marches_expiry = True
 
     def _product_class(self):
         from quantark.asset.equity.product.option.barrier_option import BarrierOption

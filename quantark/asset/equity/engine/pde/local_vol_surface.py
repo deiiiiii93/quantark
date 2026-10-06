@@ -55,6 +55,16 @@ class LocalVolSurfaceMixin:
         with self._surface_scope(env):
             return fn()
 
+    def representative_vol(self, product, pricing_env) -> float:
+        # A surface that is not the environment's own (the Heston/SLV deterministic limit) states the vol its grid
+        # must span; a Dupire surface states none and the domain stays the environment's strike vol.
+        vol = super().representative_vol(product, pricing_env)
+        surface = self._active_lv_surface if self._active_lv_surface is not None else self._prebuilt
+        domain_vol = getattr(surface, "domain_vol", None)
+        if domain_vol is None:
+            return vol
+        return max(vol, domain_vol(float(product.get_maturity(pricing_env))))
+
     def _constructor_kwargs(self) -> dict:
         return {**super()._constructor_kwargs(), "local_vol_surface": self._prebuilt}
 

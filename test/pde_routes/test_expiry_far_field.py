@@ -79,3 +79,39 @@ def test_accumulate_keeps_todays_row():
     solver.price(p, env_const(100.0))
     assert solver._next_observation(0.5) is not None
     assert solver._schedule_aggregation is ObservationAggregation.ACCUMULATE
+
+
+# --- final review I2: EXPIRY on the double barrier and the touch products ---------------------------------------
+
+
+def _expiry_products():
+    from quantark.asset.equity.engine.pde import DoubleBarrierPDESolver, DoubleOneTouchPDESolver, OneTouchPDESolver
+    from quantark.asset.equity.product.option import DoubleBarrierOption
+    from quantark.asset.equity.product.option.double_one_touch_option import DoubleOneTouchOption
+    from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
+    from quantark.util.enum import BarrierDirection, DoubleBarrierType, ObservationType, OptionType, TouchType
+    x = ObservationType.EXPIRY
+    return {
+        "double_knock_out": (DoubleBarrierPDESolver, lambda: DoubleBarrierOption(
+            100.0, OptionType.CALL, 130.0, 80.0, DoubleBarrierType.KNOCK_OUT, maturity=1.0, observation_type=x)),
+        "double_knock_in": (DoubleBarrierPDESolver, lambda: DoubleBarrierOption(
+            100.0, OptionType.CALL, 130.0, 80.0, DoubleBarrierType.KNOCK_IN, maturity=1.0, observation_type=x)),
+        "one_touch": (OneTouchPDESolver, lambda: OneTouchOption(
+            barrier=120.0, barrier_direction=BarrierDirection.UP, rebate=10.0, payment_at_hit=False,
+            touch_type=TouchType.ONE_TOUCH, maturity=1.0, observation_type=x)),
+        "double_one_touch": (DoubleOneTouchPDESolver, lambda: DoubleOneTouchOption(
+            upper_barrier=120.0, lower_barrier=85.0, rebate=10.0, payment_at_hit=False,
+            touch_type=TouchType.DOUBLE_ONE_TOUCH, maturity=1.0, observation_type=x)),
+    }
+
+
+@pytest.mark.parametrize("name", ["double_knock_out", "double_knock_in", "one_touch", "double_one_touch"])
+def test_expiry_before_maturity_is_refused_where_no_expiry_far_field_row_exists(name):
+    """These solvers' march applied the barrier at every step under EXPIRY (a double knock-out 2.66 against the exact
+    4.64): only the single barrier has the EXPIRY far-field row (spec 3C §5.2 (b); §9 leaves the others unbuilt), so
+    before maturity they refuse instead of pricing continuous monitoring. At maturity EXPIRY is decision 30's
+    terminal value (test_maturity.py)."""
+    from quantark.util.exceptions import ValidationError
+    cls, make = _expiry_products()[name]
+    with pytest.raises(ValidationError, match="EXPIRY"):
+        cls().price(make(), env_const(100.0))

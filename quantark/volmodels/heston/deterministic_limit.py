@@ -29,6 +29,12 @@ class DeterministicVarianceLocalVol:
         p = self.params
         return p.theta + (p.v0 - p.theta) * np.exp(-p.kappa * np.asarray(t, dtype=float))
 
+    def domain_vol(self, tau: float) -> float:
+        """The largest sqrt(v(t)) on [0, tau] (v moves monotonically from v0 toward theta): the grid's domain vol, so
+        an environment quoting a lower vol does not narrow the grid. The leverage is not in it; under SLV the
+        environment's own vol is the one the leverage reproduces."""
+        return float(np.sqrt(max(self.params.v0, float(self.variance(tau)))))
+
     def local_vol(self, spot, t):
         s = np.asarray(spot, dtype=float)
         vol = np.sqrt(self.variance(t))

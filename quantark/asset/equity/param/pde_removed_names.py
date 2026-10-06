@@ -75,6 +75,7 @@ REMOVED_IN: Mapping[str, str] = {
     "terminal_damping_steps": "0.7.0",
     "event_damping_steps": "0.7.0",
     "day_count": "0.8.0",
+    "layout": "0.10.0",
 }
 
 REMOVED_DCN_NAMES: Mapping[str, str] = {
@@ -88,8 +89,8 @@ REMOVED_DCN_NAMES: Mapping[str, str] = {
     "concentration": "removed; never read",
     # 0.10.0 (spec 3C §5.4): the DCN marches on the core
     "layout": (
-        "removed in 0.10.0 from price_detailed; the grid comes from DCNPDEEngine(params=PDEParams(grid=GridConfig(...))), "
-        "and a bump context freezes it (create_bump_context)"
+        "the grid comes from DCNPDEEngine(params=PDEParams(grid=GridConfig(...))), and a bump context freezes it "
+        "(create_bump_context)"
     ),
 }
 

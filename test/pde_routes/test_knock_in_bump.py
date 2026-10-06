@@ -61,3 +61,15 @@ def test_bump_context_freezes_one_layout_per_part():
     assert set(ctx._frozen_parts) == {"vanilla", "knock_out"} and ctx._frozen_base_layout is None
     knocked = solver.create_bump_context(barrier("UI", True, 130.0), env_const(135.0))
     assert set(knocked._frozen_parts) == {"vanilla"}        # no knock-out leg at the base: a crossing bump binds fresh
+
+
+def test_an_expired_knock_in_has_a_bump_context():
+    """Final review I3: decision 30 builds no part product at maturity, so a bump context of an expired knock-in
+    freezes nothing and prices as the solver does (create_bump_context raised building a zero-maturity vanilla)."""
+    from pde_routes.cases import env_const
+    from pde_routes.test_maturity import at, single
+    from quantark.asset.equity.engine.pde import BarrierPDESolver
+    from quantark.util.enum import BarrierType, ObservationType
+    product, env = at(single(BarrierType.UP_IN), ObservationType.CONTINUOUS, 0.0), env_const(125.0)
+    solver = BarrierPDESolver()
+    assert solver.create_bump_context(product, env).price(product, env) == solver.price(product, env)

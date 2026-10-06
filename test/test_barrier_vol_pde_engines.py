@@ -201,6 +201,22 @@ def test_the_flat_deterministic_limit_is_the_black_scholes_barrier(product, make
     assert abs(make(flat).price(product, _env()) - ana) < 5e-4
 
 
+@pytest.mark.parametrize("product", [
+    _uo_call(),
+    BarrierOption(strike=100., maturity=1.0, option_type=OptionType.PUT, barrier=80.,
+                  barrier_type=BarrierType.DOWN_IN, observation_type=ObservationType.CONTINUOUS),
+], ids=["uo_call_130", "di_put_80"])
+@pytest.mark.parametrize("make", [
+    lambda p: HestonBarrierPDESolver(p),
+    lambda p: HestonSLVBarrierPDESolver(p, _unit_lev()),
+], ids=["heston", "slv"])
+def test_the_deterministic_limit_domain_follows_the_model_not_the_environment(product, make):
+    """An environment quoting 0.05 must not narrow the grid of a model running at 0.30 (final review I4)."""
+    flat = HestonParams(v0=0.09, kappa=1.0, theta=0.09, sigma=1e-9, rho=0.0)
+    ana = BarrierAnalyticalEngine().price(product, _env(vol=0.30))
+    assert abs(make(flat).price(product, _env(vol=0.05)) - ana) < 5e-4
+
+
 def test_the_deterministic_limit_keeps_the_2d_solvers_refusals():
     from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
     from quantark.execution.errors import CapabilityError

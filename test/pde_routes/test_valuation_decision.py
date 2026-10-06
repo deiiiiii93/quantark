@@ -288,3 +288,29 @@ def test_record_levels_lags_and_curves(market, lag, name):
             ref = knock_out_term(payoff=payoff, strike=100.0, lower=80.0 if double else None, upper=130.0, cash=later_cash, at_hit=False,
                                  obs=[0.5, 1.0], spots=[spot], vol=VOL, df=df, growth=growth, terminal_pay=1.0 + lag)[0][spot]
             assert abs(price - scale * ref[0]) <= INSIDE, (spot, price, scale * ref[0])
+
+
+# --- final review C1: a dated observation that a coarse grid snaps to the valuation instant ------------------------
+from datetime import timedelta                                                                  # noqa: E402
+
+from quantark.asset.equity.engine.pde.grid import GridConfig                                    # noqa: E402
+from quantark.asset.equity.param import PDEParams                                                # noqa: E402
+
+
+def _dated_up_out(first_days, with_first=True):
+    dates = ([VAL_DATE + timedelta(days=first_days)] if with_first else []) + [datetime(2026, 7, 1), datetime(2027, 1, 1)]
+    sch = ObservationSchedule(records=[ObservationRecord(observation_date=d) for d in dates], aggregation_mode=FIRST)
+    return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT,
+                         exercise_date=datetime(2027, 1, 1), rebate=5.0, observation_type=ObservationType.DISCRETE,
+                         observation_schedule=sch)
+
+
+@pytest.mark.parametrize("first_days", [3, 10])
+def test_a_dated_observation_a_coarse_grid_snaps_to_the_valuation_instant_is_still_observed(first_days):
+    """An observation after the valuation instant is never filed as the valuation instant's (decision 25): a grid
+    too coarse to resolve it snaps it to the first step node, the nearest-node rule of every interior date."""
+    env, coarse = env_const(140.0), BarrierPDESolver(PDEParams(grid=GridConfig(time_steps=10)))
+    price = coarse.price(_dated_up_out(first_days), env)                     # raised AttributeError
+    # the observation is not dropped; on this 10-step year it is marched at the first node (0.1 y), the nearest-node
+    # rule of every dated record, so it sits 0.32 above the default grid's price (5.177 vs 4.852, measured)
+    assert price != coarse.price(_dated_up_out(first_days, with_first=False), env)

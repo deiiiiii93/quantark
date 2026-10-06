@@ -8,6 +8,7 @@ from pde_routes.dcn_reference import dcn_exact
 from pde_routes.sessions import GRID, PV, session
 from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine, DCNPDEResult
 from quantark.asset.equity.param import PDEParams
+from quantark.util.exceptions import ValidationError
 
 MONEYNESS = (0.70, 0.76, 0.85, 1.00, 1.05, 1.15)          # $E/d3_core_vs_today.py
 BOUND_BP = {"fast": 1.0, "standard": 1.0, "high": 0.3}    # measured 0.38 / 0.35 / 0.10
@@ -44,8 +45,8 @@ def test_price_detailed_reports_the_delivered_steps():
     product, env = dcn_case("A")
     res = DCNPDEEngine().price_detailed(product, env)
     assert isinstance(res, DCNPDEResult) and res.num_time_steps > 485        # 2,953 at standard (decision 20)
-    with pytest.raises(TypeError):
-        DCNPDEEngine().price_detailed(product, env, layout=None)              # the argument is removed
+    with pytest.raises(ValidationError, match="removed in 0.10.0.*GridConfig"):
+        DCNPDEEngine().price_detailed(product, env, layout=None)              # a removed name (REMOVED_DCN_NAMES)
 
 
 def test_nodal_projection_applies_the_legacy_masks():

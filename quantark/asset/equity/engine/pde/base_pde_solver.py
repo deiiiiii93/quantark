@@ -382,7 +382,7 @@ class BasePDESolver(BaseEngine):
                     self._terminal_schedule_records.append(rec)
                     self._has_terminal_observation = True
                 elif 0.0 < rec.observation_time < tau:
-                    idx = int(np.argmin(np.abs(t_vec - rec.observation_time)))
+                    idx = self._interior_observation_index(t_vec, rec.observation_time)
                     self._observation_indices.add(idx)
                     self._schedule_records.setdefault(idx, []).append(rec)
         elif (
@@ -395,8 +395,14 @@ class BasePDESolver(BaseEngine):
                 elif is_close(obs_time, tau):
                     self._has_terminal_observation = True
                 elif 0.0 < obs_time < tau:
-                    idx = int(np.argmin(np.abs(t_vec - obs_time)))
-                    self._observation_indices.add(idx)
+                    self._observation_indices.add(self._interior_observation_index(t_vec, obs_time))
+
+    @staticmethod
+    def _interior_observation_index(t_vec, observation_time) -> int:
+        """The node an observation strictly between the valuation instant and maturity is marched at: the nearest
+        node, but never index 0, which is the valuation instant's own decision (spec 3C decision 25). A dated record
+        is not a node of the time layout, so a grid too coarse to resolve it snaps it to the first step node."""
+        return max(int(np.argmin(np.abs(t_vec - observation_time))), 1)
 
     def _setup_maturity_observation(self, product, pricing_env, resolve_kwargs) -> None:
         """The observation state at maturity (tau <= 0; spec 3C decision 30): the records observed at the valuation
