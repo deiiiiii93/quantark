@@ -93,6 +93,31 @@ def test_changed_candidate_replaces_only_its_own_cells(tmp_path, parent):
     assert certificate.payload["amendment"]["carried_cells"] == []
 
 
+def test_a_named_candidate_reruns_although_its_identity_is_unchanged(tmp_path, parent):
+    """A schema-1 identity is the candidate's configuration: an engine-code change cannot show in it, so the
+    amendment names the candidate whose implementation changed and its cells are re-run against the carried
+    benchmark."""
+    reference = SteadyReference(means_c=CASE_MEANS_C)
+    candidate = OffsetCandidate(means_c=CASE_MEANS_C)
+    certificate = amend(make_study(reference=reference, candidates=(candidate,)), parent=parent.path,
+                        out_dir=tmp_path / "amended", reason="engine code changed",
+                        rerun_candidates=("fake.candidate",))
+
+    assert candidate.calls == 2
+    assert reference.calls == 0
+    amendment = certificate.payload["amendment"]
+    assert len(amendment["replaced_cells"]) == len(parent.payload["cells"])
+    assert amendment["carried_cells"] == []
+    assert amendment["rerun_candidates"] == ["fake.candidate"]
+    validate_parent(certificate.path)
+
+
+def test_rerunning_an_unknown_candidate_is_refused(tmp_path, parent):
+    with pytest.raises(ValidationError, match="fake.absent"):
+        amend(make_study(), parent=parent.path, out_dir=tmp_path / "amended", reason="typo",
+              rerun_candidates=("fake.absent",))
+
+
 def test_new_candidate_is_run_and_old_one_carried(tmp_path, parent):
     kept = OffsetCandidate(name="fake.candidate", means_c=CASE_MEANS_C)
     added = OffsetCandidate(name="fake.added", offset_c=0.1, means_c=CASE_MEANS_C)

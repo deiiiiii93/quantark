@@ -253,6 +253,17 @@ Rules the tool enforces:
   coverage had passed.
 - `--reason` is mandatory and lands in the payload. It is the only part of the
   record that explains *why* the numbers moved.
+- **A schema-1 identity is the candidate's configuration, not its code.** An
+  engine change that leaves every parameter alone carries the old numbers
+  forward. Name the candidate whose implementation changed with
+  `--rerun-candidate NAME` (repeatable): its cells re-run and re-gate against
+  the carried benchmark, and the names land in `amendment.rerun_candidates`.
+  (Schema 2 needs no flag: its identity digests the implementation.)
+- **An imported certificate's external benchmark is never run** (section 10).
+  Every candidate re-runs; a value that comes back bit for bit carries its cell,
+  a moved one is translated by the harness's own interval arithmetic with its
+  envelopes held at their banked values, and any move that would change a
+  verdict is refused — only the harness can re-certify that.
 
 ## 7. Adding a new engine family
 

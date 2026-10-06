@@ -1,7 +1,7 @@
 """One command line for every certification.
 
     python -m quantark.modelvalidation run     <study.yaml> [--quick] [--resume]
-    python -m quantark.modelvalidation amend   <study.yaml> --parent <cert.json> --reason TEXT
+    python -m quantark.modelvalidation amend   <study.yaml> --parent <cert.json> --reason TEXT [--rerun-candidate NAME]
     python -m quantark.modelvalidation anchors <certificate.json> [--out FILE]
     python -m quantark.modelvalidation list
 
@@ -65,6 +65,11 @@ def _build_parser() -> argparse.ArgumentParser:
     amend_parser.add_argument("--out", default=DEFAULT_OUT, help="output root")
     amend_parser.add_argument("--quick", action="store_true", help="shrink sampling")
     amend_parser.add_argument("--resume", action="store_true", help="reuse checkpoints")
+    amend_parser.add_argument(
+        "--rerun-candidate", action="append", default=[], metavar="NAME",
+        help="re-run this candidate's cells although its identity is unchanged (its implementation changed); "
+             "repeatable",
+    )
 
     anchors = subparsers.add_parser(
         "anchors", help="extract CI anchors from a certificate"
@@ -129,6 +134,7 @@ def _cmd_amend(args: argparse.Namespace) -> int:
         reason=args.reason,
         quick=args.quick,
         resume=args.resume,
+        rerun_candidates=args.rerun_candidate,
     )
     amendment = certificate.payload["amendment"]
     print(

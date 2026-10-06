@@ -153,6 +153,19 @@ def test_amend_writes_an_amended_certificate(tmp_path, study_file, capsys):
     assert "amend" in capsys.readouterr().out.lower() or payload["amendment"]
 
 
+def test_amend_reruns_a_named_candidate(tmp_path, study_file):
+    out = str(tmp_path / "out")
+    main(["run", str(study_file), "--out", out])
+    parent = tmp_path / "out" / "cli-demo" / "certificate.json"
+
+    code = main(["amend", str(study_file), "--parent", str(parent), "--reason", "engine code changed",
+                 "--rerun-candidate", "cli.candidate", "--out", str(tmp_path / "amended")])
+    assert code == 0
+    payload = read_json(tmp_path / "amended" / "cli-demo" / "certificate.json")
+    assert payload["amendment"]["rerun_candidates"] == ["cli.candidate"]
+    assert payload["amendment"]["carried_cells"] == []
+
+
 def test_anchors_writes_next_to_the_certificate(tmp_path, study_file):
     out = str(tmp_path / "out")
     main(["run", str(study_file), "--out", out])

@@ -26,7 +26,7 @@ from __future__ import annotations
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from quantark.util.exceptions import ValidationError
 from quantark.modelvalidation.candidate import CandidateResult, candidate_identity
@@ -116,6 +116,7 @@ def amend(
     reason: str,
     quick: bool = False,
     resume: bool = False,
+    rerun_candidates: Sequence[str] = (),
 ) -> Certificate:
     """Re-certify the parts of ``study`` that changed since ``parent``.
 
@@ -126,13 +127,20 @@ def amend(
         reason: Why this amendment exists; recorded in the payload.
         quick: Shrink sampling (wiring check only).
         resume: Reuse checkpoints for the work that does re-run.
+        rerun_candidates: Candidates whose implementation changed. A schema-1 identity is the candidate's
+            configuration, so an engine-code change cannot show in it: these candidates' cells re-run against the
+            (carried or re-sampled) benchmark whatever their identity says.
 
     Raises:
-        ValidationError: no reason, an invalid parent, or an amendment that
-            would drop parent coverage.
+        ValidationError: no reason, an invalid parent, an amendment that
+            would drop parent coverage, or a re-run named for a candidate the study does not have.
     """
     if not reason or not reason.strip():
         raise ValidationError("An amendment requires a reason; it is part of the record")
+    rerun = sorted(set(rerun_candidates))
+    unknown = [name for name in rerun if name not in {c.name() for c in study.candidates}]
+    if unknown:
+        raise ValidationError(f"rerun_candidates names candidates the study does not have: {unknown}")
 
     started = time.time()
     parent_payload = validate_parent(parent)
@@ -230,7 +238,8 @@ def amend(
             banked_cells = [parent_cells.get(key) for key in keys]
 
             can_carry = (
-                reference_carried[case.name]
+                name not in rerun
+                and reference_carried[case.name]
                 and qualification_carried[case.name]
                 and all(cell is not None for cell in banked_cells)
                 and all(cell["identity_hash"] == current_identity for cell in banked_cells)
@@ -305,6 +314,7 @@ def amend(
                 "reason": reason,
                 "replaced_cells": replaced,
                 "carried_cells": carried,
+                **({"rerun_candidates": rerun} if rerun else {}),
             }
         },
     )
