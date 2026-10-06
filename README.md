@@ -239,10 +239,10 @@ solvers, DCN) is configured by one `PDEParams`, keyword arguments only:
 |---|---|---|
 | `accuracy` | A faster preview or a finer answer. | Selects the `GridConfig` preset: fast (200 pts, 4/day), standard (400, 4/day), high (800, 8/day). |
 | `grid` | Override one preset field. | Each non-`None` `GridConfig` field replaces that preset value; the rest inherit. |
-| `stepper` | A different time weighting or damping schedule, or you are writing a stepper. | `None` is the built-in `CrankNicolson()` (below). A custom stepper runs on the shared-grid solvers only. |
+| `stepper` | A different time weighting or damping schedule, or you are writing a stepper. | `None` is the built-in `CrankNicolson()` (below). A custom stepper runs on every 1D route. |
 | `operator` | You are writing an operator (an exponentially fitted stencil, say). | `None` is the built-in `CentralDifference()`: the central-difference tridiagonal with upwind rows on zero-diffusion steps. |
 | `readout` | You are writing a readout. | `None` is the built-in `StandardReadout()`: linear price interpolation, delta and gamma from the local cubic. |
-| `event_projection` | Validating the event treatment. | `None` is `"cell_average"` on every core route: the autocallables, and the barrier / double-barrier / one-touch / double-one-touch discrete observations. `"nodal"` assigns whole nodes (the 0.7.0 base-family mask). Continuous monitoring and a valuation-date observation stay nodal either way. |
+| `event_projection` | Validating the event treatment. | `None` is `"cell_average"` on every core route: the autocallables, the barrier / double-barrier / one-touch / double-one-touch discrete observations, and the DCN's daily dates. `"nodal"` assigns whole nodes (the 0.7.0 base-family mask). Continuous monitoring and a valuation-date observation stay nodal either way. |
 | `cache_enabled` | Memory pressure, or a fresh solve every call. | The same numbers to round-off: a cached run shares one factorization across intervals whose `dt` differ by an ULP. |
 
 `CrankNicolson` (`quantark.asset.equity.engine.pde.core.components`) carries the
@@ -262,9 +262,10 @@ The route defaults (`DAMPING_DEFAULTS`, form, terminal count, event count):
 |---|---|
 | Core, product without continuous knock-in | half-step, 1, 1 |
 | Core, product with continuous knock-in | full-step, 1, 2 |
-| DCN | half-step, 2, 2 |
-| Local-vol vanilla and barrier kernels | half-step, 1, 2 |
 | 2D (Heston, SLV) | full-step, 1, 2 |
+
+Every 1D route is a core route, DCN and the local-vol vanilla and barrier included (0.10.0
+removed their own rows).
 
 The class is read from the contract alone (`continuous_knock_in`), never from the spot or
 the knocked-in state, so a spot bump cannot change it. **A count means intervals of the
@@ -359,15 +360,36 @@ five-year `high` Snowball asks 10,080 and fits; on a 252-day environment the def
 holds a little under six years at `high` and twelve at `standard` (half-step nodes count),
 and a six-year monthly Snowball at `high` raises where 0.7.0 scaled it.
 
-Routes other than the shared-grid solvers honour a subset and reject the rest loudly
-(`quantark.asset.equity.engine.pde.route_applicability.ROUTE_RULES`): the local-vol
-solvers have a uniform spatial grid of their own (no `eps_crit`, `num_std`, or `bounds`;
-the barrier kernel has no damping schedule), DCN's observation schedule is its time
-resolution (no `steps_per_day` or `time_steps`), and none of the three accepts a custom
-stepper, operator or readout yet.
+Since 0.10.0 every 1D route honours every field. The local-vol vanilla and barrier
+solvers, `DCNPDEEngine` and `LocalVolDCNPDEEngine` march on the shared core with the
+shared presets, the cell-average projection, the core's damping rows, the shared domain
+rule and the built-in readout, and take a custom stepper, operator or readout like any
+other 1D solver. `quantark.asset.equity.engine.pde.route_applicability.ROUTE_RULES` keeps
+one row, the 2D Heston / SLV autocallables': they damp in whole steps, and an explicit
+`damping="half_step"` raises `ValidationError` there. What the shared presets mean on
+the moved routes:
+
+- The local-vol vanilla and continuously monitored barrier take the core's time density,
+  not 0.9.0's step budget (200 at `fast` and `standard`, 400 at `high`).
+  `GridConfig(time_steps=200)` restores the `standard` budget at a cost
+  (price units at spot 100) of at most 1.4e-5 on a vanilla and 3.4e-5 on a continuous
+  barrier, but up to 5.4e-4 monthly, 4.3e-3 weekly and 2.6e-2 daily.
+- A daily monitored barrier at `standard` (4 steps per day) carries about 1e-3 of time
+  error: +9.3e-4 / +2.1e-4 / +1.1e-5 at 4 / 8 / 16 steps per day on a constant local-vol
+  surface. Use `GridConfig(steps_per_day=8.0)` where that matters.
+- The DCN takes the shared presets (200 / 400 / 800 points, 4 / 4 / 8 steps per day) in
+  place of its own table: at most 0.38 / 0.35 / 0.10 bp of notional against an exact
+  recursion on 24 cells, where 0.9.0's engine was off by up to 5.2 / 7.2 / 7.7 bp and did
+  not converge in the point count. `DCNPDEResult.num_time_steps` is the delivered step
+  count.
+- An explicit `bounds` belongs well beyond a barrier: a far-field row is a constant, and
+  next to a barrier a constant is wrong (by −0.09 to −0.13 on the autocallables' row and
+  0.1 to 3.3 on the single barrier's).
+
+`docs/engine_param_guide.md` gives the measurements behind these numbers.
 
 **What will this solve do?** `explain(product, pricing_env)` on `PDEEngine` and every
-shared-grid solver returns the resolved plan from the same preparation `price` runs,
+1D solver returns the resolved plan from the same preparation `price` runs,
 without marching: route, every setting with its source and applicability, space, time,
 events, scheme, outputs, identities, and per-operation terminal outcomes. An excerpt of
 `str(SnowballPDESolver(PDEParams()).explain(snowball, env))` for a one-year monthly
@@ -406,7 +428,8 @@ Names removed in 0.8.0:
 | `TimeLayout.fill_scaled`, `.cap_exceeded`; the same keys in `explain` and on `LifeSurfaceSolution` | none: a grid over `max_steps` raises |
 | `groups.VALUE_NO_ZERO_DIFFUSION_OVERRIDE` | `groups.VALUE` (Phoenix now takes θ = 1 on zero-diffusion steps) |
 
-The names removed in 0.6.0 and 0.7.0 are listed in `CHANGELOG.md`. How the solvers share
+The names removed in 0.6.0, 0.7.0 and 0.10.0 (among them `GridLayerMixin`, the local-vol
+and DCN preset tables and `resolve_config(profiles=)`) are listed in `CHANGELOG.md`. How the solvers share
 one core, and how to write a custom component, is in `docs/pde-core.md`.
 
 ### PDE event statistics (0.9.0)

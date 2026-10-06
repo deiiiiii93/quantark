@@ -1,18 +1,28 @@
-# The 1D PDE core (0.9.0)
+# The 1D PDE core (0.10.0)
 
-Every shared-grid 1D PDE route prices through one path: European, American, the
-barrier family (single, double, one-touch, double one-touch, knock-in by composition),
-Snowball, Phoenix, KO-reset, and the local-vol Snowball and Phoenix. The pieces live in
-`quantark/asset/equity/engine/pde/core/`. This page explains how they fit together,
-how to plug in a custom component, and what the core keeps from 0.6.0 on purpose.
-The design is `docs/superpowers/specs/2026-09-30-pde-1d-one-core-design.md`; 0.8.0's
-numerical policy (damping form, projection, grid day, cap, far-field rows) is
+Every 1D PDE route prices through one path: European, American, the barrier family
+(single, double, one-touch, double one-touch, knock-in by composition), Snowball,
+Phoenix, KO-reset, DCN, and the local-vol vanilla, barrier, DCN, Snowball and Phoenix.
+The pieces live in `quantark/asset/equity/engine/pde/core/`. This page explains how they
+fit together, how to plug in a custom component, and what the core keeps from 0.6.0 on
+purpose. The design is `docs/superpowers/specs/2026-09-30-pde-1d-one-core-design.md`;
+0.8.0's numerical policy (damping form, projection, grid day, cap, far-field rows) is
 `docs/superpowers/specs/2026-10-01-pde-1d-numerical-policy-design.md`; 0.9.0's event
-statistics are `docs/superpowers/specs/2026-10-03-pde-1d-event-statistics-design.md`.
+statistics are `docs/superpowers/specs/2026-10-03-pde-1d-event-statistics-design.md`;
+0.10.0's remaining routes and base-family repairs are
+`docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md`.
 
-DCN, the local-vol vanilla and barrier solvers, and the 2D Heston/SLV solvers are not
-on the core yet (sub-project 3). They take their damping counts and weights from
-`PDEParams.stepper` and reject custom components.
+Only the 2D Heston / SLV solvers are not on the core. The vanilla, barrier and DCN ones
+take ADI grid sizes of their own (`n_x`, `n_v`, ...). The Snowball and Phoenix ones read
+the built-in stepper's settings (`theta`, `event_theta`, the damping counts) from
+`PDEParams.stepper` and damp in whole steps: an explicit `damping="half_step"` raises
+(`ROUTE_RULES["2D"]`, the one row left in `route_applicability`). `explain` does not
+cover the 2D solvers. Below the vol-of-vol
+floor `_SIGMA_MIN` (1e-4) the Heston and SLV barrier solvers do not run their 2D grid:
+they price the deterministic-variance limit on the core, `LocalVolBarrierPDESolver` on
+`quantark.volmodels.heston.deterministic_limit.DeterministicVarianceLocalVol`, whose local
+vol is `L(S, t) sqrt(v(t))` with `v(t) = theta + (v0 - theta) e^(-kappa t)` (`L = 1` under
+Heston, the leverage surface under SLV).
 
 ## Three stages
 
@@ -44,15 +54,33 @@ explain / prepared session / bump context / intraday route / life surface
   order. The loop has no product branches.
 - **`read`** turns the retained columns into the request's outputs through the readout.
 
-A knock-in barrier prepares a `CompositeProblem`: the vanilla and the knock-out, marched
-independently and composed as `vanilla − knock-out` for the price and for each Greek.
+A knock-in barrier prepares a `CompositeProblem` of two parts, marched independently: the
+vanilla, and the knock-out leg carrying the knock-in's rebate `R` paid at the terminal
+payment time. They compose as
+
+```
+knock-in = participation × vanilla + R × DF(0, T_pay) − leg
+```
+
+for the price; the Greeks are `participation × vanilla − leg` (the constant is in the
+price only). The double barrier's vanilla carries no participation. The identity holds
+path by path only when the first breach ends the leg, so a knock-in under any aggregation
+other than `STOP_FIRST_HIT` raises `ValidationError` (continuous and EXPIRY monitoring are
+first-hit), as does a schedule record whose payoff differs from the product's rebate.
+Knocked in at valuation, the composite is `participation × vanilla` and the rebate is
+forfeited. Each part is in contract units (both copy `contract_multiplier`). A bump
+context freezes one layout per part at the base market (`_frozen_parts`); a part with no
+base-market solve (the leg of a product knocked in at the base spot) binds fresh under
+the bumped market.
 
 ## Column groups and policies
 
 | Family | Value groups | Backend |
 |---|---|---|
 | European, knock-out barriers, touches, American | one column | sparse LU |
-| Knock-in barriers | two prepared problems (vanilla, knock-out); knocked in: the vanilla alone | sparse LU each |
+| Local-vol European and knock-out barrier | one column | banded (one coefficient set per step defeats the factorization cache) |
+| Knock-in barriers | two prepared problems (vanilla, knock-out); knocked in: the vanilla alone | each part its own family's |
+| DCN, LV DCN | `alive` (never knocked in) and `ki` as one two-column group | banded |
 | Snowball, KO-reset, LV snowball | alive and knocked-in as one two-column group | banded, one `solve_banded` per step; LU with two one-column groups when the interior has two nodes or fewer |
 | Phoenix, LV phoenix | one group per (memory state, surface), plus the two termination surfaces under EXPIRY coupons, each one column | banded or LU per column |
 | Event statistics | one rolling group of `2·n_cols` columns (both surfaces hstacked) | banded only; all-zero columns skipped |
@@ -118,12 +146,82 @@ QUAD V2.
 ## Adapters
 
 One adapter per family (`core/adapters/`): `EuropeanAdapter`, `AmericanAdapter`,
-`BarrierAdapter`, `SnowballAdapter` (also the local-vol snowball, through a mixin that
-samples a local-vol row per step), `PhoenixAdapter`, `KOResetAdapter`. An adapter
-supplies the solve state, the grid request, terminal fills, boundary values, the ordered
-events, captures, the column groups for a request, and the readout branch. The adapters
-delegate to the product helpers the solvers kept (the 2D solvers inherit them), so
-per-solve state still lives on the solver. The march itself holds none.
+`BarrierAdapter` (with `DoubleBarrierAdapter`, `OneTouchAdapter`,
+`DoubleOneTouchAdapter`), `SnowballAdapter`, `PhoenixAdapter`, `KOResetAdapter`,
+`DCNAdapter`, and the local-vol adapters below. An adapter supplies the solve state, the
+grid request, terminal fills, boundary values, the ordered events, captures, the column
+groups for a request, and the readout branch. The adapters delegate to the product
+helpers the solvers kept (the 2D solvers inherit them), so per-solve state still lives on
+the solver. The march itself holds none.
+
+## The four routes moved in 0.10.0
+
+| Solver | Adapter | Parent |
+|---|---|---|
+| `LocalVolPDESolver(params, local_vol_surface)` | `LocalVolEuropeanAdapter` | `EuropeanPDESolver` / `EuropeanAdapter` |
+| `LocalVolBarrierPDESolver(params, local_vol_surface)` | `LocalVolBarrierAdapter` | `BarrierPDESolver` / `BarrierAdapter` |
+| `DCNPDEEngine(params)` | `DCNAdapter` (`core/adapters/dcn.py`) | `BasePDESolver` / `FamilyAdapter` |
+| `LocalVolDCNPDEEngine(local_vol_surface, params)` | `LocalVolDCNAdapter` | `DCNPDEEngine` / `DCNAdapter` |
+
+Class names and constructor signatures are unchanged. Each takes the core's defaults:
+200 / 400 / 800 concentrated points and 4 / 4 / 8 steps per day, the core damping rows,
+the cell-average projection, the parent family's Dirichlet rows (the DCN's below) and the
+shared domain rule, and every `PDEParams` field is honoured.
+
+**Local vol.** The three local-vol adapters (`core/adapters/local_vol.py`) are the parent
+family's adapter with `LocalVolAdapterMixin` (in `core/adapters/snowball.py`, shared with
+the local-vol Snowball and Phoenix): `NODAL` samples, one local-vol row per step at the
+interval midpoint on the solve's S grid (`sample_local_vol`). The local-vol European and
+barrier adapters skip the constant-vol smile guard and march their one value column on
+the banded backend. On the solver side `LocalVolSurfaceMixin` (`pde/local_vol_surface.py`)
+holds the surface for all five local-vol solvers: `_build_surface` takes a prebuilt
+`LocalVolSurface` or builds the Dupire surface from the environment's `GridVolSurface`;
+`_with_surface` builds it once around a whole call (price, Greeks, session outputs, spot
+curve; the barrier's bump context too), so every solve of that call, and both parts of a
+knock-in, read one surface object; and `_flat_exact_step_coefficients` returns the
+per-step sets unchanged (no flat-exact replacement). A local-vol
+knock-in's vanilla part is `LocalVolPDESolver` on that surface
+(`LocalVolBarrierPDESolver._vanilla_solver`; `EuropeanPDESolver` on the flat route).
+
+- `LocalVolPDESolver.calculate_greeks` returns `price, delta, gamma` from the grid of one
+  solve (pointwise, where 0.9.0 bumped 1 %) and `rho`, `theta` re-solved on a frozen
+  layout with the surface held fixed (`localvol_greeks.local_vol_rho_theta`: `rho` per
+  1 % from a central shift of `BumpConfig.rate_bump`, `theta` per day from a roll of
+  `BumpConfig.time_bump_days`). At maturity or in a terminal lifecycle state it returns
+  the three grid keys.
+- `LocalVolBarrierPDESolver.calculate_greeks` is the barrier family's: `price, delta,
+  gamma` from the grid, composed for a knock-in.
+- The kernel's vanilla half stays in `volmodels/localvol/pde_kernel.py` for
+  `FxLocalVolPDESolver`; its barrier half (`price_barrier_lv_pde`) left the library and
+  is the test tree's independent oracle (`test/pde_routes/lv_barrier_kernel.py`).
+
+**DCN.** `DCNAdapter` marches two surfaces, `alive` (never knocked in) and `ki` (knocked
+in), as one banded group. The contract comes from `build_dcn_grid_context(product)`.
+
+- *Grid request.* The horizon is the final observation date; every interior daily date is
+  an event node; the critical prices are the spot and the knock-in, knock-out and coupon
+  barriers; the bound anchors are the spot and the initial price.
+- *Terminal.* `ki` is the loss put `−(notional / initial_price) × participation ×
+  max(k_loss − S, 0)` discounted from its payment time to the horizon, `alive` zero; then
+  the last observation's events.
+- *Events at a date*, coupon, knock-out, knock-in, as one projection per surface: on
+  `alive`, `project_piecewise` over the thresholds present that day (`ki` below the
+  knock-in barrier, the knock-out cash at or above the knock-out barrier, which has
+  priority over the coupon, `alive + coupon` at or above the coupon barrier); on `ki`,
+  `project_between` at the knock-out barrier on knock-out dates.
+  `event_projection=NODAL` applies the legacy masks (`apply_dcn_events`) instead.
+- *Far-field rows.* Lower, both surfaces: the knocked-in loss on the edge carried forward
+  to the horizon by the solver's forward factors. Upper: the next knock-out's cash
+  discounted to the row's time, plus, on `alive`, the coupons due before it.
+- *Readout.* The `ki` column when the product is flagged knocked in at valuation or the
+  spot is at or below the knock-in barrier, else `alive`; times `direction_sign`.
+  `calculate_greeks` returns `price, delta, gamma` from that column.
+  `price_detailed` returns `DCNPDEResult`, whose `num_time_steps` is the delivered step
+  count. A session grid or spot curve is a `BranchSolution` (below).
+
+`LocalVolDCNPDEEngine` adds `LocalVolSurfaceMixin` and samples through
+`LocalVolAdapterMixin`. `apply_dcn_events` and `DCNPDEResult` stay in `dcn_pde_solver.py`
+for `HestonDCNPDESolver` (2D, not on the core).
 
 ## The three components
 
@@ -140,8 +238,9 @@ per-solve state still lives on the solver. The march itself holds none.
 `event_damping_steps` (`None` = the route's row of `grid.config.DAMPING_DEFAULTS`; 0
 disables). The core has two rows chosen by the contract alone
 (`core.adapters.base.continuous_knock_in(product)`): half-step (1, 1) for every product without
-continuous knock-in, full-step (1, 2) for one with it; DCN, the local-vol kernels and the
-2D solvers have their own rows. Its schedule is 0.6.0's rule: `theta` everywhere,
+continuous knock-in, full-step (1, 2) for one with it. Every 1D route takes these two,
+DCN and the local-vol vanilla and barrier included (0.10.0 deleted their own rows); only
+the 2D solvers have a row of their own, full-step (1, 2). Its schedule is 0.6.0's rule: `theta` everywhere,
 `event_theta` on the damped intervals before each interior event node, 1.0 on the terminal
 intervals, terminal wins on overlap.
 
@@ -195,12 +294,15 @@ shape, finite), and readout values (finite). The state a stepper is handed is re
 A stepper that writes into `state.v_next` raises `ValueError: assignment destination is
 read-only`, and must allocate its own scratch space.
 
-**Where custom components run.** On the core routes only. The local-vol vanilla and
-barrier solvers and DCN reject a stepper that is not a `CrankNicolson`, and a non-built-in
-operator or readout, with "no core seam until sub-project 3". An operator must list the
-route's `SampleKind` in `supports`: `SCALAR` on the Black-Scholes routes, `NODAL` on the
-local-vol ones. A custom operator's step sets are marched as assembled. The built-in's
-flat-exact replacement applies to the built-in only.
+**Where custom components run.** On every 1D route: since 0.10.0 the local-vol vanilla
+and barrier solvers and DCN are core routes and take them as the others do. An operator
+must list the route's `SampleKind` in `supports`: `SCALAR` on the Black-Scholes routes
+(the DCN included), `NODAL` on the local-vol ones. A custom operator's step sets are
+marched as assembled, never collapsed to the scalar stencil. The built-in's flat-exact
+replacement applies to the built-in only. Nodal (local-vol) sets are never collapsed
+either, even with one step (`FamilyAdapter.coefficients` keys the collapse on the sample
+kind as well as on the number of unique sets), so a one-step local-vol solve no longer
+returns the flat-vol price.
 
 ## Identities and the fingerprint rule
 
@@ -242,9 +344,149 @@ event, projection)` applies one observation:
   and every dual cell a threshold crosses gets the exact cell average of the whole event.
   Projecting record by record is not equivalent when two thresholds share a cell.
 
-Continuous monitoring (the barrier is the domain edge) and the valuation-date observation
-(a terminal outcome) stay nodal in every mode. `explain`'s `events` section lists each
-observation's records and treatment (`BaseFamilyEvents`).
+Continuous monitoring (the barrier is the domain edge) stays nodal in every mode. The
+valuation-date observation is not marched at all: it is the decision of the next section,
+applied where a value is read. `explain`'s `events` section lists each observation's
+records and treatment (`BaseFamilyEvents`), the valuation-date one as `"readout"`.
+
+EXPIRY monitoring on the single barrier is one observation at the maturity node (the
+terminal event, cell-average projection), its rebate paid at the terminal payment time.
+The double barrier and the touch products have no EXPIRY far-field row; before maturity
+their adapters return a composite with no marched part (`expiry_replication`): the
+terminal value is a function of the terminal spot alone, priced as European vanillas and
+cash digitals on `BlackScholesEngine` and `DigitalOptionAnalyticalEngine`. The adapter's
+`replication` hook makes `request_geometry` return `None`, so no grid is requested or bound
+(bump contexts, session artefacts). Greeks are `GreeksCalculator`'s own of the legs
+(`BaseEngine.static_replication`); the facade's are the calculator on the solver's params,
+and a session GRID reads them at each requested level (it must name its levels).
+Under DISCRETE or EXPIRY monitoring with first-hit aggregation, a single knock-out's (and
+so a knock-in's leg's) far-field row on the barrier's side is the certain knock-out at the
+next observation:
+when an observation lies at or after the row's time and the edge is beyond that
+observation's level, the row is that record's cash discounted from its payment time.
+With no observation ahead, or the edge inside the level, it is the vanilla asymptote of
+0.9.0. The opposite row, the `ACCUMULATE` rows and the double-barrier and touch rows did
+not change.
+
+## The decision at the valuation instant and at maturity
+
+The barrier family (single, double, one-touch, double one-touch; `_BarrierFamilyAdapter`
+in `core/adapters/barrier.py`) decides a hit at valuation by the product's own records,
+the counterpart of the autocallables' `_valuation_decision`.
+
+- **The event.** `valuation_event(product, env)` returns the valuation instant's
+  `DiscreteEvent` as the march would build it. Under continuous monitoring it is one `SET`
+  record at the barrier or barriers whose value is the hit outcome (the knock-out's
+  rebate, the touch value). Under a schedule (DISCRETE; EXPIRY is the schedule with one
+  record at maturity) it is the records whose observation time is the valuation instant,
+  built by the helper the march's `_step_event` uses (`_event_for_records`): each with
+  its own level, its cash discounted from its own payment time, and its operation. Otherwise it is `None`, and the product is
+  solved from its spot even when that spot lies beyond a barrier.
+- **The continuation.** The march does not apply the valuation-date observation: the
+  surface at t = 0 is the value an instant after that observation, as if it had not
+  fired.
+- **The fold.** `decision_at` folds the event at a spot by the march's nodal rule
+  (`grid.events.fold_decision`): for each record in order, `SET` replaces the price by the
+  record's value and the delta and gamma by zero; `ADD` adds the record's value to the
+  price and leaves the delta and gamma. What a record does is its operation, never a rule
+  inferred from the aggregation mode (a no-touch's maturity record is `SET 0` under either
+  mode). When a `SET` record fires at the base spot the outcome is terminal
+  (`"barrier_hit"`) and nothing is marched; otherwise `read` folds the event at the spot
+  into the marched price, the Greeks and a session's `npv`. A knock-in asks the same
+  function whether it is knocked in.
+- **At maturity** (`tau ≤ 0`), before any composite is built and identically for
+  `PRICE`, `GREEKS` and `SESSION_OUTPUTS`, a value is read in the same two steps
+  (`maturity_value`). The continuation is the solver's terminal payoff as the march
+  starts from it (`_terminal_payoff`): the payoff × the participation × the terminal
+  payment discount `DF(T_pay) / DF(T)` × the contract multiplier, with its slope by the
+  same factors as delta and gamma zero; for a no-touch the rebate × that discount, for a
+  one-touch zero. The decision is the maturity event (`_maturity_event`): under
+  continuous monitoring the hit record; under a schedule the maturity records as
+  `_terminal_event` builds them, always present under EXPIRY and in a DISCRETE schedule
+  only if it has one. A knock-in at maturity is the composite's identity on terminal
+  values, with no part product built: `participation × payoff × that discount` (delta
+  likewise) when a `SET` maturity record fires, else `R × DF(0, T_pay)` with delta zero.
+  A session's outputs at maturity carry that value as `npv` and no solution.
+
+The other base-family adapters give one expired value under every operation too:
+`EuropeanAdapter` answers `SESSION_OUTPUTS` at expiry as it answers `PRICE` (with the
+terminal payment discount and a lifecycle state's receivable), and `AmericanAdapter`'s
+Greeks and session outputs at expiry take its price's exercise payment discount.
+
+## Barrier-family grids: the per-level rule, `CompositeSolution`, `BranchSolution`
+
+Two consumers read one seam: a prepared session asked for `GRID`, and the public
+`calculate_spot_greeks_curve` (on `PDEEngine` and every solver). Both run
+`OutputRequest(SESSION_OUTPUTS, grid=True)` and hand the solution to
+`BasePDESolver._grid_projection_from_solution`; neither branches on the product. Under
+`SESSION_OUTPUTS` the barrier family applies the product check, the valuation-date
+decision and the composite test as `PRICE` does.
+
+- **A single surface** is a `PDESolutionResult` carrying `decision` (the valuation event)
+  and `cash` (a lifecycle state's spot-independent receivable on the European). Each row
+  is read in two steps: the price is interpolated and delta and gamma differentiated on
+  the solved surface at the level, then the decision is folded at that level by the rule
+  above and the cash added. At a level where a knock-out or touch product is hit the row
+  is the record's value with delta and gamma zero, not the edge node's one-sided
+  gradients.
+- **A knock-in** returns a `CompositeSolution(vanilla, leg, participation, constant,
+  decision)`: each part's solved surface, the participation, the constant
+  `R × DF(0, T_pay)` and the knock-in's own valuation event. Its `rows(levels)` projects
+  each part on its own grid and composes level by level:
+
+  ```
+  level not a hit:   price        = participation × vanilla + constant − leg
+                     delta, gamma = participation × vanilla − leg
+  level a hit:       price, delta, gamma = participation × vanilla
+  ```
+
+  "A hit" is a `SET` record of the knock-in's decision firing at the level: at or beyond a
+  continuously monitored barrier, or at or beyond the level of a record on the valuation
+  date. The leg is not read at a hit level. With no levels requested the rows are at the
+  vanilla part's nodes. The session's `npv` is the composed price.
+- **The DCN** returns a `BranchSolution(alive, ki, x_vec, s_vec, ki_barrier,
+  knocked_in)`: each row is read from the branch the readout takes at that level (`ki` at
+  or below the knock-in barrier, or when the contract is flagged knocked in; `alive`
+  otherwise) and differentiated within that surface.
+- **Decided at the base spot.** A product on which a `SET` record fires at the spot, or a
+  knock-in knocked in there, has no base-market solve to project (a knocked-in knock-in
+  has no leg). Its session outputs carry `solution=None`: a session's `GRID` request fails
+  closed with `CapabilityError` and `PV` alone is served; the public curve falls back to
+  point Greeks, one `calculate_greeks` per level, rows marked `reprice`. At maturity there
+  is no surface either, and the public curve likewise returns the terminal value level by
+  level.
+
+A level outside a part's solved domain is read from that part's edge node (`np.interp`
+clamps), for every family.
+
+## The knock-in-side far-field row (0.10.0)
+
+Under discretely observed knock-in, European included, the not-knocked-in surface's row on
+the knock-in side takes the knocked-in surface's row and its statistics allocation:
+
+- a standard product: the lower row, where the lower edge is below every knock-in level;
+- a reverse product: the upper row, where the upper edge is above every knock-in level;
+
+in both cases only at a row time with a knock-in observation at or after it. The rule is
+keyed on the contract (the product has a knock-in barrier and `continuous_knock_in` is
+false) and reads the product's resolved knock-in observation times (the cached knock-in
+profile), never a solver's index set, so a bump or a lifecycle flag cannot change it and
+the 2D solvers, which never fill that index set, are covered. After the last knock-in
+date, on an exhausted schedule, or for a KO-reset after its first schedule has ended, no
+knock-in can be observed and the row is the 0.9.0 one. It lives once in the shared row
+builder, `SnowballPDESolver._knock_in_side_row` (called from `_boundary_rows_v0`, taking
+the row and its `RowTerm`s from `_boundary_rows_v1`), so the Snowball, Phoenix and
+KO-reset solvers, their local-vol variants and the 2D solvers' inherited rows all follow
+it.
+
+Beyond every knock-in level a knock-in at the next observation is certain, so the
+not-knocked-in value at that edge is the knocked-in value there. Under monthly or daily
+knock-in the next projection already resets the edge, so those prices move at round-off;
+under European knock-in nothing does, and the 0.9.0 row ("principal plus rebate to
+maturity") left every European-knock-in Snowball about +4.4e-3 contracts high at any
+preset. The row is still a constant: with `bounds` set close to the knock-in barrier the
+right row is a knock-in probability, and an explicit bound belongs well beyond the
+barrier.
 
 ## Mesh kernels
 
@@ -288,7 +530,9 @@ source / applicability for every `PDEParams` field, every `stepper.*` setting an
 `grid.*` field), `space`, `time`, `events`, `scheme`, `outputs`, `identity`, and
 `terminal` (per operation: marches, composes, or its terminal reason). Node lists live in
 `to_dict()`, not in `str(plan)`. A request that cannot price raises the same error `price`
-would. The routes outside the core have no `explain`; the 2D solvers raise.
+would. Every 1D route has `explain` and reports every field honoured (a 1D adapter
+declares no route rule). The 2D Heston / SLV
+Snowball and Phoenix solvers' `explain` raises `PricingError`.
 
 ## Kept on purpose
 
@@ -298,17 +542,13 @@ sub-project, under re-certification, not here. (0.8.0 decided three former entri
 continuous KI the knocked-in boundary rows are written before the alive rows that read them.
 0.9.0 decided four more: the statistics conventions, the Heston/SLV statistics (now refused
 unless the surrogate is requested), the KO-reset statistics from QUAD, and the knocked-out
-`price_with_events` distribution.)
+`price_with_events` distribution. 0.10.0 decided four more: a knock-in's bump context
+freezes one layout per part, a single-step local-vol layout keeps its per-step sets, the
+American's expired Greeks carry the exercise payment discount, and the double barrier's
+knocked-out Greeks equal its price.)
 
 - The life-surface pricer's node Greeks use its own three-point stencil.
-- A knock-in barrier's bump context freezes the knock-out layout but rebinds the vanilla
-  on every bumped solve.
-- A single-step local-vol layout marches on the scalar Black-Scholes stencil (one unique
-  set selects the flat stencil). No preset reaches it.
-- American Greeks skip the valuation-date exercise max that `price` applies, and the
-  expired-Greeks short-circuit omits the settlement delay factor.
-- The double barrier's knocked-out Greeks return the undiscounted rebate; `price`
-  discounts it.
+- American Greeks skip the valuation-date exercise max that `price` applies.
 - KO-reset never composes its pre-event valuation-date readout: price and Greeks
   interpolate the post-event column 0.
 - Interior KO cash is discounted from `t_obs` on the snowball's schedule path but from

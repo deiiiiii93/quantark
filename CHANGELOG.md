@@ -5,6 +5,524 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.10.0] - 2026-10-06
+
+PDE 1D remaining routes (spec: `docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md`,
+sub-project 3C). The four remaining 1D routes, the local-vol vanilla (`LocalVolPDESolver`), the
+local-vol barrier (`LocalVolBarrierPDESolver`), the DCN (`DCNPDEEngine`) and the local-vol DCN
+(`LocalVolDCNPDEEngine`), march on the shared PDE core: the shared presets, the cell-average
+projection, grid Greeks, bump contexts, `explain` and grid-capable prepared sessions. Their
+prices move toward independent references on every measured family. Before they moved, the
+barrier family was repaired: the contract multiplier, the decision at the valuation instant and
+at maturity, EXPIRY monitoring and the far-field row beyond a discrete barrier, a knock-in's
+rebate and session grid, one bump layout per composite part; the analytic double-barrier and
+double-sharkfin engines now read one double no-touch probability with error control. The Heston
+and SLV barrier solvers' vol-of-vol → 0 limit moved onto the core as well. Last, under
+discretely observed knock-in the not-knocked-in edge on the knock-in side takes the knocked-in
+row, which moves 31 certified values in 10 cells, each as pre-measured. Every stage was checked
+against the PDE byte book (510 rows at the base, 721 at the end) with its declared movers.
+
+### Added
+- `BarrierPDESolver` and `LocalVolBarrierPDESolver` accept `ObservationType.EXPIRY`: the product
+  is a discretely monitored barrier whose only observation is maturity, its rebate paid at the
+  terminal payment time (1.0e-5 from the closed form on the restated 0.7.0 refusal test).
+- A knock-in's rebate is priced by `BarrierPDESolver`, `DoubleBarrierPDESolver` and
+  `LocalVolBarrierPDESolver` (Fixed, below).
+- Bump Greeks of a continuous knock-in through every `create_bump_context` consumer
+  (`GreeksCalculator`, the bucketed Greeks, `execution/greeks.py`, portfolio, PnL explain); they
+  raised `PricingError`. The bump context freezes one layout per composite part. On 12 cells
+  against closed-form Greeks through the same bumps the largest errors go theta 4.6e-5 → 1.0e-6,
+  rho 4.6e-4 → 1.8e-5, vega 9.5e-5 → 3.7e-5, delta 1.7e-4 → 6.9e-5.
+- `LocalVolPDESolver` and `LocalVolBarrierPDESolver`: `explain`, `create_bump_context`, every
+  `PDEParams` field honoured (the kernel's refusals of domain, event, damping and stepper fields
+  and of a custom operator are gone), grid artefacts in prepared sessions;
+  `LocalVolBarrierPDESolver.calculate_greeks` (`price, delta, gamma` from the grid, composed for
+  a knock-in). The barrier route also gains per-observation barrier schedules and a lagged
+  pay-at-hit rebate (the kernel raised `CapabilityError`), and both a value at maturity (the
+  kernel raised `ValidationError` at `tau = 0`).
+- `DCNPDEEngine` and `LocalVolDCNPDEEngine`: `calculate_greeks` (`price, delta, gamma` from the
+  grid), `explain`, `create_bump_context`, every `PDEParams` field honoured, prepared sessions
+  on the core adapters. Grid delta is within 0.040 % at six spots where the bump delta was up to
+  0.85 % off; gamma one point above the knock-in barrier (0.113) is off by −0.0036 where it was
+  off by −0.057.
+- The DCN's session grid and spot curve, per level (the user's ruling on the plan's P8, in place
+  of a fail-closed grid). `BranchSolution`, beside `CompositeSolution`, carries the alive and
+  knocked-in surfaces. Each level is read from the surface the base-spot readout would take at
+  that level, the knocked-in one at or below the knock-in barrier or when the contract is
+  flagged knocked in at valuation, else the alive one, and its delta and gamma are
+  differentiated within that surface. A session's grid rows equal `calculate_spot_greeks_curve`
+  at the same levels bit for bit; a DCN flagged knocked in reads every row from the knocked-in
+  surface. Nothing is refused.
+- `localvol_greeks.local_vol_rho_theta`, the rho / theta half of `local_vol_model_greeks`, which
+  the local-vol vanilla calls. The helper calls it too, so the Heston analytical, Heston MC,
+  Heston-SLV MC and local-vol MC engines are bit-identical.
+- A knock-in's session grid and one-solve spot curve, composed from its parts, on
+  `BarrierPDESolver`, `DoubleBarrierPDESolver` and `LocalVolBarrierPDESolver`; `CompositeSolution`.
+- `analytical/double_no_touch.py`: `double_no_touch`, the double no-touch probability by the
+  method of images, written so that two large numbers are never added. It returns a value whose
+  error bound is at most `Tolerance.ZERO` (1e-10) or raises `NumericalError` with the bound;
+  `double_no_touch_with_bound` returns `(value, bound)` and refuses nothing. Over 10,543 cells no
+  error is outside its bound and the largest is 0.46 of it. 1 to 13 image pairs, 4.5 to 35 µs a
+  call against 45 to 49 µs for the 80-term series it replaces. The double-barrier and
+  double-sharkfin engines read it.
+- Core adapters `LocalVolEuropeanAdapter`, `LocalVolBarrierAdapter`, `DCNAdapter`,
+  `LocalVolDCNAdapter`; solver mixin `LocalVolSurfaceMixin`, one copy of the surface members of
+  the five local-vol solvers (bitwise for the local-vol Snowball and Phoenix).
+- `BaseEngine.static_replication(product, env)`: the legs an engine prices a product with when
+  it is a static combination of other products (`None` otherwise); `GreeksCalculator`
+  computes such a product's greeks as the weighted sum of its own greeks of the legs.
+- `quantark.asset.equity.engine.pde.core.adapters.expiry_replication`: EXPIRY monitoring on
+  the double-barrier and touch PDE solvers as European vanillas and cash digitals on the
+  analytic engines (`FamilyAdapter.replication`; no grid).
+- `quantark.volmodels.heston.deterministic_limit.DeterministicVarianceLocalVol`: the
+  vol-of-vol → 0 limit of Heston and Heston-SLV as a local-vol surface, `L(S, t) sqrt(v(t))` with
+  `v(t) = theta + (v0 − theta) e^(−kappa t)` (`L = 1` under Heston).
+- `quantark.modelvalidation amend` keeps an imported certificate's EXTERNAL benchmark: it never
+  runs it, re-runs every candidate, carries a bit-identical cell verbatim, translates a moved one
+  by the harness's own interval arithmetic, and refuses any translation that would change a
+  verdict (`RELEASE_PROCEDURE` section 10). It refused the whole study before.
+- `quantark.modelvalidation amend --rerun-candidate NAME` (repeatable) re-runs a candidate whose
+  implementation changed although its schema-1 identity (its configuration) did not; the
+  amendment records `rerun_candidates` and an unknown name is refused (`RELEASE_PROCEDURE`
+  section 6).
+- `test/pde_routes/`: the exact DCN and discrete-barrier recursions with their term-curve forms,
+  the no-touch series, the local-vol barrier kernel as the test oracle (`lv_barrier_kernel.py`),
+  and their guards.
+
+### Changed
+- **The four migrated routes' prices and Greeks**, toward the references on every measured
+  family. Local-vol vanilla and barrier, maximum |error| at `standard` in price units at spot
+  100, kernel → core, on a constant / the byte book's / a steep surface: vanilla 4.6e-3 / 4.8e-3
+  / 4.8e-3 → 2.5e-4 / 2.6e-4 / 2.9e-4; continuous barrier 3.5e-3 / 3.8e-3 / 3.2e-3 → 4.1e-4 /
+  4.0e-4 / 7.1e-4; monthly 5.9e-3 / 4.7e-3 / 2.2e-2 → 2.5e-4 / 2.5e-4 / 6.2e-4; weekly 1.2e-2 →
+  1.6e-4 (constant); daily 1.1e-2 / 8.3e-3 / 9.4e-2 → 1.2e-3 / 1.1e-3 / 2.1e-3. Greeks on the
+  constant surface, delta and gamma: vanilla 5.7e-4, 1.3e-3 → 4.7e-6, 1.8e-6; continuous barrier
+  7.8e-4, 1.3e-3 → 1.1e-5, 1.3e-6; discrete barrier 1.7e-3, 9.1e-4 → 8.9e-5, 4.4e-5; vanilla rho
+  and theta 1.5e-4, 2.6e-5 → 1.1e-5, 1.2e-6. DCN, in bp of notional over 24 cells (four
+  contracts, six spots), maximum at fast / standard / high 5.2 / 7.2 / 7.7 → 0.38 / 0.35 / 0.10
+  (median 2.1 / 1.4 / 1.8 → 0.12 / 0.11 / 0.03); the points ladder at the money no longer
+  wanders (−10.5 to +7.7 bp over 201 to 2,401 points → 0.10 to 0.46 bp); the local-vol DCN on a
+  skewed surface −0.9 to −9.8 bp → within 0.18 bp of its finest rung. On kinked rate and dividend
+  curves: vanilla 4.5e-3 → 2.6e-4, monthly barriers 5.1e-3 → 4.6e-4, DCN 4.2 to 6.0 bp → 0.22 bp.
+- **Their defaults are the shared presets**: 200 / 400 / 800 concentrated points, 4 / 4 / 8 steps
+  per day, half-step damping (1, 1), cell-average projection. `GridConfig(time_steps=200)`
+  reproduces the old local-vol time budget at a cost of at most 1.4e-5 on a vanilla and 3.4e-5 on
+  a continuous barrier, but up to 5.4e-4 monthly, 4.3e-3 weekly and 2.6e-2 daily. Daily
+  monitoring at `standard` carries about 1e-3 of time error and wants 8 steps per day (+9.3e-4 /
+  +2.1e-4 / +1.1e-5 at 4 / 8 / 16). The DCN's 201-point floor is gone (`fast` is 200 points), and
+  a DCN grid of 2,401 points needs `GridConfig(max_points=2401)`. Their wall time: Performance,
+  below.
+- `LocalVolPDESolver.calculate_greeks`: `delta` and `gamma` are pointwise grid Greeks, not 1 %
+  bumps (the convention moves them by at most 2.4e-4 and 2.3e-5 on the measured vanillas); `rho`
+  and `theta` keep their definitions and units and re-solve on the bump context with the surface
+  held fixed. At maturity it returns `price, delta, gamma`. A numerical vega through
+  `GreeksCalculator` re-prices on that context's frozen layout; a fresh grid under the shifted
+  surface differs from it by the layout's own movement (6.2e-6, 1.6e-5 relative). The
+  structured vol-model risk's local-vol re-price is the solver's price with the surface held
+  fixed, and so now includes a lagged product's settlement discount.
+- `DCNPDEResult.num_time_steps` is the delivered step count (2,953 at `standard` on contract A,
+  where it read 485), `num_space_nodes` the layout's; the DCN's horizon is its final observation
+  date.
+- A single- or double-barrier knock-in with a rebate (Fixed). A knock-in whose schedule records
+  carry a payoff different from its rebate, or whose schedule aggregates other than
+  `STOP_FIRST_HIT`, raises `ValidationError`; four 0.7.0 nodal-semantics goldens in
+  `test_pde_base_family_projection` (knock-ins with per-record payoffs, two under `ACCUMULATE`)
+  now assert that error.
+- A discretely monitored single barrier's far-field row on the barrier's side is the certain
+  knock-out at the next observation when the edge is beyond that observation's level; with no
+  observation ahead, an edge inside the level, on the opposite side and under `ACCUMULATE` it is
+  the vanilla asymptote, as before. EXPIRY cells move by −2.8e-4 / −1.2e-4 (constant surface);
+  monthly and daily cells do not move to the printed digits; a two-year barrier observed only in
+  its second year moves by 1.0e-5 and 1.5e-5. Under `bounds=(None, 140)` on a monthly up-and-out
+  call the old row was off by +1.70 / +9.18, the new one by −8.8e-3 / −1.6e-2.
+- The European, barrier and double-barrier PDE solvers price per contract (Fixed).
+- A discretely monitored barrier, double barrier or touch product valued with the spot beyond a
+  barrier and no observation due is solved, not short-circuited (Fixed).
+- `calculate_spot_greeks_curve` and the session `GRID` output of a barrier-family product: a
+  knock-in's rows are the composition of its parts, at the vanilla part's nodes by default; a
+  knock-out's or touch product's rows at hit levels are the hit outcome with zero delta and
+  gamma; a product decided at the base spot raises `CapabilityError` for a session grid and
+  returns `reprice` rows from the public curve (Fixed).
+- `DoubleBarrierOptionAnalyticalEngine`: every price with a rebate under continuous or discrete
+  monitoring, and every EXPIRY price with the spot outside the corridor (Fixed). Rebate-free
+  prices and EXPIRY inside the corridor are bit-identical.
+- `DoubleSharkfinOptionAnalyticalEngine`: the continuous paid-at-hit rebate leg (up to 4.2e-6 at
+  vol 22 % and 3.2e-5 at vol 8 % on a rebate of 5); every price where its 80-term series was
+  unresolved; `quad_points` is keyword-only. Every other leg moves at round-off (at most 3.6e-15
+  at equity parameters).
+- A barrier-family product with a record on the valuation date: its decision there carries that
+  record's level, cash and payment time and is applied at the spot, not written into the grid.
+  At maturity `price`, `calculate_greeks` and the session outputs return one terminal value,
+  which carries the participation and the terminal payment discount `DF(T_pay) / DF(T)`, and its
+  delta the same factors; a touch product's `calculate_greeks` there agrees with its `price`; an
+  expired knock-in prices. `EuropeanPDESolver`'s session outputs and `AmericanPDESolver`'s
+  `calculate_greeks` and session outputs at expiry carry their `price`'s payment discount
+  (Fixed).
+- `DoubleBarrierOptionAnalyticalEngine` and `DoubleSharkfinOptionAnalyticalEngine` raise
+  `NumericalError` on an input whose no-touch probability is not resolved to `Tolerance.ZERO`.
+  On the double barrier that takes a vol below 1e-4 and a forward carried onto a barrier; inside
+  the market objects' limits nothing with a vol of 1e-4 or more is refused, and the sharkfin's
+  floor is 1e-3.
+- A prepared session asked for more than `PV` with a lifecycle state: the facade's values on an
+  engine that supports a state, `CapabilityError` on one that does not (Fixed).
+- **The knock-in-side far-field row** under discretely observed knock-in, while a knock-in
+  observation remains: every European-knock-in Snowball, Phoenix and KO-reset price, flat,
+  local-vol and 2D (Fixed). Under monthly or daily knock-in it moves at round-off.
+- Nodal coefficient sets never collapse to the scalar stencil: a one-step local-vol solve no
+  longer returns the flat-vol price (5.676243 exactly). Bitwise on every byte-book row.
+- Sessions and the registry: `EquityLVPDESessionAdapter` is grid-capable (the artefact-chain
+  `prepare` moved up from the local-vol autocallable adapter, bitwise for the local-vol Snowball
+  and Phoenix). `LocalVolPDESolver`, `LocalVolBarrierPDESolver` and `LocalVolDCNPDEEngine`
+  register on it, `DCNPDEEngine` on `EquityPDE1DSessionAdapter`. A prepared price equals the
+  direct one bit for bit for the four, and a `PV + GRID` session's rows equal the public curve.
+  `execution/inventory.py` and `docs/execution/capability-matrix.md` list the four as
+  prepared-capable.
+- `ROUTE_RULES` keeps the 2D row only. Its refusal now ends "These are the 2D route's limits; no
+  spec is committed to moving this route onto the shared core".
+- Goldens: nine replay frames moved, all one Snowball with discretely observed knock-in in the
+  scalar-BSM and local-vol books on its one not-knocked-in day (2024-01-02): price −3.18e-5 /
+  −3.28e-5, and every later row's P&L by the same offset. Every `book_*` frame is byte-identical
+  and no execution golden moved (`test/replay_golden/README.md`, the 2026-10-06 section).
+- Examples, re-run against the 0.9.0 tree: `dcn_gate_report_demo` DCN-A PDE −93,294.8 →
+  −93,291.5 and DCN-B −150,768.0 → −150,579.8 (|dPV| against Monte Carlo 115.6 → 112.3 and
+  277.0 → 88.7); `vol_models_demo` local-vol PDE 8.8317 → 8.8275, Dupire market-IV vega 38.6555
+  → 38.7113; `bucketed_greeks_consolidated_api_demo` Dupire market-IV parallel 0.32127 → 0.32395
+  and `strike_column[2]` 0.16597 → 0.20443; `mo_volmodels/07_barrier_exotic` local-vol PDE 23.402
+  → 23.338 (gap to Monte Carlo 1.7 % → 1.4 %); `mo_volmodels/09_delta_hedging` local-vol delta0
+  0.3736 → 0.3733, gamma0 8.1e-5 → 2.7e-4. `mo_volmodels/03_dupire_localvol`'s overall LV RMSE
+  goes 4.519 → 4.872 vol-points, which is not a regression: against the converged price of the
+  same Dupire surface the core's 300 × 150 solve errs 0.017 rms (0.043 max) and the kernel's
+  0.57 rms (2.05 max), so the kernel's discretization error partly cancelled Dupire's fit error.
+  `mo_volmodels/11c_grid_preflight.py` binds on the solver's `grid_binder`.
+
+### Removed
+| Removed | Replacement |
+|---|---|
+| `GridLayerMixin` (and its export from `pde.grid`) | `BasePDESolver` |
+| `LV_UNIFORM_ACCURACY_PROFILES`, `DCN_ACCURACY_PROFILES`, `resolve_config(profiles=)`, `GridBinder(profiles=)` | `ACCURACY_PROFILES` |
+| `DAMPING_DEFAULTS["local-vol"]`, `DAMPING_DEFAULTS["DCN"]` | `DAMPING_DEFAULTS["core"]` |
+| the `"local-vol vanilla"`, `"local-vol barrier"` and `"DCN"` rows of `ROUTE_RULES` | none: the fields are honoured |
+| `DCNPDEEngine.price_detailed(layout=)`; the constructor's `points >= 201` check | `PDEParams(grid=…)`; the shared presets |
+| `dcn_pde_solver._sinh_grid`, `_operator_coeffs`, `_theta_step`; `LocalVolDCNPDEEngine._step_vol` and its `1e-8` floor | the core march; the mixin's midpoint local-vol rows |
+| `price_barrier_lv_pde`, `_barrier_boundary_value`, `_align_discrete_barrier_midcell`, `_solve_ko_lv` (the barrier half of `quantark.volmodels.localvol.pde_kernel`) | `LocalVolBarrierPDESolver`; the functions live on in `test/pde_routes/lv_barrier_kernel.py` as the test oracle |
+| `quantark.volmodels.heston.pde_kernel._deterministic_barrier_price`, `quantark.volmodels.slv.slv_pde_kernel._deterministic_slv_barrier` | the engines' deterministic limit on the core (`DeterministicVarianceLocalVol` on `LocalVolBarrierPDESolver`) |
+| `DCNLocalVolPDEAdapter`, `_dcn_pde_adapter` | `EquityLVPDESessionAdapter` |
+| the `PricingError` on EXPIRY monitoring in `BarrierPDESolver` | EXPIRY monitoring (Added) |
+| `DoubleBarrierOptionAnalyticalEngine._prob_inside_at_expiry` | `analytical/double_no_touch.py` |
+| `DoubleSharkfinOptionAnalyticalEngine(max_terms=…)`, its `DEFAULT_MAX_TERMS`, `_survival_probability_continuous`, `_weighted_sine_integral` | `analytical/double_no_touch.py`; there is no term count to set |
+
+### Fixed
+- **The contract multiplier on the European, barrier and double-barrier PDE solvers.** Their
+  value at `contract_multiplier` 10 was their value at 1 (ratio 1 in price, delta and gamma),
+  where the analytic engines, the kernel local-vol routes and `AmericanPDESolver` scale by 10. An
+  expired product did scale, so the route disagreed with itself, and a knock-in's part products
+  were built without the multiplier. The payoff, event and rebate cash, the Dirichlet rows, the
+  hit outcomes and the knock-in's parts now carry it, `(participation × option + rebate) ×
+  multiplier`. Multiplier 1 is bit-identical.
+- **The valuation-date hit test under discrete monitoring.** A spot beyond a discretely
+  monitored barrier with no observation due returned the rebate or the vanilla; it is now solved
+  from its spot. Error against the exact discrete recursion: monthly up-and-out call, rebate 5,
+  spot 135 / 131, −0.202 / −0.346 → +5.3e-5 / +8.3e-5; observed only in months 7 to 12, −1.08 →
+  +1.2e-4; monthly down-and-out put 85, rebate 3, spot 80, +3.2e-2 → −2.0e-5; monthly up-and-in
+  call at 135 / down-and-in put at 80, +0.596 / +9.8e-2 → −1.7e-5 / −1.9e-5; monthly double
+  knock-out 80 / 130, rebate 5, spot 135, −8.6e-2 → +5.8e-6; monthly one-touch paid at expiry,
+  spot 135, +7.9e-2 → −3.5e-6; an `ACCUMULATE` schedule paying 5 monthly at spot 135 (closed
+  form 72.55), −67.7 → −1.1e-4. The touch solvers move by 0.08 (monthly) to 3.7 (semiannual). The
+  double barrier's `calculate_greeks` at a continuous hit took the rebate undiscounted (5.000000
+  for 4.962640 under a quarter-year lag at 3 %); it now takes `price`'s value.
+- **The knock-in rebate.** The knock-in composite built its knock-out leg with rebate 0 and
+  dropped the rebate. On a rebate of 5 the single barrier was off by −3.747 (continuous up-and-in:
+  the rebate-free price), −2.588 (continuous down-and-in) and −4.852 (monthly: the whole `R ×
+  DF`), the double barrier (corridor 80 / 130) by −2.2205 / −2.2206 (call / put). A knock-in is now
+  `participation × vanilla + R × DF(0, T_pay) − leg(R)`: +9e-5 to +4.9e-4 on 8 single-barrier
+  rebate cells, the rebate-free cells' own error, and +2.5e-4 / +1.2e-4 on the double barrier. A
+  knocked-in product forfeits the rebate; `R = 0` is bit-identical.
+- **A knock-in's session grid and spot curve, and a knock-out's rows at hit levels.** A knock-in
+  was marched as it stands under `SESSION_OUTPUTS`: on a continuous up-and-in call 130 the public
+  curve was off by −4.19 at the money and −51.7 at 150, and a session's `PV + GRID` returned
+  2.85597 for 6.93002. The rows are now the composition of the parts, within 5.2e-4 in price,
+  6.6e-5 in delta and 7.5e-5 in gamma of the closed forms and the exact recursion. A knock-out's
+  or touch product's row at a hit level carried the edge node's value and its one-sided
+  gradients; it is now the hit outcome with delta and gamma 0 (from −0.150 on an up-and-out call
+  with no rebate, −0.011 with a rebate of 5, +0.028 on a one-touch), and the double knock-out's
+  price there goes 4.85223 → 5.00000, the facade's value. A product decided at the base spot
+  returned a grid although the facade's hit test never ran; it now raises `CapabilityError` for a
+  session grid, and the public curve returns `reprice` rows.
+- **The analytic double-barrier engine's rebate terms and its EXPIRY branch outside the
+  corridor.** The knock-out added `R × DF` on every path and the knock-in used the probability of
+  ending inside the corridor. Corridor 80 / 130, strike 100, one year, rebate 5: continuous
+  knock-out +2.221 / +1.533 / +1.125 (spots 100 / 90 / 120) → at most 4e-15, knock-in +1.309 /
+  +1.629 / +1.859 → at most 5e-15; monthly knock-out +1.80 to +2.95 → +0.017 to +0.093 and
+  knock-in +0.90 to +1.53 → −0.017 to −0.093, the barrier shift's own error. Under EXPIRY a spot
+  outside the corridor returned the rebate or the vanilla, −3.350 to +3.497 on eight cells; the
+  closed form now applies from any spot, at most 1.1e-14.
+- **A record on the valuation date.** The march wrote the valuation-date event into the nodes,
+  and the facade tested the product's own barrier. On an up-and-out (barrier 130, rebate 5) with a
+  record at 120 paying 7 (worth 6.947696) the spots from 120 outward returned 5.00 for 6.95, and
+  just inside the record's level the price was off by −3.7e-2 / −5.2e-2 (delta −0.27). The
+  decision now carries the record's level, cash, payment time and operation and is folded at the
+  spot onto the continuation: exact where it fires, +5e-6 / +1.2e-4 just inside. A value read
+  next to a record crossed the jump, up to +2.52 in price and +13.3 in delta on an up-and-in call
+  130 at 129.9 to 129.99; now within 2.0e-4 and 8e-6. On 168 cells (single and double knock-out,
+  both one-touches and both no-touches, lags 0 and 0.25, flat and kinked curves) a fired record
+  is its cash to the last bit and the rest is within 2.8e-4 in price and 1.0e-5 in delta of the
+  term recursion, where the old values were off by −1.2 to −3.8 at the record's lower level, +1.4
+  to +4.5 just inside its upper level and −1.7 to −2.0 beyond the product's barrier. Under
+  `ACCUMULATE` at and beyond the level: −37.6 to −43.0 → within 1.4e-4.
+- **The barrier family at maturity.** At `tau = 0` the expired path returned `product.get_payoff`:
+  no payment discount, no participation, and for a touch product a number that ignored the touch;
+  `calculate_greeks` disagreed with `price`, and an expired knock-in raised. A value is now the
+  terminal payoff × participation × `DF(T_pay) / DF(T)`, then the decision, under every
+  operation. A knocked-out product's `calculate_greeks` returns the cash, not the payoff (35 →
+  5); an expired knock-in prices and pays its rebate when untriggered (`calculate_greeks` 25 →
+  5) and takes a bump context; a maturity record's own level and cash apply (25 → 7); a schedule with no maturity record
+  does not test the barrier there (5 → 35). With the terminal payment a quarter-year after
+  maturity at 3 %, a surviving knock-out, an untouched no-touch and a triggered or untriggered
+  knock-in take the discount (25.000000 → 24.813201, delta 1 → 0.992528), and the value no longer
+  jumps by 0.187 at the last instant. Participation 0.5 applies (25.000000 → 12.406601). A touch
+  product's `calculate_greeks` there agrees with its `price`: a touched one-touch reports its cash
+  (0 → 5), a touched no-touch nothing (5 → 0). `AmericanPDESolver.calculate_greeks` and session
+  outputs at expiry under the same lag (25.000000 → 24.813201, delta 1 → 0.992528) and
+  `EuropeanPDESolver`'s session outputs (25.000000 → 24.813201) take their `price`'s discount. An
+  expired product with no lag, participation 1 and multiplier 1 is bit-identical.
+- **The lifecycle state of a `PV + GRID` session on a European.** The session passed the state to
+  `price` on the `PV` path and to nothing on the other. A European call with one realized, unpaid
+  cashflow of 7 due in 91 days returned the live 9.601810 under `PV + GRID` whether terminated
+  (price 6.947839) or alive with the receivable (16.549649). Now a terminated claim's grid fails
+  closed (`CapabilityError`), and a live one returns 16.549649 with 6.95 in each row. The barrier
+  and Snowball engines, which do not support a state, returned 2.671787 and 97.157139; they now
+  raise `CapabilityError`, as for `PV`. A request with no state is bit-identical.
+- **The double sharkfin's no-touch probability.** The engine's 80-term eigenfunction series had
+  no convergence control: corridor 80 / 130, spot 129.9, vol 1 %, one day returned 0.248354 for
+  0.858487, putting a rebate of 5 off by 3.050664, and over 637 cells its worst error was 1.0 at
+  dimensionless times up to 1e-3 (two days at vol 20 % on that corridor). It now reads
+  `double_no_touch` at its three call sites. Its continuous paid-at-hit factor, which was off by
+  9e-8 to 6.3e-6, is within 1.3e-9 at spots 85 and 100 and 6.2e-8 at 127 (one year, vol 22 %).
+  The price moves by up to 4.2e-6 (vol 22 %) and 3.2e-5 (vol 8 %) on a rebate of 5, and by up to
+  a whole rebate where the series was unresolved.
+- **The Heston and SLV barrier solvers' vol-of-vol → 0 limit.** Below `_SIGMA_MIN` (1e-4)
+  `HestonBarrierPDESolver` and `HestonSLVBarrierPDESolver` used the 1D local-vol kernel at a
+  constant effective vol `sqrt(average variance)` (for SLV, with a 15 × 5 tabulation of the
+  leverage). That is exact only for Europeans; for a barrier it was a model error. They now march
+  the exact deterministic-variance local vol `L(S, t) sqrt(v(t))`, `v(t) = theta + (v0 − theta)
+  e^(−kappa t)` (`DeterministicVarianceLocalVol`), on `LocalVolBarrierPDESolver` at its standard
+  preset, after the 2D solvers' own refusals. Measured at the standard preset against a
+  3,201-point, 40 steps-per-day reference: with flat variance against the Black–Scholes barrier
+  closed form, core 1.84e-4 (continuous up-and-out call 130) / 3.17e-4 (down-and-in put 80),
+  old 3.06e-4 / 4.58e-3; monthly up-and-out 125, core 1.27e-4, old 2.08e-3; with decaying
+  variance (v0 0.09, theta 0.04, kappa 1.5) the old route was 7.0e-3 to 3.25e-2 from the exact
+  limit, the core within 2.0e-4; SLV with a skew leverage, old 1.42e-2 to 5.23e-2, core within
+  1.9e-4. Heston and SLV barrier prices at a vol-of-vol below 1e-4 move by these amounts. The
+  grid spans the model's vol, the larger of the environment's strike vol and the largest
+  `sqrt(v(t))` to maturity (`DeterministicVarianceLocalVol.domain_vol`), so an environment
+  quoting less than the model does not narrow it. The
+  low-level `price_barrier_heston_pde` / `price_barrier_slv_pde` now raise `ValidationError`
+  below `_SIGMA_MIN`, naming the engine.
+- **The knock-in-side far-field row.** The not-knocked-in lower row of a standard product was
+  "principal plus rebate to maturity", as if the far edge never knocked in; with one knock-in
+  date at maturity nothing resets it. Under discretely observed knock-in, European included, that
+  row now takes the knocked-in row (the upper row for a reverse product) while a knock-in
+  observation remains at or after the row's time; after the last one, on an exhausted schedule,
+  or for a KO-reset after its first schedule, it is the old row. Error against the exact recursion
+  (QUAD for the reverse product): Snowball with European knock-in, spot 100, standard / high,
+  +4.37e-3 / +4.25e-3 → +4.2e-5 / −4.9e-5; spot 86, +4.73e-3 / +4.75e-3 → −1.6e-4 / −8.9e-5; vol
+  35 %, +5.03e-3 / +5.10e-3 → −2.0e-4 / −4.4e-5; Phoenix with knock-in at maturity only, spot 100
+  / 80, +3.3e-3 / +4.0e-3 → −1.7e-4 / −1.2e-4; reverse Snowball, spots 100 / 114 / 98, +2.96e-3 /
+  +3.88e-3 / +1.98e-3 → −1.8e-4 / −1.2e-4 / −2.3e-5; Snowball under `bounds=(60, None)` / `(70,
+  None)`, +1.255 / +4.295 → −1.2e-3 / −0.129. On the byte book's flat market against QUAD at
+  32,001 points: Snowball price +4.17e-3 → +3.0e-5 (exact recursion +4.17e-3 → +2.8e-5), Phoenix
+  with knock-in at maturity +3.03e-3 → −2.2e-4, reverse Snowball +7.61e-3 → −5.3e-4; bump vega
+  +5.18e-3 → −2.2e-5, +4.08e-3 → −7.5e-6, +8.90e-3 → −1.2e-5. The reconciliation identity stays
+  at round-off, the knock-in probabilities do not move, and the maturity leg's error falls from
+  +4.70e-3 to +3.7e-4.
+- **EXPIRY monitoring on the double-barrier and touch PDE solvers.** `DoubleBarrierPDESolver`,
+  `OneTouchPDESolver` and `DoubleOneTouchPDESolver` tested the barrier during the march under
+  `ObservationType.EXPIRY`, close to continuous monitoring: at spot 100, vol 20 %, r 3 %, q 1 %,
+  one year, 0.9.0 priced a 80/130 double knock-out call at 3.144 (exact 4.848), an up one-touch
+  at 120 paying 10 at 3.428 (exact 1.756) and a 85/120 double one-touch at 7.237 (exact 3.777).
+  A barrier observed only at maturity makes the value a function of the terminal spot alone, so
+  before maturity these three solvers now price it by static replication: European vanillas and
+  cash-or-nothing digitals on the product's own expiry and settlement, priced on
+  `BlackScholesEngine` and `DigitalOptionAnalyticalEngine` (a knock-out is the vanilla inside
+  the corridor plus the rebate outside it; a knock-in the vanilla outside plus the rebate inside;
+  a touch product its digitals). Against quadrature of the terminal value the price is within
+  1e-9 relative, with and without a payment lag, and knock-out plus knock-in equals the vanilla
+  plus the rebate on a flat and a smile market. Each leg reads its own strike's vol, so under a
+  smile the value is the smile's static replication, not the march's single strike-selected vol.
+  No PDE grid is requested or bound for such a product: bump contexts return the engine itself,
+  a session prepares no artefact, and a session `GRID` must name its levels
+  (`grid_spot_levels`; without them `CapabilityError`, as there are no nodes). Greeks follow
+  `GreeksCalculator`: the new hook `BaseEngine.static_replication` exposes the legs, and
+  `GreeksCalculator.calculate` returns the weighted sum of its own greeks of each leg under the
+  caller's method, request and bump configuration (closed forms for the vanillas under `auto` /
+  `analytical`, bumps for the digitals, its own refusals per leg). The solver's
+  `calculate_greeks` and the session rows (`calculation_mode` `"static_replication"`) are
+  `GreeksCalculator(params=solver.params)` on the legs: delta within 1.27e-3 and gamma within
+  3.6e-5 of the exact derivatives (relative, 80 cells). The single barrier keeps its EXPIRY
+  far-field row; at maturity the terminal value applies as for every barrier product.
+- **`GreeksCalculator`'s closed forms under a terminal payment lag.** The analytic route
+  (`method="auto"` / `"analytical"` on a European vanilla) ignored `settlement_convention`: at a
+  quarter-year lag an at-the-money call returned price 96.0158, delta 5.7385, rho 4.7783 where
+  `BlackScholesEngine.price` and the bumped route give 95.2983, 5.6950, 4.5049. The closed forms
+  now take the lag as the engine prices it, `V = DF(T, T_pay) V_T`: price, delta, gamma, vega,
+  dividend rho, theta (and its three-way split) and the extended closed forms scale by
+  `DF(T, T_pay)`, and rho adds the payment's own rate sensitivity, `-(T_pay - T) V_T` (4.5044).
+  At expiry the payoff is discounted over the lag, rho is `-lag V` and theta its accretion. A
+  vanilla paid at expiry is bit-identical.
+
+### Breaking changes
+- `GridLayerMixin` and its export from `pde.grid` are removed; a solver subclasses
+  `BasePDESolver`.
+- `LV_UNIFORM_ACCURACY_PROFILES` and `DCN_ACCURACY_PROFILES` are removed, and the `profiles=`
+  keyword is removed from `resolve_config` and from `GridBinder`: every 1D route takes the shared
+  `ACCURACY_PROFILES`.
+- `DAMPING_DEFAULTS["local-vol"]` and `DAMPING_DEFAULTS["DCN"]` are removed; the routes use
+  `DAMPING_DEFAULTS["core"]`.
+- `DCNPDEEngine.price_detailed` no longer takes `layout=` (passing it raises `ValidationError`
+  naming `PDEParams(grid=GridConfig(...))`, from `REMOVED_DCN_NAMES`), and the constructor's
+  `points >= 201` check is gone. `DCNPDEResult.num_time_steps` is the delivered step count. A 2,401-point DCN
+  grid needs `GridConfig(max_points=2401)`.
+- `LocalVolPDESolver.calculate_greeks`: `delta` and `gamma` are pointwise, not 1 % bumps.
+- The barrier half of the 1D local-vol kernel (`price_barrier_lv_pde` and its helpers) leaves
+  the library for `test/pde_routes/lv_barrier_kernel.py`.
+- New `ValidationError`s: a knock-in whose schedule records carry a payoff different from its
+  rebate, or whose schedule aggregates other than `STOP_FIRST_HIT`; `price_barrier_heston_pde` /
+  `price_barrier_slv_pde` below `_SIGMA_MIN` (the 2D barrier kernels refuse the vol-of-vol → 0
+  limit and name the engine that prices it).
+- New `CapabilityError`s: a session grid for a barrier-family product decided at the base spot;
+  a stateful rich-output session request (`PV + GRID`, event statistics) to an engine without
+  lifecycle support; a session grid for a terminated European.
+- `DoubleSharkfinOptionAnalyticalEngine`: `max_terms` is removed and `quad_points` is
+  keyword-only, so a second positional argument written for `max_terms` raises.
+- New `NumericalError` from `double_no_touch`, and so from `DoubleBarrierOptionAnalyticalEngine`
+  and `DoubleSharkfinOptionAnalyticalEngine`, on an input whose no-touch probability is not
+  resolved to `Tolerance.ZERO`.
+
+### Per-stage deltas (PDE byte book)
+Stage 1, the barrier family:
+- (h) analytic engines: 510 rows, 0 diffs (no PDE file changed).
+- (e) multiplier: 510 rows bit-identical (every row has multiplier 1); 5 added (`3c|mult10|*`).
+- (f) valuation instant: the record-level event builders bit-identical (515 rows); then exactly
+  the eight `3a|farfield|{di_put_85,do_call_85}|*|80|*` rows move, equal to the evidence's
+  `r5_book_hit_rule.json` bit for bit, up to 0.5762 in price, 0.1878 in grid delta and 4.306e-2
+  in grid gamma (`3a|farfield|do_call_85|kinked|80|lag0`); 21 added.
+- (f) maturity: 536 rows bit-identical, both expired barrier rows included; 102 added.
+- (b) EXPIRY and the far-field row: discrete-barrier rows at round-off (bump rho 5.3e-13, bump
+  vega 4.1e-13); `3c|vdec|uo_late|beyond` 3.39e-5 in price, toward the exact recursion (+6.1e-5
+  → +2.7e-5 off), and `3c|vrec|uo|119.99` (+8.6e-5 → +8.0e-5); the `3a|farfield` rows
+  bit-identical; 5 added.
+- (g) session grid: 643 rows bit-identical; 41 added.
+- (g) lifecycle on rich outputs: 684 rows bit-identical; 3 added.
+- (a) knock-in rebate: 687 rows bit-identical; 16 added.
+- (c) per-part bump layouts: eight `knock_in|*|bump` rows go from `PricingError` to values;
+  `knock_in|down_in_put|knocked_in|bump` within 6.1e-5; `3a|base6|di_put|{default,v070}` (a
+  monthly down-and-in put) in bump Greeks only, gamma 1.82e-4, delta 1.63e-5, vega 4.24e-6, rho
+  9.80e-7, theta 1.07e-7 (the evidence's both-frozen arm); 1 added.
+- (d) nodal sets: 704 rows, 0 diffs.
+
+Stage 2, the routes:
+- (0) `LocalVolSurfaceMixin`: 704 rows, 0 diffs.
+- (a) local-vol vanilla: `lv_vanilla|{default,600x200}`, price up to 2.31e-3, grid gamma 2.08e-3,
+  grid delta 8.67e-5; against a fine-grid core ladder the price error goes 2.57e-3 → 2.60e-4 /
+  1.14e-3 → 2.79e-4 and delta 8.65e-5 → 2.5e-7 / 5.2e-5 → 5.8e-7; 3 added.
+- (b) local-vol barrier: six `lv_barrier_*` rows, price up to 2.01e-3
+  (`lv_barrier_discrete|default`). Against the oracle's Richardson references five move toward
+  (discrete default 1.75e-3 → 2.5e-4) and `lv_barrier_cont|600x200` away by 1.8e-5 (6.2e-5 →
+  8.0e-5). The local-vol autocallables are bit-identical; 2 added.
+- (c) DCN: `dcn|default` and `dcn|601`, pv up to 336.1 (`dcn|601`, 3.4 bp of 1e6). Against the
+  exact recursion `dcn|601` 3.51 → 0.15 bp and `dcn|default` 0.070 → 0.102 bp (an 801-point plan
+  → the 400-point preset; away by 0.03 bp, inside its 1 bp bound); `lv_dcn` bit-identical; 3
+  added.
+- (d) local-vol DCN: `lv_dcn|default` and `lv_dcn|601`, pv up to 148.6 (`lv_dcn|601`). Against
+  the exact recursion on the rows' constant 22 % surface 1.21 → 0.086 bp and 1.52 → 0.038 bp; 1
+  added.
+- (e) deletions: no value moves; the two declared-error rows
+  `3b|{heston,slv}_snowball|half_step|stats` change text; 8 European-knock-in rows added
+  (`3c|eki|*`).
+
+Stage 3, the knock-in-side row: 721 rows, 0 unexpected diffs. The 15 rows of the evidence's r4
+list equal `r4_book_gated.json` bit for bit, at most 1.11e-6 (`intraday_snowball`). The
+`3c|eki` rows move in price by −4.14e-3 (Snowball), −3.25e-3 (Phoenix) and −8.14e-3 (reverse
+Snowball), in bump vega by up to 8.91e-3, and the KO-reset by 6.8e-7 (a pre-maturity
+statistic); each move was measured toward the independent reference (Fixed). The
+`3c|eki|phoenix` row was rebuilt as a knock-in-at-maturity Phoenix; it had been the monthly one.
+
+### Certification
+The knock-in-side row moves 31 values in 10 certified cells, each equal bit for bit to its
+pre-measured value (`r4_anchors_gated.json`); every other anchored value is unchanged and every
+decision is unchanged. The six studies are amended and banked under
+`docs/modelvalidation/certificates/{snowball-flat-bsm,phoenix-flat-bsm,ko-reset-flat-bsm,snowball-localvol-1d,adi2d-snowball-greeks,snowball-intraday-daily-ki-bsm}/2026-10-06/`,
+their parents retired in place. The four schema-1 studies were amended with `--rerun-candidate`
+on their PDE candidate; `adi2d-snowball-greeks` through the external-benchmark path (24 cells
+carried bit for bit, 4 translated); the intraday study's reference re-ran value-identical.
+
+| Study | Values / cells | Cells | Largest move |
+|---|---|---|---|
+| snowball-flat-bsm | 3 / 1 | `european_ki` | 4.33e-3 (pv) |
+| snowball-localvol-1d | 12 / 4 | `calm_discrete_ki`, `calm_european_ki`, `crash_discrete_ki`, `crash_european_ki` | 0.165 contracts (`calm_european_ki` pv) |
+| ko-reset-flat-bsm | 3 / 1 | `european_ki` | 5.4e-7 |
+| snowball-intraday-daily-ki-bsm | 6 / 1 | `near_ko_on_ko_day_1s` | 5.4e-10 |
+| phoenix-flat-bsm | 3 / 1 | `ki_stepdown` | 1.9e-15 |
+| adi2d-snowball-greeks | 4 / 2 | `heston_pde\|near_expiry`, `heston_slv_pde\|near_expiry` (delta, gamma) | 1.8e-15 |
+
+The local-vol European knock-in pv errors against the certificate's reference go +0.165 →
+−0.0002 (calm) and +0.091 → −0.034 (crash) contracts; the flat `european_ki` pv goes from
++4.4e-3 to +4e-5 against the exact value. The adi2d moves are translated by the harness's own
+interval arithmetic, shifting its intervals by at most 9.8e-14 contracts. Both `amend` changes
+are listed under Added.
+
+### Performance
+Timing (`test/pde_bitwise/timing.py`, 0.9.0 and 0.10.0 interleaved, 15 repetitions per arm,
+ARM64 macOS; cold medians in ms). A case whose 15 cold times spread by more than 10 % of the
+median on either side is inconclusive, never a pass. The four statistics cases were
+re-measured one family per process: their joint run spread by 24 to 81 %.
+
+The untouched routes, gated at 1.05×: American 1.007×, barrier 1.013×, Snowball 1.007×,
+Phoenix 1.018×, KO-reset 1.010×, local-vol Snowball 1.004×, Snowball statistics 1.015×,
+Phoenix statistics 0.996×, KO-reset statistics 1.006×, local-vol Snowball statistics 1.006×:
+none fails. The flat European is **inconclusive**: three runs gave 1.008×, 0.983× and 1.007×
+with spreads of 10.8 to 28.5 % on a 23 ms single-shot case. Ungated: the memory and EXPIRY
+Phoenix statistics, 1.005× and 1.001×.
+
+The four routes moved onto the core are slower by design (the shared presets and the core's
+time density, decisions 3 and 4); declared, not gated:
+
+| Route (fast / standard / high) | `price` 0.9.0 | `price` 0.10.0 | `calculate_greeks` 0.9.0 | `calculate_greeks` 0.10.0 |
+|---|---|---|---|---|
+| Local-vol vanilla | 8.0 / 8.9 / 21.3 | 65.6 / 72.4 / 172 | 47.5 / 52.3 / 128 | 254 / 283 / 679 |
+| Local-vol barrier, continuous | 9.4 / 10.3 / 24.4 | 71.1 / 69.0 / 166 | 28.0 / 30.7 / 73.3 | 70.4 / 68.2 / 167 |
+| Local-vol barrier, daily | 12.6 / 13.7 / 31.0 | 112 / 122 / 288 | 37.8 / 41.0 / 92.6 | 112 / 123 / 239 |
+| DCN | 30.6 / 39.4 / 42.1 | 90.5 / 103 / 219 | 76.5 / 98.0 / 122 | 90.5 / 103 / 218 |
+| Local-vol DCN | 44.0 / 54.7 / 61.8 | 234 / 260 / 609 | 117 / 145 / 182 | 232 / 259 / 571 |
+
+The double-barrier and touch products under EXPIRY build no grid (static replication).
+
+### Known issues
+- The analytic engines short-circuit a spot beyond a discretely monitored barrier although no
+  observation is due: the double barrier returns the rebate (−0.086 on a monthly knock-out at
+  spot 135), the single barrier the rebate or the vanilla (−0.202, +0.596, +0.032 on three
+  monthly products); the double-sharkfin engine has the same test (read, not measured). At
+  maturity the single-barrier analytic engine returns 0 for an untriggered knock-in's rebate,
+  tests a schedule with no maturity record by the spot (5 for 35) and ignores a maturity
+  record's own level (25 for 7). The PDE is right in all of these.
+- Under `ACCUMULATE` a no-touch's interior records add 0, so only its maturity record ends it: a
+  year out, records at 0.5 and 1, the PDE gives 4.304787 = `5 DF P[S_1 < 130]`, against 4.227537
+  under first hit. Whether the mode has a meaning on a no-touch is a product question.
+- `time_shift` drops a record that lands on the valuation instant, and when that empties the
+  schedule it returns before shortening the maturity, so the product is not aged at all; a dated
+  product valued on its exercise date raises.
+- The double-barrier engine's Ikeda–Kunitomo option leg is fixed at 21 images: where the true
+  value is below 1e-13 it returns 1.6e-5 (95 / 105, vol 30 %, 3 years) to 4.1e-4 (98 / 102, vol
+  50 %, 1 year). It has no error control.
+- The double sharkfin's continuous paid-at-hit leg integrates the survival curve with 48
+  Gauss–Legendre nodes; next to a barrier (spot 129.9 on 80 / 130) the factor is off by 4.3e-7 to
+  1.9e-6 on the exact probability.
+- An explicit `GridConfig(bounds=...)` close to a barrier mis-states the far-field row: the
+  autocallable row by −0.09 to −0.13 (−0.13 at 15 points below the knock-in barrier, against
+  +4.3 before the knock-in-side row), the single-barrier row by 0.1 to 3.3, and the knocked-in
+  upper row by −0.73 to −1.74 under a narrow upper bound. The right row there is a knock-in or
+  knock-out probability; keep an explicit bound well beyond the barrier.
+
 ## [0.9.0] - 2026-10-04
 
 PDE 1D event statistics (spec: `docs/superpowers/specs/2026-10-03-pde-1d-event-statistics-design.md`).

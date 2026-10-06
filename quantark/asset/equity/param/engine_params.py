@@ -429,7 +429,8 @@ class PDEParams(EngineParams):
     - ``accuracy`` -- a faster preview or a finer answer. Selects the
       ``GridConfig`` preset: fast (200 pts, 4/day), standard (400, 4/day),
       high (800, 8/day). Resolution settings, not accuracy guarantees; a
-      "day" is 1/252 of a solver year in this release.
+      "day" is one of the pricing environment's business days
+      (``bus_days_in_year``).
     - ``grid`` -- override one preset field. Each non-``None`` ``GridConfig``
       field replaces that preset value; the rest inherit. Exactly one time
       basis (``steps_per_day`` or ``time_steps``) is in force after
@@ -440,7 +441,7 @@ class PDEParams(EngineParams):
       not cure), ``event_theta`` (the weight on the damped steps after each
       interior event), ``terminal_damping_steps`` and ``event_damping_steps``
       (``None`` = the route's defaults, 0 disables). A custom stepper runs on
-      the shared-grid routes only.
+      every 1D route.
     - ``operator`` -- the spatial operator. ``None`` is the built-in
       ``CentralDifference()``; a custom operator must support the route's
       samples. Constructed in code only (not from a config file).
@@ -456,9 +457,11 @@ class PDEParams(EngineParams):
       intervals whose dt differ by an ULP (Review Focus 5).
     - ``bump_config`` (inherited) -- bump sizes for numerical Greeks.
 
-    Routes other than the shared-grid solvers (local-vol vanilla and barrier,
-    DCN) honour a subset; ``route_applicability.ROUTE_RULES`` lists what each
-    rejects, and the error names the field, the route, and sub-project 3.
+    Every 1D route honours every field. The 2D Heston / SLV Snowball and
+    Phoenix solvers' limits are listed in ``route_applicability.ROUTE_RULES``
+    (one row, ``"2D"``: they damp in whole steps); an explicit value they
+    cannot honour raises ``ValidationError`` naming the field and the route.
+    ``explain`` covers the 1D routes only.
     """
 
     # Grid: ``accuracy`` selects a GridConfig preset; ``grid`` is the
@@ -476,8 +479,8 @@ class PDEParams(EngineParams):
     # family's discrete observations included (spec 3A §5.4), and on the
     # 1D BSM/LV and 2D Heston/SLV autocallables slice-wise (the dual-cell
     # projection that removes the half-cell trigger-phase bias documented in
-    # pde_auto_grid_investigation.md), NODAL on DCN, a mid-cell-aligned nodal
-    # mask on the local-vol barrier. Continuously monitored barriers keep
+    # pde_auto_grid_investigation.md), the DCN's daily dates and the local-vol
+    # barrier's observations included (0.10.0). Continuously monitored barriers keep
     # nodal treatment either way.
     event_projection: Optional[Union[EventProjectionMode, str]] = None
     cache_enabled: bool = True
