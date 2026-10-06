@@ -38,6 +38,7 @@ from quantark.modelvalidation.evidence import (
 )
 from quantark.modelvalidation.pipeline import (
     Certificate,
+    _reference_config,
     evaluate_candidate,
     reference_block,
     aggregate_and_decide,
@@ -148,6 +149,10 @@ def amend(
     root = validate_durable_root(out_dir) / study.name
     store = CheckpointStore(root / "checkpoints")
     parent_digest = parent_payload["projected_sha256"]
+
+    if _reference_config(reference).get("external"):
+        return _amend_external(study, parent, parent_payload, reference, sampling, quick, resume, reason,
+                               started, root, store)
 
     parent_references: Dict[str, dict] = dict(parent_payload["references"])
     parent_cells: Dict[tuple, dict] = {
@@ -304,6 +309,123 @@ def amend(
         },
     )
     return write_certificate(payload, root)
+
+
+def _amend_external(study, parent, parent_payload, reference, sampling, quick, resume, reason, started, root,
+                    store) -> Certificate:
+    """Amend an imported certification, whose benchmark is external: banked, never run, never re-gated.
+
+    Every candidate re-runs, because an imported cell's identity is the producing harness's, never this
+    module's. A value that comes back bit for bit carries its cell verbatim. A value that moved is
+    TRANSLATED by the harness's own arithmetic (RELEASE_PROCEDURE section 10): its comparison interval
+    shifts by the move in contracts, ``k = reference_standard_error / reference.se``, with the harness's
+    envelopes held at their banked values. A translation that would change a verdict -- a cell's, or an
+    aggregate's widened by its largest move -- is refused: only the harness can re-certify that.
+    """
+    banked_config, current_config = parent_payload.get("reference_config") or {}, _reference_config(reference)
+    if "imported" not in parent_payload or banked_config != current_config:
+        raise ValidationError(
+            "An external benchmark is amended only against the imported certificate that banks it, under the "
+            f"benchmark it declared: the parent declares {banked_config!r}, the study {current_config!r}")
+
+    parent_digest = parent_payload["projected_sha256"]
+    parent_cells = {(c["candidate"], c["case"], c["quantity"]): c for c in parent_payload["cells"]}
+    cells: List[dict] = []
+    carried: List[dict] = []
+    translated: List[dict] = []
+    moves: Dict[tuple, float] = {}
+
+    for candidate in study.candidates:
+        name = candidate.name()
+        for case in study.cases:
+            banked = [parent_cells.get((name, case.name, quantity)) for quantity in study.quantities]
+            if any(cell is None for cell in banked):
+                raise ValidationError(
+                    f"{name} on {case.name!r} has no banked cell: coverage added under an external benchmark has "
+                    "no reference to be judged against; re-run the harness to certify it")
+            result = evaluate_candidate(candidate, case, store, resume, schema=study.schema)
+            for quantity, cell in zip(study.quantities, banked):
+                key = {"candidate": name, "case": case.name, "quantity": quantity}
+                value = result.values[quantity]
+                if value == cell["candidate_value"]:
+                    cells.append({**cell, "carried_from": parent_digest})
+                    carried.append(key)
+                    continue
+                moved, shift_c = _translate_imported_cell(cell, value)
+                cells.append({**moved, "translated_from": parent_digest})
+                translated.append({**key, "parent_candidate_value": cell["candidate_value"],
+                                   "candidate_value": value, "shift_c": shift_c})
+                moves[(name, quantity)] = max(moves.get((name, quantity), 0.0), abs(shift_c))
+
+    bounded: List[dict] = []
+    for aggregate in parent_payload["aggregates"]:
+        largest = moves.get((aggregate["candidate"], aggregate["quantity"]))
+        if largest is None:
+            continue
+        source = aggregate.get("source_bias") or {}
+        lo, hi = source.get("interval") or (float("nan"), float("nan"))
+        if source.get("status") != "PASS" or not max(abs(lo), abs(hi)) + largest < source.get("economic_bound", 0.0):
+            raise ValidationError(
+                f"The {aggregate['candidate']} {aggregate['quantity']} aggregate cannot be translated: its banked "
+                f"interval [{lo}, {hi}] widened by the largest candidate move {largest!r} contracts does not stay "
+                "wholly inside its economic bound; re-run the harness to re-certify")
+        bounded.append({"candidate": aggregate["candidate"], "quantity": aggregate["quantity"],
+                        "shift_bound_c": largest})
+
+    payload = assemble_payload(
+        study=study,
+        sampling=sampling,
+        quick=quick,
+        references=dict(parent_payload["references"]),
+        cells=cells,
+        aggregates=[dict(aggregate) for aggregate in parent_payload["aggregates"]],
+        decisions=dict(parent_payload["decisions"]),
+        started=started,
+        reference=reference,
+        extra={
+            "imported": parent_payload["imported"],
+            "amendment": {
+                "parent": str(Path(parent)),
+                "parent_projected_sha256": parent_digest,
+                "reason": reason,
+                "external_benchmark": (
+                    "banked by the parent and carried; never run. Every candidate re-ran: a bit-identical value "
+                    "carries its cell, a moved one is translated by the harness's interval arithmetic with its "
+                    "envelopes held at their banked values, and an aggregate keeps its banked numbers within "
+                    "shift_bound_c of its translated centre"),
+                "replaced_cells": [{k: t[k] for k in ("candidate", "case", "quantity")} for t in translated],
+                "carried_cells": carried,
+                "translated_cells": translated,
+                "aggregate_shift_bounds": bounded,
+            },
+        },
+    )
+    return write_certificate(payload, root)
+
+
+def _translate_imported_cell(cell: Mapping[str, Any], value: float) -> tuple:
+    """Shift an imported cell's harness interval by its candidate's move; refuse if its verdict would change."""
+    verdict, reference = cell.get("source_verdict") or {}, cell.get("reference") or {}
+    if verdict.get("status") != "PASS" or not reference.get("se"):
+        raise ValidationError(
+            f"{cell['candidate']}/{cell['case']}/{cell['quantity']} moved, and only a PASS cell with a banked "
+            "reference standard error can be translated; re-run the harness to re-certify it")
+    shift_c = (value - cell["candidate_value"]) * (verdict["reference_standard_error"] / reference["se"])
+    lo, hi = (edge + shift_c for edge in verdict["interval"])
+    bound = verdict["economic_bound"]
+    if not -bound < lo <= hi < bound:
+        raise ValidationError(
+            f"{cell['candidate']}/{cell['case']}/{cell['quantity']} moved by {shift_c!r} contracts, which takes "
+            f"its harness interval to [{lo}, {hi}] against a bound of {bound}: the verdict would change, and "
+            "only the harness can re-certify it")
+    difference = verdict["estimate_difference"] + shift_c
+    moved = {
+        **cell,
+        "candidate_value": value,
+        "gate": {**cell["gate"], "signed_err_c": difference, "interval_c": max(abs(lo), abs(hi))},
+        "source_verdict": {**verdict, "estimate_difference": difference, "interval": [lo, hi]},
+    }
+    return moved, shift_c
 
 
 def _estimate_from_block(block: Mapping[str, Any], quantities) -> Optional[ReferenceEstimate]:
