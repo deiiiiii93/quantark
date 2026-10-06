@@ -4,7 +4,9 @@
 solvers are thin wrappers over the ``quantark.volmodels`` 2D ADI barrier kernels, pricing the
 existing ``BarrierOption``: continuous monitoring by per-step injection, discrete monitoring at the
 observation nodes; ``participation_rate`` is applied once; a per-observation
-``observation_schedule`` is rejected (v1). Deterministic — no MC inside PDE.
+``observation_schedule`` is rejected (v1). Below the kernels' vol-of-vol floor the variance is deterministic and both
+solvers march the 1D local-vol limit sigma_loc(S, t) = L(S, t) sqrt(v(t)) on the core instead. Deterministic — no MC
+inside PDE.
 """
 from __future__ import annotations
 
@@ -31,7 +33,8 @@ from quantark.util.enum.engine_enums import ADIScheme, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.heston import HestonParams
-from quantark.volmodels.heston.pde_kernel import price_barrier_heston_pde
+from quantark.volmodels.heston.deterministic_limit import DeterministicVarianceLocalVol
+from quantark.volmodels.heston.pde_kernel import _SIGMA_MIN, price_barrier_heston_pde
 from quantark.volmodels.slv.leverage import LeverageSurface
 from quantark.volmodels.slv.slv_pde_kernel import price_barrier_slv_pde
 
@@ -162,6 +165,13 @@ class _Heston2DBarrierBase(BaseEngine):
         continuous, dates = _obs_dates(product, T)
         return continuous, (None if continuous else [T - d for d in dates])
 
+    def _deterministic_limit(self, product, env, leverage=None) -> float:
+        """Vol-of-vol below ``_SIGMA_MIN``: the variance is deterministic and the 2D ADI grid ill-conditioned, so the
+        barrier is the 1D local-vol problem sigma_loc(S, t) = L(S, t) sqrt(v(t)), marched on the core at its
+        standard preset (the core prices participation, rebates, the multiplier and terminal settlement itself)."""
+        surface = DeterministicVarianceLocalVol(self.model_params, leverage)
+        return LocalVolBarrierPDESolver(local_vol_surface=surface).price(product, env)
+
 
 class HestonBarrierPDESolver(_Heston2DBarrierBase):
     """2D ADI barrier PDE under the Heston model."""
@@ -175,6 +185,8 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("HestonBarrierPDESolver", product)
         settlement_scale = _settlement_scale(self, product, env)
+        if self.model_params.sigma < _SIGMA_MIN:
+            return self._deterministic_limit(product, env)
         T = float(product.get_maturity(env))
         t_grid = np.linspace(0.0, T, self.n_t + 1)
         market = TermMarketContext.from_env(
@@ -216,6 +228,8 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("HestonSLVBarrierPDESolver", product)
         settlement_scale = _settlement_scale(self, product, env)
+        if self.model_params.sigma < _SIGMA_MIN:
+            return self._deterministic_limit(product, env, self.leverage_surface)
         T = float(product.get_maturity(env))
         t_grid = np.linspace(0.0, T, self.n_t + 1)
         market = TermMarketContext.from_env(

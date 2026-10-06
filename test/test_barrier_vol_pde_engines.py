@@ -149,3 +149,67 @@ def test_lv_discrete_barrier_matches_analytic_oracle():
     # 1600 x 2400 PDE (every date on a node) sits 0.1310 from BGK and 7.0e-4
     # from this price. Bound = measured gap + margin.
     assert abs(px - ana) < 0.15
+
+
+# The vol-of-vol -> 0 limit: the variance is deterministic, so the 2D solvers price a 1D local-vol barrier on the core.
+DECAYING = HestonParams(v0=0.09, kappa=1.5, theta=0.04, sigma=1e-9, rho=-0.5)
+SKEW = LeverageSurface(time_grid=np.array([0.0, 1.0]), strike_grid=np.array([50.0, 80.0, 100.0, 120.0, 160.0]),
+                       leverage_grid=np.array([[1.3, 1.1, 1.0, 0.9, 0.8], [1.2, 1.05, 1.0, 0.95, 0.85]]))
+
+
+def _limit_products():
+    from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+    lagged = SettlementConvention(lag=0.05, lag_unit=SettlementLagUnit.YEAR_FRACTION)
+    return {
+        "uo_cont": _uo_call(),
+        "uo_monthly": _disc_call([k / 12.0 for k in range(1, 13)]),
+        "di_put_rebate": BarrierOption(strike=100., maturity=1.0, option_type=OptionType.PUT, barrier=80.,
+                                       barrier_type=BarrierType.DOWN_IN, observation_type=ObservationType.CONTINUOUS,
+                                       rebate=1.5),
+        "uo_participation_multiplier_lagged": BarrierOption(
+            strike=100., maturity=1.0, option_type=OptionType.CALL, barrier=130., barrier_type=BarrierType.UP_OUT,
+            observation_type=ObservationType.CONTINUOUS, rebate=2.0, participation_rate=0.6, contract_multiplier=10.0,
+            settlement_convention=lagged),
+    }
+
+
+@pytest.mark.parametrize("name", list(_limit_products()))
+@pytest.mark.parametrize("leverage", [None, SKEW], ids=["heston", "slv"])
+def test_the_deterministic_limit_marches_on_the_core(name, leverage):
+    from quantark.volmodels.heston.deterministic_limit import DeterministicVarianceLocalVol
+    product, env = _limit_products()[name], _env()
+    engine = (HestonBarrierPDESolver(DECAYING) if leverage is None
+              else HestonSLVBarrierPDESolver(DECAYING, leverage))
+    core = LocalVolBarrierPDESolver(local_vol_surface=DeterministicVarianceLocalVol(DECAYING, leverage))
+    assert engine.price(product, env) == core.price(product, env)
+
+
+@pytest.mark.parametrize("product", [
+    _uo_call(),
+    BarrierOption(strike=100., maturity=1.0, option_type=OptionType.PUT, barrier=80.,
+                  barrier_type=BarrierType.DOWN_IN, observation_type=ObservationType.CONTINUOUS),
+], ids=["uo_call_130", "di_put_80"])
+@pytest.mark.parametrize("make", [
+    lambda p: HestonBarrierPDESolver(p),
+    lambda p: HestonSLVBarrierPDESolver(p, _unit_lev()),
+], ids=["heston", "slv"])
+def test_the_flat_deterministic_limit_is_the_black_scholes_barrier(product, make):
+    flat = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=1e-9, rho=0.0)
+    ana = BarrierAnalyticalEngine().price(product, _env())
+    # measured 2026-10-06 on the standard preset: 1.84e-4 (uo) and 3.17e-4 (di); the 1D LV kernel this replaced
+    # missed by 3.06e-4 and 4.58e-3
+    assert abs(make(flat).price(product, _env()) - ana) < 5e-4
+
+
+def test_the_deterministic_limit_keeps_the_2d_solvers_refusals():
+    from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+    from quantark.execution.errors import CapabilityError
+    lagged_hit = BarrierOption(strike=100., maturity=1.0, option_type=OptionType.CALL, barrier=130.,
+                               barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.CONTINUOUS,
+                               rebate=2.0, pay_at_hit=True,
+                               settlement_convention=SettlementConvention(
+                                   lag=0.05, lag_unit=SettlementLagUnit.YEAR_FRACTION))
+    with pytest.raises(CapabilityError):
+        HestonBarrierPDESolver(DECAYING).price(lagged_hit, _env())
+    with pytest.raises(CapabilityError):
+        HestonSLVBarrierPDESolver(DECAYING, SKEW).price(lagged_hit, _env())

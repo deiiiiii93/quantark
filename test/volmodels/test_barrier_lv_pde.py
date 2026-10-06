@@ -5,7 +5,8 @@ from quantark.param import GridVolSurface, FlatRateCurve, SpotQuote
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
-from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde, price_european_lv_pde
+from quantark.volmodels.localvol.pde_kernel import price_european_lv_pde
+from pde_routes.lv_barrier_kernel import price_barrier_lv_pde
 from quantark.volmodels.localvol.mc_kernel import price_barrier_lv_mc
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
 from quantark.asset.equity.product.option import BarrierOption

@@ -129,37 +129,6 @@ def _deterministic_pde_price(s0, strike, is_call, T, params, r, carry) -> float:
     return (bs_call_price if is_call else bs_put_price)(s0, strike, T, v_eff, r, carry)
 
 
-def _deterministic_barrier_price(s0, strike, is_call, T, params, r, carry, barrier, is_up, is_out,
-                                 rebate, pay_at_hit, continuous, observe_taus, n_x, n_t,
-                                 market_context=None):
-    """BSM-limit (sigma -> 0) barrier price via the 1-D local-vol kernel at constant vol."""
-    from quantark.volmodels.localvol.surface import LocalVolSurface
-    from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde
-    v_eff = _deterministic_vol(T, params)
-    ks = s0 * np.exp(np.linspace(-2.5, 2.5, 7))
-    lv = LocalVolSurface(strike_grid=ks, time_grid=np.array([0.0, max(T, 1e-8)]),
-                         lv_grid=np.full((2, ks.size), v_eff))
-    if market_context is None:
-        n = max(int(n_t), 100)
-        dt = np.full(n, T / n)
-        rf = np.full(n, float(r))
-        cf = np.full(n, float(carry))
-    else:
-        dt = np.diff(market_context.t_grid)
-        rf = market_context.fwd_rates
-        cf = market_context.fwd_carry
-        n = int(dt.size)
-    if continuous:
-        obs_steps = None
-    else:
-        t_grid = np.linspace(0.0, T, n + 1)
-        obs_steps = [int(np.argmin(np.abs(t_grid - (T - float(o))))) for o in (observe_taus or [])]
-    return price_barrier_lv_pde(s0, strike, is_call, T, lv, dt, rf, cf, barrier=float(barrier),
-                                is_up=bool(is_up), is_out=bool(is_out), rebate=float(rebate),
-                                pay_at_hit=bool(pay_at_hit), continuous=continuous,
-                                observe_steps=obs_steps, n_s=max(int(n_x), 400))
-
-
 def _observation_step_set(observe_taus, dt_grid, n_t):
     return {
         min(max(int(round(float(tau) / dt_grid)), 0), int(n_t))
@@ -188,7 +157,7 @@ def price_barrier_heston_pde(
     """Single-barrier option under Heston via 2D ADI.
 
     Continuous monitoring truncates the log-spot domain AT the barrier and imposes a Dirichlet
-    knock-out value on that boundary (exact continuous monitoring, matching the 1-D LV kernel).
+    knock-out value on that boundary (exact continuous monitoring).
     Discrete monitoring keeps the full domain and injects the KO condition at the observation
     steps via a step_hook. Knock-in = Vanilla - KO(rebate=0) + rebate * NoTouch.
     """
@@ -198,12 +167,11 @@ def price_barrier_heston_pde(
     validate_barrier(spec, s0)
 
     if params.sigma < _SIGMA_MIN:
-        # Deterministic-variance limit: the ADI grid is ill-conditioned, so price the barrier via
-        # the exact 1-D local-vol kernel at the BSM-equivalent constant vol (mirrors the European
-        # kernel's _deterministic bypass). Truncation (continuous) / injection (discrete) live there.
-        return _deterministic_barrier_price(s0, strike, is_call, T, params, r, carry, barrier, is_up,
-                                            is_out, rebate, pay_at_hit, continuous, observe_taus, n_x, n_t,
-                                            market_context=market_context)
+        # Deterministic-variance limit: the ADI grid is ill-conditioned there, and the problem is a 1-D local-vol
+        # barrier, which HestonBarrierPDESolver marches on the shared PDE core.
+        raise ValidationError(
+            f"sigma={params.sigma!r} is below {_SIGMA_MIN}: the deterministic-variance limit is a 1-D local-vol "
+            "barrier; price it with HestonBarrierPDESolver, which marches it on the PDE core")
 
     x0, v0 = float(np.log(s0)), params.v0
     dt_grid = float(T) / float(n_t)

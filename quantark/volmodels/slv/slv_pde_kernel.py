@@ -86,40 +86,6 @@ def price_delta_gamma_slv_pde(
     return price, delta, gamma
 
 
-def _deterministic_slv_barrier(s0, strike, is_call, T, params, lev_surface, r, carry, eta,
-                               barrier, is_up, is_out, rebate, pay_at_hit, continuous, observe_taus,
-                               n_x, n_t, market_context=None):
-    """BSM-limit (sigma -> 0) SLV barrier via the 1-D LV kernel at effective vol L(S,t)*sqrt(v_det)."""
-    from quantark.volmodels.localvol.surface import LocalVolSurface
-    from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde
-    from quantark.volmodels.heston.pde_kernel import _deterministic_vol
-    v_eff = _deterministic_vol(T, params)
-    ks = s0 * np.exp(np.linspace(-2.5, 2.5, 15))
-    tg = np.linspace(0.0, max(T, 1e-8), 5)
-    lv_grid = np.array([[max(float(np.asarray(lev_surface.leverage(np.array([k]), float(t))).ravel()[0]), 1e-8) * v_eff
-                         for k in ks] for t in tg])
-    lv = LocalVolSurface(strike_grid=ks, time_grid=tg, lv_grid=lv_grid)
-    if market_context is None:
-        n = max(int(n_t), 100)
-        dt = np.full(n, T / n)
-        rf = np.full(n, float(r))
-        cf = np.full(n, float(carry))
-    else:
-        dt = np.diff(market_context.t_grid)
-        rf = market_context.fwd_rates
-        cf = market_context.fwd_carry
-        n = int(dt.size)
-    if continuous:
-        obs_steps = None
-    else:
-        t_grid = np.linspace(0.0, T, n + 1)
-        obs_steps = [int(np.argmin(np.abs(t_grid - (T - float(o))))) for o in (observe_taus or [])]
-    return price_barrier_lv_pde(s0, strike, is_call, T, lv, dt, rf, cf, barrier=float(barrier),
-                                is_up=bool(is_up), is_out=bool(is_out), rebate=float(rebate),
-                                pay_at_hit=bool(pay_at_hit), continuous=continuous,
-                                observe_steps=obs_steps, n_s=max(int(n_x), 400))
-
-
 def _observation_step_set(observe_taus, dt_grid, n_t):
     return {
         min(max(int(round(float(tau) / dt_grid)), 0), int(n_t))
@@ -160,11 +126,11 @@ def price_barrier_slv_pde(
     validate_barrier(spec, s0)
 
     if params.sigma < _SIGMA_MIN:
-        # Deterministic-variance limit: effective local vol = L(S,t) * sqrt(v_det). Price via the
-        # exact 1-D local-vol kernel (the ADI grid is ill-conditioned at near-zero vol-of-vol).
-        return _deterministic_slv_barrier(s0, strike, is_call, T, params, lev_surface, r, carry, eta,
-                                          barrier, is_up, is_out, rebate, pay_at_hit, continuous,
-                                          observe_taus, n_x, n_t, market_context=market_context)
+        # Deterministic-variance limit: effective local vol L(S,t) * sqrt(v(t)), a 1-D local-vol barrier that
+        # HestonSLVBarrierPDESolver marches on the shared PDE core (the ADI grid is ill-conditioned there).
+        raise ValidationError(
+            f"sigma={params.sigma!r} is below {_SIGMA_MIN}: the deterministic-variance limit is a 1-D local-vol "
+            "barrier; price it with HestonSLVBarrierPDESolver, which marches it on the PDE core")
 
     x0, v0 = float(np.log(s0)), params.v0
     dt_grid = float(T) / float(n_t)

@@ -23,6 +23,10 @@ def test_route_rules_keep_only_the_2d_row():
     ("quantark.asset.equity.engine.pde.dcn_pde_solver", "_operator_coeffs"),
     ("quantark.asset.equity.engine.pde.dcn_pde_solver", "_theta_step"),
     ("quantark.volmodels.localvol", "price_barrier_lv_pde"),
+    ("quantark.volmodels.localvol.pde_kernel", "price_barrier_lv_pde"),           # the test oracle (decision 14)
+    ("quantark.volmodels.localvol.pde_kernel", "_solve_ko_lv"),
+    ("quantark.volmodels.heston.pde_kernel", "_deterministic_barrier_price"),     # sigma -> 0 marches on the core
+    ("quantark.volmodels.slv.slv_pde_kernel", "_deterministic_slv_barrier"),
     ("quantark.asset.equity.engine.mc.dcn_execution_adapters", "DCNLocalVolPDEAdapter"),
     ("quantark.asset.equity.engine.analytical.double_barrier_option_engine", "DoubleBarrierOptionAnalyticalEngine._prob_inside_at_expiry"),
 ])
