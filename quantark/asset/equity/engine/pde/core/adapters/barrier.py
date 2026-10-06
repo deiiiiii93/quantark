@@ -55,7 +55,6 @@ class _BarrierFamilyAdapter(FamilyAdapter):
                 f"got {type(product).__name__}"
             )
         self._validate_observation(product)
-        self._validate_expiry_march(product, env)
         # The lifecycle wrapper's check on every price / calculate_greeks call
         # (the knock-out leg of a composite went through it as super().price).
         from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
@@ -64,20 +63,33 @@ class _BarrierFamilyAdapter(FamilyAdapter):
     def _validate_observation(self, product) -> None:
         pass
 
-    def _validate_expiry_march(self, product, env) -> None:
-        """Only the single barrier marches EXPIRY monitoring (one record at maturity, its far-field row; spec 3C
-        §5.2 (b)). The double barrier and the touch products have no such row (§9), and their march applied the
-        barrier at every step: before maturity they refuse EXPIRY. At maturity it is decision 30's terminal value."""
-        if self._marches_expiry or getattr(product, "observation_type", None) != ObservationType.EXPIRY:
-            return
-        if product.get_maturity(env) > 0:
-            raise ValidationError(
-                f"{type(self.solver).__name__} does not march EXPIRY monitoring before maturity: it has no far-field "
-                "row for a barrier observed only at maturity. Use the analytic engine, or DISCRETE monitoring with "
-                "one observation at maturity")
+    # --- EXPIRY before maturity ---------------------------------------------------
 
-    #: whether the family marches EXPIRY before maturity (the single barrier does; spec 3C §5.2 (b))
+    #: whether the family marches EXPIRY before maturity (the single barrier does: one record at maturity and its
+    #: far-field row, spec 3C §5.2 (b)); the others have no such row and price it by static replication
     _marches_expiry = False
+
+    def _replicates_expiry(self, product, env) -> bool:
+        """EXPIRY before maturity on a family that does not march it (the march would apply the barrier at every
+        step): the value is a function of S_T alone, read from analytic legs (``expiry_replication``). At maturity
+        it is decision 30's terminal value as for every product."""
+        return (not self._marches_expiry
+                and getattr(product, "observation_type", None) == ObservationType.EXPIRY
+                and product.get_maturity(env) > 0)
+
+    def composite(self, product, env, request, lifecycle_state):
+        if request.operation in _FACADE and self._replicates_expiry(product, env):
+            from .expiry_replication import replication_problem
+            return replication_problem(self, product, env, request)
+        return None
+
+    def _replication_legs(self, product) -> list:
+        """The legs ``expiry_replication`` prices (the family's terminal value as vanillas and cash digitals)."""
+        raise NotImplementedError
+
+    def _replication_multiplier(self, product) -> float:
+        """The legs' contract multiplier: the family's cash carries the product's (spec 3C decision 24) or none."""
+        return 1.0
 
     # --- the outcomes known at valuation --------------------------------------
 
@@ -206,6 +218,9 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         op = request.operation
         if op not in _FACADE:
             return None
+        replicated = super().composite(product, env, request, lifecycle_state)
+        if replicated is not None:
+            return replicated
         if product.is_knock_out:
             return None
         if product.get_maturity(env) <= 0:
@@ -214,8 +229,9 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         return self._compose(product, env, request, knock_out=not knocked_in)
 
     def bump_parts(self, product, env):
-        if product.is_knock_out or product.get_maturity(env) <= 0:
-            return None                          # at maturity no part product is built (decision 30), nothing to freeze
+        if product.is_knock_out or product.get_maturity(env) <= 0 or self._replicates_expiry(product, env):
+            # at maturity no part product is built (decision 30), and a replicated EXPIRY marches none: nothing to freeze
+            return None
         solver = self.solver
         parts = {"vanilla": (solver._vanilla_solver(), self._vanilla_product(product))}
         if not self.decision_at(product, env, env.spot)[3]:
@@ -464,6 +480,13 @@ class DoubleBarrierAdapter(_KnockInAdapter):
     def _participation(self, product):
         return None     # _price_vanilla multiplies by nothing (not by 1.0)
 
+    def _replication_legs(self, product) -> list:
+        from .expiry_replication import double_barrier_legs
+        return double_barrier_legs(product)
+
+    def _replication_multiplier(self, product) -> float:
+        return self.solver._multiplier(product)
+
 
 class _TouchAdapter(_BarrierFamilyAdapter):
     """One-touch and double one-touch: a touched one-touch pays the rebate, a touched no-touch nothing."""
@@ -501,6 +524,10 @@ class OneTouchAdapter(_TouchAdapter):
         return EventRecord(*self.solver._sides(product, product.barrier),
                            self._touched_value(product, env) if product.is_one_touch else 0.0, EventOp.SET)
 
+    def _replication_legs(self, product) -> list:
+        from .expiry_replication import one_touch_legs
+        return one_touch_legs(product)
+
 
 class DoubleOneTouchAdapter(_TouchAdapter):
     """``double_one_touch_pde_solver.py``."""
@@ -515,3 +542,7 @@ class DoubleOneTouchAdapter(_TouchAdapter):
     def _continuous_hit_record(self, product, env) -> EventRecord:
         return EventRecord(product.lower_barrier, product.upper_barrier,
                            self._touched_value(product, env) if product.is_double_one_touch else 0.0, EventOp.SET)
+
+    def _replication_legs(self, product) -> list:
+        from .expiry_replication import double_one_touch_legs
+        return double_one_touch_legs(product)
