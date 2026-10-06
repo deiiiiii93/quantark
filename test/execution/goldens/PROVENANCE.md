@@ -56,3 +56,9 @@ The Snowball/Phoenix MATURITY splits move by <= 1.1e-8 and the knock-out probabi
 (<= 2e-16): the knocked-in share now comes from the marched `ki_survive`. The KO-reset distribution
 carries both schedules and two maturity outcomes with their own determination times (it was the
 pre schedule with the post knock-outs folded into the maturity mass).
+
+## 2026-10-06: PDE 1D remaining routes (0.10.0)
+
+Spec: `docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md` §8. No execution golden was regenerated:
+`test/execution/` passed against the frozen files after stage 2 (full suite at e107b94e) and after stage 3's
+knock-in-side row (b0afa9d4), compared through `test/golden_compare.py` as always.

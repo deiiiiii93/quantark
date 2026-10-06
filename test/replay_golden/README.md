@@ -184,3 +184,36 @@ Per stage: (a) moved the probabilities before a knock-in (KI 2.6e-6 / 3.1e-6, KO
  test/replay_golden/data/scalar_bsm_event_probabilities.csv | 10 +++++-----
  4 files changed, 14 insertions(+), 14 deletions(-)
 ```
+
+## 2026-10-06 regeneration: PDE 1D remaining routes (0.10.0, spec 3C §8)
+
+Spec: `docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md`. Stages 1 and 2 (the barrier family's
+repairs and the four migrated routes) moved no replay frame. Stage 3's knock-in-side row (§5.5) moved the Snowball
+with discretely observed knock-in in both books on its one not-knocked-in day, 2024-01-02 (it knocks in on
+2024-01-03): its value and grid Greeks there, and every later row's P&L by the same offset. Nine frames moved; the
+rest are byte-identical, every `book_*` frame included.
+
+| file | largest per-column delta |
+|---|---|
+| `scalar_bsm_states.csv` | `product_mtm` / `portfolio_value` +3.18e-5 on 2024-01-02; `product_pnl` / `total_pnl` -3.18e-5 after |
+| `scalar_bsm_greeks.csv` | `price` -3.18e-5, `delta` +5.32e-5, `gamma` -7.60e-5 (2024-01-02) |
+| `scalar_bsm_surfaces.csv` | the 2024-01-02 spot x q grid: `price` -3.18e-5, `gamma_cash_1pct` -7.60e-3 |
+| `scalar_bsm_daily_event_summary.csv` | `pv`, `expected_discounted_maturity_cashflow` -3.18e-5 (2024-01-02) |
+| `scalar_bsm_summary.json` | `initial_portfolio_value` +3.18e-5, `total_pnl` -3.18e-5 |
+| `localvol_states.csv` | `product_mtm` / `portfolio_value` +3.28e-5 on 2024-01-02; P&L -3.28e-5 after |
+| `localvol_greeks.csv` | `price` -3.28e-5, `delta` +7.11e-5, `gamma` -1.41e-4 (2024-01-02) |
+| `localvol_daily_event_summary.csv` | `pv`, `expected_discounted_maturity_cashflow` -1.84e-5 (2024-01-02) |
+| `localvol_summary.json` | `initial_portfolio_value` +3.28e-5, `total_pnl` -3.28e-5 |
+
+```
+ test/replay_golden/data/localvol_daily_event_summary.csv   |  2 +-
+ test/replay_golden/data/localvol_greeks.csv                |  2 +-
+ test/replay_golden/data/localvol_states.csv                |  6 ++---
+ test/replay_golden/data/localvol_summary.json              |  4 +--
+ test/replay_golden/data/scalar_bsm_daily_event_summary.csv |  2 +-
+ test/replay_golden/data/scalar_bsm_greeks.csv              |  2 +-
+ test/replay_golden/data/scalar_bsm_states.csv              | 10 ++++----
+ test/replay_golden/data/scalar_bsm_summary.json            |  4 +--
+ test/replay_golden/data/scalar_bsm_surfaces.csv            | 30 +++++++++++-----------
+ 9 files changed, 31 insertions(+), 31 deletions(-)
+```
