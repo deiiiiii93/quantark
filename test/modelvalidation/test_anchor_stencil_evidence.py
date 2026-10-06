@@ -15,12 +15,12 @@ from quantark.modelvalidation.anchors import CROSS_ARCH_ABS_TOL, CROSS_ARCH_REL_
 from quantark.modelvalidation.yaml_loader import load_study_text
 
 ANCHORS = (Path(__file__).resolve().parents[2]
-           / "docs/modelvalidation/certificates/snowball-intraday-daily-ki-bsm/2026-10-03/anchors.json")
+           / "docs/modelvalidation/certificates/snowball-intraday-daily-ki-bsm/2026-10-06/anchors.json")
 
 #: What x86_64 Linux (GitHub Actions run 36380062818, Python 3.11, 2026-09-28) computed minus the values
 #: banked on ARM64 macOS -- the six anchors the flat relative tolerance rejected. Measured against the
-#: 2026-09-19 anchors; the tolerances are now read from their 0.8.0 successor, whose values differ by the
-#: 3A numerics, so this pins the tolerance's scale, not those six cells' exact drift. Five difference prices
+#: 2026-09-19 anchors; the tolerances are now read from their 0.10.0 successor, whose values differ by the
+#: 3A numerics (and one 3C cell by <= 5.4e-10), so this pins the tolerance's scale, not those six cells' exact drift. Five difference prices
 #: over a 1% spot bump or a 1-10 s theta step; the PVs they difference all agreed within 1e-9.
 CI_X86_DRIFT = {
     ("equity.snowball.intraday.pde", "near_ki_10s", "desk_theta"): 1.229e-08,
