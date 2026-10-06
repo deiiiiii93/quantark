@@ -126,7 +126,8 @@ class DCNPDEEngine(BasePDESolver):
     def calculate_greeks(self, product, pricing_env):
         return self._run(product, pricing_env, OutputRequest(Operation.GREEKS, greeks=True))
 
-    def price_detailed(self, product, pricing_env) -> DCNPDEResult:
+    def price_detailed(self, product, pricing_env, **removed) -> DCNPDEResult:
+        reject_removed_kwargs(f"{type(self).__name__}.price_detailed", removed, REMOVED_DCN_NAMES)
         problem = prepare(self, product, pricing_env, OutputRequest(Operation.PRICE),
                           frozen=self._frozen_base_layout, session=self._session_artefacts)
         pv = float(run(problem))

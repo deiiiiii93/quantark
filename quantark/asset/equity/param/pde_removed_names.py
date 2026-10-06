@@ -28,10 +28,9 @@ REMOVED_PDE_NAMES: Mapping[str, str] = {
         "over the horizon. steps_per_day= is the per-day alternative."
     ),
     "s_max": (
-        "grid=GridConfig(bounds=(None, hi)) on the shared-grid solvers. On the two "
-        "local-vol solvers an explicit bound is rejected until sub-project 3: the "
-        "kernel sets its own domain and aligns the top, so there is no hard edge "
-        "to honour."
+        "grid=GridConfig(bounds=(None, hi)) on every 1D route (the local-vol "
+        "solvers honour it since 0.10.0). Keep an explicit bound well beyond any "
+        "barrier: the far-field row next to one is not exact."
     ),
     "s_min": "removed; it was read by nothing.",
     "use_rannacher": (
@@ -87,6 +86,11 @@ REMOVED_DCN_NAMES: Mapping[str, str] = {
     "s_min_mult": "removed; never read",
     "s_max_mult": "removed; never read",
     "concentration": "removed; never read",
+    # 0.10.0 (spec 3C §5.4): the DCN marches on the core
+    "layout": (
+        "removed in 0.10.0 from price_detailed; the grid comes from DCNPDEEngine(params=PDEParams(grid=GridConfig(...))), "
+        "and a bump context freezes it (create_bump_context)"
+    ),
 }
 
 

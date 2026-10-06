@@ -150,3 +150,11 @@ def test_dcn_removed_names():
     # the route's 201-point floor is gone with its table: the shared fast preset is 200 points
     with pytest.raises(ValidationError, match="GridConfig\\(points"):
         DCNPDEEngine(num_space_nodes=801)
+
+
+def test_price_detailed_layout_is_a_removed_name():
+    # spec 3C §5.4: REMOVED_DCN_NAMES is extended with what 0.10.0 removes - a ValidationError naming the
+    # replacement, never a TypeError
+    env = flat_env(**FLAT, spot=DCN_A["initial_price"])
+    with pytest.raises(ValidationError, match="GridConfig"):
+        DCNPDEEngine().price_detailed(make_dcn(DCN_A), env, layout=object())
