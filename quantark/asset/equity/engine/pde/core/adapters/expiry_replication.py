@@ -5,24 +5,24 @@ decision 30 (the payoff with its terminal payment discount, then the maturity de
 terminal payment time. Before maturity it is therefore exactly a static combination of European vanillas and
 cash-or-nothing digitals on the product's own expiry and settlement convention, priced on ``BlackScholesEngine``
 and ``DigitalOptionAnalyticalEngine``. Each leg reads its own strike's vol, so under a smile the value is the smile's
-static replication (the march would use one strike-selected vol). Delta and gamma are five-point central
-differences of that exact value. Where S_T sits on a barrier (a null set) does not change the value.
+static replication (the march would use one strike-selected vol). No grid is requested or bound for it. Every greek
+is ``GreeksCalculator``'s own of the legs (``BaseEngine.static_replication``): under the caller's method and bump
+configuration, and on the facade (``calculate_greeks``, session GRID rows) the calculator on the solver's params.
+Where S_T sits on a barrier (a null set) does not change the value.
 """
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Callable, NamedTuple, Optional, Sequence
+from typing import NamedTuple, Sequence
 
 from quantark.util.enum import OptionType
 
-from ..prepare import CompositeProblem, Operation, OutputRequest, bind_layout
+from ..prepare import CompositeProblem, Operation
 
 __all__ = ["Leg", "double_barrier_legs", "one_touch_legs", "double_one_touch_legs", "ExpiryReplication",
-           "ReplicationSolution", "replication_problem"]
+           "ReplicationSolution", "replication_problem", "FACADE_GREEKS"]
 
 _C, _P = OptionType.CALL, OptionType.PUT
-#: the five-point stencil's step, relative to the spot it differences at
-_STEP_REL = 1e-3
 DESCRIPTION = "EXPIRY: static replication by European vanillas and cash digitals (analytic engines)"
 
 
@@ -100,57 +100,55 @@ class ExpiryReplication:
     def price(self, env) -> float:
         return float(sum(weight * engine.price(leg, env) for weight, engine, leg in self.parts))
 
-    def point(self, env, spot: Optional[float] = None) -> tuple:
-        """(price, delta, gamma) at ``spot`` (the environment's own when None)."""
-        base = float(env.spot) if spot is None else float(spot)
-        h = _STEP_REL * base
-        values = {}
-        for j in (-2, -1, 0, 1, 2):
-            if j == 0 and spot is None:
-                values[j] = self.price(env)
-                continue
-            moved = deepcopy(env)
-            moved.spot_quote.spot = base + j * h
-            values[j] = self.price(moved)
-        delta = (-values[2] + 8.0 * values[1] - 8.0 * values[-1] + values[-2]) / (12.0 * h)
-        gamma = (-values[2] + 16.0 * values[1] - 30.0 * values[0] + 16.0 * values[-1] - values[-2]) / (12.0 * h * h)
-        return values[0], float(delta), float(gamma)
+
+#: the greeks a PDE facade reads (spec 3C decision 21: price, delta, gamma)
+FACADE_GREEKS = ("price", "delta", "gamma")
+
+
+def _calculator_greeks(solver, product, env) -> dict:
+    """price, delta, gamma as ``GreeksCalculator(params=solver.params)`` gives them: the weighted sum of its own
+    greeks of the legs (closed forms for the vanillas, its bumps for the digitals)."""
+    from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+
+    out = GreeksCalculator(params=solver.params).calculate(product, env, solver, greeks=list(FACADE_GREEKS))
+    return {key: float(out[key]) for key in FACADE_GREEKS}
 
 
 class ReplicationSolution(NamedTuple):
-    """The session's GRID carrier: each level read from the replication itself; no levels, the nodes the
-    product's own grid request binds."""
+    """The session's GRID carrier: each requested level read through ``GreeksCalculator`` at that spot. A
+    replication binds no grid, so it has no nodes to default to: a GRID request names its levels."""
 
-    replication: ExpiryReplication
+    solver: object
+    product: object
     env: object
-    nodes: Callable[[], Sequence[float]]
 
     def rows(self, spot_levels=None):
-        levels = [float(s) for s in (self.nodes() if spot_levels is None else spot_levels)]
+        if spot_levels is None:
+            from quantark.execution.errors import CapabilityError
+
+            raise CapabilityError(
+                f"{type(self.solver).__name__} prices this product by static replication and builds no grid: a "
+                "GRID request must name its levels (grid_spot_levels)")
         out = []
-        for spot in levels:
-            price, delta, gamma = self.replication.point(self.env, spot)
-            out.append({"spot": spot, "price": price, "delta": delta, "gamma": gamma,
+        for spot in (float(s) for s in spot_levels):
+            moved = deepcopy(self.env)
+            moved.spot_quote.spot = spot
+            g = _calculator_greeks(self.solver, self.product, moved)
+            out.append({"spot": spot, "price": g["price"], "delta": g["delta"], "gamma": g["gamma"],
                         "calculation_mode": "static_replication"})
         return out
 
 
-def replication_problem(adapter, product, env, request) -> CompositeProblem:
-    """The composite ``prepare`` returns for EXPIRY before maturity: no part is marched, ``compose`` reads the
-    replication in the operation's own form."""
-    replication = ExpiryReplication(adapter._replication_legs(product), product, adapter._replication_multiplier(product))
-    op = request.operation
+def replication_problem(adapter, replication, product, env, request) -> CompositeProblem:
+    """The composite ``prepare`` returns for a replicated product: no part is marched and no grid is built;
+    ``compose`` reads the legs in the operation's own form."""
+    solver, op = adapter.solver, request.operation
     if op is Operation.GREEKS:
         def compose(_):
-            price, delta, gamma = replication.point(env)
-            return {"price": price, "delta": delta, "gamma": gamma}
+            return _calculator_greeks(solver, product, env)
     elif op is Operation.SESSION_OUTPUTS:
         def compose(_):
-            solution = None
-            if request.grid:
-                solver = adapter.solver
-                solution = ReplicationSolution(replication, env, lambda: [float(s) for s in bind_layout(
-                    solver, product, env, OutputRequest(Operation.SESSION_OUTPUTS, grid=True)).spatial.s])
+            solution = ReplicationSolution(solver, product, env) if request.grid else None
             return adapter._session_outputs(replication.price(env), solution)
     else:
         def compose(_):

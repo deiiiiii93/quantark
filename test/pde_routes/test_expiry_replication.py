@@ -2,6 +2,7 @@
 value a function of S_T alone, priced before maturity as a static combination of European vanillas and cash
 digitals on the analytic engines. The reference here is independent of that algebra: quadrature of each product's
 terminal value against the lognormal density, delta and gamma by the likelihood-ratio weights under the integral."""
+from copy import deepcopy
 from math import exp, log, sqrt
 
 import numpy as np
@@ -102,8 +103,9 @@ def reference(name, spot, lagged):
 
 
 SPOTS = (100.0, 78.0, 125.0, 140.0)
-#: the facade's 1 % spot bump on the exact value, error / max(1, |exact|): measured over the 10 products x 2 payment
-#: times x spots 78/100/125/140 (80 cells) at delta max 9.4e-4 (dko_call, 140), median 7.2e-5; gamma max 6.9e-5
+#: the engine's greeks are GreeksCalculator(params=solver.params) on the legs: closed-form vanillas, the digitals
+#: bumped at its spot bump. error / max(1, |exact|) measured over the 10 products x 2 payment times x spots
+#: 78/100/125/140 (80 cells): delta max 1.27e-3 (dko_put, 78), median 7.1e-5; gamma max 3.6e-5
 BUMP_BOUND = 2e-3
 
 
@@ -116,15 +118,61 @@ def test_price_is_the_expectation_of_the_terminal_value(name, lagged):
         assert abs(cls().price(make(lagged), env_const(spot)) - want) <= 1e-9 * max(1.0, abs(want)), (name, spot)
 
 
+GREEKS = ["price", "delta", "gamma", "vega", "theta", "rho", "dividend_rho"]
+
+
+def _leg_sum(calc, engine, product, env, **kw):
+    """sum_i w_i x calc.calculate(leg_i, env, leg_engine_i, **kw): the legs through the caller's own calculator."""
+    out = {}
+    for weight, leg_engine, leg in engine.static_replication(product, env).parts:
+        for key, value in calc.calculate(leg, env, leg_engine, **kw).items():
+            out[key] = out.get(key, 0.0) + weight * value
+    return out
+
+
+@pytest.mark.parametrize("method", ["auto", "analytical", "numerical"])
 @pytest.mark.parametrize("name", list(CASES))
-def test_greeks_are_the_derivatives_of_that_expectation(name):
+def test_greeks_calculator_takes_its_own_greeks_of_the_legs(name, method):
+    """GreeksCalculator on a replicated product returns the weighted sum of what it returns for each leg under the
+    same method, greeks and bump configuration (analytical vanillas under auto/analytical, bumped digitals)."""
+    from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+    from quantark.util.exceptions import ValidationError
+    cls, make, _, _ = CASES[name]
+    product, env, engine = make(True), env_const(100.0), cls()
+    calc = GreeksCalculator()
+    names = [g for g in GREEKS if not (method == "analytical" and g == "dividend_rho")]
+    got = calc.calculate(product, env, engine, method=method, greeks=names)
+    want = _leg_sum(calc, engine, product, env, method=method, greeks=names)
+    assert set(got) == set(want) == set(names)
+    for key in names:
+        assert got[key] == pytest.approx(want[key], rel=1e-13, abs=1e-13), key
+    if method == "analytical" and any(leg_kind == "vanilla" for leg_kind in _leg_kinds(engine, product, env)):
+        with pytest.raises(ValidationError, match="dividend_rho"):      # the calculator's own refusal, per leg
+            calc.calculate(product, env, engine, method=method, greeks=GREEKS)
+
+
+def _leg_kinds(engine, product, env):
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    return ["vanilla" if isinstance(leg, EuropeanVanillaOption) else "digital"
+            for _, _, leg in engine.static_replication(product, env).parts]
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_engine_greeks_are_the_calculators_on_the_engines_params(name):
+    """The solver's own calculate_greeks (and GreeksCalculator in ENGINE mode) is GreeksCalculator(params=its
+    params) on the legs; price exact, delta and gamma within the legs' bumps of the exact derivatives."""
+    from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
     cls, make, _, _ = CASES[name]
     for spot in SPOTS:
+        product, env, engine = make(True), env_const(spot), cls()
+        got = engine.calculate_greeks(product, env)
+        want = _leg_sum(GreeksCalculator(params=engine.params), engine, product, env,
+                        greeks=["price", "delta", "gamma"])
+        assert got == pytest.approx(want, rel=1e-13, abs=1e-13)
         price, delta, gamma = reference(name, spot, True)
-        got = cls().calculate_greeks(make(True), env_const(spot))
         assert abs(got["price"] - price) <= 1e-9 * max(1.0, abs(price)), (name, spot)
-        assert abs(got["delta"] - delta) <= 1e-6 * max(1.0, abs(delta)), (name, spot)
-        assert abs(got["gamma"] - gamma) <= 1e-5 * max(1.0, abs(gamma)), (name, spot)
+        assert abs(got["delta"] - delta) <= BUMP_BOUND * max(1.0, abs(delta)), (name, spot)
+        assert abs(got["gamma"] - gamma) <= BUMP_BOUND * max(1.0, abs(gamma)), (name, spot)
 
 
 @pytest.mark.parametrize("market", ["flat", "smile"])
@@ -153,24 +201,49 @@ def test_session_grid_and_spot_curve_read_the_replication_at_each_level(name):
     assert out.pv == engine.price(product, env)
     curve = engine.calculate_spot_greeks_curve(product, env, levels)
     assert list(out.grid) == curve
-    for row, spot in zip(curve, levels):
-        price, delta, gamma = reference(name, spot, True)
-        assert abs(row["price"] - price) <= 1e-9 * max(1.0, abs(price))
-        assert abs(row["delta"] - delta) <= 1e-6 * max(1.0, abs(delta))
-        assert abs(row["gamma"] - gamma) <= 1e-5 * max(1.0, abs(gamma))
-    nodes = session(engine, product, env, {PV, GRID}).grid               # no levels: the grid's own nodes
-    assert len(nodes) > 50 and all(np.isfinite(r["price"]) for r in nodes)
+    for row, spot in zip(curve, levels):                                  # each level: the engine's own greeks there
+        moved = deepcopy(env)
+        moved.spot_quote.spot = spot
+        point = engine.calculate_greeks(product, moved)
+        assert (row["price"], row["delta"], row["gamma"]) == (point["price"], point["delta"], point["gamma"])
+        assert row["calculation_mode"] == "static_replication"
+
+
+@pytest.mark.parametrize("name", ["dko_call", "one_touch_down"])
+def test_a_grid_without_levels_is_refused_a_replication_has_no_nodes(name):
+    """No grid is built for a replicated product, so a GRID request must name its levels (fail closed)."""
+    from quantark.execution.errors import CapabilityError
+    cls, make, _, _ = CASES[name]
+    with pytest.raises(CapabilityError, match="grid_spot_levels"):
+        session(cls(), make(False), env_const(100.0), {PV, GRID})
 
 
 @pytest.mark.parametrize("name", ["dko_put", "dki_call", "no_touch_down", "double_one_touch"])
-def test_bump_greeks_and_explain_take_the_replication(name):
+def test_no_pde_grid_is_built_once_replication_is_picked(name, monkeypatch):
+    """Every entry point of a replicated product prices without a grid request or a grid bind."""
+    from quantark.asset.equity.engine.base_engine import BaseEngine
+    from quantark.asset.equity.engine.pde.core import prepare as prepare_module
+    from quantark.asset.equity.engine.pde.grid.binder import GridBinder
+    from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+    from quantark.util.enum.engine_enums import GreeksCalculationMode
+
+    def no_grid(*args, **kwargs):
+        raise AssertionError("a PDE grid was built for a replicated product")
+
+    monkeypatch.setattr(prepare_module, "_geometry", no_grid)
+    monkeypatch.setattr(GridBinder, "bind", no_grid)
+    monkeypatch.setattr(GridBinder, "bind_shared", no_grid)
     cls, make, _, _ = CASES[name]
     product, env, engine = make(False), env_const(100.0), cls()
-    from quantark.asset.equity.engine.base_engine import BaseEngine
-    bumped = BaseEngine.calculate_greeks(engine, product, env)              # through create_bump_context
+    engine.price(product, env)
+    engine.calculate_greeks(product, env)
+    assert engine.create_bump_context(product, env) is engine
+    bumped = BaseEngine.calculate_greeks(engine, product, env)
     assert bumped["price"] == engine.price(product, env)
-    _, delta, gamma = reference(name, 100.0, False)
-    # the facade's spot bump differences the exact value: O(h^2) off the derivatives  BOUND: measure
-    assert abs(bumped["delta"] - delta) <= BUMP_BOUND * max(1.0, abs(delta))
-    assert abs(bumped["gamma"] - gamma) <= BUMP_BOUND * max(1.0, abs(gamma))
+    for mode in GreeksCalculationMode:
+        GreeksCalculator(greeks_mode=mode).calculate(product, env, engine, greeks=GREEKS)
+        GreeksCalculator(greeks_mode=mode).calculate_numerical_greeks(product, env, engine, greeks=GREEKS)
+    session(engine, product, env, {PV})
+    session(engine, product, env, {PV, GRID}, levels=[90.0, 100.0])
+    engine.calculate_spot_greeks_curve(product, env, [90.0, 100.0])
     assert "static replication" in engine.explain(product, env).route["composition"]

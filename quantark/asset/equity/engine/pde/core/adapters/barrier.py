@@ -77,11 +77,21 @@ class _BarrierFamilyAdapter(FamilyAdapter):
                 and getattr(product, "observation_type", None) == ObservationType.EXPIRY
                 and product.get_maturity(env) > 0)
 
+    def replication(self, product, env):
+        # another product type is refused by validate, where price would refuse it
+        if not isinstance(product, self._product_class()) or not self._replicates_expiry(product, env):
+            return None
+        from .expiry_replication import ExpiryReplication
+        return ExpiryReplication(self._replication_legs(product), product, self._replication_multiplier(product))
+
     def composite(self, product, env, request, lifecycle_state):
-        if request.operation in _FACADE and self._replicates_expiry(product, env):
-            from .expiry_replication import replication_problem
-            return replication_problem(self, product, env, request)
-        return None
+        if request.operation not in _FACADE:
+            return None
+        replication = self.replication(product, env)
+        if replication is None:
+            return None
+        from .expiry_replication import replication_problem
+        return replication_problem(self, replication, product, env, request)
 
     def _replication_legs(self, product) -> list:
         """The legs ``expiry_replication`` prices (the family's terminal value as vanillas and cash digitals)."""

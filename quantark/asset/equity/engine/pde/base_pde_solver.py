@@ -517,6 +517,11 @@ class BasePDESolver(BaseEngine):
         """The arguments a bump context is constructed with (subclasses add theirs)."""
         return {"params": self.params}
 
+    def static_replication(self, product: BaseEquityProduct, pricing_env: PricingEnvironment):
+        """The analytic legs this solver prices ``product`` with instead of a march (``expiry_replication``: EXPIRY
+        on the double barrier and the touch products before maturity), or ``None``; no grid is built for it."""
+        return self.adapter.replication(product, pricing_env)
+
     # ------------------------------------------------------------------
     # Declarative grid layer seam (grid redesign spec §4.6)
     # ------------------------------------------------------------------

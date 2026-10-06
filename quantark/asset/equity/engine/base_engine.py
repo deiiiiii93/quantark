@@ -159,6 +159,12 @@ class BaseEngine(ABC):
         """
         return self
 
+    def static_replication(self, product: BaseEquityProduct, pricing_env: PricingEnvironment):
+        """The legs this engine prices ``product`` with when it is a static combination of other products, or
+        ``None``. An object with ``parts``: ``(weight, engine, leg_product)`` triples whose weighted prices sum to
+        ``price``. ``GreeksCalculator`` then takes every greek as the weighted sum of its own greeks of the legs."""
+        return None
+
     def execute(self, request, context):
         """Route a framework ``PricingRequest`` through the execution kernel.
 

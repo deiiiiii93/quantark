@@ -144,6 +144,19 @@ class GreeksCalculator:
                 f"got {theta_decomposition_mode!r}"
             )
 
+        replication = getattr(engine, "static_replication", None)
+        replication = replication(product, pricing_env) if replication is not None else None
+        if replication is not None:
+            # the engine prices the product as a static combination: every greek is the weighted sum of this
+            # calculator's own greeks of the legs, under the same method, request and bump configuration
+            out: Dict[str, float] = {}
+            for weight, leg_engine, leg in replication.parts:
+                leg_greeks = self.calculate(leg, pricing_env, leg_engine, method=method, greeks=greeks,
+                                            theta_decomposition_mode=theta_decomposition_mode)
+                for key, value in leg_greeks.items():
+                    out[key] = out.get(key, 0.0) + weight * value
+            return out
+
         requests = registry.normalize_greeks(greeks)
 
         if method in ("auto", "analytical") and isinstance(

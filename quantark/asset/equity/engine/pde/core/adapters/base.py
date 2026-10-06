@@ -64,6 +64,11 @@ class FamilyAdapter:
     def composite(self, product, env, request, lifecycle_state):
         return None
 
+    def replication(self, product, env):
+        """The analytic legs that price ``product`` instead of a march (``expiry_replication``), or ``None``. A
+        replicated product binds no grid: ``request_geometry`` returns ``None`` for it."""
+        return None
+
     def bump_parts(self, product, env):
         """``{part: (solver, product)}`` a bump context freezes one layout for each (spec 3C decision 10);
         ``None``, a single layout for the product itself."""

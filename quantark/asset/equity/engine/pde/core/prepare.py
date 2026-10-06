@@ -235,6 +235,8 @@ def request_geometry(solver, product, env, request, *, lifecycle_state=None):
     """
     adapter = solver.adapter
     adapter.validate(product, env, request, lifecycle_state)
+    if adapter.replication(product, env) is not None:     # priced by analytic legs: no grid to request or bind
+        return None
     if adapter.terminal_outcome(product, env, request, lifecycle_state) is not None:
         return None
     tau = float(product.get_maturity(env))
