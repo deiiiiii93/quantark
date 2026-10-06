@@ -134,6 +134,9 @@ def calculate_analytical_greeks(
         else {}
     )
     multiplier = product.contract_multiplier
+    # a terminal payment lag scales every extended closed form by DF(T, T_pay) (spot, vol, q and flat-curve time
+    # derivatives of DF(T, T_pay) V_T); none is a rate derivative
+    delay = _terminal_lag(product, pricing_env)[0] if raw_extended else 1.0
     out: Dict[str, float] = {}
     for req in ordered:
         name = req.canonical
@@ -143,7 +146,8 @@ def calculate_analytical_greeks(
                 if name in TIME_GREEKS
                 else None
             )
-            out[req.key] = _scale_extended(name, raw_extended[name], days, multiplier)
+            raw = raw_extended[name] if delay == 1.0 else raw_extended[name] * delay
+            out[req.key] = _scale_extended(name, raw, days, multiplier)
         else:
             # At expiry the legacy base dict omits some zero-valued names
             # (dividend_rho); an explicit request still deserves its 0.0 key.
@@ -303,8 +307,9 @@ def _base_greeks(
     sigma = pricing_env.get_vol(K, T)
 
     # Handle edge case: option at expiry
+    delay, lag = _terminal_lag(product, pricing_env)
     if is_zero(T):
-        return greeks_at_expiry(product, S)
+        return _lagged_at_expiry(greeks_at_expiry(product, S), delay, lag)
 
     # Calculate d1 and d2
     sqrt_T = math.sqrt(T)
@@ -325,6 +330,7 @@ def _base_greeks(
     multiplier = product.contract_multiplier
 
     # Calculate price if not provided (per-unit)
+    price_given = price
     if price is None:
         if product.is_call():
             price = S * discount_div * N_d1 - K * discount_rf * N_d2
@@ -389,10 +395,46 @@ def _base_greeks(
         dividend_rho = S * T * discount_div * stats.norm.cdf(-d1) / 100
     greeks["dividend_rho"] = dividend_rho
 
+    if lag > 0.0:
+        # paid at T_pay: V = DF(T, T_pay) V_T. Spot, vol, dividend and (flat-curve) time greeks scale by the delay;
+        # rho adds the delay's own rate sensitivity, -(T_pay - T) V_T. A supplied price is the product's (lagged).
+        value_t = greeks["price"] if price_given is None else greeks["price"] / delay
+        rho_t = greeks["rho"]
+        for key in greeks:
+            if key != "price" or price_given is None:
+                greeks[key] = greeks[key] * delay
+        greeks["rho"] = delay * (rho_t - lag * value_t / 100)
+
     for key, value in greeks.items():
         greeks[key] = value * multiplier
 
     return greeks
+
+
+def _terminal_lag(product: BaseEquityProduct, pricing_env: PricingEnvironment):
+    """(DF(T, T_pay), T_pay - T) of the terminal payment (``resolve_terminal_timing``, as the engines price it);
+    ``(1.0, 0.0)`` when payment is at determination."""
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+
+    timing = resolve_terminal_timing(product, pricing_env)
+    lag = float(timing.payment_time) - float(timing.determination_time)
+    if lag <= 0.0:
+        return 1.0, 0.0
+    return float(timing.delay_df), lag
+
+
+def _lagged_at_expiry(greeks: Dict[str, float], delay: float, lag: float) -> Dict[str, float]:
+    """The expiry dict when the payoff is paid ``lag`` years later: every entry scales by DF(0, lag), rho is the
+    payment's own rate sensitivity -lag V, and theta its accretion, the lag's average rate x V per calendar day."""
+    if lag <= 0.0:
+        return greeks
+    out = {key: value * delay for key, value in greeks.items()}
+    price = out["price"]
+    out["rho"] = -lag * price / 100
+    accretion = (-math.log(delay) / lag) * price / 365
+    out["r_theta"] = accretion
+    out["theta"] = out["convexity_theta"] + out["r_theta"] + out["q_theta"]
+    return out
 
 
 def greeks_at_expiry(
