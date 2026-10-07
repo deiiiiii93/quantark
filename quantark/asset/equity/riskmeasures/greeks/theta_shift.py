@@ -13,6 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 from quantark.execution.errors import CapabilityError
+from quantark.util.numerical import is_close, is_zero
 
 __all__ = ["ThetaShift", "shift_for_theta", "bumped_value", "bumped_trade_value", "carried_ended_value",
            "shift_cash_legs"]
@@ -30,6 +31,8 @@ class ThetaShift:
         ended_at_t0: ``(product, env, payment_time, time_bump)`` when ``t0`` ended the contract: the bumped value
             is then the engine's own ``t0`` value of it, re-discounted to ``t1`` (0 once paid within the bump).
         time_bump: the step ``t1 - t0`` in years.
+        settled_value: when ``t0`` ended a contract whose remaining value no engine prices (an accumulator knocked
+            out at ``t0``): its booked value at ``t1``; the bumped value is this plus ``fixed_pv``.
     """
 
     product: object
@@ -38,18 +41,26 @@ class ThetaShift:
     fixed_pv: float = 0.0
     ended_at_t0: Optional[Tuple[object, object, float, float]] = None
     time_bump: float = 0.0
+    settled_value: Optional[float] = None
 
     @property
     def terminated(self) -> bool:
-        return self.ended_at_t0 is not None
+        return self.ended_at_t0 is not None or self.settled_value is not None
 
 
 def _carried_to_t1(cash_pv_at_t0: float, payment_time: float, env_t0, env_t1, time_bump: float) -> float:
-    """A fixed cash's value at ``t1`` from its value at ``t0``: re-discounted, or 0 once paid within the bump."""
-    if payment_time is None or payment_time <= time_bump:
+    """A fixed cash's value at ``t1`` from its value at ``t0``: re-discounted, or 0 once paid before ``t1``.
+
+    Cash paid ON ``t1`` is still in the value (discount 1 at the new as-of instant, as an engine prices a payment
+    at time 0), whatever float residue the two times carry."""
+    if payment_time is None:
+        return 0.0
+    if is_close(payment_time, time_bump):
+        payment_time = time_bump
+    elif payment_time < time_bump:
         return 0.0
     df0 = float(env_t0.get_discount_factor(payment_time))
-    return cash_pv_at_t0 * float(env_t1.get_discount_factor(payment_time - time_bump)) / df0
+    return cash_pv_at_t0 * float(env_t1.get_discount_factor(max(payment_time - time_bump, 0.0))) / df0
 
 
 def _price(engine, product, env, lifecycle_state) -> float:
@@ -73,9 +84,33 @@ def _autocallable_outcome(product, env, env_t1, time_bump, state):
     fixed_pv = 0.0
     coupon = float(getattr(decision, "coupon", 0.0) or 0.0)
     if coupon:
+        from quantark.util.enum import CouponPayType
+        if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
+            # TODO(theta boundary): an EXPIRY coupon rolls up to the note's end, a knock-out or maturity, so its value
+            # at t1 is coupon x E[DF(note end)]; no product or lifecycle state carries a rolled-up coupon yet.
+            raise CapabilityError(
+                "theta: a coupon decided at the as-of date under CouponPayType.EXPIRY rolls up to the note's end; "
+                "no state carries it into the bumped contract")
         pay = _coupon_payment_time(product, env, decision.coupon_index)
         fixed_pv = _carried_to_t1(coupon * float(env.get_discount_factor(pay)), pay, env, env_t1, time_bump)
-    return bool(decision.knocked_in), fixed_pv, None, getattr(decision, "arrears", None)
+    knocked_in = bool(decision.knocked_in)
+    ended = _ko_reset_schedule_1_end(product, env, time_bump) if not knocked_in else None
+    return knocked_in, fixed_pv, ended, getattr(decision, "arrears", None)
+
+
+def _ko_reset_schedule_1_end(product, env, time_bump):
+    """The payment time when a KO-reset's schedule 1 ends within the bump un-knocked: it matured then (rule 2),
+    paid with the terminal settlement lag after its last observation; else None."""
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+    from quantark.asset.equity.product.option import KnockOutResetSnowballOption
+
+    if not isinstance(product, KnockOutResetSnowballOption):
+        return None
+    times = [float(t) for t in product.get_pre_ko_observation_profile(env)["observation_times"]]
+    if not times or any(t >= time_bump or is_close(t, time_bump) for t in times):
+        return None
+    terminal = resolve_terminal_timing(product, env)
+    return max(times) + float(terminal.payment_time - terminal.determination_time)
 
 
 def _coupon_payment_time(product, env, index: int) -> float:
@@ -157,6 +192,35 @@ def _barrier_outcome(product, env, state):
     return False, _hit_payment_time(product, env, record)     # ended: the engine's own hit value, re-discounted
 
 
+# --- the accumulator ------------------------------------------------------------------------------------------
+
+def _accumulator_t0(product, env, env_t1, time_bump):
+    """(fixed_pv, terminated) of a fixing at ``t0``, settled on the spot as the engines settle it (R4): its
+    settlement is engine-determined cash, a receivable only when paid after ``t1``; a TERMINATION breach ends the
+    contract with the knock-out rebate, a SINGLE_DAY breach accrues nothing that day."""
+    from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+    from quantark.util.enum import AccumulatorKnockOutType
+
+    schedule = product.observation_schedule
+    if schedule is None or not schedule.records:
+        return 0.0, False
+    resolved = schedule.resolve(env, product=product)
+    now = [(raw, rec) for raw, rec in zip(schedule.records, resolved) if is_zero(float(rec.observation_time))]
+    if not now:
+        return 0.0, False
+    raw, rec = now[0]
+    use_terminal = (product.settlement_at_expiry and raw.settlement_date is None and raw.settlement_time is None)
+    pay = float(resolve_terminal_timing(product, env).payment_time if use_terminal else rec.settlement_time)
+    spot = float(env.spot)
+    if spot >= product.knock_out_barrier:
+        if product.knock_out_type != AccumulatorKnockOutType.TERMINATION:
+            return 0.0, False
+        cash = product.get_knock_out_rebate_cash() * product.contract_multiplier
+        return _carried_to_t1(cash * float(env.get_discount_factor(pay)), pay, env, env_t1, time_bump), True
+    cash = product.get_observation_payoff(spot)
+    return _carried_to_t1(cash * float(env.get_discount_factor(pay)), pay, env, env_t1, time_bump), False
+
+
 # --- entry points ---------------------------------------------------------------------------------------------
 
 def shift_for_theta(product, pricing_env, time_bump: float, bumped_date, *, lifecycle_state=None) -> ThetaShift:
@@ -170,6 +234,7 @@ def shift_for_theta(product, pricing_env, time_bump: float, bumped_date, *, life
     env_t1.valuation_date = bumped_date
     shifted = deepcopy(product)
     knocked_in, fixed_pv, ended_pay, arrears = False, 0.0, None, None
+    accumulator_ended = False
 
     if isinstance(product, (SnowballOption, PhoenixOption, KnockOutResetSnowballOption)):
         knocked_in, fixed_pv, ended_pay, arrears = _autocallable_outcome(
@@ -178,12 +243,16 @@ def shift_for_theta(product, pricing_env, time_bump: float, bumped_date, *, life
                               SingleSharkfinOption, DoubleSharkfinOption)):
         knocked_in, ended_pay = _barrier_outcome(product, pricing_env, lifecycle_state)
     elif isinstance(product, AccumulatorOption):
-        shifted.record_valuation_fixing(pricing_env.spot, pricing_env, time_bump)
+        fixed_pv, accumulator_ended = _accumulator_t0(product, pricing_env, env_t1, time_bump)
 
     if ended_pay is not None:
         return ThetaShift(shifted, env_t1, lifecycle_state, fixed_pv, (product, pricing_env, ended_pay, time_bump),
                           time_bump)
     shifted.time_shift(time_bump, bumped_date, env_t1, keep_landing=True)
+    if accumulator_ended:                               # no engine prices a terminated accumulator: its booked value
+        from quantark.asset.equity.engine.accumulator_valuation import realized_value
+        return ThetaShift(shifted, env_t1, lifecycle_state, fixed_pv, None, time_bump,
+                          settled_value=realized_value(shifted, env_t1))
     if knocked_in:                                      # carried on the product, as every autocallable engine reads it
         shifted._otc_lifecycle_knocked_in = True
     if arrears is not None and getattr(shifted, "has_memory_coupon", False):
@@ -213,6 +282,8 @@ def shift_cash_legs(legs, time_bump: float) -> list:
 def bumped_value(engine, shift: ThetaShift) -> float:
     """The bumped contract's value: when ``t0`` ended it, the engine's own ``t0`` value re-discounted to ``t1``
     (0 once paid within the bump); else the engine's price with the carried state. Plus the carried receivable."""
+    if shift.settled_value is not None:
+        return shift.settled_value + shift.fixed_pv
     if shift.ended_at_t0 is not None:
         product_t0, env_t0, _payment_time, _time_bump = shift.ended_at_t0
         value_t0 = _price(engine, product_t0, env_t0, shift.lifecycle_state)
@@ -232,6 +303,10 @@ def bumped_trade_value(bump_engine, shift: ThetaShift, legs, *, streams, unit_of
     ``unit_of(env)`` is the caller's unit notional."""
     from quantark.cashleg.leg_valuator import value_leg
 
+    if shift.settled_value is not None:
+        if legs:
+            raise CapabilityError("theta: cash legs on a contract settled at the as-of date have no distribution")
+        return shift.settled_value + shift.fixed_pv, 0.0
     if shift.ended_at_t0 is not None:
         product_t0, env_t0, _payment_time, _time_bump = shift.ended_at_t0
         result = bump_engine.price_with_events(product_t0, env_t0, streams=streams)

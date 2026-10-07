@@ -12,7 +12,19 @@ from typing import List, Sequence, Tuple
 from quantark.util.enum import AccumulatorKnockOutType
 from quantark.util.numerical import is_zero
 
-__all__ = ["settle_valuation_instant"]
+__all__ = ["realized_value", "settle_valuation_instant"]
+
+
+def realized_value(product, pricing_env, terminal_timing=None) -> float:
+    """The booked accrual of ``past_observations`` as the accumulator engines count it: at face when each fixing
+    settled on its own date, discounted to the terminal payment when settlement is deferred to expiry."""
+    realized = product.get_realized_accrual()
+    if product.settlement_at_expiry:
+        if terminal_timing is None:
+            from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
+            terminal_timing = resolve_terminal_timing(product, pricing_env)
+        realized *= terminal_timing.payment_df
+    return realized
 
 
 def settle_valuation_instant(product, spot: float, legs: Sequence[tuple]) -> Tuple[float, List[tuple], bool]:

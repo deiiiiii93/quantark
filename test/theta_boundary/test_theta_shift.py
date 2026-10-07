@@ -51,12 +51,15 @@ def test_accumulator_theta_no_longer_drops_an_observation():
     assert kept_less_dropped == pytest.approx(p.get_observation_payoff(env.spot), rel=1e-12)
 
 
-def test_accumulator_t0_fixing_is_carried_into_past_observations():
+def test_accumulator_t0_fixing_is_cash_not_a_booked_fixing():
+    """Final review I2: the t0 fixing settles on the spot as engine-determined cash; it is no longer appended to
+    past_observations (counted at face on both dates, theta ~0); paid at t0 it leaves the value."""
     from quantark.asset.equity.engine.analytical.accumulator_analytical_engine import AccumulatorAnalyticalEngine
     eng, env = AccumulatorAnalyticalEngine(), env_const(98.0)
     p = accumulator([0.0] + [k / 365 for k in range(1, 64)])
     shift, tb = bumped(p, env, eng)
-    assert (pytest.approx(-tb), 98.0) in [(t, s) for t, s in shift.product.past_observations]
+    assert not shift.product.past_observations
+    assert shift.fixed_pv == 0.0
 
 
 def test_snowball_t0_knock_in_is_carried():

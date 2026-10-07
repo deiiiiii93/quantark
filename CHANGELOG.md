@@ -148,8 +148,12 @@ runs the old comparisons) apart from the KO-reset fix below; the replay goldens 
   outcome is carried: a knock-in (on the product, as the autocallable engines read it, and now
   for the barrier family too), an accumulator fixing, a Phoenix's memory arrears, cash paid after
   `t1` as a receivable. A contract `t0` ends is worth its engine's own `t0` value re-discounted to
-  `t1`, or 0 once paid within the bump: on an event day theta is about minus the payment. Theta
-  excludes only cash flows already booked (user ruling 2026-10-07).
+  `t1`, or 0 once paid within the bump: on an event day theta is about minus the payment; cash
+  paid on `t1` itself stays. Theta excludes only cash flows already booked (user ruling 2026-10-07).
+  An accumulator's `t0` fixing is that cash (it is no longer added to `past_observations`); a
+  TERMINATION breach on it leaves the booked accrual and the rebate receivable; a KO-reset whose
+  schedule 1 ends un-knocked matured then. A Phoenix `EXPIRY`-pay coupon decided at `t0` raises
+  `CapabilityError`: it rolls up to the note's end, which no state carries yet.
 - A carried knock-in is priced through each engine's own triggered knock-in, the path a knock-in it
   decides at the valuation instant takes, so theta differences one method: the PDE composition, the
   MC vanilla, the local-vol European kernel, QUAD's vanilla; the analytic engines' is the

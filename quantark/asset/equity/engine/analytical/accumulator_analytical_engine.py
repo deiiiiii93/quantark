@@ -20,7 +20,7 @@ approximation implemented by the composed barrier and one-touch engines.
 
 from typing import List, Optional
 
-from quantark.asset.equity.engine.accumulator_valuation import settle_valuation_instant
+from quantark.asset.equity.engine.accumulator_valuation import realized_value, settle_valuation_instant
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -130,9 +130,7 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         if maturity < self.MIN_MATURITY:
             # At expiry only the locked-in accrual and the deterministic terminal
             # extra-shares leg remain -- no rate/dividend/volatility needed.
-            realized = product.get_realized_accrual()
-            if product.settlement_at_expiry:
-                realized *= terminal_timing.payment_df
+            realized = realized_value(product, pricing_env, terminal_timing)
             return (
                 realized
                 + self._extra_shares_intrinsic(product, spot)
@@ -148,9 +146,7 @@ class AccumulatorAnalyticalEngine(BaseEngine):
 
         # Realized accrual from past observations is locked in (rate-free part is
         # supplied by the product; discounting is applied here).
-        realized = product.get_realized_accrual()
-        if product.settlement_at_expiry:
-            realized *= terminal_timing.payment_df
+        realized = realized_value(product, pricing_env, terminal_timing)
 
         resolved_legs = self._resolve_observation_legs(
             product,

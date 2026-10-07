@@ -60,13 +60,17 @@ class BaseEquityProduct(ABC):
         time_bump: float,
         bumped_date: datetime,
         pricing_env: "PricingEnvironment",
-    ) -> bool:
+        *,
+        keep_landing: bool = False,
+    ) -> None:
         """
-        Shift product state for theta bumping.
+        Shift product state for a theta bump (spec 2026-10-07 theta boundary).
 
-        Returns True if all observations were dropped.
+        A product with no observation schedule has no state to move here;
+        ``keep_landing`` (keep an observation landing on the bumped date) is
+        accepted for the common signature.
         """
-        return False
+        return None
 
     def __repr__(self):
         return f"{self.__class__.__name__}()"

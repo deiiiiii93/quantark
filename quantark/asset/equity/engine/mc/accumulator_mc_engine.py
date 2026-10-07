@@ -19,7 +19,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
-from quantark.asset.equity.engine.accumulator_valuation import settle_valuation_instant
+from quantark.asset.equity.engine.accumulator_valuation import realized_value, settle_valuation_instant
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -128,9 +128,7 @@ class AccumulatorMCEngine(BaseEngine):
             # At expiry only locked-in accrual and the deterministic terminal
             # extra-shares leg remain -- no rate/dividend/volatility needed.
             self._last_std_error = 0.0
-            realized = product.get_realized_accrual()
-            if product.settlement_at_expiry:
-                realized *= terminal_timing.payment_df
+            realized = realized_value(product, pricing_env, terminal_timing)
             return (
                 realized
                 + self._extra_shares_intrinsic(product, spot)
@@ -147,9 +145,7 @@ class AccumulatorMCEngine(BaseEngine):
 
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product)
 
-        realized = product.get_realized_accrual()
-        if product.settlement_at_expiry:
-            realized *= terminal_timing.payment_df
+        realized = realized_value(product, pricing_env, terminal_timing)
 
         resolved_legs = self._resolve_observation_legs(
             product,
