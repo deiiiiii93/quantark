@@ -20,6 +20,7 @@ approximation implemented by the composed barrier and one-touch engines.
 
 from typing import List, Optional
 
+from quantark.asset.equity.engine.accumulator_valuation import settle_valuation_instant
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -156,6 +157,13 @@ class AccumulatorAnalyticalEngine(BaseEngine):
             pricing_env,
             terminal_timing.payment_df,
         )
+        settled_now, resolved_legs, ended = settle_valuation_instant(
+            product, spot, resolved_legs
+        )
+        if ended:
+            return realized + settled_now + pending_receivable_pv(
+                lifecycle_state, pricing_env
+            )
         times = [leg[0] for leg in resolved_legs]
         daily = product.daily_share_accumulation
         per_contract = 0.0
@@ -184,7 +192,7 @@ class AccumulatorAnalyticalEngine(BaseEngine):
             product, pricing_env, times, maturity
         ) * terminal_timing.delay_df
 
-        value = per_contract * product.contract_multiplier + realized
+        value = per_contract * product.contract_multiplier + realized + settled_now
         return value + pending_receivable_pv(lifecycle_state, pricing_env)
 
     def _resolve_observation_legs(

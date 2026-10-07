@@ -19,6 +19,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
+from quantark.asset.equity.engine.accumulator_valuation import settle_valuation_instant
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -155,6 +156,13 @@ class AccumulatorMCEngine(BaseEngine):
             pricing_env,
             terminal_timing.payment_df,
         )
+        settled_now, resolved_legs, ended = settle_valuation_instant(
+            product, spot, resolved_legs
+        )
+        realized += settled_now
+        if ended:
+            self._last_std_error = 0.0
+            return realized + pending_receivable_pv(lifecycle_state, pricing_env)
         times = [leg[0] for leg in resolved_legs]
         payment_dfs = np.asarray([leg[1] for leg in resolved_legs])
         if not times:

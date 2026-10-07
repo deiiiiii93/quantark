@@ -189,3 +189,30 @@ def test_heston_barrier_engines_refuse_an_ended_schedule():
     for engine in (HestonBarrierPDESolver(hp), HestonBarrierMCEngine(hp)):
         with pytest.raises(CapabilityError, match="monitoring has ended"):
             engine.price(make(), env_const())
+
+
+@pytest.mark.parametrize("spot", [98.0, 92.0, 106.0])
+def test_accumulator_observation_at_the_valuation_instant_is_its_known_settlement(spot):
+    """A record at t = 0 (theta's landing record, R1) is observed now: the price of the product with it equals the
+    product without it plus that observation's settlement on the spot (a breach: none, the rebate leg pays)."""
+    from quantark.asset.equity.engine.analytical.accumulator_analytical_engine import AccumulatorAnalyticalEngine
+    from quantark.asset.equity.engine.mc.accumulator_mc_engine import AccumulatorMCEngine
+    from quantark.asset.equity.param import MCParams
+    from quantark.asset.equity.product.option import AccumulatorOption
+
+    def make(dates):
+        return AccumulatorOption(strike=95.0, knock_out_barrier=105.0, initial_price=100.0, maturity=dates[-1],
+                                 option_type=OptionType.CALL, notional=1_000_000.0, observation_type=DISC,
+                                 observation_dates=list(dates))
+    later = [k / 252 for k in range(1, 20)]
+    env = env_const(spot)
+    now = make([0.0] + later)
+    for engine in (AccumulatorAnalyticalEngine(), AccumulatorMCEngine(params=MCParams(num_paths=4096, time_steps=19,
+                                                                                       seed=11))):
+        with_now = float(engine.price(now, env))
+        if spot >= 105.0:
+            assert with_now == pytest.approx(0.0, abs=1e-9)      # TERMINATION knocked out now, no rebate
+            continue
+        settlement = now.get_observation_payoff(spot)
+        without = float(engine.price(make(later), env))
+        assert with_now == pytest.approx(without + settlement, rel=1e-9), type(engine).__name__

@@ -285,6 +285,42 @@ class RangeAccrualOption(BaseEquityOption):
             "observation_times, or num_observations with maturity"
         )
 
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> None:
+        """Age the range accrual by ``time_bump`` (spec 2026-10-07 theta boundary).
+
+        Numeric records move with the clock (a record on the bumped instant to exactly 0.0); a record that becomes
+        past, or lands on the bumped instant, without a fixing gets one decided on the spot - the spot is held over
+        a theta bump, and a record at or before the as-of instant must carry ``observed_in_range``. Dated records
+        resolve against the bumped valuation date; those on or before its calendar day get the same fixing. The
+        schedule is written out as explicit records first (a ``num_observations`` schedule follows the maturity).
+        ``keep_landing`` changes nothing here: a range accrual observation is always a fixing, never skipped.
+        """
+        from copy import deepcopy
+
+        from quantark.util.numerical import is_zero
+
+        records = [deepcopy(rec) for rec in self.get_observation_records()]
+        spot = float(pricing_env.spot)
+        for idx, rec in enumerate(records):
+            past = False
+            if rec.observation_time is not None:
+                shifted = rec.observation_time - time_bump
+                rec.observation_time = 0.0 if is_zero(shifted) else shifted
+                past = rec.observation_time <= 0.0
+            elif rec.observation_date is not None and bumped_date is not None:
+                past = rec.observation_date.date() <= bumped_date.date()
+            if past and rec.observed_in_range is None:
+                rec.observed_in_range = self.is_in_range(spot, idx, rec)
+        self.observation_records = records
+        self.observation_times = None
+        self.num_observations = None
+        if self.exercise_date is None and self.maturity is not None:
+            self.maturity -= time_bump
+        else:
+            pricing_env.valuation_date = bumped_date
+
     def get_observation_records(self) -> List[RangeAccrualObservationRecord]:
         """
         Get observation records, building from legacy inputs if needed.

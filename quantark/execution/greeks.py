@@ -52,6 +52,7 @@ class TradeState:
     greeks_params: object
     warnings: tuple = ()
     theta_degenerate: bool = False
+    theta_shift: object = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -147,6 +148,11 @@ def _apply_theta_bump(state: TradeState, gc) -> TradeState:
     """Verbatim _trade_theta / calculate_numerical_theta time shift,
     including every degenerate early-out (returned as a flag so the
     assembler can emit the identical 0.0)."""
+    from quantark.asset.equity.riskmeasures.greeks.theta_shift import (
+        shift_cash_legs,
+        shift_for_theta,
+    )
+
     bc = gc._bump_config
     env = state.pricing_env
     product = state.product
@@ -169,20 +175,13 @@ def _apply_theta_bump(state: TradeState, gc) -> TradeState:
         return dataclasses.replace(state, theta_degenerate=True)
     if current_maturity <= time_bump:
         return dataclasses.replace(state, theta_degenerate=True)
-    prod2 = deepcopy(product)
-    env2 = deepcopy(env)
-    env2.valuation_date = bumped_date
-    dropped_all = prod2.time_shift(time_bump, bumped_date, env2)
-    if dropped_all:
-        return dataclasses.replace(state, theta_degenerate=True)
-    legs2 = []
-    for leg in state.cash_legs:
-        shift = getattr(leg, "time_shift", None)
-        shifted = shift(time_bump) if callable(shift) else leg
-        if shifted is not None:
-            legs2.append(shifted)
+    # spec 2026-10-07 theta boundary: t0's outcome carried, t1's observation
+    # kept; the cell prices the shift (bumped_value / bumped_trade_value).
+    shift = shift_for_theta(product, env, time_bump, bumped_date)
     return dataclasses.replace(
-        state, product=prod2, pricing_env=env2, cash_legs=tuple(legs2)
+        state, product=shift.product, pricing_env=shift.env,
+        cash_legs=tuple(shift_cash_legs(state.cash_legs, time_bump)),
+        theta_shift=shift,
     )
 
 
@@ -296,6 +295,10 @@ def run_greek_bump(bump_id: str, base: TradeState, bumped: TradeState,
       ``raw_price``), bump cells on the resolved bump context
       (calculate_numerical_greeks).
     """
+    from quantark.asset.equity.riskmeasures.greeks.theta_shift import (
+        bumped_trade_value,
+        bumped_value,
+    )
     from quantark.cashleg.leg_valuator import value_leg
 
     if bumped.theta_degenerate:
@@ -304,6 +307,13 @@ def run_greek_bump(bump_id: str, base: TradeState, bumped: TradeState,
         bump_engine = gc._resolve_bump_engine(
             base.product, base.pricing_env, base.engine
         )
+        if bumped.theta_shift is not None:
+            npv, leg_sum = bumped_trade_value(
+                bump_engine, bumped.theta_shift, base.cash_legs,
+                streams=base.streams,
+                unit_of=lambda env: _unit_notional(base, env),
+            )
+            return {"degenerate": 0.0, "npv": npv, "leg_sum": leg_sum}
         result = bump_engine.price_with_events(
             bumped.product, bumped.pricing_env, streams=base.streams
         )
@@ -341,7 +351,12 @@ def run_greek_bump(bump_id: str, base: TradeState, bumped: TradeState,
         bump_engine = gc._resolve_bump_engine(
             base.product, base.pricing_env, base.engine
         )
-        price = float(bump_engine.price(bumped.product, bumped.pricing_env))
+        if bumped.theta_shift is not None:
+            price = bumped_value(bump_engine, bumped.theta_shift)
+        else:
+            price = float(
+                bump_engine.price(bumped.product, bumped.pricing_env)
+            )
     return {"degenerate": 0.0, "npv": price, "leg_sum": 0.0}
 
 

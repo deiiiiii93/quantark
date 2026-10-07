@@ -360,7 +360,10 @@ class EquityPosition:
         self, gc, bump_engine, pricing_env, streams, base_npv, base_legs, q
     ) -> tuple:
         """Theta for product + total via a time shift of product and legs."""
-        from copy import deepcopy
+        from quantark.asset.equity.riskmeasures.greeks.theta_shift import (
+            bumped_trade_value,
+            shift_for_theta,
+        )
 
         bc = gc._bump_config
         product = self.product
@@ -371,26 +374,11 @@ class EquityPosition:
         if time_bump <= 0.0 or current_maturity <= time_bump:
             return 0.0, 0.0
 
-        prod_theta = deepcopy(product)
-        env_theta = deepcopy(pricing_env)
-        env_theta.valuation_date = bumped_date
-        dropped_all = prod_theta.time_shift(time_bump, bumped_date, env_theta)
-        if dropped_all:
-            return 0.0, 0.0
-
-        shifted_legs = []
-        for leg in self.cash_legs:
-            shift = getattr(leg, "time_shift", None)
-            shifted = shift(time_bump) if callable(shift) else leg
-            if shifted is not None:
-                shifted_legs.append(shifted)
-
-        result = bump_engine.price_with_events(prod_theta, env_theta, streams=streams)
-        unit = self._get_unit_notional(env_theta)
-        npv_t = float(result.npv)
-        legs_t = sum(
-            value_leg(leg, result.event_distribution, env_theta, unit)
-            for leg in shifted_legs
+        # spec 2026-10-07 theta boundary: t0's outcome carried, t1's observation kept
+        shift = shift_for_theta(product, pricing_env, time_bump, bumped_date)
+        npv_t, legs_t = bumped_trade_value(
+            bump_engine, shift, self.cash_legs,
+            streams=streams, unit_of=self._get_unit_notional,
         )
         product_theta = q * (npv_t - base_npv)
         total_theta = q * (npv_t - base_npv) + (legs_t - base_legs)

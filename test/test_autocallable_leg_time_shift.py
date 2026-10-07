@@ -79,3 +79,15 @@ def test_shifted_leg_still_valid_and_required_streams_preserved():
     assert shifted.required_event_types() == frozenset(
         {EventType.KO, EventType.MATURITY_NO_KO}
     )
+
+
+def test_keep_landing_keeps_the_observation_on_the_bumped_instant_at_zero():
+    # theta (spec 2026-10-07 R1): an observation landing on the bumped instant is kept at time 0
+    leg = _leg(observation_schedule=(0.3, 0.6), accrual_factors=(0.5, 1.0), settlement_schedule=(0.32, 0.6))
+    shifted = leg.time_shift(0.3, keep_landing=True)
+    assert np.allclose(shifted.observation_schedule, [0.0, 0.3])
+    assert shifted.observation_schedule[0] == 0.0
+    assert np.allclose(shifted.accrual_factors, [0.5, 1.0])
+    assert np.allclose(shifted.settlement_schedule, [0.02, 0.3])
+    # a past observation still drops under keep_landing
+    assert np.allclose(_leg().time_shift(0.3, keep_landing=True).observation_schedule, [0.2, 0.45, 0.7])

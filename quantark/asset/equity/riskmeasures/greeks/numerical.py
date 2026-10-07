@@ -12,6 +12,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.riskmeasures.greeks import bump_envs
 from quantark.asset.equity.riskmeasures.greeks.registry import REGISTRY
+from quantark.asset.equity.riskmeasures.greeks.theta_shift import bumped_value, shift_for_theta
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
 
@@ -229,8 +230,6 @@ def numerical_theta(
         else getattr(calc._bump_config, "time_bump_mode", "auto")
     )
     base_price = bump_envs.ensure_base_price(product, pricing_env, engine, base_price)
-    product_theta = deepcopy(product)
-    env_theta = deepcopy(pricing_env)
     current_maturity = product.get_maturity(pricing_env)
 
     bumped_date, time_bump, resolved_mode = bump_envs.advance_theta_bump(
@@ -250,16 +249,9 @@ def numerical_theta(
     if current_maturity <= time_bump:
         return 0.0
 
-    env_theta.valuation_date = bumped_date
-    dropped_all_observations = product_theta.time_shift(
-        time_bump, bumped_date, env_theta
-    )
-
-    if dropped_all_observations:
-        return 0.0
-
-    price_theta = engine.price(product_theta, env_theta)
-    return price_theta - base_price
+    # spec 2026-10-07 theta boundary: the as-of outcome carried, the bumped date's observation kept
+    shift = shift_for_theta(product, pricing_env, time_bump, bumped_date)
+    return bumped_value(engine, shift) - base_price
 
 
 def numerical_rho(
@@ -560,8 +552,10 @@ def time_scenario(
     """Advanced-date scenario for one clock, memoized per request.
 
     Mirrors numerical_theta's guard cascade exactly: a non-advancing step,
-    an at-expiry product, a step past maturity, or a time_shift that drops
-    every observation all mark the scenario ``zero`` (the greek is 0.0).
+    an at-expiry product or a step past maturity marks the scenario ``zero``
+    (the greek is 0.0). The advanced product is ``shift_for_theta``'s
+    (spec 2026-10-07 theta boundary); a contract the as-of date ended is
+    ``frozen``: its price is the carried receivable and its spot greeks are 0.
     """
     key = f"time_adv:{clock or 'bare'}"
     if key in memo:
@@ -588,18 +582,15 @@ def time_scenario(
 
     product_adv = None
     env_adv = None
+    shift = None
     if not zero:
-        product_adv = deepcopy(product)
-        env_adv = deepcopy(pricing_env)
-        env_adv.valuation_date = bumped_date
-        dropped_all_observations = product_adv.time_shift(
-            time_bump, bumped_date, env_adv
-        )
-        if dropped_all_observations:
-            zero = True
+        shift = shift_for_theta(product, pricing_env, time_bump, bumped_date)
+        product_adv, env_adv = shift.product, shift.env
 
     scenario = {
         "zero": zero,
+        "frozen": bool(shift is not None and shift.terminated),
+        "shift": shift,
         "product": product_adv,
         "env": env_adv,
         "bumped_date": bumped_date,
@@ -619,7 +610,7 @@ def advanced_price(engine, scenario, clock, memo) -> float:
     """
     key = f"price:adv:{clock or 'bare'}"
     if key not in memo:
-        memo[key] = engine.price(scenario["product"], scenario["env"])
+        memo[key] = bumped_value(engine, scenario["shift"])
     return memo[key]
 
 
@@ -655,8 +646,17 @@ def _base_delta_gamma(calc, product, pricing_env, engine, base_price, memo):
     return memo[key]
 
 
+def _advanced_engine_price(engine, scenario, clock, memo) -> float:
+    """The advanced price less the carried receivable: the base the advanced
+    bumps difference against (the receivable has no spot or vol sensitivity)."""
+    return advanced_price(engine, scenario, clock, memo) - scenario["shift"].fixed_pv
+
+
 def _adv_delta_gamma(calc, engine, scenario, clock, memo):
     key = f"delta_gamma:adv:{clock or 'bare'}"
+    if key not in memo and scenario["frozen"]:
+        # Ended at the as-of date: a fixed receivable at the advanced date.
+        memo[key] = (advanced_price(engine, scenario, clock, memo), 0.0, 0.0)
     if key not in memo:
         # Bump mode needs the advanced base price for its central
         # differences: take the shared one. Engine-greeks mode reads price,
@@ -664,7 +664,7 @@ def _adv_delta_gamma(calc, engine, scenario, clock, memo):
         base_price = (
             None
             if calc._should_use_engine_greeks(engine)
-            else advanced_price(engine, scenario, clock, memo)
+            else _advanced_engine_price(engine, scenario, clock, memo)
         )
         memo[key] = get_delta_gamma(
             calc, scenario["product"], scenario["env"], engine, base_price
@@ -743,13 +743,15 @@ def numerical_vega_theta(
             )
         base_vega = memo[vega_key]
     adv_key = f"vega:adv:{clock or 'bare'}"
+    if adv_key not in memo and scenario["frozen"]:
+        memo[adv_key] = 0.0                 # a fixed receivable has no vega
     if adv_key not in memo:
         memo[adv_key] = numerical_vega(
             calc,
             scenario["product"],
             scenario["env"],
             engine,
-            base_price=advanced_price(engine, scenario, clock, memo),
+            base_price=_advanced_engine_price(engine, scenario, clock, memo),
         )
     return memo[adv_key] - base_vega
 

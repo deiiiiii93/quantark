@@ -53,10 +53,13 @@ class PhoenixObservationsAtValuation(ObservationsAtValuation):
         coupon: the period's own coupon plus the memory arrears it releases, ``0.0`` when the coupon
             level is not met (the arrears then stay owed, or lapse if this was the last period).
         coupon_index: the observation that paid it, position in ``resolve_ko_observations``.
+        arrears: the memory arrears carried out of this instant when it does not knock out (theta carries them
+            into the bumped product, spec 2026-10-07 theta boundary R4).
     """
 
     coupon: float = 0.0
     coupon_index: Optional[int] = None
+    arrears: float = 0.0
 
 
 @dataclass
@@ -771,7 +774,7 @@ class PhoenixOption(BaseEquityOption):
         if not knocked_in and self.has_ki_barrier:
             knocked_in = knock_in_decided_at_valuation(self, spot, pricing_env)
         return PhoenixObservationsAtValuation(
-            False, knocked_in, coupon=coupon, coupon_index=coupon_index
+            False, knocked_in, coupon=coupon, coupon_index=coupon_index, arrears=arrears
         )
 
     def get_ko_observation_profile(self, pricing_env) -> Dict[str, List[Optional[float]]]:

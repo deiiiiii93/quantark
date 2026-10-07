@@ -49,6 +49,7 @@ from quantark.asset.equity.riskmeasures import (
     BucketedGreeksRequest,
     GreeksCalculator,
 )
+from quantark.asset.equity.riskmeasures.greeks.theta_shift import bumped_value, shift_for_theta
 from quantark.param import FlatVolSurface, SpotQuote
 from quantark.param import TermStructureVolSurface
 from quantark.param.div import ContinuousDividendYield, DividendYield
@@ -179,6 +180,13 @@ def _select_snowball_pricing_engine(
     raise ValidationError(f"Unable to select a Snowball engine from preference={list(preference)} (tried={tried})")
 
 
+def _bumped_maturity(product, time_bump: float, bumped_date, bumped_env) -> float:
+    """The product's maturity one theta step on (the as-of outcome does not move it)."""
+    aged = copy.deepcopy(product)
+    aged.time_shift(time_bump, bumped_date, bumped_env, keep_landing=True)
+    return aged.get_maturity(bumped_env)
+
+
 def _compute_pv_surface_sq(
     *,
     product: SnowballOption,
@@ -188,14 +196,23 @@ def _compute_pv_surface_sq(
     q_grid: np.ndarray,
     base_div_yield: DividendYield,
     base_q: float,
+    theta_step: Optional[Tuple[float, datetime]] = None,
 ) -> np.ndarray:
+    """PV over spot x q. With ``theta_step = (time_bump, bumped_date)``, ``product``
+    and ``pricing_env`` are the as-of ones and each point is the theta step's
+    bumped value: the as-of outcome decided at that point's spot (spec
+    2026-10-07 theta boundary)."""
     pv = np.zeros((spot_grid.size, q_grid.size), dtype=float)
     for j, q in enumerate(q_grid):
         shift = float(q) - float(base_q)
         div_yield = ShiftedDividendYield(base=base_div_yield, shift=shift)
         for i, s in enumerate(spot_grid):
             env = _clone_env(pricing_env, spot=float(s), div_yield=div_yield)
-            pv[i, j] = float(engine.price(product, env))
+            if theta_step is None:
+                pv[i, j] = float(engine.price(product, env))
+            else:
+                step = shift_for_theta(product, env, *theta_step)
+                pv[i, j] = bumped_value(engine, step)
     return pv
 
 
@@ -327,7 +344,10 @@ def _compute_delta_surface_sq(
     q_grid: np.ndarray,
     base_div_yield: DividendYield,
     base_q: float,
+    theta_step: Optional[Tuple[float, datetime]] = None,
 ) -> np.ndarray:
+    """Delta over spot x q; ``theta_step`` as in ``_compute_pv_surface_sq`` (a
+    contract the as-of date ended is a fixed receivable: delta 0)."""
     delta = np.zeros((spot_grid.size, q_grid.size), dtype=float)
     greek_list = [EquityGreek.DELTA]
     for j, q in enumerate(q_grid):
@@ -335,8 +355,14 @@ def _compute_delta_surface_sq(
         div_yield = _shift_dividend_yield(base_div_yield, shift)
         for i, s in enumerate(spot_grid):
             env = _clone_env(pricing_env, spot=float(s), div_yield=div_yield)
+            point_product = product
+            if theta_step is not None:
+                step = shift_for_theta(product, env, *theta_step)
+                if step.terminated:
+                    continue
+                point_product, env = step.product, step.env
             greeks = greeks_calculator.calculate(
-                product, env, engine, greeks=greek_list
+                point_product, env, engine, greeks=greek_list
             )
             delta[i, j] = float(greeks["delta"])
     return delta
@@ -1047,38 +1073,40 @@ def build_snowball_risk_snapshot(
     if time_bump > 0.0:
         bumped_date = pricing_env.valuation_date + timedelta(days=int(time_bump * 365))
         bumped_env = _clone_env(pricing_env, valuation_date=bumped_date)
-        bumped_product = copy.deepcopy(product)
-        dropped_all = bumped_product.time_shift(time_bump, bumped_date, bumped_env)
-        if not dropped_all and bumped_product.get_maturity(bumped_env) > 0.0:
-            pv_bumped = float(engine.price(bumped_product, bumped_env))
+        bumped_maturity = _bumped_maturity(product, time_bump, bumped_date, bumped_env)
+        if bumped_maturity > 0.0:
+            theta_step = (time_bump, bumped_date)
+            pv_bumped = bumped_value(engine, shift_for_theta(product, pricing_env, *theta_step))
             theta_base = (pv_bumped - float(engine.price(product, pricing_env))) / time_bump
             bumped_div_yield = (
                 ContinuousDividendYield(div_yield=0.0)
                 if bumped_env.div_yield is None
                 else bumped_env.div_yield
             )
-            bumped_q = bumped_env.get_div_yield(bumped_product.get_maturity(bumped_env))
+            bumped_q = bumped_env.get_div_yield(bumped_maturity)
             if greeks_calculator is None:
                 pv_sq_bumped = _compute_pv_surface_sq(
-                    product=bumped_product,
-                    pricing_env=bumped_env,
+                    product=product,
+                    pricing_env=pricing_env,
                     engine=engine,
                     spot_grid=spot_grid,
                     q_grid=q_grid,
                     base_div_yield=bumped_div_yield,
                     base_q=bumped_q,
+                    theta_step=theta_step,
                 )
                 delta_bumped = derivative_1d(pv_sq_bumped, spot_grid, axis=0)
             else:
                 delta_bumped = _compute_delta_surface_sq(
-                    product=bumped_product,
-                    pricing_env=bumped_env,
+                    product=product,
+                    pricing_env=pricing_env,
                     engine=engine,
                     greeks_calculator=greeks_calculator,
                     spot_grid=spot_grid,
                     q_grid=q_grid,
                     base_div_yield=bumped_div_yield,
                     base_q=bumped_q,
+                    theta_step=theta_step,
                 )
             gamma_bumped = derivative_1d(delta_bumped, spot_grid, axis=0)
             charm_sq = (delta_bumped - surfaces.delta_sq) / time_bump
@@ -1568,43 +1596,43 @@ def generate_snowball_risk_report(
     if time_bump > 0.0:
         bumped_date = pricing_env.valuation_date + timedelta(days=int(time_bump * 365))
         bumped_env = _clone_env(pricing_env, valuation_date=bumped_date)
-        bumped_product = copy.deepcopy(product)
-        dropped_all = bumped_product.time_shift(time_bump, bumped_date, bumped_env)
-        if not dropped_all:
-            bumped_maturity = bumped_product.get_maturity(bumped_env)
-            if bumped_maturity > 0.0:
-                pv_bumped = float(engine.price(bumped_product, bumped_env))
-                theta_base = (pv_bumped - base_pv) / time_bump
-                if bumped_env.div_yield is None:
-                    bumped_div_yield: DividendYield = ContinuousDividendYield(div_yield=0.0)
-                else:
-                    bumped_div_yield = bumped_env.div_yield
-                bumped_q = bumped_env.get_div_yield(bumped_maturity)
-                if greeks_calculator is None:
-                    pv_sq_bumped = _compute_pv_surface_sq(
-                        product=bumped_product,
-                        pricing_env=bumped_env,
-                        engine=engine,
-                        spot_grid=spot_grid,
-                        q_grid=q_grid,
-                        base_div_yield=bumped_div_yield,
-                        base_q=bumped_q,
-                    )
-                    delta_bumped = derivative_1d(pv_sq_bumped, spot_grid, axis=0)
-                else:
-                    delta_bumped = _compute_delta_surface_sq(
-                        product=bumped_product,
-                        pricing_env=bumped_env,
-                        engine=engine,
-                        greeks_calculator=greeks_calculator,
-                        spot_grid=spot_grid,
-                        q_grid=q_grid,
-                        base_div_yield=bumped_div_yield,
-                        base_q=bumped_q,
-                    )
-                gamma_bumped = derivative_1d(delta_bumped, spot_grid, axis=0)
-                charm_sq = (delta_bumped - surfaces.delta_sq) / time_bump
-                color_sq = (gamma_bumped - gamma_sq) / time_bump
+        bumped_maturity = _bumped_maturity(product, time_bump, bumped_date, bumped_env)
+        if bumped_maturity > 0.0:
+            theta_step = (time_bump, bumped_date)
+            pv_bumped = bumped_value(engine, shift_for_theta(product, pricing_env, *theta_step))
+            theta_base = (pv_bumped - base_pv) / time_bump
+            if bumped_env.div_yield is None:
+                bumped_div_yield: DividendYield = ContinuousDividendYield(div_yield=0.0)
+            else:
+                bumped_div_yield = bumped_env.div_yield
+            bumped_q = bumped_env.get_div_yield(bumped_maturity)
+            if greeks_calculator is None:
+                pv_sq_bumped = _compute_pv_surface_sq(
+                    product=product,
+                    pricing_env=pricing_env,
+                    engine=engine,
+                    spot_grid=spot_grid,
+                    q_grid=q_grid,
+                    base_div_yield=bumped_div_yield,
+                    base_q=bumped_q,
+                    theta_step=theta_step,
+                )
+                delta_bumped = derivative_1d(pv_sq_bumped, spot_grid, axis=0)
+            else:
+                delta_bumped = _compute_delta_surface_sq(
+                    product=product,
+                    pricing_env=pricing_env,
+                    engine=engine,
+                    greeks_calculator=greeks_calculator,
+                    spot_grid=spot_grid,
+                    q_grid=q_grid,
+                    base_div_yield=bumped_div_yield,
+                    base_q=bumped_q,
+                    theta_step=theta_step,
+                )
+            gamma_bumped = derivative_1d(delta_bumped, spot_grid, axis=0)
+            charm_sq = (delta_bumped - surfaces.delta_sq) / time_bump
+            color_sq = (gamma_bumped - gamma_sq) / time_bump
 
     vega_sv = derivative_1d(pv_sv, vol_grid, axis=1)
     spot_idx = _nearest_index(spot_grid, base_spot)

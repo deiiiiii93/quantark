@@ -427,6 +427,21 @@ class AccumulatorOption(BaseEquityOption):
             total += self.get_observation_payoff(spot)
         return total
 
+    def record_valuation_fixing(self, spot: float, pricing_env, time_bump: float) -> None:
+        """Carry an observation at the valuation instant into ``past_observations`` before a theta shift drops it
+        (spec 2026-10-07 theta boundary R4): its fixing is the known spot, timed ``-time_bump`` in the bumped
+        frame (``get_realized_accrual`` only orders the records)."""
+        schedule = self.observation_schedule
+        if schedule is None or not schedule.records:
+            return
+        from quantark.util.numerical import is_zero
+
+        if not any(rec.observation_time is not None and is_zero(rec.observation_time) for rec in schedule.records):
+            if not any(rec.observation_date is not None and rec.observation_date.date() == pricing_env.valuation_date.date()
+                       for rec in schedule.records):
+                return
+        self.past_observations = list(self.past_observations or []) + [(-float(time_bump), float(spot))]
+
     def get_observation_times(self) -> List[float]:
         """Return discrete observation times in years."""
         if self.observation_schedule is not None:

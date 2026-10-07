@@ -81,10 +81,13 @@ class _BarrierFamilyAdapter(FamilyAdapter):
         # another product type is refused by validate, where price would refuse it
         if not isinstance(product, self._product_class()):
             return None
-        from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
-        if monitoring_ended(product) and product.get_maturity(env) > 0:
-            # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication
-            return remaining_replication(product, knocked_in)
+        from quantark.asset.equity.engine.monitoring_ended import (knock_in_carried, monitoring_ended,
+                                                                   remaining_replication)
+        triggered = knock_in_carried(product) or (knocked_in and bool(getattr(product, "is_knock_in", False)))
+        if (monitoring_ended(product) or triggered) and product.get_maturity(env) > 0:
+            # no observation left, or a knock-in triggered (spec 2026-10-07 theta boundary 3.3, R4): the remaining
+            # contract, by replication
+            return remaining_replication(product, triggered)
         if not self._replicates_expiry(product, env):
             return None
         from .expiry_replication import ExpiryReplication

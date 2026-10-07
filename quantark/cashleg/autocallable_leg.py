@@ -204,15 +204,20 @@ class AutocallableCashLeg(CashLeg):
             return self.sign() * R
         return self.sign() * (float(self.notional) - R)
 
-    def time_shift(self, dt: float) -> "Optional[AutocallableCashLeg]":
+    def time_shift(
+        self, dt: float, *, keep_landing: bool = False
+    ) -> "Optional[AutocallableCashLeg]":
         """Advance the leg by ``dt`` years for a theta bump [§11.9].
 
         Mirrors the parent product's observation-drop rule (a time observation
         survives iff ``obs - dt > 0``): survivors shift by ``-dt`` (floored at
         0), their accrual factors and settlement times move with them, and the
-        terminal settlement shifts likewise. Returns ``None`` when the leg had
-        observations and they all drop (fully expired within the bump); a
-        terminal-only leg (no observations) survives with a shifted terminal.
+        terminal settlement shifts likewise. With ``keep_landing`` (theta,
+        spec 2026-10-07 R1) an observation landing on the bumped instant
+        (``obs - dt`` zero within tolerance) is kept at time 0, as the parent
+        keeps it. Returns ``None`` when the leg had observations and they all
+        drop (fully expired within the bump); a terminal-only leg (no
+        observations) survives with a shifted terminal.
         """
         dt = float(dt)
         if dt <= 0.0:
@@ -221,8 +226,14 @@ class AutocallableCashLeg(CashLeg):
         obs = np.asarray(self.observation_schedule, dtype=float)
         had_obs = obs.size > 0
         keep = (obs - dt) > Tolerance.ZERO if had_obs else np.array([], dtype=bool)
+        if keep_landing and had_obs:
+            keep = keep | (np.abs(obs - dt) <= Tolerance.ZERO)
 
-        new_obs = tuple(max(0.0, float(t - dt)) for t, k in zip(obs, keep) if k)
+        new_obs = tuple(
+            0.0 if abs(float(t - dt)) <= Tolerance.ZERO else max(0.0, float(t - dt))
+            for t, k in zip(obs, keep)
+            if k
+        )
         new_af = tuple(
             float(a) for a, k in zip(self.accrual_factors, keep) if k
         )

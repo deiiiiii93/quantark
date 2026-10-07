@@ -192,12 +192,13 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
         if fixed_pv is not None:
             self._last_std_error = 0.0
             return fixed_pv
-        from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
-        if monitoring_ended(product) and product.get_maturity(env) > 0.0:
+        from quantark.asset.equity.engine.monitoring_ended import (knock_in_carried, remaining_contract_applies,
+                                                                   remaining_replication)
+        if remaining_contract_applies(product, lifecycle_state) and product.get_maturity(env) > 0.0:
             # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication on
             # the implied surface (the local-vol European reprices it, Dupire)
             self._last_std_error = 0.0
-            return (remaining_replication(product, bool(getattr(lifecycle_state, "knocked_in", False))).price(env)
+            return (remaining_replication(product, knock_in_carried(product, lifecycle_state)).price(env)
                     + pending_receivable_pv(lifecycle_state, env))
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)

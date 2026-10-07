@@ -834,10 +834,11 @@ class GreeksCalculator:
             self, product, pricing_env, clock, memo
         )
         if T <= 0.0 or scenario["zero"]:
-            # A zero scenario (non-advancing step, maturity-crossing step, or
-            # a time_shift that dropped every observation) zeroes theta, so
-            # its carry components must be zero too — otherwise r/q_theta
-            # would report carry the repriced theta does not contain.
+            # A zero scenario (non-advancing step or maturity-crossing step)
+            # zeroes theta, so its carry components must be zero too —
+            # otherwise r/q_theta would report carry the repriced theta does
+            # not contain. (An emptied schedule is no longer zero: it is
+            # monitoring_ended and priced, spec 2026-10-07 R3.)
             memo[key] = {
                 "convexity_theta": 0.0,
                 "r_theta": 0.0,

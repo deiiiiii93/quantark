@@ -13,7 +13,8 @@ from quantark.util.enum import ObservationType, OptionType
 
 from .pde.core.adapters.expiry_replication import ExpiryReplication, Leg
 
-__all__ = ["monitoring_ended", "remaining_legs", "remaining_replication"]
+__all__ = ["knock_in_carried", "monitoring_ended", "remaining_contract_applies", "remaining_legs",
+           "remaining_replication"]
 
 _C, _P = OptionType.CALL, OptionType.PUT
 
@@ -23,6 +24,20 @@ def monitoring_ended(product) -> bool:
     schedule = getattr(product, "observation_schedule", None)
     return (getattr(product, "observation_type", None) == ObservationType.DISCRETE and schedule is not None
             and schedule.monitoring_ended and not schedule.records)
+
+
+def knock_in_carried(product, lifecycle_state=None) -> bool:
+    """A knock-in carried as triggered: by ``lifecycle_state.knocked_in`` or on the product
+    (``_otc_lifecycle_knocked_in``, as the autocallables carry it; theta's as-of knock-in, spec 2026-10-07 R4)."""
+    return bool(getattr(product, "is_knock_in", False)) and bool(
+        getattr(lifecycle_state, "knocked_in", False) or getattr(product, "_otc_lifecycle_knocked_in", False)
+    )
+
+
+def remaining_contract_applies(product, lifecycle_state=None) -> bool:
+    """Whether the remaining-contract replication prices ``product``: its monitoring has ended, or it is a
+    knock-in carried as triggered - a triggered knock-in has nothing left to monitor."""
+    return monitoring_ended(product) or knock_in_carried(product, lifecycle_state)
 
 
 def _cash(amount: float, strike: float) -> list:
