@@ -59,6 +59,16 @@ def _check_barrier(engine_name: str, product) -> None:
     _reject_nonuniform_schedule(product)
 
 
+def _refuse_ended(engine_name: str, product) -> None:
+    """A stochastic-volatility engine prices the remaining European under its own model, which it has no path for:
+    an ended schedule is refused, not priced under another model (spec 2026-10-07 theta boundary 3.3)."""
+    from quantark.asset.equity.engine.monitoring_ended import monitoring_ended
+    if monitoring_ended(product):
+        raise CapabilityError(
+            f"{engine_name}: the product's monitoring has ended; price the remaining European with a European "
+            "engine of the same model")
+
+
 def _monitoring(product: BarrierOption, t_grid: np.ndarray):
     """Return (continuous: bool, observe_idx: Optional[np.ndarray]) snapping discrete dates to grid.
 
@@ -182,6 +192,13 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
         if fixed_pv is not None:
             self._last_std_error = 0.0
             return fixed_pv
+        from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
+        if monitoring_ended(product) and product.get_maturity(env) > 0.0:
+            # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication on
+            # the implied surface (the local-vol European reprices it, Dupire)
+            self._last_std_error = 0.0
+            return (remaining_replication(product, bool(getattr(lifecycle_state, "knocked_in", False))).price(env)
+                    + pending_receivable_pv(lifecycle_state, env))
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
@@ -225,6 +242,7 @@ class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
         lifecycle_state=None,
     ) -> float:
         _check_barrier("HestonBarrierMCEngine", product)
+        _refuse_ended("HestonBarrierMCEngine", product)
         fixed_pv, settlement_scale = _settlement_scale(
             self, product, env, lifecycle_state
         )
@@ -273,6 +291,7 @@ class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
         lifecycle_state=None,
     ) -> float:
         _check_barrier("HestonSLVBarrierMCEngine", product)
+        _refuse_ended("HestonSLVBarrierMCEngine", product)
         fixed_pv, settlement_scale = _settlement_scale(
             self, product, env, lifecycle_state
         )

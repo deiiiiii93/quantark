@@ -115,6 +115,16 @@ def _settlement_scale(engine, product, env) -> float:
     return float(terminal_timing.delay_df)
 
 
+def _refuse_ended(engine_name: str, product) -> None:
+    """The 2D model's remaining European has no path here: an ended schedule is refused (spec 2026-10-07 theta
+    boundary 3.3), never priced under another model."""
+    from quantark.asset.equity.engine.monitoring_ended import monitoring_ended
+    if monitoring_ended(product):
+        raise CapabilityError(
+            f"{engine_name}: the product's monitoring has ended; price the remaining European with a European "
+            "engine of the same model")
+
+
 class LocalVolBarrierPDESolver(LocalVolSurfaceMixin, BarrierPDESolver):
     """Single barriers under a Dupire local-volatility surface, marched on the core (spec 3C §5.3): EXPIRY, knock-in
     rebates, per-observation schedules, lagged pay-at-hit rebates, bump contexts and session grids are the base
@@ -184,6 +194,7 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
 
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("HestonBarrierPDESolver", product)
+        _refuse_ended("HestonBarrierPDESolver", product)
         settlement_scale = _settlement_scale(self, product, env)
         if self.model_params.sigma < _SIGMA_MIN:
             return self._deterministic_limit(product, env)
@@ -227,6 +238,7 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
 
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("HestonSLVBarrierPDESolver", product)
+        _refuse_ended("HestonSLVBarrierPDESolver", product)
         settlement_scale = _settlement_scale(self, product, env)
         if self.model_params.sigma < _SIGMA_MIN:
             return self._deterministic_limit(product, env, self.leverage_surface)

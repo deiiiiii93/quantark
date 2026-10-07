@@ -77,9 +77,15 @@ class _BarrierFamilyAdapter(FamilyAdapter):
                 and getattr(product, "observation_type", None) == ObservationType.EXPIRY
                 and product.get_maturity(env) > 0)
 
-    def replication(self, product, env):
+    def replication(self, product, env, knocked_in: bool = False):
         # another product type is refused by validate, where price would refuse it
-        if not isinstance(product, self._product_class()) or not self._replicates_expiry(product, env):
+        if not isinstance(product, self._product_class()):
+            return None
+        from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
+        if monitoring_ended(product) and product.get_maturity(env) > 0:
+            # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication
+            return remaining_replication(product, knocked_in)
+        if not self._replicates_expiry(product, env):
             return None
         from .expiry_replication import ExpiryReplication
         return ExpiryReplication(self._replication_legs(product), product, self._replication_multiplier(product))
@@ -87,7 +93,7 @@ class _BarrierFamilyAdapter(FamilyAdapter):
     def composite(self, product, env, request, lifecycle_state):
         if request.operation not in _FACADE:
             return None
-        replication = self.replication(product, env)
+        replication = self.replication(product, env, bool(getattr(lifecycle_state, "knocked_in", False)))
         if replication is None:
             return None
         from .expiry_replication import replication_problem

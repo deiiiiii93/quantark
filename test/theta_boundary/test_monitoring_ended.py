@@ -133,3 +133,59 @@ def test_ended_accumulator_prices_its_realized_accrual():
     a = float(AccumulatorAnalyticalEngine().price(make(), env_const()))
     m = float(AccumulatorMCEngine(params=MCParams(num_paths=1024, time_steps=4, seed=3)).price(make(), env_const()))
     assert a == pytest.approx(m, abs=1e-8)
+
+
+# --- Task 4: PDE, QUAD and vol engines ---------------------------------------------------------------------
+
+def pde_quad_engines(name):
+    from pde_routes.cases import surface_const
+    from quantark.asset.equity.engine.pde import (BarrierPDESolver, DoubleBarrierPDESolver, DoubleOneTouchPDESolver,
+                                                  OneTouchPDESolver)
+    from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import LocalVolBarrierPDESolver
+    from quantark.asset.equity.engine.quad.discrete_quad_engine import DiscreteQuadEngine
+    from quantark.asset.equity.engine.mc.barrier_vol_mc_engines import LocalVolBarrierMCEngine
+    single = [BarrierPDESolver(), LocalVolBarrierPDESolver(local_vol_surface=surface_const()), DiscreteQuadEngine(),
+              LocalVolBarrierMCEngine(local_vol_surface=surface_const())]
+    return {
+        "uo_call": single, "ui_call": single,
+        "dko_put": [DoubleBarrierPDESolver(), DiscreteQuadEngine()],
+        "dki_call": [DoubleBarrierPDESolver(), DiscreteQuadEngine()],
+        "one_touch": [OneTouchPDESolver(), DiscreteQuadEngine()],
+        "no_touch": [OneTouchPDESolver(), DiscreteQuadEngine()],
+        "double_no_touch": [DoubleOneTouchPDESolver(), DiscreteQuadEngine()],
+        "double_one_touch": [DoubleOneTouchPDESolver(), DiscreteQuadEngine()],
+        "sharkfin_call": [], "double_sharkfin_put": [],
+    }[name]
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_ended_monitoring_on_pde_and_quad(name):
+    make, truth = CASES[name]
+    for engine in pde_quad_engines(name):
+        assert float(engine.price(make(), env_const())) == pytest.approx(truth(), abs=1e-10), type(engine).__name__
+
+
+def test_ended_monitoring_greeks_are_the_legs():
+    from quantark.asset.equity.engine.pde import BarrierPDESolver
+    from quantark.asset.equity.riskmeasures import GreeksCalculator
+    make, _ = CASES["uo_call"]
+    g = GreeksCalculator().calculate(product=make(), pricing_env=env_const(), engine=BarrierPDESolver(),
+                                     greeks=["price", "delta", "gamma"])
+    v = GreeksCalculator().calculate(product=EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL,
+                                                                   maturity=TB, contract_multiplier=10.0),
+                                     pricing_env=env_const(), engine=BlackScholesEngine(),
+                                     greeks=["price", "delta", "gamma"])
+    for k in ("price", "delta", "gamma"):
+        assert g[k] == pytest.approx(0.8 * v[k], rel=1e-9), k
+
+
+def test_heston_barrier_engines_refuse_an_ended_schedule():
+    from quantark.asset.equity.engine.mc.barrier_vol_mc_engines import HestonBarrierMCEngine
+    from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import HestonBarrierPDESolver
+    from quantark.execution.errors import CapabilityError
+    from quantark.volmodels.heston import HestonParams
+    hp = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.5, rho=-0.6)
+    make, _ = CASES["uo_call"]
+    for engine in (HestonBarrierPDESolver(hp), HestonBarrierMCEngine(hp)):
+        with pytest.raises(CapabilityError, match="monitoring has ended"):
+            engine.price(make(), env_const())

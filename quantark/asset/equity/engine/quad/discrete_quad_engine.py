@@ -22,6 +22,9 @@ from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 
 
+from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
+
+
 class DiscreteQuadEngine(BaseEngine):
     """
     Unified quadrature engine for discretely monitored products.
@@ -51,8 +54,17 @@ class DiscreteQuadEngine(BaseEngine):
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
+        if monitoring_ended(product) and product.get_maturity(pricing_env) > 0.0:
+            # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication
+            return remaining_replication(product).price(pricing_env)
         adapter = resolve_quad_adapter(product)
         return self._price_discrete_instrument(adapter, product, pricing_env)
+
+    def static_replication(self, product, pricing_env):
+        """An ended schedule's remaining contract (spec 2026-10-07 theta boundary 3.3), else none."""
+        if monitoring_ended(product):
+            return remaining_replication(product)
+        return super().static_replication(product, pricing_env)
 
     def _price_discrete_instrument(
         self,
