@@ -200,9 +200,9 @@ class SnowballQuadEngine(BaseEngine):
         if vol > 5.0:
             raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
 
+        # An empty side (spec 2026-10-07 theta boundary: aged past its last date) folds away:
+        # no knock-out records = no autocall before maturity; no knock-in records = no knock-in.
         ko_records = product.resolve_ko_observations(pricing_env)
-        if not ko_records:
-            raise PricingError("KO observation schedule is empty for SnowballQuadEngine.")
         payment_timings = resolve_structured_payment_timings(
             product, pricing_env, ko_records
         )
@@ -223,8 +223,6 @@ class SnowballQuadEngine(BaseEngine):
             ki_barrier_continuous = self._continuous_ki_barrier_value(product)
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
-            if not ki_records:
-                raise PricingError("KI observation schedule is empty for SnowballQuadEngine.")
 
         ko_record_0 = self._match_record(0.0, ko_records)
         if self._ko_record_triggers_at_spot(product, spot, ko_record_0):

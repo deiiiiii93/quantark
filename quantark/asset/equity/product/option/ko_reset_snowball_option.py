@@ -252,25 +252,34 @@ class KnockOutResetSnowballOption(SnowballOption):
             self.post_barrier_config, ko_observation_schedule=post_schedule
         )
 
-    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> bool:
         """Age the product: the snowball's schedules and an ABSOLUTE schedule 2, the post-knock-in knock-out
         schedule. A REBASED schedule 2 holds offsets from the knock-in time and stays.
 
-        Returns True only when every observation has passed: schedule 1 and the knock-ins behind a knocked-in
-        contract leave it alive on schedule 2. Schedule 2's records keep their accrual periods, so its cash does
-        not move (accrual time spec §1); its explicit factors drop with its records.
+        ``keep_landing`` keeps a record landing on the bumped instant at time 0 (theta, spec 2026-10-07) on every
+        schedule. Returns True only when every observation has passed: schedule 1 and the knock-ins behind a
+        knocked-in contract leave it alive on schedule 2. Schedule 2's records keep their accrual periods, so its
+        cash does not move (accrual time spec §1); its explicit factors drop with its records.
         """
-        dropped_all = super().time_shift(time_bump, bumped_date, pricing_env)
+        super().time_shift(time_bump, bumped_date, pricing_env, keep_landing=keep_landing)
+        config = self.barrier_config
+        passed = config is None or not (
+            BarrierConfig._has_future(config.ko_observation_schedule, config.ko_observation_dates)
+            or BarrierConfig._has_future(config.ki_observation_schedule, config.ki_observation_dates)
+        )
         if self.post_ko_mode != PostKOScheduleMode.ABSOLUTE:
-            return dropped_all
+            return passed
         before = self._get_observation_length_for_config(self.post_barrier_config) or 0
-        self.post_barrier_config, post_dropped_all = self.post_barrier_config.time_shift(
-            time_bump, bumped_date, pricing_env
+        self.post_barrier_config, _ = self.post_barrier_config.time_shift(
+            time_bump, bumped_date, pricing_env, keep_landing=keep_landing
         )
         dropped = before - (self._get_observation_length_for_config(self.post_barrier_config) or 0)
         # the elapsed time was banked by the snowball's shift above: this one only takes the prefix off
         self.accrual_config = self.accrual_config.shifted(0.0, dropped_post=dropped)
-        return dropped_all and post_dropped_all
+        post = self.post_barrier_config
+        return passed and not BarrierConfig._has_future(post.ko_observation_schedule, post.ko_observation_dates)
 
     def _resolve_ko_schedule(
         self, config: BarrierConfig, pricing_env: PricingEnv

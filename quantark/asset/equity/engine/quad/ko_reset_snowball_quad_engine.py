@@ -154,8 +154,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if rec.observation_time <= maturity
             or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
         ]
-        if not post_ko_records:
-            raise PricingError("Post-KO observation schedule is empty for KOResetSnowballQuadEngine.")
+        # An empty schedule 2 (aged past its last date, spec 2026-10-07) is legal: a knock-in
+        # then leaves no knock-out before maturity. An empty knock-in side folds away too.
         all_ko_records = [*pre_ko_records, *post_ko_records]
         payment_timings = resolve_structured_payment_timings(
             product,
@@ -177,8 +177,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         ki_records: Sequence = []
         if product.has_ki_barrier and not ki_continuous and not carried_knock_in:
             ki_records = product.resolve_ki_observations(pricing_env)
-            if not ki_records:
-                raise PricingError("KI observation schedule is empty for KOResetSnowballQuadEngine.")
 
         times = self._merge_times(
             [rec.observation_time for rec in pre_ko_records]
@@ -562,8 +560,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         ki_records: Sequence = []
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
-            if not ki_records:
-                raise PricingError("KI observation schedule is empty for KOResetSnowballQuadEngine.")
 
         times = self._merge_times(
             [rec.observation_time for rec in pre_ko_records]

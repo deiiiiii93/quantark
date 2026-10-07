@@ -102,9 +102,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         if vol > 5.0:
             raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
 
+        # An empty side (spec 2026-10-07 theta boundary: aged past its last date) folds away:
+        # no knock-out records = no autocall before maturity; no knock-in records = no knock-in.
         ko_records = product.resolve_ko_observations(pricing_env)
-        if not ko_records:
-            raise PricingError("KO observation schedule is empty for PhoenixQuadEngine.")
         payment_timings = resolve_structured_payment_timings(
             product, pricing_env, ko_records
         )
@@ -122,8 +122,6 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         ki_records: Sequence = []
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
-            if not ki_records:
-                raise PricingError("KI observation schedule is empty for PhoenixQuadEngine.")
 
         times = self._merge_times(
             [rec.observation_time for rec in ko_records],

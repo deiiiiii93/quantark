@@ -79,3 +79,17 @@ def test_autocallable_config_keeps_landing_by_flag():
     assert kept.barrier_config.ko_observation_dates[0] == 0.0
     assert len(kept.barrier_config.ko_observation_dates) == 3
     assert len(aged.barrier_config.ko_observation_dates) == 2
+
+
+@pytest.mark.parametrize("keep_landing", [False, True])
+def test_ko_reset_ages_its_post_knock_in_schedule_too(keep_landing):
+    """Schedule 2 (the knock-out schedule after a knock-in) ages with schedule 1: it was left at its original times."""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+    from test_quad_empty_side import make
+    p = make("ko_reset", (0.5, 0.75, 1.0), (0.5, 0.75, 1.0), (0.1, 0.3, 0.6))
+    p.time_shift(0.3, None, env_const(), keep_landing=keep_landing)
+    post = [r.observation_time for r in p.post_barrier_config.ko_observation_schedule.records]
+    assert post == pytest.approx([0.0, 0.3] if keep_landing else [0.3])
+    assert [r.observation_time for r in p.barrier_config.ko_observation_schedule.records] == pytest.approx(
+        [0.2, 0.45, 0.7])
