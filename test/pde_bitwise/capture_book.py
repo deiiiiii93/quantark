@@ -1533,7 +1533,8 @@ def _rows_3c_maturity():
                     cells[f"3c|mat|{fam}|{case}|{side}"] = (cls, aged(make, obs, lag=lag), spot)
     for side, spot in (("hit", 135.0), ("nohit", 125.0)):
         cells[f"3c|mat|single_ko|part05|{side}"] = (BarrierPDESolver, aged(single(BarrierType.UP_OUT, 0.5), cont), spot)
-        for fam in ("one_touch", "no_touch", "double_one_touch", "double_no_touch"):
+        # the no-touch rows under ACCUMULATE were retired: the products refuse the mode (user ruling 2026-10-07)
+        for fam in ("one_touch", "double_one_touch"):
             cls, make, _ = families[fam]
             cells[f"3c|mat|{fam}|acc|{side}"] = (cls, aged(make, disc, mode=ObservationAggregation.ACCUMULATE), spot)
     out = {}

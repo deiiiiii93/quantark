@@ -25,7 +25,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
 from .base_equity_option import BaseEquityOption
-from .observation_schedule import ObservationRecord, ObservationSchedule
+from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 
 
@@ -192,6 +192,7 @@ class SingleSharkfinOption(BaseEquityOption):
 
         self._validate_barrier_orientation()
         self._normalize_observation_schedule()
+        refuse_accumulate(self.observation_schedule, "single sharkfin")
 
     def _validate_barrier_orientation(self) -> None:
         """Validate the barrier is on the sharkfin side of the strike."""

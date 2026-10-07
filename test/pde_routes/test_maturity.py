@@ -125,8 +125,11 @@ def test_schedule_without_a_maturity_record_does_not_test_the_barrier():
 @pytest.mark.parametrize("spot", [135.0, 125.0])
 def test_touch_and_knock_out_operations_agree_with_the_march(mode, spot):
     """(iii): the three operations equal the fold of the march's own maturity record (a no-touch's is SET 0)."""
+    touch_one = touch(TouchType.ONE_TOUCH)
     for family, make in (("touch", touch(TouchType.NO_TOUCH)), ("touch2", touch2(TouchType.DOUBLE_NO_TOUCH)),
-                         ("touch", touch(TouchType.ONE_TOUCH)), ("single", single(BarrierType.UP_OUT))):
+                         ("touch", touch_one), ("single", single(BarrierType.UP_OUT))):
+        if mode is ObservationAggregation.ACCUMULATE and family.startswith("touch") and make is not touch_one:
+            continue            # a no-touch refuses ACCUMULATE (user ruling 2026-10-07)
         product = at(make, D, 0.0)
         product.observation_schedule = dataclasses.replace(product.observation_schedule, aggregation_mode=mode)
         price, g, npv = three_ops(SOLVERS[family], product, spot)

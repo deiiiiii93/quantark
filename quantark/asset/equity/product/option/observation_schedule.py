@@ -297,6 +297,19 @@ def knock_in_decided_at_valuation(product, spot: float, pricing_env) -> bool:
     return any((spot >= level) if product.is_reverse else (spot <= level) for level in levels)
 
 
+def refuse_accumulate(schedule: Optional["ObservationSchedule"], product_name: str) -> None:
+    """Raise when a never-hit contract carries an ``ACCUMULATE`` schedule (user ruling 2026-10-07).
+
+    A no-touch pays only if its barrier is never hit up to and including expiry, and so does a sharkfin's no-hit
+    leg: there is nothing to accumulate, so the mode has no meaning and is refused rather than given one.
+    """
+    if schedule is not None and schedule.aggregation_mode == ObservationAggregation.ACCUMULATE:
+        raise ValidationError(
+            f"{product_name}: ACCUMULATE has no meaning here - the contract pays only if its barrier is never hit "
+            "up to and including expiry; use STOP_FIRST_HIT"
+        )
+
+
 @dataclass
 class ObservationSchedule:
     """Ordered schedule of observation records with aggregation semantics."""

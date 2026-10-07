@@ -24,7 +24,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
 from .base_equity_option import BaseEquityOption
-from .observation_schedule import ObservationRecord, ObservationSchedule
+from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 
 
@@ -207,6 +207,7 @@ class DoubleSharkfinOption(BaseEquityOption):
 
         self._validate_strike_in_corridor()
         self._normalize_observation_schedule()
+        refuse_accumulate(self.observation_schedule, "double sharkfin")
 
     def _validate_strike_in_corridor(self) -> None:
         """Validate that the strike is inside the double sharkfin corridor."""

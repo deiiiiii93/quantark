@@ -249,8 +249,9 @@ class DoubleOneTouchPDESolver(BasePDESolver):
             pricing_env, current_time, self._terminal_payment_time(product, pricing_env))
         schedule_records = records
         if schedule_records:
-            accumulate = (self._schedule_aggregation if aggregation is None
-                          else aggregation) == ObservationAggregation.ACCUMULATE
+            # a no-touch never accumulates: the products refuse ACCUMULATE on it (user ruling 2026-10-07)
+            accumulate = product.is_double_one_touch and (self._schedule_aggregation if aggregation is None
+                                                else aggregation) == ObservationAggregation.ACCUMULATE
             out = []
             for rec in schedule_records:
                 upper = rec.upper_barrier if rec.upper_barrier is not None else product.upper_barrier

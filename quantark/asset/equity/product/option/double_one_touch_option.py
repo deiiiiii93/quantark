@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
-from .observation_schedule import ObservationRecord, ObservationSchedule
+from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.enum import (
     ObservationType,
@@ -207,6 +207,8 @@ class DoubleOneTouchOption(BaseEquityProduct):
                 lower_barrier=self.lower_barrier,
             )
             self.observation_dates = self.observation_schedule.times
+        if self.touch_type == TouchType.DOUBLE_NO_TOUCH:
+            refuse_accumulate(self.observation_schedule, "double no-touch")
 
     def get_maturity(self, pricing_env=None) -> float:
         """

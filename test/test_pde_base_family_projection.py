@@ -124,6 +124,11 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
     monkeypatch.setattr(BasePDESolver, "_apply_discrete_event", spy)
     monkeypatch.setattr(BasePDESolver, "_apply_discrete_event_at", spy_at)
     solver = cls(PDEParams(event_projection="nodal", stepper=V070_STEPPER))
+    if name in ("no_touch|acc", "double_no_touch|acc"):
+        # user ruling 2026-10-07: ACCUMULATE has no meaning for a no-touch; the 0.7.0 product is refused
+        with pytest.raises(ValidationError, match="never hit up to and including expiry"):
+            factory()
+        return
     if name.startswith(("barrier_di_put|", "double_ki|")):
         # spec 3C decision 8: a knock-in has one rebate and first-hit monitoring; these 0.7.0 knock-ins carry per-record
         # payoffs on a rebate of 0 (and '|acc' accumulates), so they are refused rather than priced
@@ -163,14 +168,12 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
 
 
 @pytest.mark.parametrize("name", ["no_touch|acc", "double_no_touch|acc"])
-def test_an_accumulating_no_touch_ignores_its_interior_observation(name):
-    cls, factory, _ = cases()[name]
-    env = make_term_env("flat")
-    acc = cls(PDEParams(event_projection="nodal")).price(factory(), env)
-    stop = cls(PDEParams(event_projection="nodal")).price(cases()[name.replace("acc", "stop")][1](), env)
-    single = V070[name]["single_observation_price"]
-    assert abs(acc - single) < V070[name]["single_observation_tolerance"]
-    assert abs(acc - stop) > 10 * V070[name]["single_observation_tolerance"]
+def test_an_accumulating_no_touch_is_refused(name):
+    """0.7.0 priced it ignoring its interior observations (only maturity ended it); the mode has no meaning on a
+    no-touch, which pays only if never hit up to and including expiry (user ruling 2026-10-07)."""
+    _, factory, _ = cases()[name]
+    with pytest.raises(ValidationError, match="never hit up to and including expiry"):
+        factory()
 
 
 def test_a_valuation_date_observation_stays_nodal_under_projection():

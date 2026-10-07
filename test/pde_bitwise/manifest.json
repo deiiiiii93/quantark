@@ -1491,22 +1491,6 @@
   "error": null,
   "none": []
  },
- "3c|mat|double_no_touch|acc|hit|greeks": {
-  "error": null,
-  "none": []
- },
- "3c|mat|double_no_touch|acc|hit|price": {
-  "error": null,
-  "none": []
- },
- "3c|mat|double_no_touch|acc|nohit|greeks": {
-  "error": null,
-  "none": []
- },
- "3c|mat|double_no_touch|acc|nohit|price": {
-  "error": null,
-  "none": []
- },
  "3c|mat|double_no_touch|cont_lag|hit|greeks": {
   "error": null,
   "none": []
@@ -1588,22 +1572,6 @@
   "none": []
  },
  "3c|mat|european|lag|session": {
-  "error": null,
-  "none": []
- },
- "3c|mat|no_touch|acc|hit|greeks": {
-  "error": null,
-  "none": []
- },
- "3c|mat|no_touch|acc|hit|price": {
-  "error": null,
-  "none": []
- },
- "3c|mat|no_touch|acc|nohit|greeks": {
-  "error": null,
-  "none": []
- },
- "3c|mat|no_touch|acc|nohit|price": {
   "error": null,
   "none": []
  },

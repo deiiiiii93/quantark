@@ -111,9 +111,20 @@ barriers away from maturity are bit-identical.
   barrier comes within nine deviations (exact below it), at two orders, and raises
   `NumericalError` when they disagree; 4e-15 against an adaptive reference on 60 cells.
 
+### Changed
+- A no-touch (`OneTouchOption` with `NO_TOUCH`, `DoubleOneTouchOption` with `DOUBLE_NO_TOUCH`) and
+  both sharkfins refuse an `ACCUMULATE` observation schedule at construction (`ValidationError`):
+  they pay only if the barrier is never hit up to and including expiry, so nothing accumulates
+  (user ruling 2026-10-07). The PDE priced an accumulating no-touch as if only its maturity
+  observation existed (4.304787 against 4.227537 under first hit, a year out, records at 0.5 and 1);
+  the double-sharkfin MC summed every hit's cash. One-touches and barrier knock-outs keep the mode.
+  The eight `3c|mat|*no_touch|acc|*` byte-book rows are retired.
+
 ### Removed
 - `DoubleSharkfinOptionAnalyticalEngine(quad_points=...)`: the paid-at-hit integral controls its
   own error. Passing it raises `TypeError`.
+- The double-sharkfin MC engine's `ACCUMULATE` aggregation branch (unreachable: the product refuses
+  the mode).
 - At maturity those engines observe only what is observed now: a discrete schedule's records at
   the valuation instant, each at its own level and paying its own cash (none: no hit; it tested
   the spot against the product's barrier, 5 for 35 and 25 for 7), and an untouched single-barrier

@@ -436,15 +436,6 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
             discounted[~hit_any] = 0.0
             return discounted, hit_any
 
-        if aggregation == ObservationAggregation.ACCUMULATE:
-            if pay_at_hit:
-                discount = self._df(settlement_times)
-                discounted = np.sum(hit_matrix * (payoffs * discount), axis=1)
-            else:
-                total = np.sum(hit_matrix * payoffs, axis=1)
-                discounted = total * self._terminal_df
-            return discounted, hit_any
-
         if aggregation in (ObservationAggregation.BEST, ObservationAggregation.WORST):
             if pay_at_hit:
                 discount = self._df(settlement_times)

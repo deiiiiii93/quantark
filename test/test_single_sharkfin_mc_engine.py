@@ -181,7 +181,7 @@ def test_rejects_non_first_hit_discrete_schedule():
                 ObservationRecord(observation_time=0.5),
                 ObservationRecord(observation_time=1.0),
             ],
-            aggregation_mode=ObservationAggregation.ACCUMULATE,
+            aggregation_mode=ObservationAggregation.BEST,   # ACCUMULATE is refused by the product itself
         ),
     )
     engine = SingleSharkfinOptionMCEngine(
