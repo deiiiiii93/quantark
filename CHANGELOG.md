@@ -130,6 +130,53 @@ barriers away from maturity are bit-identical.
   the spot against the product's barrier, 5 for 35 and 25 for 7), and an untouched single-barrier
   knock-in pays its rebate (it returned 0).
 
+
+
+Theta at an observation boundary (spec
+`docs/superpowers/specs/2026-10-07-theta-observation-boundary-design.md`). Theta moves the contract
+from the as-of date `t0` to the bumped date `t1` in one step shared by every caller
+(`riskmeasures/greeks/theta_shift.py`): `GreeksCalculator` and the clock family (charm, color,
+vega decay), the execution bump cells, `EquityPosition.get_trade_risk` with cash legs, and the
+autocallable risk report with its surfaces. Lifecycle aging keeps its rules (`keep_landing=False`
+runs the old comparisons) apart from the KO-reset fix below; the replay goldens are byte-identical.
+
+### Changed
+- An observation that lands on `t1` is kept at time 0 and observed at the new as-of instant; it
+  was dropped. A daily accumulator one day before a fixing (spot 100, strike 95, 10,000 shares a
+  day): theta +19,397 → +69,397, the difference being exactly that fixing's settlement.
+- The observation at `t0` is decided on the spot, as the engines decide it at `t0`, and only its
+  outcome is carried: a knock-in (on the product, as the autocallable engines read it, and now
+  for the barrier family too), an accumulator fixing, a Phoenix's memory arrears, cash paid after
+  `t1` as a receivable. A contract `t0` ends is worth its engine's own `t0` value re-discounted to
+  `t1`, or 0 once paid within the bump: on an event day theta is about minus the payment. Theta
+  excludes only cash flows already booked (user ruling 2026-10-07).
+- A carried knock-in is priced through each engine's own triggered knock-in, the path a knock-in it
+  decides at the valuation instant takes, so theta differences one method: the PDE composition, the
+  MC vanilla, the local-vol European kernel, QUAD's vanilla; the analytic engines' is the
+  Black-Scholes vanilla. The Heston and SLV barrier engines raise `CapabilityError` on it.
+- A schedule the bump empties is `ObservationSchedule.monitoring_ended` and priced as what
+  remains (barrier family: vanillas and cash digitals, `engine/monitoring_ended.py`; a triggered
+  knock-in the same way); theta there is carry and discounting, not 0. The Heston and SLV barrier
+  engines raise `CapabilityError` on it (no remaining-European path under their own model).
+- Charm, color and vega decay treat a contract `t0` ended as a fixed receivable (no spot or vol
+  greeks at `t1`) and never difference a carried receivable.
+- `time_shift(..., keep_landing=False)` on schedules, `BarrierConfig`, products and
+  `AutocallableCashLeg`; product `time_shift` always ages and returns `None`.
+  `RangeAccrualOption.time_shift` now shifts numeric records and decides past fixings on the spot.
+
+### Fixed
+- `SnowballQuadEngine`, `PhoenixQuadEngine` and `KOResetSnowballQuadEngine` price an empty
+  knock-in or knock-out side (the contract aged past its last date) as QUAD V2 does; they raised
+  `PricingError`. A KO-reset whose schedule 1 ended un-knocked still raises: it has matured.
+- `KnockOutResetSnowballOption.time_shift` ages an `ABSOLUTE` schedule 2 (the post-knock-in
+  knock-out schedule); numeric post dates stayed put. A knocked-in KO-reset's theta now equals the
+  knocked-in snowball's on schedule 2 (+0.0166 in the byte book's case, where it was -0.1406); 24
+  KO-reset `bump_theta` byte-book rows move, no other output of the 713 rows.
+- `DiscreteQuadEngine` ignored a knock-in carried on the product (`_otc_lifecycle_knocked_in`) and
+  priced a knocked-in contract as alive.
+- The accumulator analytic and MC engines settle an observation at the valuation instant on the
+  spot; the analytic engine raised on its zero-maturity leg.
+
 ## [0.10.0] - 2026-10-06
 
 PDE 1D remaining routes (spec: `docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md`,

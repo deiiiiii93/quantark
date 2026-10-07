@@ -41,7 +41,7 @@ sit in that step.
 | R1 | Theta moves one day forward. `t0` is gone: its record is dropped even when `t0` is an observation date. A record on `t1` is kept only if `t1` is an observation date of the contract, and it is observed at the new as-of instant (time 0), never skipped. Records strictly between `t0` and `t1` are past. |
 | R2 | Only the theta paths keep the `t1` record. Lifecycle aging (`lifecycle/autocallable.py`, replay, backtest repricing, the dashboard) has already observed and booked `t1`'s events, so it keeps dropping the record; its behaviour is byte-identical. |
 | R3 | A bump past the last observation (maturity later) prices the remaining contract with no monitoring left; the bumped product is always aged. Once observation ends the payoff is fixed by what was observed, so theta is carry: discounting, plus the time value of whatever terminal payoff remains (a knock-out never hit is a European). |
-| R4 | The outcome decided at `t0` is carried into the bumped product's state, decided on the spot exactly as the engines decide it at `t0`. Cash paid at `t0` leaves the value: theta excludes cash flows. |
+| R4 | The outcome decided at `t0` is carried into the bumped product's state, decided on the spot exactly as the engines decide it at `t0`. Cash paid at `t0` leaves the value: theta excludes cash flows. (User ruling 2026-10-07: that means the cash flows already BOOKED in the trading system. Cash the engine determines at `t0` is part of the contract: paid within the bump it is gone at `t1`, so theta on an event day is about minus the payment; paid after `t1` it stays in the bumped value as a receivable.) |
 
 ## 3. Design
 
