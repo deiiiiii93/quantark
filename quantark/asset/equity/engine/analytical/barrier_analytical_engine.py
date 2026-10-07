@@ -33,8 +33,15 @@ from quantark.util.barrier_shift import apply_barrier_shift
 from quantark.util.enum import ObservationType, BarrierDirection, TouchType
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError, PricingError
+from quantark.util.numerical import is_zero
 
 from .black_scholes_engine import BlackScholesEngine
+from .first_observation import (
+    first_future_observation,
+    observed_at_valuation,
+    resolve_current_records,
+    through_first_observation,
+)
 from .one_touch_analytical_engine import OneTouchAnalyticalEngine
 
 
@@ -44,7 +51,12 @@ class BarrierAnalyticalEngine(BaseEngine):
 
     Notes:
         - Discrete monitoring uses Broadie-Glasserman-Kou barrier shift assuming
-          a regular observation grid and fixed payoff across observations.
+          a regular observation grid and fixed payoff across observations. A spot
+          beyond the barrier with no observation due is valued through the next
+          observation (``first_observation``); only an observation at the valuation
+          instant knocks the option out or in on the spot.
+        - At maturity only what is observed now decides: a discrete schedule's
+          records at the valuation instant, each at its own level and cash.
         - Rebates for continuous/discrete monitoring are valued via OneTouchAnalyticalEngine.
     """
 
@@ -107,38 +119,27 @@ class BarrierAnalyticalEngine(BaseEngine):
 
         # Immediate handling for zero maturity
         if maturity < self.MIN_MATURITY:
-            if product.is_knock_out and product.is_barrier_hit(spot):
-                if product.pay_at_hit:
-                    return (
-                        self._price_rebate_leg(product, pricing_env)
-                        * multiplier
-                        + pending_pv
-                    )
-                return (
-                    product.rebate
-                    * terminal_timing.payment_df
-                    * multiplier
-                    + pending_pv
-                )
-            if product.is_knock_in and product.is_barrier_hit(spot):
-                return (
-                    product.get_payoff(spot)
-                    * participation
-                    * terminal_timing.payment_df
-                    + pending_pv
-                )
-            if product.is_knock_in:
-                return pending_pv
             return (
-                product.get_payoff(spot)
-                * participation
-                * terminal_timing.payment_df
+                self._price_at_maturity(product, pricing_env, spot, terminal_timing)
                 + pending_pv
             )
 
         obs_type = product.observation_type
 
-        # Knock-out already hit under continuous monitoring
+        if (
+            obs_type == ObservationType.DISCRETE
+            and product.is_barrier_hit(spot)
+            and not self._breached_at_valuation(product, pricing_env, spot)
+        ):
+            # Beyond the barrier with no observation due: the next observation decides
+            return (
+                self._price_beyond_discrete(
+                    product, pricing_env, spot, maturity, rate, div, vol, terminal_timing
+                )
+                + pending_pv
+            )
+
+        # Barrier already hit: continuously, or by an observation at the valuation instant
         if obs_type != ObservationType.EXPIRY and product.is_barrier_hit(spot):
             if product.is_knock_out:
                 # Pay rebate depending on timing preference
@@ -213,6 +214,199 @@ class BarrierAnalyticalEngine(BaseEngine):
             ) + pending_pv
 
         raise PricingError(f"Unsupported observation type: {obs_type}")
+
+    def _resolved_records(self, product: BarrierOption, pricing_env: PricingEnvironment):
+        return resolve_current_records(
+            product.observation_schedule,
+            pricing_env,
+            default_barrier=product.barrier,
+            default_payoff=product.rebate,
+            require_single=True,
+            product=product,
+        )
+
+    def _breached(self, product: BarrierOption, spot: float, level: float) -> bool:
+        return spot >= level if product.is_up_barrier else spot <= level
+
+    def _breached_at_valuation(
+        self, product: BarrierOption, pricing_env: PricingEnvironment, spot: float
+    ) -> bool:
+        """Whether an observation at the valuation instant is breached by the spot, at its own level."""
+        return any(
+            self._breached(product, spot, rec.barrier)
+            for rec in observed_at_valuation(self._resolved_records(product, pricing_env))
+        )
+
+    def _price_at_maturity(
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        terminal_timing,
+    ) -> float:
+        """The value at maturity: what is observed now decides, and nothing else.
+
+        Continuous and expiry monitoring observe the spot at the product's barrier; a discrete schedule observes
+        only its records at the valuation instant, each at its own level and paying its own cash (none observed:
+        no hit). A knock-out hit pays its cash, an untouched knock-in its rebate, at the terminal payment time
+        (hit-paid knock-out cash at the record's own payment time).
+        """
+        multiplier = product.contract_multiplier
+        payoff = product.get_payoff(spot) * product.participation_rate * terminal_timing.payment_df
+        if product.observation_type == ObservationType.DISCRETE:
+            hits = [
+                rec
+                for rec in observed_at_valuation(self._resolved_records(product, pricing_env))
+                if self._breached(product, spot, rec.barrier)
+            ]
+            hit = hits[0] if hits else None
+            if product.is_knock_in:
+                return payoff if hit is not None else product.rebate * terminal_timing.payment_df * multiplier
+            if hit is None:
+                return payoff
+            cash_df = (
+                pricing_env.get_discount_factor(hit.settlement_time)
+                if product.pay_at_hit
+                else terminal_timing.payment_df
+            )
+            return hit.payoff * cash_df * multiplier
+
+        hit = product.is_barrier_hit(spot)
+        if product.is_knock_in:
+            return payoff if hit else product.rebate * terminal_timing.payment_df * multiplier
+        if not hit:
+            return payoff
+        if product.pay_at_hit:
+            return self._price_rebate_leg(product, pricing_env) * multiplier
+        return product.rebate * terminal_timing.payment_df * multiplier
+
+    def _price_beyond_discrete(
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        maturity: float,
+        rate: float,
+        div: float,
+        vol: float,
+        terminal_timing,
+    ) -> float:
+        """A spot beyond a discretely monitored barrier with no observation due (``first_observation``).
+
+        The breach at the first future observation ``t1`` pays the knock-out's rebate (at the hit, after the
+        constant hit lag, or at the terminal payment time) or knocks the option in (Black-Scholes from ``t1``);
+        otherwise the continuation is this engine's shifted formula from ``t1`` (no observation left: no barrier).
+        """
+        schedule = product.observation_schedule
+        if schedule is None or not schedule.records:
+            raise PricingError("Discrete barrier monitoring requires ObservationSchedule.")
+        schedule.assert_analytical_ready(default_payoff=product.rebate)
+        freq = schedule.ensure_regular_frequency(schedule.times)
+        first = first_future_observation(
+            self._resolved_records(product, pricing_env),
+            schedule,
+            single=True,
+            is_up=product.is_up_barrier,
+        )
+        tau = maturity - first.time
+        shifted = apply_barrier_shift(
+            barrier=product.barrier,
+            is_up_barrier=product.is_up_barrier,
+            volatility=vol,
+            observation_interval=freq,
+        )
+        carry = rate - div
+        delay = terminal_timing.delay_df
+        participation = product.participation_rate
+        rebate = product.rebate
+        is_call = product.is_call()
+        terminal_df = math.exp(-rate * tau) * delay
+        hit_lag = 0.0
+        if product.is_knock_out and product.pay_at_hit and rebate > 0:
+            hit_lag = constant_hit_lag_year_fraction(product, pricing_env, maturity)
+        touch = self._one_touch_engine
+
+        def vanilla(s: float) -> float:
+            if is_zero(tau):
+                return max(s - product.strike, 0.0) if is_call else max(product.strike - s, 0.0)
+            d1, d2 = self._d1_d2(s, product.strike, tau, rate, div, vol)
+            if is_call:
+                return self._bs_engine._price_call(s, product.strike, tau, rate, div, d1, d2)
+            return self._bs_engine._price_put(s, product.strike, tau, rate, div, d1, d2)
+
+        def knock_out(s: float) -> float:
+            return max(
+                self._price_knock_out_closed_form(
+                    spot=s,
+                    strike=product.strike,
+                    barrier=shifted,
+                    maturity=tau,
+                    rate=rate,
+                    carry=carry,
+                    vol=vol,
+                    is_call=is_call,
+                    is_up=product.is_up_barrier,
+                ),
+                0.0,
+            )
+
+        def touch_probability(s: float) -> float:
+            return min(
+                max(
+                    touch._expiry_touch_term(
+                        spot=s, barrier=shifted, maturity=tau, rate=rate, div=div, vol=vol,
+                        is_up=product.is_up_barrier,
+                    ),
+                    0.0,
+                ),
+                1.0,
+            )
+
+        if product.is_knock_out:
+            def hit_value(s: float) -> float:
+                if product.pay_at_hit:
+                    return rebate * math.exp(-rate * hit_lag)
+                return rebate * terminal_df
+
+            def continuation(s: float) -> float:
+                if first.remaining == 0:
+                    return participation * vanilla(s) * delay
+                value = participation * knock_out(s) * delay
+                if rebate > 0:
+                    if product.pay_at_hit:
+                        value += rebate * touch._instant_touch_term(
+                            spot=s, barrier=shifted, maturity=tau, rate=rate, div=div, vol=vol,
+                            is_up=product.is_up_barrier,
+                        ) * math.exp(-rate * hit_lag)
+                    else:
+                        value += rebate * terminal_df * touch._expiry_touch_term(
+                            spot=s, barrier=shifted, maturity=tau, rate=rate, div=div, vol=vol,
+                            is_up=product.is_up_barrier,
+                        )
+                return value
+        else:
+            def hit_value(s: float) -> float:
+                return participation * vanilla(s) * delay
+
+            def continuation(s: float) -> float:
+                if first.remaining == 0:
+                    return rebate * terminal_df
+                value = participation * max(vanilla(s) - knock_out(s), 0.0) * delay
+                if rebate > 0:
+                    value += rebate * terminal_df * max(0.0, 1.0 - touch_probability(s))
+                return value
+
+        return through_first_observation(
+            spot=spot,
+            first=first,
+            rate=rate,
+            div=div,
+            vol=vol,
+            hit_value=hit_value,
+            continuation=continuation,
+            remaining_time=tau,
+            hit_is_constant=product.is_knock_out,
+        ) * product.contract_multiplier
 
     def _price_continuous(
         self,

@@ -35,6 +35,7 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import validate_non_negative, validate_positive
 
 from .barrier_analytical_engine import BarrierAnalyticalEngine
+from .first_observation import observed_at_valuation, resolve_current_records
 from .one_touch_analytical_engine import OneTouchAnalyticalEngine
 
 
@@ -129,7 +130,7 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
 
         if maturity < self.MIN_MATURITY:
             return (
-                product.get_payoff(spot) * terminal_timing.payment_df
+                self._price_at_maturity(product, pricing_env, spot, terminal_timing.payment_df)
                 + pending_pv
             )
 
@@ -162,6 +163,33 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             + no_hit_rebate_value
         )
         return max(value, 0.0) * product.contract_multiplier + pending_pv
+
+    def _price_at_maturity(
+        self,
+        product: SingleSharkfinOption,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        terminal_payment_df: float,
+    ) -> float:
+        """The value at maturity: a discrete schedule is breached only by its records at the valuation instant,
+        each at its own level and paying its own cash; continuous and expiry monitoring observe the spot."""
+        if product.observation_type != ObservationType.DISCRETE:
+            return product.get_payoff(spot) * terminal_payment_df
+        records = observed_at_valuation(
+            resolve_current_records(
+                product.observation_schedule,
+                pricing_env,
+                default_barrier=product.barrier,
+                default_payoff=product.knock_out_rebate,
+                require_single=True,
+                product=product,
+            )
+        )
+        up = self._barrier_direction(product) == BarrierDirection.UP
+        hits = [rec for rec in records if (spot >= rec.barrier if up else spot <= rec.barrier)]
+        if not hits:
+            return product.get_no_hit_payoff(spot) * terminal_payment_df
+        return hits[0].payoff * terminal_payment_df * product.contract_multiplier
 
     def _price_no_rebate_knock_out(
         self, product: SingleSharkfinOption, pricing_env: PricingEnvironment

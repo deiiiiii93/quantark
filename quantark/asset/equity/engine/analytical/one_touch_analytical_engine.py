@@ -31,6 +31,12 @@ from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 
 from .digital_option_engine import DigitalOptionAnalyticalEngine
+from .first_observation import (
+    first_future_observation,
+    observed_at_valuation,
+    resolve_current_records,
+    through_first_observation,
+)
 
 
 class OneTouchAnalyticalEngine(BaseEngine):
@@ -116,6 +122,19 @@ class OneTouchAnalyticalEngine(BaseEngine):
 
         obs_type = product.observation_type
 
+        if (
+            obs_type == ObservationType.DISCRETE
+            and product.is_barrier_hit(spot)
+            and not self._breached_at_valuation(product, pricing_env, spot)
+        ):
+            # Beyond the barrier with no observation due: the next observation decides
+            return (
+                self._price_beyond_discrete(
+                    product, pricing_env, spot, maturity, rate, div, vol, terminal_timing
+                )
+                + pending_pv
+            )
+
         if obs_type != ObservationType.EXPIRY and product.is_barrier_hit(spot):
             if product.is_one_touch:
                 if pay_at_hit:
@@ -188,6 +207,106 @@ class OneTouchAnalyticalEngine(BaseEngine):
             * terminal_timing.payment_df
             * max(0.0, 1.0 - prob_touch)
             + pending_pv
+        )
+
+    def _resolved_records(self, product: OneTouchOption, pricing_env: PricingEnvironment):
+        return resolve_current_records(
+            product.observation_schedule,
+            pricing_env,
+            default_barrier=product.barrier,
+            default_payoff=product.rebate,
+            require_single=True,
+            product=product,
+        )
+
+    def _breached_at_valuation(
+        self, product: OneTouchOption, pricing_env: PricingEnvironment, spot: float
+    ) -> bool:
+        """Whether an observation at the valuation instant is breached by the spot, at its own level."""
+        return any(
+            (spot >= rec.barrier) if product.is_up_barrier else (spot <= rec.barrier)
+            for rec in observed_at_valuation(self._resolved_records(product, pricing_env))
+        )
+
+    def _price_beyond_discrete(
+        self,
+        product: OneTouchOption,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        maturity: float,
+        rate: float,
+        div: float,
+        vol: float,
+        terminal_timing,
+    ) -> float:
+        """A spot beyond a discretely monitored barrier with no observation due (``first_observation``).
+
+        A touch at the first future observation ``t1`` pays the one-touch's rebate (at the hit, after the constant
+        hit lag, or at the terminal payment time) and ends the no-touch; otherwise the continuation is this
+        engine's shifted formula from ``t1`` (no observation left: no touch).
+        """
+        schedule = product.observation_schedule
+        if schedule is None or not schedule.records:
+            raise PricingError("Discrete monitoring requires a populated ObservationSchedule.")
+        rebate = product.rebate
+        schedule.assert_analytical_ready(default_payoff=rebate)
+        frequency = schedule.ensure_regular_frequency(schedule.times)
+        first = first_future_observation(
+            self._resolved_records(product, pricing_env),
+            schedule,
+            single=True,
+            is_up=product.is_up_barrier,
+        )
+        tau = maturity - first.time
+        shifted = apply_barrier_shift(
+            barrier=product.barrier,
+            is_up_barrier=product.is_up_barrier,
+            volatility=vol,
+            observation_interval=frequency,
+        )
+        terminal_df = math.exp(-rate * tau) * terminal_timing.delay_df
+        pay_at_hit = product.payment_at_hit if product.is_one_touch else False
+        hit_lag = 0.0
+        if pay_at_hit:
+            hit_lag = constant_hit_lag_year_fraction(product, pricing_env, maturity)
+
+        def touch_probability(s: float) -> float:
+            return min(max(self._touch_probability(
+                spot=s, barrier=shifted, maturity=tau, rate=rate, div=div, vol=vol,
+                is_up=product.is_up_barrier,
+            ), 0.0), 1.0)
+
+        if product.is_one_touch:
+            def hit_value(s: float) -> float:
+                return rebate * math.exp(-rate * hit_lag) if pay_at_hit else rebate * terminal_df
+
+            def continuation(s: float) -> float:
+                if first.remaining == 0:
+                    return 0.0
+                value = self._one_touch_price(
+                    spot=s, barrier=shifted, maturity=tau, rate=rate, div=div, vol=vol,
+                    rebate=rebate, pay_at_hit=pay_at_hit, is_up=product.is_up_barrier, hit_lag=hit_lag,
+                )
+                return value if pay_at_hit else value * terminal_timing.delay_df
+        else:
+            def hit_value(s: float) -> float:
+                return 0.0
+
+            def continuation(s: float) -> float:
+                if first.remaining == 0:
+                    return rebate * terminal_df
+                return rebate * terminal_df * max(0.0, 1.0 - touch_probability(s))
+
+        return through_first_observation(
+            spot=spot,
+            first=first,
+            rate=rate,
+            div=div,
+            vol=vol,
+            hit_value=hit_value,
+            continuation=continuation,
+            remaining_time=tau,
+            hit_is_constant=True,
         )
 
     def _price_expiry(
@@ -335,8 +454,12 @@ class OneTouchAnalyticalEngine(BaseEngine):
         pricing_env: PricingEnvironment,
         terminal_payment_df: float,
     ) -> float:
-        """Handle payoffs when maturity is effectively zero."""
-        touched = product.is_barrier_hit(spot)
+        """Handle payoffs when maturity is effectively zero: a discrete schedule touches only through its records
+        at the valuation instant, each at its own level."""
+        if product.observation_type == ObservationType.DISCRETE:
+            touched = self._breached_at_valuation(product, pricing_env, spot)
+        else:
+            touched = product.is_barrier_hit(spot)
         if product.is_one_touch:
             if touched:
                 if pay_at_hit:

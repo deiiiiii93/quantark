@@ -6,6 +6,7 @@ double-touch cash leg for the knock-out rebate, and a double-no-touch cash leg
 for the no-hit rebate.
 """
 
+import math
 from typing import Optional
 
 import numpy as np
@@ -32,8 +33,9 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
 from quantark.util.enum import DoubleBarrierType, ObservationType
 from quantark.util.enum.engine_enums import EngineType
-from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 from quantark.util.numerical import (
+    Tolerance,
     is_zero,
     safe_exp,
     safe_log,
@@ -44,6 +46,12 @@ from quantark.util.numerical import (
 
 from .double_barrier_option_engine import DoubleBarrierOptionAnalyticalEngine
 from .double_no_touch import double_no_touch
+from .first_observation import (
+    first_future_observation,
+    observed_at_valuation,
+    resolve_current_records,
+    through_first_observation,
+)
 
 
 class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
@@ -58,7 +66,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
 
     engine_type = EngineType.ANALYTICAL
     # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
-    MODEL_FINGERPRINT_ATTRS = ('params', 'quad_points', '_double_barrier_engine')
+    MODEL_FINGERPRINT_ATTRS = ('params', '_double_barrier_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
@@ -66,24 +74,19 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
     MIN_VOL = 0.001
     MAX_VOL = 5.0
     MAX_MATURITY = 50.0
-    DEFAULT_QUAD_POINTS = 48
+    HIT_LOW_ORDER = 8
+    HIT_HIGH_ORDER = 12
+    HIT_EDGE_SD = 9.0          # below t_min neither barrier is reached within 9 sd: survival 1 to 4.5e-19
 
-    def __init__(self, params: Optional[EngineParams] = None, *, quad_points: int = DEFAULT_QUAD_POINTS):
+    def __init__(self, params: Optional[EngineParams] = None):
         """
         Initialize double sharkfin analytical engine.
 
         Args:
-            params: Engine configuration parameters.
-            quad_points: Gauss-Legendre nodes for pay-at-hit integration (keyword-only: a second positional
-                argument once meant ``max_terms``, removed in 0.10.0).
-
-        Raises:
-            ValidationError: If engine controls are invalid.
+            params: Engine configuration parameters. (``max_terms`` was removed in 0.10.0 and ``quad_points``
+                after it: the paid-at-hit integral controls its own error.)
         """
         super().__init__(params)
-        if quad_points <= 0:
-            raise ValidationError(f"quad_points must be positive, got {quad_points}")
-        self.quad_points = int(quad_points)
         self._double_barrier_engine = DoubleBarrierOptionAnalyticalEngine(params)
 
     def price(
@@ -138,7 +141,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
 
         if maturity < self.MIN_MATURITY:
             return (
-                product.get_payoff(spot) * terminal_timing.payment_df
+                self._price_at_maturity(product, pricing_env, spot, terminal_timing.payment_df)
                 + pending_pv
             )
 
@@ -149,6 +152,19 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         ):
             raise PricingError(
                 f"Unsupported observation type: {product.observation_type}"
+            )
+
+        if (
+            product.observation_type == ObservationType.DISCRETE
+            and product.is_barrier_hit(spot)
+            and not self._breached_at_valuation(product, pricing_env, spot)
+        ):
+            # Outside the corridor with no observation due: the next observation decides
+            return (
+                self._price_beyond_discrete(
+                    product, pricing_env, spot, maturity, rate, div, vol, terminal_timing
+                )
+                + pending_pv
             )
 
         if product.observation_type != ObservationType.EXPIRY and product.is_barrier_hit(spot):
@@ -198,6 +214,152 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             max(float(value), 0.0) * product.contract_multiplier
             + pending_pv
         )
+
+    def _resolved_records(self, product: DoubleSharkfinOption, pricing_env: PricingEnvironment):
+        return resolve_current_records(
+            product.observation_schedule,
+            pricing_env,
+            default_upper=product.upper_barrier,
+            default_lower=product.lower_barrier,
+            default_payoff=product.knock_out_rebate,
+            require_double=True,
+            product=product,
+        )
+
+    def _breached_at_valuation(
+        self, product: DoubleSharkfinOption, pricing_env: PricingEnvironment, spot: float
+    ):
+        """The first observation at the valuation instant the spot breaches at its own levels, or None."""
+        for rec in observed_at_valuation(self._resolved_records(product, pricing_env)):
+            if spot <= rec.lower_barrier or spot >= rec.upper_barrier:
+                return rec
+        return None
+
+    def _price_at_maturity(
+        self,
+        product: DoubleSharkfinOption,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        terminal_payment_df: float,
+    ) -> float:
+        """The value at maturity: a discrete schedule is breached only by its records at the valuation instant,
+        each at its own levels and paying its own cash (hit-paid: at the record's payment time); continuous and
+        expiry monitoring observe the spot."""
+        if product.observation_type == ObservationType.DISCRETE:
+            record = self._breached_at_valuation(product, pricing_env, spot)
+            if record is None:
+                return product.get_no_hit_payoff(spot) * terminal_payment_df
+            cash_df = (
+                pricing_env.get_discount_factor(record.settlement_time)
+                if product.pay_at_hit
+                else terminal_payment_df
+            )
+            return record.payoff * cash_df * product.contract_multiplier
+        if not product.is_barrier_hit(spot):
+            return product.get_no_hit_payoff(spot) * terminal_payment_df
+        if product.observation_type == ObservationType.EXPIRY:
+            return product.get_barrier_payoff() * terminal_payment_df
+        return self._price_already_hit(product, pricing_env, terminal_payment_df)
+
+    def _price_beyond_discrete(
+        self,
+        product: DoubleSharkfinOption,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        maturity: float,
+        rate: float,
+        div: float,
+        vol: float,
+        terminal_timing,
+    ) -> float:
+        """A spot outside a discretely monitored corridor with no observation due (``first_observation``).
+
+        A breach at the first future observation ``t1`` pays the knock-out cash (at the record's payment time when
+        hit-paid, else at the terminal payment time); otherwise the continuation is this engine's shifted value
+        from ``t1``: the participation leg (Ikeda-Kunitomo on the shifted corridor), the knock-out cash on the
+        remaining observations and the no-hit cash. Under the engine's flat rate throughout.
+        """
+        schedule = product.observation_schedule
+        lower_shifted, upper_shifted = self._shift_discrete_barriers(product, vol)
+        resolved = self._resolved_records(product, pricing_env)
+        first = first_future_observation(resolved, schedule, single=False)
+        t1 = first.time
+        tau = maturity - t1
+        later = [rec for rec in resolved if rec.observation_time > t1]
+        terminal_df = float(safe_exp(-rate * tau)) * terminal_timing.delay_df
+        multiplier = product.contract_multiplier
+        participation = product.participation_rate
+        is_call = product.is_call()
+        ko_cash, no_hit_cash = product.knock_out_rebate, product.no_hit_rebate
+        db = self._double_barrier_engine
+
+        def cash_df(settlement_time: float) -> float:
+            return float(safe_exp(-rate * (settlement_time - t1)))
+
+        def hit_value(s: float) -> float:
+            paid = cash_df(first.settlement_time) if product.pay_at_hit else terminal_df
+            return first.payoff * paid * multiplier
+
+        def survival(s: float, horizon: float) -> float:
+            return double_no_touch(s, horizon, rate, div, vol, lower_shifted, upper_shifted)
+
+        def continuation(s: float) -> float:
+            if not later:
+                return self._unmonitored_value(product, s, tau, rate, div, vol, terminal_timing.delay_df)
+            option_leg = max(
+                db._price_knock_out_ikeda_kuintomo(
+                    S=s, K=product.strike, L=lower_shifted, U=upper_shifted, T=tau,
+                    r=rate, b=rate - div, sigma=vol, is_call=is_call,
+                ),
+                0.0,
+            ) * terminal_timing.delay_df
+            survive = survival(s, tau)
+            value = participation * option_leg + no_hit_cash * terminal_df * survive
+            if ko_cash > 0.0:
+                if product.pay_at_hit:
+                    previous = 1.0
+                    for rec in later:
+                        current = survival(s, min(rec.observation_time, maturity) - t1)
+                        value += ko_cash * max(previous - current, 0.0) * cash_df(rec.settlement_time)
+                        previous = min(max(current, 0.0), previous)
+                else:
+                    value += ko_cash * terminal_df * (1.0 - survive)
+            return max(value, 0.0) * multiplier
+
+        return through_first_observation(
+            spot=spot, first=first, rate=rate, div=div, vol=vol,
+            hit_value=hit_value, continuation=continuation, remaining_time=tau,
+            hit_is_constant=True,
+        )
+
+    def _unmonitored_value(
+        self,
+        product: DoubleSharkfinOption,
+        spot: float,
+        tau: float,
+        rate: float,
+        div: float,
+        vol: float,
+        delay_df: float,
+    ) -> float:
+        """The no-hit payoff with no observation left: a call spread K..U (put spread L..K) plus the no-hit cash."""
+        if is_zero(tau):
+            return product.get_no_hit_payoff(spot) * delay_df
+        bs = self._double_barrier_engine._bs_engine
+        sqrt_tau = float(safe_sqrt(tau))
+
+        def vanilla(strike: float, call: bool) -> float:
+            d1 = (float(safe_log(spot / strike)) + (rate - div + 0.5 * vol * vol) * tau) / (vol * sqrt_tau)
+            d2 = d1 - vol * sqrt_tau
+            return bs._price_call(spot, strike, tau, rate, div, d1, d2) if call else bs._price_put(
+                spot, strike, tau, rate, div, d1, d2)
+
+        if product.is_call():
+            spread = vanilla(product.strike, True) - vanilla(product.upper_barrier, True)
+        else:
+            spread = vanilla(product.strike, False) - vanilla(product.lower_barrier, False)
+        value = product.participation_rate * spread + product.no_hit_rebate * float(safe_exp(-rate * tau))
+        return value * delay_df * product.contract_multiplier
 
     def _price_already_hit(
         self,
@@ -393,13 +555,9 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         if is_zero(rate):
             return 1.0 - survival_at_maturity
 
-        nodes, weights = np.polynomial.legendre.leggauss(self.quad_points)
-        times = 0.5 * maturity * (nodes + 1.0)
-        integral = 0.0
-        for time_value, weight in zip(times, weights):
-            survival = double_no_touch(spot, float(time_value), rate, div, vol, lower_barrier, upper_barrier)
-            integral += float(weight) * safe_exp(-rate * float(time_value)) * survival
-        integral *= 0.5 * maturity
+        integral = self._discounted_survival_integral(
+            spot, maturity, rate, div, vol, lower_barrier, upper_barrier
+        )
 
         hit_factor = (
             1.0
@@ -407,6 +565,53 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             - rate * integral
         )
         return max(float(hit_factor), 0.0)
+
+    def _discounted_survival_integral(
+        self,
+        spot: float,
+        maturity: float,
+        rate: float,
+        div: float,
+        vol: float,
+        lower_barrier: float,
+        upper_barrier: float,
+    ) -> float:
+        """``int_0^T exp(-r t) P(t) dt``, ``P`` the double no-touch probability, with its error checked.
+
+        Next to a barrier ``P`` falls from 1 on the time scale ``d^2 / vol^2`` (``d`` the log distance to the
+        nearer barrier), far below ``T``: a rule spread over ``(0, T)`` misses it. Below ``t_min``, where neither
+        barrier is within ``HIT_EDGE_SD`` drift-adjusted deviations, ``P`` is 1 to 4.5e-19 and the piece is exact;
+        above it the panels double in length up to ``T``, so each sees ``P`` smooth. Two orders per panel; their
+        difference beyond ``Tolerance.RELATIVE`` (relative to the integral, floor ``T``) raises ``NumericalError``.
+        """
+        d = min(float(safe_log(upper_barrier / spot)), float(safe_log(spot / lower_barrier)))
+        drift = abs(rate - div - 0.5 * vol * vol)
+        t_min = min(maturity, (d / (self.HIT_EDGE_SD * vol)) ** 2)
+        while t_min > 0.0 and (d - drift * t_min) < self.HIT_EDGE_SD * vol * math.sqrt(t_min):
+            t_min *= 0.25
+        head = t_min if is_zero(rate) else -math.expm1(-rate * t_min) / rate
+        edges = [t_min]
+        while edges[-1] < maturity:
+            edges.append(min(maturity, 2.0 * edges[-1]))
+        values = []
+        for order in (self.HIT_LOW_ORDER, self.HIT_HIGH_ORDER):
+            nodes, weights = np.polynomial.legendre.leggauss(order)
+            total = head
+            for a, b in zip(edges[:-1], edges[1:]):
+                half, mid = 0.5 * (b - a), 0.5 * (b + a)
+                for x, w in zip(mid + half * nodes, half * weights):
+                    t = float(x)
+                    total += float(w) * float(safe_exp(-rate * t)) * double_no_touch(
+                        spot, t, rate, div, vol, lower_barrier, upper_barrier
+                    )
+            values.append(total)
+        low, high = values
+        if abs(high - low) > Tolerance.RELATIVE * max(maturity, abs(high)):
+            raise NumericalError(
+                "double sharkfin paid-at-hit integral did not resolve: orders "
+                f"{self.HIT_LOW_ORDER} and {self.HIT_HIGH_ORDER} differ by {abs(high - low):.3e}"
+            )
+        return high
 
     def _shift_discrete_barriers(
         self, product: DoubleSharkfinOption, vol: float

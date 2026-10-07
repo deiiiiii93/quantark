@@ -85,6 +85,40 @@ up to a sign change on knocked-in and near-barrier rows (`3a|class|ko_reset|cont
 ### Removed
 - `AccrualConfig.accrual_dates` (it had no reader).
 
+The analytic barrier engines' observation rules (the 3C handoff, spec
+`docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md` §12). Prices inside the
+barriers away from maturity are bit-identical.
+
+### Fixed
+- A spot beyond a discretely monitored barrier with no observation due is no longer a hit in
+  `BarrierAnalyticalEngine`, `OneTouchAnalyticalEngine`, `DoubleBarrierOptionAnalyticalEngine` and
+  `DoubleSharkfinOptionAnalyticalEngine` (and `SingleSharkfinOptionAnalyticalEngine`, which prices
+  through the first two). The value is taken through the next observation
+  (`engine/analytical/first_observation.py`): the Gaussian step to it and its barrier test are
+  exact, the engine's own barrier-shifted formula applies from it on, and the expectation is a
+  two-order Gauss-Legendre rule that raises `NumericalError` when the orders disagree beyond
+  `Tolerance.RELATIVE`. Against the exact discrete recursion (`test/pde_routes/barrier_reference`),
+  monthly and aged monthly schedules: single barrier 1.41 → 4.4e-2 (74 cells), one-touch /
+  no-touch 0.74 → 2.2e-2 (18), double barrier 0.44 → 2.0e-2 (32), double sharkfin 0.58 → 1.3e-2
+  (32), each below the shift's own error just inside the barrier (0.24, 0.096). An observation at
+  the valuation instant still decides on the spot, at its own level. A schedule other than
+  `STOP_FIRST_HIT` beyond its barrier now raises `PricingError` (it was priced as a hit). A price
+  beyond the barrier costs 25-30 ms on the single barrier and up to 0.5-0.9 s on a daily-monitored
+  double sharkfin (one Ikeda-Kunitomo series per quadrature node); inside, unchanged.
+- `DoubleSharkfinOptionAnalyticalEngine`'s continuous paid-at-hit leg integrated the survival curve
+  with 48 Gauss-Legendre nodes over (0, T), which miss its fall next to a barrier: off by up to
+  2.4e-5 on a rebate of 5. The integral now runs on panels doubling from the time at which a
+  barrier comes within nine deviations (exact below it), at two orders, and raises
+  `NumericalError` when they disagree; 4e-15 against an adaptive reference on 60 cells.
+
+### Removed
+- `DoubleSharkfinOptionAnalyticalEngine(quad_points=...)`: the paid-at-hit integral controls its
+  own error. Passing it raises `TypeError`.
+- At maturity those engines observe only what is observed now: a discrete schedule's records at
+  the valuation instant, each at its own level and paying its own cash (none: no hit; it tested
+  the spot against the product's barrier, 5 for 35 and 25 for 7), and an untouched single-barrier
+  knock-in pays its rebate (it returned 0).
+
 ## [0.10.0] - 2026-10-06
 
 PDE 1D remaining routes (spec: `docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md`,

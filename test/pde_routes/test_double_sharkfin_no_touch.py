@@ -71,3 +71,30 @@ def test_max_terms_is_gone():
         DoubleSharkfinOptionAnalyticalEngine(None, 48)
     assert not hasattr(DoubleSharkfinOptionAnalyticalEngine, "DEFAULT_MAX_TERMS")
     assert "max_terms" not in DoubleSharkfinOptionAnalyticalEngine.MODEL_FINGERPRINT_ATTRS
+
+
+@pytest.mark.parametrize("vol", [0.22, 0.08])
+@pytest.mark.parametrize("maturity", [1 / 365, 30 / 365, 1.0, 3.0])
+@pytest.mark.parametrize("spot", [81.0, 100.0, 129.0, 129.9])
+def test_paid_at_hit_integral_resolves_next_to_a_barrier(spot, maturity, vol):
+    """The continuous paid-at-hit leg's integral against an adaptive reference (3C handoff: the 48-node rule
+    was off by up to 2.4e-5 on the leg next to a barrier; graded panels: 4e-15 in the evidence sweep)."""
+    import math
+
+    from scipy import integrate
+
+    from quantark.asset.equity.engine.analytical.double_no_touch import double_no_touch
+    from quantark.asset.equity.engine.analytical.double_sharkfin_option_analytical_engine import (
+        DoubleSharkfinOptionAnalyticalEngine,
+    )
+
+    r, q, lo, up = 0.03, 0.01, 80.0, 130.0
+
+    def f(t):
+        return math.exp(-r * t) * double_no_touch(spot, t, r, q, vol, lo, up) if t > 0 else 1.0
+
+    d = min(math.log(up / spot), math.log(spot / lo))
+    points = sorted({min(maturity, (d / vol) ** 2 * k) for k in (0.01, 0.1, 1, 10, 100)} - {maturity})
+    ref = integrate.quad(f, 0.0, maturity, points=points or None, limit=2000, epsabs=1e-15, epsrel=1e-13)[0]
+    got = DoubleSharkfinOptionAnalyticalEngine()._discounted_survival_integral(spot, maturity, r, q, vol, lo, up)
+    assert got == pytest.approx(ref, abs=1e-12)

@@ -35,7 +35,7 @@ def test_engines_equivalent_rules():
     assert engines_equivalent(mc, mc) and not engines_equivalent(mc, EuropeanMCEngine())  # identity only
     assert engines_equivalent(AmericanOptionAnalyticalEngine(), AmericanOptionAnalyticalEngine())
     assert engines_equivalent(DoubleSharkfinOptionAnalyticalEngine(), DoubleSharkfinOptionAnalyticalEngine())
-    assert not engines_equivalent(DoubleSharkfinOptionAnalyticalEngine(quad_points=16),
+    assert not engines_equivalent(DoubleSharkfinOptionAnalyticalEngine(EngineParams(bus_days_in_year=244)),
                                   DoubleSharkfinOptionAnalyticalEngine())
     assert not engines_equivalent(object(), object())                                    # no fingerprint hook
 
