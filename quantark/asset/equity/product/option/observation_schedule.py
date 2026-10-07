@@ -22,6 +22,7 @@ from quantark.util.calendar import (
     calculate_year_fraction,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 if TYPE_CHECKING:
     from quantark.priceenv import PricingEnvironment
@@ -317,10 +318,15 @@ class ObservationSchedule:
     records: List[ObservationRecord] = field(default_factory=list)
     aggregation_mode: ObservationAggregation = ObservationAggregation.STOP_FIRST_HIT
     frequency: ObservationFrequency = ObservationFrequency.CUSTOM
+    #: set only by ``time_shift`` when it drops the last record: the contract's monitoring is over and an empty
+    #: schedule is legal (spec 2026-10-07 theta boundary, 3.3); a schedule emptied by hand is still refused
+    monitoring_ended: bool = False
 
     def validate(self, require_single: bool = False, require_double: bool = False) -> None:
         """Validate schedule ordering and record completeness."""
         if len(self.records) == 0:
+            if self.monitoring_ended:
+                return
             raise ValidationError("ObservationSchedule must contain at least one record for discrete monitoring.")
         if not isinstance(self.aggregation_mode, ObservationAggregation):
             raise ValidationError(f"Invalid aggregation mode: {self.aggregation_mode}")
@@ -345,13 +351,20 @@ class ObservationSchedule:
         )
 
     def time_shift(
-        self, time_bump: float, bumped_date: Optional[datetime] = None
-    ) -> Optional["ObservationSchedule"]:
-        """
-        Shift observation schedule by time_bump and drop past records.
+        self,
+        time_bump: float,
+        bumped_date: Optional[datetime] = None,
+        *,
+        keep_landing: bool = False,
+    ) -> "ObservationSchedule":
+        """Shift the schedule by ``time_bump`` (to ``bumped_date``) and drop what is past.
 
-        - observation_time is reduced by time_bump
-        - observation_date records are dropped if <= bumped_date
+        A record before the bumped instant is dropped. A record ON it (numeric: ``is_zero(t - time_bump)``; dated:
+        the same calendar date, whatever the time of day) is kept at the new as-of instant when ``keep_landing``
+        (theta: it is observed there, spec 2026-10-07 theta boundary R1), with ``observation_time = 0.0`` and a
+        dated record's date moved to ``bumped_date`` itself so date and time agree; it is dropped otherwise
+        (lifecycle aging has already observed it, R2). A schedule left with no record comes back empty with
+        ``monitoring_ended`` set, never ``None``.
         """
         if not self.records:
             return self
@@ -359,29 +372,47 @@ class ObservationSchedule:
         updated_records = []
         for rec in self.records:
             rec_copy = deepcopy(rec)
-
-            if getattr(rec_copy, "observation_date", None) is not None:
-                if bumped_date is not None and rec_copy.observation_date <= bumped_date:
+            if not keep_landing:
+                # lifecycle aging: today's comparisons verbatim (R2, byte-identical)
+                if getattr(rec_copy, "observation_date", None) is not None:
+                    if bumped_date is not None and rec_copy.observation_date <= bumped_date:
+                        continue
+                if getattr(rec_copy, "observation_time", None) is not None:
+                    adjusted_time = rec_copy.observation_time - time_bump
+                    if adjusted_time <= 0:
+                        continue
+                    rec_copy.observation_time = adjusted_time
+                if getattr(rec_copy, "settlement_time", None) is not None:
+                    rec_copy.settlement_time -= time_bump
+                updated_records.append(rec_copy)
+                continue
+            landing = False
+            if getattr(rec_copy, "observation_date", None) is not None and bumped_date is not None:
+                day, bumped_day = rec_copy.observation_date.date(), bumped_date.date()
+                if day < bumped_day:
                     continue
-
+                landing = day == bumped_day
             if getattr(rec_copy, "observation_time", None) is not None:
                 adjusted_time = rec_copy.observation_time - time_bump
-                if adjusted_time <= 0:
+                if is_zero(adjusted_time):
+                    landing = True
+                elif adjusted_time < 0.0:
                     continue
-                rec_copy.observation_time = adjusted_time
-
+                else:
+                    rec_copy.observation_time = adjusted_time
+            if landing:
+                rec_copy.observation_time = 0.0
+                if rec_copy.observation_date is not None:
+                    rec_copy.observation_date = bumped_date
             if getattr(rec_copy, "settlement_time", None) is not None:
                 rec_copy.settlement_time -= time_bump
-
             updated_records.append(rec_copy)
-
-        if not updated_records:
-            return None
 
         return ObservationSchedule(
             records=updated_records,
             aggregation_mode=self.aggregation_mode,
             frequency=self.frequency,
+            monitoring_ended=not updated_records,
         )
 
     def resolve(
