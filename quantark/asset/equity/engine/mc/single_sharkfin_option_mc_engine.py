@@ -15,6 +15,7 @@ from quantark.asset.equity.engine.settlement_support import (
     terminal_lifecycle_pv,
     validate_settlement_capability,
 )
+from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_brownian_bridge import (
     compute_step_crossing_probabilities,
@@ -114,6 +115,11 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         if fixed_pv is not None:
             self._last_std_error = 0.0
             return fixed_pv
+        if monitoring_ended(product) and product.get_maturity(pricing_env) > 0.0:
+            # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication
+            self._last_std_error = 0.0
+            return (remaining_replication(product).price(pricing_env)
+                    + pending_receivable_pv(lifecycle_state, pricing_env))
         terminal_timing = resolve_terminal_timing(product, pricing_env)
         pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
@@ -648,6 +654,12 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
     def get_last_rqmc_result(self):
         """Return the full RQMC result from the most recent RQMC run."""
         return getattr(self, "_last_rqmc_result", None)
+
+    def static_replication(self, product, pricing_env):
+        """An ended schedule's remaining contract (spec 2026-10-07 theta boundary 3.3), else none."""
+        if monitoring_ended(product):
+            return remaining_replication(product)
+        return super().static_replication(product, pricing_env)
 
     def __repr__(self) -> str:
         return (

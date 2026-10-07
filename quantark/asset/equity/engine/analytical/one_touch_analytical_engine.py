@@ -16,6 +16,7 @@ from quantark.asset.equity.engine.settlement_support import (
     terminal_lifecycle_pv,
     validate_settlement_capability,
 )
+from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import CashOrNothingDigitalOption, OneTouchOption
 from quantark.asset.equity.settlement import (
@@ -83,6 +84,11 @@ class OneTouchAnalyticalEngine(BaseEngine):
         fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
         if fixed_pv is not None:
             return fixed_pv
+        if monitoring_ended(product) and product.get_maturity(pricing_env) > 0.0:
+            # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication
+            knocked_in = bool(getattr(lifecycle_state, "knocked_in", False))
+            return (remaining_replication(product, knocked_in).price(pricing_env)
+                    + pending_receivable_pv(lifecycle_state, pricing_env))
         terminal_timing = resolve_terminal_timing(product, pricing_env)
         pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
@@ -504,6 +510,12 @@ class OneTouchAnalyticalEngine(BaseEngine):
             )
         if rebate < 0:
             raise ValidationError(f"Rebate must be non-negative, got {rebate}")
+
+    def static_replication(self, product, pricing_env):
+        """An ended schedule's remaining contract (spec 2026-10-07 theta boundary 3.3), else none."""
+        if monitoring_ended(product):
+            return remaining_replication(product)
+        return super().static_replication(product, pricing_env)
 
     def __repr__(self):
         return "OneTouchAnalyticalEngine()"
