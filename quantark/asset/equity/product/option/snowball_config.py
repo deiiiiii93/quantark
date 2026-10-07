@@ -15,6 +15,8 @@ from quantark.util.enum import (
     CouponPayType,
     ProtectionType,
 )
+from quantark.util.numerical import is_zero
+
 from .observation_schedule import ObservationSchedule
 
 
@@ -74,7 +76,9 @@ class BarrierConfig:
         if not isinstance(self.ki_observation_type, ObservationType):
             raise ValueError(f"ki_observation_type must be ObservationType, got {type(self.ki_observation_type)}")
 
-    def time_shift(self, time_bump: float, bumped_date, pricing_env) -> tuple["BarrierConfig", bool]:
+    def time_shift(
+        self, time_bump: float, bumped_date, pricing_env, *, keep_landing: bool = False
+    ) -> tuple["BarrierConfig", bool]:
         """
         Shift KO/KI observation schedules and legacy dates for theta bumps.
 
@@ -94,6 +98,7 @@ class BarrierConfig:
             time_bump,
             bumped_date,
             pricing_env,
+            keep_landing,
         )
         ki_schedule, ki_dates = self._shift_side(
             self.ki_observation_schedule,
@@ -101,6 +106,7 @@ class BarrierConfig:
             time_bump,
             bumped_date,
             pricing_env,
+            keep_landing,
         )
 
         had_any = self._has_future(
@@ -137,7 +143,7 @@ class BarrierConfig:
         return bool(dates)
 
     @staticmethod
-    def _shift_side(schedule, dates, time_bump, bumped_date, pricing_env):
+    def _shift_side(schedule, dates, time_bump, bumped_date, pricing_env, keep_landing=False):
         """Shift one side's schedule and legacy dates, returning both.
 
         ``ObservationSchedule.time_shift`` returns ``None`` once every
@@ -149,12 +155,16 @@ class BarrierConfig:
         """
         if schedule is None:
             if dates:
+                if keep_landing:
+                    # theta (spec 2026-10-07 theta boundary R1): the date the bump lands on is observed at time 0
+                    return None, [0.0 if is_zero(t - time_bump) else t - time_bump
+                                  for t in dates if is_zero(t - time_bump) or t - time_bump > 0]
                 return None, [t - time_bump for t in dates if t - time_bump > 0]
             return None, dates
 
         if schedule.uses_dates():
             pricing_env.valuation_date = bumped_date
-        shifted = schedule.time_shift(time_bump, bumped_date)
+        shifted = schedule.time_shift(time_bump, bumped_date, keep_landing=keep_landing)
         if shifted is None:
             shifted = ObservationSchedule(
                 records=[],

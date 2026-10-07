@@ -23,7 +23,7 @@ from quantark.util.enum import (
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
-from .base_equity_option import BaseEquityOption
+from .base_equity_option import BaseEquityOption, _refresh_observation_dates
 from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 
@@ -263,11 +263,12 @@ class DoubleSharkfinOption(BaseEquityOption):
                 ],
                 aggregation_mode=self.observation_schedule.aggregation_mode,
                 frequency=self.observation_schedule.frequency,
+                monitoring_ended=self.observation_schedule.monitoring_ended,
             )
             self._validate_observation_times(normalized_schedule.times)
             normalized_schedule.validate(require_double=True)
             self.observation_schedule = normalized_schedule
-            if self.observation_schedule.times:
+            if self.observation_schedule.times or self.observation_schedule.monitoring_ended:
                 self.observation_dates = self.observation_schedule.times
             return
 
@@ -451,23 +452,21 @@ class DoubleSharkfinOption(BaseEquityOption):
 
         return safe_log(self.upper_barrier / self.lower_barrier)
 
-    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
-        """Shift observation schedule and maturity for theta bumping."""
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> None:
+        """Age the product (spec 2026-10-07 theta boundary): see ``BaseEquityOption.time_shift``."""
         schedule = getattr(self, "observation_schedule", None)
         if schedule is not None:
             if schedule.uses_dates():
                 pricing_env.valuation_date = bumped_date
-            bumped_schedule = schedule.time_shift(time_bump, bumped_date)
-            if bumped_schedule is None:
-                return True
+            bumped_schedule = schedule.time_shift(time_bump, bumped_date, keep_landing=keep_landing)
             self.observation_schedule = bumped_schedule
-            if bumped_schedule.uses_times():
-                self.observation_dates = bumped_schedule.times
+            _refresh_observation_dates(self)
 
         if getattr(self, "exercise_date", None) is None and self.maturity is not None:
             self.maturity -= time_bump
 
-        return False
 
     def __repr__(self) -> str:
         return (

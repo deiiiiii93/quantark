@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
+from .base_equity_option import _refresh_observation_dates
 from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.enum import (
@@ -179,10 +180,11 @@ class OneTouchOption(BaseEquityProduct):
                 ],
                 aggregation_mode=self.observation_schedule.aggregation_mode,
                 frequency=self.observation_schedule.frequency,
+                monitoring_ended=self.observation_schedule.monitoring_ended,
             )
             normalized_schedule.validate(require_single=True)
             self.observation_schedule = normalized_schedule
-            if self.observation_schedule.times:
+            if self.observation_schedule.times or self.observation_schedule.monitoring_ended:
                 self.observation_dates = self.observation_schedule.times
             self.observation_type = ObservationType.DISCRETE
         elif self.observation_type == ObservationType.DISCRETE:
@@ -223,18 +225,17 @@ class OneTouchOption(BaseEquityProduct):
         else:
             return self.maturity
 
-    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
-        """Shift observation schedule and maturity for theta bumping."""
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> None:
+        """Age the product (spec 2026-10-07 theta boundary): see ``BaseEquityOption.time_shift``."""
         schedule = getattr(self, "observation_schedule", None)
         if schedule is not None:
             if schedule.uses_dates():
                 pricing_env.valuation_date = bumped_date
-            bumped_schedule = schedule.time_shift(time_bump, bumped_date)
-            if bumped_schedule is None:
-                return True
+            bumped_schedule = schedule.time_shift(time_bump, bumped_date, keep_landing=keep_landing)
             self.observation_schedule = bumped_schedule
-            if hasattr(self, "observation_dates") and bumped_schedule.uses_times():
-                self.observation_dates = bumped_schedule.times
+            _refresh_observation_dates(self)
 
         if getattr(self, "exercise_date", None) is None:
             if getattr(self, "maturity", None) is not None:
@@ -242,7 +243,6 @@ class OneTouchOption(BaseEquityProduct):
         else:
             pricing_env.valuation_date = bumped_date
 
-        return False
 
     def get_payoff(self, spot: float, touched: bool = False) -> float:
         """

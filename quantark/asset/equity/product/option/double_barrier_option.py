@@ -197,10 +197,11 @@ class DoubleBarrierOption(BaseEquityOption):
                 ],
                 aggregation_mode=self.observation_schedule.aggregation_mode,
                 frequency=self.observation_schedule.frequency,
+                monitoring_ended=self.observation_schedule.monitoring_ended,
             )
             normalized_schedule.validate(require_double=True)
             self.observation_schedule = normalized_schedule
-            if self.observation_schedule.times:
+            if self.observation_schedule.times or self.observation_schedule.monitoring_ended:
                 self.observation_dates = self.observation_schedule.times
             self.observation_type = ObservationType.DISCRETE
         elif self.observation_type == ObservationType.DISCRETE:

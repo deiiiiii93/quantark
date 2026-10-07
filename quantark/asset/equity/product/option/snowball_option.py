@@ -587,17 +587,17 @@ class SnowballOption(BaseEquityOption):
             ),
         )
 
-    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
-        """Shift barrier schedules for theta bumping."""
-        dropped_all = super().time_shift(time_bump, bumped_date, pricing_env)
-        if dropped_all:
-            return True
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> None:
+        """Age the product: maturity and both barrier schedules (spec 2026-10-07 theta boundary)."""
+        super().time_shift(time_bump, bumped_date, pricing_env, keep_landing=keep_landing)
 
         before = self._ko_observation_count()
         schedule = None if self.barrier_config is None else self.barrier_config.ko_observation_schedule
         if self.barrier_config is not None:
-            new_config, dropped_all = self.barrier_config.time_shift(
-                time_bump, bumped_date, pricing_env
+            new_config, _ = self.barrier_config.time_shift(
+                time_bump, bumped_date, pricing_env, keep_landing=keep_landing
             )
             self.barrier_config = new_config
 
@@ -606,7 +606,6 @@ class SnowballOption(BaseEquityOption):
         self.accrual_config = self.accrual_config.shifted(
             time_bump, before - self._ko_observation_count(), schedule
         )
-        return dropped_all
 
     def _ko_observation_count(self) -> int:
         config = getattr(self, "barrier_config", None)

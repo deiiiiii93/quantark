@@ -646,31 +646,28 @@ class BaseEquityOption(BaseEquityProduct):
 
         return intrinsic * self.contract_multiplier
 
-    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> None:
         """
-        Shift option state for theta bumping.
+        Age the option by ``time_bump`` (to ``bumped_date``).
 
-        Returns True if all observations were dropped.
+        The schedule drops what is past and keeps the record on the bumped instant only under
+        ``keep_landing`` (theta, spec 2026-10-07 theta boundary R1); the maturity or valuation date
+        always moves, and a schedule left with no record stays, marked ``monitoring_ended`` (R3).
         """
-        dropped_all = False
         schedule = getattr(self, "observation_schedule", None)
         if schedule is not None:
             if schedule.uses_dates():
                 pricing_env.valuation_date = bumped_date
-            bumped_schedule = schedule.time_shift(time_bump, bumped_date)
-            if bumped_schedule is None:
-                return True
-            self.observation_schedule = bumped_schedule
-            if hasattr(self, "observation_dates") and bumped_schedule.uses_times():
-                self.observation_dates = bumped_schedule.times
+            self.observation_schedule = schedule.time_shift(time_bump, bumped_date, keep_landing=keep_landing)
+            _refresh_observation_dates(self)
 
         if getattr(self, "exercise_date", None) is None:
             if getattr(self, "maturity", None) is not None:
                 self.maturity -= time_bump
         else:
             pricing_env.valuation_date = bumped_date
-
-        return dropped_all
 
     # ==========================================================================
     # Abstract Methods
@@ -714,3 +711,10 @@ class BaseEquityOption(BaseEquityProduct):
             f"{self.__class__.__name__}("
             f"{self.option_type}, K={self.strike:.2f}, {self._format_maturity()})"
         )
+
+
+def _refresh_observation_dates(product) -> None:
+    """Mirror a shifted schedule's numeric times into ``observation_dates`` ([] once monitoring has ended)."""
+    schedule = product.observation_schedule
+    if hasattr(product, "observation_dates") and (schedule.uses_times() or schedule.monitoring_ended):
+        product.observation_dates = schedule.times
