@@ -216,3 +216,72 @@ def test_accumulator_observation_at_the_valuation_instant_is_its_known_settlemen
         settlement = now.get_observation_payoff(spot)
         without = float(engine.price(make(later), env))
         assert with_now == pytest.approx(without + settlement, rel=1e-9), type(engine).__name__
+
+
+def _knocked_in_engines():
+    from pde_routes.cases import surface_const
+    from quantark.asset.equity.engine.analytical.barrier_analytical_engine import BarrierAnalyticalEngine
+    from quantark.asset.equity.engine.mc.barrier_option_mc_engine import BarrierOptionMCEngine
+    from quantark.asset.equity.engine.mc.barrier_vol_mc_engines import LocalVolBarrierMCEngine
+    from quantark.asset.equity.engine.pde import BarrierPDESolver
+    from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import LocalVolBarrierPDESolver
+    from quantark.asset.equity.param import MCParams
+    return [BarrierAnalyticalEngine(), BarrierPDESolver(), LocalVolBarrierPDESolver(local_vol_surface=surface_const()),
+            BarrierOptionMCEngine(params=MCParams(num_paths=4096, time_steps=50, seed=3)),
+            LocalVolBarrierMCEngine(local_vol_surface=surface_const(), params=MCParams(num_paths=4096, time_steps=50,
+                                                                                      seed=3))]
+
+
+@pytest.mark.parametrize("observation", ["continuous", "record_now"])
+def test_a_carried_knock_in_is_priced_as_the_engine_prices_its_own(observation):
+    """Theta carries a knock-in decided at t0 (spec R4); the engine must price it at t1 as it priced it at t0 - its
+    own triggered knock-in - or theta differences two methods (the PDE's grid vanilla at t0 against the analytic
+    replication at t1 moved the byte book's knocked-in theta by 3%). Same spot beyond the barrier, flag or not."""
+    def make():
+        kw = (dict(observation_type=ObservationType.CONTINUOUS) if observation == "continuous"
+              else dict(observation_type=DISC, observation_dates=[0.0, 0.5, 1.0]))
+        return BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0,
+                             barrier_type=BarrierType.UP_IN, maturity=1.0, rebate=2.0, **kw)
+    env = env_const(131.0)
+    engines = _knocked_in_engines()
+    if observation == "record_now":
+        from quantark.asset.equity.engine.quad.discrete_quad_engine import DiscreteQuadEngine
+        engines.append(DiscreteQuadEngine())
+    for engine in engines:
+        decided = float(engine.price(make(), env))
+        carried = make()
+        carried._otc_lifecycle_knocked_in = True
+        assert float(engine.price(carried, env)) == pytest.approx(decided, rel=1e-12, abs=1e-12), type(engine).__name__
+
+
+def test_heston_and_slv_barrier_engines_refuse_a_carried_knock_in():
+    """They cannot price the knocked-in contract by their own path yet (their kernels' start-hit identity with the
+    European kernels is unproven), and ignoring the flag priced a knocked-in contract as alive."""
+    from quantark.asset.equity.engine.mc.barrier_vol_mc_engines import HestonBarrierMCEngine
+    from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import HestonBarrierPDESolver
+    from quantark.execution.errors import CapabilityError
+    from quantark.volmodels.heston import HestonParams
+    hp = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.6)
+    p = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_IN,
+                      maturity=1.0, observation_type=DISC, observation_dates=[0.25, 0.5, 1.0])
+    p._otc_lifecycle_knocked_in = True
+    for engine in (HestonBarrierMCEngine(hp), HestonBarrierPDESolver(hp)):
+        with pytest.raises(CapabilityError, match="knock-in"):
+            engine.price(p, env_const())
+
+
+@pytest.mark.parametrize("make", [
+    lambda b, dates: BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=b, barrier_type=BarrierType.UP_IN,
+                                   maturity=1.0, rebate=2.0, observation_type=DISC, observation_dates=dates),
+    lambda b, dates: DoubleBarrierOption(100.0, OptionType.CALL, b, 60.0, DoubleBarrierType.KNOCK_IN, maturity=1.0,
+                                         rebate=2.0, observation_type=DISC, observation_dates=dates),
+], ids=["single", "double"])
+def test_quad_honours_a_carried_knock_in(make):
+    """QUAD ignored the flag (a carried knock-in priced as alive, 6.9378 for 9.6011). Its own triggered value at
+    the same spot is the knock-in its barrier breaches now; a knock-in's value does not depend on the barrier level."""
+    from quantark.asset.equity.engine.quad.discrete_quad_engine import DiscreteQuadEngine
+    q, env = DiscreteQuadEngine(), env_const(100.0)
+    carried = make(130.0, [0.25, 0.5, 1.0])
+    carried._otc_lifecycle_knocked_in = True
+    decided = make(99.0, [0.0, 0.25, 0.5, 1.0])
+    assert float(q.price(carried, env)) == pytest.approx(float(q.price(decided, env)), rel=1e-12)

@@ -133,7 +133,10 @@ def test_theta_uses_filtered_schedule_in_pricing():
     assert 1 in engine.calls
 
 
-def test_theta_all_records_dropped_still_returns_rho():
+def test_theta_on_an_emptied_schedule_prices_the_ended_contract_and_still_returns_rho():
+    """Before: every record dropped -> theta 0.0 with no bumped price. After (spec
+    2026-10-07 R3): the emptied schedule is monitoring_ended and the bumped
+    contract is priced, so its theta is carry, not zero."""
     schedule = ObservationSchedule(
         records=[ObservationRecord(observation_time=0.0001, barrier=110.0, payoff=1.0)],
         aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
@@ -159,17 +162,15 @@ def test_theta_all_records_dropped_still_returns_rho():
             self.calls = []
 
         def price(self, product, pricing_env):
-            self.calls.append(
-                len(product.observation_schedule.records)
-                if getattr(product, "observation_schedule", None)
-                else 0
-            )
+            schedule = product.observation_schedule
+            self.calls.append((len(schedule.records), schedule.monitoring_ended))
             return float(len(self.calls))
 
     engine = DummyEngine()
     greeks = calc.calculate_numerical_greeks(option, env, engine)
 
-    assert greeks["theta"] == pytest.approx(0.0)
+    assert (0, True) in engine.calls  # the ended contract was priced
+    assert greeks["theta"] != 0.0
     assert "rho" in greeks
     assert greeks["rho"] != 0.0
     # Theta path did not short-circuit rho computation
@@ -307,7 +308,7 @@ def _scheduled_barrier_config():
     )
 
 
-def test_snowball_theta_business_day_shift_updates_state_and_drops_past_records():
+def test_snowball_theta_business_day_shift_updates_state_and_keeps_the_bumped_date_record():
     env = _business_day_pricing_env()
     product = SnowballOption(
         initial_price=100.0,
@@ -325,17 +326,19 @@ def test_snowball_theta_business_day_shift_updates_state_and_drops_past_records(
     assert theta == pytest.approx(-1 / 244)
     assert shifted_env.valuation_date == datetime(2026, 6, 29)
     assert shifted_product.maturity == pytest.approx(1.0 - 1 / 244)
-    assert len(shifted_product.barrier_config.ko_observation_schedule.records) == 1
-    assert len(shifted_product.barrier_config.ki_observation_schedule.records) == 1
-    assert shifted_product.barrier_config.ko_observation_schedule.records[
-        0
-    ].observation_time == pytest.approx(2 / 244)
-    assert shifted_product.barrier_config.ki_observation_schedule.records[
-        0
-    ].observation_time == pytest.approx(2 / 244)
+    # Monday is the bumped date AND an observation date: kept at time 0 on the
+    # bumped date (spec 2026-10-07 R1; before: dropped, one record left).
+    for schedule in (
+        shifted_product.barrier_config.ko_observation_schedule,
+        shifted_product.barrier_config.ki_observation_schedule,
+    ):
+        assert [r.observation_time for r in schedule.records] == pytest.approx(
+            [0.0, 2 / 244]
+        )
+        assert schedule.records[0].observation_date == datetime(2026, 6, 29)
 
 
-def test_phoenix_theta_business_day_shift_updates_state_and_drops_past_records():
+def test_phoenix_theta_business_day_shift_updates_state_and_keeps_the_bumped_date_record():
     env = _business_day_pricing_env()
     product = PhoenixOption(
         initial_price=100.0,
@@ -354,14 +357,16 @@ def test_phoenix_theta_business_day_shift_updates_state_and_drops_past_records()
     assert theta == pytest.approx(-1 / 244)
     assert shifted_env.valuation_date == datetime(2026, 6, 29)
     assert shifted_product.maturity == pytest.approx(1.0 - 1 / 244)
-    assert len(shifted_product.barrier_config.ko_observation_schedule.records) == 1
-    assert len(shifted_product.barrier_config.ki_observation_schedule.records) == 1
-    assert shifted_product.barrier_config.ko_observation_schedule.records[
-        0
-    ].observation_time == pytest.approx(2 / 244)
-    assert shifted_product.barrier_config.ki_observation_schedule.records[
-        0
-    ].observation_time == pytest.approx(2 / 244)
+    # Monday is the bumped date AND an observation date: kept at time 0 on the
+    # bumped date (spec 2026-10-07 R1; before: dropped, one record left).
+    for schedule in (
+        shifted_product.barrier_config.ko_observation_schedule,
+        shifted_product.barrier_config.ki_observation_schedule,
+    ):
+        assert [r.observation_time for r in schedule.records] == pytest.approx(
+            [0.0, 2 / 244]
+        )
+        assert schedule.records[0].observation_date == datetime(2026, 6, 29)
 
 
 def _daily_ki_times():

@@ -22,7 +22,8 @@ from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 
 
-from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
+from quantark.asset.equity.engine.monitoring_ended import (ended_without_knock_in, knock_in_carried,
+                                                           remaining_replication)
 
 
 class DiscreteQuadEngine(BaseEngine):
@@ -54,15 +55,19 @@ class DiscreteQuadEngine(BaseEngine):
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
-        if monitoring_ended(product) and product.get_maturity(pricing_env) > 0.0:
+        adapter = resolve_quad_adapter(product)
+        if knock_in_carried(product) and product.get_maturity(pricing_env) > 0.0:
+            # a knock-in carried as triggered (spec 2026-10-07 R4): the adapter's own triggered value, its vanilla
+            # (vanilla + rebate x DF - the knock-out core, which pays the rebate once knocked in)
+            return adapter._vanilla_price(product, pricing_env, self) * product.contract_multiplier
+        if ended_without_knock_in(product) and product.get_maturity(pricing_env) > 0.0:
             # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication
             return remaining_replication(product).price(pricing_env)
-        adapter = resolve_quad_adapter(product)
         return self._price_discrete_instrument(adapter, product, pricing_env)
 
     def static_replication(self, product, pricing_env):
         """An ended schedule's remaining contract (spec 2026-10-07 theta boundary 3.3), else none."""
-        if monitoring_ended(product):
+        if ended_without_knock_in(product):
             return remaining_replication(product)
         return super().static_replication(product, pricing_env)
 

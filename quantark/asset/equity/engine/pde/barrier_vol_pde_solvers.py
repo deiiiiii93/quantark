@@ -115,13 +115,19 @@ def _settlement_scale(engine, product, env) -> float:
     return float(terminal_timing.delay_df)
 
 
-def _refuse_ended(engine_name: str, product) -> None:
+def _refuse_ended(engine_name: str, product, lifecycle_state=None) -> None:
     """The 2D model's remaining European has no path here: an ended schedule is refused (spec 2026-10-07 theta
     boundary 3.3), never priced under another model."""
-    from quantark.asset.equity.engine.monitoring_ended import monitoring_ended
+    from quantark.asset.equity.engine.monitoring_ended import knock_in_carried, monitoring_ended
     if monitoring_ended(product):
         raise CapabilityError(
             f"{engine_name}: the product's monitoring has ended; price the remaining European with a European "
+            "engine of the same model")
+    if knock_in_carried(product, lifecycle_state):
+        # the knock-in carried as triggered (spec 2026-10-07 R4) is the same European; ignoring the flag priced a
+        # knocked-in contract as alive
+        raise CapabilityError(
+            f"{engine_name}: the product carries a triggered knock-in; price the European with a European "
             "engine of the same model")
 
 

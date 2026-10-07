@@ -31,7 +31,7 @@ from quantark.util.enum.engine_enums import EngineType, HestonMCScheme
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.curves import forward_carry_on_grid, forward_rates_on_grid
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
-from quantark.volmodels.localvol.mc_kernel import price_barrier_lv_mc
+from quantark.volmodels.localvol.mc_kernel import price_barrier_lv_mc, price_european_lv_mc
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.heston.mc_kernel import price_barrier_heston_mc
 from quantark.volmodels.slv.leverage import LeverageSurface
@@ -59,13 +59,19 @@ def _check_barrier(engine_name: str, product) -> None:
     _reject_nonuniform_schedule(product)
 
 
-def _refuse_ended(engine_name: str, product) -> None:
+def _refuse_ended(engine_name: str, product, lifecycle_state=None) -> None:
     """A stochastic-volatility engine prices the remaining European under its own model, which it has no path for:
     an ended schedule is refused, not priced under another model (spec 2026-10-07 theta boundary 3.3)."""
-    from quantark.asset.equity.engine.monitoring_ended import monitoring_ended
+    from quantark.asset.equity.engine.monitoring_ended import knock_in_carried, monitoring_ended
     if monitoring_ended(product):
         raise CapabilityError(
             f"{engine_name}: the product's monitoring has ended; price the remaining European with a European "
+            "engine of the same model")
+    if knock_in_carried(product, lifecycle_state):
+        # the knock-in carried as triggered (spec 2026-10-07 R4) is the same European; ignoring the flag priced a
+        # knocked-in contract as alive
+        raise CapabilityError(
+            f"{engine_name}: the product carries a triggered knock-in; price the European with a European "
             "engine of the same model")
 
 
@@ -192,13 +198,13 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
         if fixed_pv is not None:
             self._last_std_error = 0.0
             return fixed_pv
-        from quantark.asset.equity.engine.monitoring_ended import (knock_in_carried, remaining_contract_applies,
+        from quantark.asset.equity.engine.monitoring_ended import (ended_without_knock_in, knock_in_carried,
                                                                    remaining_replication)
-        if remaining_contract_applies(product, lifecycle_state) and product.get_maturity(env) > 0.0:
+        if ended_without_knock_in(product, lifecycle_state) and product.get_maturity(env) > 0.0:
             # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication on
             # the implied surface (the local-vol European reprices it, Dupire)
             self._last_std_error = 0.0
-            return (remaining_replication(product, knock_in_carried(product, lifecycle_state)).price(env)
+            return (remaining_replication(product).price(env)
                     + pending_receivable_pv(lifecycle_state, env))
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
@@ -210,6 +216,17 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
                 raise PricingError("LocalVolBarrierMCEngine needs a GridVolSurface or a prebuilt LocalVolSurface")
             lv = build_dupire_local_vol(env.vol_surface, spot=env.spot, rate_curve=env.rate_curve,
                                         div_yield=env.get_div_yield)
+        if knock_in_carried(product, lifecycle_state):
+            # a knock-in carried as triggered (spec 2026-10-07 R4): the kernel's own knocked-in paths, which are
+            # the European kernel's on the same draws
+            unit, se = price_european_lv_mc(float(env.spot), float(product.strike),
+                                            product.option_type == OptionType.CALL, lv, np.diff(t_grid), r_fwd,
+                                            carry_fwd, float(env.get_discount_factor(T)),
+                                            num_paths=int(self.params.num_paths), seed=self.params.seed,
+                                            use_antithetic=bool(self.params.use_antithetic), return_stderr=True)
+            participation = float(product.participation_rate)
+            return _finish_price(self, participation * unit, participation * se, product, env, lifecycle_state,
+                                 settlement_scale)
         continuous, observe_idx = _monitoring(product, t_grid)
         unit, se = price_barrier_lv_mc(float(env.spot), float(product.strike),
                                        product.option_type == OptionType.CALL, lv,
@@ -243,7 +260,7 @@ class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
         lifecycle_state=None,
     ) -> float:
         _check_barrier("HestonBarrierMCEngine", product)
-        _refuse_ended("HestonBarrierMCEngine", product)
+        _refuse_ended("HestonBarrierMCEngine", product, lifecycle_state)
         fixed_pv, settlement_scale = _settlement_scale(
             self, product, env, lifecycle_state
         )
@@ -292,7 +309,7 @@ class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
         lifecycle_state=None,
     ) -> float:
         _check_barrier("HestonSLVBarrierMCEngine", product)
-        _refuse_ended("HestonSLVBarrierMCEngine", product)
+        _refuse_ended("HestonSLVBarrierMCEngine", product, lifecycle_state)
         fixed_pv, settlement_scale = _settlement_scale(
             self, product, env, lifecycle_state
         )

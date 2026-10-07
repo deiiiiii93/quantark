@@ -16,8 +16,8 @@ from quantark.asset.equity.engine.settlement_support import (
     validate_settlement_capability,
 )
 from quantark.asset.equity.engine.monitoring_ended import (
+    ended_without_knock_in,
     knock_in_carried,
-    remaining_contract_applies,
     remaining_replication,
 )
 from quantark.asset.equity.product.option import BarrierOption
@@ -179,9 +179,9 @@ class BarrierOptionMCEngine(BaseEngine):
         fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
         if fixed_pv is not None:
             return fixed_pv
-        if remaining_contract_applies(product, lifecycle_state) and product.get_maturity(pricing_env) > 0.0:
+        if ended_without_knock_in(product, lifecycle_state) and product.get_maturity(pricing_env) > 0.0:
             # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication
-            return (remaining_replication(product, knock_in_carried(product, lifecycle_state)).price(pricing_env)
+            return (remaining_replication(product).price(pricing_env)
                     + pending_receivable_pv(lifecycle_state, pricing_env))
         terminal_timing = resolve_terminal_timing(product, pricing_env)
 
@@ -207,7 +207,10 @@ class BarrierOptionMCEngine(BaseEngine):
                 + pending_receivable_pv(lifecycle_state, pricing_env)
             )
 
-        if product.observation_type != ObservationType.EXPIRY and product.is_barrier_hit(S):
+        # Hit at valuation, or a knock-in carried as triggered (spec 2026-10-07 R4): the engine's own triggered path
+        if product.observation_type != ObservationType.EXPIRY and (
+            product.is_barrier_hit(S) or knock_in_carried(product, lifecycle_state)
+        ):
             if product.is_knock_out:
                 return (
                     self._price_immediate_knock_out(
@@ -846,8 +849,8 @@ class BarrierOptionMCEngine(BaseEngine):
 
     def static_replication(self, product, pricing_env):
         """An ended schedule's remaining contract (spec 2026-10-07 theta boundary 3.3), else none."""
-        if remaining_contract_applies(product):
-            return remaining_replication(product, knock_in_carried(product))
+        if ended_without_knock_in(product):
+            return remaining_replication(product)
         return super().static_replication(product, pricing_env)
 
     def __repr__(self) -> str:

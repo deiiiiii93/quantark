@@ -13,8 +13,8 @@ from quantark.util.enum import ObservationType, OptionType
 
 from .pde.core.adapters.expiry_replication import ExpiryReplication, Leg
 
-__all__ = ["knock_in_carried", "monitoring_ended", "remaining_contract_applies", "remaining_legs",
-           "remaining_replication"]
+__all__ = ["ended_without_knock_in", "knock_in_carried", "monitoring_ended", "remaining_contract_applies",
+           "remaining_legs", "remaining_replication"]
 
 _C, _P = OptionType.CALL, OptionType.PUT
 
@@ -35,9 +35,18 @@ def knock_in_carried(product, lifecycle_state=None) -> bool:
 
 
 def remaining_contract_applies(product, lifecycle_state=None) -> bool:
-    """Whether the remaining-contract replication prices ``product``: its monitoring has ended, or it is a
-    knock-in carried as triggered - a triggered knock-in has nothing left to monitor."""
+    """Whether the remaining-contract replication prices ``product`` on an ANALYTIC engine: its monitoring has
+    ended, or it is a knock-in carried as triggered. The analytic engines' own triggered knock-in is the
+    Black-Scholes vanilla the replication reproduces, so both routes are one method."""
     return monitoring_ended(product) or knock_in_carried(product, lifecycle_state)
+
+
+def ended_without_knock_in(product, lifecycle_state=None) -> bool:
+    """Whether the replication prices ``product`` on a NUMERICAL engine: monitoring has ended and no knock-in is
+    carried. A carried knock-in is priced through the engine's own triggered knock-in (the path a knock-in it
+    decides at the valuation instant takes), so theta differences one method, not the grid or the paths against
+    the analytic replication."""
+    return monitoring_ended(product) and not knock_in_carried(product, lifecycle_state)
 
 
 def _cash(amount: float, strike: float) -> list:

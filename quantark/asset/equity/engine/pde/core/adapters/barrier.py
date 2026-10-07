@@ -84,10 +84,13 @@ class _BarrierFamilyAdapter(FamilyAdapter):
         from quantark.asset.equity.engine.monitoring_ended import (knock_in_carried, monitoring_ended,
                                                                    remaining_replication)
         triggered = knock_in_carried(product) or (knocked_in and bool(getattr(product, "is_knock_in", False)))
-        if (monitoring_ended(product) or triggered) and product.get_maturity(env) > 0:
-            # no observation left, or a knock-in triggered (spec 2026-10-07 theta boundary 3.3, R4): the remaining
-            # contract, by replication
-            return remaining_replication(product, triggered)
+        if triggered:
+            # a carried knock-in is the knock-in adapter's own triggered composition (the grid vanilla it takes
+            # for a knock-in decided at the valuation instant), so theta differences one method
+            return None
+        if monitoring_ended(product) and product.get_maturity(env) > 0:
+            # no observation left (spec 2026-10-07 theta boundary 3.3): the remaining contract, by replication
+            return remaining_replication(product)
         if not self._replicates_expiry(product, env):
             return None
         from .expiry_replication import ExpiryReplication
@@ -244,7 +247,10 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
             return None
         if product.get_maturity(env) <= 0:
             return None                          # maturity is read before any composite is built (decision 30, P1)
-        knocked_in = self.decision_at(product, env, env.spot)[3]      # a SET record fires at the spot (decision 25)
+        from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
+        # a SET record fires at the spot (decision 25); a knock-in carried as triggered (spec 2026-10-07 R4) is
+        # the same composition
+        knocked_in = knock_in_carried(product, lifecycle_state) or self.decision_at(product, env, env.spot)[3]
         return self._compose(product, env, request, knock_out=not knocked_in)
 
     def bump_parts(self, product, env):
@@ -252,8 +258,9 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
             # at maturity no part product is built (decision 30), and a replicated EXPIRY marches none: nothing to freeze
             return None
         solver = self.solver
+        from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
         parts = {"vanilla": (solver._vanilla_solver(), self._vanilla_product(product))}
-        if not self.decision_at(product, env, env.spot)[3]:
+        if not (knock_in_carried(product) or self.decision_at(product, env, env.spot)[3]):
             parts["knock_out"] = (solver, self._knock_out_product(product))
         return parts
 

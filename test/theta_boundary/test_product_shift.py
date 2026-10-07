@@ -93,3 +93,19 @@ def test_ko_reset_ages_its_post_knock_in_schedule_too(keep_landing):
     assert post == pytest.approx([0.0, 0.3] if keep_landing else [0.3])
     assert [r.observation_time for r in p.barrier_config.ko_observation_schedule.records] == pytest.approx(
         [0.2, 0.45, 0.7])
+
+
+def test_ko_reset_rebased_post_schedule_holds_offsets_and_does_not_age():
+    """A REBASED schedule 2 is offsets from the knock-in time: aging the contract leaves them."""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+    from dataclasses import replace
+    from test_quad_empty_side import make
+    from quantark.util.enum import PostKOScheduleMode
+    base = make("ko_reset", (0.5, 0.75, 1.0), (0.25, 0.5, 0.75), (0.1, 0.3, 0.6))
+    p = type(base)(initial_price=100.0, strike=100.0, maturity=1.0, barrier_config=base.barrier_config,
+                   post_barrier_config=base.post_barrier_config, accrual_config=base.accrual_config,
+                   payoff_config=base.payoff_config, post_ko_mode=PostKOScheduleMode.REBASED)
+    p.time_shift(0.3, None, env_const(), keep_landing=True)
+    post = [r.observation_time for r in p.post_barrier_config.ko_observation_schedule.records]
+    assert post == pytest.approx([0.1, 0.3, 0.6])
