@@ -217,7 +217,8 @@ runs the old comparisons) apart from the KO-reset fix below; the replay goldens 
 - Charm, color and vega decay treat a contract `t0` ended as a fixed receivable (no spot or vol
   greeks at `t1`) and never difference a carried receivable.
 - `time_shift(..., keep_landing=False)` on schedules, `BarrierConfig`, products and
-  `AutocallableCashLeg`; product `time_shift` always ages and returns `None`.
+  `AutocallableCashLeg`; product `time_shift` always ages and returns `None` (a KO-reset's returns whether
+  every observation, schedule 2 included, has passed).
   `RangeAccrualOption.time_shift` now shifts numeric records and decides past fixings on the spot.
 
 ### Fixed
@@ -227,7 +228,10 @@ runs the old comparisons) apart from the KO-reset fix below; the replay goldens 
 - `KnockOutResetSnowballOption.time_shift` ages an `ABSOLUTE` schedule 2 (the post-knock-in
   knock-out schedule); numeric post dates stayed put. A knocked-in KO-reset's theta now equals the
   knocked-in snowball's on schedule 2 (+0.0166 in the byte book's case, where it was -0.1406); 24
-  KO-reset `bump_theta` byte-book rows move, no other output of the 713 rows.
+  KO-reset `bump_theta` byte-book rows move, no other output of the 713 rows. (The same fix landed
+  independently on the accrual-time branch, entry above; this branch keeps both its `keep_landing`
+  and accrual time's schedule-2 factor slicing. Both byte-book counts were measured against main on
+  their own branch; the merged tree has not been re-measured.)
 - `DiscreteQuadEngine` ignored a knock-in carried on the product (`_otc_lifecycle_knocked_in`) and
   priced a knocked-in contract as alive.
 - The accumulator analytic and MC engines settle an observation at the valuation instant on the
