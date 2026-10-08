@@ -222,9 +222,9 @@ def _rolled_equal(a: Any, b: Any) -> bool:
     passed); a schedule whose observations have all passed becomes ``None``.
 
     A rolled accrual moves with it: ``accrued_offset`` banks the elapsed
-    period, so it only advances, and ``accrual_factors`` are addressed by
-    position in the knock-out schedule, so a roll takes the same prefix off
-    them.  Both are bookkeeping that keeps the aged contract paying what the
+    period, so it only advances, and ``accrual_factors`` (``post_accrual_factors``)
+    are addressed by position in the knock-out schedule (KO-reset schedule 2),
+    so a roll takes the same prefix off them.  Both are bookkeeping that keeps the aged contract paying what the
     original promised -- the thing this check exists to confirm -- so
     neither may read as a different contract.
 
@@ -260,8 +260,10 @@ def _rolled_equal(a: Any, b: Any) -> bool:
             va, vb = _float_leaf(sa), _float_leaf(sb)
             if vb is not None and (va is None or vb < va - ROLL_TOL):
                 return False
-        if not _rolled_suffix(fa.pop("accrual_factors", None), fb.pop("accrual_factors", None)):
-            return False
+        # both positional factor lists lose the prefix their schedule lost (KO-reset ageing slices schedule 2's)
+        for name in ("accrual_factors", "post_accrual_factors"):
+            if not _rolled_suffix(fa.pop(name, None), fb.pop(name, None)):
+                return False
         return fa == fb
     if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):
         return all(_rolled_equal(x, y) for x, y in zip(a, b))

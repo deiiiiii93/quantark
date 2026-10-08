@@ -205,6 +205,45 @@ def test_the_first_period_anchor_may_only_advance():
         check_contract_roll(unknown, p1, calendar_days=100)
 
 
+def _ko_reset_with_post_factors():
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+    from quantark.asset.equity.product.option.snowball_config import AccrualConfig, BarrierConfig, PayoffConfig
+    from quantark.util.enum import PostKOScheduleMode
+
+    def times(*ts, level):
+        return ObservationSchedule(records=[ObservationRecord(observation_time=t, barrier=level) for t in ts])
+
+    return KnockOutResetSnowballOption(
+        initial_price=100.0, strike=100.0,
+        barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.12, ko_observation_schedule=times(0.25, 0.5, level=103.0),
+                                     ki_barrier=75.0, ki_observation_schedule=times(0.25, 0.5, level=75.0)),
+        post_barrier_config=BarrierConfig(ko_barrier=100.0, ko_rate=0.05,
+                                          ko_observation_schedule=times(0.25, 0.5, 0.75, level=100.0)),
+        payoff_config=PayoffConfig(rebate_rate=0.05),
+        accrual_config=AccrualConfig(post_accrual_factors=[0.25, 0.5, 0.75]),
+        maturity=0.75, post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+    )
+
+
+def test_schedule_two_accrual_factors_may_only_lose_a_prefix():
+    """KO-reset ageing takes schedule 2's dropped records off its explicit factors too: the same bookkeeping as
+    ``accrual_factors``, so a rolled KO-reset is still the same contract -- and nothing else may change."""
+    from dataclasses import replace
+
+    p0 = _ko_reset_with_post_factors()
+    p1 = deepcopy(p0)
+    env = _env(date=D0 + timedelta(days=100))
+    p1.time_shift(100 / 365, env.valuation_date, env)
+    assert p1.accrual_config.post_accrual_factors == [0.5, 0.75]
+    check_contract_roll(p0, p1, calendar_days=100)
+
+    altered = deepcopy(p1)
+    altered.accrual_config = replace(altered.accrual_config, post_accrual_factors=[0.5, 2.0])
+    with pytest.raises(ValidationError):
+        check_contract_roll(p0, altered, calendar_days=100)
+
+
 def test_value_rejects_non_finite_price():
     class NanEngine:
         def price(self, product, env):
