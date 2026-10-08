@@ -30,6 +30,7 @@ import pandas as pd
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
+from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.settlement import SettlementLagUnit
 from quantark.priceenv import PricingEnvironment
@@ -85,6 +86,7 @@ class AutocallableLifecycleTracker:
         """
         product = deepcopy(self.product)
         setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
+        setattr(product, "_otc_lifecycle_knock_in_anchor", self.lifecycle.knock_in_anchor)
         return product
 
     def product_for_pricing(self, date: pd.Timestamp, pricing_env: PricingEnvironment) -> Any:
@@ -98,6 +100,7 @@ class AutocallableLifecycleTracker:
         """
         product = deepcopy(self.product)
         setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
+        setattr(product, "_otc_lifecycle_knock_in_anchor", self.lifecycle.knock_in_anchor)
         if (
             getattr(product, "exercise_date", None) is None
             and getattr(product, "maturity", None) is not None
@@ -268,7 +271,9 @@ class AutocallableLifecycleTracker:
                 self.lifecycle.observed_ki_indices.add(idx)
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=False):
                     before = self._state_snapshot()
-                    if self.lifecycle.mark_ki(pd.Timestamp(date).to_pydatetime()):
+                    # the anchor is the record whose test fired, at its contractual fixing (spec §5.1)
+                    anchor = knock_in_anchor_for(product.barrier_config.ki_observation_schedule.records[idx], idx)
+                    if self.lifecycle.mark_ki(pd.Timestamp(date).to_pydatetime(), anchor):
                         events.append(
                             LifecycleEvent(
                                 event_type=LifecycleEventType.KNOCK_IN,

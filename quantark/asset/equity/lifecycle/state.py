@@ -8,7 +8,7 @@ vanilla barrier product family.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol
 
 from quantark.util.exceptions import ValidationError
 
@@ -18,6 +18,9 @@ from .cashflows import (
     ValuationPoint,
 )
 from .events import LifecycleEventType
+
+if TYPE_CHECKING:
+    from quantark.asset.equity.product.option.accrual import KnockInAnchor
 
 
 class EquityOptionLifecycleState(Protocol):
@@ -57,12 +60,17 @@ class AutocallableLifecycleState:
     pending_settlement_cashflow: float = 0.0
     settlement_date: Optional[datetime] = None
     settled: bool = False
+    #: The knock-in a REBASED schedule hangs from (accrual time spec §5.1): resolved once, from the record whose
+    #: test fired, and persisted, never looked up again. ``None`` before a knock-in, for a continuously monitored
+    #: one, or for a non-accruing record. ``ki_date`` (the close it was observed on) stays the reset's timing.
+    knock_in_anchor: Optional["KnockInAnchor"] = None
 
-    def mark_ki(self, timestamp: datetime) -> bool:
+    def mark_ki(self, timestamp: datetime, anchor: Optional["KnockInAnchor"] = None) -> bool:
         if self.knocked_in or self.knocked_out:
             return False
         self.knocked_in = True
         self.ki_date = timestamp
+        self.knock_in_anchor = anchor
         return True
 
     def mark_ko(
