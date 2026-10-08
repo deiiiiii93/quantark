@@ -113,7 +113,7 @@ def test_phoenix_twin_reproduces_contractual_coupons(sse_calendar, sse_sessions)
     ts = _kos(tl0)[0].timestamp - timedelta(hours=3)
     tl, rec, num = _twin(sse_sessions, prod, ts, EventPhase.BEFORE)
     twin = num.product
-    assert twin.accrual_config.accrual_factors is not None
+    assert all(r.accrual is not None for r in twin.barrier_config.ko_observation_schedule.records)
     from quantark.intraday.events import phoenix_coupon_fractions
     times = [r.observation_time for r in twin.barrier_config.ko_observation_schedule.records]
     fractions = phoenix_coupon_fractions(twin, times)

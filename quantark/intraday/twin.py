@@ -59,6 +59,18 @@ def _clear_dates(twin) -> None:
             setattr(twin, name, None)
 
 
+def _period(record):
+    """A source record's accrual period, carried onto the twin as an explicit period: the twin clears its dates and
+    re-times its records, and its cash stays the source contract's (accrual time spec §6)."""
+    return None if record.accrual is None else replace(record.accrual, terms=None)
+
+
+def _rekey(twin) -> None:
+    """The twin carries its source contract's periods on purpose: key the stale-terms guard to its own terms."""
+    from quantark.asset.equity.product.option.accrual_build import accrual_terms_key
+    twin._accrual_terms_key = accrual_terms_key(twin)
+
+
 def _pick(value, indices):
     """A per-observation list restricted to ``indices``; scalars pass through."""
     return [value[i] for i in indices] if isinstance(value, (list, tuple)) else value
@@ -83,26 +95,16 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
     principal = twin.initial_price * twin.contract_multiplier if twin.payoff_config.include_principal else 0.0
     unit = twin.initial_price * twin.contract_multiplier
     src = list(product.barrier_config.ko_observation_schedule.records)
-    records, ko_factors, rates = [], [], []
+    records = []
     for e in kos:
         rate = src[e.index].return_rate
         rate = float(product.get_ko_rate_at(e.index)) if rate is None else float(rate)
-        ko_factors.append((e.cash - principal) / (unit * rate) if rate != 0.0 else None)
-        rates.append(rate)
         records.append(ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier,
-                                         return_rate=rate, settlement_time=calendar_year_fraction(ts, e.payment_timestamp)))
+                                         return_rate=rate, settlement_time=calendar_year_fraction(ts, e.payment_timestamp),
+                                         accrual=_period(src[e.index])))
     if phoenix:
         if [c.index for c in coupons] != [k.index for k in kos]:
             raise ValidationError("Phoenix coupon events must align with the remaining KO events")
-        coupon_rate = twin.coupon_config.coupon_rate
-        coupon_factors = [c.cash / (unit * coupon_rate) if coupon_rate != 0.0 else 0.0 for c in coupons]
-        # One positional list serves both the KO accrual (x ko_rate) and the coupon fractions.
-        for k, (kf, cf) in enumerate(zip(ko_factors, coupon_factors)):
-            if kf is not None and not is_close(kf, cf, rel_tol=_CASH_REL_TOL, abs_tol=_CASH_ABS_TOL):
-                raise CapabilityError(
-                    f"Phoenix KO accrual ({kf!r}) and coupon fraction ({cf!r}) differ at KO[{kos[k].index}]: the "
-                    "float-time twin carries a single accrual_factors list; not in the intraday inventory")
-        factors = coupon_factors
         memory = int(getattr(state, "coupon_memory_count", 0) or 0) if state is not None else 0
         # Memory arrives as a COUNT of missed periods, so it only reconstructs an amount when
         # every period is worth the same: a declared fixed fraction, or a per-period rate
@@ -114,8 +116,6 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
         # QUAD V2 takes the lifecycle state and rebuilds the same total from the count,
         # so exactly one of the two carries it per route and neither double counts.
         arrears = memory * float(product.get_coupon_payoff(0, year_fraction=1.0 if fixed is None else fixed))
-    else:
-        factors = [0.0 if f is None else f for f in ko_factors]
     indices = [e.index for e in kos]
     bc = twin.barrier_config
     ko_schedule = ObservationSchedule(records=records, aggregation_mode=bc.ko_observation_schedule.aggregation_mode,
@@ -123,7 +123,9 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
     kwargs = dict(ko_barrier=_pick(bc.ko_barrier, indices), ko_rate=_pick(bc.ko_rate, indices),
                   ko_observation_dates=None, ko_observation_schedule=ko_schedule)
     if product.has_ki_barrier and timeline.continuous_ki_barrier is None:
-        ki_records = [ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier) for e in kis]
+        ki_src = list(product.barrier_config.ki_observation_schedule.records)
+        ki_records = [ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier,
+                                        accrual=_period(ki_src[e.index])) for e in kis]
         ki_indices = [e.index for e in kis]
         if ki_records:
             kwargs.update(ki_barrier=_pick(bc.ki_barrier, ki_indices), ki_observation_dates=None,
@@ -131,8 +133,8 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
         else:
             kwargs.update(ki_observation_dates=None, ki_observation_schedule=ObservationSchedule(records=[]))
     twin.barrier_config = replace(bc, **kwargs)
-    twin.accrual_config = replace(twin.accrual_config, accrual_factors=[float(f) for f in factors],
-                                  accrued_offset=0.0)
+    twin.accrual_config = replace(twin.accrual_config,
+                                  accrual_factors=_pick(product.accrual_config.accrual_factors, indices))
     if phoenix:
         twin.coupon_config = replace(twin.coupon_config, coupon_barrier=_pick(twin.coupon_config.coupon_barrier, indices),
                                      initial_coupon_arrears=arrears)
@@ -141,6 +143,7 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
     twin.tenor = timeline.contractual_tenor
     _clear_dates(twin)
     twin.settlement_convention = _settlement(calendar_year_fraction(ts, terminal.payment_timestamp) - twin.maturity)
+    _rekey(twin)
     setattr(twin, "_otc_lifecycle_knocked_in", bool(state.knocked_in) if state is not None else False)
     _verify_autocallable_cash(twin, kos, coupons, ts, phoenix)
     return twin
@@ -149,11 +152,9 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
 def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime, state, schedule_env):
     """Float-time KO-reset snowball carrying both KO schedules.
 
-    Its engines read the KO accrual through ``compute_ko_accrual_factor``, which
-    for a dateless schedule is ``accrued_offset + tau`` and ignores positional
-    factors. With every fixing at one time of day, (contractual accrual - tau)
-    is the same for every record, so one ``accrued_offset`` reproduces the
-    contract's cash and both contract tenors; that is verified, else fail closed.
+    Each twin record carries its source record's accrual period and the twin keeps
+    the source's terminal periods, so its cash and both contract tenors are the
+    contract's (accrual time spec §6); that is verified, else fail closed.
     """
     from quantark.intraday.events import ko_reset_records
     twin = deepcopy(product)
@@ -161,10 +162,6 @@ def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime,
     pre_all = [e for e in timeline.events if e.kind is EventKind.KO and e.regime == "pre"]
     if not pre_all:
         raise ValidationError("a KO-reset snowball needs a pre-KI KO schedule")
-    offset = float(product._resolve_pre_contract_tenor(schedule_env)) - calendar_year_fraction(ts, pre_all[-1].timestamp)
-    if offset < 0.0:
-        raise CapabilityError("valuation before the contract's accrual origin: the KO-reset twin cannot carry a "
-                              "negative accrued offset")
 
     def schedule(config, regime):
         events = [e for e in remaining if e.kind is EventKind.KO and e.regime == regime]
@@ -174,7 +171,8 @@ def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime,
             rate = src[e.index].return_rate
             rate = float(product._get_barrier_at(config.ko_rate, e.index, "KO rate")) if rate is None else float(rate)
             records.append(ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier,
-                                             return_rate=rate, settlement_time=calendar_year_fraction(ts, e.payment_timestamp)))
+                                             return_rate=rate, settlement_time=calendar_year_fraction(ts, e.payment_timestamp),
+                                             accrual=_period(src[e.index])))
         indices = [e.index for e in events]
         barrier = _pick(config.ko_barrier, indices) if indices else (
             config.ko_barrier[-1] if isinstance(config.ko_barrier, (list, tuple)) else config.ko_barrier)
@@ -190,16 +188,22 @@ def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime,
     post_config, post_events = schedule(pbc, "post")
     if product.has_ki_barrier and timeline.continuous_ki_barrier is None:
         kis = [e for e in remaining if e.kind is EventKind.KI]
-        ki_records = [ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier) for e in kis]
+        ki_src = list(bc.ki_observation_schedule.records)
+        ki_records = [ObservationRecord(observation_time=calendar_year_fraction(ts, e.timestamp), barrier=e.barrier,
+                                        accrual=_period(ki_src[e.index])) for e in kis]
         pre_config = replace(pre_config, ki_barrier=_pick(bc.ki_barrier, [e.index for e in kis]) if kis else bc.ki_barrier,
                              ki_observation_dates=None, ki_observation_schedule=ObservationSchedule(records=ki_records))
     twin.barrier_config, twin.post_barrier_config = pre_config, post_config
-    twin.accrual_config = replace(twin.accrual_config, accrual_factors=None, accrued_offset=offset)
+    ac = product.accrual_config
+    twin.accrual_config = replace(ac, accrual_factors=_pick(ac.accrual_factors, [e.index for e in pre_events]),
+                                  post_accrual_factors=_pick(ac.post_accrual_factors, [e.index for e in post_events]))
     terminal = timeline.terminal()
     twin.maturity = calendar_year_fraction(ts, terminal.timestamp)
     _clear_dates(twin)
     twin.settlement_convention = _settlement(calendar_year_fraction(ts, terminal.payment_timestamp) - twin.maturity)
+    _rekey(twin)
     setattr(twin, "_otc_lifecycle_knocked_in", bool(state.knocked_in))
+    setattr(twin, "_otc_lifecycle_knock_in_anchor", getattr(state, "knock_in_anchor", None))
     env = _cash_env(ts, twin)
     # Past its first schedule only a knocked-in contract is alive (it runs on the second schedule to the end);
     # one that is not knocked in matured when that schedule ended, and a checkpoint calling it alive is wrong.
@@ -210,8 +214,7 @@ def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime,
             raise ValidationError("KO-reset twin resolves a different number of KO observations")
         for (_rec, _src, _rate, cash), e in zip(records, events):
             if not is_close(cash, e.cash, rel_tol=_CASH_REL_TOL, abs_tol=_CASH_ABS_TOL):
-                raise CapabilityError(f"KO-reset twin {e.event_id} pays {cash!r}, the contract pays {e.cash!r}: fixings at "
-                                      "different times of day cannot share one accrued offset")
+                raise CapabilityError(f"KO-reset twin {e.event_id} pays {cash!r}, the contract pays {e.cash!r}")
     # The pre-KI tenor scales the not-knocked-in rebate alone. Once the first schedule has ended nothing reads it,
     # and an emptied schedule cannot reproduce it, so it is verified only while that schedule is live.
     tenors = ("_resolve_post_contract_tenor",) if not pre_events else (

@@ -80,13 +80,15 @@ def test_uncovered_fixings_fail_closed(sse_calendar, sse_sessions, desk):
         resolve_context(_req(sse_sessions, desk, prod, lifecycle_state=one_day_late))
 
 
-def test_same_time_of_day_is_required_for_one_accrued_offset(sse_calendar, sse_sessions, desk):
+def test_fixings_at_different_times_of_day_keep_the_contractual_cash(sse_calendar, sse_sessions, desk):
+    """The twin used to bank one accrued offset for every record, so a fixing at another time of day was refused.
+    Each twin record now carries its source record's accrual period (accrual time spec §6): the twin builds, and its
+    own cash verification (equal to the contract's to 1e-12) passes."""
     prod = dated_ko_reset(sse_calendar, T0)
     rec = prod.post_barrier_config.ko_observation_schedule.records[8]
     rec.observation_timestamp = datetime(rec.observation_date.year, rec.observation_date.month, rec.observation_date.day,
                                          10, 0, tzinfo=SHANGHAI)
-    with pytest.raises(CapabilityError, match="accrued offset"):
-        resolve_context(_req(sse_sessions, desk, prod, lifecycle_state=_checkpoint(True)))
+    assert resolve_context(_req(sse_sessions, desk, prod, lifecycle_state=_checkpoint(True))) is not None
 
 
 # --- the contract's two rules (KnockOutResetSnowballOption), past the first schedule ---------------------------------
