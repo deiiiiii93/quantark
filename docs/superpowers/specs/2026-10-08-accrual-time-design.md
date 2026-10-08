@@ -1,6 +1,6 @@
 # Accrual time, separate from observation time — design
 
-Status: approved in conversation 2026-10-08 (sections 1–3); revised for review rounds 1 and 2;
+Status: approved in conversation 2026-10-08 (sections 1–3); revised for review rounds 1–3;
 awaiting review.
 
 ## 1. Purpose
@@ -31,7 +31,7 @@ every product, engine and intraday path asks that place.
 - **R2. Accrual end type.** A contract-level option `ACCRUAL_END_TYPE ∈ {OBSERVATION, SETTLEMENT}` says whether a record accrues to its observation (fixing) or to its settlement (payment). Default `OBSERVATION`: existing contracts do not move.
 - **R3. Scope.** One accrual resolver for snowball, Phoenix and KO-reset and every engine and intraday path they run on. The inconsistencies of §3 items 1–5 are fixed as a consequence. Items 6–10 are listed follow-ups, untouched.
 - **R4. Approach A.** The accrual period lives on each observation record, not in positional lists (B), nor as a separate observation instant (C).
-- **R5. A dated, annualized contract without `initial_date` is refused at construction.** Its accrual has no start but "today".
+- **R5. A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at construction.** Its accrual would have no start but "today". A contract with no annualized leg needs none (review round 3, P2-4).
 
 ## 3. Where accrual is computed today (inventory, 2026-10-08)
 
@@ -76,14 +76,13 @@ A frozen dataclass in a new module, `asset/equity/product/option/accrual.py`. It
 needs, so a period read off a copy, a twin or an aged contract gives the same cash wherever it travels (review round
 2, P1-1):
 
-- **`kind`**: `TIME` (contract-clock years, the quoted fraction, R1) or `DATE` (calendar dates). Every endpoint below is of that kind.
+- **`kind`**: `TIME` (contract-clock years, the quoted fraction, R1), `DATE` (calendar dates), or `NONE` (no accrual terms: a non-accruing record, below). Every endpoint below is of that kind.
 - **`origin`**: the contract's accrual start. `0.0` for `TIME`; `initial_date` for `DATE`, copied in, so a twin that clears `initial_date` still resolves.
 - **`start`**: the coupon period's start. It may be unknown (`None`).
 - **`end`**: the accrual end. It may be absent only when `cumulative_fraction` is set.
-- **`day_count`**: the cumulative leg's basis, the contract's `annualization_day_count`.
-- **`period_day_count`**: the coupon leg's basis, Phoenix's coupon day count, else `day_count`.
+- **`basis`**: an immutable `AccrualBasis(day_count, calendar, bus_days_in_year)`, the cumulative leg's basis (the contract's `annualization_day_count`). **`period_basis`** is the coupon leg's (Phoenix's coupon day count, else `basis`). Every term the year fraction reads travels in it, so no accrual reads the pricing environment (review round 3, P1-2). §4.7 says where `calendar` and `bus_days_in_year` come from.
 - **`cumulative_fraction`**, **`period_fraction`**: explicit overrides, one per cash leg (review round 1, P1-1).
-- **`relative`**: True for a REBASED schedule-2 offset record. Its `start` and `end` are quoted offsets from the knock-in anchor, and it has no `origin` (§4.3, §5.1).
+- **`relative`**: True for a REBASED schedule-2 offset record. Its `start` and `end` are quoted offsets from the knock-in anchor, and it has no `origin`. It may embed its **`anchor`** (§5.1), which a converted schedule does (§5.2); otherwise the resolver needs one passed in (§4.3, §5.1).
 
 The representations that are allowed (review round 2, P2-7), every other combination raising `ValidationError`:
 
@@ -92,9 +91,14 @@ The representations that are allowed (review round 2, P2-7), every other combina
 | `cumulative_fraction` only (e.g. a terminal from `product.tenor`) | the fraction | `period_fraction`, else raises |
 | `origin` + `end`, `start` unknown (an aged first period with no recorded start) | from `origin` to `end` | `period_fraction`, else raises "period start unknown" |
 | `origin` + `start` + `end`, `start <= end` | from `origin` to `end` | from `start` to `end` |
-| `relative`: `start` + `end` offsets, no `origin` | anchor + `end` (§5) | `end − start` |
+| `relative`: `start` + `end` offsets, no `origin`, `anchor` embedded or passed | the anchor's accrual + `end` (§5) | `end − start` |
+| `NONE`: no endpoints, no overrides (a contract without annualized cash, e.g. dated with no `initial_date`) | raises "no accrual terms" when an annualized leg asks; never read otherwise | the same |
 
 An override always wins on its own leg; endpoints serve whichever leg has no override.
+
+**Zero-length periods** (review round 3, P2-4). An end equal to its start (coupon leg), or to its `origin` (cumulative
+leg), accrues exactly `0.0`. The resolver returns 0.0 without calling the year-fraction helper, which rejects equal
+dates.
 
 **`ObservationRecord.accrual: Optional[AccrualPeriod] = None`.**
 
@@ -137,21 +141,28 @@ Detaching copies the period along with the record.
 - **ABSOLUTE schedule 2**: as schedule 1, on its own records.
 - **REBASED schedule 2: its own rule** (review round 2, P1-2). Its times are offsets from the knock-in, so no `accrued_offset` is banked into them. The record is `relative`, with `end` = its quoted offset (`OBSERVATION`) or its offset settlement endpoint (`SETTLEMENT`: the explicit offset payment, else offset + the convention's `YEAR_FRACTION` lag). `start` is the previous offset's `end`, or 0 for the first.
   - The control: an aged contract with elapsed 0.3, remaining knock-in time 0.2 (anchor 0.5) and offset 0.25 accrues to 0.75, not 1.05.
+  - **Offsets are quoted fractions, on a dated contract too** (review round 3, P1-1). REBASED offsets are numeric (the product's validation refuses dated offsets), so an offset of 0.25 means a quarter of a year of accrual, R1's quoted fraction. Nothing converts it to days: a DATE anchor contributes its own accrual, and the offset adds 0.25 to it (§5). Days enter only the observation timing, which places the record at the knock-in close plus `round(offset × 365)` days. The control: a dated knock-in, offset 0.25, accrues to YF(`origin`, knock-in fixing) + 0.25, not the year fraction of 91 days.
 
-Dated annualized contracts need `initial_date`: one without it raises at construction (R5).
+Dated contracts whose annualized cash needs an origin need `initial_date`: one without it raises at construction (R5).
+A contract with no annualized leg gets `NONE` periods; its cash stays what it is today (a current-code control pays a
+knock-out of 12 on a dated, non-annualized contract with no `initial_date`).
 
-### 4.4 Terminal periods
+### 4.4 Terminal periods (review round 3, P1-3)
 
-The contract gets a terminal period the same way:
-- `product.tenor` set: `cumulative_fraction` only;
-- dated: `origin = initial_date`, `end` = the `tenor_end` date;
-- numeric: `origin = 0.0`, `end = accrued_offset + maturity`.
+A terminal period is the accrual of an annualized V0 rebate or V1 knock-in amount. It is **built from its own terms,
+never from a record's period**. It is unaffected by `ACCRUAL_END_TYPE` and by `accrual_factors` /
+`post_accrual_factors`, which are knock-out terms.
+- **Snowball and Phoenix (`contract`)**: today's `get_tenor` rule.
+  - `product.tenor` set: `cumulative_fraction` only.
+  - Dated: `origin = initial_date`, `end` = the `tenor_end` date.
+  - Numeric: `origin = 0.0`, `end = accrued_offset + maturity`.
+- **KO-reset `pre`**: from the origin to schedule 1's last contractual fixing (its observation date, or `accrued_offset` + its original observation time), as `_resolve_pre_contract_tenor` does today.
+- **KO-reset `post`, ABSOLUTE**: from the origin to schedule 2's last contractual fixing, as today.
+- **KO-reset `post`, REBASED**: a `relative` terminal whose `end` is the final offset's contractual fixing, i.e. the final observation offset, never its payment offset.
 
-KO-reset has two:
-- `pre`: schedule 1's last record's accrual end, from schedule 1's origin.
-- `post`:
-  - ABSOLUTE: schedule 2's last record's accrual end.
-  - REBASED: a `relative` terminal whose `end` is the final offset. It resolves only with an anchor (§5).
+The control: knock-in at 0.25, final observation offset 0.5, payment offset 0.52, under `SETTLEMENT`. The terminal
+is 0.75 in both the MC route and the converted copy. The payment offset belongs to the knock-out record's period, not
+to the terminal.
 
 ### 4.5 The authoritative settlement endpoint (`SETTLEMENT`)
 
@@ -170,32 +181,46 @@ terms only (construction has no environment):
 - These move `observation_time`, and settlement times, only: `ObservationSchedule.time_shift`, `BarrierConfig.time_shift`, `snap_contract` and `with_absolute_schedule_2`. Every record keeps its `accrual`.
 - `accrued_offset` and `first_period_start` stay as fields, banked by `AccrualConfig.shifted`. They are read once, when legacy inputs are turned into periods, and never again.
 
+### 4.7 Basis terms (review round 3, P1-2)
+
+Year fractions that depend on a calendar need its terms frozen in the contract: `BUSINESS_DAYS` today reads the
+pricing environment's calendar and `bus_days_in_year`. The same endpoints give 4/252 across one holiday and 3/252
+across another, and a different denominator changes the cash. The intraday schedule environment and the twin's
+verification environment carry no calendar at all.
+- **`AccrualConfig.accrual_calendar: Optional[Calendar]`** and **`AccrualConfig.accrual_bus_days_in_year: Optional[float]`** are new. Construction copies them into every `AccrualBasis`.
+- A contract whose annualized leg uses `BUSINESS_DAYS` must set both, or it is refused at construction ("BUSINESS_DAYS accrual needs its calendar and denominator on the contract").
+- Every other convention (ACT/365, ACT/360, 30/360, ACT/ACT, ...) reads neither, so neither is required, and their year fractions are unchanged.
+- Before landing, every test and golden building a `BUSINESS_DAYS`-annualized contract is counted and given the two terms, each listed.
+
 ## 5. The resolver (`accrual.py`)
 
 The only functions that compute accrual. Each reads the period, not the product's dates (review round 2, P1-1), and
 keeps today's precedence leg by leg (review round 1, P2-6).
 
+`env` stays in the signatures for the callers' convenience; no accrual reads it (§4.7).
+
 - **`ko_accrual_factor(product, record, env, *, knock_in=None) -> float`.** The cumulative leg:
   1. `cumulative_fraction` when set, whatever the annualization flag. Explicit factors win today: notional 100, rate 12% and factor 0.4 pay 4.8.
   2. Otherwise 1.0 when knock-out accrual is not annualized (`_effective_annualized_flag(is_annualized_ko)`).
-  3. Otherwise `DATE`: YF(`origin`, `end`, `day_count`, `env.bus_days_in_year`, `env.calendar`); `TIME`: `end − origin`.
-  4. A `relative` record needs `knock_in`: the end is the anchor's fixing + `end` (`DATE`: + `end` whole days), measured from the anchor's `origin` in the anchor's `day_count`.
+  3. Otherwise, for a non-`relative` period: `NONE` raises "no accrual terms"; an end equal to `origin` gives 0.0; `DATE`: YF(`origin`, `end`, `basis`); `TIME`: `end − origin`.
+  4. A `relative` record: the anchor's accrual + `end`. The anchor is embedded or passed as `knock_in`, else it raises. The anchor's accrual is YF(`anchor.origin`, `anchor.fixing`, `anchor.basis`) for `DATE`, and `anchor.fixing − anchor.origin` for `TIME`. The offset adds as a quoted fraction (§4.3).
 - **`coupon_period_fraction(product, record, env) -> float`.** The coupon leg, in today's order:
   1. 1.0 when the coupon rate is not annualized;
   2. else `period_fraction`;
-  3. else an unknown `start` raises;
-  4. else `DATE`: YF(`start`, `end`, `period_day_count`); `TIME`: `end − start`.
-- **`contract_tenor(product, env, leg="contract", *, knock_in=None) -> float`.** The cumulative leg of a terminal period. A REBASED `post` leg needs `knock_in`: with a final offset 0.5, knock-ins at 0.25 and 0.5 give 0.75 and 1.0.
+  3. else an unknown `start` or `NONE` raises;
+  4. else an end equal to `start` gives 0.0;
+  5. else `DATE`: YF(`start`, `end`, `period_basis`); `TIME`: `end − start`.
+- **`contract_tenor(product, env, leg="contract", *, knock_in=None) -> float`.** The cumulative leg of a terminal period (§4.4). A REBASED `post` leg is `relative` and needs its anchor: with a final offset 0.5, knock-ins at 0.25 and 0.5 give 0.75 and 1.0.
 
 Each function raises `ValidationError` on a record it needs that carries no `accrual`, or on a `relative` period
-without `knock_in`. None falls back to observation time.
+with no anchor, embedded or passed. None falls back to observation time.
 
 ### 5.1 The knock-in anchor (review round 1, P1-3; round 2, P1-3 and P1-4)
 
 **`KnockInAnchor`** is a frozen dataclass:
 - `source_index`: the knock-in record that fired, an index into the contract's original knock-in schedule;
 - `fixing`: that record's accrual `end`, its contractual fixing (`TIME` or `DATE`);
-- `origin` and `day_count`: copied from that record's period.
+- `origin` and `basis`: copied from that record's period (§4.7), so the anchor resolves without the environment.
 
 It is **resolved once, when the knock-in happens, and then persisted**, never looked up again:
 - **The tracker** builds it from the record whose test fired. With knock-in records due on days 91 and 93 and the first close on day 95, that is index 0 with its contractual fixing at day 91. The close the knock-in was observed on, day 95, stays the timing of the reset (the KO-reset spec's `ki_date`), and is not the accrual anchor.
@@ -208,15 +233,17 @@ It is **resolved once, when the knock-in happens, and then persisted**, never lo
 
 `KnockOutResetSnowballOption.with_absolute_schedule_2(knock_in_time, *, anchor)` places each converted record's
 observation at `knock_in_time + offset`; this is timing, so snapping still applies to it. Each record's accrual comes
-from its **preserved** `relative` period: `end = anchor.fixing + period.end`, `start` likewise, with `origin` and
-`day_count` from the anchor. The result is an ordinary non-relative period.
+from its **preserved** `relative` period, with the anchor embedded. Its accrual is the anchor's accrual plus the
+period's quoted offset (§5). The period stays `relative`: a DATE anchor plus a quoted offset is not a date, and must
+not be rounded into one (review round 3, P1-1).
 
 Under `SETTLEMENT` the offset endpoint already holds the payment offset, and the anchor is the fixing, so the lag is
 counted once. A knock-in at 0.25 with a knock-in lag of 0.01 and an explicit post payment offset of 0.52 accrues to
 0.77, not 0.78.
 
-The converted contract's `post` terminal becomes `anchor.fixing + final offset`. A knocked-in REBASED contract
-therefore prices and books the same cash as the un-knocked contract's MC route on the same path.
+The converted contract's `post` terminal is the preserved `relative` terminal (§4.4) with the anchor embedded: the
+anchor's accrual plus the final observation offset, which is 0.75 in the control and identical to the MC route.
+A knocked-in REBASED contract therefore prices and books the same cash as the un-knocked contract's MC route on the same path.
 
 ## 6. Consumers rewired (each local copy deleted)
 
@@ -228,7 +255,7 @@ therefore prices and books the same cash as the un-knocked contract's MC route o
 - `quad/v2/adapters.py` Phoenix fractions: `coupon_period_fraction` (fixes §3.5).
 - `intraday/events.py` `phoenix_coupon_fractions`: `coupon_period_fraction` (fixes §3.5).
 - **The intraday twin changes** (review round 1, P1-4; round 2, P1-1). It builds new `ObservationRecord`s without running product construction, and it clears `initial_date`.
-  - `intraday/twin.py` copies each source record's `accrual` onto the twin record built from it, matched by source index. Periods are self-contained (`origin` and both day counts travel inside them), so clearing `initial_date` on the twin no longer matters.
+  - `intraday/twin.py` copies each source record's `accrual` onto the twin record built from it, matched by source index. Periods are self-contained (`origin` and both bases, calendar and denominator included, travel inside them), so clearing `initial_date` on the twin no longer matters.
   - The snowball/Phoenix twin stops back-solving `accrual_factors`.
   - The KO-reset twin stops clearing `accrual_factors` and stops reconstructing cash through one `accrued_offset`. It carries a carried knock-in's `KnockInAnchor`.
   - Its existing cash and tenor checks become equalities against the source contract's periods.
@@ -242,6 +269,8 @@ therefore prices and books the same cash as the un-knocked contract's MC route o
 | numeric, aged | ulp-level: today `(offset + bump) + (t − bump)`, now the original `t`; every moved golden row listed with its magnitude |
 | numeric with `initial_date` | the quoted fraction replaces YF(`initial_date` → valuation) + raw `t` (§3.2); can move when the basis is not ACT/365; measured and listed |
 | dated, annualized, no `initial_date` | refused (R5); before landing, every test, example and golden that builds one is counted and given an `initial_date`, each listed |
+| dated, non-annualized, no `initial_date` | unchanged (`NONE` periods) |
+| `BUSINESS_DAYS`-annualized | refused without `accrual_calendar` / `accrual_bus_days_in_year` (§4.7); affected tests counted and listed |
 
 Every product's fingerprint changes once (every record gains a field): simulation and replay caches cold-start; any
 golden that pins a fingerprint is regenerated and listed.
@@ -285,6 +314,12 @@ fixed after the rebase.
   - **Schedule-specific factors:** 2 pre, 3 post, `accrual_factors` of length 2 is accepted; `post_accrual_factors` of length 2 against 3 post records is refused; a REBASED `post_accrual_factors` entry is the offset's accrual.
   - **Ownership:** two products on one shared `ObservationSchedule` with fixed fractions 1/12 and 0.1 pay 1.0 and 1.2, in either construction order.
   - **Representations:** a `cumulative_fraction`-only terminal and an end-only first period both serve the cumulative leg; the coupon leg on the end-only period raises "period start unknown".
+- **Review round 3 controls.**
+  - **Dated knock-in, quoted offset:** a dated knock-in with REBASED offset 0.25 accrues to YF(origin, knock-in fixing) + 0.25. The test also shows it differs from the year fraction of 91 days.
+  - **Basis terms:** a `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused. With them, its cash is identical under two environments with different calendars and denominators, and in the intraday twin.
+  - **Terminal:** knock-in 0.25, final observation offset 0.5, payment offset 0.52, `SETTLEMENT`: V1's tenor is 0.75 in the MC route and in the converted copy.
+  - **Non-accruing:** a dated, non-annualized contract without `initial_date` constructs and pays a knock-out of 12 as today; asking it for an annualized leg raises "no accrual terms".
+  - **Zero-length:** a `DATE` period with `end == start` gives a coupon fraction of 0.0, and `end == origin` gives a cumulative fraction of 0.0, without raising.
 - **Refusals.** Every `AccrualPeriod` combination outside §4.1's table raises, as do mixed `TIME`/`DATE` endpoints and `end < start`. The resolver raises on a record without `accrual`, and on a `relative` period without `knock_in`.
 - **Goldens.** Dated and unaged numeric products are byte-identical. Aged numeric and numeric-with-`initial_date` rows are listed with magnitudes. Fingerprint-pinned goldens are regenerated and listed.
 - **Full suite** with `-n 6` under the RAM guard.
