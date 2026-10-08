@@ -171,9 +171,16 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     def _age_extra(self, product, elapsed, date, pricing_env, keep_landing) -> None:
         """Age schedule 2 with schedule 1; a REBASED one (offsets) stays until a knock-in converts it."""
         if product.post_ko_mode == PostKOScheduleMode.ABSOLUTE:
+            before = product._get_observation_length_for_config(product.post_barrier_config) or 0
             product.post_barrier_config, _ = product.post_barrier_config.time_shift(
                 elapsed, date, pricing_env, keep_landing=keep_landing
             )
+            # schedule 2's explicit factors drop with its records, as KnockOutResetSnowballOption.time_shift drops
+            # them (a copy whose factor list outlived its records fails validate(), which QUAD V2 calls)
+            dropped = before - (product._get_observation_length_for_config(product.post_barrier_config) or 0)
+            factors = product.accrual_config.post_accrual_factors
+            if factors is not None and dropped > 0:
+                product.accrual_config = replace(product.accrual_config, post_accrual_factors=list(factors[dropped:]))
 
     # ------------------------------------------------------------------
     # Records, tenors and terminal timings

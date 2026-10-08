@@ -226,3 +226,21 @@ def test_an_absolute_pricing_copy_ages_schedule_two():
     copy = t.product_for_pricing(day(100), env(90.0, day(100)))
     assert [r.observation_time for r in copy.post_barrier_config.ko_observation_schedule.records] == [
         pytest.approx(173 * D), pytest.approx(265 * D)]
+
+
+def test_an_aged_absolute_copy_keeps_its_post_factors_in_step_with_schedule_two():
+    """Self-review: the pricing copy aged schedule 2 but not post_accrual_factors (product.time_shift slices both), so a
+    copy past a schedule-2 record failed validate(), which QUAD V2 calls on every product it prices."""
+    from quantark.asset.equity.product.option.accrual import ko_accrual_factor
+    product = kr(post=(120, 273, 365), annualized=True)
+    product.accrual_config = AccrualConfig(is_annualized=True, is_annualized_ki=True, is_annualized_rebate=True,
+                                           post_accrual_factors=[0.1, 0.2, 0.3])
+    product.validate()
+    t = tracker(product)
+    run(t, {91: 70.0})
+    copy = t.product_for_pricing(day(150), env(90.0, day(150)))
+    assert copy.accrual_config.post_accrual_factors == [0.2, 0.3]
+    copy.validate()
+    assert [ko_accrual_factor(copy, r) for r in copy.post_barrier_config.ko_observation_schedule.records] == [0.2, 0.3]
+    assert KOResetSnowballQuadEngineV2().price(copy, env(90.0, day(150))) == pytest.approx(
+        KOResetSnowballQuadEngine(params=QuadParams(grid_points=2001)).price(copy, env(90.0, day(150))), rel=5e-3)
