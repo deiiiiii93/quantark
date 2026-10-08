@@ -311,7 +311,9 @@ class TestBarrierFamilyIntegration:
         assert [e.event_type for e in events] == ["COUPON"]
         assert not events[0].terminates_position
         # get_coupon_payoff(0) with no dates → dcf=1.0, so payoff = 100*1.0*0.01*1.0 = 1.0
-        expected_coupon = float(phoenix.get_coupon_payoff(0))
+        # cash follows the snapped contract (spec 2026-10-08 4a): the 1/12 coupon accrues to day 30
+        from quantark.asset.equity.lifecycle import snap_contract
+        expected_coupon = float(snap_contract(phoenix).get_coupon_payoff(0))
         assert almost_equal(events[0].cashflow, expected_coupon)
         # Position must still be alive after coupon
         final_day = results.day_results[-1]

@@ -16,6 +16,7 @@ from .cashflows import (
 )
 from .events import LifecycleEvent, LifecycleEventType
 from .float_roll import FLOAT_ROLLABLE_PRODUCTS, FloatMaturityRoller, is_float_rollable
+from .snapping import snap_contract, snap_time
 from .manager import PortfolioLifecycleManager, ProcessedLifecycleEvent
 from .state import (
     AutocallableLifecycleState,
@@ -44,4 +45,6 @@ __all__ = [
     "BarrierLifecycleState",
     "EquityOptionLifecycleState",
     "TerminalLifecycleState",
+    "snap_contract",
+    "snap_time",
 ]

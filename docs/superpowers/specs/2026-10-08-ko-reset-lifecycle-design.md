@@ -131,9 +131,13 @@ observed: a record due that day is still pending and kept at time 0, `keep_landi
 (the day's records applied, `keep_landing=False`). `product_for_pricing` takes the phase; the simulation's aged-product
 and surface caches key on it beside the date, so the two never share an entry.
 
-**Acceptance.** Event goldens (event days, cashflows) are unchanged — the due rule is unchanged. Prices move only for
-products with off-day numeric times; each moved replay / simulation golden row is listed with the record that moved
-it. Whole-day and dated products: byte-identical. The PDE byte book does not age through the tracker: byte-identical.
+**Cash follows the snapped time (user, 2026-10-08, measured at implementation).** An annualized amount accrues to
+the snapped time, so an off-day numeric record's cash moves by under half a day of accrual: a `k / 12` Phoenix coupon
+at 12% pays 30/365 or 31/365 of a year (0.9863 / 1.0192) instead of 1/12, a `k / 12` snowball knock-out 202.466
+instead of 202.5; the sum over a contract's life is unchanged. Event days are unchanged — the due rule is unchanged.
+
+**Acceptance.** Prices, and the annualized cash above, move only for products with off-day numeric times; each moved
+replay / simulation golden row and each updated test is listed with the record that moved it. Whole-day and dated products: byte-identical. The PDE byte book does not age through the tracker: byte-identical.
 
 ## 5. Pricing copy, portfolio manager, replay
 
@@ -240,7 +244,7 @@ position registration), naming the product, the mode and the engine — never mi
   record is absent from the post-close copy and present in the initial copy; the review's day-1.4 control: the
   surface and the exact copy agree after the observation within the surface gate (corrected copy 0.4381, today's
   surface 4.9183); whole-day and dated
-  schedules bit-identical; the replay-golden diff lists every moved price row with its record, event rows unchanged.
+  schedules bit-identical; the replay-golden diff lists every moved row with its record, event days unchanged.
 - **Provider matrix (§6a):** each refusal raised at configuration with its message; an MC replay of an un-knocked
   `REBASED` contract runs through a knock-in and its knocked-in days price on PDE and QUAD too.
 - **Pricing copy:** a knocked-in `REBASED` copy prices as the same contract with an `ABSOLUTE` schedule 2 at
@@ -255,7 +259,7 @@ position registration), naming the product, the mode and the engine — never mi
   (MC) over paths that knock out on schedule 1, mature un-knocked, knock in then knock out on schedule 2, and knock in
   then mature; surface mode for an `ABSOLUTE` contract within the existing gate against exact mode; surface mode
   refuses a `REBASED` contract at configuration (§6a).
-- **Unchanged:** event goldens; snowball and Phoenix replay and simulation price goldens byte-identical apart from §4a's
+- **Unchanged:** event days; snowball and Phoenix replay and simulation price goldens byte-identical apart from §4a's
   listed rows (off-day numeric schedules only); the PDE byte book byte-identical; full suite `-n 6` under the RAM
   guard.
 

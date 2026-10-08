@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from quantark.asset.equity.lifecycle.snapping import snap_time
+
 from quantark.asset.equity.param import MCParams, QuadParams
 from quantark.asset.equity.product.option import create_standard_snowball
 from quantark.backtest.replay import (
@@ -381,11 +383,13 @@ class TestBuildEnvSurfaceModes:
 
         env, *_ = _build_env(replay, dataset, DATE_A)
 
-        # Remaining maturity is exactly 0.75y on the start date: between the
-        # 0.5y and 1.0y ATM pillars, so total-variance interpolation applies.
+        # Remaining maturity on the start date is the tracker's snapped 0.75y (day 274,
+        # spec 2026-10-08 4a): between the 0.5y and 1.0y ATM pillars, so total-variance
+        # interpolation applies.
         assert isinstance(env.vol_surface, FlatVolSurface)
         total_variances = [v * v * t for v, t in zip(ATM_VOLS_A, MATURITIES)]
-        expected = math.sqrt(np.interp(0.75, MATURITIES, total_variances) / 0.75)
+        remaining = snap_time(0.75)
+        expected = math.sqrt(np.interp(remaining, MATURITIES, total_variances) / remaining)
         sampled = env.vol_surface.get_vol(90.0, 3.0, 100.0)
         assert is_close(sampled, expected)
         assert min(ATM_VOLS_A[1:]) < sampled < max(ATM_VOLS_A[1:])
@@ -394,11 +398,12 @@ class TestBuildEnvSurfaceModes:
         dates = pd.date_range(DATE_A, periods=3, freq="D")
         dataset = _market_data(dates, surface_history=VolSurfaceHistory(history_dir))
         config = _surface_engine_config("flat_atm_remaining")
-        replay = _make_replay(dataset, config, _product(0.5), DATE_A)
+        # 1.0y is a whole day (365), so the snapped maturity is the pillar itself
+        replay = _make_replay(dataset, config, _product(1.0), DATE_A)
 
         env, *_ = _build_env(replay, dataset, DATE_A)
 
-        assert is_close(env.vol_surface.get_vol(90.0, 0.1, 100.0), ATM_VOLS_A[1])
+        assert is_close(env.vol_surface.get_vol(90.0, 0.1, 100.0), ATM_VOLS_A[2])
 
     def test_flat_atm_remaining_refreshes_daily(self, history_dir):
         dates = pd.date_range(DATE_A, periods=3, freq="D")
@@ -408,8 +413,8 @@ class TestBuildEnvSurfaceModes:
 
         env_b, *_ = _build_env(replay, dataset, DATE_B)
 
-        # Two days elapsed: remaining = 0.75 - 2/365, sampled on artifact B.
-        remaining = 0.75 - 2.0 / 365.0
+        # Two days elapsed: remaining = snapped 0.75 (day 274) - 2/365, sampled on artifact B.
+        remaining = snap_time(0.75) - 2.0 / 365.0
         total_variances = [v * v * t for v, t in zip(ATM_VOLS_B, MATURITIES)]
         expected = math.sqrt(np.interp(remaining, MATURITIES, total_variances) / remaining)
         assert is_close(env_b.vol_surface.get_vol(90.0, 3.0, 100.0), expected)

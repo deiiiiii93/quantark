@@ -38,6 +38,7 @@ from quantark.util.exceptions import ValidationError
 
 from .events import LifecycleEvent, LifecycleEventType
 from .cashflows import RealizedCashflow, ValuationPoint
+from .snapping import snap_contract
 from .state import AutocallableLifecycleState
 
 #: Ledger metadata key: the contractual coupon periods a memory coupon released
@@ -67,7 +68,9 @@ class AutocallableLifecycleTracker:
         date_resolver: Optional[DateResolver] = None,
         has_lifecycle: bool = True,
     ) -> None:
-        self.product = product
+        # The snapped contract (spec 2026-10-08 section 4a): every numeric observation time on the
+        # day this tracker observes it, so every consumer that builds from it agrees with the tracker.
+        self.product = snap_contract(product)
         self.quantity = float(quantity)
         self.lifecycle = lifecycle if lifecycle is not None else AutocallableLifecycleState()
         self.start_date = start_date
@@ -77,6 +80,21 @@ class AutocallableLifecycleTracker:
     # ------------------------------------------------------------------
     # Pricing-product construction (mirrors ProductReplay)
     # ------------------------------------------------------------------
+
+    @property
+    def lifecycle_contract(self) -> Any:
+        """The snapped contract every consumer builds from (spec 2026-10-08 section 4a)."""
+        return self.product
+
+    def _contract_for_pricing(self) -> Any:
+        """The contract the pricing copy ages; a subclass may convert it first (KO-reset REBASED)."""
+        product = deepcopy(self.product)
+        setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
+        setattr(product, "_otc_lifecycle_knock_in_anchor", self.lifecycle.knock_in_anchor)
+        return product
+
+    def _age_extra(self, product: Any, elapsed: float, date, pricing_env, keep_landing: bool) -> None:
+        """Age schedules beyond ``barrier_config`` (none for snowball and Phoenix)."""
 
     def product_for_lifecycle(self) -> Any:
         """
@@ -90,7 +108,9 @@ class AutocallableLifecycleTracker:
         setattr(product, "_otc_lifecycle_knock_in_anchor", self.lifecycle.knock_in_anchor)
         return product
 
-    def product_for_pricing(self, date: pd.Timestamp, pricing_env: PricingEnvironment) -> Any:
+    def product_for_pricing(
+        self, date: pd.Timestamp, pricing_env: PricingEnvironment, *, initial: bool = False
+    ) -> Any:
         """
         Return a time-decayed copy of the product for pricing on ``date``.
 
@@ -98,10 +118,13 @@ class AutocallableLifecycleTracker:
         ``None`` no time decay or barrier-schedule shift is applied (elapsed
         defaults to 0.0). The returned product's ``_otc_lifecycle_knocked_in``
         attribute reflects the current lifecycle state.
+
+        ``initial`` is the run's first valuation, before its first close is
+        observed: a record due that day is still pending and kept at time 0.
+        Otherwise (a post-close valuation) the day's records have been
+        applied and are gone.
         """
-        product = deepcopy(self.product)
-        setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
-        setattr(product, "_otc_lifecycle_knock_in_anchor", self.lifecycle.knock_in_anchor)
+        product = self._contract_for_pricing()
         if (
             getattr(product, "exercise_date", None) is None
             and getattr(product, "maturity", None) is not None
@@ -129,6 +152,7 @@ class AutocallableLifecycleTracker:
                 elapsed,
                 pd.Timestamp(date).to_pydatetime(),
                 pricing_env,
+                keep_landing=initial,
             )
             if shifted_config is not None:
                 dropped = barrier_config.ko_observation_count - shifted_config.ko_observation_count
@@ -143,6 +167,7 @@ class AutocallableLifecycleTracker:
                 accrual = getattr(product, "accrual_config", None)
                 if accrual is not None and hasattr(accrual, "shifted"):
                     product.accrual_config = accrual.shifted(elapsed, dropped, barrier_config.ko_observation_schedule)
+        self._age_extra(product, elapsed, pd.Timestamp(date).to_pydatetime(), pricing_env, initial)
         return product
 
     # ------------------------------------------------------------------
@@ -614,7 +639,12 @@ class AutocallableLifecycleTracker:
             if not getattr(product, "has_ki_barrier", False):
                 return []
             resolved = product.resolve_ki_observations(schedule_env)
+        return self._record_dicts(product, resolved)
 
+    def _record_dicts(
+        self, product: Any, resolved, payoffs: Optional[List[float]] = None
+    ) -> List[Dict[str, Any]]:
+        """The replay-clock record dicts of resolved observations; ``payoffs`` overrides each ``rec.payoff``."""
         records: List[Dict[str, Any]] = []
         # Replay clock: a numeric schedule still plays out on real calendar
         # days of this run, so dates absent from the schedule are derived from
@@ -623,7 +653,7 @@ class AutocallableLifecycleTracker:
         # due checks, pending settlement, and run termination key on.
         base = getattr(product, "initial_date", None) or self.start_date
         base_date = pd.Timestamp(base) if base is not None else None
-        for rec in resolved:
+        for position, rec in enumerate(resolved):
             obs_time = float(rec.observation_time)
             settlement_time = float(rec.settlement_time)
             observation_date = getattr(rec, "observation_date", None)
@@ -664,7 +694,7 @@ class AutocallableLifecycleTracker:
                         if rec.barrier is not None
                         else None
                     ),
-                    "payoff": float(rec.payoff),
+                    "payoff": float(rec.payoff if payoffs is None else payoffs[position]),
                 }
             )
         return records
