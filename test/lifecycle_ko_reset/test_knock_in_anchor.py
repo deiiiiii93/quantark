@@ -156,3 +156,21 @@ def test_a_dated_knock_in_plus_a_quoted_offset_in_the_converted_copy():
     ninety_one_days = calculate_year_fraction(T0 + timedelta(days=91), T0 + timedelta(days=182),
                                               DayCountConvention.ACT_365)
     assert ko_accrual_factor(converted, first) != pytest.approx(origin_to_fixing + ninety_one_days, abs=1e-6)
+
+
+def test_the_ko_reset_tracker_refuses_to_observe_an_aged_knock_in_schedule():
+    """The KO-reset tracker's own knock-in test reads the anchor off the contract, as the snowball tracker does
+    (accrual follow-up M1): an aged pricing copy has dropped its past knock-in records, so its indices are not the
+    contract's and neither observed_ki_indices nor the anchor's source_index could address them."""
+    t = tracker(kr(M.REBASED, pre=(200, 300), ki=(91, 93), post=(91, 365), annualized=True))
+    aged = t.product_for_pricing(day(92), env(100.0, day(92)))
+    assert len(aged.barrier_config.ki_observation_schedule.records) == 1
+    with pytest.raises(ValidationError, match="product_for_lifecycle"):
+        t.observe(day(95), aged, env(70.0, day(95)), 70.0)
+
+
+def test_the_ko_reset_tracker_anchors_a_later_knock_in_at_its_contract_index():
+    t = tracker(kr(M.REBASED, pre=(200, 300), ki=(91, 93), post=(91, 365), annualized=True))
+    t.lifecycle.observed_ki_indices.add(0)              # the first knock-in test passed without a hit
+    assert run(t, {95: 70.0}) == [(95, E.KNOCK_IN, None)]
+    assert (t.lifecycle.knock_in_anchor.source_index, t.lifecycle.knock_in_anchor.fixing) == (1, 93 * D)

@@ -365,7 +365,10 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             metadata = {"monitoring": "daily_close", "schedule": 1}
         else:
             hits = []
-            for idx, rec in enumerate(self._scheduled_records(product, env, "ki")):
+            ki_records = self._scheduled_records(product, env, "ki")
+            # the anchor and observed_ki_indices address the contract's own records: refuse an aged copy's
+            contract_ki = self._contract_ki_records(product) if ki_records else []
+            for idx, rec in enumerate(ki_records):
                 if idx in self.lifecycle.observed_ki_indices or not self._record_is_due(date, valuation_point, rec):
                     continue
                 self.lifecycle.observed_ki_indices.add(idx)
@@ -377,8 +380,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         index, barrier = hits[0]
         # the anchor is the record whose test fired, at its contractual fixing (accrual time spec §5.1); a
         # continuous knock-in has none (a REBASED contract requires discrete monitoring)
-        anchor = None if index is None else knock_in_anchor_for(
-            product.barrier_config.ki_observation_schedule.records[index], index)
+        anchor = None if index is None else knock_in_anchor_for(contract_ki[index], index)
         before = self._state_snapshot()
         if not self.lifecycle.mark_ki(pd.Timestamp(date).normalize().to_pydatetime(), anchor):
             return None
