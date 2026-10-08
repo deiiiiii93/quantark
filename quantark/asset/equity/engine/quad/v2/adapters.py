@@ -1,6 +1,7 @@
 """Compile QuantArk contractual rules into numerical state/event maps."""
 
 import math
+from copy import copy
 import numpy as np
 
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
@@ -130,6 +131,10 @@ def compile_contract(
         )
     if event_phase not in {"before", "after"}:
         raise ValidationError("event_phase must be before or after")
+    # validate a copy: validate() rebuilds the schedules and terminal periods, and pricing must not rebuild the
+    # caller's product. Shallow is enough: validate() rebinds the product's configs and periods (detached copies,
+    # dataclasses.replace) and mutates none of the objects it shares with the caller.
+    product = copy(product)
     product.validate()
     phoenix = isinstance(product, PhoenixOption)
     reset = isinstance(product, KnockOutResetSnowballOption)

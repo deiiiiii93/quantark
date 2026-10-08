@@ -134,3 +134,38 @@ def test_mc_anchors_each_knock_in_column_at_its_priced_schedule_index(monkeypatc
     SnowballMCEngine(params=MCParams(seed=3, num_paths=256)).price(p, env(spot=80.0))
     ki = p.barrier_config.ki_observation_schedule.records
     assert seen and set(seen) == {(i, r.accrual.end) for i, r in enumerate(ki)}
+
+
+# -- declined (b): QUAD V2 prices without rebuilding the caller's product ----------------------------------------
+
+def _identities(p):
+    schedules = [p.barrier_config.ko_observation_schedule, p.barrier_config.ki_observation_schedule]
+    post = getattr(p, "post_barrier_config", None)
+    if post is not None:
+        schedules.append(post.ko_observation_schedule)
+    records = [r for s in schedules if s is not None for r in s.records]
+    terminals = p._terminal_accrual
+    return ([id(p.barrier_config), id(post)] + [id(s) for s in schedules] + [id(r) for r in records]
+            + [id(r.accrual) for r in records] + [id(terminals)] + [id(v) for v in terminals.values()])
+
+
+@pytest.mark.parametrize("build", [
+    lambda: snowball(ki=times(1 / 12, 2 / 12, 3 / 12, level=75.0)),
+    lambda: phoenix(ki=times(1 / 12, 2 / 12, 3 / 12, level=75.0)),
+    lambda: ko_reset(M.ABSOLUTE),
+], ids=["snowball", "phoenix", "ko_reset"])
+def test_quad_v2_pricing_leaves_the_callers_product_untouched(build):
+    from copy import deepcopy
+    from quantark.asset.equity.engine.quad import (
+        KOResetSnowballQuadEngineV2, PhoenixQuadEngineV2, SnowballQuadEngineV2,
+    )
+    from quantark.pnlexplain.equity.fingerprints import contract_fingerprint
+    p = build()
+    before, fingerprint, state = _identities(p), contract_fingerprint(p), deepcopy(vars(p))
+    engine = {"SnowballOption": SnowballQuadEngineV2, "PhoenixOption": PhoenixQuadEngineV2,
+              "KnockOutResetSnowballOption": KOResetSnowballQuadEngineV2}[type(p).__name__]()
+    reference = float(engine.price(deepcopy(p), env(spot=90.0)))
+    assert float(engine.price(p, env(spot=90.0))) == reference
+    engine.price_components(p, env(spot=95.0))
+    assert _identities(p) == before
+    assert contract_fingerprint(p) == fingerprint and sorted(vars(p)) == sorted(state)
