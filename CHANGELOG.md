@@ -157,6 +157,13 @@ barriers away from maturity are bit-identical.
   price it on schedule 1 (21-26% off).
 
 ### Fixed
+- KO-reset lifecycle final review: a `REBASED` schedule 2 hangs from the knock-in close on the clock the contract's
+  records are dated on (`initial_date`, else the run start; a mid-life contract placed it early) and sits exactly on
+  the day grid (a record ~5.55e-17 years ahead on its own close made QUAD raise); a dated `REBASED` contract's
+  knocked-in end is dated (it raised `TypeError` on the knock-in close); `observed_post_ko_indices` is PnL-explain
+  bookkeeping; `PortfolioLifecycleManager` values each tracked autocallable from its tracker's initial copy and the
+  dynamic scenario and equity backtest price their baseline after registering trackers (a carried knocked-in
+  `REBASED` position was priced as booked); `EnsembleConfig` refuses a carried knock-in (it was dropped).
 - `SnowballMCEngine`, `REBASED` KO-reset: a post-knock-in knock-out keeps the accrued offset of an aged contract
   without `initial_date` (an annualized control paid 6.5 instead of 7.5); V1 is read at each path's own maturity
   (`ki_time + max(offset)`, not the grid's last node) on that path's tenor (`get_maturity_payoff_v1` takes

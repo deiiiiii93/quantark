@@ -56,10 +56,13 @@ product identity in reports and still needs the pre-knock-in phase logic in the 
 ## 4. State and event rules (`KOResetLifecycleTracker`)
 
 `AutocallableLifecycleState` gains `knock_in_date: Optional[datetime]` (the close the knock-in was observed on), set
-by `mark_ki`. It is the one record of WHEN; on the numeric clock the knock-in time is derived from it exactly as the
-tracker derives every valuation point, `knock_in_time = (knock_in_date - start_date).days / 365` (years from the
-tracker's `start_date`, the origin of the product's numeric schedule). Snowball and Phoenix never read it. The phase
-follows from the state: schedule 1 until a knock-in, schedule 2 after.
+by `mark_ki`. It is the one record of WHEN; on the numeric clock the knock-in time is derived from it,
+`knock_in_time = (knock_in_date - origin).days / 365`, where `origin` is the day the tracker dates the product's
+numeric records from: its `initial_date`, else the tracker's `start_date` (final review C1: measured from
+`start_date`, a mid-life contract's schedule 2 sat `initial_date - start_date` before the knock-in close). Snowball and
+Phoenix never read it. The phase follows from the state: schedule 1 until a knock-in, schedule 2 after. A converted
+schedule 2 sits exactly on the day grid (`k / 365`, final review C2), and a dated contract's knocked-in end is dated on
+the same clock: the knock-in close plus the final offset.
 
 **The knock-in anchor (accrual time spec §5.1; adopted after that spec merged).** `knock_in_date` is the reset's
 TIMING. Its ACCRUAL hangs from `AutocallableLifecycleState.knock_in_anchor`: the knock-in record whose test fired, at
@@ -198,7 +201,10 @@ in the tracker's maturity valuation:
   "ki_time is required for rebased post-KO maturity".
 Controls: an aged annualized `REBASED` knock-out and V1, each equal to the `ABSOLUTE` contract it becomes.
 
-**`PortfolioLifecycleManager`** builds a `KOResetLifecycleTracker` for a KO-reset (the warning goes), its initial state
+**`PortfolioLifecycleManager`** hands every tracked autocallable position its tracker's initial copy when it registers
+it (`product_for_pricing(base_date, initial=True)`), and the dynamic scenario and the equity backtest register their
+trackers before pricing the baseline (final review I2: a carried knocked-in `REBASED` position was valued from the
+booked contract). It builds a `KOResetLifecycleTracker` for a KO-reset (the warning goes), its initial state
 from the product's carried attributes (§4), and processes it as it processes the autocallables. Snowball and Phoenix
 keep their tracker.
 
@@ -210,6 +216,8 @@ KO-reset and refuses it where it would misprice schedule 2. Snowball and Phoenix
 
 ## 6. Simulated-path backtest
 
+- `EnsembleConfig` refuses a carried knock-in on any product (final review I3: every simulated path starts not knocked
+  in, so it was silently dropped).
 - `EnsembleConfig` accepts `KnockOutResetSnowballOption` beside `SnowballOption`; the vol-model gate refuses a
   KO-reset where §5's measurement shows the vol-model engine cannot price schedule 2.
 - `KOResetLifecycleTracker.resolve_calendar_schedule` returns a `KOResetCalendarSchedule`: the snowball fields for
