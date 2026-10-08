@@ -127,8 +127,8 @@ class KnockOutResetSnowballOption(SnowballOption):
         )
 
     def validate(self) -> None:
-        super().validate()
         self._validate_post_ko_mode()
+        super().validate()
 
     def _validate_barrier_parameters(self) -> None:
         super()._validate_barrier_parameters()

@@ -30,6 +30,7 @@ from quantark.util.enum import (
 )
 from quantark.util.exceptions import ValidationError
 
+from .accrual_build import build_contract_accrual
 from .observation_schedule import (
     at_valuation_instant,
     ObservationsAtValuation,
@@ -236,6 +237,7 @@ class SnowballOption(BaseEquityOption):
         self._validate_payoff_parameters()
         self._validate_accrual_parameters()
         self._build_observation_schedules()
+        build_contract_accrual(self)
 
     def _validate_core_parameters(self) -> None:
         """Validate core product parameters (initial_price, strike)."""

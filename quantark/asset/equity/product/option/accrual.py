@@ -143,6 +143,9 @@ class AccrualPeriod:
     period_fraction: Optional[float] = None
     relative: bool = False
     anchor: Optional[KnockInAnchor] = None
+    #: The contract terms this period was derived from (``accrual_build``); ``None`` for a period the caller set
+    #: explicitly. A rebuilt product keeps a derived period only while its terms are unchanged.
+    terms: Optional[tuple] = None
 
     def __post_init__(self):
         if not isinstance(self.kind, AccrualKind):
