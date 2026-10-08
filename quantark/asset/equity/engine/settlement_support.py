@@ -392,6 +392,30 @@ def resolve_terminal_timing(
     )
 
 
+def resolve_terminal_timing_at(
+    product,
+    pricing_env: "PricingEnvironment",
+    *,
+    determination_time: Optional[float] = None,
+    determination_date: Optional[datetime] = None,
+    cashflow_id: str = "terminal",
+) -> ResolvedPaymentTiming:
+    """A terminal determination/payment pair at a given determination.
+
+    A KO-reset contract ends at its first schedule's last observation (not knocked in) or at its second
+    schedule's end (knocked in), neither of which is the product's own maturity.
+    """
+    if (determination_time is None) == (determination_date is None):
+        raise ValidationError("give exactly one of determination_time and determination_date")
+    request = SettlementRequest(
+        kind=CashflowKind.TERMINAL,
+        determination_date=determination_date,
+        determination_time=None if determination_time is None else float(determination_time),
+        cashflow_id=cashflow_id,
+    )
+    return SettlementResolver.resolve_contingent(product, request, pricing_env)
+
+
 def apply_determination_to_payment(
     value_at_determination,
     timing: ResolvedPaymentTiming,

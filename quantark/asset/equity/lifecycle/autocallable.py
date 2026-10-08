@@ -432,7 +432,6 @@ class AutocallableLifecycleTracker:
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> Optional[LifecycleEvent]:
         """Determine the terminal payoff once contractual maturity is reached."""
-        timestamp = pd.Timestamp(date).to_pydatetime()
         valuation_point = self._valuation_point(date, product)
         self.lifecycle.valuation_point = valuation_point
         if not self.lifecycle.alive:
@@ -442,7 +441,6 @@ class AutocallableLifecycleTracker:
         if not self._timing_is_due(date, valuation_point, timing):
             return None
 
-        before = self._state_snapshot()
         if isinstance(product, PhoenixOption):
             # Phoenix takes the knock-in state second and the environment by keyword; the snowball
             # call below raised TypeError for every Phoenix alive at maturity. Its coupons are
@@ -459,6 +457,14 @@ class AutocallableLifecycleTracker:
             payoff = float(
                 product.get_payoff(spot, env, knocked_in=self.lifecycle.knocked_in)
             )
+        return self._book_maturity(date, spot, payoff, timing, valuation_point)
+
+    def _book_maturity(
+        self, date: pd.Timestamp, spot: float, payoff: float, timing, valuation_point: ValuationPoint
+    ) -> Optional[LifecycleEvent]:
+        """Book a maturity of ``payoff`` per unit, settled with ``timing``; the MATURITY event or ``None``."""
+        timestamp = pd.Timestamp(date).to_pydatetime()
+        before = self._state_snapshot()
         cashflow = self.quantity * payoff
         realized = self._timing_cashflow(
             LifecycleEventType.MATURITY,

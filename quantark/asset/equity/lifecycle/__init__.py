@@ -17,6 +17,7 @@ from .cashflows import (
 from .events import LifecycleEvent, LifecycleEventType
 from .float_roll import FLOAT_ROLLABLE_PRODUCTS, FloatMaturityRoller, is_float_rollable
 from .snapping import snap_contract, snap_time
+from .ko_reset import KOResetLifecycleTracker, tracker_for
 from .manager import PortfolioLifecycleManager, ProcessedLifecycleEvent
 from .state import (
     AutocallableLifecycleState,
@@ -45,6 +46,8 @@ __all__ = [
     "BarrierLifecycleState",
     "EquityOptionLifecycleState",
     "TerminalLifecycleState",
+    "KOResetLifecycleTracker",
+    "tracker_for",
     "snap_contract",
     "snap_time",
 ]
