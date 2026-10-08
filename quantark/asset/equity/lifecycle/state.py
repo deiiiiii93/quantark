@@ -49,6 +49,8 @@ class AutocallableLifecycleState:
     observed_ko_indices: set[int] = field(default_factory=set)
     observed_ki_indices: set[int] = field(default_factory=set)
     observed_coupon_indices: set[int] = field(default_factory=set)
+    #: KO-reset schedule-2 records already observed, or consumed by the knock-in (spec 2026-10-08 section 4).
+    observed_post_ko_indices: set[int] = field(default_factory=set)
     #: Coupon periods observed below their barrier and still unpaid. A memory
     #: coupon pays these together with the period that finally triggers, so the
     #: periods themselves are kept: under an annualized rate they need not be

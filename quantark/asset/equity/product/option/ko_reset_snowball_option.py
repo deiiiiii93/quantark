@@ -8,6 +8,7 @@ The post-KI schedule can be applied in two modes:
 - REBASED: post-KI schedule uses offsets from the KI time.
 """
 
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Union
@@ -280,6 +281,40 @@ class KnockOutResetSnowballOption(SnowballOption):
         self.accrual_config = self.accrual_config.shifted(0.0, dropped_post=dropped)
         post = self.post_barrier_config
         return passed and not BarrierConfig._has_future(post.ko_observation_schedule, post.ko_observation_dates)
+
+    def with_absolute_schedule_2(self, knock_in_time: float) -> "KnockOutResetSnowballOption":
+        """The ABSOLUTE contract a REBASED one becomes once knocked in at ``knock_in_time``.
+
+        ``knock_in_time`` is on this product's own clock (years from its numeric origin; negative for a knock-in
+        before it). Every schedule-2 record moves to ``knock_in_time + offset`` keeping its barrier, rate and
+        accrual; the contract ends at ``knock_in_time + max(offsets)``, the REBASED maturity
+        (``get_post_maturity_time(ki_time)``), so V1 is paid and discounted when it ends.
+        """
+        if self.post_ko_mode != PostKOScheduleMode.REBASED:
+            raise ValidationError("with_absolute_schedule_2 converts a REBASED contract only")
+        schedule = self.post_barrier_config.ko_observation_schedule
+        if schedule is None or not schedule.records:
+            raise ValidationError("a REBASED contract needs its schedule-2 offsets to be placed")
+        shift = float(knock_in_time)
+        records = [
+            replace(
+                record,
+                observation_time=shift + float(record.observation_time),
+                settlement_time=(
+                    None if record.settlement_time is None else shift + float(record.settlement_time)
+                ),
+            )
+            for record in schedule.records
+        ]
+        product = deepcopy(self)
+        product.post_barrier_config = replace(
+            self.post_barrier_config,
+            ko_observation_schedule=replace(schedule, records=records),
+            ko_observation_dates=None,
+        )
+        product.post_ko_mode = PostKOScheduleMode.ABSOLUTE
+        product.maturity = shift + max(float(record.observation_time) for record in schedule.records)
+        return product
 
     def _resolve_ko_schedule(
         self, config: BarrierConfig, pricing_env: PricingEnv
