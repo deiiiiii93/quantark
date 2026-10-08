@@ -555,12 +555,8 @@ class AutocallableLifecycleTracker:
                 ki_due.append(first_due(lambda day, vp, rec=rec: self._record_is_due(day, vp, rec)))
                 ki_barrier.append(float(rec["barrier"]) if rec["barrier"] is not None else np.nan)
 
-        timing = resolve_terminal_timing(product, self._schedule_resolution_env(product, env))
-        terminal_due = first_due(
-            lambda day, vp: self._timing_is_due(day, vp, timing)
-        )
-        terminal_settle = settlement_position(terminal_payment_date(timing), terminal_due)
-        terminal_delay = float(timing.payment_time) - float(timing.determination_time)
+        terminal_due, terminal_settle, terminal_delay = self._calendar_terminal(
+            product, env, first_due, settlement_position, terminal_payment_date)
         return CalendarSchedule(
             dates=dates,
             ko_due_day=np.array(ko_due, dtype=np.int64),
@@ -581,6 +577,13 @@ class AutocallableLifecycleTracker:
             ko_settlement_delay=np.array(ko_delay, dtype=float),
             terminal_settlement_delay=terminal_delay,
         )
+
+    def _calendar_terminal(self, product, env, first_due, settlement_position, terminal_payment_date):
+        """(due day, settlement day, settlement delay) of the contract's terminal on the run calendar."""
+        timing = resolve_terminal_timing(product, self._schedule_resolution_env(product, env))
+        terminal_due = first_due(lambda day, vp: self._timing_is_due(day, vp, timing))
+        terminal_settle = settlement_position(terminal_payment_date(timing), terminal_due)
+        return terminal_due, terminal_settle, float(timing.payment_time) - float(timing.determination_time)
 
     def _first_due(self, dates: pd.DatetimeIndex, is_due, product: Any) -> int:
         """The first position in ``dates`` whose close ``is_due(day, valuation_point)``; -1 past the end."""

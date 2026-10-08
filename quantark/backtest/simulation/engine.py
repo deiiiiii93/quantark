@@ -404,7 +404,9 @@ class EnsembleBacktestEngine:
                 valuation_date=pd.Timestamp(day).to_pydatetime(),
             )
             pay = product.get_maturity_payoff_v1 if bool(knocked_in[n]) else product.get_maturity_payoff_v0
-            out[n] = float(pay(float(spot[i]), env, contract_tenor=float(tenors[n])))
+            tenor = float(tenors[n])
+            # NaN: the contract reads no tenor (not annualized); every annualized leg carries a resolved one
+            out[n] = float(pay(float(spot[i]), env, contract_tenor=None if np.isnan(tenor) else tenor))
         return out
 
     def _receivable_pv(self, lifecycle, rate, d, schedules) -> np.ndarray:

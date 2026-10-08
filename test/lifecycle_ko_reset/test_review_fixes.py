@@ -186,3 +186,36 @@ def test_the_simulation_refuses_a_carried_knock_in():
     setattr(product, "_otc_lifecycle_knocked_in", True)
     with pytest.raises(ValidationError, match="carried knock-in"):
         ensemble_config(products=[ReplayProduct(product=product, quantity=-1.0, position_id=1, has_lifecycle=True)])
+
+
+# -- self-review (independent reviewer): a non-accruing REBASED contract reads no tenor ----------------------------
+
+def _non_accruing_dated_rebased():
+    """dated_rebased() without initial_date: the knock-in records carry NONE periods, nothing is annualized."""
+    product = dated_rebased()
+    product.initial_date = None
+    product.validate()
+    return product
+
+
+def test_a_non_accruing_rebased_contract_matures_on_v1_without_a_tenor():
+    from quantark.asset.equity.product.option.accrual import AccrualKind
+    product = _non_accruing_dated_rebased()
+    assert {r.accrual.kind for r in product.barrier_config.ki_observation_schedule.records} == {AccrualKind.NONE}
+    t = tracker(product)
+    assert run(t, {91: 70.0, 121: 90.0, 150: 80.0, 151: 60.0})[-1] == (151, E.MATURITY, "maturity")
+    assert t.lifecycle.ledger.cashflows[-1].amount == pytest.approx(t.contract().get_maturity_payoff_v1(60.0, env(60.0)))
+
+
+def test_a_non_accruing_rebased_contract_matures_on_v0_without_a_tenor():
+    t = tracker(_non_accruing_dated_rebased())
+    assert run(t, {91: 90.0, 182: 90.0})[-1] == (182, E.MATURITY, "maturity")
+    assert t.lifecycle.ledger.cashflows[-1].amount == pytest.approx(5.0)          # the 5% rebate, not annualized
+
+
+def test_a_non_accruing_rebased_contract_resolves_its_calendar_schedule():
+    t = tracker(_non_accruing_dated_rebased())
+    dates = pd.date_range(START, periods=200, freq="D")
+    schedule = t.resolve_calendar_schedule(dates, env(date=START))
+    assert schedule.placement(91).final_due_day == 151
+    assert math.isnan(schedule.placement(91).final_tenor) and math.isnan(schedule.pre_tenor)

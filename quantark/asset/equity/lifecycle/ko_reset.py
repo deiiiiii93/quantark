@@ -51,7 +51,7 @@ class SchedulePlacement:
     final_due_day: int
     final_settlement_day: int
     final_settlement_delay: float
-    final_tenor: float
+    final_tenor: float          # NaN when V1 is not annualized (no tenor is read)
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,7 @@ class KOResetCalendarSchedule(CalendarSchedule):
     pre_due_day: int
     pre_settlement_day: int
     pre_settlement_delay: float
-    pre_tenor: float
+    pre_tenor: float            # NaN when V0 is not annualized
     rebased: bool
     absolute: Optional[SchedulePlacement]
     place: Optional[Callable[[int], SchedulePlacement]]
@@ -198,13 +198,20 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         ]
         return self._record_dicts(product, resolved, payoffs)
 
-    def pre_contract_tenor(self, env: PricingEnvironment) -> float:
-        """Schedule 1's contract length (V0's tenor)."""
+    def pre_contract_tenor(self, env: PricingEnvironment) -> Optional[float]:
+        """Schedule 1's contract length (V0's tenor); ``None`` when the rebate is not annualized, which reads none (a
+        non-accruing contract has no tenor to resolve)."""
+        if not self.product.accrual_config.is_annualized_rebate:
+            return None
         return float(self.product._resolve_pre_contract_tenor(self._schedule_resolution_env(self.product, env)))
 
-    def final_contract_tenor(self, env: PricingEnvironment) -> float:
-        """The knocked-in contract's length (V1's tenor)."""
+    def final_contract_tenor(self, env: PricingEnvironment) -> Optional[float]:
+        """The knocked-in contract's length (V1's tenor); ``None`` when the knock-in amount is not annualized, which
+        reads none (a non-accruing REBASED contract has no anchor, so its tenor cannot be resolved -- and is not
+        needed). The Monte Carlo route gates it the same way."""
         contract = self.contract()
+        if not contract.accrual_config.is_annualized_ki:
+            return None
         return float(contract._resolve_post_contract_tenor(self._schedule_resolution_env(contract, env)))
 
     def _last_pre_record(self, product: Any, env: PricingEnvironment) -> Dict[str, Any]:
@@ -414,6 +421,12 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             ))
         return self._book_maturity(date, spot, payoff, timing, valuation_point)
 
+    def _calendar_terminal(self, product, env, first_due, settlement_position, terminal_payment_date):
+        """Not resolved here: a KO-reset has two terminals (V0 at schedule 1's end, V1 at the knocked-in end), which
+        ``resolve_calendar_schedule`` places itself and writes into the ``terminal_*`` fields. The snowball's
+        single-terminal rule does not apply (a dated KO-reset with a numeric maturity has no date for it)."""
+        return -1, -1, 0.0
+
     def knock_in_anchor_on(self, dates: pd.DatetimeIndex, knock_in_day: int, env: PricingEnvironment):
         """The anchor of a knock-in observed on run-calendar position ``knock_in_day``, for a consumer that keys a
         REBASED path by its knock-in day (the simulated paths): the lowest-index discrete knock-in record due on that
@@ -467,7 +480,7 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
             final_settlement_day=int(owner._settlement_position(
                 dates, owner._terminal_payment_date(contract, timing), final_due)),
             final_settlement_delay=float(timing.payment_time) - float(timing.determination_time),
-            final_tenor=owner.final_contract_tenor(env),
+            final_tenor=_or_nan(owner.final_contract_tenor(env)),
         )
 
     rebased = product.post_ko_mode == PostKOScheduleMode.REBASED
@@ -518,8 +531,13 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
     )
     return KOResetCalendarSchedule(
         **values, pre_due_day=int(pre_due), pre_settlement_day=int(pre_settle), pre_settlement_delay=pre_delay,
-        pre_tenor=tracker.pre_contract_tenor(env), rebased=rebased, absolute=absolute, place=place,
+        pre_tenor=_or_nan(tracker.pre_contract_tenor(env)), rebased=rebased, absolute=absolute, place=place,
     )
+
+
+def _or_nan(tenor: Optional[float]) -> float:
+    """A calendar schedule's tenor field: NaN where the contract reads none (not annualized)."""
+    return float("nan") if tenor is None else float(tenor)
 
 
 def _day_grid(time: float) -> float:
