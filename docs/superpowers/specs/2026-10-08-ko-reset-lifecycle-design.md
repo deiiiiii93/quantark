@@ -1,7 +1,8 @@
 # KO-reset snowball lifecycle tracking — design
 
-Status: approved in conversation 2026-10-08 (sections 1–4); revised for review findings 1–5 and the user's
-rulings on the day rule and the `REBASED` provider matrix (2026-10-08); awaiting review.
+Status: approved in conversation 2026-10-08 (sections 1–4); revised for review rounds 1 and 2 and the user's
+rulings (2026-10-08): the day rule in this spec, option (a) for the `REBASED` provider matrix, option (ii) snapped
+numeric times; awaiting review.
 
 ## 1. Purpose
 
@@ -22,7 +23,8 @@ schedule-2 modes, `ABSOLUTE` and `REBASED` ("common", user 2026-10-08).
 
 **Success.** A KO-reset position in any of those consumers books its events and cashflows, is closed when the
 contract ends, is never repriced after it matured, and never raises on a live state. Snowball and Phoenix results
-stay byte-identical except where §4a's day rule corrects a pricing copy (every such row listed).
+stay byte-identical except where §4a's snapped times correct an off-day numeric schedule (every such row
+listed).
 
 ## 2. Contract rules (user rulings)
 
@@ -42,9 +44,8 @@ reinterpret them.
 
 A `KOResetLifecycleTracker` subclass of `AutocallableLifecycleTracker` and a KO-reset variant of the simulation's
 vector lifecycle (approach B, approved 2026-10-08); the KO-reset rules live in one place. Snowball and Phoenix event
-code is not touched. One shared change reaches them on purpose: §4's day rule (user, 2026-10-08: "put the
-day-rounding mismatch in this spec"), which moves the base tracker's pricing copy from time-based ageing to
-removing observed records by identity (§4a).
+code is not touched. One shared change reaches them on purpose: §4a's snapped numeric times (user, 2026-10-08: "put
+the day-rounding mismatch in this spec", option (ii)).
 
 Rejected: (A) KO-reset branches inside the existing tracker — interleaves the rules and puts every snowball golden
 behind inert branches; (C) swapping the product for a knocked-in `SnowballOption` at the knock-in — loses the
@@ -68,16 +69,18 @@ follows from the state: schedule 1 until a knock-in, schedule 2 after.
 - a carried knock-in on a `REBASED` contract without a `knock_in_date` is refused at construction
   (`ValidationError`: schedule 2 cannot be placed without it). An `ABSOLUTE` contract needs no date.
 
-**One day rule (review finding 2).** A record falls due on the first available close whose day index reaches the
-record's due day, where a dated record's due day is its date and a numeric record's due day is
-`round(time * 365)` days after `start_date` — the tracker's existing `_record_is_due` rule, kept for every product.
-A `REBASED` record's numeric time is `knock_in_time + offset`, so its due day is
-`round((knock_in_time + offset) * 365)`. A due day with no market close (holiday, data gap) fires on the next
-available close. Ageing never decides by time comparison whether a record is still pending: the pricing copy
-removes the records this tracker has OBSERVED, by their stable identity (schedule + index, the `observed_*_indices`
-sets), and keeps every other one. So a target at day 1.4, observed on day 1's close, is gone from day 1's pricing
-copy; and an unobserved record whose time has passed (the gap case) is still observed at the next close and never
-silently dropped.
+**One day rule (review finding 2; user, 2026-10-08: option (ii)).** A record falls due on the first available close
+whose day index reaches its due day: a dated record's date; a numeric record's `round(time * 365)` days after
+`start_date` (the tracker's existing `_record_is_due` rule, unchanged). To make every consumer agree with that day,
+the numeric times themselves are SNAPPED to it (§4a), so a record observed on day 1's close is at day 1 in every
+pricing copy, surface and engine, and ordinary time-based ageing removes it on the same close. A due day with no market
+close (holiday, data gap) fires on the next available close; the pricing copy of that close no longer holds it.
+
+**Schedule 2 before the knock-in (review round 2, finding 3).** Schedule-2 records whose due day is BEFORE the close the
+knock-in is observed on were due while schedule 2 was not in force: the knock-in consumes them (marked observed,
+never tested), and the pricing copy drops them by time as engines do. Records due ON the knock-in close are tested
+that close (R1, inclusive). A schedule-2 record delayed by a missing close after the knock-in is still tested at the
+next close.
 
 Each daily close, in this order:
 
@@ -101,33 +104,45 @@ Each daily close, in this order:
 
 Event indices name their schedule (`ko1:i`, `ko2:i`, `ki:i`) so ledger cashflow IDs stay unique.
 
-## 4a. The day rule in the base tracker (every autocallable)
+## 4a. Snapped numeric times (every autocallable)
 
-The mismatch of §4 is the base tracker's, for snowball and Phoenix too: `_record_is_due` fires a numeric record on
-`round(time * 365)` days while `product_for_pricing` ages by `barrier_config.time_shift(elapsed)` and keeps a record
-whose time exceeds the elapsed time. A numeric record off a whole day (`k / 12`, `k / 52`, `k / 252` schedules: day
-30.42, 7.02, 1.45) is observed on its rounded day but stays in that day's pricing copy as a future observation (or,
-rounding up, is dropped from the copy a day before it is observed).
+The base tracker fires a numeric record on `round(time * 365)` days while its pricing copy ages by
+`barrier_config.time_shift(elapsed)` and keeps a record whose time exceeds the elapsed time; surfaces and engines see
+the original fractional time. A record off a whole day (`k / 12`, `k / 52`, `k / 252` schedules: days 30.42, 7.02,
+1.45) is observed on its rounded day yet priced as still ahead (or dropped a day early) — the review's control: a
+knock-out at day 1.4 observed on day 1's close, priced 0.4381 by a corrected copy and 4.9183 by the surface.
 
-`AutocallableLifecycleTracker.product_for_pricing` removes the records the tracker has observed — `observed_ko_indices`,
-`observed_ki_indices`, `observed_coupon_indices` — by identity and keeps the others, with times measured from the
-pricing date as today; ageing by time comparison is gone from the pricing copy. Dated records and numeric records on
-whole days are removed on the same day as before, so the change moves a price only on a day where the old copy kept an
-observed record or dropped an unobserved one. The simulated-path backtest's aged product (`aged_product`) goes through
-the same tracker and follows; its `VectorLifecycle` already fires on the tracker's due days.
+**Rule.** At construction, every autocallable tracker (base, Phoenix, KO-reset) replaces its contract by the SNAPPED
+contract: each numeric observation time — knock-out, knock-in, Phoenix coupon, an `ABSOLUTE` schedule 2 — and a
+`REBASED` offset becomes `round(time * 365) / 365` (the rounding `_record_is_due` uses); a numeric maturity likewise. A time already on a whole day
+(`time * 365` within `Tolerance.PRECISION` of an integer) keeps its exact float, so whole-day schedules are
+bit-identical. Settlement lags are kept as offsets from the snapped determination time. Dated records are untouched.
+Because a knock-in time is a whole number of days, a `REBASED` record's snapped time is
+`knock_in_time + round(offset * 365) / 365`, its due day exactly as §4 states.
 
-Acceptance: every replay, simulation and lifecycle golden is byte-identical except on such days; each moving
-row is listed with the record that caused it (old, new value); the PDE byte book is untouched (it does not age
-through the tracker).
+**Who sees it.** The tracker exposes the snapped contract (`lifecycle_contract`); every consumer builds from it:
+`product_for_lifecycle` and `product_for_pricing`, `ProductReplay`, the portfolio manager, and the simulated-path
+backtest (its `aged_product` cache, its surfaces and its `resolve_calendar_schedule`). Ageing stays time-based
+(`time_shift`) and is now consistent with the due rule, so no consumer needs the observed-index sets (the
+simulation's per-path pricer never had them).
+
+**Valuation phase.** A pricing copy is either the INITIAL valuation (the run's start, before its first close is
+observed: a record due that day is still pending and kept at time 0, `keep_landing=True`) or a POST-CLOSE valuation
+(the day's records applied, `keep_landing=False`). `product_for_pricing` takes the phase; the simulation's aged-product
+and surface caches key on it beside the date, so the two never share an entry.
+
+**Acceptance.** Event goldens (event days, cashflows) are unchanged — the due rule is unchanged. Prices move only for
+products with off-day numeric times; each moved replay / simulation golden row is listed with the record that moved
+it. Whole-day and dated products: byte-identical. The PDE byte book does not age through the tracker: byte-identical.
 
 ## 5. Pricing copy, portfolio manager, replay
 
-**`product_for_pricing`.** Ages maturity, schedule 1, the knock-in schedule and an `ABSOLUTE` schedule 2; removes the
-observed records by identity (§4's day rule), never by time; sets `_otc_lifecycle_knocked_in` and
-`_otc_lifecycle_knock_in_date` from the state. A knocked-in `REBASED` contract's copy is converted to the `ABSOLUTE`
-contract it has become:
-- schedule 2 at `knock_in_time + offset` (measured from the pricing date), the observed records removed, each record
-  keeping its barrier, rate and accrual from inception;
+**`product_for_pricing(date, env, phase)`.** Ages the snapped contract (§4a) — maturity, schedule 1, the knock-in
+schedule and an `ABSOLUTE` schedule 2 — by time, keeping a record due today only in the initial phase; sets
+`_otc_lifecycle_knocked_in` and `_otc_lifecycle_knock_in_date` from the state. A knocked-in `REBASED` contract's copy
+is converted to the `ABSOLUTE` contract it has become:
+- schedule 2 at `knock_in_time + offset` (snapped offsets, measured from the pricing date), the records before the
+  knock-in close dropped (§4), each record keeping its barrier, rate and accrual from inception;
 - `post_ko_mode = ABSOLUTE`;
 - its horizon reset (review finding 1): maturity `knock_in_time + max(offsets)` measured from the pricing date — the
   original contract's maturity is NOT aged on — with the terminal settlement and V1's contract tenor following that
@@ -142,6 +157,17 @@ before the grid ends and its V1 is read at the wrong time. V1 is read at each pa
 (`ki_time + max(offset)` on its grid); the `ABSOLUTE` path is unchanged (its maturity is the last node). Control:
 a `REBASED` contract with two knock-in dates against the two `ABSOLUTE` contracts they become, and a grid
 extended past a path's maturity leaves that path's V1 unchanged.
+
+**`REBASED` accrual and V1 tenor (review round 2, finding 4).** Two more inputs are fixed on the MC `REBASED` route and
+in the tracker's maturity valuation:
+- the elapsed accrual: a post-knock-in knock-out's coupon accrues from inception, including the aged contract's
+  `accrual_config.accrued_offset` (today's MC omits it: an annualized control aged 0.1 years pays 6.5 instead of
+  7.5);
+- V1's contract tenor per path: `get_maturity_payoff_v1` takes an explicit `contract_tenor`, which the MC route
+  supplies per path from that path's knock-in time and the tracker from `knock_in_time`
+  (`get_post_maturity_time(ki_time)` + elapsed); without it an annualized `REBASED` V1 raises
+  "ki_time is required for rebased post-KO maturity".
+Controls: an aged annualized `REBASED` knock-out and V1, each equal to the `ABSOLUTE` contract it becomes.
 
 **`PortfolioLifecycleManager`** builds a `KOResetLifecycleTracker` for a KO-reset (the warning goes), its initial state
 from the product's carried attributes (§4), and processes it as it processes the autocallables. Snowball and Phoenix
@@ -172,8 +198,8 @@ KO-reset and refuses it where it would misprice schedule 2. Snowball and Phoenix
   `REBASED`, the path's V1 tenor.
 - `DayStates`, `StateKey` and the aged-product cache gain `knock_in_day`, set only for a knocked-in `REBASED` path
   (-1 otherwise: snowball and `ABSOLUTE` keys, caches and goldens unchanged). The aged product of such a path is
-  §5's pricing copy for that knock-in day. Surface mode builds a knocked-in surface per (bucket, knock-in day)
-  visited, lazily; exact mode is unchanged. Which providers can price the un-knocked `REBASED` contract is §6a.
+  §5's pricing copy for that knock-in day, in exact mode. Surface mode refuses `REBASED` (§6a). Caches also key on
+  the valuation phase (§4a).
 - The conformance oracle (exact mode == replay to the last bit) gains KO-reset cases (§7).
 
 ## 6a. Who prices an un-knocked `REBASED` contract (user, 2026-10-08: option (a))
@@ -207,10 +233,14 @@ position registration), naming the product, the mode and the engine — never mi
   day rule: a numeric target at day 1.4 fires on day 1's close and is absent from day 1's pricing copy, a due day on
   a holiday fires on the next close, an unobserved past record is observed, never dropped; initial state: a product
   carrying a knock-in keeps it through the tracker (the flag is not reset), a carried `REBASED` knock-in without a
-  date is refused.
-- **Day rule, base tracker (§4a):** a snowball and a Phoenix with `k / 12` numeric schedules: on an observation day the
-  observed record is absent from the pricing copy and the next one present (before: present); the replay-golden diff
-  lists every moved row with its record; all other rows byte-identical.
+  date is refused; schedule 2 before the knock-in: an `ABSOLUTE` schedule-2 record at 0.2 years and a knock-in at
+  0.5 — not tested on the knock-in close; a schedule-2 record on the knock-in close — tested; one delayed by a
+  missing close after the knock-in — tested at the next close.
+- **Snapped times (§4a):** a snowball and a Phoenix with `k / 12` numeric schedules: on an observation day the observed
+  record is absent from the post-close copy and present in the initial copy; the review's day-1.4 control: the
+  surface and the exact copy agree after the observation within the surface gate (corrected copy 0.4381, today's
+  surface 4.9183); whole-day and dated
+  schedules bit-identical; the replay-golden diff lists every moved price row with its record, event rows unchanged.
 - **Provider matrix (§6a):** each refusal raised at configuration with its message; an MC replay of an un-knocked
   `REBASED` contract runs through a knock-in and its knocked-in days price on PDE and QUAD too.
 - **Pricing copy:** a knocked-in `REBASED` copy prices as the same contract with an `ABSOLUTE` schedule 2 at
@@ -219,17 +249,20 @@ position registration), naming the product, the mode and the engine — never mi
 - **Consumers:** the manager closes a KO-reset at schedule 1's end and the next day does not raise; dynamic scenario
   and equity backtest smoke cases; replay QUAD prices a knocked-in KO-reset on `KOResetSnowballQuadEngine` (the
   4.195 vs -1.744 case as a regression).
-- **Simulation:** conformance cases for an `ABSOLUTE` and a `REBASED` contract over paths that knock out on schedule
-  1, mature un-knocked, knock in then knock out on schedule 2, and knock in then mature; surface mode's `REBASED`
-  per-knock-in-day surfaces within the existing gate against exact mode.
-- **Unchanged:** snowball and Phoenix replay goldens and simulation snowball goldens byte-identical apart from §4a's
-  listed rows; the PDE byte book byte-identical; full suite `-n 6` under the RAM guard.
+- **`REBASED` MC inputs (§5):** an aged annualized `REBASED` knock-out pays 7.5 (accrued offset kept) and an annualized
+  `REBASED` V1 prices without raising, each equal to its `ABSOLUTE` conversion; V1 read at each path's own maturity.
+- **Simulation:** exact-mode conformance cases (== replay to the last bit) for an `ABSOLUTE` and a `REBASED` contract
+  (MC) over paths that knock out on schedule 1, mature un-knocked, knock in then knock out on schedule 2, and knock in
+  then mature; surface mode for an `ABSOLUTE` contract within the existing gate against exact mode; surface mode
+  refuses a `REBASED` contract at configuration (§6a).
+- **Unchanged:** event goldens; snowball and Phoenix replay and simulation price goldens byte-identical apart from §4a's
+  listed rows (off-day numeric schedules only); the PDE byte book byte-identical; full suite `-n 6` under the RAM
+  guard.
 
 ## 8. Out of scope
 
 - A PDE / QUAD route for an un-knocked `REBASED` KO-reset (§6a): the knocked-in value depends on the knock-in time,
   so it needs one knocked-in solve per knock-in date folded in at each knock-in observation — its own spec, with its
   own measurements and certification. Until then §6a's matrix stands.
-
-New local-vol / Heston / SLV KO-reset engines. Under those models a KO-reset is refused wherever a snowball engine
-would misprice it.
+- New local-vol / Heston / SLV KO-reset engines. Under those models a KO-reset is refused wherever a snowball engine
+  would misprice it.
