@@ -231,37 +231,10 @@ def _ki_is_continuous(product) -> bool:
 
 
 def phoenix_coupon_fractions(product, ko_times: List[float]) -> List[float]:
-    """Contractual per-period coupon year fractions over the FULL KO schedule.
-
-    A rate that is not annualized is the period's amount, so every fraction is 1.
-    Otherwise the precedence the QUAD V2 Phoenix adapter applies at inception:
-    explicit ``coupon_year_fractions``, positional ``accrual_factors``, a fixed
-    fraction, the coupon day count between consecutive contract dates (from
-    ``initial_date``), else consecutive observation-time differences.
-    """
-    raw = product.barrier_config.ko_observation_schedule.records
-    n = len(raw)
-    if not product.is_coupon_rate_annualized:
-        return [1.0] * n
-    explicit = getattr(product.coupon_config, "coupon_year_fractions", None)
-    if explicit is not None:
-        if len(explicit) != n:
-            raise ValidationError(f"coupon_year_fractions has {len(explicit)} entries for {n} KO records")
-        return [float(f) for f in explicit]
-    factors = product.accrual_config.accrual_factors
-    if factors is not None:
-        if len(factors) != n:
-            raise ValidationError(f"accrual_factors has {len(factors)} entries for {n} KO records")
-        return [float(f) for f in factors]
-    fixed = product.coupon_config.fixed_coupon_year_fraction
-    if fixed is not None:
-        return [float(fixed)] * n
-    if product.initial_date is not None and all(r.observation_date is not None for r in raw):
-        dates = [product.initial_date] + [r.observation_date for r in raw]
-        return [float(product.get_coupon_year_fraction(dates[i], dates[i + 1])) for i in range(n)]
-    if len(ko_times) != n:
-        raise ValidationError("Phoenix coupon fractions need one observation time per KO record")
-    return [float(ko_times[0])] + [float(ko_times[i] - ko_times[i - 1]) for i in range(1, n)]
+    """Contractual per-period coupon fractions over the FULL KO schedule, from each record's accrual period
+    (accrual time spec §6): the product's and QUAD V2's answer. ``ko_times`` is unused, kept for callers."""
+    n = len(product.barrier_config.ko_observation_schedule.records)
+    return [float(product.coupon_period_fraction(i)) for i in range(n)]
 
 
 def ko_reset_records(product, config, env):

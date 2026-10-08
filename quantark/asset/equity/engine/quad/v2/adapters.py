@@ -361,32 +361,8 @@ def compile_contract(
             raise ValidationError(
                 "Phoenix coupon schedule does not align with active KO records"
             )
-        factors = product.accrual_config.accrual_factors
-        if factors is not None and len(factors) == len(raw):
-            fractions = [float(factors[i]) for i in active]
-        elif (
-            factors is None
-            and product.coupon_config.fixed_coupon_year_fraction is None
-            and product.initial_date is not None
-            and all(r.observation_date is not None for r in raw)
-        ):
-            dates = [product.initial_date] + [r.observation_date for r in raw]
-            fractions = [
-                product.get_coupon_year_fraction(dates[i], dates[i + 1]) for i in active
-            ]
-        elif (
-            factors is None
-            and product.coupon_config.fixed_coupon_year_fraction is None
-            and active
-            and active[0] > 0
-            and all(r.observation_time is not None for r in raw)
-        ):
-            fractions = [
-                float(raw[i].observation_time - raw[i - 1].observation_time)
-                for i in active
-            ]
-        else:
-            fractions = product.get_coupon_period_year_fractions(env)[:len(pre)]
+        # each active coupon's contractual period, by its source record (accrual time spec §6)
+        fractions = [product.coupon_period_fraction(i) for i in active]
         coupon_amounts = [
             product.get_coupon_payoff(i, year_fraction=f)
             for i, f in enumerate(fractions)
@@ -398,19 +374,11 @@ def compile_contract(
                 historic = [
                     product.get_coupon_payoff(0, year_fraction=fixed)
                 ] * initial_memory
-            elif (
-                active
-                and active[0] >= initial_memory
-                and product.initial_date is not None
-                and all(r.observation_date is not None for r in raw)
-            ):
-                dates = [product.initial_date] + [r.observation_date for r in raw]
-                start = active[0] - initial_memory
+            elif active and active[0] >= initial_memory:
+                # the missed periods are still in the schedule: their coupons are their own periods'
                 historic = [
-                    product.get_coupon_payoff(
-                        i, start_date=dates[i], end_date=dates[i + 1]
-                    )
-                    for i in range(start, active[0])
+                    product.get_coupon_payoff(i)
+                    for i in range(active[0] - initial_memory, active[0])
                 ]
             else:
                 raise NotImplementedError(
