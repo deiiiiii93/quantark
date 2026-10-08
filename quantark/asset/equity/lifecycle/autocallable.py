@@ -603,11 +603,12 @@ class AutocallableLifecycleTracker:
         later = np.flatnonzero(dates >= stamp)
         return int(later[0]) if later.size else -1
 
-    def _terminal_payment_date(self, product: Any, timing) -> Optional[pd.Timestamp]:
-        """The terminal payment day, on the same clock ``_scheduled_records`` uses."""
+    def _terminal_payment_date(self, product: Any, timing, base=None) -> Optional[pd.Timestamp]:
+        """The terminal payment day, on the same clock ``_scheduled_records`` uses (or ``base``'s)."""
         if getattr(timing, "payment_date", None) is not None:
             return pd.Timestamp(timing.payment_date).normalize()
-        base = getattr(product, "initial_date", None) or self.start_date
+        if base is None:
+            base = getattr(product, "initial_date", None) or self.start_date
         if base is None:
             return None
         payment_time = float(timing.payment_time)
@@ -667,16 +668,19 @@ class AutocallableLifecycleTracker:
         return self._record_dicts(product, resolved)
 
     def _record_dicts(
-        self, product: Any, resolved, payoffs: Optional[List[float]] = None
+        self, product: Any, resolved, payoffs: Optional[List[float]] = None, base=None
     ) -> List[Dict[str, Any]]:
-        """The replay-clock record dicts of resolved observations; ``payoffs`` overrides each ``rec.payoff``."""
+        """The replay-clock record dicts of resolved observations; ``payoffs`` overrides each ``rec.payoff``.
+        ``base`` dates numeric records from another day than the product's (the KO-reset tracker's REBASED schedule
+        2, timed from the knock-in close on the pricing clock)."""
         records: List[Dict[str, Any]] = []
         # Replay clock: a numeric schedule still plays out on real calendar
         # days of this run, so dates absent from the schedule are derived from
         # the run's base date. The settlement RESOLVER never fabricates dates;
         # this is the replay layer's own calendar, and it is what date-based
         # due checks, pending settlement, and run termination key on.
-        base = getattr(product, "initial_date", None) or self.start_date
+        if base is None:
+            base = getattr(product, "initial_date", None) or self.start_date
         base_date = pd.Timestamp(base) if base is not None else None
         for position, rec in enumerate(resolved):
             obs_time = float(rec.observation_time)

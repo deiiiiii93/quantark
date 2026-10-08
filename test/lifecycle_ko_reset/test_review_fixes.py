@@ -219,3 +219,44 @@ def test_a_non_accruing_rebased_contract_resolves_its_calendar_schedule():
     schedule = t.resolve_calendar_schedule(dates, env(date=START))
     assert schedule.placement(91).final_due_day == 151
     assert math.isnan(schedule.placement(91).final_tenor) and math.isnan(schedule.pre_tenor)
+
+
+# -- self-review (independent reviewer, Critical): one clock for schedule 2's events and its pricing copy ---------
+
+def _issued_100_days_early(product):
+    product.initial_date = (START - pd.Timedelta(days=100)).to_pydatetime()
+    product.validate()
+    return product
+
+
+def test_a_dated_rebased_copy_issued_before_the_run_is_timed_like_its_events():
+    """Issued 100 days before the run, knocked in on run day 91, offsets 30 and 60: the knock-out falls due on run
+    day 121 and the contract ends on day 151, so the day-100 copy holds them 21 and 51 days ahead (it held 121/151)."""
+    product = _issued_100_days_early(dated_rebased())
+    t = tracker(product)
+    run(t, {91: 70.0})
+    copy = t.product_for_pricing(day(100), env(90.0, day(100)))
+    assert [r.observation_time for r in copy.post_barrier_config.ko_observation_schedule.records] == [
+        pytest.approx(21 * D), pytest.approx(51 * D)]
+    assert copy.maturity == pytest.approx(51 * D)
+    assert run(tracker(_issued_100_days_early(dated_rebased())), {91: 70.0, 121: 96.0}) == [
+        (91, E.KNOCK_IN, None), (121, E.KNOCK_OUT, "knock-out:ko2:0")]
+    assert run(tracker(_issued_100_days_early(dated_rebased())), {91: 70.0, 121: 90.0, 150: 80.0, 151: 60.0})[-1] == (
+        151, E.MATURITY, "maturity")
+
+
+def test_a_numeric_mid_life_rebased_copy_is_timed_like_its_events():
+    """The C1 mid-life contract: knocked in on run day 60, offsets 30 and 60. The knock-out falls due on day 90, the
+    contract ends on day 120; the day-70 copy holds them 20 and 50 days ahead (it held 120/150) and V1 is booked on
+    day 120 (it was booked on day 220)."""
+    def product():
+        p = kr(M.REBASED, post=(30, 60), pre=(160, 250), ki=(160, 250))
+        p.initial_date = (START - pd.Timedelta(days=100)).to_pydatetime()
+        return p
+    t = tracker(product())
+    run(t, {60: 70.0})
+    copy = t.product_for_pricing(day(70), env(90.0, day(70)))
+    assert [r.observation_time for r in copy.post_barrier_config.ko_observation_schedule.records] == [
+        pytest.approx(20 * D), pytest.approx(50 * D)]
+    assert copy.maturity == pytest.approx(50 * D)
+    assert run(tracker(product()), {60: 70.0, 90: 90.0, 119: 80.0, 120: 60.0})[-1] == (120, E.MATURITY, "maturity")

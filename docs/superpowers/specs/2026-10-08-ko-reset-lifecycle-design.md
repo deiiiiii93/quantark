@@ -56,13 +56,17 @@ product identity in reports and still needs the pre-knock-in phase logic in the 
 ## 4. State and event rules (`KOResetLifecycleTracker`)
 
 `AutocallableLifecycleState` gains `knock_in_date: Optional[datetime]` (the close the knock-in was observed on), set
-by `mark_ki`. It is the one record of WHEN; on the numeric clock the knock-in time is derived from it,
-`knock_in_time = (knock_in_date - origin).days / 365`, where `origin` is the day the tracker dates the product's
-numeric records from: its `initial_date`, else the tracker's `start_date` (final review C1: measured from
-`start_date`, a mid-life contract's schedule 2 sat `initial_date - start_date` before the knock-in close). Snowball and
-Phoenix never read it. The phase follows from the state: schedule 1 until a knock-in, schedule 2 after. A converted
-schedule 2 sits exactly on the day grid (`k / 365`, final review C2), and a dated contract's knocked-in end is dated on
-the same clock: the knock-in close plus the final offset.
+by `mark_ki`. It is the one record of WHEN; on the numeric clock the knock-in time is derived from it exactly as the
+tracker derives every valuation point, `knock_in_time = (knock_in_date - start_date).days / 365` (years from the
+tracker's `start_date`, the origin `product_for_pricing` ages numeric times from). A converted `REBASED` schedule 2 and
+its knocked-in end are DATED from `start_date` too (not from `initial_date`, the base the tracker dates schedule 1's
+numeric records from), so its events and its pricing copies hang from the knock-in close on one clock (final review C1
+and the independent review: with `initial_date` before the run, one clock or the other sat `start_date -
+initial_date` off). It sits exactly on the day grid (`k / 365`, final review C2), and a dated contract's knocked-in
+end is the knock-in close plus the final offset. Snowball and Phoenix never read it. The phase follows from the state:
+schedule 1 until a knock-in, schedule 2 after. (Open, not changed here: a NUMERIC schedule 1, or an `ABSOLUTE` numeric
+schedule 2, on a contract whose `initial_date` precedes `start_date` is dated from `initial_date` but aged from
+`start_date` by the base tracker, for every autocallable.)
 
 **The knock-in anchor (accrual time spec §5.1; adopted after that spec merged).** `knock_in_date` is the reset's
 TIMING. Its ACCRUAL hangs from `AutocallableLifecycleState.knock_in_anchor`: the knock-in record whose test fired, at

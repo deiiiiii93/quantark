@@ -131,20 +131,28 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     # The contract in force
     # ------------------------------------------------------------------
 
-    def _clock_origin(self) -> Optional[pd.Timestamp]:
-        """The day the product's numeric records are dated from: ``initial_date``, else ``start_date`` -- the base
-        ``_record_dicts`` and ``_terminal_payment_date`` place every numeric record and payment on."""
-        base = getattr(self.product, "initial_date", None) or self.start_date
-        return None if base is None else pd.Timestamp(base).normalize()
+    def _schedule_two_base(self) -> Optional[pd.Timestamp]:
+        """The day a REBASED contract's converted schedule 2 and its knocked-in end are dated from: ``start_date``,
+        the origin ``product_for_pricing`` ages numeric times from (``None`` for ABSOLUTE, whose numeric records are
+        contract times dated like schedule 1's).
+
+        One clock for schedule 2's events and its pricing copy (independent review, Critical): measured from
+        ``initial_date`` the copy held schedule 2 ``start_date - initial_date`` too far ahead; measured from
+        ``start_date`` but dated from ``initial_date`` (``_record_dicts``' default) it fell due that much early
+        (final review C1). Timed from the knock-in close either way; the accrual is the anchor's (§5.1).
+        """
+        if self.product.post_ko_mode != PostKOScheduleMode.REBASED or self.start_date is None:
+            return None
+        return pd.Timestamp(self.start_date).normalize()
 
     def knock_in_time(self) -> Optional[float]:
-        """Years from the numeric clock's origin (``_clock_origin``) to the knock-in close; ``None`` while not knocked
-        in. Measured on the clock schedule 1 and the knock-in are dated on, so a REBASED schedule 2 hangs from the
-        knock-in close itself (review finding C1: from ``start_date`` it sat ``initial_date - start_date`` early)."""
-        origin = self._clock_origin()
-        if not self.lifecycle.knocked_in or self.lifecycle.ki_date is None or origin is None:
+        """Years from ``start_date`` (the pricing clock's origin) to the knock-in close; ``None`` while not knocked
+        in. A REBASED schedule 2 is placed at ``knock_in_time + offset`` and dated from ``start_date`` too
+        (``_schedule_two_base``), so it hangs from the knock-in close in every consumer."""
+        if not self.lifecycle.knocked_in or self.lifecycle.ki_date is None or self.start_date is None:
             return None
-        return (pd.Timestamp(self.lifecycle.ki_date).normalize() - origin).days / DAYS_PER_YEAR
+        return (pd.Timestamp(self.lifecycle.ki_date).normalize() - pd.Timestamp(self.start_date).normalize()).days \
+            / DAYS_PER_YEAR
 
     def contract(self) -> Any:
         """The snapped contract, or the ABSOLUTE contract a knocked-in REBASED one has become."""
@@ -196,7 +204,8 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             product._ko_cash(record.observation_time, rate, source, schedule_env)
             for record, rate, source in zip(resolved, rates, sources)
         ]
-        return self._record_dicts(product, resolved, payoffs)
+        base = self._schedule_two_base() if config is getattr(product, "post_barrier_config", None) else None
+        return self._record_dicts(product, resolved, payoffs, base=base)
 
     def pre_contract_tenor(self, env: PricingEnvironment) -> Optional[float]:
         """Schedule 1's contract length (V0's tenor); ``None`` when the rebate is not annualized, which reads none (a
@@ -240,13 +249,14 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         contract = self.contract()
         schedule_env = self._schedule_resolution_env(contract, env)
         end_date = _last_observation_date(contract.post_barrier_config.ko_observation_schedule)
-        if end_date is None and self._uses_date_timing(contract) and self._clock_origin() is not None:
+        base = self._schedule_two_base()
+        if end_date is None and self._uses_date_timing(contract) and base is not None:
             # a dated contract's converted REBASED schedule 2 is numeric: its end is dated on the same clock as its
             # records, the knock-in close plus the final offset (review finding C1: it was read off a numeric
             # valuation point a dated contract never has)
             end_time = float(contract.get_post_maturity_time(schedule_env))
             end_date = self._date_resolver(
-                (self._clock_origin() + timedelta(days=int(round(end_time * DAYS_PER_YEAR)))).normalize()
+                (base + timedelta(days=int(round(end_time * DAYS_PER_YEAR)))).normalize()
             ).to_pydatetime()
         if end_date is not None and self._uses_date_timing(contract):
             return resolve_terminal_timing_at(
@@ -478,7 +488,7 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
             ko_due_day=due, ko_barrier=barrier, ko_payoff=payoff, ko_settlement_day=settle, ko_settlement_delay=delay,
             final_due_day=int(final_due),
             final_settlement_day=int(owner._settlement_position(
-                dates, owner._terminal_payment_date(contract, timing), final_due)),
+                dates, owner._terminal_payment_date(contract, timing, base=owner._schedule_two_base()), final_due)),
             final_settlement_delay=float(timing.payment_time) - float(timing.determination_time),
             final_tenor=_or_nan(owner.final_contract_tenor(env)),
         )

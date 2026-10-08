@@ -157,9 +157,9 @@ barriers away from maturity are bit-identical.
   price it on schedule 1 (21-26% off).
 
 ### Fixed
-- KO-reset lifecycle final review: a `REBASED` schedule 2 hangs from the knock-in close on the clock the contract's
-  records are dated on (`initial_date`, else the run start; a mid-life contract placed it early) and sits exactly on
-  the day grid (a record ~5.55e-17 years ahead on its own close made QUAD raise); a dated `REBASED` contract's
+- KO-reset lifecycle final review: a `REBASED` schedule 2 hangs from the knock-in close, timed and dated from the
+  run start, the clock pricing copies age on (a contract issued before the run placed it early, or its pricing
+  copy held it the gap too far ahead) and sits exactly on the day grid (a record ~5.55e-17 years ahead on its own close made QUAD raise); a dated `REBASED` contract's
   knocked-in end is dated (it raised `TypeError` on the knock-in close); `observed_post_ko_indices` is PnL-explain
   bookkeeping; `PortfolioLifecycleManager` values each tracked autocallable from its tracker's initial copy and the
   dynamic scenario and equity backtest price their baseline after registering trackers (a carried knocked-in
