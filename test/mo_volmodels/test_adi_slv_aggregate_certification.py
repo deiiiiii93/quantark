@@ -136,6 +136,21 @@ def _accept_live_production_pde(module, monkeypatch):
     )
 
 
+def _accept_recorded_runtime(module, monkeypatch):
+    """Let a test past the parent's numerical-runtime guard.
+
+    The parent pins the exact ``runtime_environment()`` it ran on, including
+    ``platform.platform()`` -- so an OS update alone (macOS 26.6 -> 27.0, with
+    Python 3.11.8 / numpy 2.4.6 / scipy 1.17.1 unchanged) makes the loader
+    refuse it, and correctly: numpy's arm64 wheels link Accelerate, whose
+    numerics are the OS's. That refusal has its own test
+    (``test_the_parent_refuses_a_different_numerical_runtime``); tests about
+    the PDE guard or the loaded payload opt past it explicitly.
+    """
+    recorded = json.loads(PARENT_EVIDENCE_FILE.read_text())["runtime_environment"]
+    monkeypatch.setattr(module, "runtime_environment", lambda: dict(recorded))
+
+
 @requires_banked_evidence
 def test_the_banked_parent_is_intact_and_every_cell_passed():
     """Pure evidence assertions: no live engine is consulted, so this keeps
@@ -157,7 +172,7 @@ def test_the_banked_parent_is_intact_and_every_cell_passed():
 
 
 @requires_banked_evidence
-def test_the_parent_no_longer_accepts_this_tree_for_new_pde_work():
+def test_the_parent_no_longer_accepts_this_tree_for_new_pde_work(monkeypatch):
     """The parent's production-PDE guard fires, and that is correct.
 
     Main's continuous-KI work (62f72b6, c6b8401, 7baf042) edited files inside
@@ -174,6 +189,8 @@ def test_the_parent_no_longer_accepts_this_tree_for_new_pde_work():
     quietly widening it.
     """
     module = _load()
+    # Isolate the PDE guard: the runtime guard runs first and has its own test.
+    _accept_recorded_runtime(module, monkeypatch)
     live = module.stage16().production_pde_compatibility_sha256()
     assert live != module.PARENT_PRODUCTION_PDE_SHA256
 
@@ -187,6 +204,7 @@ def test_the_parent_no_longer_accepts_this_tree_for_new_pde_work():
 @requires_banked_evidence
 def test_the_parent_loads_when_the_production_pde_matches(monkeypatch):
     module = _load()
+    _accept_recorded_runtime(module, monkeypatch)
     _accept_live_production_pde(module, monkeypatch)
 
     evidence, decision, manifest = module.load_and_validate_parent_certificate(
@@ -197,6 +215,23 @@ def test_the_parent_loads_when_the_production_pde_matches(monkeypatch):
     assert manifest == module.parent_certificate_manifest()
     assert evidence["evidence_sha256"] == module.PARENT_EVIDENCE_SHA256
     assert decision["decision_sha256"] == module.PARENT_DECISION_SHA256
+
+
+@requires_banked_evidence
+def test_the_parent_refuses_a_different_numerical_runtime(monkeypatch):
+    """Any field of the recorded runtime differing -- the OS build included --
+    refuses the parent before the PDE guard is consulted."""
+    module = _load()
+    _accept_live_production_pde(module, monkeypatch)
+    recorded = json.loads(PARENT_EVIDENCE_FILE.read_text())["runtime_environment"]
+    moved = dict(recorded, platform=recorded["platform"] + "-moved")
+    monkeypatch.setattr(module, "runtime_environment", lambda: dict(moved))
+
+    with pytest.raises(ValueError, match="numerical runtime mismatch"):
+        module.load_and_validate_parent_certificate(
+            PARENT_EVIDENCE_FILE,
+            PARENT_DECISION_FILE,
+        )
 
 
 @requires_banked_evidence
