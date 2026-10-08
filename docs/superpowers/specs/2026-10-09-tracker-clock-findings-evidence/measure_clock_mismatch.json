@@ -1,0 +1,1138 @@
+{
+ "mode": "current",
+ "start_date": "2026-01-05",
+ "walks": [
+  {
+   "kind": "snowball",
+   "N": 0,
+   "rows": [
+    {
+     "record": 0,
+     "contract_day": 30,
+     "booked_day": 30,
+     "coupon_day": null,
+     "copy_last_holding_day": 29,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 1,
+     "contract_day": 61,
+     "booked_day": 61,
+     "coupon_day": null,
+     "copy_last_holding_day": 60,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 2,
+     "contract_day": 91,
+     "booked_day": 91,
+     "coupon_day": null,
+     "copy_last_holding_day": 90,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 3,
+     "contract_day": 122,
+     "booked_day": 122,
+     "coupon_day": null,
+     "copy_last_holding_day": 121,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 4,
+     "contract_day": 152,
+     "booked_day": 152,
+     "coupon_day": null,
+     "copy_last_holding_day": 151,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 5,
+     "contract_day": 182,
+     "booked_day": 182,
+     "coupon_day": null,
+     "copy_last_holding_day": 181,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 6,
+     "contract_day": 213,
+     "booked_day": 213,
+     "coupon_day": null,
+     "copy_last_holding_day": 212,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 7,
+     "contract_day": 243,
+     "booked_day": 243,
+     "coupon_day": null,
+     "copy_last_holding_day": 242,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 8,
+     "contract_day": 274,
+     "booked_day": 274,
+     "coupon_day": null,
+     "copy_last_holding_day": 273,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 9,
+     "contract_day": 304,
+     "booked_day": 304,
+     "coupon_day": null,
+     "copy_last_holding_day": 303,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 10,
+     "contract_day": 335,
+     "booked_day": 335,
+     "coupon_day": null,
+     "copy_last_holding_day": 334,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 11,
+     "contract_day": 365,
+     "booked_day": 365,
+     "coupon_day": null,
+     "copy_last_holding_day": 364,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    }
+   ],
+   "maturity_settled_day": 365,
+   "ko": null
+  },
+  {
+   "kind": "snowball",
+   "N": 30,
+   "rows": [
+    {
+     "record": 0,
+     "contract_day": 30,
+     "booked_day": 0,
+     "coupon_day": null,
+     "copy_last_holding_day": 29,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 1,
+     "contract_day": 61,
+     "booked_day": 31,
+     "coupon_day": null,
+     "copy_last_holding_day": 60,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 2,
+     "contract_day": 91,
+     "booked_day": 61,
+     "coupon_day": null,
+     "copy_last_holding_day": 90,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 3,
+     "contract_day": 122,
+     "booked_day": 92,
+     "coupon_day": null,
+     "copy_last_holding_day": 121,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 4,
+     "contract_day": 152,
+     "booked_day": 122,
+     "coupon_day": null,
+     "copy_last_holding_day": 151,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 5,
+     "contract_day": 182,
+     "booked_day": 152,
+     "coupon_day": null,
+     "copy_last_holding_day": 181,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 6,
+     "contract_day": 213,
+     "booked_day": 183,
+     "coupon_day": null,
+     "copy_last_holding_day": 212,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 7,
+     "contract_day": 243,
+     "booked_day": 213,
+     "coupon_day": null,
+     "copy_last_holding_day": 242,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 8,
+     "contract_day": 274,
+     "booked_day": 244,
+     "coupon_day": null,
+     "copy_last_holding_day": 273,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 9,
+     "contract_day": 304,
+     "booked_day": 274,
+     "coupon_day": null,
+     "copy_last_holding_day": 303,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 10,
+     "contract_day": 335,
+     "booked_day": 305,
+     "coupon_day": null,
+     "copy_last_holding_day": 334,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 11,
+     "contract_day": 365,
+     "booked_day": 335,
+     "coupon_day": null,
+     "copy_last_holding_day": 364,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    }
+   ],
+   "maturity_settled_day": 365,
+   "ko": null
+  },
+  {
+   "kind": "snowball",
+   "N": 100,
+   "rows": [
+    {
+     "record": 0,
+     "contract_day": 30,
+     "booked_day": 0,
+     "coupon_day": null,
+     "copy_last_holding_day": 29,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 1,
+     "contract_day": 61,
+     "booked_day": 0,
+     "coupon_day": null,
+     "copy_last_holding_day": 60,
+     "copy_remaining_days_on_booked_day": 61.0,
+     "lead_days": 60
+    },
+    {
+     "record": 2,
+     "contract_day": 91,
+     "booked_day": 0,
+     "coupon_day": null,
+     "copy_last_holding_day": 90,
+     "copy_remaining_days_on_booked_day": 91.0,
+     "lead_days": 90
+    },
+    {
+     "record": 3,
+     "contract_day": 122,
+     "booked_day": 22,
+     "coupon_day": null,
+     "copy_last_holding_day": 121,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 4,
+     "contract_day": 152,
+     "booked_day": 52,
+     "coupon_day": null,
+     "copy_last_holding_day": 151,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 5,
+     "contract_day": 182,
+     "booked_day": 82,
+     "coupon_day": null,
+     "copy_last_holding_day": 181,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 6,
+     "contract_day": 213,
+     "booked_day": 113,
+     "coupon_day": null,
+     "copy_last_holding_day": 212,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 7,
+     "contract_day": 243,
+     "booked_day": 143,
+     "coupon_day": null,
+     "copy_last_holding_day": 242,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 8,
+     "contract_day": 274,
+     "booked_day": 174,
+     "coupon_day": null,
+     "copy_last_holding_day": 273,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 9,
+     "contract_day": 304,
+     "booked_day": 204,
+     "coupon_day": null,
+     "copy_last_holding_day": 303,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 10,
+     "contract_day": 335,
+     "booked_day": 235,
+     "coupon_day": null,
+     "copy_last_holding_day": 334,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 11,
+     "contract_day": 365,
+     "booked_day": 265,
+     "coupon_day": null,
+     "copy_last_holding_day": 364,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    }
+   ],
+   "maturity_settled_day": 365,
+   "ko": null
+  },
+  {
+   "kind": "phoenix",
+   "N": 0,
+   "rows": [
+    {
+     "record": 0,
+     "contract_day": 30,
+     "booked_day": 30,
+     "coupon_day": 30,
+     "copy_last_holding_day": 29,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 1,
+     "contract_day": 61,
+     "booked_day": 61,
+     "coupon_day": 61,
+     "copy_last_holding_day": 60,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 2,
+     "contract_day": 91,
+     "booked_day": 91,
+     "coupon_day": 91,
+     "copy_last_holding_day": 90,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 3,
+     "contract_day": 122,
+     "booked_day": 122,
+     "coupon_day": 122,
+     "copy_last_holding_day": 121,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 4,
+     "contract_day": 152,
+     "booked_day": 152,
+     "coupon_day": 152,
+     "copy_last_holding_day": 151,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 5,
+     "contract_day": 182,
+     "booked_day": 182,
+     "coupon_day": 182,
+     "copy_last_holding_day": 181,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 6,
+     "contract_day": 213,
+     "booked_day": 213,
+     "coupon_day": 213,
+     "copy_last_holding_day": 212,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 7,
+     "contract_day": 243,
+     "booked_day": 243,
+     "coupon_day": 243,
+     "copy_last_holding_day": 242,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 8,
+     "contract_day": 274,
+     "booked_day": 274,
+     "coupon_day": 274,
+     "copy_last_holding_day": 273,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 9,
+     "contract_day": 304,
+     "booked_day": 304,
+     "coupon_day": 304,
+     "copy_last_holding_day": 303,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 10,
+     "contract_day": 335,
+     "booked_day": 335,
+     "coupon_day": 335,
+     "copy_last_holding_day": 334,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 11,
+     "contract_day": 365,
+     "booked_day": 365,
+     "coupon_day": 365,
+     "copy_last_holding_day": 364,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    }
+   ],
+   "maturity_settled_day": 365,
+   "ko": null
+  },
+  {
+   "kind": "phoenix",
+   "N": 30,
+   "rows": [
+    {
+     "record": 0,
+     "contract_day": 30,
+     "booked_day": 0,
+     "coupon_day": 0,
+     "copy_last_holding_day": 29,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 1,
+     "contract_day": 61,
+     "booked_day": 31,
+     "coupon_day": 31,
+     "copy_last_holding_day": 60,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 2,
+     "contract_day": 91,
+     "booked_day": 61,
+     "coupon_day": 61,
+     "copy_last_holding_day": 90,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 3,
+     "contract_day": 122,
+     "booked_day": 92,
+     "coupon_day": 92,
+     "copy_last_holding_day": 121,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 4,
+     "contract_day": 152,
+     "booked_day": 122,
+     "coupon_day": 122,
+     "copy_last_holding_day": 151,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 5,
+     "contract_day": 182,
+     "booked_day": 152,
+     "coupon_day": 152,
+     "copy_last_holding_day": 181,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 6,
+     "contract_day": 213,
+     "booked_day": 183,
+     "coupon_day": 183,
+     "copy_last_holding_day": 212,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 7,
+     "contract_day": 243,
+     "booked_day": 213,
+     "coupon_day": 213,
+     "copy_last_holding_day": 242,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 8,
+     "contract_day": 274,
+     "booked_day": 244,
+     "coupon_day": 244,
+     "copy_last_holding_day": 273,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 9,
+     "contract_day": 304,
+     "booked_day": 274,
+     "coupon_day": 274,
+     "copy_last_holding_day": 303,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 10,
+     "contract_day": 335,
+     "booked_day": 305,
+     "coupon_day": 305,
+     "copy_last_holding_day": 334,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 11,
+     "contract_day": 365,
+     "booked_day": 335,
+     "coupon_day": 335,
+     "copy_last_holding_day": 364,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    }
+   ],
+   "maturity_settled_day": 365,
+   "ko": null
+  },
+  {
+   "kind": "phoenix",
+   "N": 100,
+   "rows": [
+    {
+     "record": 0,
+     "contract_day": 30,
+     "booked_day": 0,
+     "coupon_day": 0,
+     "copy_last_holding_day": 29,
+     "copy_remaining_days_on_booked_day": 30.0,
+     "lead_days": 29
+    },
+    {
+     "record": 1,
+     "contract_day": 61,
+     "booked_day": 0,
+     "coupon_day": 0,
+     "copy_last_holding_day": 60,
+     "copy_remaining_days_on_booked_day": 61.0,
+     "lead_days": 60
+    },
+    {
+     "record": 2,
+     "contract_day": 91,
+     "booked_day": 0,
+     "coupon_day": 0,
+     "copy_last_holding_day": 90,
+     "copy_remaining_days_on_booked_day": 91.0,
+     "lead_days": 90
+    },
+    {
+     "record": 3,
+     "contract_day": 122,
+     "booked_day": 22,
+     "coupon_day": 22,
+     "copy_last_holding_day": 121,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 4,
+     "contract_day": 152,
+     "booked_day": 52,
+     "coupon_day": 52,
+     "copy_last_holding_day": 151,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 5,
+     "contract_day": 182,
+     "booked_day": 82,
+     "coupon_day": 82,
+     "copy_last_holding_day": 181,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 6,
+     "contract_day": 213,
+     "booked_day": 113,
+     "coupon_day": 113,
+     "copy_last_holding_day": 212,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 7,
+     "contract_day": 243,
+     "booked_day": 143,
+     "coupon_day": 143,
+     "copy_last_holding_day": 242,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 8,
+     "contract_day": 274,
+     "booked_day": 174,
+     "coupon_day": 174,
+     "copy_last_holding_day": 273,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 9,
+     "contract_day": 304,
+     "booked_day": 204,
+     "coupon_day": 204,
+     "copy_last_holding_day": 303,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 10,
+     "contract_day": 335,
+     "booked_day": 235,
+     "coupon_day": 235,
+     "copy_last_holding_day": 334,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    },
+    {
+     "record": 11,
+     "contract_day": 365,
+     "booked_day": 265,
+     "coupon_day": 265,
+     "copy_last_holding_day": 364,
+     "copy_remaining_days_on_booked_day": 100.0,
+     "lead_days": 99
+    }
+   ],
+   "maturity_settled_day": 365,
+   "ko": null
+  }
+ ],
+ "pv": [
+  {
+   "kind": "snowball",
+   "N": 0,
+   "rows": [
+    {
+     "offset_days": 0,
+     "copy_maturity_days": 365.0,
+     "event_clock_maturity_days": 365.0,
+     "copy_records": 12,
+     "event_clock_records": 12,
+     "pv_copy": 2.339507340630228,
+     "pv_event_clock": 2.339507340630228,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    },
+    {
+     "offset_days": 15,
+     "copy_maturity_days": 350.0,
+     "event_clock_maturity_days": 350.0,
+     "copy_records": 12,
+     "event_clock_records": 12,
+     "pv_copy": 2.765276900144322,
+     "pv_event_clock": 2.765276900144322,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    },
+    {
+     "offset_days": 45,
+     "copy_maturity_days": 320.0,
+     "event_clock_maturity_days": 320.0,
+     "copy_records": 11,
+     "event_clock_records": 11,
+     "pv_copy": 4.016561441604804,
+     "pv_event_clock": 4.016561441604804,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    },
+    {
+     "offset_days": 180,
+     "copy_maturity_days": 185.0,
+     "event_clock_maturity_days": 185.0,
+     "copy_records": 7,
+     "event_clock_records": 7,
+     "pv_copy": 10.18078263138488,
+     "pv_event_clock": 10.18078263138488,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    },
+    {
+     "offset_days": 300,
+     "copy_maturity_days": 65.0,
+     "event_clock_maturity_days": 65.0,
+     "copy_records": 3,
+     "event_clock_records": 3,
+     "pv_copy": 14.368668963280838,
+     "pv_event_clock": 14.368668963280838,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    }
+   ]
+  },
+  {
+   "kind": "snowball",
+   "N": 30,
+   "rows": [
+    {
+     "offset_days": 0,
+     "copy_maturity_days": 365.0,
+     "event_clock_maturity_days": 335.0,
+     "copy_records": 12,
+     "event_clock_records": 11,
+     "pv_copy": 2.339507340630228,
+     "pv_event_clock": 3.586587469140902,
+     "diff": -1.247080128510674,
+     "diff_bp_of_notional": -124.70801285106741
+    },
+    {
+     "offset_days": 15,
+     "copy_maturity_days": 350.0,
+     "event_clock_maturity_days": 320.0,
+     "copy_records": 12,
+     "event_clock_records": 11,
+     "pv_copy": 2.765276900144322,
+     "pv_event_clock": 4.016561441604804,
+     "diff": -1.2512845414604818,
+     "diff_bp_of_notional": -125.12845414604818
+    },
+    {
+     "offset_days": 45,
+     "copy_maturity_days": 320.0,
+     "event_clock_maturity_days": 290.0,
+     "copy_records": 11,
+     "event_clock_records": 10,
+     "pv_copy": 4.016561441604804,
+     "pv_event_clock": 5.313963784487366,
+     "diff": -1.2974023428825623,
+     "diff_bp_of_notional": -129.74023428825623
+    },
+    {
+     "offset_days": 180,
+     "copy_maturity_days": 185.0,
+     "event_clock_maturity_days": 155.0,
+     "copy_records": 7,
+     "event_clock_records": 6,
+     "pv_copy": 10.18078263138488,
+     "pv_event_clock": 11.425598792025646,
+     "diff": -1.2448161606407666,
+     "diff_bp_of_notional": -124.48161606407666
+    },
+    {
+     "offset_days": 300,
+     "copy_maturity_days": 65.0,
+     "event_clock_maturity_days": 35.0,
+     "copy_records": 3,
+     "event_clock_records": 2,
+     "pv_copy": 14.368668963280838,
+     "pv_event_clock": 14.830711571420114,
+     "diff": -0.4620426081392761,
+     "diff_bp_of_notional": -46.20426081392761
+    }
+   ]
+  },
+  {
+   "kind": "snowball",
+   "N": 100,
+   "rows": [
+    {
+     "offset_days": 0,
+     "copy_maturity_days": 365.0,
+     "event_clock_maturity_days": 265.0,
+     "copy_records": 12,
+     "event_clock_records": 9,
+     "pv_copy": 2.339507340630228,
+     "pv_event_clock": 6.460174861081537,
+     "diff": -4.12066752045131,
+     "diff_bp_of_notional": -412.066752045131
+    },
+    {
+     "offset_days": 15,
+     "copy_maturity_days": 350.0,
+     "event_clock_maturity_days": 250.0,
+     "copy_records": 12,
+     "event_clock_records": 9,
+     "pv_copy": 2.765276900144322,
+     "pv_event_clock": 7.073299309050368,
+     "diff": -4.308022408906046,
+     "diff_bp_of_notional": -430.8022408906046
+    },
+    {
+     "offset_days": 45,
+     "copy_maturity_days": 320.0,
+     "event_clock_maturity_days": 220.0,
+     "copy_records": 11,
+     "event_clock_records": 8,
+     "pv_copy": 4.016561441604804,
+     "pv_event_clock": 8.432417324271348,
+     "diff": -4.415855882666545,
+     "diff_bp_of_notional": -441.58558826665444
+    },
+    {
+     "offset_days": 180,
+     "copy_maturity_days": 185.0,
+     "event_clock_maturity_days": 85.0,
+     "copy_records": 7,
+     "event_clock_records": 3,
+     "pv_copy": 10.18078263138488,
+     "pv_event_clock": 13.90372258782517,
+     "diff": -3.7229399564402907,
+     "diff_bp_of_notional": -372.2939956440291
+    },
+    {
+     "offset_days": 300,
+     "copy_maturity_days": 65.0,
+     "event_clock_maturity_days": 0.0,
+     "copy_records": 3,
+     "event_clock_records": 0,
+     "pv_copy": 14.368668963280838,
+     "pv_event_clock": 14.999999995500005,
+     "diff": -0.6313310322191672,
+     "diff_bp_of_notional": -63.13310322191672
+    }
+   ]
+  },
+  {
+   "kind": "phoenix",
+   "N": 0,
+   "rows": [
+    {
+     "offset_days": 0,
+     "copy_maturity_days": 365.0,
+     "event_clock_maturity_days": 365.0,
+     "copy_records": 12,
+     "event_clock_records": 12,
+     "pv_copy": -1.1715756997269817,
+     "pv_event_clock": -1.1715756997269817,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    },
+    {
+     "offset_days": 15,
+     "copy_maturity_days": 350.0,
+     "event_clock_maturity_days": 350.0,
+     "copy_records": 12,
+     "event_clock_records": 12,
+     "pv_copy": -1.0051416672718432,
+     "pv_event_clock": -1.0051416672718432,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    },
+    {
+     "offset_days": 45,
+     "copy_maturity_days": 320.0,
+     "event_clock_maturity_days": 320.0,
+     "copy_records": 11,
+     "event_clock_records": 11,
+     "pv_copy": -0.8232270733285223,
+     "pv_event_clock": -0.8232270733285223,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    },
+    {
+     "offset_days": 180,
+     "copy_maturity_days": 185.0,
+     "event_clock_maturity_days": 185.0,
+     "copy_records": 7,
+     "event_clock_records": 7,
+     "pv_copy": 0.04442330904643835,
+     "pv_event_clock": 0.04442330904643835,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    },
+    {
+     "offset_days": 300,
+     "copy_maturity_days": 65.0,
+     "event_clock_maturity_days": 65.0,
+     "copy_records": 3,
+     "event_clock_records": 3,
+     "pv_copy": 0.21218571957659021,
+     "pv_event_clock": 0.21218571957659021,
+     "diff": 0.0,
+     "diff_bp_of_notional": 0.0
+    }
+   ]
+  },
+  {
+   "kind": "phoenix",
+   "N": 30,
+   "rows": [
+    {
+     "offset_days": 0,
+     "copy_maturity_days": 365.0,
+     "event_clock_maturity_days": 335.0,
+     "copy_records": 12,
+     "event_clock_records": 11,
+     "pv_copy": -1.1715756997269817,
+     "pv_event_clock": -0.9894234910071629,
+     "diff": -0.18215220871981885,
+     "diff_bp_of_notional": -18.215220871981884
+    },
+    {
+     "offset_days": 15,
+     "copy_maturity_days": 350.0,
+     "event_clock_maturity_days": 320.0,
+     "copy_records": 12,
+     "event_clock_records": 11,
+     "pv_copy": -1.0051416672718432,
+     "pv_event_clock": -0.8232270733285223,
+     "diff": -0.18191459394332088,
+     "diff_bp_of_notional": -18.19145939433209
+    },
+    {
+     "offset_days": 45,
+     "copy_maturity_days": 320.0,
+     "event_clock_maturity_days": 290.0,
+     "copy_records": 11,
+     "event_clock_records": 10,
+     "pv_copy": -0.8232270733285223,
+     "pv_event_clock": -0.633268414065751,
+     "diff": -0.18995865926277133,
+     "diff_bp_of_notional": -18.995865926277133
+    },
+    {
+     "offset_days": 180,
+     "copy_maturity_days": 185.0,
+     "event_clock_maturity_days": 155.0,
+     "copy_records": 7,
+     "event_clock_records": 6,
+     "pv_copy": 0.04442330904643835,
+     "pv_event_clock": 0.16319218449083536,
+     "diff": -0.11876887544439702,
+     "diff_bp_of_notional": -11.8768875444397
+    },
+    {
+     "offset_days": 300,
+     "copy_maturity_days": 65.0,
+     "event_clock_maturity_days": 35.0,
+     "copy_records": 3,
+     "event_clock_records": 2,
+     "pv_copy": 0.21218571957659021,
+     "pv_event_clock": 0.15773182483947149,
+     "diff": 0.05445389473711873,
+     "diff_bp_of_notional": 5.445389473711873
+    }
+   ]
+  },
+  {
+   "kind": "phoenix",
+   "N": 100,
+   "rows": [
+    {
+     "offset_days": 0,
+     "copy_maturity_days": 365.0,
+     "event_clock_maturity_days": 265.0,
+     "copy_records": 12,
+     "event_clock_records": 9,
+     "pv_copy": -1.1715756997269817,
+     "pv_event_clock": -0.488663291686287,
+     "diff": -0.6829124080406948,
+     "diff_bp_of_notional": -68.29124080406947
+    },
+    {
+     "offset_days": 15,
+     "copy_maturity_days": 350.0,
+     "event_clock_maturity_days": 250.0,
+     "copy_records": 12,
+     "event_clock_records": 9,
+     "pv_copy": -1.0051416672718432,
+     "pv_event_clock": -0.3457116390611613,
+     "diff": -0.6594300282106819,
+     "diff_bp_of_notional": -65.94300282106819
+    },
+    {
+     "offset_days": 45,
+     "copy_maturity_days": 320.0,
+     "event_clock_maturity_days": 220.0,
+     "copy_records": 11,
+     "event_clock_records": 8,
+     "pv_copy": -0.8232270733285223,
+     "pv_event_clock": -0.16262727600759383,
+     "diff": -0.6605997973209284,
+     "diff_bp_of_notional": -66.05997973209284
+    },
+    {
+     "offset_days": 180,
+     "copy_maturity_days": 185.0,
+     "event_clock_maturity_days": 85.0,
+     "copy_records": 7,
+     "event_clock_records": 3,
+     "pv_copy": 0.04442330904643835,
+     "pv_event_clock": 0.18132233940153278,
+     "diff": -0.13689903035509443,
+     "diff_bp_of_notional": -13.689903035509444
+    },
+    {
+     "offset_days": 300,
+     "copy_maturity_days": 65.0,
+     "event_clock_maturity_days": 0.0,
+     "copy_records": 3,
+     "event_clock_records": 0,
+     "pv_copy": 0.21218571957659021,
+     "pv_event_clock": 0.0,
+     "diff": 0.21218571957659021,
+     "diff_bp_of_notional": 21.218571957659023
+    }
+   ]
+  }
+ ],
+ "ko_paths": [
+  {
+   "kind": "snowball",
+   "N": 0,
+   "ko_day_record_payoff_dettime": [
+    30,
+    0,
+    1.25,
+    0.0821917808219178
+   ],
+   "copy_first_record_day": 30
+  },
+  {
+   "kind": "snowball",
+   "N": 30,
+   "ko_day_record_payoff_dettime": [
+    0,
+    0,
+    1.25,
+    0.0
+   ],
+   "copy_first_record_day": 30
+  },
+  {
+   "kind": "snowball",
+   "N": 100,
+   "ko_day_record_payoff_dettime": [
+    0,
+    0,
+    1.25,
+    0.0
+   ],
+   "copy_first_record_day": 30
+  },
+  {
+   "kind": "phoenix",
+   "N": 0,
+   "ko_day_record_payoff_dettime": [
+    30,
+    0,
+    0.0,
+    0.0821917808219178
+   ],
+   "copy_first_record_day": 30
+  },
+  {
+   "kind": "phoenix",
+   "N": 30,
+   "ko_day_record_payoff_dettime": [
+    0,
+    0,
+    0.0,
+    0.0
+   ],
+   "copy_first_record_day": 30
+  },
+  {
+   "kind": "phoenix",
+   "N": 100,
+   "ko_day_record_payoff_dettime": [
+    0,
+    0,
+    0.0,
+    0.0
+   ],
+   "copy_first_record_day": 30
+  }
+ ]
+}

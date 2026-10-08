@@ -1,0 +1,84 @@
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [ 61%]
+.................................FF..........                            [100%]
+=================================== FAILURES ===================================
+________ test_a_numeric_mid_life_rebased_copy_is_timed_like_its_events _________
+[gw1] darwin -- Python 3.11.8 /Users/fuxinyao/quant-ark/.venv/bin/python
+
+    def test_a_numeric_mid_life_rebased_copy_is_timed_like_its_events():
+        """The C1 mid-life contract: knocked in on run day 60, offsets 30 and 60. The knock-out falls due on day 90, the
+        contract ends on day 120; the day-70 copy holds them 20 and 50 days ahead (it held 120/150) and V1 is booked on
+        day 120 (it was booked on day 220)."""
+        def product():
+            p = kr(M.REBASED, post=(30, 60), pre=(160, 250), ki=(160, 250))
+            p.initial_date = (START - pd.Timedelta(days=100)).to_pydatetime()
+            return p
+        t = tracker(product())
+>       run(t, {60: 70.0})
+
+test/lifecycle_ko_reset/test_review_fixes.py:257: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/lifecycle_ko_reset/test_tracker_rules.py:57: in run
+    events = tracker.observe(day(n), product, e, spot)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <quantark.asset.equity.lifecycle.ko_reset.KOResetLifecycleTracker object at 0x11fffd010>
+args = (Timestamp('2026-03-06 00:00:00'), KnockOutResetSnowballOption(initial_price=100.0, strike=100.0, is_reverse=False, op...stKOScheduleMode.REBASED: 2>), PricingEnvironment(valuation_date=2026-03-06, spot=70.00, rate=3.00%, vol=25.00%), 70.0)
+kwargs = {}, gap = 100
+
+    @functools.wraps(original)
+    def wrapper(self, *args, **kwargs):
+        gap = gap_days(self)
+        if gap == 0:
+            return original(self, *args, **kwargs)
+        _log(self, name, gap)
+        if MODE == "C":
+>           raise ValidationError(
+                f"tracker clock option C: a numeric-schedule contract whose initial_date "
+                f"({self.product.initial_date}) is not the run start ({self.start_date})")
+E           quantark.util.exceptions.ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-09-27 00:00:00) is not the run start (2026-01-05 00:00:00)
+
+docs/superpowers/specs/2026-10-09-tracker-clock-findings-evidence/tracker_clock_options.py:73: ValidationError
+__________ test_a_mid_life_run_places_schedule_two_after_the_knock_in __________
+[gw0] darwin -- Python 3.11.8 /Users/fuxinyao/quant-ark/.venv/bin/python
+
+    def test_a_mid_life_run_places_schedule_two_after_the_knock_in():
+        """initial_date 100 days before the run: the record clock's origin; schedule 2 hangs 30 days after the knock-in
+        close, not 30 days after the run's own day 60 measured from initial_date (which lay before the knock-in)."""
+        product = kr(M.REBASED, post=(30, 60), pre=(160, 250), ki=(160, 250))
+        product.initial_date = (START - pd.Timedelta(days=100)).to_pydatetime()
+>       assert run(tracker(product), {60: 70.0, 90: 96.0}) == [(60, E.KNOCK_IN, None), (90, E.KNOCK_OUT, "knock-out:ko2:0")]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test/lifecycle_ko_reset/test_review_fixes.py:93: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/lifecycle_ko_reset/test_tracker_rules.py:57: in run
+    events = tracker.observe(day(n), product, e, spot)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <quantark.asset.equity.lifecycle.ko_reset.KOResetLifecycleTracker object at 0x133d04ad0>
+args = (Timestamp('2026-03-06 00:00:00'), KnockOutResetSnowballOption(initial_price=100.0, strike=100.0, is_reverse=False, op...stKOScheduleMode.REBASED: 2>), PricingEnvironment(valuation_date=2026-03-06, spot=70.00, rate=3.00%, vol=25.00%), 70.0)
+kwargs = {}, gap = 100
+
+    @functools.wraps(original)
+    def wrapper(self, *args, **kwargs):
+        gap = gap_days(self)
+        if gap == 0:
+            return original(self, *args, **kwargs)
+        _log(self, name, gap)
+        if MODE == "C":
+>           raise ValidationError(
+                f"tracker clock option C: a numeric-schedule contract whose initial_date "
+                f"({self.product.initial_date}) is not the run start ({self.start_date})")
+E           quantark.util.exceptions.ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-09-27 00:00:00) is not the run start (2026-01-05 00:00:00)
+
+docs/superpowers/specs/2026-10-09-tracker-clock-findings-evidence/tracker_clock_options.py:73: ValidationError
+=========================== short test summary info ============================
+FAILED test/lifecycle_ko_reset/test_review_fixes.py::test_a_numeric_mid_life_rebased_copy_is_timed_like_its_events
+FAILED test/lifecycle_ko_reset/test_review_fixes.py::test_a_mid_life_run_places_schedule_two_after_the_knock_in
+2 failed, 115 passed in 4.00s
+exit 1

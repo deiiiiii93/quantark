@@ -1,0 +1,311 @@
+{
+ "mode": "C",
+ "start_date": "2026-01-05",
+ "walks": [
+  {
+   "kind": "snowball",
+   "N": 0,
+   "rows": [
+    {
+     "record": 0,
+     "contract_day": 30,
+     "booked_day": 30,
+     "coupon_day": null,
+     "copy_last_holding_day": 29,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 1,
+     "contract_day": 61,
+     "booked_day": 61,
+     "coupon_day": null,
+     "copy_last_holding_day": 60,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 2,
+     "contract_day": 91,
+     "booked_day": 91,
+     "coupon_day": null,
+     "copy_last_holding_day": 90,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 3,
+     "contract_day": 122,
+     "booked_day": 122,
+     "coupon_day": null,
+     "copy_last_holding_day": 121,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 4,
+     "contract_day": 152,
+     "booked_day": 152,
+     "coupon_day": null,
+     "copy_last_holding_day": 151,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 5,
+     "contract_day": 182,
+     "booked_day": 182,
+     "coupon_day": null,
+     "copy_last_holding_day": 181,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 6,
+     "contract_day": 213,
+     "booked_day": 213,
+     "coupon_day": null,
+     "copy_last_holding_day": 212,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 7,
+     "contract_day": 243,
+     "booked_day": 243,
+     "coupon_day": null,
+     "copy_last_holding_day": 242,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 8,
+     "contract_day": 274,
+     "booked_day": 274,
+     "coupon_day": null,
+     "copy_last_holding_day": 273,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 9,
+     "contract_day": 304,
+     "booked_day": 304,
+     "coupon_day": null,
+     "copy_last_holding_day": 303,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 10,
+     "contract_day": 335,
+     "booked_day": 335,
+     "coupon_day": null,
+     "copy_last_holding_day": 334,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 11,
+     "contract_day": 365,
+     "booked_day": 365,
+     "coupon_day": null,
+     "copy_last_holding_day": 364,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    }
+   ],
+   "maturity_settled_day": 365,
+   "ko": null
+  },
+  {
+   "kind": "snowball",
+   "N": 30,
+   "refused": "ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-12-06 00:00:00) is not the run start (2026-01-05 00:00:00)",
+   "rows": []
+  },
+  {
+   "kind": "snowball",
+   "N": 100,
+   "refused": "ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-09-27 00:00:00) is not the run start (2026-01-05 00:00:00)",
+   "rows": []
+  },
+  {
+   "kind": "phoenix",
+   "N": 0,
+   "rows": [
+    {
+     "record": 0,
+     "contract_day": 30,
+     "booked_day": 30,
+     "coupon_day": 30,
+     "copy_last_holding_day": 29,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 1,
+     "contract_day": 61,
+     "booked_day": 61,
+     "coupon_day": 61,
+     "copy_last_holding_day": 60,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 2,
+     "contract_day": 91,
+     "booked_day": 91,
+     "coupon_day": 91,
+     "copy_last_holding_day": 90,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 3,
+     "contract_day": 122,
+     "booked_day": 122,
+     "coupon_day": 122,
+     "copy_last_holding_day": 121,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 4,
+     "contract_day": 152,
+     "booked_day": 152,
+     "coupon_day": 152,
+     "copy_last_holding_day": 151,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 5,
+     "contract_day": 182,
+     "booked_day": 182,
+     "coupon_day": 182,
+     "copy_last_holding_day": 181,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 6,
+     "contract_day": 213,
+     "booked_day": 213,
+     "coupon_day": 213,
+     "copy_last_holding_day": 212,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 7,
+     "contract_day": 243,
+     "booked_day": 243,
+     "coupon_day": 243,
+     "copy_last_holding_day": 242,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 8,
+     "contract_day": 274,
+     "booked_day": 274,
+     "coupon_day": 274,
+     "copy_last_holding_day": 273,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 9,
+     "contract_day": 304,
+     "booked_day": 304,
+     "coupon_day": 304,
+     "copy_last_holding_day": 303,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 10,
+     "contract_day": 335,
+     "booked_day": 335,
+     "coupon_day": 335,
+     "copy_last_holding_day": 334,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    },
+    {
+     "record": 11,
+     "contract_day": 365,
+     "booked_day": 365,
+     "coupon_day": 365,
+     "copy_last_holding_day": 364,
+     "copy_remaining_days_on_booked_day": 0.0,
+     "lead_days": -1
+    }
+   ],
+   "maturity_settled_day": 365,
+   "ko": null
+  },
+  {
+   "kind": "phoenix",
+   "N": 30,
+   "refused": "ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-12-06 00:00:00) is not the run start (2026-01-05 00:00:00)",
+   "rows": []
+  },
+  {
+   "kind": "phoenix",
+   "N": 100,
+   "refused": "ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-09-27 00:00:00) is not the run start (2026-01-05 00:00:00)",
+   "rows": []
+  }
+ ],
+ "pv": [],
+ "ko_paths": [
+  {
+   "kind": "snowball",
+   "N": 0,
+   "ko_day_record_payoff_dettime": [
+    30,
+    0,
+    1.25,
+    0.0821917808219178
+   ],
+   "copy_first_record_day": 30
+  },
+  {
+   "kind": "snowball",
+   "N": 30,
+   "refused": "ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-12-06 00:00:00) is not the run start (2026-01-05 00:00:00)",
+   "rows": []
+  },
+  {
+   "kind": "snowball",
+   "N": 100,
+   "refused": "ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-09-27 00:00:00) is not the run start (2026-01-05 00:00:00)",
+   "rows": []
+  },
+  {
+   "kind": "phoenix",
+   "N": 0,
+   "ko_day_record_payoff_dettime": [
+    30,
+    0,
+    0.0,
+    0.0821917808219178
+   ],
+   "copy_first_record_day": 30
+  },
+  {
+   "kind": "phoenix",
+   "N": 30,
+   "refused": "ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-12-06 00:00:00) is not the run start (2026-01-05 00:00:00)",
+   "rows": []
+  },
+  {
+   "kind": "phoenix",
+   "N": 100,
+   "refused": "ValidationError: tracker clock option C: a numeric-schedule contract whose initial_date (2025-09-27 00:00:00) is not the run start (2026-01-05 00:00:00)",
+   "rows": []
+  }
+ ]
+}
