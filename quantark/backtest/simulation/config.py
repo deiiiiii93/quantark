@@ -179,12 +179,24 @@ class EnsembleConfig:
     def __post_init__(self) -> None:
         if not self.products:
             raise ValidationError("EnsembleConfig needs at least one product")
+        from quantark.asset.equity.lifecycle.providers import is_unknocked_rebased, require_rebased_provider
+
         for bp in self.products:
             if not isinstance(bp.product, SnowballOption):
                 raise ValidationError(
-                    "the simulated-path engine prices standard snowballs only, got "
+                    "the simulated-path engine prices snowballs and KO-reset snowballs only, got "
                     f"{type(bp.product).__name__} for position {bp.position_id}"
                 )
+            if is_unknocked_rebased(bp.product):
+                # spec 2026-10-08 section 6a: only Monte Carlo places a REBASED schedule 2
+                if self.pricing.provider == "life_surface":
+                    raise ValidationError(
+                        f"position {bp.position_id}: surface mode prices one post-close contract per bucket, but a "
+                        "REBASED KO-reset's knocked-in contract depends on its knock-in day; use provider='repricing' "
+                        "with a Monte Carlo engine"
+                    )
+                require_rebased_provider(bp.product, engines={"pricing": self.engine_config.pricing_engine_type},
+                                         consumer="EnsembleConfig", position=bp.position_id)
             if not bp.has_lifecycle:
                 raise ValidationError(
                     f"position {bp.position_id} must carry a lifecycle in a simulated run"

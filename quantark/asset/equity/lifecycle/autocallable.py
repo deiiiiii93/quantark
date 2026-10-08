@@ -513,33 +513,13 @@ class AutocallableLifecycleTracker:
         product = self.product
 
         def first_due(is_due) -> int:
-            for d, day in enumerate(dates):
-                if is_due(day, self._valuation_point(day, product)):
-                    return d
-            return -1
+            return self._first_due(dates, is_due, product)
 
         def settlement_position(settlement_date, due_day: int) -> int:
-            if due_day < 0:
-                return -1
-            if settlement_date is None:
-                return due_day
-            stamp = pd.Timestamp(settlement_date).normalize()
-            later = np.flatnonzero(dates >= stamp)
-            return int(later[0]) if later.size else -1
+            return self._settlement_position(dates, settlement_date, due_day)
 
         def terminal_payment_date(timing) -> Optional[pd.Timestamp]:
-            """The terminal payment day, on the same clock ``_scheduled_records`` uses."""
-            if getattr(timing, "payment_date", None) is not None:
-                return pd.Timestamp(timing.payment_date).normalize()
-            base = getattr(product, "initial_date", None) or self.start_date
-            if base is None:
-                return None
-            payment_time = float(timing.payment_time)
-            if payment_time <= float(timing.determination_time):
-                return None          # pays at determination
-            return self._date_resolver(
-                (pd.Timestamp(base) + timedelta(days=int(round(payment_time * 365)))).normalize()
-            )
+            return self._terminal_payment_date(product, timing)
 
         ko_records = self._scheduled_records(product, env, "ko")
         ko_due, ko_barrier, ko_payoff, ko_settle, ko_delay = [], [], [], [], []
@@ -596,6 +576,38 @@ class AutocallableLifecycleTracker:
             uses_date_timing=bool(self._uses_date_timing(product)),
             ko_settlement_delay=np.array(ko_delay, dtype=float),
             terminal_settlement_delay=terminal_delay,
+        )
+
+    def _first_due(self, dates: pd.DatetimeIndex, is_due, product: Any) -> int:
+        """The first position in ``dates`` whose close ``is_due(day, valuation_point)``; -1 past the end."""
+        for d, day in enumerate(dates):
+            if is_due(day, self._valuation_point(day, product)):
+                return d
+        return -1
+
+    @staticmethod
+    def _settlement_position(dates: pd.DatetimeIndex, settlement_date, due_day: int) -> int:
+        """The first position on or after ``settlement_date`` (the due day when it has none); -1 past the end."""
+        if due_day < 0:
+            return -1
+        if settlement_date is None:
+            return due_day
+        stamp = pd.Timestamp(settlement_date).normalize()
+        later = np.flatnonzero(dates >= stamp)
+        return int(later[0]) if later.size else -1
+
+    def _terminal_payment_date(self, product: Any, timing) -> Optional[pd.Timestamp]:
+        """The terminal payment day, on the same clock ``_scheduled_records`` uses."""
+        if getattr(timing, "payment_date", None) is not None:
+            return pd.Timestamp(timing.payment_date).normalize()
+        base = getattr(product, "initial_date", None) or self.start_date
+        if base is None:
+            return None
+        payment_time = float(timing.payment_time)
+        if payment_time <= float(timing.determination_time):
+            return None          # pays at determination
+        return self._date_resolver(
+            (pd.Timestamp(base) + timedelta(days=int(round(payment_time * 365)))).normalize()
         )
 
     # ------------------------------------------------------------------

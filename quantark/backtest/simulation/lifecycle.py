@@ -91,13 +91,18 @@ class VectorLifecycle:
             raise ValidationError(f"spot must have shape {(self.n_paths,)}, got {spot.shape}")
         records: List[LifecycleRecord] = []
         for p, schedule in enumerate(self.schedules):
-            # ``today_ko`` is per product: one product knocking out must not
-            # silence another product's knock-in on the same path.
-            ko_records, today_ko = self._knock_out(p, schedule, day_index, spot)
-            records += ko_records
-            records += self._knock_in(p, schedule, day_index, spot, today_ko)
-            records += self._maturity(p, schedule, day_index, spot, payoff_fn)
-            records += self._settle(p, schedule, day_index)
+            records += self._step_product(p, schedule, day_index, spot, payoff_fn)
+        return records
+
+    def _step_product(self, p, schedule, d, spot, payoff_fn) -> List[LifecycleRecord]:
+        """One product's day: knock-out, knock-in, maturity, settlement."""
+        # ``today_ko`` is per product: one product knocking out must not
+        # silence another product's knock-in on the same path.
+        ko_records, today_ko = self._knock_out(p, schedule, d, spot)
+        records = list(ko_records)
+        records += self._knock_in(p, schedule, d, spot, today_ko)
+        records += self._maturity(p, schedule, d, spot, payoff_fn)
+        records += self._settle(p, schedule, d)
         return records
 
     @staticmethod
@@ -108,12 +113,13 @@ class VectorLifecycle:
 
     # -- the day's three blocks, in the tracker's order -----------------
 
-    def _knock_out(self, p, schedule, d, spot) -> Tuple[List[LifecycleRecord], np.ndarray]:
+    def _knock_out(self, p, schedule, d, spot, eligible=None) -> Tuple[List[LifecycleRecord], np.ndarray]:
+        """``schedule.ko_*`` on the paths ``eligible`` (default: the tracker's snowball rule)."""
         records: List[LifecycleRecord] = []
         today_ko = np.zeros(self.n_paths, dtype=bool)
         # A knocked-in path skips the KO block entirely under this flag, so
         # its indices are not marked observed either.
-        eligible_block = self.alive[p] & ~(
+        eligible_block = eligible if eligible is not None else self.alive[p] & ~(
             self.knocked_in[p] if schedule.disable_ko_after_ki else np.zeros(self.n_paths, bool)
         )
         for idx in np.flatnonzero(schedule.ko_due_day == d):

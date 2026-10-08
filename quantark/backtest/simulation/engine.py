@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
+from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker, tracker_for
+from quantark.asset.equity.lifecycle.ko_reset import KOResetCalendarSchedule
 from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
 from quantark.backtest.replay.market import ImpliedBasisYield, derive_implied_dividend_yield
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
@@ -30,6 +31,7 @@ from .hedge import (
     should_rebalance_vector,
     target_contracts_vector,
 )
+from .ko_reset_lifecycle import KOResetVectorLifecycle
 from .lifecycle import LifecycleRecord, VectorLifecycle, receivable_pv
 from .paths.market_path import MarketPath
 from .pricing.base import DayStates, GateFailure, GateReport, GateScale, row_keys, state_row
@@ -70,7 +72,10 @@ class EnsembleBacktestEngine:
         ]
         self._check_calendar(schedules, n_days)
 
-        lifecycle = VectorLifecycle(schedules, self.quantities, n_paths=n_paths)
+        lifecycle_cls = (KOResetVectorLifecycle if any(isinstance(s, KOResetCalendarSchedule) for s in schedules)
+                         else VectorLifecycle)
+        lifecycle = lifecycle_cls(schedules, self.quantities, n_paths=n_paths)
+        self._rebased = [bool(getattr(s, "rebased", False)) for s in schedules]
         ledger = VectorHedgeLedger(n_paths)
         cube = StateCube(dates, n_paths)
         trades: List[Dict[str, Any]] = []
@@ -131,9 +136,9 @@ class EnsembleBacktestEngine:
 
             events += lifecycle.step(
                 d, spot,
-                lambda p, idx, ki, day=day, spot=spot, vol=vol, rate=rate,
+                lambda p, idx, ki, tenors=None, day=day, spot=spot, vol=vol, rate=rate,
                        div_yield=div_yield, basis=basis: self._payoffs(
-                    pricers[p], day, idx, ki, spot, vol, rate, div_yield, basis
+                    pricers[p], day, idx, ki, spot, vol, rate, div_yield, basis, tenors=tenors
                 ),
             )
 
@@ -202,6 +207,7 @@ class EnsembleBacktestEngine:
             else:
                 out.append(RepricingPricer(
                     bp.product, engine_config=cfg.engine_config, start_date=dates[0], underlying=cfg.underlying,
+                    dates=dates,
                     cache=cache, delta_bump_size=cfg.delta_bump_size, gamma_bump_size=cfg.gamma_bump_size,
                     spot_step=cfg.pricing.spot_step, vol_step=cfg.pricing.vol_step, q_step=cfg.pricing.q_step,
                     gate=cfg.pricing.gate,
@@ -217,8 +223,8 @@ class EnsembleBacktestEngine:
         )
 
     def _tracker(self, bp, start_date) -> AutocallableLifecycleTracker:
-        return AutocallableLifecycleTracker(
-            product=bp.product, quantity=float(bp.quantity), has_lifecycle=True,
+        return tracker_for(
+            bp.product, quantity=float(bp.quantity), has_lifecycle=True,
             lifecycle=AutocallableLifecycleState(), start_date=start_date,
         )
 
@@ -350,8 +356,10 @@ class EnsembleBacktestEngine:
             idx = np.flatnonzero(lifecycle.alive[p])
             if idx.size == 0:
                 continue
+            # a knocked-in REBASED path prices the contract its knock-in day made (spec 2026-10-08 6)
+            knock_in_day = lifecycle.knock_in_day[p][idx] if self._rebased[p] else None
             states = self._states_for(day, d, idx, lifecycle.knocked_in[p][idx], spot, vol, rate,
-                                      q_T, div_yield, basis, env_key)
+                                      q_T, div_yield, basis, env_key, knock_in_day=knock_in_day)
             pv, delta, gamma = pricer.price_day(states)
             quantity = float(self.quantities[p])
             product_mtm[idx] += quantity * pv
@@ -359,8 +367,15 @@ class EnsembleBacktestEngine:
             net_gamma[idx] += quantity * gamma
         return product_mtm, net_delta, net_gamma
 
-    def _payoffs(self, pricer, day, idx, knocked_in, spot, vol, rate, div_yield, basis):
-        """``product.get_payoff`` per path, each in its own environment."""
+    def _payoffs(self, pricer, day, idx, knocked_in, spot, vol, rate, div_yield, basis, tenors=None):
+        """``product.get_payoff`` per path, each in its own environment.
+
+        A KO-reset (``tenors`` given) pays V0 on schedule 1's tenor or V1 on the path's knocked-in tenor, on the
+        snapped contract, as its tracker books them.
+        """
+        if tenors is not None:
+            return self._ko_reset_payoffs(pricer.product, day, idx, knocked_in, spot, vol, rate, div_yield,
+                                          basis, tenors)
         product = pricer.aged_product(day, knocked_in=False)
         out = np.empty(idx.size)
         for n, i in enumerate(idx):
@@ -374,6 +389,22 @@ class EnsembleBacktestEngine:
                 valuation_date=pd.Timestamp(day).to_pydatetime(),
             )
             out[n] = float(product.get_payoff(float(spot[i]), env, knocked_in=bool(knocked_in[n])))
+        return out
+
+    def _ko_reset_payoffs(self, product, day, idx, knocked_in, spot, vol, rate, div_yield, basis, tenors):
+        out = np.empty(idx.size)
+        for n, i in enumerate(idx):
+            i = int(i)
+            env = PricingEnvironment(
+                spot_quote=SpotQuote(spot=float(spot[i]), asset_name=self.config.underlying),
+                vol_surface=FlatVolSurface(volatility=float(vol[i])),
+                rate_curve=FlatRateCurve(rate=float(rate[i])),
+                div_yield=div_yield[i],
+                basis_yield=ImpliedBasisYield(float(basis[i])),
+                valuation_date=pd.Timestamp(day).to_pydatetime(),
+            )
+            pay = product.get_maturity_payoff_v1 if bool(knocked_in[n]) else product.get_maturity_payoff_v0
+            out[n] = float(pay(float(spot[i]), env, contract_tenor=float(tenors[n])))
         return out
 
     def _receivable_pv(self, lifecycle, rate, d, schedules) -> np.ndarray:

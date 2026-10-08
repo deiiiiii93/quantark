@@ -15,8 +15,10 @@ time, so every engine prices an ordinary knocked-in contract and the tracker boo
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, fields
+from typing import Any, Callable, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing_at
@@ -24,13 +26,52 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.option_enums import PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
 
-from .autocallable import AutocallableLifecycleTracker, DateResolver
+from .autocallable import AutocallableLifecycleTracker, CalendarSchedule, DateResolver
 from .events import LifecycleEvent, LifecycleEventType
 from .state import AutocallableLifecycleState
 
 DAYS_PER_YEAR = 365.0
 
-__all__ = ["KOResetLifecycleTracker", "tracker_for"]
+__all__ = ["KOResetCalendarSchedule", "KOResetLifecycleTracker", "SchedulePlacement", "tracker_for"]
+
+
+@dataclass(frozen=True)
+class SchedulePlacement:
+    """Schedule 2 and the knocked-in maturity on a run calendar: an ABSOLUTE contract's, or a REBASED one's for one
+    knock-in day. Every ``*_day`` is a position in the calendar, -1 past its end."""
+
+    ko_due_day: np.ndarray
+    ko_barrier: np.ndarray
+    ko_payoff: np.ndarray
+    ko_settlement_day: np.ndarray
+    ko_settlement_delay: np.ndarray
+    final_due_day: int
+    final_settlement_day: int
+    final_settlement_delay: float
+    final_tenor: float
+
+
+@dataclass(frozen=True)
+class KOResetCalendarSchedule(CalendarSchedule):
+    """A KO-reset's observations on a run calendar (``KOResetLifecycleTracker.resolve_calendar_schedule``).
+
+    The inherited ``ko_*`` fields are schedule 1 and the ``ki_*`` fields the knock-in; ``terminal_*`` is the
+    latest terminal the calendar may have to hold (the knocked-in maturity of the last possible knock-in), which
+    is what the run's data-end check reads. ``pre_*`` is schedule 1's maturity (V0 on ``pre_tenor``). Schedule 2
+    is ``absolute`` for an ABSOLUTE contract, or ``place(knock_in_day)`` for a REBASED one.
+    """
+
+    pre_due_day: int
+    pre_settlement_day: int
+    pre_settlement_delay: float
+    pre_tenor: float
+    rebased: bool
+    absolute: Optional[SchedulePlacement]
+    place: Optional[Callable[[int], SchedulePlacement]]
+
+    def placement(self, knock_in_day: int) -> SchedulePlacement:
+        """Schedule 2 for a path knocked in on ``knock_in_day``."""
+        return self.place(int(knock_in_day)) if self.rebased else self.absolute
 
 
 class KOResetLifecycleTracker(AutocallableLifecycleTracker):
@@ -332,6 +373,92 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
                 spot, self._schedule_resolution_env(product, env), contract_tenor=self.pre_contract_tenor(env)
             ))
         return self._book_maturity(date, spot, payoff, timing, valuation_point)
+
+    def resolve_calendar_schedule(self, dates: pd.DatetimeIndex, env: PricingEnvironment) -> "KOResetCalendarSchedule":
+        """Map this contract's observations onto ``dates`` (one resolution), by the records and due rules
+        ``observe`` and ``settle_maturity_if_due`` use; a REBASED schedule 2 is placed per knock-in day."""
+        return _resolve_calendar_schedule(self, dates, env)
+
+
+def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> KOResetCalendarSchedule:
+    dates = pd.DatetimeIndex(dates)
+    product = tracker.product
+    base = AutocallableLifecycleTracker.resolve_calendar_schedule(tracker, dates, env)
+
+    def records_on_calendar(owner, contract, config):
+        recs = owner._schedule_records(contract, env, config)
+        due = [owner._first_due(dates, lambda day, vp, r=r: owner._record_is_due(day, vp, r), contract) for r in recs]
+        return (
+            np.array(due, dtype=np.int64),
+            np.array([float(r["barrier"]) if r["barrier"] is not None else np.nan for r in recs], dtype=float),
+            np.array([float(r["payoff"]) for r in recs], dtype=float),
+            np.array([owner._settlement_position(dates, r["settlement_date"], d) for r, d in zip(recs, due)],
+                     dtype=np.int64),
+            np.array([float(r["settlement_time"]) - float(r["time"]) for r in recs], dtype=float),
+        )
+
+    def placement(owner: KOResetLifecycleTracker) -> SchedulePlacement:
+        contract = owner.contract()
+        due, barrier, payoff, settle, delay = records_on_calendar(owner, contract, contract.post_barrier_config)
+        timing = owner._final_timing(env)
+        final_due = owner._first_due(dates, lambda day, vp: owner._timing_is_due(day, vp, timing), contract)
+        return SchedulePlacement(
+            ko_due_day=due, ko_barrier=barrier, ko_payoff=payoff, ko_settlement_day=settle, ko_settlement_delay=delay,
+            final_due_day=int(final_due),
+            final_settlement_day=int(owner._settlement_position(
+                dates, owner._terminal_payment_date(contract, timing), final_due)),
+            final_settlement_delay=float(timing.payment_time) - float(timing.determination_time),
+            final_tenor=owner.final_contract_tenor(env),
+        )
+
+    rebased = product.post_ko_mode == PostKOScheduleMode.REBASED
+    absolute = None
+    place = None
+    if rebased:
+        memo: Dict[int, SchedulePlacement] = {}
+
+        def place(knock_in_day: int) -> SchedulePlacement:
+            hit = memo.get(knock_in_day)
+            if hit is None:
+                scratch = KOResetLifecycleTracker(
+                    product=product, quantity=tracker.quantity,
+                    lifecycle=AutocallableLifecycleState(
+                        knocked_in=True, ki_date=pd.Timestamp(dates[knock_in_day]).normalize().to_pydatetime()),
+                    start_date=tracker.start_date, date_resolver=tracker._date_resolver,
+                )
+                hit = memo[knock_in_day] = placement(scratch)
+            return hit
+    else:
+        absolute = placement(tracker)
+
+    ko_due, ko_barrier, ko_payoff, ko_settle, ko_delay = records_on_calendar(tracker, product, product.barrier_config)
+    last = tracker._last_pre_record(product, env)
+    pre_due = tracker._first_due(dates, lambda day, vp: tracker._record_is_due(day, vp, last), product)
+    pre_timing = tracker._pre_timing(product, env, last)
+    pre_settle = tracker._settlement_position(dates, tracker._terminal_payment_date(product, pre_timing), pre_due)
+    pre_delay = float(pre_timing.payment_time) - float(pre_timing.determination_time)
+
+    # the latest terminal the calendar may have to hold: the knocked-in maturity of the last knock-in day
+    if rebased:
+        knock_in_days = [int(d) for d in base.ki_due_day if d >= 0 and (pre_due < 0 or d <= pre_due)]
+        latest = place(max(knock_in_days)) if knock_in_days else None
+    else:
+        latest = absolute
+    if latest is not None:
+        terminal = (latest.final_due_day, latest.final_settlement_day, latest.final_settlement_delay)
+    else:
+        terminal = (int(pre_due), int(pre_settle), pre_delay)
+
+    values = {f.name: getattr(base, f.name) for f in fields(CalendarSchedule)}
+    values.update(
+        ko_due_day=ko_due, ko_barrier=ko_barrier, ko_payoff=ko_payoff, ko_settlement_day=ko_settle,
+        ko_settlement_delay=ko_delay, terminal_due_day=int(terminal[0]), terminal_settlement_day=int(terminal[1]),
+        terminal_settlement_delay=float(terminal[2]),
+    )
+    return KOResetCalendarSchedule(
+        **values, pre_due_day=int(pre_due), pre_settlement_day=int(pre_settle), pre_settlement_delay=pre_delay,
+        pre_tenor=tracker.pre_contract_tenor(env), rebased=rebased, absolute=absolute, place=place,
+    )
 
 
 def tracker_for(product: Any, **kwargs) -> AutocallableLifecycleTracker:
