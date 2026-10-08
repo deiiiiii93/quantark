@@ -32,7 +32,16 @@ def _detach(schedule: Optional[ObservationSchedule]) -> Optional[ObservationSche
 
 
 def _calendar_key(calendar):
-    return None if calendar is None else calendar.identity()
+    """``calendar.identity()``, cached on the calendar: it sorts every holiday, and the stale-terms check reads it
+    on each resolver call. The cache is refreshed when the holiday count or the weekend changes."""
+    if calendar is None:
+        return None
+    stamp = (len(calendar.holidays), tuple(sorted(calendar.weekend_days)))
+    cached = getattr(calendar, "_accrual_identity_cache", None)
+    if cached is None or cached[0] != stamp:
+        cached = (stamp, calendar.identity())
+        calendar._accrual_identity_cache = cached
+    return cached[1]
 
 
 def same_terms(period: AccrualPeriod, derived: tuple, current: tuple) -> bool:
@@ -151,11 +160,18 @@ def settlement_endpoint(convention: Optional[SettlementConvention], rec: Observa
     raise ValidationError(f"a {convention.lag_unit.name} settlement lag cannot end a numeric record's accrual")
 
 
-def _keep(rec: ObservationRecord, key: tuple) -> bool:
-    """Whether a record keeps the period it carries (§4.2): an explicit one always, a derived one while the terms
-    it was derived from are the contract's current terms."""
+def _keep(rec: ObservationRecord, key: tuple, end=None) -> bool:
+    """Whether a record keeps the period it carries (§4.2): an explicit one always; a derived one while the terms it
+    was derived from are the contract's current terms and, for a DATE period, while ``end`` (its record's current
+    endpoint) is still its end. Ageing and snapping never move a date, so only a corrected record fails that."""
     period = rec.accrual
-    return period is not None and (period.terms is None or same_terms(period, period.terms, key))
+    if period is None:
+        return False
+    if period.terms is None:
+        return True
+    if not same_terms(period, period.terms, key):
+        return False
+    return not (period.kind is AccrualKind.DATE and end is not None and period.end != end)
 
 
 def _check_length(factors, records, name: str) -> None:
@@ -167,21 +183,28 @@ def _fill_ko(records: List[ObservationRecord], terms: _Terms, factors, name: str
              factor_sets_coupon: bool) -> None:
     _check_length(factors, records, name)
     previous = None
+    rederived = False
     for i, rec in enumerate(records):
         cumulative = None if factors is None else float(factors[i])
         key = terms.key + (name, cumulative)
-        if _keep(rec, key):
+        kind, origin, end = terms.end_of(rec)
+        if not rederived and _keep(rec, key, end):
             previous = rec.accrual
             continue
-        kind, origin, end = terms.end_of(rec)
+        rederived = True   # the periods after a re-derived one chain from it
+        old = rec.accrual
         period_fraction = cumulative if factor_sets_coupon else None
         if coupon and period_fraction is None:
             period_fraction = terms.fixed
         start = None
         if kind is not AccrualKind.NONE:
             if previous is None:
-                start = (terms.initial_date if kind is AccrualKind.DATE else
-                         (None if terms.first_period_start is None else float(terms.first_period_start)))
+                if (old is not None and old.terms is not None and old.kind is kind and not old.relative
+                        and old.start is not None and old.start != old.origin):
+                    start = old.start   # an aged schedule's first remaining period keeps its contractual start
+                else:
+                    start = (terms.initial_date if kind is AccrualKind.DATE else
+                             (None if terms.first_period_start is None else float(terms.first_period_start)))
             elif previous.kind is kind and not previous.relative:
                 start = previous.end
             if start is not None and end < start:
@@ -198,9 +221,9 @@ def _fill_ki(records: List[ObservationRecord], terms: _Terms, anchor_needed: boo
     """Knock-in records accrue to their contractual fixing, always (§4.3): the end is a REBASED anchor only."""
     key = terms.key + ("knock-in",)
     for rec in records:
-        if _keep(rec, key):
-            continue
         kind, origin, end = terms.fixing(rec)
+        if _keep(rec, key, end):
+            continue
         terms.require(kind, anchor_needed)
         rec.accrual = AccrualPeriod(kind, origin=origin, end=end, basis=terms.basis_for(kind), terms=key)
 
@@ -252,19 +275,32 @@ def _contract_terminal(product, terms: _Terms) -> AccrualPeriod:
     return AccrualPeriod(AccrualKind.NONE)
 
 
-def _terminals(product, terms: _Terms) -> Dict[str, AccrualPeriod]:
+def _terminals(product, terms: _Terms, stored: Optional[Dict[str, AccrualPeriod]]) -> Dict[str, AccrualPeriod]:
+    """The terminal periods (§4.4). A stored terminal is kept while the one derived from today's terms agrees with
+    it, and when its schedule has aged out (nothing left to derive it from); otherwise today's replaces it."""
     ac = product.accrual_config
-    out = {"contract": _contract_terminal(product, terms)}
+    stored = stored or {}
+
+    def settle(leg: str, candidate: Optional[AccrualPeriod]) -> Optional[AccrualPeriod]:
+        old = stored.get(leg)
+        if candidate is None:
+            return old
+        return old if old is not None and _same_terminal(old, candidate) else candidate
+
+    out = {"contract": settle("contract", _contract_terminal(product, terms))}
     post_config = getattr(product, "post_barrier_config", None)
     if post_config is not None:
-        out["pre"] = _schedule_terminal(product.barrier_config.ko_observation_schedule.records, terms) \
+        out["pre"] = settle("pre", _schedule_terminal(product.barrier_config.ko_observation_schedule.records, terms)) \
             or out["contract"]
         post_records = post_config.ko_observation_schedule.records
         if product.post_ko_mode is PostKOScheduleMode.REBASED:
-            final = max(float(r.observation_time) for r in post_records) if post_records else 0.0
-            out["post"] = AccrualPeriod(AccrualKind.TIME, start=0.0, end=final, basis=terms.basis, relative=True)
+            candidate = None if not post_records else AccrualPeriod(
+                AccrualKind.TIME, start=0.0, end=max(float(r.observation_time) for r in post_records),
+                basis=terms.basis, relative=True)
+            out["post"] = settle("post", candidate) or AccrualPeriod(
+                AccrualKind.TIME, start=0.0, end=0.0, basis=terms.basis, relative=True)
         else:
-            out["post"] = _schedule_terminal(post_records, terms) or out["pre"]
+            out["post"] = settle("post", _schedule_terminal(post_records, terms)) or out["pre"]
     v0 = "pre" if post_config is not None else "contract"
     v1 = "post" if post_config is not None else "contract"
     for leg, needed in ((v0, bool(ac.is_annualized_rebate)), (v1, bool(ac.is_annualized_ki))):
@@ -274,9 +310,32 @@ def _terminals(product, terms: _Terms) -> Dict[str, AccrualPeriod]:
     return out
 
 
-def _terminal_key(product, terms: _Terms) -> tuple:
-    """Terminals are re-derived when their terms change; ``maturity`` is not one of them (ageing decays it)."""
-    return terms.key + (product.tenor, product.get_tenor_end_date(), getattr(product, "post_ko_mode", None))
+def _same_terminal(stored: AccrualPeriod, candidate: AccrualPeriod) -> bool:
+    """Whether a stored terminal is still the contract's: the candidate derived from today's terms agrees with it.
+    A numeric end is ``accrued_offset + maturity`` (or + the last fixing), which ageing keeps to round-off."""
+    if (stored.kind, stored.relative, stored.cumulative_fraction) != (
+            candidate.kind, candidate.relative, candidate.cumulative_fraction):
+        return False
+    if stored.kind is AccrualKind.TIME:
+        return (abs(float(stored.end) - float(candidate.end)) <= _TERMINAL_TOL
+                and (stored.relative or abs(float(stored.origin) - float(candidate.origin)) <= _TERMINAL_TOL)
+                and (stored.basis is None or stored.basis.same_terms(candidate.basis)))
+    if stored.kind is AccrualKind.DATE:
+        return (stored.origin, stored.end) == (candidate.origin, candidate.end) and \
+            stored.basis.same_terms(candidate.basis)
+    return True
+
+
+_TERMINAL_TOL = 1e-9   # years (about 30 ms): ageing round-off, never a contract change
+
+
+def snapshot_terms(product) -> None:
+    """Record the terms the product's periods were derived under, for the resolver's stale-terms check (§4.2)."""
+    ac = product.accrual_config
+    product._accrual_terms_key = accrual_terms_key(product)
+    product._accrual_factor_snapshot = None if ac.accrual_factors is None else tuple(ac.accrual_factors)
+    product._post_factor_snapshot = None if ac.post_accrual_factors is None else tuple(ac.post_accrual_factors)
+    product._tenor_snapshot = product.tenor
 
 
 def build_contract_accrual(product) -> None:
@@ -305,8 +364,6 @@ def build_contract_accrual(product) -> None:
         product.post_barrier_config = replace(post_config, ko_observation_schedule=post)
     elif ac.post_accrual_factors is not None:
         raise ValidationError("post_accrual_factors belong to a KO-reset contract's schedule 2")
-    product._accrual_terms_key = terms.key
-    key = _terminal_key(product, terms)
-    if getattr(product, "_terminal_accrual_key", None) != key or getattr(product, "_terminal_accrual", None) is None:
-        product._terminal_accrual = _terminals(product, terms)
-        product._terminal_accrual_key = key
+    if not getattr(product, "_terminal_accrual_explicit", False):
+        product._terminal_accrual = _terminals(product, terms, getattr(product, "_terminal_accrual", None))
+    snapshot_terms(product)

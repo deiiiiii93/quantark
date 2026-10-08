@@ -1314,18 +1314,10 @@ class SnowballMCEngine(BaseEngine):
             if product.payoff_config.include_principal
             else 0.0
         )
-        annualized_ko = product._effective_annualized_flag(
-            product.accrual_config.is_annualized_ko
-        )
-
         payoffs = np.zeros(len(times), dtype=float)
         for idx, t in enumerate(times):
-            if annualized_ko:
-                accrual_factor = product.compute_ko_accrual_factor(
-                    float(t), records[idx], pricing_env
-                )
-            else:
-                accrual_factor = 1.0
+            # the resolver's precedence: an explicit factor, else 1.0 when not annualized, else the period
+            accrual_factor = product.compute_ko_accrual_factor(float(t), records[idx], pricing_env)
             coupon = (
                 product.initial_price
                 * product.contract_multiplier

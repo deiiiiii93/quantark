@@ -233,13 +233,38 @@ def _period_of(record) -> AccrualPeriod:
     return period
 
 
-def _guard_current(product, period: AccrualPeriod) -> None:
-    """Accrual terms changed on a built product without ``validate()`` would pay the old cash: refuse instead."""
+def _stale(product) -> bool:
+    """Whether the product's accrual terms changed since its periods were derived (in place, without ``validate()``).
+    Explicit factor lists are compared as a suffix of the derived ones: ageing takes a prefix off them."""
     built = getattr(product, "_accrual_terms_key", None)
     if built is None:
-        return
-    from .accrual_build import accrual_terms_key, same_terms
-    if not same_terms(period, built, accrual_terms_key(product)):
+        return False
+    from .accrual_build import accrual_terms_key
+    current = accrual_terms_key(product)
+    ac = product.accrual_config
+    for now, then in ((ac.accrual_factors, getattr(product, "_accrual_factor_snapshot", None)),
+                      (ac.post_accrual_factors, getattr(product, "_post_factor_snapshot", None))):
+        if (now is None) != (then is None):
+            return True
+        if now is not None and (len(now) > len(then) or tuple(now) != then[len(then) - len(now):]):
+            return True
+    return built != current if current[0] == built[0] else _initial_date_matters(product, built, current)
+
+
+def _initial_date_matters(product, built: tuple, current: tuple) -> bool:
+    """``initial_date`` changed: stale unless only TIME periods read the terms (a numeric contract never reads it)."""
+    if built[1:] != current[1:]:
+        return True
+    schedules = [product.barrier_config.ko_observation_schedule, product.barrier_config.ki_observation_schedule,
+                 getattr(getattr(product, "post_barrier_config", None), "ko_observation_schedule", None)]
+    periods = [r.accrual for s in schedules if s is not None for r in s.records if r.accrual is not None]
+    periods += list((getattr(product, "_terminal_accrual", None) or {}).values())
+    return any(p.kind is not AccrualKind.TIME and p.cumulative_fraction is None for p in periods)
+
+
+def _guard_current(product, period: AccrualPeriod) -> None:
+    """Accrual terms changed on a built product without ``validate()`` would pay the old cash: refuse instead."""
+    if _stale(product):
         raise ValidationError("the contract's accrual terms changed after its periods were derived: call "
                               "product.validate() to derive them again")
 
@@ -247,11 +272,11 @@ def _guard_current(product, period: AccrualPeriod) -> None:
 def ko_accrual_factor(product, record, env=None, *, knock_in: Optional[KnockInAnchor] = None) -> float:
     """The knock-out leg, in today's precedence: explicit factor, then the annualization flag, then the period."""
     period = _period_of(record)
+    _guard_current(product, period)
     if period.cumulative_fraction is not None:
         return float(period.cumulative_fraction)
     if not product._effective_annualized_flag(product.accrual_config.is_annualized_ko):
         return 1.0
-    _guard_current(product, period)
     return cumulative_accrual(period, knock_in=knock_in)
 
 
@@ -260,8 +285,7 @@ def coupon_period_fraction(product, record, env=None) -> float:
     if not product.is_coupon_rate_annualized:
         return 1.0
     period = _period_of(record)
-    if period.period_fraction is None:
-        _guard_current(product, period)
+    _guard_current(product, period)
     return coupon_accrual(period)
 
 
@@ -271,8 +295,10 @@ def contract_tenor(product, env=None, leg: str = "contract", *, knock_in: Option
     if not terminals or leg not in terminals:
         raise ValidationError(f"{type(product).__name__} carries no {leg!r} terminal accrual period")
     period = terminals[leg]
-    if period.cumulative_fraction is None:
-        _guard_current(product, period)
+    _guard_current(product, period)
+    if getattr(product, "_tenor_snapshot", product.tenor) != product.tenor:
+        raise ValidationError("the contract's tenor changed after its terminal periods were derived: call "
+                              "product.validate() to derive them again")
     return cumulative_accrual(period, knock_in=knock_in)
 
 

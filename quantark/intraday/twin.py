@@ -66,9 +66,11 @@ def _period(record):
 
 
 def _rekey(twin) -> None:
-    """The twin carries its source contract's periods on purpose: key the stale-terms guard to its own terms."""
-    from quantark.asset.equity.product.option.accrual_build import accrual_terms_key
-    twin._accrual_terms_key = accrual_terms_key(twin)
+    """The twin carries its source contract's record and terminal periods on purpose: they are explicit (a
+    re-validation keeps them), and the stale-terms guard is keyed to the twin's own changed terms."""
+    from quantark.asset.equity.product.option.accrual_build import snapshot_terms
+    twin._terminal_accrual_explicit = True
+    snapshot_terms(twin)
 
 
 def _pick(value, indices):

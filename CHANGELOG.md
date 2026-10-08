@@ -33,10 +33,11 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - A numeric schedule with `initial_date` accrues its quoted fraction instead of YF(`initial_date` -> valuation) plus
   the remaining time.
 - Periods are derived from the contract's terms when it is built. Changing an accrual term on a built product
-  (`initial_date` of a dated contract, a day count, `accrual_factors`, `fixed_coupon_year_fraction`, the accrual
-  end, the settlement convention under `SETTLEMENT`, the accrual calendar) needs `product.validate()`, which derives
-  the affected periods again; pricing before that raises instead of paying the old cash. A schedule set on a built
-  product likewise needs `validate()`.
+  (`initial_date` of a dated contract, a day count, `accrual_factors`, `fixed_coupon_year_fraction`, `tenor`,
+  the accrual end, the settlement convention under `SETTLEMENT`, the accrual calendar) needs `product.validate()`,
+  which derives the affected periods again (a re-dated record, a new maturity or a new last fixing too); pricing
+  before that raises instead of paying the old cash. A schedule set on a built product likewise needs `validate()`.
+  `accrued_offset` and `first_period_start` are ageing bookkeeping, read once when periods are derived.
 - The intraday twin carries its source records' periods: fixings at different times of day are no longer refused,
   and the twin no longer back-solves `accrual_factors` or banks one `accrued_offset`.
 - Monte Carlo REBASED KO-reset reads each path's knock-in anchor for the knock-out accrual and the knocked-in tenor
