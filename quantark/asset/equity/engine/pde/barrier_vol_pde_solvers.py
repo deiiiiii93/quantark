@@ -119,15 +119,9 @@ def _refuse_ended(engine_name: str, product, lifecycle_state=None) -> None:
     """The 2D model's remaining European has no path here: an ended schedule is refused (spec 2026-10-07 theta
     boundary 3.3), never priced under another model."""
     from quantark.asset.equity.engine.monitoring_ended import knock_in_carried, monitoring_ended
-    if monitoring_ended(product):
+    if monitoring_ended(product) and not knock_in_carried(product, lifecycle_state):
         raise CapabilityError(
             f"{engine_name}: the product's monitoring has ended; price the remaining European with a European "
-            "engine of the same model")
-    if knock_in_carried(product, lifecycle_state):
-        # the knock-in carried as triggered (spec 2026-10-07 R4) is the same European; ignoring the flag priced a
-        # knocked-in contract as alive
-        raise CapabilityError(
-            f"{engine_name}: the product carries a triggered knock-in; price the European with a European "
             "engine of the same model")
 
 
@@ -199,6 +193,8 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
         self.model_params = model_params
 
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
+        from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
+
         _check("HestonBarrierPDESolver", product)
         _refuse_ended("HestonBarrierPDESolver", product)
         settlement_scale = _settlement_scale(self, product, env)
@@ -217,7 +213,7 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
                                             self.model_params, float(env.get_rate(T)), float(env.get_div_yield(T)),
                                             rebate=reb, continuous=continuous, observe_taus=observe_taus,
                                             n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
-                                            market_context=market,
+                                            market_context=market, knocked_in=knock_in_carried(product),
                                             **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)
@@ -243,6 +239,8 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
         self.eta = float(eta)
 
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
+        from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
+
         _check("HestonSLVBarrierPDESolver", product)
         _refuse_ended("HestonSLVBarrierPDESolver", product)
         settlement_scale = _settlement_scale(self, product, env)
@@ -262,7 +260,7 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
                                          float(env.get_rate(T)), float(env.get_div_yield(T)),
                                          eta=self.eta, rebate=reb, continuous=continuous, observe_taus=observe_taus,
                                          n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
-                                         market_context=market,
+                                         market_context=market, knocked_in=knock_in_carried(product),
                                          **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)

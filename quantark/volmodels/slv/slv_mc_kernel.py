@@ -288,6 +288,7 @@ def price_barrier_slv_mc(
     s0, strike, is_call, params, leverage_surface, step_dt, r_fwd, carry_fwd, disc_factor,
     barrier, is_up, is_out, rebate=0.0, pay_at_hit=False, continuous=True, eta=1.0,
     observe_idx=None, participation=1.0, num_paths=50_000, seed=42, return_stderr=False,
+    knocked_in=False,
 ):
     """Single-barrier option under Heston-SLV via MC using a precomputed leverage surface.
 
@@ -353,6 +354,11 @@ def price_barrier_slv_mc(
         w, first = discrete_survival(nodes[:, idx], spec)
         hit_cumT = node_times[idx[np.minimum(first, idx.size - 1)]]
 
+    if knocked_in:
+        # a knock-in that has already happened: every path is knocked in, as from a spot beyond the barrier
+        if spec.is_out:
+            raise ValidationError("knocked_in applies to a knock-in barrier")
+        w = np.zeros_like(w)
     pv = mc_barrier_cashflows(nodes[:, -1], w, hit_cumT, spec, disc, T, participation=participation)
     price = float(np.mean(pv))
     if return_stderr:

@@ -109,7 +109,7 @@ def price_barrier_slv_pde(
     s0, strike, is_call, T, params, lev_surface, r, carry, barrier, is_up, is_out,
     rebate=0.0, pay_at_hit=False, continuous=True, observe_taus=None, eta=1.0,
     n_x=200, n_v=100, n_t=100, scheme=ADIScheme.CRAIG_SNEYD, theta=0.5, rannacher=True,
-    market_context=None,
+    market_context=None, knocked_in=False,
 ):
     """Single-barrier option under Heston-SLV via 2D ADI.
 
@@ -168,10 +168,16 @@ def price_barrier_slv_pde(
         return core.interpolate(U, x0, v0)
 
     if is_out:
+        if knocked_in:
+            raise ValidationError("knocked_in applies to a knock-in barrier")
         return _ko_leg(rebate)
 
     van = price_european_slv_pde(s0, strike, is_call, T, params, lev_surface, r, carry, eta,
                                  n_x, n_v, n_t, scheme=scheme, theta=theta, rannacher=rannacher)
+    if knocked_in:
+        # a knock-in that has already happened: the vanilla leg (the knock-out leg is spent), as from a spot
+        # beyond the barrier; the rebate is never paid
+        return van
     ki = van - _ko_leg(0.0)
     if rebate > 0.0:
         # NoTouch (survival) leg: full-domain KO injection with terminal payoff 1.

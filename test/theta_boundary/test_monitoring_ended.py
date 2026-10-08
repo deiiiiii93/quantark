@@ -1,4 +1,5 @@
 """A contract whose monitoring has ended (spec 3.3): every engine prices the remaining contract."""
+import numpy as np
 import pytest
 
 from pde_routes.cases import env_const
@@ -254,21 +255,40 @@ def test_a_carried_knock_in_is_priced_as_the_engine_prices_its_own(observation):
         assert float(engine.price(carried, env)) == pytest.approx(decided, rel=1e-12, abs=1e-12), type(engine).__name__
 
 
-def test_heston_and_slv_barrier_engines_refuse_a_carried_knock_in():
-    """They cannot price the knocked-in contract by their own path yet (their kernels' start-hit identity with the
-    European kernels is unproven), and ignoring the flag priced a knocked-in contract as alive."""
-    from quantark.asset.equity.engine.mc.barrier_vol_mc_engines import HestonBarrierMCEngine
-    from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import HestonBarrierPDESolver
-    from quantark.execution.errors import CapabilityError
+def _heston_slv_barrier_engines():
+    from quantark.asset.equity.engine.mc.barrier_vol_mc_engines import HestonBarrierMCEngine, HestonSLVBarrierMCEngine
+    from quantark.asset.equity.engine.pde.barrier_vol_pde_solvers import (HestonBarrierPDESolver,
+                                                                          HestonSLVBarrierPDESolver)
+    from quantark.asset.equity.param import MCParams
     from quantark.volmodels.heston import HestonParams
+    from quantark.volmodels.slv.leverage import LeverageSurface
     hp = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.6)
-    p = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_IN,
-                      maturity=1.0, observation_type=DISC, observation_dates=[0.25, 0.5, 1.0])
-    p._otc_lifecycle_knocked_in = True
-    for engine in (HestonBarrierMCEngine(hp), HestonBarrierPDESolver(hp)):
-        with pytest.raises(CapabilityError, match="knock-in"):
-            engine.price(p, env_const())
+    lev = LeverageSurface(time_grid=np.linspace(0, 1, 4), strike_grid=100.0 * np.exp(np.linspace(-1, 1, 5)),
+                          leverage_grid=np.ones((4, 5)))
+    mc = MCParams(num_paths=4096, time_steps=50, seed=3)
+    return [HestonBarrierPDESolver(hp, n_x=64, n_v=24, n_t=40), HestonSLVBarrierPDESolver(hp, lev, n_x=64, n_v=24, n_t=40),
+            HestonBarrierMCEngine(hp, mc), HestonSLVBarrierMCEngine(hp, lev, mc)]
 
+
+@pytest.mark.parametrize("observation", ["continuous", "discrete"])
+def test_heston_and_slv_barrier_engines_take_a_carried_knock_in_as_happened(observation):
+    """A carried knock-in is an event that happened (user ruling 2026-10-08): the engine prices the knocked-in
+    contract by its own path - the one a knock-in breached at the valuation spot takes. A knock-in's value does not
+    depend on the barrier level, so the same contract with its up barrier at 99 (breached at spot 100) is that path.
+    They refused it before."""
+    def make(barrier, carried):
+        kw = (dict(observation_type=ObservationType.CONTINUOUS) if observation == "continuous"
+              else dict(observation_type=DISC, observation_dates=[0.0, 0.5, 1.0]))
+        p = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=barrier, barrier_type=BarrierType.UP_IN,
+                          maturity=1.0, participation_rate=0.8, **kw)
+        if carried:
+            p._otc_lifecycle_knocked_in = True
+        return p
+    env = env_const(100.0)
+    for engine in _heston_slv_barrier_engines():
+        carried = float(engine.price(make(130.0, True), env))
+        assert carried == pytest.approx(float(engine.price(make(99.0, False), env)), rel=1e-12), type(engine).__name__
+        assert carried > float(engine.price(make(130.0, False), env)) + 1.0, type(engine).__name__
 
 @pytest.mark.parametrize("make", [
     lambda b, dates: BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=b, barrier_type=BarrierType.UP_IN,

@@ -14,6 +14,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
 from quantark.asset.equity.engine.settlement_support import (
     pending_receivable_pv,
     resolve_terminal_timing,
@@ -63,15 +64,9 @@ def _refuse_ended(engine_name: str, product, lifecycle_state=None) -> None:
     """A stochastic-volatility engine prices the remaining European under its own model, which it has no path for:
     an ended schedule is refused, not priced under another model (spec 2026-10-07 theta boundary 3.3)."""
     from quantark.asset.equity.engine.monitoring_ended import knock_in_carried, monitoring_ended
-    if monitoring_ended(product):
+    if monitoring_ended(product) and not knock_in_carried(product, lifecycle_state):
         raise CapabilityError(
             f"{engine_name}: the product's monitoring has ended; price the remaining European with a European "
-            "engine of the same model")
-    if knock_in_carried(product, lifecycle_state):
-        # the knock-in carried as triggered (spec 2026-10-07 R4) is the same European; ignoring the flag priced a
-        # knocked-in contract as alive
-        raise CapabilityError(
-            f"{engine_name}: the product carries a triggered knock-in; price the European with a European "
             "engine of the same model")
 
 
@@ -277,6 +272,7 @@ class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
                                            np.diff(t_grid), r_fwd, carry_fwd, float(env.get_discount_factor(T)),
                                            num_paths=int(self.params.num_paths), seed=self.params.seed,
                                            return_stderr=True,
+                                           knocked_in=knock_in_carried(product, lifecycle_state),
                                            **_barrier_kwargs(product, continuous, observe_idx))
         return _finish_price(
             self, unit, se, product, env, lifecycle_state, settlement_scale
@@ -327,6 +323,7 @@ class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
                                         float(env.get_discount_factor(T)), eta=self.eta,
                                         num_paths=int(self.params.num_paths), seed=self.params.seed,
                                         return_stderr=True,
+                                        knocked_in=knock_in_carried(product, lifecycle_state),
                                         **_barrier_kwargs(product, continuous, observe_idx))
         return _finish_price(
             self, unit, se, product, env, lifecycle_state, settlement_scale

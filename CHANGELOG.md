@@ -157,7 +157,10 @@ runs the old comparisons) apart from the KO-reset fix below; the replay goldens 
 - A carried knock-in is priced through each engine's own triggered knock-in, the path a knock-in it
   decides at the valuation instant takes, so theta differences one method: the PDE composition, the
   MC vanilla, the local-vol European kernel, QUAD's vanilla; the analytic engines' is the
-  Black-Scholes vanilla. The Heston and SLV barrier engines raise `CapabilityError` on it.
+  Black-Scholes vanilla; the Heston and SLV barrier engines (MC and 2D PDE) take it through a
+  `knocked_in` flag on their kernels (every path knocked in; the PDE's own vanilla leg), equal to
+  their own breached knock-in to 1e-12. A carried knock-in is an event that happened (user
+  ruling 2026-10-08); they refused it.
 - A schedule the bump empties is `ObservationSchedule.monitoring_ended` and priced as what
   remains (barrier family: vanillas and cash digitals, `engine/monitoring_ended.py`; a triggered
   knock-in the same way); theta there is carry and discounting, not 0. The Heston and SLV barrier
