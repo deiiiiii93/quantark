@@ -245,3 +245,58 @@ def test_concrete_options_forward_lifecycle_values(factory):
 
     for name, expected in terms.items():
         assert getattr(option, name) == expected
+
+
+# -- get_tenor on a BUSINESS_DAYS basis (accrual follow-up item 8) -------------------------------------------------
+
+_BD_START, _BD_END = datetime(2026, 1, 5), datetime(2027, 1, 5)
+
+
+def _sse():
+    from quantark.util.calendar import CalendarType, create_calendar
+
+    return create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+
+
+def _bd_env(calendar, bus_days_in_year):
+    return SimpleNamespace(valuation_date=_BD_START, day_count_convention=DayCountConvention.BUSINESS_DAYS,
+                           bus_days_in_year=bus_days_in_year, calendar=calendar)
+
+
+def test_a_business_day_tenor_reads_the_environments_calendar_like_the_maturity_does():
+    cal = _sse()
+    option = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, initial_date=_BD_START,
+                                   exercise_date=_BD_END, annualization_day_count=DayCountConvention.BUSINESS_DAYS)
+    days = cal.count_business_days(_BD_START, _BD_END, include_start=False, include_end=True)
+    assert option.get_tenor(_bd_env(cal, 244)) == days / 244
+    # the same environment the product's own maturity reads (get_time_to_date)
+    assert option.get_tenor(_bd_env(cal, 244)) == option.get_time_to_date(_BD_END, _bd_env(cal, 244))
+
+
+def test_a_business_day_tenor_without_a_calendar_is_refused():
+    option = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, initial_date=_BD_START,
+                                   exercise_date=_BD_END, annualization_day_count=DayCountConvention.BUSINESS_DAYS)
+    with pytest.raises(Exception, match="requires a business-day calendar"):
+        option.get_tenor()
+    with pytest.raises(Exception, match="requires a business-day calendar"):
+        option.get_tenor(_bd_env(None, 244))
+
+
+def test_an_autocallables_tenor_is_its_frozen_contract_tenor():
+    """An autocallable's contract tenor is frozen at construction with its own basis terms (accrual spec §4.4, §4.7):
+    get_tenor answers the same number as get_contract_tenor, under any environment's calendar or none."""
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+    from quantark.asset.equity.product.option.snowball_config import AccrualConfig, PayoffConfig
+
+    cal = _sse()
+    ko = ObservationSchedule(records=[ObservationRecord(observation_date=_BD_END, barrier=103.0)])
+    snowball = SnowballOption(
+        initial_price=100.0, strike=100.0,
+        barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.12, ko_observation_schedule=ko),
+        payoff_config=PayoffConfig(rebate_rate=0.05),
+        accrual_config=AccrualConfig(is_annualized_rebate=True, accrual_calendar=cal, accrual_bus_days_in_year=244.0),
+        initial_date=_BD_START, exercise_date=_BD_END, annualization_day_count=DayCountConvention.BUSINESS_DAYS)
+    frozen = snowball.get_contract_tenor(None)
+    assert frozen == cal.count_business_days(_BD_START, _BD_END, include_start=False, include_end=True) / 244
+    assert snowball.get_tenor() == frozen
+    assert snowball.get_tenor(_bd_env(None, 252)) == frozen

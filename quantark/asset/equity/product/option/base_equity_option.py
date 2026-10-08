@@ -358,7 +358,9 @@ class BaseEquityOption(BaseEquityProduct):
         if self.tenor is not None:
             return self.tenor
 
-        # Calculate from dates if available
+        # Calculate from dates if available. A BUSINESS_DAYS basis counts the
+        # environment's business days over its denominator, as get_time_to_date
+        # does for the maturity; with no calendar the year fraction refuses.
         if self.initial_date is not None:
             end_date = self.get_tenor_end_date()
             if end_date is not None:
@@ -366,6 +368,8 @@ class BaseEquityOption(BaseEquityProduct):
                     self.initial_date,
                     end_date,
                     self.annualization_day_count,
+                    getattr(pricing_env, "bus_days_in_year", 252),
+                    calendar=getattr(pricing_env, "calendar", None),
                 )
 
         # Fall back to the remaining maturity plus whatever has already gone.

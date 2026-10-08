@@ -1216,6 +1216,12 @@ class PhoenixOption(BaseEquityOption):
         """The accrual offset is the elapsed time, banked by ``time_shift``."""
         return float(self.accrual_config.accrued_offset)
 
+    def get_tenor(self, pricing_env=None) -> float:
+        """The contract tenor: ``BaseEquityOption.get_tenor``'s rule, frozen at construction with the contract's own
+        basis terms (accrual time spec §4.4, §4.7), so it reads no environment and agrees with the contract
+        terminal every annualized leg uses."""
+        return _contract_tenor(self, pricing_env, "contract")
+
     def get_contract_tenor(self, pricing_env=None) -> float:
         """
         Get contract tenor in years.
