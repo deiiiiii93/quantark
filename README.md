@@ -454,6 +454,24 @@ Field semantics (the knock-in fields, the Phoenix memory and EXPIRY coupon cash,
 KO-reset maturity buckets, the valuation-date rules) are in
 `quantark/asset/equity/engine/docs/autocallable_event_stats_api.md`.
 
+### Accrual time (unreleased)
+
+An autocallable's cash depends on its accrual terms only. Each knock-out, coupon and knock-in
+record carries an `AccrualPeriod` derived when the product is built: a numeric schedule accrues
+its quoted fraction (`k/12` is 1/12 per period), a dated one the contract's day count from
+`initial_date`. Ageing or re-timing an observation never moves the cash.
+
+```python
+from quantark.asset.equity.product.option.snowball_config import AccrualConfig
+from quantark.util.enum import AccrualEndType
+
+AccrualConfig(accrual_end=AccrualEndType.SETTLEMENT)          # accrue to the payment date, not the fixing
+AccrualConfig(accrual_calendar=cal, accrual_bus_days_in_year=244)   # required for a BUSINESS_DAYS accrual
+```
+
+A dated contract with annualized cash needs `initial_date`. After changing a built product's
+accrual terms or schedules, call `product.validate()` to derive its periods again.
+
 ## RQMC Target Std Scaling (MC Benchmarking)
 
 Randomized QMC uses a target standard error for adaptive batching. For large

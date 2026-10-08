@@ -5,6 +5,64 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [Unreleased]
+
+Accrual time, separate from observation time (spec: `docs/superpowers/specs/2026-10-08-accrual-time-design.md`).
+An autocallable's observation is a trading-day quantity (when the market is checked); its accrual is a calendar
+quantity in the contract's interest basis (how much it owes). Every snowball, Phoenix and KO-reset record now
+carries its own immutable `AccrualPeriod`, derived once at construction, and every product, engine and intraday
+path reads accrual through one resolver (`quantark.asset.equity.product.option.accrual`). Ageing (`time_shift`),
+snapping an observation time or rebasing a schedule moves observation timing and never moves cash. A numeric
+record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period).
+
+### Added
+- `AccrualPeriod`, `AccrualBasis`, `KnockInAnchor` and the resolver: `ko_accrual_factor`, `coupon_period_fraction`,
+  `contract_tenor`, `knock_in_anchor_for`. `ObservationRecord.accrual` holds a record's period.
+- `AccrualConfig.accrual_end` (`AccrualEndType.OBSERVATION`, the default, or `SETTLEMENT`: a record accrues to its
+  authoritative payment endpoint, resolved from the contract's own terms).
+- `AccrualConfig.post_accrual_factors`: KO-reset schedule 2's explicit factors (`accrual_factors` is schedule 1's).
+- `AccrualConfig.accrual_calendar` / `accrual_bus_days_in_year`: the frozen terms of a `BUSINESS_DAYS` accrual; no
+  accrual reads the pricing environment.
+- `AutocallableLifecycleState.knock_in_anchor`, set at the knock-in from the record whose test fired, carried on
+  pricing copies as `_otc_lifecycle_knock_in_anchor`.
+
+### Changed
+- A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
+  construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
+- A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.
+- A numeric schedule with `initial_date` accrues its quoted fraction instead of YF(`initial_date` -> valuation) plus
+  the remaining time.
+- Periods are derived from the contract's terms when it is built. Changing an accrual term on a built product
+  (`initial_date` of a dated contract, a day count, `accrual_factors`, `fixed_coupon_year_fraction`, the accrual
+  end, the settlement convention under `SETTLEMENT`, the accrual calendar) needs `product.validate()`, which derives
+  the affected periods again; pricing before that raises instead of paying the old cash. A schedule set on a built
+  product likewise needs `validate()`.
+- The intraday twin carries its source records' periods: fixings at different times of day are no longer refused,
+  and the twin no longer back-solves `accrual_factors` or banks one `accrued_offset`.
+- Monte Carlo REBASED KO-reset reads each path's knock-in anchor for the knock-out accrual and the knocked-in tenor
+  (an annualized V1 used to raise).
+
+### Fixed
+- Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract
+  aged).
+- Phoenix `get_ko_payoff` keeps `accrued_offset`.
+- The product, QUAD V2 and the intraday path agree on every Phoenix coupon period, the first one included.
+- An aged MC REBASED knock-out accrues from the contract's origin (it lost the elapsed part).
+- Ageing a KO-reset contract (`time_shift`, a theta bump) no longer grows its schedule-2 knock-out cash and
+  knocked-in tenor: schedule 2's times were not shifted, yet the elapsed time was banked into `accrued_offset`,
+  so one day of ageing added 1/365 to every post-KI accrual (0.75 -> 0.75274). KO-reset bump thetas move
+  accordingly (below). Schedule 2's observation timing is still not shifted by `time_shift` here.
+
+Measured on the PDE byte book (`test/pde_bitwise/capture_book.py`, 721 rows, main e3021668 vs this branch, same
+machine): 678 rows bit-identical; in the 43 that moved only `bump_theta` moved, every price and every other Greek
+is bit-identical. 16 Phoenix rows move at ulp level (relative 2e-14 to 2.5e-12: an aged numeric accrual now reads
+the original quoted end instead of `(offset + bump) + (t - bump)`). 27 KO-reset rows move by the schedule-2 fix
+above: relative 2e-4 to 6e-2 on alive contracts, 0.42 and 4.2 on the two knocked-in rows of `3a|class` (a small
+theta that was mostly the spurious accrual).
+
+### Removed
+- `AccrualConfig.accrual_dates` (it had no reader).
+
 ## [0.10.0] - 2026-10-06
 
 PDE 1D remaining routes (spec: `docs/superpowers/specs/2026-10-04-pde-1d-remaining-routes-design.md`,
