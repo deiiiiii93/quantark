@@ -15,12 +15,15 @@ solver's own declaration, so this tests what the fleet will actually build
 rather than a parallel reimplementation:
 
     solver = PDEEngine._get_solver(product)
-    tau     = solver._prepare_for_request(product, env)
-    market  = solver.market_snapshot(product, env)
-    request = solver.grid_request(product, market, tau)
-    solver.grid_binder.bind(request, market)
+    layout = bind_layout(solver, product, env, OutputRequest(Operation.PRICE))
 
-`bind` is what calls `build_space`, and `build_space` is what raises.
+`bind_layout` is `prepare` steps 0-5 -- the solve state, the market
+snapshot, the grid request, then `solver.grid_binder` -- the same path a
+solve takes (spec 2 section 5.10; it replaced the 1D `_prepare_for_request`
+seam in a303f50d).  The binder is what calls `build_space`, and
+`build_space` is what raises.  A request with a terminal outcome (already
+expired or knocked out at valuation) binds no grid, exactly as the fleet's
+solve does not.
 
 SCOPE -- recorded in the artifact so it cannot overclaim.  This sweeps the
 1-D PDE spatial grid under the flat-ATM-at-remaining-tenor environment.
@@ -123,14 +126,18 @@ def build_artifact(
 def _grid_builds(solver_engine, product, env) -> Optional[str]:
     """Build the grid for one operating point. None on success, else the error."""
     try:
+        from quantark.asset.equity.engine.pde.core.prepare import (
+            Operation,
+            OutputRequest,
+            bind_layout,
+        )
+
         solver = solver_engine._get_solver(product)
-        tau = solver._prepare_for_request(product, env)
-        market = solver.market_snapshot(product, env)
-        request = solver.grid_request(product, market, tau)
-        # every 1D solver is a BasePDESolver exposing its engine-owned binder
-        # (the DCN included since 0.10.0): bind on the solver's own binder,
-        # never a second one, which would bind a config the fleet never uses.
-        solver.grid_binder.bind(request, market)
+        # bind_layout is the solve's own prepare steps 0-5, binding on the
+        # solver's engine-owned grid_binder (every 1D solver, the DCN included
+        # since 0.10.0) -- never a second binder, which would bind a config the
+        # fleet never uses.
+        bind_layout(solver, product, env, OutputRequest(Operation.PRICE))
     except Exception as exc:  # noqa: BLE001 - the point is to catch and record
         return f"{type(exc).__name__}: {exc}"
     return None
