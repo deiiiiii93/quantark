@@ -216,3 +216,64 @@ def coupon_accrual(period: AccrualPeriod) -> float:
     if period.kind is AccrualKind.DATE:
         return period.period_basis.period(period.start, period.end)
     return float(period.end) - float(period.start)
+
+
+# -- the resolver: the only place a product's accrual is read (spec §5) ------------------------------------------
+
+def _period_of(record) -> AccrualPeriod:
+    period = getattr(record, "accrual", None)
+    if period is None:
+        raise ValidationError("this observation record carries no accrual period: a schedule set on a built product "
+                              "needs product.validate() to derive its periods")
+    return period
+
+
+def _guard_current(product) -> None:
+    """Accrual terms changed on a built product without ``validate()`` would pay the old cash: refuse instead."""
+    built = getattr(product, "_accrual_terms_key", None)
+    if built is None:
+        return
+    from .accrual_build import accrual_terms_key
+    if accrual_terms_key(product) != built:
+        raise ValidationError("the contract's accrual terms changed after its periods were derived: call "
+                              "product.validate() to derive them again")
+
+
+def ko_accrual_factor(product, record, env=None, *, knock_in: Optional[KnockInAnchor] = None) -> float:
+    """The knock-out leg, in today's precedence: explicit factor, then the annualization flag, then the period."""
+    period = _period_of(record)
+    if period.cumulative_fraction is not None:
+        return float(period.cumulative_fraction)
+    if not product._effective_annualized_flag(product.accrual_config.is_annualized_ko):
+        return 1.0
+    _guard_current(product)
+    return cumulative_accrual(period, knock_in=knock_in)
+
+
+def coupon_period_fraction(product, record, env=None) -> float:
+    """The Phoenix coupon leg: 1 for a per-period rate, else the period's fraction."""
+    if not product.is_coupon_rate_annualized:
+        return 1.0
+    period = _period_of(record)
+    if period.period_fraction is None:
+        _guard_current(product)
+    return coupon_accrual(period)
+
+
+def contract_tenor(product, env=None, leg: str = "contract", *, knock_in: Optional[KnockInAnchor] = None) -> float:
+    """The cumulative leg of a terminal period (spec §4.4): ``contract``, or KO-reset's ``pre`` / ``post``."""
+    terminals = getattr(product, "_terminal_accrual", None)
+    if not terminals or leg not in terminals:
+        raise ValidationError(f"{type(product).__name__} carries no {leg!r} terminal accrual period")
+    period = terminals[leg]
+    if period.cumulative_fraction is None:
+        _guard_current(product)
+    return cumulative_accrual(period, knock_in=knock_in)
+
+
+def knock_in_anchor_for(record, source_index: int) -> Optional[KnockInAnchor]:
+    """The anchor a knock-in on ``record`` fixes (spec §5.1); ``None`` for a non-accruing record."""
+    period = _period_of(record)
+    if period.kind is AccrualKind.NONE:
+        return None
+    return KnockInAnchor(source_index=int(source_index), fixing=period.end, origin=period.origin, basis=period.basis)

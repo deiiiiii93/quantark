@@ -18,7 +18,6 @@ from quantark.asset.equity.settlement import (
     SettlementRequest,
     SettlementResolver,
 )
-from quantark.util.calendar import calculate_year_fraction
 from quantark.util.calendar.day_counter import DayCountConvention, calculate_day_count_fraction
 from quantark.util.enum import (
     BarrierType,
@@ -31,6 +30,7 @@ from quantark.util.enum import (
 )
 from quantark.util.exceptions import ValidationError
 
+from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor
 from .accrual_build import build_contract_accrual
 from .observation_schedule import (
     at_valuation_instant,
@@ -616,19 +616,14 @@ class PhoenixOption(BaseEquityOption):
             product=self,
         )
 
-        annualized_ko = self._effective_annualized_flag(
-            self.accrual_config.is_annualized_ko
-        )
         principal_component = (
             self.initial_price * self.contract_multiplier
             if self.payoff_config.include_principal
             else 0.0
         )
         terminal_timing = None
-        bus_days_in_year = pricing_env.bus_days_in_year if pricing_env else 252
 
         ko_records: List[ResolvedObservationRecord] = []
-        accrual_factors = self.accrual_config.accrual_factors
         for idx, rec in enumerate(resolved_schedule):
             source_idx = active_indices[idx]
             source_record = schedule.records[source_idx]
@@ -636,52 +631,7 @@ class PhoenixOption(BaseEquityOption):
             if rate is None:
                 rate = self.get_ko_rate_at(source_idx)
 
-            if accrual_factors is not None:
-                accrual_factor = float(accrual_factors[source_idx])
-            elif annualized_ko:
-                schedule_record = source_record
-                accrual_start_date = self.initial_date
-                if schedule_record.observation_date is not None:
-                    if accrual_start_date is None:
-                        if pricing_env is None:
-                            raise ValidationError(
-                                "PricingEnvironment required to resolve KO accrual from observation_date."
-                            )
-                        accrual_start_date = pricing_env.valuation_date
-                    accrual_factor = calculate_year_fraction(
-                        accrual_start_date,
-                        schedule_record.observation_date,
-                        self.annualization_day_count,
-                        bus_days_in_year,
-                        calendar=getattr(pricing_env, "calendar", None),
-                    )
-                else:
-                    if accrual_start_date is None:
-                        accrual_factor = (
-                            self.accrual_config.accrued_offset + rec.observation_time
-                        )
-                    else:
-                        if pricing_env is None:
-                            raise ValidationError(
-                                "PricingEnvironment required to resolve KO accrual without observation_date."
-                            )
-                        if pricing_env.valuation_date < accrual_start_date:
-                            raise ValidationError(
-                                "valuation_date must be on or after initial_date to resolve KO accrual."
-                            )
-                        if pricing_env.valuation_date == accrual_start_date:
-                            initial_to_valuation = 0.0
-                        else:
-                            initial_to_valuation = calculate_year_fraction(
-                                accrual_start_date,
-                                pricing_env.valuation_date,
-                                self.annualization_day_count,
-                                pricing_env.bus_days_in_year,
-                                calendar=getattr(pricing_env, "calendar", None),
-                            )
-                        accrual_factor = initial_to_valuation + rec.observation_time
-            else:
-                accrual_factor = 1.0
+            accrual_factor = ko_accrual_factor(self, source_record, pricing_env)
 
             ko_coupon = (
                 self.initial_price * self.contract_multiplier * rate * accrual_factor
@@ -878,72 +828,16 @@ class PhoenixOption(BaseEquityOption):
         return self._effective_annualized_flag(self.accrual_config.is_annualized_coupon)
 
     def coupon_period_fraction(self, observation_idx: int) -> float:
-        """The period fraction of one coupon, from the contract alone.
+        """The period fraction of one coupon: its record's accrual period (accrual time spec §5).
 
-        A per-period rate is the period's amount, so its fraction is 1. An annualized
-        rate needs the period's year fraction, in the precedence engines apply: an
-        external accrual factor, the fixed fraction, the coupon day count between
-        consecutive contract dates, else the gap between consecutive observation
-        times. A contract that carries none of those cannot say what it accrues
-        over, so this fails closed rather than picking one.
-
-        Engines pass their own resolved times to
-        ``get_coupon_period_year_fractions``; this is the same answer for callers
-        that hold only the contract (the lifecycle tracker).
+        A per-period rate is the period's amount, so its fraction is 1. An annualized rate reads the record's
+        coupon leg: an explicit factor (``accrual_factors``, ``fixed_coupon_year_fraction``), else the period from
+        the previous record's end in the coupon day count. A period with no known start refuses.
         """
-        if not self.is_coupon_rate_annualized:
-            return 1.0
-
-        factors = self.accrual_config.accrual_factors
-        if factors is not None:
-            return float(factors[observation_idx])
-
-        fixed = self.coupon_config.fixed_coupon_year_fraction
-        if fixed is not None:
-            return float(fixed)
-
-        schedule = self.barrier_config.ko_observation_schedule
-        records = schedule.records if schedule is not None else []
-        if (
-            self.initial_date is not None
-            and observation_idx < len(records)
-            and all(r.observation_date is not None for r in records[: observation_idx + 1])
-        ):
-            start = (
-                self.initial_date
-                if observation_idx == 0
-                else records[observation_idx - 1].observation_date
-            )
-            return float(
-                self.get_coupon_year_fraction(
-                    start, records[observation_idx].observation_date
-                )
-            )
-
-        if observation_idx < len(records) and all(
-            r.observation_time is not None for r in records[: observation_idx + 1]
-        ):
-            current = float(records[observation_idx].observation_time)
-            if observation_idx == 0:
-                # the elapsed part of the first period was banked by time_shift (accrued_offset); an
-                # ageing past an observation recorded where the period started (first_period_start)
-                start = self.accrual_config.first_period_start
-                if start is None:
-                    raise ValidationError(
-                        f"coupon {observation_idx} is quoted per annum on a tenor schedule aged past an "
-                        "observation with no time: its contractual period is unknown -- give the contract "
-                        "a fixed_coupon_year_fraction or accrual_factors (or an initial_date with dated KO "
-                        "observations)"
-                    )
-                return float(self.accrual_config.accrued_offset) + current - float(start)
-            return current - float(records[observation_idx - 1].observation_time)
-
-        raise ValidationError(
-            f"coupon {observation_idx} is quoted per annum but its accrual period is "
-            "undetermined: give the contract an initial_date with dated KO observations, "
-            "a fixed_coupon_year_fraction, or accrual_factors -- or declare "
-            "is_annualized_coupon=False if the rate is the period amount"
-        )
+        records = self.barrier_config.ko_observation_schedule.records
+        if not 0 <= observation_idx < len(records):
+            raise ValidationError(f"coupon {observation_idx} has no knock-out record")
+        return coupon_period_fraction(self, records[observation_idx])
 
     def get_coupon_payoff(
         self,
@@ -1126,64 +1020,14 @@ class PhoenixOption(BaseEquityOption):
         # KO coupon based on ko_rate
         ko_rate = self.get_ko_rate_at(observation_idx)
 
-        # Use specific flag or fall back to general is_annualized
-        annualized_ko = self._effective_annualized_flag(
-            self.accrual_config.is_annualized_ko
-        )
-
-        accrual_factors = self.accrual_config.accrual_factors
-        if accrual_factors is not None:
-            accrual_factor = float(accrual_factors[observation_idx])
-        elif annualized_ko:
-            # Calculate proper accrual from initial_date
-            if self.barrier_config.ko_observation_schedule is not None:
-                schedule = self.barrier_config.ko_observation_schedule
-                schedule_record = schedule.records[observation_idx]
-
-                if schedule_record.observation_date is not None:
-                    # Use date-based calculation
-                    accrual_start_date = self.initial_date
-                    if accrual_start_date is None:
-                        if pricing_env is None:
-                            raise ValidationError(
-                                "PricingEnvironment required to resolve KO accrual from observation_date."
-                            )
-                        accrual_start_date = pricing_env.valuation_date
-
-                    bus_days_in_year = (
-                        pricing_env.bus_days_in_year if pricing_env else 252
-                    )
-                    accrual_factor = calculate_year_fraction(
-                        accrual_start_date,
-                        schedule_record.observation_date,
-                        self.annualization_day_count,
-                        bus_days_in_year,
-                        calendar=getattr(pricing_env, "calendar", None),
-                    )
-                else:
-                    # Fallback to observation_time
-                    accrual_factor = schedule_record.observation_time
-            elif self.barrier_config.ko_observation_dates is not None:
-                # Legacy path: use year fraction directly
-                accrual_factor = self.barrier_config.ko_observation_dates[observation_idx]
-            else:
-                accrual_factor = 1.0
-        else:
-            accrual_factor = 1.0
-
+        record = self.barrier_config.ko_observation_schedule.records[observation_idx]
+        accrual_factor = ko_accrual_factor(self, record, pricing_env)
         ko_coupon = self.initial_price * self.contract_multiplier * ko_rate * accrual_factor
 
         # Check if current period coupon is triggered
         current_coupon = 0.0
         if self.is_coupon_triggered(spot, observation_idx):
-            coupon_year_fraction = (
-                float(accrual_factors[observation_idx])
-                if accrual_factors is not None
-                else None
-            )
-            current_coupon = self.get_coupon_payoff(
-                observation_idx, year_fraction=coupon_year_fraction
-            )
+            current_coupon = self.get_coupon_payoff(observation_idx)
 
         return principal + ko_coupon + accumulated_coupons + current_coupon
 
@@ -1232,9 +1076,9 @@ class PhoenixOption(BaseEquityOption):
                 contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
                 rebate *= contract_tenor
         else:
-            # Fixed rebate
-            contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
+            # Fixed rebate: the tenor is read only when the rebate is annualized
             if self.accrual_config.is_annualized_rebate:
+                contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
                 rebate = (
                     self.payoff_config.rebate_rate
                     * self.initial_price
@@ -1385,8 +1229,7 @@ class PhoenixOption(BaseEquityOption):
         Returns:
             Contract tenor in years
         """
-        # Use get_tenor from base class which handles various scenarios
-        return self.get_tenor(pricing_env)
+        return _contract_tenor(self, pricing_env)
 
     def intrinsic_value(self, spot: float) -> float:
         """

@@ -35,6 +35,24 @@ def _calendar_key(calendar):
     return None if calendar is None else calendar.identity()
 
 
+def accrual_terms_key(product) -> tuple:
+    """The contract terms every derived period depends on, factors aside (ageing slices those by position): a
+    period derived under another key is stale."""
+    ac = product.accrual_config
+    coupon = getattr(product, "coupon_config", None)
+    convention = product.settlement_convention
+    settlement = ac.accrual_end is AccrualEndType.SETTLEMENT
+    return (
+        product.initial_date, product.annualization_day_count.name,
+        None if coupon is None else coupon.day_count_convention.name,
+        None if coupon is None else coupon.fixed_coupon_year_fraction, ac.accrual_end.name,
+        None if not settlement or convention is None else (
+            convention.lag, convention.lag_unit.name, convention.business_day_convention.name,
+            _calendar_key(convention.calendar)),
+        _calendar_key(ac.accrual_calendar), ac.accrual_bus_days_in_year,
+    )
+
+
 class _Terms:
     """The contract terms every record's period is derived from."""
 
@@ -56,15 +74,7 @@ class _Terms:
                                 or getattr(coupon, "coupon_pay_type", None) is CouponPayType.EXPIRY):
             raise ValidationError("an EXPIRY coupon under ACCRUAL_END_TYPE=SETTLEMENT: its accrual end is a "
                                   "term-sheet choice the contract must state (accrual time spec §4.5)")
-        convention = product.settlement_convention
-        self.key = (
-            self.initial_date, product.annualization_day_count.name,
-            None if coupon is None else coupon.day_count_convention.name, self.fixed, ac.accrual_end.name,
-            None if not self.settlement or convention is None else (
-                convention.lag, convention.lag_unit.name, convention.business_day_convention.name,
-                _calendar_key(convention.calendar)),
-            _calendar_key(ac.accrual_calendar), ac.accrual_bus_days_in_year,
-        )
+        self.key = accrual_terms_key(product)
 
     # -- endpoints -----------------------------------------------------------------------------------------
     def fixing(self, rec: ObservationRecord):
@@ -284,6 +294,7 @@ def build_contract_accrual(product) -> None:
         product.post_barrier_config = replace(post_config, ko_observation_schedule=post)
     elif ac.post_accrual_factors is not None:
         raise ValidationError("post_accrual_factors belong to a KO-reset contract's schedule 2")
+    product._accrual_terms_key = terms.key
     key = _terminal_key(product, terms)
     if getattr(product, "_terminal_accrual_key", None) != key or getattr(product, "_terminal_accrual", None) is None:
         product._terminal_accrual = _terminals(product, terms)

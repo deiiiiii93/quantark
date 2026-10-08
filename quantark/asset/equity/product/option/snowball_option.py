@@ -16,7 +16,6 @@ from quantark.asset.equity.settlement import (
     SettlementRequest,
     SettlementResolver,
 )
-from quantark.util.calendar import calculate_year_fraction
 from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import (
     BarrierType,
@@ -30,6 +29,7 @@ from quantark.util.enum import (
 )
 from quantark.util.exceptions import ValidationError
 
+from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor
 from .accrual_build import build_contract_accrual
 from .observation_schedule import (
     at_valuation_instant,
@@ -644,8 +644,7 @@ class SnowballOption(BaseEquityOption):
         Returns:
             Contract tenor in years
         """
-        # Use get_tenor from base class which handles various scenarios
-        return self.get_tenor(pricing_env)
+        return _contract_tenor(self, pricing_env)
 
     def get_payoff(
         self, spot: float, pricing_env: PricingEnv = None, **kwargs
@@ -714,9 +713,9 @@ class SnowballOption(BaseEquityOption):
                 contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
                 rebate *= contract_tenor
         else:
-            # Fixed rebate
-            contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
+            # Fixed rebate: the tenor is read only when the rebate is annualized
             if self.accrual_config.is_annualized_rebate:
+                contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
                 rebate = (
                     self.payoff_config.rebate_rate
                     * self.initial_price
@@ -1020,21 +1019,14 @@ class SnowballOption(BaseEquityOption):
             product=self,
         )
 
-        annualized_ko = self._effective_annualized_flag(
-            self.accrual_config.is_annualized_ko
-        )
         principal_component = (
             self.initial_price * self.contract_multiplier
             if self.payoff_config.include_principal
             else 0.0
         )
         terminal_timing = None
-        bus_days_in_year = (
-            pricing_env.bus_days_in_year if pricing_env is not None else 252
-        )
 
         ko_records: List[ResolvedObservationRecord] = []
-        accrual_factors = self.accrual_config.accrual_factors
         for idx, rec in enumerate(resolved_schedule):
             source_idx = active_indices[idx]
             source_record = schedule.records[source_idx]
@@ -1042,52 +1034,7 @@ class SnowballOption(BaseEquityOption):
             if rate is None:
                 rate = self.get_ko_rate_at(source_idx)
 
-            if accrual_factors is not None:
-                accrual_factor = float(accrual_factors[source_idx])
-            elif annualized_ko:
-                schedule_record = source_record
-                accrual_start_date = self.initial_date
-                if schedule_record.observation_date is not None:
-                    if accrual_start_date is None:
-                        if pricing_env is None:
-                            raise ValidationError(
-                                "PricingEnvironment required to resolve KO accrual from observation_date."
-                            )
-                        accrual_start_date = pricing_env.valuation_date
-                    accrual_factor = calculate_year_fraction(
-                        accrual_start_date,
-                        schedule_record.observation_date,
-                        self.annualization_day_count,
-                        bus_days_in_year,
-                        calendar=getattr(pricing_env, "calendar", None),
-                    )
-                else:
-                    if accrual_start_date is None:
-                        accrual_factor = (
-                            self.accrual_config.accrued_offset + rec.observation_time
-                        )
-                    else:
-                        if pricing_env is None:
-                            raise ValidationError(
-                                "PricingEnvironment required to resolve KO accrual without observation_date."
-                            )
-                        if pricing_env.valuation_date < accrual_start_date:
-                            raise ValidationError(
-                                "valuation_date must be on or after initial_date to resolve KO accrual."
-                            )
-                        if pricing_env.valuation_date == accrual_start_date:
-                            initial_to_valuation = 0.0
-                        else:
-                            initial_to_valuation = calculate_year_fraction(
-                                accrual_start_date,
-                                pricing_env.valuation_date,
-                                self.annualization_day_count,
-                                pricing_env.bus_days_in_year,
-                                calendar=getattr(pricing_env, "calendar", None),
-                            )
-                        accrual_factor = initial_to_valuation + rec.observation_time
-            else:
-                accrual_factor = 1.0
+            accrual_factor = ko_accrual_factor(self, source_record, pricing_env)
             coupon_payoff = (
                 self.initial_price * self.contract_multiplier * rate * accrual_factor
             )

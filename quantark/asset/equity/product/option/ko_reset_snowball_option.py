@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Union
 
 from quantark.asset.equity.settlement import SettlementConvention
-from quantark.util.calendar import calculate_year_fraction
 from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import (
     BarrierType,
@@ -35,6 +34,7 @@ from .observation_schedule import (
     ResolvedObservationRecord,
 )
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
+from .accrual import contract_tenor as _contract_tenor, ko_accrual_factor
 from .snowball_option import SnowballOption
 
 
@@ -360,58 +360,21 @@ class KnockOutResetSnowballOption(SnowballOption):
                 "matured at the end of that schedule; only a knocked-in contract runs on the post-KI schedule."
             )
 
-    def _resolve_schedule_end_date(
-        self, schedule: Optional[ObservationSchedule]
-    ) -> Optional[datetime]:
-        if schedule is None:
-            return None
-        dates = [
-            rec.observation_date
-            for rec in schedule.records
-            if rec.observation_date is not None
-        ]
-        return max(dates) if dates else None
-
     def _resolve_pre_contract_tenor(self, pricing_env: PricingEnv) -> float:
-        end_date = self._resolve_schedule_end_date(
-            self.barrier_config.ko_observation_schedule
-        )
-        if end_date is not None and self.initial_date is not None:
-            return calculate_year_fraction(
-                self.initial_date,
-                end_date,
-                self.annualization_day_count,
-                pricing_env.bus_days_in_year,
-                calendar=getattr(pricing_env, "calendar", None),
-            )
-        # The remaining time to the last pre-KO observation, plus whatever
-        # has already gone: a CONTRACT tenor does not shorten as the
-        # contract ages (see ``BaseEquityOption.get_tenor``).
-        return self.get_pre_maturity_time(pricing_env) + self._elapsed_since_origin()
+        """The not-knocked-in (V0) tenor: origin to schedule 1's last contractual fixing (accrual time spec §4.4)."""
+        return _contract_tenor(self, pricing_env, "pre")
 
-    def _resolve_post_contract_tenor(self, pricing_env: PricingEnv) -> float:
-        if self.post_ko_mode == PostKOScheduleMode.ABSOLUTE:
-            end_date = self._resolve_schedule_end_date(
-                self.post_barrier_config.ko_observation_schedule
-            )
-            if end_date is not None and self.initial_date is not None:
-                return calculate_year_fraction(
-                    self.initial_date,
-                    end_date,
-                    self.annualization_day_count,
-                    pricing_env.bus_days_in_year,
-                    calendar=getattr(pricing_env, "calendar", None),
-                )
-        return self.get_post_maturity_time(pricing_env) + self._elapsed_since_origin()
+    def _resolve_post_contract_tenor(self, pricing_env: PricingEnv, *, knock_in=None) -> float:
+        """The knocked-in (V1) tenor: to schedule 2's last contractual fixing; a REBASED contract's hangs from its
+        knock-in anchor (``knock_in``)."""
+        return _contract_tenor(self, pricing_env, "post", knock_in=knock_in)
 
     def get_contract_tenor(self, pricing_env: PricingEnv = None) -> float:
         """
         For KO-reset snowball, default contract tenor follows the pre-KI schedule.
         Post-KI tenor is handled explicitly in get_maturity_payoff_v1.
         """
-        if pricing_env is None:
-            return super().get_contract_tenor(pricing_env)
-        return self._resolve_pre_contract_tenor(pricing_env)
+        return _contract_tenor(self, pricing_env, "contract" if pricing_env is None else "pre")
 
     def get_post_maturity_time(
         self, pricing_env: PricingEnv, ki_time: Optional[float] = None
@@ -480,10 +443,10 @@ class KnockOutResetSnowballOption(SnowballOption):
                 )
                 rebate *= contract_tenor
         else:
-            contract_tenor = contract_tenor or self._resolve_pre_contract_tenor(
-                pricing_env
-            )
             if self.accrual_config.is_annualized_rebate:
+                contract_tenor = contract_tenor or self._resolve_pre_contract_tenor(
+                    pricing_env
+                )
                 rebate = (
                     self.payoff_config.rebate_rate
                     * self.initial_price
@@ -500,10 +463,14 @@ class KnockOutResetSnowballOption(SnowballOption):
         return principal + rebate
 
     def get_maturity_payoff_v1(
-        self, spot: float, pricing_env: PricingEnv = None
+        self, spot: float, pricing_env: PricingEnv = None, *,
+        contract_tenor: Optional[float] = None,
     ) -> float:
         """
         KO-reset V1 payoff uses post-KI tenor when annualized.
+
+        ``contract_tenor`` is the post-KI tenor resolved by a caller that knows the knock-in (a REBASED
+        contract's tenor hangs from it); ``None`` resolves it here, from a carried anchor if the copy has one.
         """
         if spot < 0:
             raise ValidationError(f"Spot price must be non-negative, got {spot}")
@@ -541,7 +508,10 @@ class KnockOutResetSnowballOption(SnowballOption):
             participation_rate * min(raw_diff, 0.0) * self.contract_multiplier
         )
         if self.accrual_config.is_annualized_ki:
-            contract_tenor = self._resolve_post_contract_tenor(pricing_env)
+            if contract_tenor is None:
+                contract_tenor = self._resolve_post_contract_tenor(
+                    pricing_env, knock_in=getattr(self, "_otc_lifecycle_knock_in_anchor", None)
+                )
             downside *= contract_tenor
 
         if self.payoff_config.protection_type == ProtectionType.FULL:
@@ -629,55 +599,16 @@ class KnockOutResetSnowballOption(SnowballOption):
 
     def compute_ko_accrual_factor(
         self,
-        observation_time: float,
+        observation_time: Optional[float],
         schedule_record: ObservationRecord,
         pricing_env: PricingEnv,
+        *,
+        knock_in=None,
     ) -> float:
-        """Compute accrual factor for KO coupon given observation time."""
-        annualized_ko = self._effective_annualized_flag(
-            self.accrual_config.is_annualized_ko
-        )
-        if not annualized_ko:
-            return 1.0
-
-        accrual_start_date = self.initial_date
-        if schedule_record.observation_date is not None:
-            if accrual_start_date is None:
-                if pricing_env is None:
-                    raise ValidationError(
-                        "PricingEnvironment required to resolve KO accrual from observation_date."
-                    )
-                accrual_start_date = pricing_env.valuation_date
-            return calculate_year_fraction(
-                accrual_start_date,
-                schedule_record.observation_date,
-                self.annualization_day_count,
-                pricing_env.bus_days_in_year,
-                calendar=getattr(pricing_env, "calendar", None),
-            )
-
-        if accrual_start_date is None:
-            return float(self.accrual_config.accrued_offset + observation_time)
-
-        if pricing_env is None:
-            raise ValidationError(
-                "PricingEnvironment required to resolve KO accrual without observation_date."
-            )
-        if pricing_env.valuation_date < accrual_start_date:
-            raise ValidationError(
-                "valuation_date must be on or after initial_date to resolve KO accrual."
-            )
-        if pricing_env.valuation_date == accrual_start_date:
-            initial_to_valuation = 0.0
-        else:
-            initial_to_valuation = calculate_year_fraction(
-                accrual_start_date,
-                pricing_env.valuation_date,
-                self.annualization_day_count,
-                pricing_env.bus_days_in_year,
-                calendar=getattr(pricing_env, "calendar", None),
-            )
-        return float(initial_to_valuation + observation_time)
+        """The knock-out leg of ``schedule_record``'s accrual period (accrual time spec §5). ``observation_time`` is
+        unused, kept for callers: accrual is the record's own, not its observation time. A REBASED schedule-2
+        record needs its knock-in anchor (``knock_in``)."""
+        return ko_accrual_factor(self, schedule_record, pricing_env, knock_in=knock_in)
 
     def cache_key(self) -> Dict[str, object]:
         key = super().cache_key()
