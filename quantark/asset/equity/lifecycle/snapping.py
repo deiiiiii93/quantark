@@ -106,11 +106,20 @@ def _snap_config(config):
 def snap_contract(product):
     """A deep copy of ``product`` with every numeric observation time and a numeric maturity snapped."""
     contract = deepcopy(product)
-    if getattr(contract, "barrier_config", None) is not None:
-        contract.barrier_config = _snap_config(contract.barrier_config)
-    if getattr(contract, "post_barrier_config", None) is not None:
-        contract.post_barrier_config = _snap_config(contract.post_barrier_config)
+    moved = False
+    for name in ("barrier_config", "post_barrier_config"):
+        config = getattr(contract, name, None)
+        if config is not None:
+            snapped = _snap_config(config)
+            moved = moved or snapped is not config
+            setattr(contract, name, snapped)
     maturity = getattr(contract, "maturity", None)
-    if getattr(contract, "exercise_date", None) is None and isinstance(maturity, (int, float)):
-        contract.maturity = snap_time(float(maturity)) if is_off_day(maturity) else maturity
+    if getattr(contract, "exercise_date", None) is None and isinstance(maturity, (int, float)) and is_off_day(maturity):
+        contract.maturity = snap_time(float(maturity))
+        moved = True
+    if moved and getattr(contract, "_terminal_accrual", None):
+        # Snapping moves observation timing only: the terminal tenors (V0, V1) stay the contract's. A numeric terminal
+        # is derived from the last fixing or the maturity, so a later validate() (QUAD V2 validates every product)
+        # would otherwise re-derive it from the snapped times (0.5 -> 182/365). Records already keep their periods.
+        contract._terminal_accrual_explicit = True
     return contract

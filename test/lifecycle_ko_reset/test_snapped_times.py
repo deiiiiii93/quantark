@@ -112,3 +112,34 @@ def test_a_whole_day_record_an_ulp_above_its_day_leaves_the_post_close_copy(k):
             AutocallableLifecycleTracker(product=snowball([200 * d], [200 * d], 200 * d), quantity=1.0,
                                          start_date=START).product_for_pricing(day, env(90.0, day)),
             env(90.0, day)), rel=1e-12)
+
+
+def test_a_snapped_contract_keeps_its_terminal_tenors_through_validate():
+    """Independent review (Important): validate() on a snapped copy re-derived the numeric terminals from the snapped
+    times (schedule 1's last fixing 0.5 -> 182/365), so snapping moved V0/V1 cash on QUAD V2, which validates every
+    product it prices. Snapping moves observation timing only (accrual time spec §1)."""
+    from quantark.asset.equity.product.option.accrual import contract_tenor
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+    from quantark.asset.equity.product.option.snowball_config import AccrualConfig, BarrierConfig, PayoffConfig
+    from quantark.util.enum.option_enums import ObservationType, PostKOScheduleMode
+
+    from .conftest import schedule
+
+    months = [k / 12.0 for k in range(1, 7)]
+    product = KnockOutResetSnowballOption(
+        initial_price=100.0, strike=100.0, maturity=1.0, tenor=1.0,
+        barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+                                     ko_observation_schedule=schedule(months, 103.0), ki_barrier=75.0,
+                                     ki_observation_type=ObservationType.DISCRETE,
+                                     ki_observation_schedule=schedule(months, 75.0)),
+        post_barrier_config=BarrierConfig(ko_barrier=95.0, ko_rate=0.03, ko_observation_type=ObservationType.DISCRETE,
+                                          ko_observation_schedule=schedule([k / 12.0 for k in (7, 9, 12)], 95.0)),
+        accrual_config=AccrualConfig(is_annualized=True, is_annualized_ki=True, is_annualized_rebate=True),
+        payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=False),
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE)
+    snapped = snap_contract(product)
+    legs = ("contract", "pre", "post")
+    assert [contract_tenor(snapped, None, leg) for leg in legs] == [1.0, 0.5, 1.0]
+    snapped.validate()
+    assert [contract_tenor(snapped, None, leg) for leg in legs] == [1.0, 0.5, 1.0]
+    assert snapped.get_maturity_payoff_v0(100.0, env()) == pytest.approx(2.5, abs=1e-15)
