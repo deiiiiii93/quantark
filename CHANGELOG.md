@@ -120,6 +120,40 @@ barriers away from maturity are bit-identical.
   the double-sharkfin MC summed every hit's cash. One-touches and barrier knock-outs keep the mode.
   The eight `3c|mat|*no_touch|acc|*` byte-book rows are retired.
 
+### Added
+- KO-reset snowball lifecycle tracking (spec `docs/superpowers/specs/2026-10-08-ko-reset-lifecycle-design.md`):
+  `KOResetLifecycleTracker` books the schedule-1 knock-out, the knock-in that switches the contract to schedule 2
+  for good (tested the same close, inclusive; schedule-2 records due on an earlier close are consumed), V0 at
+  schedule 1's end on its tenor (no schedule-2 extension), and V1 at the knocked-in contract's end; a knock-out
+  wins a tie. `PortfolioLifecycleManager` (equity backtest, dynamic scenarios), `ProductReplay` and the
+  simulated-path backtest track KO-reset positions (the manager used to warn and reprice them as of every day,
+  and every engine raised the day after schedule 1 ended un-knocked). Both schedule-2 modes: a knocked-in
+  `REBASED` contract is priced as the `ABSOLUTE` contract it has become
+  (`KnockOutResetSnowballOption.with_absolute_schedule_2`); an un-knocked `REBASED` contract needs a Monte
+  Carlo engine (refused at configuration elsewhere, and in simulation surface mode). A carried `REBASED`
+  knock-in needs `_otc_lifecycle_knock_in_date`.
+
+### Changed
+- Every autocallable tracker holds its contract with numeric observation times snapped to the day it observes
+  them (`round(time * 365) / 365`; whole-day times keep their exact float, dated records are untouched), and
+  every consumer (pricing copy, replay, simulation surfaces) builds from it. An off-day numeric record used to
+  be observed on its rounded day yet priced as still ahead (a day-1.4 knock-out: 4.9183 on the life surface
+  against 0.4381). Annualized cash follows the snapped time (user ruling 2026-10-08): a `k / 12` Phoenix coupon
+  at 12% pays 30/365 or 31/365 of a year instead of 1/12; a life's total is unchanged. Whole-day and dated
+  products are bit-identical; replay goldens unchanged.
+- The replay and the simulation price the initial book before the first close (`product_for_pricing(...,
+  initial=True)` keeps a record landing that day); the simulation keys such a state apart only where a record
+  lands.
+- Replay QUAD prices a KO-reset on `KOResetSnowballQuadEngine` (`SnowballQuadEngine` ignored schedule 2: 4.195
+  for -1.744). A KO-reset under `vol_model != "bsm"` needs `vol_model_solver="mc"`: the vol-model PDE solvers
+  price it on schedule 1 (21-26% off).
+
+### Fixed
+- `SnowballMCEngine`, `REBASED` KO-reset: a post-knock-in knock-out keeps the accrued offset of an aged contract
+  without `initial_date` (an annualized control paid 6.5 instead of 7.5); V1 is read at each path's own maturity
+  (`ki_time + max(offset)`, not the grid's last node) on that path's tenor (`get_maturity_payoff_v1` takes
+  `contract_tenor`; an annualized `REBASED` V1 raised "ki_time is required").
+
 ### Removed
 - `DoubleSharkfinOptionAnalyticalEngine(quad_points=...)`: the paid-at-hit integral controls its
   own error. Passing it raises `TypeError`.
