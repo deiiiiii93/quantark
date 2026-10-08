@@ -27,8 +27,7 @@ def _detach(schedule: Optional[ObservationSchedule]) -> Optional[ObservationSche
     """A copy whose records are fresh copies: periods derived for this product never reach another (§4.2)."""
     if schedule is None:
         return None
-    return ObservationSchedule(records=[replace(r) for r in schedule.records],
-                               aggregation_mode=schedule.aggregation_mode, frequency=schedule.frequency)
+    return replace(schedule, records=[replace(r) for r in schedule.records])
 
 
 def _calendar_key(calendar):
