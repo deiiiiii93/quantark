@@ -391,7 +391,8 @@ class ReplayBacktestEngine:
                     if bp.initial_price is not None:
                         initial_price = float(bp.initial_price)
                     else:
-                        product = replay.product_for_date(date, env)
+                        # before the first close: a record due today is still pending (spec 2026-10-08 4a)
+                        product = replay.product_for_date(date, env, initial=True)
                         initial_price = float(engine.price(product, env))
                     initial_book_value += float(bp.quantity) * initial_price
                 self._initial_book_value = initial_book_value

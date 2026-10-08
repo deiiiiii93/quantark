@@ -107,7 +107,7 @@ class EnsembleBacktestEngine:
                 everyone = np.arange(n_paths)
                 for bp, pricer in zip(cfg.products, pricers):
                     states = self._states_for(day, d, everyone, np.zeros(n_paths, dtype=bool),
-                                              spot, vol, rate, q_T, div_yield, basis, env_key)
+                                              spot, vol, rate, q_T, div_yield, basis, env_key, initial=True)
                     gate_reports.append(pricer.verify(
                         [state_row(states, n) for n in range(len(states))],
                         cfg.pricing.gate, self._gate_scale(bp),
@@ -311,11 +311,13 @@ class EnsembleBacktestEngine:
 
     # -- pricing -------------------------------------------------------
 
-    def _states_for(self, day, d, idx, knocked_in, spot, vol, rate, q_T, div_yield, basis, env_key):
+    def _states_for(self, day, d, idx, knocked_in, spot, vol, rate, q_T, div_yield, basis, env_key,
+                    initial=False, knock_in_day=None):
         return DayStates(
             day_index=d, date=day, path_index=idx, spot=spot[idx], vol=vol[idx], rate=rate[idx],
             q_T=q_T[idx], div_yield=tuple(div_yield[int(i)] for i in idx),
             basis_yield=basis[idx], env_key=env_key[idx], knocked_in=knocked_in,
+            initial=initial, knock_in_day=knock_in_day,
         )
 
     def _initial_book_value(self, pricers, day, d, spot, vol, rate, q_T, div_yield, basis, env_key):
@@ -331,8 +333,9 @@ class EnsembleBacktestEngine:
             if bp.initial_price is not None:
                 total += float(quantity) * float(bp.initial_price)
                 continue
+            # before the first close: a record due today is still pending (spec 2026-10-08 4a)
             states = self._states_for(day, d, everyone, np.zeros(spot.size, dtype=bool),
-                                      spot, vol, rate, q_T, div_yield, basis, env_key)
+                                      spot, vol, rate, q_T, div_yield, basis, env_key, initial=True)
             pv, _, _ = pricer.price_day(states)
             total += float(quantity) * pv
         return total

@@ -119,6 +119,12 @@ class DayStates(NamedTuple):
     basis_yield: np.ndarray     # (m,)
     env_key: np.ndarray         # (m,) int64
     knocked_in: np.ndarray      # (m,) bool
+    #: The run's first valuation, before its first close is observed (spec 2026-10-08 4a): a record
+    #: due that day is still pending in the priced contract.
+    initial: bool = False
+    #: (m,) int64: the knock-in day of a knocked-in REBASED KO-reset path (its schedule 2 hangs on it),
+    #: -1 otherwise; ``None`` for a product without one (spec 2026-10-08 section 6).
+    knock_in_day: Optional[np.ndarray] = None
 
     def __len__(self) -> int:
         return int(self.path_index.size)
@@ -136,6 +142,8 @@ def state_row(states: DayStates, n: int) -> DayStates:
         spot=states.spot[sl].copy(), vol=states.vol[sl].copy(), rate=states.rate[sl].copy(),
         q_T=states.q_T[sl].copy(), div_yield=(states.div_yield[n],), basis_yield=states.basis_yield[sl].copy(),
         env_key=states.env_key[sl].copy(), knocked_in=states.knocked_in[sl].copy(),
+        initial=states.initial,
+        knock_in_day=None if states.knock_in_day is None else states.knock_in_day[sl].copy(),
     )
 
 
@@ -161,6 +169,10 @@ class StateKey:
     vol_key: int
     env_key: int
     engine_fingerprint: str
+    #: The initial valuation phase, set only where its contract differs from the post-close one.
+    initial: bool = False
+    #: A knocked-in REBASED KO-reset path's knock-in day; -1 for every other state.
+    knock_in_day: int = -1
 
     def digest(self) -> bytes:
         """blake2b of a canonical byte encoding of the key."""
@@ -174,6 +186,11 @@ class StateKey:
                 dtype=np.int64,
             ).tobytes()
         )
+        # Appended only when set, so every key without them hashes exactly as before.
+        if self.initial:
+            h.update(b"\x01initial")
+        if self.knock_in_day >= 0:
+            h.update(b"\x02knock_in_day" + np.int64(self.knock_in_day).tobytes())
         return h.digest()
 
     def seed(self) -> int:

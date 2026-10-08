@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
+from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker, snap_contract
 from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.backtest.replay.engine_factory import create_pricing_engine
@@ -153,10 +153,17 @@ class RepricingPricer:
         vol_step: Optional[float] = None,
         q_step: Optional[float] = None,
         gate: Optional[GateConfig] = None,
+        dates: Optional[pd.DatetimeIndex] = None,
     ) -> None:
-        self.product = product
+        # The snapped contract (spec 2026-10-08 4a), as every lifecycle tracker holds it: its identity,
+        # engine and aged copies all come from it, so a cache entry of the fractional contract is never
+        # served for it.
+        self.product = snap_contract(product)
+        product = self.product
         self.engine_config = engine_config
         self.start_date = pd.Timestamp(start_date).normalize()
+        # The run calendar: a knocked-in REBASED KO-reset path's knock-in day is a position in it.
+        self._dates = None if dates is None else pd.DatetimeIndex(dates)
         self.underlying = underlying
         self.cache = cache
         self.delta_bump_size = delta_bump_size
@@ -188,7 +195,8 @@ class RepricingPricer:
             and getattr(engine_config, "vol_model", "bsm") == "bsm"
             and isinstance(product, SnowballOption)
         )
-        self._aged: Dict[Tuple[pd.Timestamp, bool], Any] = {}
+        self._aged: Dict[Tuple[pd.Timestamp, bool, bool, int], Any] = {}
+        self._initial_differs: Dict[Tuple[pd.Timestamp, bool, int], bool] = {}
         self._engine_calls = 0
         # The gate's reservoir (Algorithm R): a uniform sample of the states
         # priced approximately, seeded from the fingerprints so the same run
@@ -206,8 +214,41 @@ class RepricingPricer:
     def reset_aging_memo(self) -> None:
         """Drop the per-day product memo (tests and long runs)."""
         self._aged.clear()
+        self._initial_differs.clear()
 
-    def aged_product(self, date: pd.Timestamp, *, knocked_in: bool) -> Any:
+    def _tracker_for(self, knocked_in: bool, knock_in_day: int) -> AutocallableLifecycleTracker:
+        """A fresh tracker holding only the knock-in state, for ageing."""
+        return AutocallableLifecycleTracker(
+            product=self.product, quantity=1.0, has_lifecycle=True,
+            lifecycle=AutocallableLifecycleState(knocked_in=bool(knocked_in)),
+            start_date=self.start_date,
+        )
+
+    def initial_differs(self, date: pd.Timestamp, *, knocked_in: bool, knock_in_day: int = -1) -> bool:
+        """Whether the initial-phase copy for ``date`` differs from the post-close one (a record lands that day).
+
+        Only then does an initial state get keys of its own: where the two contracts are the same they
+        share an entry, as they always did (spec 2026-10-08 4a: the phases never share a DIFFERENT contract).
+        """
+        key = (pd.Timestamp(date).normalize(), bool(knocked_in), int(knock_in_day))
+        hit = self._initial_differs.get(key)
+        if hit is None:
+            a = self.aged_product(key[0], knocked_in=key[1], initial=True, knock_in_day=key[2])
+            b = self.aged_product(key[0], knocked_in=key[1], knock_in_day=key[2])
+            hit = product_fingerprint(a) != product_fingerprint(b)
+            self._initial_differs[key] = hit
+        return hit
+
+    def _phase(self, states: DayStates, n: int) -> Tuple[bool, int]:
+        """``(initial, knock_in_day)`` of state ``n`` as its key and its aged contract see them."""
+        knock_in_day = -1 if states.knock_in_day is None else int(states.knock_in_day[n])
+        initial = bool(states.initial) and self.initial_differs(
+            states.date, knocked_in=bool(states.knocked_in[n]), knock_in_day=knock_in_day)
+        return initial, knock_in_day
+
+    def aged_product(
+        self, date: pd.Timestamp, *, knocked_in: bool, initial: bool = False, knock_in_day: int = -1
+    ) -> Any:
         """The tracker's time-decayed copy for ``date`` and the KI flag.
 
         One copy serves every path: ``product_for_pricing`` reads no market
@@ -216,15 +257,11 @@ class RepricingPricer:
         on the environment it is handed and reads nothing from it), so the
         environment below is a throwaway.
         """
-        key = (pd.Timestamp(date).normalize(), bool(knocked_in))
+        key = (pd.Timestamp(date).normalize(), bool(knocked_in), bool(initial), int(knock_in_day))
         product = self._aged.get(key)
         if product is None:
-            tracker = AutocallableLifecycleTracker(
-                product=self.product, quantity=1.0, has_lifecycle=True,
-                lifecycle=AutocallableLifecycleState(knocked_in=bool(knocked_in)),
-                start_date=self.start_date,
-            )
-            product = tracker.product_for_pricing(key[0], self._aging_env(key[0]))
+            tracker = self._tracker_for(bool(knocked_in), int(knock_in_day))
+            product = tracker.product_for_pricing(key[0], self._aging_env(key[0]), initial=bool(initial))
             self._aged[key] = product
         return product
 
@@ -307,7 +344,8 @@ class RepricingPricer:
             r = positions[0]
             n = int(rows[r])
             values = self._price_env(
-                date, knocked_in=bool(states.knocked_in[n]), key=key, spot=float(node_spot[r]),
+                date, knocked_in=bool(states.knocked_in[n]), initial=key.initial, knock_in_day=key.knock_in_day,
+                key=key, spot=float(node_spot[r]),
                 vol=float(vol_c[n]), rate=float(states.rate[n]),
                 div_yield=SignedDividendYield(float(q_c[n])), basis_yield=None,
                 label=f"ladder node {int(node_j[r])}",
@@ -339,11 +377,13 @@ class RepricingPricer:
         m = len(states)
         node_j = np.repeat(j, 2) + np.tile([0, 1], m)
         rows = np.repeat(np.arange(m), 2)
+        phases = [self._phase(states, n) for n in range(m)]
         keys = [
             StateKey(
                 product_fingerprint=self._product_fp, day_index=int(states.day_index),
                 knocked_in=bool(states.knocked_in[n]), spot_key=int(node_j[r]), vol_key=int(vol_k[n]),
                 env_key=int(env_key[n]), engine_fingerprint=self._engine_fp,
+                initial=phases[n][0], knock_in_day=phases[n][1],
             )
             for r, n in enumerate(rows)
         ]
@@ -374,7 +414,8 @@ class RepricingPricer:
         self, states: DayStates, n: int, date: pd.Timestamp, key: StateKey
     ) -> Tuple[float, float, float]:
         return self._price_env(
-            date, knocked_in=bool(states.knocked_in[n]), key=key, spot=float(states.spot[n]),
+            date, knocked_in=bool(states.knocked_in[n]), initial=key.initial, knock_in_day=key.knock_in_day,
+            key=key, spot=float(states.spot[n]),
             vol=float(states.vol[n]), rate=float(states.rate[n]), div_yield=states.div_yield[n],
             basis_yield=ImpliedBasisYield(float(states.basis_yield[n])),
             label=f"day {states.day_index} path {int(states.path_index[n])}",
@@ -382,10 +423,11 @@ class RepricingPricer:
 
     def _price_env(
         self, date: pd.Timestamp, *, knocked_in: bool, key: StateKey, spot: float, vol: float,
-        rate: float, div_yield: Any, basis_yield: Any, label: str,
+        rate: float, div_yield: Any, basis_yield: Any, label: str, initial: bool = False,
+        knock_in_day: int = -1,
     ) -> Tuple[float, float, float]:
         """One state: on the flat-vol PDE engine one calculate_greeks call (price read off the same solve); otherwise price then calculate_greeks, as the replay calls them."""
-        product = self.aged_product(date, knocked_in=knocked_in)
+        product = self.aged_product(date, knocked_in=knocked_in, initial=initial, knock_in_day=knock_in_day)
         self._seed_engine(self._engine, key)
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=spot, asset_name=self.underlying),
@@ -432,15 +474,16 @@ class RepricingPricer:
         """The exact state's own keys under the EXACT-mode fingerprint, whatever the mode."""
         spot_keys = float_key(states.spot)
         vol_keys = float_key(states.vol)
-        return [
-            StateKey(
+        keys = []
+        for n in range(len(states)):
+            initial, knock_in_day = self._phase(states, n)
+            keys.append(StateKey(
                 product_fingerprint=self._product_fp, day_index=int(states.day_index),
                 knocked_in=bool(states.knocked_in[n]), spot_key=int(spot_keys[n]),
                 vol_key=int(vol_keys[n]), env_key=int(states.env_key[n]),
-                engine_fingerprint=self._exact_fp,
-            )
-            for n in range(len(states))
-        ]
+                engine_fingerprint=self._exact_fp, initial=initial, knock_in_day=knock_in_day,
+            ))
+        return keys
 
     def price_exact(self, row: DayStates) -> Tuple[float, float, float]:
         """One state priced exactly, through the cache under its exact-mode key.
@@ -456,7 +499,7 @@ class RepricingPricer:
             return hit
         date = pd.Timestamp(row.date).normalize()
         values = self._price_env(
-            date, knocked_in=bool(row.knocked_in[0]), key=key,
+            date, knocked_in=bool(row.knocked_in[0]), initial=key.initial, knock_in_day=key.knock_in_day, key=key,
             spot=float(row.spot[0]), vol=float(row.vol[0]), rate=float(row.rate[0]),
             div_yield=row.div_yield[0], basis_yield=ImpliedBasisYield(float(row.basis_yield[0])),
             label=f"gate sample day {row.day_index} path {int(row.path_index[0])}",

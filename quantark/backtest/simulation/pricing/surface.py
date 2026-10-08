@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from quantark.asset.equity.lifecycle import snap_contract
 from quantark.backtest.replay.engine_factory import create_pricing_engine
 from quantark.backtest.replay.market import SignedDividendYield
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
@@ -197,7 +198,10 @@ class LifeSurfacePricer:
         delta_bump_size: Optional[float] = None, gamma_bump_size: Optional[float] = None,
         cache: Optional[StateCache] = None, compact: bool = True,
     ) -> None:
-        self.product = product
+        # The snapped contract (spec 2026-10-08 4a): an observation lands on the day node the tracker
+        # observes it on, so the surface column read after that close has applied it.
+        self.product = snap_contract(product)
+        product = self.product
         self.compact = bool(compact)
         self.engine_config = engine_config
         self.start_date = pd.Timestamp(start_date).normalize()
@@ -223,7 +227,7 @@ class LifeSurfacePricer:
             (engine_fingerprint(engine_config, delta_bump_size, gamma_bump_size)
              + repr(("life_surface", self.vol_step, self.q_step))).encode(), digest_size=16,
         ).hexdigest()
-        self._maturity = float(product.maturity)
+        self._maturity = float(self.product.maturity)
         self._extra_times = tuple(
             t for t in (self.elapsed(d) for d in range(1, len(self.dates)))
             if 0.0 < t < self._maturity
@@ -308,6 +312,13 @@ class LifeSurfacePricer:
         if m == 0:
             return pv, delta, gamma
         elapsed = self.elapsed(int(states.day_index))
+        if states.initial and any(
+            self._exact.initial_differs(states.date, knocked_in=bool(ki)) for ki in np.unique(states.knocked_in)
+        ):
+            raise ValidationError(
+                "the life surface prices the post-close contract; an initial valuation with a record landing "
+                "that day needs provider='repricing' (spec 2026-10-08 4a)"
+            )
         vol_c = bucket_centre(states.vol, self.vol_step)
         q_c = bucket_centre(states.q_T, self.q_step)
         rate_c = bucket_centre(states.rate, self.q_step)

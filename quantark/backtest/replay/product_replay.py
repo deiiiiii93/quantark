@@ -196,8 +196,9 @@ class ProductReplay:
     def product_for_lifecycle(self):
         return self._tracker.product_for_lifecycle()
 
-    def product_for_date(self, date: pd.Timestamp, pricing_env: PricingEnvironment):
-        return self._tracker.product_for_pricing(date, pricing_env)
+    def product_for_date(self, date: pd.Timestamp, pricing_env: PricingEnvironment, *, initial: bool = False):
+        """The pricing copy for ``date``; ``initial`` before the run's first close is observed."""
+        return self._tracker.product_for_pricing(date, pricing_env, initial=initial)
 
     def build_env(
         self,
