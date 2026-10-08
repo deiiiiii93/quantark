@@ -375,11 +375,19 @@ def compile_contract(
                     product.get_coupon_payoff(0, year_fraction=fixed)
                 ] * initial_memory
             elif active and active[0] >= initial_memory:
-                # the missed periods are still in the schedule: their coupons are their own periods'
-                historic = [
-                    product.get_coupon_payoff(i)
-                    for i in range(active[0] - initial_memory, active[0])
-                ]
+                # the missed periods are still in the schedule: their coupons are their own periods'. A missed
+                # period with no known start (a record before the contract's time origin) is missing contract
+                # terms, not an unsupported feature: refuse as such, saying what needs it.
+                try:
+                    historic = [
+                        product.get_coupon_payoff(i)
+                        for i in range(active[0] - initial_memory, active[0])
+                    ]
+                except ValidationError as err:
+                    raise ValidationError(
+                        "aged Phoenix memory needs the missed periods' starts to pay their arrears "
+                        f"({err})"
+                    ) from err
             else:
                 raise NotImplementedError(
                     "aged Phoenix memory requires fixed_coupon_year_fraction or retained historical coupon dates"
