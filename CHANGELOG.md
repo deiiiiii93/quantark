@@ -49,17 +49,20 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - Phoenix `get_ko_payoff` keeps `accrued_offset`.
 - The product, QUAD V2 and the intraday path agree on every Phoenix coupon period, the first one included.
 - An aged MC REBASED knock-out accrues from the contract's origin (it lost the elapsed part).
-- Ageing a KO-reset contract (`time_shift`, a theta bump) no longer grows its schedule-2 knock-out cash and
-  knocked-in tenor: schedule 2's times were not shifted, yet the elapsed time was banked into `accrued_offset`,
-  so one day of ageing added 1/365 to every post-KI accrual (0.75 -> 0.75274). KO-reset bump thetas move
-  accordingly (below). Schedule 2's observation timing is still not shifted by `time_shift` here.
+- Ageing a KO-reset contract (`time_shift`, a theta bump) now moves an ABSOLUTE schedule 2 a day closer as
+  well, and no longer grows its knock-out cash or knocked-in tenor. Schedule 2 used to stay where it was while
+  the elapsed time was banked into `accrued_offset` (one day added 1/365 to every post-KI accrual, 0.75 ->
+  0.75274), so KO-reset theta was wrong: about 10% low on a live contract, of the wrong sign on a knocked-in one
+  (book contract: -0.0181 -> +0.0489). The one-day theta now equals the calculator's theta on the contract aged by
+  hand (`test/accrual_time/test_ko_reset_theta.py`). A REBASED schedule 2 holds offsets and stays.
 
 Measured on the PDE byte book (`test/pde_bitwise/capture_book.py`, 721 rows, main e3021668 vs this branch, same
 machine): 678 rows bit-identical; in the 43 that moved only `bump_theta` moved, every price and every other Greek
 is bit-identical. 16 Phoenix rows move at ulp level (relative 2e-14 to 2.5e-12: an aged numeric accrual now reads
 the original quoted end instead of `(offset + bump) + (t - bump)`). 27 KO-reset rows move by the schedule-2 fix
-above: relative 2e-4 to 6e-2 on alive contracts, 0.42 and 4.2 on the two knocked-in rows of `3a|class` (a small
-theta that was mostly the spurious accrual).
+above: relative 2e-2 to 1.6e-1 on the standard alive rows (e.g. `ko_reset|flat|standard` +0.02480 -> +0.02707),
+up to a sign change on knocked-in and near-barrier rows (`3a|class|ko_reset|cont|knocked_in` -0.01807 ->
++0.04887, `3a|bumpcross|ko_reset|cont|85.5` -0.14185 -> +0.00369).
 
 ### Removed
 - `AccrualConfig.accrual_dates` (it had no reader).
