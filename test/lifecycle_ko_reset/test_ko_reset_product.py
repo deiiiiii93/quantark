@@ -7,6 +7,7 @@ from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KORese
 from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
 from quantark.asset.equity.engine.quad.v2 import KOResetSnowballQuadEngineV2
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.snowball_config import AccrualConfig, BarrierConfig, PayoffConfig
 from quantark.util.enum.option_enums import ObservationType, PostKOScheduleMode
@@ -37,6 +38,11 @@ def ko_reset(mode, post, *, pre=(91 * D, 182 * D), ki_times=(91 * D, 182 * D), a
         payoff_config=PayoffConfig(rebate_rate=0.05, include_principal=False), post_ko_mode=mode)
 
 
+def anchor(product, index):
+    """The knock-in anchor of the product's knock-in record ``index`` (accrual time spec §5.1)."""
+    return knock_in_anchor_for(product.barrier_config.ki_observation_schedule.records[index], index)
+
+
 def test_an_explicit_v1_tenor_is_the_resolved_one_on_absolute():
     product = ko_reset(PostKOScheduleMode.ABSOLUTE, [273 * D, 365 * D], annualized=True)
     tenor = product._resolve_post_contract_tenor(env())
@@ -46,23 +52,23 @@ def test_an_explicit_v1_tenor_is_the_resolved_one_on_absolute():
 
 def test_a_rebased_annualized_v1_with_its_tenor_prices():
     product = ko_reset(PostKOScheduleMode.REBASED, [91 * D, 365 * D], annualized=True)
-    with pytest.raises(ValidationError, match="ki_time is required"):
+    with pytest.raises(ValidationError, match="needs its knock-in anchor"):
         product.get_maturity_payoff_v1(60.0, env())
-    converted = product.with_absolute_schedule_2(91 * D)
+    converted = product.with_absolute_schedule_2(91 * D, anchor=anchor(product, 0))
     assert product.get_maturity_payoff_v1(60.0, env(), contract_tenor=91 * D + 365 * D) == pytest.approx(
         converted.get_maturity_payoff_v1(60.0, env()), rel=1e-15)
 
 
 def test_the_conversion_places_schedule_two_after_the_knock_in():
     product = ko_reset(PostKOScheduleMode.REBASED, [91 * D, 365 * D])
-    converted = product.with_absolute_schedule_2(182 * D)
+    converted = product.with_absolute_schedule_2(182 * D, anchor=anchor(product, 1))
     times = [r.observation_time for r in converted.post_barrier_config.ko_observation_schedule.records]
     assert times == [182 * D + 91 * D, 182 * D + 365 * D]
     assert converted.post_ko_mode == PostKOScheduleMode.ABSOLUTE
     assert converted.maturity == 182 * D + 365 * D
     assert product.post_ko_mode == PostKOScheduleMode.REBASED          # the original is untouched
     with pytest.raises(ValidationError):
-        ko_reset(PostKOScheduleMode.ABSOLUTE, [273 * D]).with_absolute_schedule_2(0.1)
+        ko_reset(PostKOScheduleMode.ABSOLUTE, [273 * D]).with_absolute_schedule_2(0.1, anchor=None)
 
 
 @pytest.mark.parametrize("engine", [
@@ -72,7 +78,8 @@ def test_the_conversion_places_schedule_two_after_the_knock_in():
     lambda: SnowballMCEngine(params=MCParams(seed=7, num_paths=8192)),
 ], ids=["pde", "quad_v1", "quad_v2", "mc"])
 def test_a_converted_knocked_in_contract_prices_as_the_absolute_contract(engine):
-    rebased = ko_reset(PostKOScheduleMode.REBASED, [91 * D, 365 * D]).with_absolute_schedule_2(91 * D)
+    rebased = ko_reset(PostKOScheduleMode.REBASED, [91 * D, 365 * D])
+    rebased = rebased.with_absolute_schedule_2(91 * D, anchor=anchor(rebased, 0))
     direct = ko_reset(PostKOScheduleMode.ABSOLUTE, [182 * D, 456 * D], maturity=456 * D)
     for product in (rebased, direct):
         setattr(product, "_otc_lifecycle_knocked_in", True)

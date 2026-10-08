@@ -10,6 +10,7 @@ from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KORe
 from quantark.asset.equity.engine.quad.v2 import KOResetSnowballQuadEngineV2
 from quantark.asset.equity.lifecycle import KOResetLifecycleTracker, LifecycleEventType as E
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option.accrual import KnockInAnchor
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.snowball_config import AccrualConfig, BarrierConfig, PayoffConfig
 from quantark.util.enum.option_enums import ObservationType, PostKOScheduleMode as M
@@ -199,6 +200,10 @@ def test_carried_rebased_knock_in_before_start():
     product = kr(M.REBASED, post=(91, 365))
     setattr(product, "_otc_lifecycle_knocked_in", True)
     setattr(product, "_otc_lifecycle_knock_in_date", (START - pd.Timedelta(days=100)).to_pydatetime())
+    # a carried knock-in arrives with its anchor (accrual time spec §5.1): the record that fired, 100 days before
+    # this product's numeric origin
+    ki = product.barrier_config.ki_observation_schedule.records[0].accrual
+    setattr(product, "_otc_lifecycle_knock_in_anchor", KnockInAnchor(0, -100 * D, ki.origin, ki.basis))
     t = tracker(product)
     copy = t.product_for_pricing(day(1), env(90.0, day(1)))
     assert [r.observation_time for r in copy.post_barrier_config.ko_observation_schedule.records] == [

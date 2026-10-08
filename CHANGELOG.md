@@ -130,8 +130,15 @@ barriers away from maturity are bit-identical.
   and every engine raised the day after schedule 1 ended un-knocked). Both schedule-2 modes: a knocked-in
   `REBASED` contract is priced as the `ABSOLUTE` contract it has become
   (`KnockOutResetSnowballOption.with_absolute_schedule_2`); an un-knocked `REBASED` contract needs a Monte
-  Carlo engine (refused at configuration elsewhere, and in simulation surface mode). A carried `REBASED`
-  knock-in needs `_otc_lifecycle_knock_in_date`.
+  Carlo engine (refused at configuration elsewhere, and in simulation surface mode). The knock-in close
+  (`ki_date`) is the reset's timing; its accrual hangs from the persisted `KnockInAnchor` (the knock-in record that
+  fired, at its contractual fixing; accrual time spec §5.1), stored in the state beside `ki_date`, carried by every
+  pricing copy (`_otc_lifecycle_knock_in_anchor`) and embedded by
+  `with_absolute_schedule_2(knock_in_time, *, anchor)` in each converted record's relative period and in the `post`
+  terminal (§5.2): knock-in records due on days 91 and 93 observed on day 95 accrue from day 91. A carried `REBASED`
+  knock-in needs `_otc_lifecycle_knock_in_date` and, when its knock-in records accrue, its anchor
+  (`_otc_lifecycle_knock_in_anchor`); it is never looked up by date. Simulated paths take the lowest-index knock-in
+  record due on a path's knock-in close and refuse records of different levels due on one close.
 
 ### Changed
 - Every autocallable tracker holds its contract with numeric observation times snapped to the day it observes

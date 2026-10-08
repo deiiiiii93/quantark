@@ -61,15 +61,27 @@ tracker derives every valuation point, `knock_in_time = (knock_in_date - start_d
 tracker's `start_date`, the origin of the product's numeric schedule). Snowball and Phoenix never read it. The phase
 follows from the state: schedule 1 until a knock-in, schedule 2 after.
 
+**The knock-in anchor (accrual time spec §5.1; adopted after that spec merged).** `knock_in_date` is the reset's
+TIMING. Its ACCRUAL hangs from `AutocallableLifecycleState.knock_in_anchor`: the knock-in record whose test fired, at
+its contractual fixing (its accrual period's end), resolved once at the knock-in by `mark_ki(date, anchor)` and
+stored beside `knock_in_date`. With knock-in records due on days 91 and 93 and the first close on day 95, the anchor
+is record 0 fixing at day 91 and the reset is timed from day 95. A continuous knock-in has no anchor (a `REBASED`
+contract requires discrete knock-in monitoring). The anchor is a value: ageing past its record, a checkpoint and every
+pricing copy (`_otc_lifecycle_knock_in_anchor`) carry it.
+
 **Initial state (review finding 4).** Every consumer hands the tracker its starting state explicitly:
 - a `lifecycle` state passed in (replay checkpoints, the dynamic-scenario and backtest managers when they resume) is
   used as given;
-- otherwise the state is built from the product: `knocked_in = product._otc_lifecycle_knocked_in` and
-  `knock_in_date = product._otc_lifecycle_knock_in_date` (a new carried attribute beside the flag);
+- otherwise the state is built from the product: `knocked_in = product._otc_lifecycle_knocked_in`,
+  `knock_in_date = product._otc_lifecycle_knock_in_date` (a new carried attribute beside the flag) and
+  `knock_in_anchor = product._otc_lifecycle_knock_in_anchor`;
 - the tracker never overwrites a carried knock-in with a default `False` (the base tracker's `product_for_lifecycle`
   does today; the KO-reset tracker builds its state first and writes the flag from it);
 - a carried knock-in on a `REBASED` contract without a `knock_in_date` is refused at construction
-  (`ValidationError`: schedule 2 cannot be placed without it). An `ABSOLUTE` contract needs no date.
+  (`ValidationError`: schedule 2 cannot be placed without it), and so is one without its `knock_in_anchor` whenever
+  its knock-in records accrue (`knock_in_anchor_required`): the anchor is never looked up by date, which can match
+  zero records or several. A non-accruing contract (`NONE` knock-in periods: dated, no `initial_date`, nothing
+  annualized) has no anchor to carry. An `ABSOLUTE` contract needs neither.
 
 **One day rule (review finding 2; user, 2026-10-08: option (ii)).** A record falls due on the first available close
 whose day index reaches its due day: a dated record's date; a numeric record's `round(time * 365)` days after
@@ -151,10 +163,15 @@ and dated products: byte-identical. The PDE byte book does not age through the t
 
 **`product_for_pricing(date, env, phase)`.** Ages the snapped contract (§4a) — maturity, schedule 1, the knock-in
 schedule and an `ABSOLUTE` schedule 2 — by time, keeping a record due today only in the initial phase; sets
-`_otc_lifecycle_knocked_in` and `_otc_lifecycle_knock_in_date` from the state. A knocked-in `REBASED` contract's copy
-is converted to the `ABSOLUTE` contract it has become:
-- schedule 2 at `knock_in_time + offset` (snapped offsets, measured from the pricing date), the records before the
-  knock-in close dropped (§4), each record keeping its barrier, rate and accrual from inception;
+`_otc_lifecycle_knocked_in`, `_otc_lifecycle_knock_in_date` and `_otc_lifecycle_knock_in_anchor` from the state. A
+knocked-in `REBASED` contract's copy is converted to the `ABSOLUTE` contract it has become,
+`with_absolute_schedule_2(knock_in_time, anchor=state.knock_in_anchor)`:
+- schedule 2 observed at `knock_in_time + offset` (snapped offsets, measured from the pricing date), the records
+  before the knock-in close dropped (§4), each record keeping its barrier and rate and its quoted `relative` accrual
+  period with the anchor EMBEDDED (accrual time spec §5.2): it accrues the anchor's accrual plus its quoted offset (a
+  DATE anchor plus an offset is never rounded into a date), so the copy books the cash the un-knocked contract's
+  Monte Carlo route pays on the same path; the `post` terminal (V1's tenor) is the preserved relative terminal with
+  the anchor embedded; the periods are explicit, so a re-validated copy keeps them;
 - `post_ko_mode = ABSOLUTE`;
 - its horizon reset (review finding 1): maturity `knock_in_time + max(offsets)` measured from the pricing date — the
   original contract's maturity is NOT aged on — with the terminal settlement and V1's contract tenor following that
@@ -208,6 +225,9 @@ KO-reset and refuses it where it would misprice schedule 2. Snowball and Phoenix
   1's tenor, settled with its lag); final maturity of knocked-in paths (V1) on each path's own maturity day — per
   path under `REBASED`. The maturity payoff callback receives the per-path knocked-in flag (V0 or V1) and, under
   `REBASED`, the path's V1 tenor.
+- A `REBASED` path is keyed by its knock-in day; its anchor is the lowest-index knock-in record due on that close
+  (`knock_in_anchor_on`), the record the tracker fires first. A contract whose knock-in records due on one close carry
+  different levels is refused when its calendar schedule is resolved (which record fired would depend on the spot).
 - `DayStates`, `StateKey` and the aged-product cache gain `knock_in_day`, set only for a knocked-in `REBASED` path
   (-1 otherwise: snowball and `ABSOLUTE` keys, caches and goldens unchanged). The aged product of such a path is
   §5's pricing copy for that knock-in day, in exact mode. Surface mode refuses `REBASED` (§6a). Caches also key on

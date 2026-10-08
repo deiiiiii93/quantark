@@ -35,7 +35,8 @@ from .observation_schedule import (
     ResolvedObservationRecord,
 )
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
-from .accrual import contract_tenor as _contract_tenor, ko_accrual_factor
+from .accrual import AccrualKind, AccrualPeriod, KnockInAnchor, contract_tenor as _contract_tenor, ko_accrual_factor
+from .accrual_build import snapshot_terms
 from .snowball_option import SnowballOption
 
 
@@ -282,19 +283,51 @@ class KnockOutResetSnowballOption(SnowballOption):
         post = self.post_barrier_config
         return passed and not BarrierConfig._has_future(post.ko_observation_schedule, post.ko_observation_dates)
 
-    def with_absolute_schedule_2(self, knock_in_time: float) -> "KnockOutResetSnowballOption":
+    def knock_in_anchor_required(self) -> bool:
+        """Whether a knocked-in contract needs its ``KnockInAnchor`` (accrual time spec §5.1): a REBASED contract
+        whose knock-in records accrue. A non-accruing one (``NONE`` periods: dated, no ``initial_date``, nothing
+        annualized) has no anchor to resolve, so none is required."""
+        if self.post_ko_mode != PostKOScheduleMode.REBASED:
+            return False
+        schedule = self.barrier_config.ki_observation_schedule
+        records = [] if schedule is None else schedule.records
+        return any(r.accrual is not None and r.accrual.kind is not AccrualKind.NONE for r in records)
+
+    def with_absolute_schedule_2(
+        self, knock_in_time: float, *, anchor: Optional[KnockInAnchor]
+    ) -> "KnockOutResetSnowballOption":
         """The ABSOLUTE contract a REBASED one becomes once knocked in at ``knock_in_time``.
 
-        ``knock_in_time`` is on this product's own clock (years from its numeric origin; negative for a knock-in
-        before it). Every schedule-2 record moves to ``knock_in_time + offset`` keeping its barrier, rate and
-        accrual; the contract ends at ``knock_in_time + max(offsets)``, the REBASED maturity
-        (``get_post_maturity_time(ki_time)``), so V1 is paid and discounted when it ends.
+        ``knock_in_time`` is TIMING: the knock-in close on this product's own clock (years from its numeric origin;
+        negative for a knock-in before it). Every schedule-2 record is observed at ``knock_in_time + offset`` and the
+        contract ends at ``knock_in_time + max(offsets)``, the REBASED maturity (``get_post_maturity_time(ki_time)``),
+        so V1 is paid and discounted when it ends.
+
+        ``anchor`` is ACCRUAL: the knock-in record that fired, at its contractual fixing (accrual time spec §5.1),
+        resolved once at the knock-in. Each converted record keeps its quoted ``relative`` period with the anchor
+        embedded, and so does the ``post`` terminal (§5.2): a DATE anchor plus a quoted offset is never rounded into a
+        date, and the copy books the cash the un-knocked contract's Monte Carlo route pays on the same path. The
+        periods become explicit, so a re-validated copy keeps them. A contract whose knock-in records accrue refuses a
+        missing anchor; it is never looked up by date.
         """
         if self.post_ko_mode != PostKOScheduleMode.REBASED:
             raise ValidationError("with_absolute_schedule_2 converts a REBASED contract only")
         schedule = self.post_barrier_config.ko_observation_schedule
         if schedule is None or not schedule.records:
             raise ValidationError("a REBASED contract needs its schedule-2 offsets to be placed")
+        if anchor is None and self.knock_in_anchor_required():
+            raise ValidationError(
+                "a knocked-in REBASED KO-reset needs its knock-in anchor (the knock-in record that fired, at its "
+                "contractual fixing; accrual time spec §5.1): schedule 2's accrual hangs from it"
+            )
+
+        def embedded(period: Optional[AccrualPeriod]) -> Optional[AccrualPeriod]:
+            if period is None:
+                return None
+            if period.relative and anchor is not None:
+                return replace(period, anchor=anchor, terms=None)
+            return replace(period, terms=None)
+
         shift = float(knock_in_time)
         records = [
             replace(
@@ -303,6 +336,7 @@ class KnockOutResetSnowballOption(SnowballOption):
                 settlement_time=(
                     None if record.settlement_time is None else shift + float(record.settlement_time)
                 ),
+                accrual=embedded(record.accrual),
             )
             for record in schedule.records
         ]
@@ -314,6 +348,13 @@ class KnockOutResetSnowballOption(SnowballOption):
         )
         product.post_ko_mode = PostKOScheduleMode.ABSOLUTE
         product.maturity = shift + max(float(record.observation_time) for record in schedule.records)
+        terminals = dict(getattr(self, "_terminal_accrual", None) or {})
+        if "post" in terminals:
+            terminals["post"] = embedded(terminals["post"])
+        product._terminal_accrual = terminals
+        # the converted terminals are the contract's, kept as they are when the copy is validated again
+        product._terminal_accrual_explicit = True
+        snapshot_terms(product)
         return product
 
     def _resolve_ko_schedule(

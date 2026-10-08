@@ -197,6 +197,7 @@ class RepricingPricer:
         )
         self._aged: Dict[Tuple[pd.Timestamp, bool, bool, int], Any] = {}
         self._initial_differs: Dict[Tuple[pd.Timestamp, bool, int], bool] = {}
+        self._anchors: Dict[int, Any] = {}
         self._engine_calls = 0
         # The gate's reservoir (Algorithm R): a uniform sample of the states
         # priced approximately, seeded from the fingerprints so the same run
@@ -223,8 +224,17 @@ class RepricingPricer:
             if self._dates is None:
                 raise ValidationError("a knock-in day needs the run calendar (RepricingPricer(dates=...))")
             state.ki_date = pd.Timestamp(self._dates[int(knock_in_day)]).normalize().to_pydatetime()
+            state.knock_in_anchor = self._knock_in_anchor(int(knock_in_day))
         return tracker_for(self.product, quantity=1.0, has_lifecycle=True, lifecycle=state,
                            start_date=self.start_date)
+
+    def _knock_in_anchor(self, knock_in_day: int):
+        """The knock-in anchor of a REBASED path knocked in on ``knock_in_day`` (accrual time spec §5.1), one per day."""
+        if knock_in_day not in self._anchors:
+            probe = tracker_for(self.product, quantity=1.0, start_date=self.start_date)
+            self._anchors[knock_in_day] = probe.knock_in_anchor_on(
+                self._dates, knock_in_day, self._aging_env(self.start_date))
+        return self._anchors[knock_in_day]
 
     def initial_differs(self, date: pd.Timestamp, *, knocked_in: bool, knock_in_day: int = -1) -> bool:
         """Whether the initial-phase copy for ``date`` differs from the post-close one (a record lands that day).

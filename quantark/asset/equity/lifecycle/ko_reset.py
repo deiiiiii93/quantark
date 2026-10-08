@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing_at
+from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.option_enums import PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
@@ -78,8 +79,10 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     """Tracks one ``KnockOutResetSnowballOption`` under rules R1-R4 (see the module docstring).
 
     The knock-in close is the state's ``ki_date`` (set by ``mark_ki``); on the numeric clock the knock-in time
-    is ``(ki_date - start_date).days / 365``. Without a ``lifecycle`` the starting state is the product's
-    carried one: ``_otc_lifecycle_knocked_in`` and ``_otc_lifecycle_knock_in_date``.
+    is ``(ki_date - start_date).days / 365``. It is the reset's TIMING. The reset's ACCRUAL hangs from the state's
+    ``knock_in_anchor``: the knock-in record that fired, at its contractual fixing, resolved once at the knock-in
+    (accrual time spec §5.1). Without a ``lifecycle`` the starting state is the product's carried one:
+    ``_otc_lifecycle_knocked_in``, ``_otc_lifecycle_knock_in_date`` and ``_otc_lifecycle_knock_in_anchor``.
     """
 
     def __init__(
@@ -97,15 +100,21 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             lifecycle = AutocallableLifecycleState(knocked_in=knocked_in)
             if knocked_in:
                 lifecycle.ki_date = getattr(product, "_otc_lifecycle_knock_in_date", None)
-        if (
-            lifecycle.knocked_in
-            and lifecycle.ki_date is None
-            and product.post_ko_mode == PostKOScheduleMode.REBASED
-        ):
-            raise ValidationError(
-                "KO-reset snowball: a carried knock-in on a REBASED contract needs its knock-in date "
-                "(_otc_lifecycle_knock_in_date): schedule 2 holds offsets from it and cannot be placed without it"
-            )
+                lifecycle.knock_in_anchor = getattr(product, "_otc_lifecycle_knock_in_anchor", None)
+        if lifecycle.knocked_in and product.post_ko_mode == PostKOScheduleMode.REBASED:
+            if lifecycle.ki_date is None:
+                raise ValidationError(
+                    "KO-reset snowball: a carried knock-in on a REBASED contract needs its knock-in date "
+                    "(_otc_lifecycle_knock_in_date): schedule 2 holds offsets from it and cannot be placed without it"
+                )
+            if lifecycle.knock_in_anchor is None and product.knock_in_anchor_required():
+                # accrual time spec §5.1: resolved once at the knock-in and persisted; a date can match zero
+                # records or several, so it is never looked up by date
+                raise ValidationError(
+                    "KO-reset snowball: a carried knock-in on a REBASED contract needs its knock-in anchor "
+                    "(_otc_lifecycle_knock_in_anchor, or knock_in_anchor on the state): schedule 2's accrual hangs "
+                    "from the record that fired, which is never looked up by date"
+                )
         super().__init__(
             product=product,
             quantity=quantity,
@@ -135,7 +144,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             knock_in_time = self.knock_in_time()
             if knock_in_time is None:
                 raise ValidationError("a knocked-in REBASED KO-reset needs start_date and its knock-in date")
-            return self.product.with_absolute_schedule_2(knock_in_time)
+            return self.product.with_absolute_schedule_2(knock_in_time, anchor=self.lifecycle.knock_in_anchor)
         return self.product
 
     def product_for_lifecycle(self) -> Any:
@@ -147,6 +156,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         product = deepcopy(self.contract())
         setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
         setattr(product, "_otc_lifecycle_knock_in_date", self.lifecycle.ki_date)
+        setattr(product, "_otc_lifecycle_knock_in_anchor", self.lifecycle.knock_in_anchor)
         return product
 
     def _age_extra(self, product, elapsed, date, pricing_env, keep_landing) -> None:
@@ -323,8 +333,12 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         if not hits:
             return None
         index, barrier = hits[0]
+        # the anchor is the record whose test fired, at its contractual fixing (accrual time spec §5.1); a
+        # continuous knock-in has none (a REBASED contract requires discrete monitoring)
+        anchor = None if index is None else knock_in_anchor_for(
+            product.barrier_config.ki_observation_schedule.records[index], index)
         before = self._state_snapshot()
-        if not self.lifecycle.mark_ki(pd.Timestamp(date).normalize().to_pydatetime()):
+        if not self.lifecycle.mark_ki(pd.Timestamp(date).normalize().to_pydatetime(), anchor):
             return None
         return LifecycleEvent(
             event_type=LifecycleEventType.KNOCK_IN,
@@ -374,6 +388,25 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             ))
         return self._book_maturity(date, spot, payoff, timing, valuation_point)
 
+    def knock_in_anchor_on(self, dates: pd.DatetimeIndex, knock_in_day: int, env: PricingEnvironment):
+        """The anchor of a knock-in observed on run-calendar position ``knock_in_day``, for a consumer that keys a
+        REBASED path by its knock-in day (the simulated paths): the lowest-index discrete knock-in record due on that
+        close, the record ``observe`` fires first. ``resolve_calendar_schedule`` refuses a REBASED contract whose
+        records due on one close carry different levels, so a path knocked in on that close breached every one of
+        them and this IS the record that fired (accrual time spec §5.1). ``None`` when no anchor is required."""
+        product = self.product
+        if not product.knock_in_anchor_required():
+            return None
+        records = self._scheduled_records(product, env, "ki")
+        due = [
+            index for index, rec in enumerate(records)
+            if self._first_due(dates, lambda day, vp, r=rec: self._record_is_due(day, vp, r), product) == knock_in_day
+        ]
+        if not due:
+            raise ValidationError(f"KO-reset snowball: no knock-in record is due on run day {knock_in_day}")
+        index = due[0]
+        return knock_in_anchor_for(product.barrier_config.ki_observation_schedule.records[index], index)
+
     def resolve_calendar_schedule(self, dates: pd.DatetimeIndex, env: PricingEnvironment) -> "KOResetCalendarSchedule":
         """Map this contract's observations onto ``dates`` (one resolution), by the records and due rules
         ``observe`` and ``settle_maturity_if_due`` use; a REBASED schedule 2 is placed per knock-in day."""
@@ -415,6 +448,7 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
     absolute = None
     place = None
     if rebased:
+        _refuse_ambiguous_anchors(base, product)
         memo: Dict[int, SchedulePlacement] = {}
 
         def place(knock_in_day: int) -> SchedulePlacement:
@@ -423,7 +457,8 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
                 scratch = KOResetLifecycleTracker(
                     product=product, quantity=tracker.quantity,
                     lifecycle=AutocallableLifecycleState(
-                        knocked_in=True, ki_date=pd.Timestamp(dates[knock_in_day]).normalize().to_pydatetime()),
+                        knocked_in=True, ki_date=pd.Timestamp(dates[knock_in_day]).normalize().to_pydatetime(),
+                        knock_in_anchor=tracker.knock_in_anchor_on(dates, knock_in_day, env)),
                     start_date=tracker.start_date, date_resolver=tracker._date_resolver,
                 )
                 hit = memo[knock_in_day] = placement(scratch)
@@ -459,6 +494,24 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
         **values, pre_due_day=int(pre_due), pre_settlement_day=int(pre_settle), pre_settlement_delay=pre_delay,
         pre_tenor=tracker.pre_contract_tenor(env), rebased=rebased, absolute=absolute, place=place,
     )
+
+
+def _refuse_ambiguous_anchors(base: CalendarSchedule, product: Any) -> None:
+    """A REBASED path is keyed by its knock-in day. When knock-in records due on one close carry different levels,
+    which of them fired -- the anchor its accrual hangs from -- depends on the path's spot, not on the day."""
+    if not product.knock_in_anchor_required():
+        return
+    levels: Dict[int, set] = {}
+    for day, level in zip(base.ki_due_day, base.ki_barrier):
+        if day >= 0:
+            levels.setdefault(int(day), set()).add(float(level))
+    clash = sorted(day for day, seen in levels.items() if len(seen) > 1)
+    if clash:
+        raise ValidationError(
+            "KO-reset snowball (REBASED): knock-in records with different levels fall due on one close of the run "
+            f"calendar (positions {clash}); the record that fires, and so the anchor schedule 2 accrues from, would "
+            "depend on the path's spot. Simulated paths key a knocked-in path by its knock-in day only."
+        )
 
 
 def _last_observation_date(schedule) -> Optional[Any]:

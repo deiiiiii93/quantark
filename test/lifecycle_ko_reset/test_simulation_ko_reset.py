@@ -106,3 +106,46 @@ def test_rebased_knock_in_past_calendar_is_data_end():
                           allow_data_end=True)
     results = EnsembleBacktestEngine(cfg).run(_paths("ki_v1", n_days=8))
     assert results.manifest["data_end_paths"] == 1
+
+
+# -- the knock-in anchor on simulated paths (accrual time spec §5.1) ----------------------------------------------
+
+def _gap_close_path():
+    """Knock-in records on calendar days 4 and 5 (Sat 2024-01-06, Sun 01-07) both fall due on Mon 01-08 (trading
+    index 4, calendar day 6), where the path knocks in; schedule 2 (offset 4) knocks out on day 10 (index 8)."""
+    path = make_market_path(n_paths=1, n_days=10)
+    spot = np.full(10, SPOT * 0.98)
+    spot[4], spot[8] = SPOT * 0.70, SPOT * 1.00
+    path.spot[0, :] = spot
+    return path
+
+
+def test_a_gap_close_knock_in_accrues_from_the_record_that_fired():
+    from quantark.asset.equity.lifecycle import KOResetLifecycleTracker
+    import pandas as pd
+    from .conftest import env
+
+    product = short_ko_reset(M.REBASED, pre=(2, 9), ki=(4, 5), post=(4, 7))
+    path = _gap_close_path()
+    cfg = ensemble_config(products=_book(product), engine_config=mc_engine_config())
+    report = run_oracle(cfg, path, 0)                       # simulation == replay, cash included, to the bit
+    assert report.passed, report.summary()
+    tracker = KOResetLifecycleTracker(product=product, quantity=1.0, start_date=pd.Timestamp(INCEPTION))
+    dates = pd.DatetimeIndex(path.dates)
+    anchor = tracker.knock_in_anchor_on(dates, 4, env(date=dates[0]))
+    assert (anchor.source_index, anchor.fixing) == (0, 4 * D)          # the fixing, not the close (day 6)
+    placement = tracker.resolve_calendar_schedule(dates, env(date=dates[0])).placement(4)
+    assert placement.ko_payoff[0] == pytest.approx(SPOT + SPOT * 0.05 * (4 * D + 4 * D), rel=1e-15)
+
+
+def test_knock_in_records_of_different_levels_on_one_close_are_refused():
+    from quantark.asset.equity.lifecycle import KOResetLifecycleTracker
+    import pandas as pd
+    from .conftest import env
+
+    product = short_ko_reset(M.REBASED, pre=(2, 9), ki=(4, 5), post=(4, 7))
+    product.barrier_config.ki_observation_schedule.records[1].barrier = 0.70 * SPOT
+    tracker = KOResetLifecycleTracker(product=product, quantity=1.0, start_date=pd.Timestamp(INCEPTION))
+    dates = pd.DatetimeIndex(_gap_close_path().dates)
+    with pytest.raises(ValidationError, match="different levels"):
+        tracker.resolve_calendar_schedule(dates, env(date=dates[0]))
