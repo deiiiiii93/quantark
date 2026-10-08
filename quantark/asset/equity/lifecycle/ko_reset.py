@@ -204,7 +204,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         """V1's terminal timing: determined at the knocked-in contract's end."""
         contract = self.contract()
         schedule_env = self._schedule_resolution_env(contract, env)
-        end_date = contract._resolve_schedule_end_date(contract.post_barrier_config.ko_observation_schedule)
+        end_date = _last_observation_date(contract.post_barrier_config.ko_observation_schedule)
         if end_date is not None and self._uses_date_timing(contract):
             return resolve_terminal_timing_at(
                 contract, schedule_env, determination_date=end_date, cashflow_id="ko_reset_v1_terminal"
@@ -459,6 +459,12 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
         **values, pre_due_day=int(pre_due), pre_settlement_day=int(pre_settle), pre_settlement_delay=pre_delay,
         pre_tenor=tracker.pre_contract_tenor(env), rebased=rebased, absolute=absolute, place=place,
     )
+
+
+def _last_observation_date(schedule) -> Optional[Any]:
+    """A dated schedule's last observation date (its contract end); ``None`` for a numeric one."""
+    dates = [] if schedule is None else [r.observation_date for r in schedule.records if r.observation_date is not None]
+    return max(dates) if dates else None
 
 
 def tracker_for(product: Any, **kwargs) -> AutocallableLifecycleTracker:

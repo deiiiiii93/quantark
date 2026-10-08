@@ -32,16 +32,17 @@ CASES = {
 }
 
 
-def _hand_aged(self, time_bump, bumped_date, pricing_env):
+def _hand_aged(self, time_bump, bumped_date, pricing_env, *, keep_landing=False):
     """The contract aged by hand: the snowball's schedules by its own time_shift, schedule 2 (records and the legacy
-    times the builder also states it as) by the same day, its records keeping their accrual periods."""
-    dropped_all = SnowballOption.time_shift(self, time_bump, bumped_date, pricing_env)
+    times the builder also states it as) by the same day, its records keeping their accrual periods. A record landing
+    on the bumped instant is kept at time 0 when theta asks (``keep_landing``, spec 2026-10-07)."""
+    SnowballOption.time_shift(self, time_bump, bumped_date, pricing_env, keep_landing=keep_landing)
     post = self.post_barrier_config
     legacy = post.ko_observation_dates
+    shifted = post.ko_observation_schedule.time_shift(time_bump, bumped_date, keep_landing=keep_landing)
     self.post_barrier_config = replace(
-        post, ko_observation_schedule=post.ko_observation_schedule.time_shift(time_bump, bumped_date),
-        ko_observation_dates=None if legacy is None else [t - time_bump for t in legacy if t - time_bump > 0])
-    return dropped_all and not self.post_barrier_config.ko_observation_schedule.records
+        post, ko_observation_schedule=shifted,
+        ko_observation_dates=None if legacy is None else [r.observation_time for r in shifted.records])
 
 
 def _reference_theta(product, market, engine, monkeypatch):
