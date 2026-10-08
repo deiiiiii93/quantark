@@ -34,6 +34,7 @@ from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.settlement import SettlementLagUnit
 from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError
 
 from .events import LifecycleEvent, LifecycleEventType
 from .cashflows import RealizedCashflow, ValuationPoint
@@ -263,6 +264,7 @@ class AutocallableLifecycleTracker:
                     )
         else:
             ki_records = self._scheduled_records(product, env, "ki")
+            contract_ki = self._contract_ki_records(product) if ki_records else []
             for idx, rec in enumerate(ki_records):
                 if idx in self.lifecycle.observed_ki_indices:
                     continue
@@ -272,7 +274,7 @@ class AutocallableLifecycleTracker:
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=False):
                     before = self._state_snapshot()
                     # the anchor is the record whose test fired, at its contractual fixing (spec §5.1)
-                    anchor = knock_in_anchor_for(product.barrier_config.ki_observation_schedule.records[idx], idx)
+                    anchor = knock_in_anchor_for(contract_ki[idx], idx)
                     if self.lifecycle.mark_ki(pd.Timestamp(date).to_pydatetime(), anchor):
                         events.append(
                             LifecycleEvent(
@@ -588,6 +590,19 @@ class AutocallableLifecycleTracker:
         schedule_env = deepcopy(env)
         schedule_env.valuation_date = pd.Timestamp(base_date).to_pydatetime()
         return schedule_env
+
+    def _contract_ki_records(self, product: Any) -> list:
+        """The tracker's contract's knock-in records, which ``observed_ki_indices`` and a knock-in anchor's
+        ``source_index`` index. ``observe()`` takes the contract's own schedule (``product_for_lifecycle()``): an aged
+        pricing copy has dropped its past records, so its indices are not the contract's."""
+        contract = self.product.barrier_config.ki_observation_schedule.records
+        observed = product.barrier_config.ki_observation_schedule.records
+        if len(observed) != len(contract):
+            raise ValidationError(
+                f"observe() was handed a knock-in schedule of {len(observed)} records for a contract of "
+                f"{len(contract)}: observe the contract's own schedule (product_for_lifecycle()), not an aged copy"
+            )
+        return contract
 
     def _scheduled_records(
         self, product: Any, env: PricingEnvironment, kind: str

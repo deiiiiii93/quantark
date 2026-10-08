@@ -1154,8 +1154,10 @@ class SnowballMCEngine(BaseEngine):
         )
         ki_times: List[float] = []
         ki_barriers: List[float] = []
-        # the source knock-in records aligned with ki_times: each path's knock-in anchor (accrual time spec §5.1)
+        # the source knock-in records aligned with ki_times, and their indices in the priced product's knock-in
+        # schedule: each path's knock-in anchor (accrual time spec §5.1)
         ki_records: List[ObservationRecord] = []
+        ki_record_indices: List[int] = []
         if carried_knock_in:
             pass
         elif ki_continuous:
@@ -1173,6 +1175,7 @@ class SnowballMCEngine(BaseEngine):
             ki_barriers = [ki_profile["barriers"][index] for index in in_horizon]
             ki_schedule_records = product.barrier_config.ki_observation_schedule.records
             ki_records = [ki_schedule_records[index] for index in in_horizon]
+            ki_record_indices = list(in_horizon)
 
         all_times_set = set(pre_times) | set(ki_times) | {T}
 
@@ -1277,6 +1280,7 @@ class SnowballMCEngine(BaseEngine):
             "carried_knock_in": carried_knock_in,
             "ki_barriers": np.array(ki_barriers, dtype=float),
             "ki_records": ki_records,
+            "ki_record_indices": ki_record_indices,
             # the not-knocked-in contract matures HERE: its rebate is read off this node
             "pre_maturity_idx": int(indices_for([pre_maturity])[0]) if len(pre_times) else None,
             "all_times": all_times,
@@ -1864,6 +1868,13 @@ class SnowballMCEngine(BaseEngine):
 
         return payoffs, settlement_times, stats
 
+    @staticmethod
+    def _knock_in_anchors(grid) -> list:
+        """One anchor per knock-in column of the grid, indexed by its record's place in the PRICED product's
+        knock-in schedule. That is the contract's original index only for an unaged product: an aged copy has
+        dropped its past knock-in records and keeps no count of them (see ``KnockInAnchor.source_index``)."""
+        return [knock_in_anchor_for(rec, index) for index, rec in zip(grid["ki_record_indices"], grid["ki_records"])]
+
     def _compute_payoffs_ko_reset(
         self,
         product: KnockOutResetSnowballOption,
@@ -2101,7 +2112,7 @@ class SnowballMCEngine(BaseEngine):
                     else 0.0
                 )
                 # each path's knock-out accrual hangs from the knock-in record that fired on it (spec §5.1)
-                anchors = [knock_in_anchor_for(rec, k) for k, rec in enumerate(grid["ki_records"])]
+                anchors = self._knock_in_anchors(grid)
                 accrual_table = np.array([
                     [float(product.compute_ko_accrual_factor(None, rec, pricing_env, knock_in=anchor))
                      for rec in post_records]
@@ -2164,7 +2175,7 @@ class SnowballMCEngine(BaseEngine):
             terminal_spots = paths[is_v1, -1]
             if post_mode == PostKOScheduleMode.REBASED and product.accrual_config.is_annualized_ki:
                 # a REBASED knocked-in tenor hangs from the path's knock-in (spec §4.4, §5.1)
-                anchors = [knock_in_anchor_for(rec, k) for k, rec in enumerate(grid["ki_records"])]
+                anchors = self._knock_in_anchors(grid)
                 tenors = np.array(
                     [product._resolve_post_contract_tenor(pricing_env, knock_in=a) for a in anchors], dtype=float
                 )

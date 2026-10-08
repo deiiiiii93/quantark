@@ -99,6 +99,13 @@ class KnockInAnchor:
     """The knock-in a REBASED schedule hangs from (spec §5.1): resolved once, when the knock-in happens.
 
     ``fixing`` is the knock-in record's contractual fixing (its accrual ``end``), not the close it was observed on.
+
+    ``source_index`` is bookkeeping (no cash reads it; the cash reads ``fixing``, ``origin`` and ``basis``): the
+    fired record's index in the knock-in schedule of the product the knock-in was decided on.
+      * Lifecycle tracker: the tracker's contract's schedule, its original one (``observe()`` refuses an aged copy).
+      * MC pricing: the priced product's current schedule. That is the original index only for an unaged product:
+        ageing (``time_shift``, ``product_for_pricing``) drops past knock-in records and keeps no count of them, and
+        an intraday twin builds its knock-in records afresh, so the original index is not recoverable there.
     """
 
     source_index: int

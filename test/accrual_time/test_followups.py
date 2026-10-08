@@ -3,6 +3,7 @@ import math
 from dataclasses import dataclass
 from datetime import timedelta
 
+import pandas as pd
 import pytest
 
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
@@ -81,3 +82,55 @@ def test_quad_v2_aged_memory_pays_a_missed_coupon_whose_period_is_known():
     assert p.barrier_config.ko_observation_schedule.records[0].accrual.start == 0.0
     state = AutocallableLifecycleState(coupon_memory_count=1)
     assert math.isfinite(float(PhoenixQuadEngineV2().price(p, env(), lifecycle_state=state)))
+
+
+# -- M1: a knock-in anchor's source_index is the contract's own knock-in record ----------------------------------
+
+D = 1 / 365.0
+
+
+def _tracker_on_two_knock_ins():
+    from quantark.asset.equity.lifecycle.autocallable import AutocallableLifecycleTracker
+    product = snowball(ko=times(200 * D, 300 * D, level=1e6), ki=times(91 * D, 93 * D, level=75.0), maturity=300 * D)
+    return AutocallableLifecycleTracker(product=product, quantity=1.0, start_date=pd.Timestamp(T0))
+
+
+def test_the_tracker_anchors_a_later_knock_in_at_its_contract_index():
+    tracker = _tracker_on_two_knock_ins()
+    tracker.lifecycle.observed_ki_indices.add(0)        # the first knock-in test passed without a hit
+    day = pd.Timestamp(T0 + timedelta(days=95))
+    tracker.observe(day, tracker.product_for_lifecycle(), env(day.to_pydatetime(), spot=70.0), 70.0)
+    assert tracker.lifecycle.knock_in_anchor.source_index == 1
+    assert tracker.lifecycle.knock_in_anchor.fixing == 93 * D
+
+
+def test_the_tracker_refuses_to_observe_an_aged_knock_in_schedule():
+    """An aged pricing copy has dropped its past knock-in records: its indices are not the contract's, so neither
+    observed_ki_indices nor the anchor's source_index could address the contract's records."""
+    tracker = _tracker_on_two_knock_ins()
+    aged_on = pd.Timestamp(T0 + timedelta(days=92))
+    aged = tracker.product_for_pricing(aged_on, env(aged_on.to_pydatetime()))
+    assert len(aged.barrier_config.ki_observation_schedule.records) == 1
+    day = pd.Timestamp(T0 + timedelta(days=95))
+    with pytest.raises(ValidationError, match="product_for_lifecycle"):
+        tracker.observe(day, aged, env(day.to_pydatetime(), spot=70.0), 70.0)
+
+
+def test_mc_anchors_each_knock_in_column_at_its_priced_schedule_index(monkeypatch):
+    """Pin (not a RED case: the in-horizon knock-ins are always a prefix of the time-ordered schedule, so the column
+    index already equalled the schedule index): MC hands each anchor its record's priced-schedule index."""
+    import quantark.asset.equity.engine.mc.snowball_mc_engine as mc
+    from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+    from quantark.asset.equity.param import MCParams
+    seen = []
+    original = mc.knock_in_anchor_for
+
+    def spy(record, index):
+        seen.append((index, record.accrual.end))
+        return original(record, index)
+
+    monkeypatch.setattr(mc, "knock_in_anchor_for", spy)
+    p = ko_reset(M.REBASED)
+    SnowballMCEngine(params=MCParams(seed=3, num_paths=256)).price(p, env(spot=80.0))
+    ki = p.barrier_config.ki_observation_schedule.records
+    assert seen and set(seen) == {(i, r.accrual.end) for i, r in enumerate(ki)}
