@@ -64,8 +64,9 @@ Each daily close, in this order:
    - Schedule-1 maturity: when schedule 1's last observation was today and neither event fired, the contract matures
      (R2): `MATURITY` with `get_maturity_payoff_v0(close, env, contract_tenor=<schedule-1 tenor>)`, paid with the
      terminal settlement lag after schedule 1's last date (QUAD V2's pre-maturity payment timing), and terminates.
-2. **Knocked in (schedule 2).** Only schedule-2 knock-outs are tested; a `REBASED` record falls due on
-   `knock_in_date` + offset under the tracker's own day rule. With no knock-out the contract matures at its final
+2. **Knocked in (schedule 2).** Only schedule-2 knock-outs are tested. A `REBASED` record's offset is a
+   numeric time (the product refuses dates for it), so it falls due on the first close whose numeric valuation time
+   reaches `knock_in_time + offset` — the tracker's existing `_record_is_due` rule on the numeric clock. With no knock-out the contract matures at its final
    maturity with the knocked-in payoff (`get_maturity_payoff_v1` on schedule 2's tenor).
 
 Event indices name their schedule (`ko1:i`, `ko2:i`, `ki:i`) so ledger cashflow IDs stay unique.
