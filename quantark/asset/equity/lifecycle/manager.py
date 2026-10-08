@@ -46,9 +46,6 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from quantark.asset.equity.product.option.ko_reset_snowball_option import (
-    KnockOutResetSnowballOption,
-)
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 
@@ -59,6 +56,8 @@ from .cashflows import (
     ValuationPoint,
 )
 from .events import LifecycleEvent
+from .ko_reset import tracker_for
+from .providers import require_rebased_provider
 from .float_roll import FloatMaturityRoller, has_unrolled_float_maturity, is_float_rollable
 
 
@@ -122,18 +121,15 @@ class PortfolioLifecycleManager:
         """
         for position_id, position in portfolio.positions.items():
             product = position.product
-            if isinstance(product, KnockOutResetSnowballOption):
-                self._unrolled_warned.add(position_id)   # this message replaces the generic one
-                warnings.warn(
-                    "KO-reset snowball lifecycle (barrier reset on KO) is not "
-                    f"tracked; position {position_id} will be repriced as of "
-                    "today on every day.",
-                    UserWarning,
-                )
-                continue
             if isinstance(product, (SnowballOption, PhoenixOption)):
-                tracker = AutocallableLifecycleTracker(
-                    product=product,
+                # A KO-reset (a SnowballOption) gets its own tracker (spec 2026-10-08); an un-knocked
+                # REBASED one only prices on Monte Carlo (section 6a).
+                require_rebased_provider(
+                    product, engines={"pricing": position.engine},
+                    consumer="PortfolioLifecycleManager", position=position_id,
+                )
+                tracker = tracker_for(
+                    product,
                     quantity=position.quantity,
                     start_date=self.base_date,
                 )

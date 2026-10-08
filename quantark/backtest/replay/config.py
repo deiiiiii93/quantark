@@ -660,11 +660,16 @@ class ReplayBacktestConfig:
             products=self.products,
         )
         self.carry_audit_dates = self.carry_recording.audit_dates
+        _validate_rebased_providers(self)
         if self.engine_config.vol_model != "bsm":
             # create_vol_model_engine builds Snowball engines only; pricing a
             # Phoenix/European with one would be silently wrong (fail-closed).
             from quantark.asset.equity.product.option.snowball_option import (
                 SnowballOption,
+            )
+
+            from quantark.asset.equity.product.option.ko_reset_snowball_option import (
+                KnockOutResetSnowballOption,
             )
 
             for bp in self.products:
@@ -675,6 +680,37 @@ class ReplayBacktestConfig:
                         f"{type(bp.product).__name__}. Wire the corresponding "
                         "vol-model engines before booking other product types."
                     )
+                if (
+                    isinstance(bp.product, KnockOutResetSnowballOption)
+                    and self.engine_config.vol_model_solver != "mc"
+                ):
+                    # Measured 2026-10-08: the LV / Heston / SLV PDE snowball solvers price a knocked-in
+                    # KO-reset on schedule 1 (21-26% off the knocked-in snowball on schedule 2); the
+                    # vol-model MC engines take its KO-reset route and match it exactly.
+                    raise ValidationError(
+                        f"position_id={bp.position_id}: a KO-reset snowball under vol_model="
+                        f"{self.engine_config.vol_model!r} needs vol_model_solver='mc'; the vol-model PDE "
+                        "solvers ignore its second schedule"
+                    )
+
+
+def _validate_rebased_providers(config: "ReplayBacktestConfig") -> None:
+    """An un-knocked REBASED KO-reset prices on Monte Carlo only, on every engine the replay builds for it
+    (spec 2026-10-08 section 6a), refused here rather than on its first un-knocked day."""
+    from quantark.asset.equity.lifecycle.providers import require_rebased_provider
+
+    ec = config.engine_config
+    pricing = (
+        EngineType.MONTE_CARLO if ec.vol_model != "bsm" and ec.vol_model_solver == "mc" else ec.pricing_engine_type
+    )
+    engines = {"pricing": pricing}
+    if config.calculate_surfaces:
+        engines["surface"] = ec.resolve_surface_engine_type()
+    if config.calculate_event_probabilities:
+        engines["event_stats"] = ec.resolve_event_stats_engine_type()
+    for bp in config.products:
+        require_rebased_provider(bp.product, engines=engines, consumer="ReplayBacktestConfig",
+                                 position=bp.position_id)
 
 
 # Compatible aliases (canonical names above).

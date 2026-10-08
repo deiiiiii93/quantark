@@ -17,6 +17,8 @@ from .config import (
     SurfaceGridConfig,
 )
 from .market import AutocallableMarketDataSet, ImpliedBasisYield, SignedDividendYield
+from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+
 from .strategy_state import AutocallableDeltaHedgeStrategy, AutocallableLifecycleState, FuturesHedgePosition
 from quantark.backtest.futures_ledger import FuturesHedgeBook
 from quantark.backtest.strategy.futures_bucket_strategy import (
@@ -182,7 +184,8 @@ class ReplayBacktestEngine:
         # every pricing call; vol-model days swap this list wholesale.
         self._pricing_engines: list[Any] = []
         for bp in config.products:
-            lifecycle = AutocallableLifecycleState()
+            # A KO-reset starts from the product's carried state (its tracker builds it); the others fresh.
+            lifecycle = None if isinstance(bp.product, KnockOutResetSnowballOption) else AutocallableLifecycleState()
             self._pricing_engines.append(
                 create_pricing_engine(
                     bp.product,

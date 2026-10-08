@@ -30,6 +30,7 @@ from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
 from quantark.asset.equity.engine.pde_engine import PDEEngine
 from quantark.asset.equity.engine.quad.european_quad_engine import EuropeanQuadEngine
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import KOResetSnowballQuadEngine
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
 from quantark.asset.equity.param.pde_removed_names import removed_name_error
@@ -42,6 +43,7 @@ from quantark.asset.equity.product.option import (
     OneTouchOption,
     SingleSharkfinOption,
 )
+from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.util.enum.engine_enums import EngineType
@@ -132,6 +134,9 @@ def create_autocallable_engine(
             return EuropeanQuadEngine(params=quad_params, method=selected_method)
         if isinstance(product, PhoenixOption):
             return PhoenixQuadEngine(params=quad_params)
+        if isinstance(product, KnockOutResetSnowballOption):
+            # SnowballQuadEngine ignores schedule 2 (a knocked-in contract priced 4.195 for -1.744)
+            return KOResetSnowballQuadEngine(params=quad_params)
         if isinstance(product, SnowballOption):
             return SnowballQuadEngine(params=quad_params)
         raise ValidationError(f"Unsupported Quad product type: {type(product).__name__}")

@@ -61,7 +61,8 @@ class TestLifecycleManager:
         manager.register_positions(portfolio)
         assert manager.num_tracked == 1
 
-    def test_ko_reset_snowball_warns_and_is_untracked(self):
+    def test_ko_reset_snowball_is_tracked(self):
+        """Tracked since spec 2026-10-08 (it was warned about and repriced as of every day before)."""
         from quantark.asset.equity.engine.quad import SnowballQuadEngine
         from quantark.asset.equity.product.option.ko_reset_snowball_option import (
             KnockOutResetSnowballOption,
@@ -83,9 +84,8 @@ class TestLifecycleManager:
         )
         portfolio = make_portfolio(ko_reset, SnowballQuadEngine())
         manager = LifecycleManager(base_date=VAL_DATE)
-        with pytest.warns(UserWarning, match="KO-reset"):
-            manager.register_positions(portfolio)
-        assert manager.num_tracked == 0
+        manager.register_positions(portfolio)
+        assert manager.num_tracked == 1
 
     def test_process_day_settles_snowball_ko_to_cash(self):
         from quantark.asset.equity.engine.quad import SnowballQuadEngine

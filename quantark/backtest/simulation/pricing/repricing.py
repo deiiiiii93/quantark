@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker, snap_contract
+from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker, snap_contract, tracker_for
 from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.backtest.replay.engine_factory import create_pricing_engine
@@ -217,12 +217,14 @@ class RepricingPricer:
         self._initial_differs.clear()
 
     def _tracker_for(self, knocked_in: bool, knock_in_day: int) -> AutocallableLifecycleTracker:
-        """A fresh tracker holding only the knock-in state, for ageing."""
-        return AutocallableLifecycleTracker(
-            product=self.product, quantity=1.0, has_lifecycle=True,
-            lifecycle=AutocallableLifecycleState(knocked_in=bool(knocked_in)),
-            start_date=self.start_date,
-        )
+        """A fresh tracker holding only the knock-in state (and a REBASED path's knock-in day), for ageing."""
+        state = AutocallableLifecycleState(knocked_in=bool(knocked_in))
+        if knock_in_day >= 0:
+            if self._dates is None:
+                raise ValidationError("a knock-in day needs the run calendar (RepricingPricer(dates=...))")
+            state.ki_date = pd.Timestamp(self._dates[int(knock_in_day)]).normalize().to_pydatetime()
+        return tracker_for(self.product, quantity=1.0, has_lifecycle=True, lifecycle=state,
+                           start_date=self.start_date)
 
     def initial_differs(self, date: pd.Timestamp, *, knocked_in: bool, knock_in_day: int = -1) -> bool:
         """Whether the initial-phase copy for ``date`` differs from the post-close one (a record lands that day).

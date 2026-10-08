@@ -27,7 +27,7 @@ import pandas as pd
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import StatisticsRefused
-from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
+from quantark.asset.equity.lifecycle import tracker_for
 from quantark.asset.equity.market import IndexFuturesQuote
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.param.div.forward_carry_curve import ForwardCarryCurve
@@ -176,14 +176,17 @@ class ProductReplay:
 
         # date_resolver captures self; do not replace self.market_data
         # post-construction or the resolver will keep using the old one.
-        self._tracker = AutocallableLifecycleTracker(
-            product=product,
+        # The tracker the product's rules need (a KO-reset has its own); with ``lifecycle=None`` it builds
+        # the starting state from the product's carried attributes (spec 2026-10-08 section 4).
+        self._tracker = tracker_for(
+            product,
             quantity=product_quantity,
             lifecycle=lifecycle,
             start_date=start_date,
             date_resolver=self._next_available_market_date,
             has_lifecycle=has_lifecycle,
         )
+        self.lifecycle = self._tracker.lifecycle
 
     @property
     def start_date(self) -> Optional[pd.Timestamp]:
