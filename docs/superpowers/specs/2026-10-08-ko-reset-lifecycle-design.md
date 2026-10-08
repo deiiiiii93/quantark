@@ -22,7 +22,7 @@ schedule-2 modes, `ABSOLUTE` and `REBASED` ("common", user 2026-10-08).
 
 **Success.** A KO-reset position in any of those consumers books its events and cashflows, is closed when the
 contract ends, is never repriced after it matured, and never raises on a live state. Snowball and Phoenix results
-stay byte-identical.
+stay byte-identical except where §4a's day rule corrects a pricing copy (every such row listed).
 
 ## 2. Contract rules (user rulings)
 
