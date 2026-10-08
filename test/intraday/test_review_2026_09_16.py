@@ -68,6 +68,7 @@ def _uo_continuous(expiry=datetime(2026, 9, 16), **kw):
 def test_finding_1_initial_phoenix_memory_reaches_every_engine(sse_calendar, sse_sessions, desk):
     product = dated_phoenix(sse_calendar, T0, months=3, ko=1000.0)
     product.coupon_config = replace(product.coupon_config, fixed_coupon_year_fraction=1 / 12)
+    product.validate()   # a term changed on a built product: derive its accrual periods again
     first = _kos(product, sse_sessions)[0]
     ts = first.timestamp + timedelta(days=1)
     missed = AutocallableLifecycleState(coupon_memory_count=1, missed_coupon_indices={0}, observed_coupon_indices={0},
@@ -264,6 +265,7 @@ def test_finding_9_the_daily_expiry_tolerance_is_not_an_intraday_limit(sse_sessi
 def test_finding_10_a_memory_coupon_reconciles_against_its_constituent_periods(sse_calendar, sse_sessions, desk):
     product = dated_phoenix(sse_calendar, T0)
     product.coupon_config = replace(product.coupon_config, fixed_coupon_year_fraction=1 / 12)
+    product.validate()   # a term changed on a built product: derive its accrual periods again
     events = _kos(product, sse_sessions)
     ts = events[1].timestamp + timedelta(seconds=1)
     res = value_intraday(PhoenixQuadEngineV2(), _req(product, sse_sessions, desk, ts,

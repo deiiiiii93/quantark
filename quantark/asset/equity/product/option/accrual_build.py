@@ -35,9 +35,18 @@ def _calendar_key(calendar):
     return None if calendar is None else calendar.identity()
 
 
+def same_terms(period: AccrualPeriod, derived: tuple, current: tuple) -> bool:
+    """Whether ``period``, derived under ``derived``, is still the period of a contract with terms ``current``.
+    ``initial_date`` (the keys' first term) is the origin of DATE periods and decides NONE ones; a TIME or
+    relative period never reads it, so setting it on a numeric contract changes none of them."""
+    if period.kind is AccrualKind.TIME:
+        return derived[1:] == current[1:]
+    return derived == current
+
+
 def accrual_terms_key(product) -> tuple:
     """The contract terms every derived period depends on, factors aside (ageing slices those by position): a
-    period derived under another key is stale."""
+    period derived under another key is stale. ``initial_date`` comes first (see ``same_terms``)."""
     ac = product.accrual_config
     coupon = getattr(product, "coupon_config", None)
     convention = product.settlement_convention
@@ -146,7 +155,7 @@ def _keep(rec: ObservationRecord, key: tuple) -> bool:
     """Whether a record keeps the period it carries (§4.2): an explicit one always, a derived one while the terms
     it was derived from are the contract's current terms."""
     period = rec.accrual
-    return period is not None and (period.terms is None or period.terms == key)
+    return period is not None and (period.terms is None or same_terms(period, period.terms, key))
 
 
 def _check_length(factors, records, name: str) -> None:
@@ -175,6 +184,8 @@ def _fill_ko(records: List[ObservationRecord], terms: _Terms, factors, name: str
                          (None if terms.first_period_start is None else float(terms.first_period_start)))
             elif previous.kind is kind and not previous.relative:
                 start = previous.end
+            if start is not None and end < start:
+                start = None   # a past record before the contract's time origin: its period start is unknown
         terms.require(kind, terms.ko_annualized and cumulative is None,
                       coupon and terms.coupon_annualized and period_fraction is None)
         rec.accrual = AccrualPeriod(kind, origin=origin, start=start, end=end, basis=terms.basis_for(kind),

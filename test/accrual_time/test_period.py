@@ -54,7 +54,7 @@ def test_none_raises_when_asked():
     dict(kind=K.NONE, end=0.25),                                         # NONE carries no endpoints
     dict(kind=K.TIME, origin=0.0),                                       # no end
     dict(kind=K.TIME, origin=0.0, start=0.3, end=0.2),                   # end < start
-    dict(kind=K.TIME, origin=0.5, end=0.2),                              # end < origin
+    dict(kind=K.DATE, origin=T1, end=T0, basis=A365),                    # a DATE end before its origin
     dict(kind=K.TIME, origin=0.0, end=T1),                               # mixed TIME / DATE
     dict(kind=K.DATE, origin=T0, end=T1),                                # DATE without basis
     dict(kind=K.TIME, start=0.0, end=0.25, relative=True, origin=0.0),   # relative has no origin
@@ -95,3 +95,13 @@ def test_business_days_reads_its_own_calendar_and_denominator():
     assert cumulative_accrual(p) == calculate_year_fraction(T0, T1, DC.BUSINESS_DAYS, 244.0, calendar=cal)
     with pytest.raises(ValidationError, match="BUSINESS_DAYS accrual needs its calendar and denominator"):
         cumulative_accrual(AccrualPeriod(K.DATE, origin=T0, end=T1, basis=AccrualBasis(DC.BUSINESS_DAYS)))
+
+
+def test_a_past_numeric_record_keeps_its_place_but_not_its_cumulative_accrual():
+    """Spec 3B decision 13: a record at a negative time is history kept in the schedule. Its time starts the next
+    coupon period, as today; its own knock-out accrual (before the contract's time origin) is never paid: refused."""
+    past = AccrualPeriod(K.TIME, origin=0.0, end=-0.25)
+    nxt = AccrualPeriod(K.TIME, origin=0.0, start=-0.25, end=0.0)
+    assert coupon_accrual(nxt) == 0.25
+    with pytest.raises(ValidationError, match="before the contract's accrual origin"):
+        cumulative_accrual(past)

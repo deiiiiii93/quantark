@@ -174,9 +174,11 @@ class AccrualPeriod:
                 raise ValidationError("only a relative accrual period carries an anchor")
             if self.origin is None or self.end is None:
                 raise ValidationError("an accrual period needs its origin and end")
-            if self.end < self.origin:
+            # A numeric record at a negative time is history kept in the schedule (spec 3B decision 13): it may lie
+            # before the contract's time origin, and only its cumulative accrual is then refused (when read).
+            if self.kind is AccrualKind.DATE and self.end < self.origin:
                 raise ValidationError(f"accrual end {self.end!r} is before its origin {self.origin!r}")
-            if self.start is not None and self.start < self.origin:
+            if self.kind is AccrualKind.DATE and self.start is not None and self.start < self.origin:
                 raise ValidationError(f"accrual start {self.start!r} is before its origin {self.origin!r}")
         if self.start is not None and self.end < self.start:
             raise ValidationError(f"accrual end {self.end!r} is before its start {self.start!r}")
@@ -199,6 +201,9 @@ def cumulative_accrual(period: AccrualPeriod, *, knock_in: Optional[KnockInAncho
         return 0.0
     if period.kind is AccrualKind.DATE:
         return period.basis.cumulative(period.origin, period.end)
+    if period.end < period.origin:
+        raise ValidationError(f"a record at {period.end!r} lies before the contract's accrual origin (a past "
+                              "record): it has no knock-out accrual to pay")
     return float(period.end) - float(period.origin)
 
 
@@ -228,13 +233,13 @@ def _period_of(record) -> AccrualPeriod:
     return period
 
 
-def _guard_current(product) -> None:
+def _guard_current(product, period: AccrualPeriod) -> None:
     """Accrual terms changed on a built product without ``validate()`` would pay the old cash: refuse instead."""
     built = getattr(product, "_accrual_terms_key", None)
     if built is None:
         return
-    from .accrual_build import accrual_terms_key
-    if accrual_terms_key(product) != built:
+    from .accrual_build import accrual_terms_key, same_terms
+    if not same_terms(period, built, accrual_terms_key(product)):
         raise ValidationError("the contract's accrual terms changed after its periods were derived: call "
                               "product.validate() to derive them again")
 
@@ -246,7 +251,7 @@ def ko_accrual_factor(product, record, env=None, *, knock_in: Optional[KnockInAn
         return float(period.cumulative_fraction)
     if not product._effective_annualized_flag(product.accrual_config.is_annualized_ko):
         return 1.0
-    _guard_current(product)
+    _guard_current(product, period)
     return cumulative_accrual(period, knock_in=knock_in)
 
 
@@ -256,7 +261,7 @@ def coupon_period_fraction(product, record, env=None) -> float:
         return 1.0
     period = _period_of(record)
     if period.period_fraction is None:
-        _guard_current(product)
+        _guard_current(product, period)
     return coupon_accrual(period)
 
 
@@ -267,7 +272,7 @@ def contract_tenor(product, env=None, leg: str = "contract", *, knock_in: Option
         raise ValidationError(f"{type(product).__name__} carries no {leg!r} terminal accrual period")
     period = terminals[leg]
     if period.cumulative_fraction is None:
-        _guard_current(product)
+        _guard_current(product, period)
     return cumulative_accrual(period, knock_in=knock_in)
 
 

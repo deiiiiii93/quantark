@@ -67,6 +67,7 @@ def test_lifecycle_books_released_arrears_at_the_knock_out():
         ko_observation_schedule=ObservationSchedule(records=[
             ObservationRecord(observation_date=d1, barrier=103.0),
             ObservationRecord(observation_date=d2, barrier=103.0)]))
+    p.validate()   # terms set on a built product: derive its accrual periods
     portfolio = Portfolio(portfolio_name="release-rule",
                           pricing_environments={"IDX": _lifecycle_env(d1 - timedelta(days=1), 100.0)})
     portfolio.add_position(product=p, quantity=1.0, entry_price=0.0, underlying="IDX",

@@ -204,3 +204,14 @@ def test_annualized_rebate_without_dated_origin_is_refused():
         snowball(ko=dates(30), maturity=None, exercise_date=T0 + timedelta(days=30),
                  accrual=AccrualConfig(is_annualized=False, is_annualized_rebate=True),
                  payoff_config=PayoffConfig(rebate_rate=0.05))
+
+
+def test_setting_initial_date_on_a_numeric_contract_changes_no_period():
+    """A factory that takes no initial_date leaves callers setting it afterwards: numeric periods never read it."""
+    p = snowball()
+    before = periods(p.barrier_config.ko_observation_schedule)
+    p.initial_date = T0
+    from quantark.asset.equity.product.option.accrual import ko_accrual_factor
+    assert [ko_accrual_factor(p, r) for r in p.barrier_config.ko_observation_schedule.records] == [1 / 12, 2 / 12, 3 / 12]
+    p.validate()
+    assert periods(p.barrier_config.ko_observation_schedule) == before

@@ -216,6 +216,7 @@ def test_r7_a_memory_coupon_after_an_assumed_fixing_is_provisional(sse_calendar,
     product.coupon_config = replace(product.coupon_config, fixed_coupon_year_fraction=1 / 12)
     for record in product.barrier_config.ko_observation_schedule.records:
         record.settlement_date = record.observation_date + timedelta(days=90)
+    product.validate()   # terms changed on a built product: derive its accrual periods again
     kos = _events(product, sse_sessions, EventKind.KO)
     ts = kos[1].timestamp + timedelta(seconds=1)
     req = _req(product, sse_sessions, desk, ts, env=flat_env(ts, spot=79.0), fixings=(Fixing(kos[1].timestamp, 100.0),))

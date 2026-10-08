@@ -168,6 +168,7 @@ def test_dated_post_schedule_lies_on_the_grid():
     shifted = [ObservationRecord(observation_date=cal.add_business_days(r.observation_date, 3), barrier=r.barrier)
                for r in post.ko_observation_schedule.records[:-1]]
     product.post_barrier_config = dataclasses.replace(post, ko_observation_schedule=ObservationSchedule(records=shifted))
+    product.validate()   # a schedule set on a built product: derive its accrual periods
     env = flat_env(datetime(2026, 4, 1))
     solver = KOResetSnowballPDESolver(PDEParams())
     p = prepare(solver, product, env, OutputRequest(Operation.PRICE))

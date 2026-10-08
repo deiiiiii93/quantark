@@ -134,6 +134,7 @@ def test_explicit_accrual_factors_outrank_the_offset():
     product = _snowball()
     factors = [0.3, 0.6, 0.9, 1.2]
     product.accrual_config = replace(product.accrual_config, accrual_factors=factors)
+    product.validate()   # a term changed on a built product: derive its accrual periods again
     aged = _aged(product)
     principal = product.initial_price * product.contract_multiplier
     coupons = [p - principal for _, p in _coupons(aged, _env(SHIFT))]

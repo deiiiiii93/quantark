@@ -50,6 +50,14 @@ def env(spot=90.0):
                               vol_surface=FlatVolSurface(0.25), div_yield=ContinuousDividendYield(0.01))
 
 
+def _derive_accrual(product):
+    """These contracts are aged by hand (schedules set on a built product, maturity down to zero), a shape
+    ``validate()`` refuses at zero maturity; derive the accrual periods of the schedules they now carry."""
+    from quantark.asset.equity.product.option.accrual_build import build_contract_accrual
+    build_contract_accrual(product)
+    return product
+
+
 def _schedule(times, level):
     return ObservationSchedule(records=[ObservationRecord(observation_time=t, barrier=level) for t in times])
 
@@ -70,6 +78,7 @@ def ko_reset(pre, post, ki, maturity, knocked_in):
                                      ki_observation_schedule=_schedule(ki, KI))
     product.post_barrier_config = replace(product.post_barrier_config, ko_observation_schedule=_schedule(post, POST_KO))
     product.maturity = maturity
+    _derive_accrual(product)
     setattr(product, "_otc_lifecycle_knocked_in", knocked_in)
     return product
 
@@ -88,6 +97,7 @@ def knocked_in_snowball(ko_times, maturity):
     product.barrier_config = replace(product.barrier_config, ko_observation_schedule=_schedule(ko_times, POST_KO),
                                      ki_observation_schedule=_schedule(ko_times, KI))
     product.maturity = maturity
+    _derive_accrual(product)
     setattr(product, "_otc_lifecycle_knocked_in", True)
     return product
 
@@ -146,6 +156,7 @@ def test_monte_carlo_pays_the_rebate_on_the_spot_at_the_end_of_the_first_schedul
         product.payoff_config = PayoffConfig(call_rebate_enabled=True, call_strike=100.0, call_participation_rate=1.0,
                                              include_principal=False)
         product.barrier_config = replace(product.barrier_config, ko_observation_schedule=_schedule(MONTHS[:6], 1e6))
+        _derive_accrual(product)
         return product
 
     mc = SnowballMCEngine(params=MCParams(seed=7, num_paths=65536))
@@ -160,6 +171,7 @@ def _second_level_below_the_knock_in_level(pre, post, ki, maturity, level=60.0):
     product = ko_reset(pre, post, ki, maturity, False)
     product.post_barrier_config = replace(product.post_barrier_config, ko_barrier=level,
                                           ko_observation_schedule=_schedule(post, level))
+    _derive_accrual(product)
     return product
 
 
@@ -195,6 +207,7 @@ def _first_schedule_ends_now(monitoring):
     if monitoring == "continuous":
         product.barrier_config = replace(product.barrier_config, ki_observation_type=ObservationType.CONTINUOUS,
                                          ki_continuous=True, ki_observation_schedule=None)
+    _derive_accrual(product)
     return product
 
 
@@ -243,6 +256,7 @@ def _knocked_in_now(monitoring, pre=(0.0,), pre_level=PRE_KO, post=(0.0, 0.5, 1.
     if monitoring == "continuous":
         product.barrier_config = replace(product.barrier_config, ki_observation_type=ObservationType.CONTINUOUS,
                                          ki_continuous=True, ki_observation_schedule=None)
+    _derive_accrual(product)
     return product
 
 

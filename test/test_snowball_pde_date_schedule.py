@@ -60,7 +60,9 @@ def _snowball(dated: bool):
         ki = ObservationSchedule(records=[
             ObservationRecord(observation_date=d, barrier=KI) for d in KI_DATES])
         extra = dict(ko_observation_schedule=ko, ki_observation_schedule=ki)
-        dates = dict(exercise_date=MATURITY_DATE, maturity_date=MATURITY_DATE, maturity=None)
+        # accrual time R5: a dated annualized contract states where its accrual starts (it accrued from the
+        # valuation date, T0 here, before)
+        dates = dict(exercise_date=MATURITY_DATE, maturity_date=MATURITY_DATE, maturity=None, initial_date=T0)
     else:
         extra = dict(ko_observation_dates=[_yf(d) for d in KO_DATES],
                      ki_observation_dates=[_yf(d) for d in KI_DATES])

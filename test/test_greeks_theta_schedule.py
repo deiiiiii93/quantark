@@ -314,6 +314,7 @@ def test_snowball_theta_business_day_shift_updates_state_and_drops_past_records(
         strike=100.0,
         barrier_config=_scheduled_barrier_config(),
         maturity=1.0,
+        initial_date=datetime(2026, 6, 26),   # accrual time R5: the dated contract's accrual start
     )
     engine = _CapturingMaturityEngine()
     calc = GreeksCalculator()
@@ -342,6 +343,7 @@ def test_phoenix_theta_business_day_shift_updates_state_and_drops_past_records()
         barrier_config=_scheduled_barrier_config(),
         coupon_config=CouponBarrierConfig(coupon_barrier=85.0, coupon_rate=0.01),
         maturity=1.0,
+        initial_date=datetime(2026, 6, 26),   # accrual time R5: the dated contract's accrual start
     )
     engine = _CapturingMaturityEngine()
     calc = GreeksCalculator()

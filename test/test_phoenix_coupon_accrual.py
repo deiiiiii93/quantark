@@ -34,6 +34,7 @@ def test_first_period_on_its_observation_date_is_contractual():
 def test_coupon_day_count_is_the_coupons():
     p = dated_phoenix(CAL, T0, memory=False)
     p.coupon_config = dataclasses.replace(p.coupon_config, day_count_convention=DayCountConvention.ACT_360)
+    p.validate()   # a term changed on a built product: derive its accrual periods again
     f = p.get_coupon_period_year_fractions(flat_env(_obs(p, 0), spot=95.0))
     assert p.get_coupon_payoff(0, year_fraction=f[0]) == pytest.approx(1.033333, abs=1e-6)
 
@@ -86,6 +87,10 @@ def test_aged_tenor_product_past_an_observation_keeps_the_contractual_period():
 def test_aged_tenor_product_with_an_unknown_period_start_refuses():
     p, e = _tenor(), env()
     p.accrual_config = dataclasses.replace(p.accrual_config, first_period_start=None)
+    # an aged contract arriving with legacy terms: its records carry no accrual period yet (accrual time spec §4.6)
+    for record in p.barrier_config.ko_observation_schedule.records:
+        record.accrual = None
+    p.validate()
     with pytest.raises(ValidationError, match="fixed_coupon_year_fraction.*accrual_factors"):
         p.get_coupon_period_year_fractions(e)
 

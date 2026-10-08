@@ -168,6 +168,7 @@ def test_pending_phoenix_coupon_coexists_with_live_continuation_value():
             ]
         ),
     )
+    phoenix.validate()   # terms set on a built product: derive its accrual periods
     portfolio = _portfolio(
         phoenix,
         date=DETERMINATION - timedelta(days=1),

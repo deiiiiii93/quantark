@@ -175,6 +175,13 @@ def test_a_phoenix_desk_theta_rolling_onto_the_maturity_close_agrees_across_rout
 
 # ---------------------------------------------------------------------------------------------------------------------
 # the Phoenix decision itself, on a float-time contract
+def _derive_accrual(product):
+    """These contracts are aged by hand to zero maturity (a shape ``validate()`` refuses): derive the accrual
+    periods of the schedules set on the built product (accrual time spec §4.2)."""
+    from quantark.asset.equity.product.option.accrual_build import build_contract_accrual
+    build_contract_accrual(product)
+
+
 def _float_phoenix(arrears=0.0, disable_ko_after_ki=False):
     schedule = lambda level: ObservationSchedule(records=[ObservationRecord(observation_time=0.0, barrier=level)])   # noqa: E731
     product = PhoenixOption(
@@ -193,6 +200,7 @@ def _float_phoenix(arrears=0.0, disable_ko_after_ki=False):
     product.barrier_config = replace(product.barrier_config, ko_observation_schedule=schedule(103.0),
                                      ki_observation_schedule=schedule(75.0))
     product.maturity = 0.0
+    _derive_accrual(product)
     return product
 
 
@@ -315,6 +323,7 @@ def _float_ko_reset(pre_times, post_times, ki_times, post_ko=95.0, mode=PostKOSc
                                      ki_observation_schedule=schedule(ki_times, 75.0))
     product.post_barrier_config = replace(product.post_barrier_config, ko_observation_schedule=schedule(post_times, post_ko))
     product.maturity = 0.0
+    _derive_accrual(product)
     return product
 
 
