@@ -187,6 +187,14 @@ class EnsembleConfig:
                     "the simulated-path engine prices snowballs and KO-reset snowballs only, got "
                     f"{type(bp.product).__name__} for position {bp.position_id}"
                 )
+            if bool(getattr(bp.product, "_otc_lifecycle_knocked_in", False)):
+                # review finding I3: every simulated path starts not knocked in (the vector lifecycle has no
+                # per-position starting state), so a carried knock-in would be silently dropped
+                raise ValidationError(
+                    f"position {bp.position_id}: a carried knock-in ({type(bp.product).__name__} with "
+                    "_otc_lifecycle_knocked_in) cannot be simulated: every simulated path starts not knocked in; "
+                    "simulate the contract from before its knock-in or price it through the replay"
+                )
             if is_unknocked_rebased(bp.product):
                 # spec 2026-10-08 section 6a: only Monte Carlo places a REBASED schedule 2
                 if self.pricing.provider == "life_surface":

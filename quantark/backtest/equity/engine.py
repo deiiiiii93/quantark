@@ -196,9 +196,6 @@ class BacktestEngine:
             f"Initialized portfolio with {len(self.config.initial_positions)} positions"
         )
 
-        # Record initial portfolio value
-        self._initial_portfolio_value = self.portfolio.get_portfolio_value()
-
         # The lifecycle manager always exists: it also rolls schedule-free
         # float-maturity contracts (patch spec 2026-09-03 §4). Lifecycle TRACKERS
         # (Snowball/Phoenix and barrier-family KO/KI/coupon/maturity/expiry
@@ -217,6 +214,10 @@ class BacktestEngine:
                     f"Lifecycle tracking enabled for "
                     f"{self.lifecycle_manager.num_tracked} position(s)"
                 )
+
+        # Record initial portfolio value, after the trackers attach: a tracked position is valued from its
+        # tracker's initial copy (review finding I2)
+        self._initial_portfolio_value = self.portfolio.get_portfolio_value()
 
         # Create hedge executor (multi-instrument strategies trade a basket
         # of instruments; single-target strategies keep the spot/futures path)

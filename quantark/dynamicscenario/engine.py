@@ -130,21 +130,8 @@ class DynamicScenarioEngine:
         # Create working copy of portfolio
         working_portfolio = self._clone_portfolio(portfolio)
         
-        # Track state
-        baseline_value = working_portfolio.get_portfolio_value()
-        cumulative_transaction_costs = 0.0
-        total_hedges = 0
-        day_results: List[DayResult] = []
-        previous_value = baseline_value
-        
-        # Reset strategy if provided
-        if hedge_strategy:
-            hedge_strategy.reset()
-        
-        # Track hedge positions
-        hedge_positions: Dict[str, str] = {}  # underlying -> position_id
-
-        # Lifecycle event handling
+        # Lifecycle event handling: trackers attach BEFORE the baseline is priced, so a tracked position is valued
+        # from its tracker's initial copy from day 0 (review finding I2)
         lifecycle_manager: Optional[LifecycleManager] = None
         if self.config.handle_lifecycle_events:
             base_date = day_path.start_date
@@ -161,6 +148,20 @@ class DynamicScenarioEngine:
                 )
             lifecycle_manager = LifecycleManager(base_date=base_date)
             lifecycle_manager.register_positions(working_portfolio)
+
+        # Track state
+        baseline_value = working_portfolio.get_portfolio_value()
+        cumulative_transaction_costs = 0.0
+        total_hedges = 0
+        day_results: List[DayResult] = []
+        previous_value = baseline_value
+
+        # Reset strategy if provided
+        if hedge_strategy:
+            hedge_strategy.reset()
+
+        # Track hedge positions
+        hedge_positions: Dict[str, str] = {}  # underlying -> position_id
 
         use_analytical = (self.config.greeks_method == 'analytical')
 

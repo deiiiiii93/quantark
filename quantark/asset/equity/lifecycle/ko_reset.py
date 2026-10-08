@@ -15,7 +15,8 @@ time, so every engine prices an ordinary knocked-in contract and the tracker boo
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
+from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
@@ -29,6 +30,7 @@ from quantark.util.exceptions import ValidationError
 
 from .autocallable import AutocallableLifecycleTracker, CalendarSchedule, DateResolver
 from .events import LifecycleEvent, LifecycleEventType
+from .snapping import is_off_day
 from .state import AutocallableLifecycleState
 
 DAYS_PER_YEAR = 365.0
@@ -129,14 +131,20 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     # The contract in force
     # ------------------------------------------------------------------
 
+    def _clock_origin(self) -> Optional[pd.Timestamp]:
+        """The day the product's numeric records are dated from: ``initial_date``, else ``start_date`` -- the base
+        ``_record_dicts`` and ``_terminal_payment_date`` place every numeric record and payment on."""
+        base = getattr(self.product, "initial_date", None) or self.start_date
+        return None if base is None else pd.Timestamp(base).normalize()
+
     def knock_in_time(self) -> Optional[float]:
-        """Years from ``start_date`` to the knock-in close (numeric clock); ``None`` while not knocked in."""
-        if not self.lifecycle.knocked_in or self.lifecycle.ki_date is None or self.start_date is None:
+        """Years from the numeric clock's origin (``_clock_origin``) to the knock-in close; ``None`` while not knocked
+        in. Measured on the clock schedule 1 and the knock-in are dated on, so a REBASED schedule 2 hangs from the
+        knock-in close itself (review finding C1: from ``start_date`` it sat ``initial_date - start_date`` early)."""
+        origin = self._clock_origin()
+        if not self.lifecycle.knocked_in or self.lifecycle.ki_date is None or origin is None:
             return None
-        days = (
-            pd.Timestamp(self.lifecycle.ki_date).normalize() - pd.Timestamp(self.start_date).normalize()
-        ).days
-        return days / DAYS_PER_YEAR
+        return (pd.Timestamp(self.lifecycle.ki_date).normalize() - origin).days / DAYS_PER_YEAR
 
     def contract(self) -> Any:
         """The snapped contract, or the ABSOLUTE contract a knocked-in REBASED one has become."""
@@ -144,7 +152,8 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             knock_in_time = self.knock_in_time()
             if knock_in_time is None:
                 raise ValidationError("a knocked-in REBASED KO-reset needs start_date and its knock-in date")
-            return self.product.with_absolute_schedule_2(knock_in_time, anchor=self.lifecycle.knock_in_anchor)
+            converted = self.product.with_absolute_schedule_2(knock_in_time, anchor=self.lifecycle.knock_in_anchor)
+            return _on_the_day_grid(converted)
         return self.product
 
     def product_for_lifecycle(self) -> Any:
@@ -215,6 +224,14 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         contract = self.contract()
         schedule_env = self._schedule_resolution_env(contract, env)
         end_date = _last_observation_date(contract.post_barrier_config.ko_observation_schedule)
+        if end_date is None and self._uses_date_timing(contract) and self._clock_origin() is not None:
+            # a dated contract's converted REBASED schedule 2 is numeric: its end is dated on the same clock as its
+            # records, the knock-in close plus the final offset (review finding C1: it was read off a numeric
+            # valuation point a dated contract never has)
+            end_time = float(contract.get_post_maturity_time(schedule_env))
+            end_date = self._date_resolver(
+                (self._clock_origin() + timedelta(days=int(round(end_time * DAYS_PER_YEAR)))).normalize()
+            ).to_pydatetime()
         if end_date is not None and self._uses_date_timing(contract):
             return resolve_terminal_timing_at(
                 contract, schedule_env, determination_date=end_date, cashflow_id="ko_reset_v1_terminal"
@@ -494,6 +511,38 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
         **values, pre_due_day=int(pre_due), pre_settlement_day=int(pre_settle), pre_settlement_delay=pre_delay,
         pre_tenor=tracker.pre_contract_tenor(env), rebased=rebased, absolute=absolute, place=place,
     )
+
+
+def _day_grid(time: float) -> float:
+    """A whole-day time as exactly ``k / 365``; an off-day time unchanged."""
+    return time if is_off_day(time) else round(float(time) * DAYS_PER_YEAR) / DAYS_PER_YEAR
+
+
+def _on_the_day_grid(contract: Any) -> Any:
+    """A converted REBASED copy's schedule 2 and maturity on the tracker's day grid (review finding C2).
+
+    The knock-in time is whole days and every snapped offset is whole days, so each converted observation is a whole
+    day, but the float sum ``k1 / 365 + k2 / 365`` can sit an ulp off ``(k1 + k2) / 365``: ageing by the elapsed days
+    then left the record ~1e-17 years ahead on the very close that observed it (QUAD raised on it). Each observation
+    becomes exactly ``k / 365``, its settlement lag kept; accrual periods are untouched (timing only).
+    """
+    schedule = contract.post_barrier_config.ko_observation_schedule
+    records = []
+    for record in schedule.records:
+        time = record.observation_time
+        if time is None or record.observation_date is not None:
+            records.append(record)
+            continue
+        grid = _day_grid(time)
+        settlement = record.settlement_time
+        if settlement is not None:
+            settlement = grid + (float(settlement) - float(time))
+        records.append(replace(record, observation_time=grid, settlement_time=settlement))
+    contract.post_barrier_config = replace(
+        contract.post_barrier_config, ko_observation_schedule=replace(schedule, records=records))
+    if contract.exercise_date is None and isinstance(contract.maturity, (int, float)):
+        contract.maturity = _day_grid(contract.maturity)
+    return contract
 
 
 def _refuse_ambiguous_anchors(base: CalendarSchedule, product: Any) -> None:

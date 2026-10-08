@@ -369,9 +369,10 @@ def check_contract_roll(
 
 
 BOOKKEEPING_FIELDS = frozenset({
-    "observed_ko_indices", "observed_ki_indices", "observed_coupon_indices",
+    "observed_ko_indices", "observed_ki_indices", "observed_coupon_indices", "observed_post_ko_indices",
     "valuation_point", "pending_settlement_cashflow", "settled",
 })   # change without an event; pricing-neutral (spec §8).
+# ``observed_post_ko_indices`` is the KO-reset schedule-2 analogue of ``observed_ko_indices``.
 # ``valuation_point`` is the tracker's last-observation clock stamp: the snapshot
 # carries its own valuation point, so the stamp is bookkeeping, not contract state.
 # ``pending_settlement_cashflow`` / ``settled`` mirror the ledger for the replay

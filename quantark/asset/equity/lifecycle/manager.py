@@ -135,6 +135,11 @@ class PortfolioLifecycleManager:
                 )
                 self._autocallable[position_id] = tracker
                 position.lifecycle_state = tracker.lifecycle
+                # The position is valued from the tracker's initial copy from the start (review finding I2):
+                # the snapped contract, its carried state, and a knocked-in REBASED contract already the
+                # ABSOLUTE one it has become; the booked product is not what the run prices.
+                env = deepcopy(portfolio.pricing_environments[position.underlying])
+                position.product = tracker.product_for_pricing(self.base_date, env, initial=True)
             elif isinstance(product, TRACKED_BARRIER_PRODUCTS):
                 tracker = BarrierLifecycleTracker(
                     product=product,
