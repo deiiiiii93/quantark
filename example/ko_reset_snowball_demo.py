@@ -41,9 +41,11 @@ from quantark.asset.equity.engine.pde import GridConfig
 
 
 def business_day_time(calendar, start_date, end_date, bus_days_in_year):
-    # "含头含尾" -> include start and end business days
+    # The pricing environment's BUSINESS_DAYS clock counts (start, end]:
+    # the valuation date is t = 0. A record carrying both a date and a time
+    # must agree with that clock, or schedule resolution rejects it.
     days = calendar.count_business_days(
-        start_date, end_date, include_start=True, include_end=True
+        start_date, end_date, include_start=False, include_end=True
     )
     return days / float(bus_days_in_year)
 
@@ -86,7 +88,7 @@ def business_day_offsets(calendar, start_date, dates):
     for curr in dates:
         offsets.append(
             calendar.count_business_days(
-                start_date, curr, include_start=True, include_end=True
+                start_date, curr, include_start=False, include_end=True
             )
         )
     return offsets
