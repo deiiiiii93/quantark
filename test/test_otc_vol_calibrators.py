@@ -845,7 +845,9 @@ class TestVolModelMcMethodSlot:
     ``method`` belongs to ``pricing_engine_type`` and is what the surface and
     event-stats engines receive.  A vol-model MC route needs its own method
     (``MonteCarloMethod.RANDOMIZED_QUASI``), which a PDE engine rejects
-    outright ("Invalid method type"), so a Heston-on-RQMC run that keeps the
+    outright (originally "Invalid method type"; since 0.6.0, 3ecf545b, PDE
+    takes no method at all and any ``method`` raises "PDEEngine(method=...)
+    was removed"), so a Heston-on-RQMC run that keeps the
     deterministic PDE reporting engines could not express both through one
     field.
     """
@@ -916,5 +918,10 @@ class TestVolModelMcMethodSlot:
             pricing_engine_type=EngineType.PDE,
             method=MonteCarloMethod.RANDOMIZED_QUASI,
         )
-        with pytest.raises(ValidationError, match="Invalid method type"):
+        # Since 0.6.0 (3ecf545b, CHANGELOG "Removed: PDEEngine(method=...)")
+        # the PDE route takes no method, so the rejection is the removed-name
+        # error rather than the old "Invalid method type".
+        with pytest.raises(
+            ValidationError, match=r"PDEEngine\(method=\.\.\.\) was removed"
+        ):
             create_pricing_engine(product, config)
