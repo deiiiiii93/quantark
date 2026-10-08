@@ -2175,29 +2175,35 @@ class SnowballMCEngine(BaseEngine):
             )
 
         if is_v1.any():
-            terminal_spots = paths[is_v1, -1]
-            if post_mode == PostKOScheduleMode.REBASED and product.accrual_config.is_annualized_ki:
-                # a REBASED knocked-in tenor hangs from the path's knock-in (spec §4.4, §5.1)
-                anchors = self._knock_in_anchors(grid)
-                tenors = np.array(
-                    [product._resolve_post_contract_tenor(pricing_env, knock_in=a) for a in anchors], dtype=float
-                )
-                path_tenors = tenors[first_ki_idx[is_v1]]
-                v1_payoffs = np.array(
-                    [
-                        product.get_maturity_payoff_v1(spot, pricing_env, contract_tenor=float(tenor))
-                        for spot, tenor in zip(terminal_spots, path_tenors)
-                    ],
-                    dtype=float,
-                )
+            tenors = None
+            if post_mode == PostKOScheduleMode.ABSOLUTE or len(post_times) == 0 or carried_knock_in:
+                terminal_spots = paths[is_v1, -1]
             else:
-                v1_payoffs = np.array(
-                    [
-                        product.get_maturity_payoff_v1(spot, pricing_env)
-                        for spot in terminal_spots
-                    ],
-                    dtype=float,
+                # REBASED: each path matures at its own ki_time + max(offset), before the grid's last node when
+                # it knocked in early, so V1 is read there
+                v1_paths = np.flatnonzero(is_v1)
+                last = int(np.argmax(post_times))
+                nodes = np.array(
+                    [post_indices_by_ki[int(first_ki_idx[i])][last] for i in v1_paths], dtype=int
                 )
+                terminal_spots = paths[v1_paths, nodes + 1]
+                if product.accrual_config.is_annualized_ki:
+                    # a REBASED knocked-in tenor hangs from the path's knock-in (accrual spec §4.4, §5.1)
+                    anchors = self._knock_in_anchors(grid)
+                    by_ki = np.array(
+                        [product._resolve_post_contract_tenor(pricing_env, knock_in=a) for a in anchors],
+                        dtype=float,
+                    )
+                    tenors = by_ki[first_ki_idx[v1_paths]]
+            v1_payoffs = np.array(
+                [
+                    product.get_maturity_payoff_v1(
+                        spot, pricing_env, contract_tenor=None if tenors is None else float(tenors[n])
+                    )
+                    for n, spot in enumerate(terminal_spots)
+                ],
+                dtype=float,
+            )
             payoffs[is_v1] = v1_payoffs
             if post_mode == PostKOScheduleMode.ABSOLUTE:
                 settlement_times[is_v1] = self._resolve_payment_time(
