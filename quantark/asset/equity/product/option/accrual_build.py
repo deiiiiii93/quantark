@@ -351,7 +351,9 @@ def build_contract_accrual(product) -> None:
     post_config = getattr(product, "post_barrier_config", None)
     rebased = post_config is not None and product.post_ko_mode is PostKOScheduleMode.REBASED
     if ki is not None:
-        _fill_ki(ki.records, terms, anchor_needed=rebased and terms.ko_annualized)
+        # a REBASED contract reads its knock-in's accrual for the knock-out leg and the knocked-in (V1) tenor
+        _fill_ki(ki.records, terms,
+                 anchor_needed=rebased and (terms.ko_annualized or bool(ac.is_annualized_ki)))
     product.barrier_config = replace(bc, ko_observation_schedule=ko, ki_observation_schedule=ki)
     if post_config is not None:
         post = _detach(post_config.ko_observation_schedule)
