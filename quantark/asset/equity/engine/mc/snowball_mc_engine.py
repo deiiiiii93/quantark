@@ -1201,8 +1201,11 @@ class SnowballMCEngine(BaseEngine):
 
             if end_dates:
                 end_date = max(end_dates)
+                # The environment's BUSINESS_DAYS clock counts (valuation, date]: the valuation date is
+                # t = 0 whether or not it is a business day. Counting it as day 1 put every daily node one
+                # business day ahead of the record times and overran maturity.
                 current = pricing_env.valuation_date
-                count = 1 if calendar.is_business_day(current) else 0
+                count = 0
                 times: List[float] = []
                 while current < end_date:
                     current = current + timedelta(days=1)
