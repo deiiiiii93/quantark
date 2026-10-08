@@ -5,11 +5,12 @@ These classes group related parameters to simplify the SnowballOption API.
 """
 
 from dataclasses import dataclass, replace
-from datetime import datetime
 from math import isfinite
 from typing import List, Optional, Union
 
+from quantark.util.calendar.business_calendar import Calendar
 from quantark.util.enum import (
+    AccrualEndType,
     ObservationType,
     CouponPayType,
     ProtectionType,
@@ -247,7 +248,6 @@ class AccrualConfig:
         is_annualized_coupon: If True, a Phoenix coupon rate is per annum and the
             coupon pays principal x rate x the period's year fraction; if False the
             rate IS the period's amount and its fraction is 1
-        accrual_dates: Calendar dates for annualized coupon calculation
         accrual_factors: Optional externally supplied accrual factors by
             KO/coupon observation
         accrued_offset: Year fraction already accrued before the valuation
@@ -261,7 +261,6 @@ class AccrualConfig:
     is_annualized_ki: Optional[bool] = None
     is_annualized_rebate: Optional[bool] = None
     is_annualized_coupon: Optional[bool] = None
-    accrual_dates: Optional[List[datetime]] = None
     accrual_factors: Optional[List[float]] = None
     #: Year fraction already accrued before the valuation date.
     #:
@@ -283,9 +282,18 @@ class AccrualConfig:
     #: ``None`` when an ageing dropped an observation that carries no time: the period start is unknown
     #: and a per-annum coupon refuses (spec 3B decision 13, as amended by the user 2026-10-04).
     first_period_start: Optional[float] = 0.0
+    #: Where every record's accrual ends (R2): its observation, or its authoritative settlement endpoint.
+    accrual_end: AccrualEndType = AccrualEndType.OBSERVATION
+    #: KO-reset schedule 2's explicit factors, positionally (accrual time spec §4.3). ``accrual_factors`` is
+    #: schedule 1's only.
+    post_accrual_factors: Optional[List[float]] = None
+    #: The accrual basis's calendar and denominator for a ``BUSINESS_DAYS`` annualized leg (spec §4.7), frozen
+    #: with the contract: no accrual reads the pricing environment's.
+    accrual_calendar: Optional[Calendar] = None
+    accrual_bus_days_in_year: Optional[float] = None
 
     def shifted(self, time_bump: float, dropped_observations: int = 0,
-                schedule=None) -> "AccrualConfig":
+                schedule=None, dropped_post: int = 0) -> "AccrualConfig":
         """The accrual of the same contract after it has been aged.
 
         Two things move.  ``accrued_offset`` banks the elapsed period, so
@@ -302,9 +310,14 @@ class AccrualConfig:
         the records that fall behind the valuation date are a prefix.
 
         ``schedule`` is the knock-out schedule BEFORE the shift: its last dropped record is where the
-        first remaining period now starts (``first_period_start``).
+        first remaining period now starts (``first_period_start``). ``dropped_post`` takes the same prefix off
+        ``post_accrual_factors`` (KO-reset schedule 2). The factors only keep a rebuilt aged product's length
+        checks true: every record's accrual period already holds them.
         """
         factors = self.accrual_factors
+        post = self.post_accrual_factors
+        if post is not None and int(dropped_post) > 0:
+            post = list(post[int(dropped_post):])
         start = self.first_period_start
         dropped = int(dropped_observations)
         if dropped > 0:
@@ -317,6 +330,7 @@ class AccrualConfig:
         return replace(
             self,
             accrual_factors=factors,
+            post_accrual_factors=post,
             accrued_offset=float(self.accrued_offset) + float(time_bump),
             first_period_start=start,
         )
@@ -332,20 +346,32 @@ class AccrualConfig:
                 "accrued_offset must be a finite non-negative year fraction, "
                 f"got {self.accrued_offset}"
             )
-        if self.accrual_factors is not None:
-            if not isinstance(self.accrual_factors, list):
+        self._check_factor_list("accrual_factors", self.accrual_factors)
+        self._check_factor_list("post_accrual_factors", self.post_accrual_factors)
+        if not isinstance(self.accrual_end, AccrualEndType):
+            raise ValueError(f"accrual_end must be AccrualEndType, got {self.accrual_end!r}")
+        if self.accrual_calendar is not None and not isinstance(self.accrual_calendar, Calendar):
+            raise ValueError(
+                f"accrual_calendar must be Calendar, got {type(self.accrual_calendar).__name__}"
+            )
+        if self.accrual_bus_days_in_year is not None:
+            days = float(self.accrual_bus_days_in_year)
+            if not isfinite(days) or days <= 0.0:
                 raise ValueError(
-                    f"accrual_factors must be a list, got {type(self.accrual_factors)}"
+                    f"accrual_bus_days_in_year must be positive, got {self.accrual_bus_days_in_year}"
                 )
-            for i, factor in enumerate(self.accrual_factors):
-                if isinstance(factor, bool) or not isinstance(factor, (int, float)):
-                    raise ValueError(
-                        f"accrual_factors[{i}] must be numeric, got {factor}"
-                    )
-                if factor < 0:
-                    raise ValueError(
-                        f"accrual_factors[{i}] must be non-negative, got {factor}"
-                    )
+
+    @staticmethod
+    def _check_factor_list(name: str, values) -> None:
+        if values is None:
+            return
+        if not isinstance(values, list):
+            raise ValueError(f"{name} must be a list, got {type(values)}")
+        for i, factor in enumerate(values):
+            if isinstance(factor, bool) or not isinstance(factor, (int, float)):
+                raise ValueError(f"{name}[{i}] must be numeric, got {factor}")
+            if factor < 0:
+                raise ValueError(f"{name}[{i}] must be non-negative, got {factor}")
 
 @dataclass(frozen=True)
 class AirbagConfig:

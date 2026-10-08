@@ -132,7 +132,7 @@ def _autocallable_twin(product, timeline: ContractTimeline, remaining, ts: datet
             kwargs.update(ki_observation_dates=None, ki_observation_schedule=ObservationSchedule(records=[]))
     twin.barrier_config = replace(bc, **kwargs)
     twin.accrual_config = replace(twin.accrual_config, accrual_factors=[float(f) for f in factors],
-                                  accrued_offset=0.0, accrual_dates=None)
+                                  accrued_offset=0.0)
     if phoenix:
         twin.coupon_config = replace(twin.coupon_config, coupon_barrier=_pick(twin.coupon_config.coupon_barrier, indices),
                                      initial_coupon_arrears=arrears)
@@ -194,7 +194,7 @@ def _ko_reset_twin(product, timeline: ContractTimeline, remaining, ts: datetime,
         pre_config = replace(pre_config, ki_barrier=_pick(bc.ki_barrier, [e.index for e in kis]) if kis else bc.ki_barrier,
                              ki_observation_dates=None, ki_observation_schedule=ObservationSchedule(records=ki_records))
     twin.barrier_config, twin.post_barrier_config = pre_config, post_config
-    twin.accrual_config = replace(twin.accrual_config, accrual_factors=None, accrual_dates=None, accrued_offset=offset)
+    twin.accrual_config = replace(twin.accrual_config, accrual_factors=None, accrued_offset=offset)
     terminal = timeline.terminal()
     twin.maturity = calendar_year_fraction(ts, terminal.timestamp)
     _clear_dates(twin)

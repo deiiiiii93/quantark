@@ -145,6 +145,16 @@ class TenorEnd(Enum):
         return self.name.capitalize()
 
 
+class AccrualEndType(Enum):
+    """Where a record's accrual ends (accrual time spec 2026-10-08, R2): its fixing or its payment."""
+
+    OBSERVATION = auto()  # the observation (fixing): today's behaviour, the default
+    SETTLEMENT = auto()   # the record's authoritative settlement endpoint
+
+    def __str__(self):
+        return self.name.capitalize()
+
+
 class ObservationFrequency(Enum):
     """Frequency of observations for barrier monitoring."""
 

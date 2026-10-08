@@ -25,6 +25,7 @@ from quantark.util.exceptions import ValidationError
 
 if TYPE_CHECKING:
     from quantark.priceenv import PricingEnvironment
+    from .accrual import AccrualPeriod
 
 # Type alias for cleaner signatures
 PricingEnv = Optional["PricingEnvironment"]
@@ -68,6 +69,9 @@ class ObservationRecord:
     observation_timestamp: Optional[datetime] = None
     #: Explicit payment instant (timezone-aware); intraday mode only.
     settlement_timestamp: Optional[datetime] = None
+    #: The record's accrual period (accrual time spec 2026-10-08), filled once at product construction and never
+    #: recomputed: observation timing (``observation_time``) may move, this does not.
+    accrual: Optional["AccrualPeriod"] = None
 
     def resolve_time(self, pricing_env: PricingEnv) -> float:
         """Resolve observation time to a year fraction.
@@ -171,6 +175,12 @@ class ObservationRecord:
         """Validate record fields."""
         if self.observation_time is None and self.observation_date is None:
             raise ValidationError("ObservationRecord must provide observation_time or observation_date.")
+        if self.accrual is not None:
+            from .accrual import AccrualPeriod
+            if not isinstance(self.accrual, AccrualPeriod):
+                raise ValidationError(
+                    f"ObservationRecord.accrual must be AccrualPeriod, got {type(self.accrual).__name__}"
+                )
         for name in ("observation_timestamp", "settlement_timestamp"):
             ts = getattr(self, name)
             if ts is None:
