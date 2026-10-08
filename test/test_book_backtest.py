@@ -89,10 +89,19 @@ def test_single_product_summary_is_stable(single_summary):
     # accrual restores the coupons the contract promised at inception, which
     # moves PV, the hedge ladder and the realised P&L, and fires one more
     # rebalance over the 86 days. Day count is unchanged.
+    # Re-pinned 2026-10-08: the standard helper's monthly k/12 schedule is now
+    # snapped to the day the tracker observes it (spec 2026-10-08 KO-reset
+    # lifecycle 4a): a just-observed record leaves the pricing copy on its own
+    # close instead of lingering a fraction of a day. PV moves by at most 0.4%
+    # (largest gap 258 on 71,972, 2024-01-26) and the event days are unchanged,
+    # but the hedge no longer flips one contract out and back on 2024-02-21/22
+    # (a delta on a rounding edge): 6 -> 4 trades, and that round trip's futures
+    # P&L at multiplier 200 is the whole P&L move (10848.94 -> -1656.28; with
+    # snapping patched out the old anchor reproduces to the last digit).
     assert single_summary["num_days"] == 86
-    assert single_summary["num_trades"] == 6
+    assert single_summary["num_trades"] == 4
     assert single_summary["num_trades"] > 0, "hedging must produce at least one trade"
-    assert single_summary["total_pnl"] == pytest.approx(10848.943648048378, rel=1e-9)
+    assert single_summary["total_pnl"] == pytest.approx(-1656.282876087651, rel=1e-9)
 
 
 def test_book_config_rejects_empty_products():

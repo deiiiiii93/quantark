@@ -67,3 +67,20 @@ def test_snapped_knock_out_cash_matches_the_engine():
     copy = tracker.product_for_pricing(day, env(110.0, day), initial=True)
     decided = SnowballPDESolver(PDEParams()).price(copy, env(110.0, day))
     assert events[0].cashflow == pytest.approx(decided, rel=1e-9)
+
+
+def test_records_snapped_onto_a_kept_whole_day_stay_ordered():
+    """A whole-day time kept as its exact float (a hair above k/365) and an off-day neighbour that rounds onto the
+    same day: the neighbour shares the kept time, so the schedule stays non-decreasing (case study i/36 x tenor)."""
+    kept = 30 / 365.0 + 1e-12                       # whole day within Tolerance.PRECISION: kept as is
+    product = snowball([kept, 30.4 / 365.0, 60 / 365.0], [30 / 365.0], 60 / 365.0)
+    times = [r.observation_time for r in snap_contract(product).barrier_config.ko_observation_schedule.records]
+    assert times == [kept, kept, 60 / 365.0]
+
+
+def test_a_record_snapped_onto_a_kept_whole_day_from_below_stays_ordered():
+    """The case study's i/36 x tenor: 0.6 days snaps to day 1, next to a whole day kept a hair BELOW 1/365."""
+    kept = 1 / 365.0 - 1e-18 if 1 / 365.0 - 1e-18 != 1 / 365.0 else (1 / 365.0) * (1 - 2 ** -52)
+    product = snowball([0.6 / 365.0, kept, 60 / 365.0], [30 / 365.0], 60 / 365.0)
+    times = [r.observation_time for r in snap_contract(product).barrier_config.ko_observation_schedule.records]
+    assert times == [kept, kept, 60 / 365.0]

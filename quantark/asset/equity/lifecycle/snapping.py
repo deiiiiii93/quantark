@@ -32,11 +32,38 @@ def snap_time(time: Optional[float]) -> Optional[float]:
     return round(float(time) * DAYS_PER_YEAR) / DAYS_PER_YEAR
 
 
-def _snap_record(record):
+def _snapped_times(times: List[Optional[float]]) -> List[Optional[float]]:
+    """One schedule's numeric times snapped, kept in order.
+
+    An off-day time moves to its rounded day. A whole-day time keeps its exact float, which may sit an ulp
+    either side of ``k / 365``; an off-day neighbour rounding onto the same day then takes that kept float
+    (the lowest kept one when it lies before the day, the highest when after), so the schedule stays
+    non-decreasing and whole-day times stay bit-identical.
+    """
+    kept: dict = {}
+    for t in times:
+        if t is not None and not is_off_day(t):
+            kept.setdefault(int(round(float(t) * DAYS_PER_YEAR)), []).append(t)
+    out: List[Optional[float]] = []
+    for t in times:
+        if t is None or not is_off_day(t):
+            out.append(t)
+            continue
+        days = float(t) * DAYS_PER_YEAR
+        day = int(round(days))
+        same_day = kept.get(day)
+        if same_day:
+            out.append(min(same_day) if days < day else max(same_day))
+        else:
+            out.append(day / DAYS_PER_YEAR)
+    return out
+
+
+def _snap_record(record, snapped: Optional[float]):
+    """``record`` at its snapped numeric time (dated and whole-day records unchanged)."""
     time = record.observation_time
     if record.observation_date is not None or time is None or not is_off_day(time):
         return record
-    snapped = round(float(time) * DAYS_PER_YEAR) / DAYS_PER_YEAR
     settlement = record.settlement_time
     if settlement is not None:
         settlement = snapped + (float(settlement) - float(time))   # the lag is kept
@@ -46,7 +73,9 @@ def _snap_record(record):
 def _snap_schedule(schedule):
     if schedule is None:
         return None
-    records = [_snap_record(r) for r in schedule.records]
+    numeric = [None if r.observation_date is not None else r.observation_time for r in schedule.records]
+    snapped = _snapped_times(numeric)
+    records = [_snap_record(r, t) for r, t in zip(schedule.records, snapped)]
     if all(a is b for a, b in zip(records, schedule.records)):
         return schedule
     return replace(schedule, records=records)
@@ -55,7 +84,9 @@ def _snap_schedule(schedule):
 def _snap_dates(dates: Optional[List[float]]):
     if dates is None or not any(isinstance(t, (int, float)) and is_off_day(t) for t in dates):
         return dates
-    return [snap_time(t) if isinstance(t, (int, float)) else t for t in dates]
+    numeric = [t if isinstance(t, (int, float)) else None for t in dates]
+    snapped = _snapped_times(numeric)
+    return [s if isinstance(t, (int, float)) else t for t, s in zip(dates, snapped)]
 
 
 def _snap_config(config):
