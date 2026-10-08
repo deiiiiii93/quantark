@@ -24,6 +24,7 @@ from quantark.asset.equity.report.autocallable_risk_report import (
 from quantark.asset.equity.report.surfaces import GridSpec
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.option_enums import PostKOScheduleMode
 
 from .engine_factory import create_surface_engine
 from .market import ImpliedBasisYield, SignedDividendYield
@@ -286,6 +287,14 @@ class AutocallableBacktestDashboard:
                 accrual = getattr(product, "accrual_config", None)
                 if accrual is not None and hasattr(accrual, "shifted"):
                     product.accrual_config = accrual.shifted(elapsed, dropped, barrier_config.ko_observation_schedule)
+        # A KO-reset's ABSOLUTE schedule 2 ages with schedule 1, as its own ``time_shift`` does; its explicit
+        # factors drop with its records (the elapsed time is banked above). A REBASED one holds offsets and stays.
+        post_config = getattr(product, "post_barrier_config", None)
+        if post_config is not None and getattr(product, "post_ko_mode", None) == PostKOScheduleMode.ABSOLUTE:
+            shifted_post, _ = post_config.time_shift(elapsed, date.to_pydatetime(), pricing_env)
+            product.post_barrier_config = shifted_post
+            product.accrual_config = product.accrual_config.shifted(
+                0.0, dropped_post=post_config.ko_observation_count - shifted_post.ko_observation_count)
         return product
 
     def _risk_warnings(
