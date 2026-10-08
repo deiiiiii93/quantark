@@ -9,7 +9,7 @@ from quantark.asset.equity.product.option.snowball_config import AccrualConfig
 from quantark.util.enum import PostKOScheduleMode as M
 from quantark.util.exceptions import ValidationError
 
-from .conftest import T0, dates, ko_reset, snowball
+from .conftest import T0, dates, env, ko_reset, snowball
 
 
 # -- M2: a REBASED knocked-in tenor hangs from the knock-in too -------------------------------------------------------
@@ -38,3 +38,20 @@ def test_detaching_a_schedule_keeps_every_field_and_its_type():
     assert type(detached) is _TaggedSchedule and detached.tag == "desk" and detached is not source
     assert all(a is not b for a, b in zip(detached.records, source.records))
     assert all(r.accrual is None for r in source.records)
+
+
+# -- M3: one place takes the aged-out prefix off the positional factor lists -------------------------------------
+
+def test_ko_reset_ageing_takes_schedule_two_factors_off_through_accrual_config_shifted(monkeypatch):
+    calls = []
+    original = AccrualConfig.shifted
+
+    def spy(self, *args, **kwargs):
+        calls.append(kwargs.get("dropped_post", 0))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(AccrualConfig, "shifted", spy)
+    p = ko_reset(M.ABSOLUTE, accrual=AccrualConfig(post_accrual_factors=[0.1, 0.2, 0.3]))
+    p.time_shift(0.3, T0 + timedelta(days=110), env())
+    assert 1 in calls
+    assert p.accrual_config.post_accrual_factors == [0.2, 0.3]

@@ -268,9 +268,8 @@ class KnockOutResetSnowballOption(SnowballOption):
             time_bump, bumped_date, pricing_env
         )
         dropped = before - (self._get_observation_length_for_config(self.post_barrier_config) or 0)
-        factors = self.accrual_config.post_accrual_factors
-        if factors is not None and dropped > 0:
-            self.accrual_config = replace(self.accrual_config, post_accrual_factors=list(factors[dropped:]))
+        # the elapsed time was banked by the snowball's shift above: this one only takes the prefix off
+        self.accrual_config = self.accrual_config.shifted(0.0, dropped_post=dropped)
         return dropped_all and post_dropped_all
 
     def _resolve_ko_schedule(
