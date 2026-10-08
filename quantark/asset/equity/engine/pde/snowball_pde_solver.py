@@ -1388,6 +1388,15 @@ class SnowballPDESolver(BasePDESolver):
             principal_per_contract if product.payoff_config.include_principal else 0.0
         )
         rebate = product.payoff_config.rebate_rate * principal_per_contract
+        call_rebate = (
+            product.payoff_config.call_rebate_enabled
+            and product.payoff_config.call_strike is not None
+        )
+        if product.accrual_config.is_annualized_rebate and not call_rebate:
+            # the fixed rebate the contract pays (get_maturity_payoff_v0's fixed branch): annualized over the V0
+            # contract tenor. A call-rebate contract pays no fixed rebate; its rows are left as they were (see
+            # docs/superpowers/specs/2026-10-08-accrual-scope-followups-findings.md, item 7).
+            rebate *= product.get_contract_tenor(pricing_env)
 
         # Lower boundary (S -> 0)
         # For V0, if continuous KI, it will transition to V1
@@ -1418,10 +1427,7 @@ class SnowballPDESolver(BasePDESolver):
             upper = EdgeRow(ko_payoff, "v0_upper_ko",
                             (RowTerm("KO", unit, None if rec is None else float(rec.observation_time), payoff),))
         else:
-            if (
-                product.payoff_config.call_rebate_enabled
-                and product.payoff_config.call_strike is not None
-            ):
+            if call_rebate:
                 df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
                 participation = (
                     product.payoff_config.call_participation_rate

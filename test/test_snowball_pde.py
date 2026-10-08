@@ -771,3 +771,52 @@ class TestSnowballPDERepr:
         repr_str = repr(solver)
 
         assert "SnowballPDESolver" in repr_str
+
+
+class TestSnowballPDEV0BoundaryRebate:
+    """The V0 Dirichlet rows pay the rebate the contract pays (accrual follow-up item 7).
+
+    A contract that cannot knock out (KO at 5x spot) or knock in (discrete KI at 1% of spot) matures in V0 for certain,
+    so its price is (principal + rebate_rate x S0 x tenor) x DF(T) when the rebate is annualized. The terminal payoff
+    reads the product; the boundary rows must too, or an annualized rebate over a two-year tenor is half paid there.
+    """
+
+    TENOR = 2.0
+    RATE = 0.03
+
+    def _product(self, annualized: bool) -> SnowballOption:
+        obs = [(i + 1) / 24 * self.TENOR for i in range(24)]
+        barrier = BarrierConfig(
+            ko_barrier=500.0, ko_rate=0.15,
+            ko_observation_schedule=ObservationSchedule(
+                records=[ObservationRecord(observation_time=t, barrier=500.0) for t in obs]),
+            ki_barrier=1.0, ki_observation_type=ObservationType.DISCRETE, ki_continuous=False,
+            ki_observation_schedule=ObservationSchedule(
+                records=[ObservationRecord(observation_time=t, barrier=1.0) for t in obs]),
+        )
+        return SnowballOption(
+            initial_price=100.0, strike=100.0, barrier_config=barrier,
+            payoff_config=PayoffConfig(rebate_rate=0.10, include_principal=True),
+            accrual_config=AccrualConfig(is_annualized_rebate=annualized),
+            maturity=self.TENOR, tenor=self.TENOR,
+        )
+
+    def _env(self) -> PricingEnvironment:
+        return create_pricing_env(rate=self.RATE, div_yield=0.0)
+
+    def _closed_form(self, annualized: bool) -> float:
+        tenor = self.TENOR if annualized else 1.0
+        return (100.0 + 0.10 * 100.0 * tenor) * np.exp(-self.RATE * self.TENOR)
+
+    @pytest.mark.parametrize("annualized", [False, True])
+    def test_lower_row_is_the_discounted_v0_payoff(self, annualized):
+        solver = SnowballPDESolver()
+        solver.price(self._product(annualized), self._env())
+        lower = solver._rows_v0_stash[4]          # the t = 0 row, set last
+        assert lower.branch == "v0_lower_principal_rebate"
+        assert lower.value == pytest.approx(self._closed_form(annualized), rel=1e-14)
+
+    @pytest.mark.parametrize("annualized", [False, True])
+    def test_certain_v0_price_is_the_closed_form(self, annualized):
+        price = SnowballPDESolver().price(self._product(annualized), self._env())
+        assert price == pytest.approx(self._closed_form(annualized), abs=1e-5)
