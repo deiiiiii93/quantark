@@ -186,11 +186,10 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             if not keep_landing:
                 product.post_barrier_config = drop_observed_residue(product.post_barrier_config)
             # schedule 2's explicit factors drop with its records, as KnockOutResetSnowballOption.time_shift drops
-            # them (a copy whose factor list outlived its records fails validate(), which QUAD V2 calls)
+            # them (a copy whose factor list outlived its records fails validate(), which QUAD V2 calls). The
+            # elapsed time was banked with schedule 1 in observe(): this only takes schedule 2's prefix off.
             dropped = before - (product._get_observation_length_for_config(product.post_barrier_config) or 0)
-            factors = product.accrual_config.post_accrual_factors
-            if factors is not None and dropped > 0:
-                product.accrual_config = replace(product.accrual_config, post_accrual_factors=list(factors[dropped:]))
+            product.accrual_config = product.accrual_config.shifted(0.0, dropped_post=dropped)
 
     # ------------------------------------------------------------------
     # Records, tenors and terminal timings
