@@ -44,6 +44,7 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
+from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord
 from quantark.asset.equity.settlement import (
     CashflowKind,
@@ -52,7 +53,7 @@ from quantark.asset.equity.settlement import (
 )
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
-from quantark.util.calendar import DayCountConvention, calculate_year_fraction
+from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import (
     CouponPayType,
     ObservationType,
@@ -1153,6 +1154,8 @@ class SnowballMCEngine(BaseEngine):
         )
         ki_times: List[float] = []
         ki_barriers: List[float] = []
+        # the source knock-in records aligned with ki_times: each path's knock-in anchor (accrual time spec §5.1)
+        ki_records: List[ObservationRecord] = []
         if carried_knock_in:
             pass
         elif ki_continuous:
@@ -1168,6 +1171,8 @@ class SnowballMCEngine(BaseEngine):
             ]
             ki_times = [ki_profile["observation_times"][index] for index in in_horizon]
             ki_barriers = [ki_profile["barriers"][index] for index in in_horizon]
+            ki_schedule_records = product.barrier_config.ki_observation_schedule.records
+            ki_records = [ki_schedule_records[index] for index in in_horizon]
 
         all_times_set = set(pre_times) | set(ki_times) | {T}
 
@@ -1271,6 +1276,7 @@ class SnowballMCEngine(BaseEngine):
         return {
             "carried_knock_in": carried_knock_in,
             "ki_barriers": np.array(ki_barriers, dtype=float),
+            "ki_records": ki_records,
             # the not-knocked-in contract matures HERE: its rebate is read off this node
             "pre_maturity_idx": int(indices_for([pre_maturity])[0]) if len(pre_times) else None,
             "all_times": all_times,
@@ -2102,39 +2108,18 @@ class SnowballMCEngine(BaseEngine):
                     if product.payoff_config.include_principal
                     else 0.0
                 )
-                annualized_ko = product._effective_annualized_flag(
-                    product.accrual_config.is_annualized_ko
-                )
-                if annualized_ko and product.initial_date is not None:
-                    if pricing_env is None:
-                        raise ValidationError(
-                            "PricingEnvironment required to resolve KO accrual without observation_date."
-                        )
-                    if pricing_env.valuation_date < product.initial_date:
-                        raise ValidationError(
-                            "valuation_date must be on or after initial_date to resolve KO accrual."
-                        )
-                    if pricing_env.valuation_date == product.initial_date:
-                        initial_to_valuation = 0.0
-                    else:
-                        initial_to_valuation = calculate_year_fraction(
-                            product.initial_date,
-                            pricing_env.valuation_date,
-                            product.annualization_day_count,
-                            pricing_env.bus_days_in_year,
-                            calendar=getattr(pricing_env, "calendar", None),
-                        )
-                else:
-                    initial_to_valuation = 0.0
-
+                # each path's knock-out accrual hangs from the knock-in record that fired on it (spec §5.1)
+                anchors = [knock_in_anchor_for(rec, k) for k, rec in enumerate(grid["ki_records"])]
+                accrual_table = np.array([
+                    [float(product.compute_ko_accrual_factor(None, rec, pricing_env, knock_in=anchor))
+                     for rec in post_records]
+                    for anchor in anchors
+                ], dtype=float).reshape(len(anchors), len(post_records))
                 idx = np.flatnonzero(is_post_ko)
                 local_idx = first_post_idx[idx]
                 offsets = post_times[local_idx]
                 rates = post_rates[local_idx]
-                if annualized_ko:
-                    accrual = initial_to_valuation + ki_time[idx] + offsets
-                else:
-                    accrual = 1.0
+                accrual = accrual_table[first_ki_idx[idx], local_idx]
                 coupon = (
                     product.initial_price
                     * product.contract_multiplier
@@ -2185,13 +2170,28 @@ class SnowballMCEngine(BaseEngine):
 
         if is_v1.any():
             terminal_spots = paths[is_v1, -1]
-            v1_payoffs = np.array(
-                [
-                    product.get_maturity_payoff_v1(spot, pricing_env)
-                    for spot in terminal_spots
-                ],
-                dtype=float,
-            )
+            if post_mode == PostKOScheduleMode.REBASED and product.accrual_config.is_annualized_ki:
+                # a REBASED knocked-in tenor hangs from the path's knock-in (spec §4.4, §5.1)
+                anchors = [knock_in_anchor_for(rec, k) for k, rec in enumerate(grid["ki_records"])]
+                tenors = np.array(
+                    [product._resolve_post_contract_tenor(pricing_env, knock_in=a) for a in anchors], dtype=float
+                )
+                path_tenors = tenors[first_ki_idx[is_v1]]
+                v1_payoffs = np.array(
+                    [
+                        product.get_maturity_payoff_v1(spot, pricing_env, contract_tenor=float(tenor))
+                        for spot, tenor in zip(terminal_spots, path_tenors)
+                    ],
+                    dtype=float,
+                )
+            else:
+                v1_payoffs = np.array(
+                    [
+                        product.get_maturity_payoff_v1(spot, pricing_env)
+                        for spot in terminal_spots
+                    ],
+                    dtype=float,
+                )
             payoffs[is_v1] = v1_payoffs
             if post_mode == PostKOScheduleMode.ABSOLUTE:
                 settlement_times[is_v1] = self._resolve_payment_time(
