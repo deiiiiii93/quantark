@@ -252,6 +252,27 @@ class KnockOutResetSnowballOption(SnowballOption):
             self.post_barrier_config, ko_observation_schedule=post_schedule
         )
 
+    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
+        """Age the product: the snowball's schedules and an ABSOLUTE schedule 2, the post-knock-in knock-out
+        schedule. A REBASED schedule 2 holds offsets from the knock-in time and stays.
+
+        Returns True only when every observation has passed: schedule 1 and the knock-ins behind a knocked-in
+        contract leave it alive on schedule 2. Schedule 2's records keep their accrual periods, so its cash does
+        not move (accrual time spec §1); its explicit factors drop with its records.
+        """
+        dropped_all = super().time_shift(time_bump, bumped_date, pricing_env)
+        if self.post_ko_mode != PostKOScheduleMode.ABSOLUTE:
+            return dropped_all
+        before = self._get_observation_length_for_config(self.post_barrier_config) or 0
+        self.post_barrier_config, post_dropped_all = self.post_barrier_config.time_shift(
+            time_bump, bumped_date, pricing_env
+        )
+        dropped = before - (self._get_observation_length_for_config(self.post_barrier_config) or 0)
+        factors = self.accrual_config.post_accrual_factors
+        if factors is not None and dropped > 0:
+            self.accrual_config = replace(self.accrual_config, post_accrual_factors=list(factors[dropped:]))
+        return dropped_all and post_dropped_all
+
     def _resolve_ko_schedule(
         self, config: BarrierConfig, pricing_env: PricingEnv
     ) -> Tuple[List[ResolvedObservationRecord], List[float], List[ObservationRecord]]:
