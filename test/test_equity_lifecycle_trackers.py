@@ -107,14 +107,17 @@ class TestAutocallableLifecycleTracker:
         assert event.terminates_position
         assert tracker.lifecycle.knocked_out and not tracker.lifecycle.alive
 
-        # The tracker books the SNAPPED contract's cash (spec 2026-10-08 4a, user ruling: cash follows the
-        # snapped observation day): the 1/12 record is observed, and accrues, to day 30.
-        profile = tracker.lifecycle_contract.get_ko_observation_profile(
+        profile = product.get_ko_observation_profile(
             make_env(spot=105.0, valuation_date=START.to_pydatetime())
         )
         expected = 2.0 * float(profile["payoffs"][0])
         assert almost_equal(event.cashflow, expected)
         assert almost_equal(tracker.lifecycle.realized_cashflows, expected)
+        # Snapping moves the observation to day 30, never the cash: the record accrues its quoted 1/12
+        # (accrual time spec R1), not 30/365 (202.466).
+        snapped = tracker.lifecycle_contract.barrier_config.ko_observation_schedule.records[0]
+        assert snapped.observation_time == 30.0 / 365.0
+        assert almost_equal(event.cashflow, 2.0 * (100.0 + 100.0 * 0.15 / 12.0))
         assert len(tracker.lifecycle.ledger.cashflows) == 1
         assert (
             tracker.lifecycle.ledger.cashflows[0].event_type
@@ -203,17 +206,15 @@ class TestAutocallableLifecycleTracker:
         assert len(coupon_events) == 1
         assert not coupon_events[0].terminates_position
         assert tracker.lifecycle.alive
-        contract = tracker.lifecycle_contract
-        expected = 1.0 * float(contract.get_coupon_payoff(0))
+        expected = 1.0 * float(phoenix.get_coupon_payoff(0))
         assert almost_equal(coupon_events[0].cashflow, expected)
         # The tracker books the amount an engine pays for that period: principal x rate
-        # x the period's own fraction (monthly observations, annualized rate), on the
-        # snapped contract: the 1/12 record is observed, and accrues, to day 30.
-        assert almost_equal(coupon_events[0].cashflow, 100.0 * 0.01 * (30.0 / 365.0))
-        engine_fractions = contract.get_coupon_period_year_fractions(env)
+        # x the period's own fraction (monthly observations, annualized rate).
+        assert almost_equal(coupon_events[0].cashflow, 100.0 * 0.01 * (1.0 / 12.0))
+        engine_fractions = phoenix.get_coupon_period_year_fractions(env)
         assert almost_equal(
             coupon_events[0].cashflow,
-            float(contract.get_coupon_payoff(0, year_fraction=engine_fractions[0])),
+            float(phoenix.get_coupon_payoff(0, year_fraction=engine_fractions[0])),
         )
 
     def test_a_per_period_coupon_rate_books_the_rate_itself(self):
@@ -262,8 +263,8 @@ class TestAutocallableLifecycleTracker:
 
         events = tracker.observe(SECOND_KO_OBS, live, make_env(spot=100.0), 100.0)
         coupon = next(e for e in events if e.event_type is LifecycleEventType.COUPON)
-        # snapped periods: day 0 -> 30 -> 61
-        assert almost_equal(coupon.cashflow, 100.0 * 0.12 * 61.0 / 365.0)
+        one_period = 100.0 * 0.12 / 12.0
+        assert almost_equal(coupon.cashflow, 2.0 * one_period)
         assert coupon.metadata["memorized_periods"] == [0]
         assert not tracker.lifecycle.missed_coupon_indices
         assert tracker.lifecycle.coupon_memory_count == 0
@@ -282,7 +283,7 @@ class TestAutocallableLifecycleTracker:
             LifecycleEventType.KNOCK_OUT,
         ]
         assert phoenix.is_coupon_triggered(105.0, 0)
-        assert almost_equal(events[0].cashflow, 100.0 * 0.12 * 30.0 / 365.0)   # snapped to day 30
+        assert almost_equal(events[0].cashflow, 100.0 * 0.12 / 12.0)
         assert not tracker.lifecycle.alive
 
     def test_a_phoenix_settles_its_maturity_in_either_knock_in_state(self):

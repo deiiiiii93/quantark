@@ -58,7 +58,8 @@ def test_a_phoenix_coupon_schedule_snaps_with_its_knock_out_schedule():
 
 
 def test_snapped_knock_out_cash_matches_the_engine():
-    """Review focus 3: annualized off-day cash is the snapped contract's, booked and priced alike."""
+    """Review focus 3: annualized off-day cash is booked and priced alike, and it is the contract's quoted 1/12, not
+    the snapped day's 30/365 (accrual time spec R1; the KO-reset spec's "cash follows snap" is withdrawn)."""
     tracker = AutocallableLifecycleTracker(product=snowball(MONTHS, MONTHS, 1.0, annualized=True), quantity=1.0,
                                            start_date=START)
     day = START + pd.Timedelta(days=30)
@@ -67,6 +68,7 @@ def test_snapped_knock_out_cash_matches_the_engine():
     copy = tracker.product_for_pricing(day, env(110.0, day), initial=True)
     decided = SnowballPDESolver(PDEParams()).price(copy, env(110.0, day))
     assert events[0].cashflow == pytest.approx(decided, rel=1e-9)
+    assert events[0].cashflow == pytest.approx(100.0 * 0.15 / 12.0, rel=1e-12)
 
 
 def test_records_snapped_onto_a_kept_whole_day_stay_ordered():

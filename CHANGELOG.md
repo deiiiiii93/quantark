@@ -138,9 +138,10 @@ barriers away from maturity are bit-identical.
   them (`round(time * 365) / 365`; whole-day times keep their exact float, dated records are untouched), and
   every consumer (pricing copy, replay, simulation surfaces) builds from it. An off-day numeric record used to
   be observed on its rounded day yet priced as still ahead (a day-1.4 knock-out: 4.9183 on the life surface
-  against 0.4381). Annualized cash follows the snapped time (user ruling 2026-10-08): a `k / 12` Phoenix coupon
-  at 12% pays 30/365 or 31/365 of a year instead of 1/12; a life's total is unchanged. Whole-day and dated
-  products are bit-identical; replay goldens unchanged.
+  against 0.4381). Snapping moves observation timing only: each record keeps its accrual period, so a `k / 12`
+  Phoenix coupon at 12% still pays its quoted 1/12 (1.0) when observed on day 30 (the "cash follows the snapped
+  time" amendment is withdrawn, accrual time spec §7). Whole-day and dated products are bit-identical; replay
+  goldens unchanged.
 - The replay and the simulation price the initial book before the first close (`product_for_pricing(...,
   initial=True)` keeps a record landing that day); the simulation keys such a state apart only where a record
   lands.

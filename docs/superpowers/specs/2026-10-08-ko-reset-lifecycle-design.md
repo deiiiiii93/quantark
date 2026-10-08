@@ -2,7 +2,9 @@
 
 Status: approved in conversation 2026-10-08 (sections 1–4); revised for review rounds 1 and 2 and the user's
 rulings (2026-10-08): the day rule in this spec, option (a) for the `REBASED` provider matrix, option (ii) snapped
-numeric times; awaiting review.
+numeric times; awaiting review. Revised after the accrual-time spec merged into this branch: §4a's "cash follows the
+snapped time" amendment is withdrawn (snapping moves observation timing only), and §4/§5 adopt the persisted
+`KnockInAnchor` (accrual time spec §5.1, §5.2).
 
 ## 1. Purpose
 
@@ -23,8 +25,8 @@ schedule-2 modes, `ABSOLUTE` and `REBASED` ("common", user 2026-10-08).
 
 **Success.** A KO-reset position in any of those consumers books its events and cashflows, is closed when the
 contract ends, is never repriced after it matured, and never raises on a live state. Snowball and Phoenix results
-stay byte-identical except where §4a's snapped times correct an off-day numeric schedule (every such row
-listed).
+stay byte-identical except where §4a's snapped times correct an off-day numeric schedule's observation timing (every
+such row listed); contractual cash never moves (§4a).
 
 ## 2. Contract rules (user rulings)
 
@@ -131,13 +133,19 @@ observed: a record due that day is still pending and kept at time 0, `keep_landi
 (the day's records applied, `keep_landing=False`). `product_for_pricing` takes the phase; the simulation's aged-product
 and surface caches key on it beside the date, so the two never share an entry.
 
-**Cash follows the snapped time (user, 2026-10-08, measured at implementation).** An annualized amount accrues to
-the snapped time, so an off-day numeric record's cash moves by under half a day of accrual: a `k / 12` Phoenix coupon
-at 12% pays 30/365 or 31/365 of a year (0.9863 / 1.0192) instead of 1/12, a `k / 12` snowball knock-out 202.466
-instead of 202.5; the sum over a contract's life is unchanged. Event days are unchanged — the due rule is unchanged.
+**Snapping moves observation timing only; cash comes from the record's accrual period.** The earlier amendment
+"cash follows the snapped time" (user, 2026-10-08) is WITHDRAWN: it moved a `k / 12` Phoenix coupon at 12% to
+30/365 or 31/365 of a year (0.9863 / 1.0192) and a `k / 12` snowball knock-out to 202.466, and a standard snowball
+backtest by one hedge round trip, so the user stopped the branch until accrual time was separated from observation
+time (spec `2026-10-08-accrual-time-design.md`, its §7 "After this spec merges"). Every record now carries its own
+`AccrualPeriod`, derived once at construction from the contract's accrual terms; `snap_contract` replaces a record's
+`observation_time` (and settlement time) and keeps its period, so a `k / 12` record observed and priced on day 30
+still accrues its quoted 1/12 (accrual time spec R1): the Phoenix coupon pays 1.0, the knock-out 202.5. Event days
+are unchanged — the due rule is unchanged.
 
-**Acceptance.** Prices, and the annualized cash above, move only for products with off-day numeric times; each moved
-replay / simulation golden row and each updated test is listed with the record that moved it. Whole-day and dated products: byte-identical. The PDE byte book does not age through the tracker: byte-identical.
+**Acceptance.** Prices move only for products with off-day numeric times (observation timing); cash does not move.
+Each moved replay / simulation golden row and each updated test is listed with the record that moved it. Whole-day
+and dated products: byte-identical. The PDE byte book does not age through the tracker: byte-identical.
 
 ## 5. Pricing copy, portfolio manager, replay
 
