@@ -378,3 +378,36 @@ def test_contract_roll_validates_floored_and_missing_maturities():
     with pytest.raises(ValidationError, match="must be a number"):
         check_contract_roll(_Terms(maturity=1.0), _Terms(maturity="1y"), calendar_days=1)
     check_contract_roll(_Terms(maturity=None), _Terms(maturity=None), calendar_days=1)   # no expiry at all
+
+
+def _numeric_snowball(times, maturity, offset=0.0, first=0.0):
+    from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+    from quantark.asset.equity.product.option.snowball_config import AccrualConfig, BarrierConfig, PayoffConfig
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+
+    def schedule(level):
+        return ObservationSchedule(records=[ObservationRecord(observation_time=t, barrier=level) for t in times])
+
+    return SnowballOption(
+        initial_price=100.0, strike=100.0,
+        barrier_config=BarrierConfig(ko_barrier=103.0, ko_rate=0.12, ko_observation_schedule=schedule(103.0),
+                                     ki_barrier=75.0, ki_observation_schedule=schedule(75.0)),
+        payoff_config=PayoffConfig(rebate_rate=0.05),
+        accrual_config=AccrualConfig(accrued_offset=offset, first_period_start=first), maturity=maturity,
+    )
+
+
+def test_a_desk_built_aged_contract_is_the_same_contract_to_rounding():
+    """A desk snapshot rebuilds the aged contract on its own clock (banked offset + shifted times): its numeric
+    accrual periods end at offset + (t - offset), an ulp from the original's t on about a fifth of days (5 days
+    in: 7/12 -> 0.5833333333333335 vs 0.5833333333333334). That is rounding, not a contract change."""
+    original = _numeric_snowball([k / 12 for k in range(1, 13)], 1.0)
+    e = 5 / 365.0
+    desk = _numeric_snowball([k / 12 - e for k in range(1, 13)], 1.0 - e, offset=e)
+    ends = [r.accrual.end for r in desk.barrier_config.ko_observation_schedule.records]
+    assert ends != [k / 12 for k in range(1, 13)]           # the ulp this test is about
+    check_contract_roll(original, desk, calendar_days=5)
+
+    moved = _numeric_snowball([k / 12 - e for k in range(1, 13)], 1.0 - e, offset=e + 1e-6)
+    with pytest.raises(ValidationError):                    # a period end moved by 1e-6 years is a new contract
+        check_contract_roll(original, moved, calendar_days=5)

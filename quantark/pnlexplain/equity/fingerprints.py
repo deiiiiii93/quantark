@@ -202,8 +202,35 @@ def _float_leaf(node: Any) -> Optional[float]:
     return None
 
 
-def _rolled_suffix(a: Any, b: Any) -> bool:
-    """`b` is `a` with a prefix removed, for a normalised sequence or ``None``."""
+_PERIOD_INSTANTS = frozenset({"origin", "start", "end"})
+
+
+def _same_record(a: Any, b: Any) -> bool:
+    """Exact equality of two normalised schedule records, except the numeric endpoints of an accrual period,
+    which agree within ``ROLL_TOL``: a contract rebuilt on the aged clock ends its periods at
+    ``offset + (t - offset)``, an ulp from the original's ``t`` (accrual time spec §4.2). Dated endpoints and
+    every other term stay exact."""
+    if not (isinstance(a, tuple) and isinstance(b, tuple)) or len(a) != len(b):
+        return a == b
+    if len(a) == 2 and a[0] == "AccrualPeriod" == b[0]:
+        fa, fb = a[1], b[1]
+        if len(fa) != len(fb):
+            return False
+        for (name_a, va), (name_b, vb) in zip(fa, fb):
+            if name_a != name_b:
+                return False
+            xa, xb = _float_leaf(va), _float_leaf(vb)
+            if name_a in _PERIOD_INSTANTS and xa is not None and xb is not None:
+                if not is_close(xa, xb, rel_tol=0.0, abs_tol=ROLL_TOL):
+                    return False
+            elif not _same_record(va, vb):
+                return False
+        return True
+    return all(_same_record(x, y) for x, y in zip(a, b))
+
+
+def _rolled_suffix(a: Any, b: Any, same=lambda x, y: x == y) -> bool:
+    """`b` is `a` with a prefix removed, for a normalised sequence or ``None``; ``same`` compares elements."""
     if a is None or b is None:
         return a == b
     if not (isinstance(a, tuple) and a[:1] == ("seq",)):
@@ -211,7 +238,7 @@ def _rolled_suffix(a: Any, b: Any) -> bool:
     if not (isinstance(b, tuple) and b[:1] == ("seq",)):
         return False
     sa, sb = a[1], b[1]
-    return len(sb) <= len(sa) and sa[len(sa) - len(sb):] == sb
+    return len(sb) <= len(sa) and all(same(x, y) for x, y in zip(sa[len(sa) - len(sb):], sb))
 
 
 def _rolled_equal(a: Any, b: Any) -> bool:
@@ -220,6 +247,8 @@ def _rolled_equal(a: Any, b: Any) -> bool:
     A rolled observation schedule keeps its non-record terms and its records
     are a SUFFIX of the original's (the shifter drops observations that have
     passed); a schedule whose observations have all passed becomes ``None``.
+    A record's numeric accrual-period endpoints match within ``ROLL_TOL`` (a
+    contract rebuilt on the aged clock lands them an ulp away).
 
     A rolled accrual moves with it: ``accrued_offset`` banks the elapsed
     period, so it only advances, and ``accrual_factors`` (``post_accrual_factors``)
@@ -241,7 +270,7 @@ def _rolled_equal(a: Any, b: Any) -> bool:
         ra, rb = fa.pop("records"), fb.pop("records")
         if fa != fb:
             return False
-        return _rolled_suffix(ra, rb)
+        return _rolled_suffix(ra, rb, _same_record)
     if _accrual_node(a):
         if not _accrual_node(b):
             return False
