@@ -86,3 +86,29 @@ def test_a_record_snapped_onto_a_kept_whole_day_from_below_stays_ordered():
     product = snowball([0.6 / 365.0, kept, 60 / 365.0], [30 / 365.0], 60 / 365.0)
     times = [r.observation_time for r in snap_contract(product).barrier_config.ko_observation_schedule.records]
     assert times == [kept, kept, 60 / 365.0]
+
+
+@pytest.mark.parametrize("k", [3, 6, 12, 45])
+def test_a_whole_day_record_an_ulp_above_its_day_leaves_the_post_close_copy(k):
+    """Self-review (the C2 failure on schedule 1): ``k * (1/365)`` is a whole day kept as its exact float, an ulp above
+    ``k / 365`` for 47 of the first 730 days; ageing by the elapsed ``k / 365`` left the record observed on that close
+    ~1e-18 years ahead (``ObservationSchedule.time_shift`` keeps it on purpose: lifecycle ageing stays byte-identical,
+    theta spec R2), and QUAD refused the copy. The tracker, which owns the day rule, drops it from its post-close copy."""
+    from quantark.asset.equity.engine.quad import SnowballQuadEngine
+    from quantark.asset.equity.param import QuadParams
+
+    d = 1 / 365.0
+    assert k * d > k / 365.0
+    tracker = AutocallableLifecycleTracker(product=snowball([k * d, 200 * d], [k * d, 200 * d], 200 * d),
+                                           quantity=1.0, start_date=START)
+    day = START + pd.Timedelta(days=k)
+    tracker.observe(day, tracker.product_for_lifecycle(), env(90.0, day), 90.0)
+    copy = tracker.product_for_pricing(day, env(90.0, day))
+    assert [r.observation_time for r in copy.barrier_config.ko_observation_schedule.records] == [
+        pytest.approx((200 - k) * d)]
+    assert len(copy.barrier_config.ki_observation_schedule.records) == 1
+    assert SnowballQuadEngine(params=QuadParams(grid_points=801)).price(copy, env(90.0, day)) == pytest.approx(
+        SnowballQuadEngine(params=QuadParams(grid_points=801)).price(
+            AutocallableLifecycleTracker(product=snowball([200 * d], [200 * d], 200 * d), quantity=1.0,
+                                         start_date=START).product_for_pricing(day, env(90.0, day)),
+            env(90.0, day)), rel=1e-12)

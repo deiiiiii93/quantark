@@ -20,7 +20,7 @@ observation method is called.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional
 
@@ -31,10 +31,12 @@ from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
 from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
+from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.settlement import SettlementLagUnit
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 from .events import LifecycleEvent, LifecycleEventType
 from .cashflows import RealizedCashflow, ValuationPoint
@@ -154,6 +156,8 @@ class AutocallableLifecycleTracker:
                 pricing_env,
                 keep_landing=initial,
             )
+            if shifted_config is not None and not initial:
+                shifted_config = drop_observed_residue(shifted_config)
             if shifted_config is not None:
                 dropped = barrier_config.ko_observation_count - shifted_config.ko_observation_count
                 product.barrier_config = shifted_config
@@ -866,6 +870,47 @@ class AutocallableLifecycleTracker:
         if is_ko:
             return spot <= barrier if is_reverse else spot >= barrier
         return spot >= barrier if is_reverse else spot <= barrier
+
+
+def _without_residue(schedule):
+    """``schedule`` without the numeric records an ulp ahead of the valuation instant (``0 < t``, ``is_zero(t)``)."""
+    if schedule is None:
+        return None
+    kept = [
+        r for r in schedule.records
+        if r.observation_date is not None or r.observation_time is None
+        or not (0.0 < float(r.observation_time) and is_zero(float(r.observation_time)))
+    ]
+    if len(kept) == len(schedule.records):
+        return schedule
+    return ObservationSchedule(records=kept, aggregation_mode=schedule.aggregation_mode,
+                               frequency=schedule.frequency, monitoring_ended=not kept)
+
+
+def drop_observed_residue(config):
+    """A post-close pricing copy's barrier config without the records observed on this close that ageing left an ulp
+    ahead (spec 2026-10-08 KO-reset lifecycle §4a: ageing removes a record on the close that observed it).
+
+    A whole-day time kept as its exact float (``k * (1/365)``) can sit an ulp above ``k / 365``; aged by the
+    elapsed ``k / 365`` it stays ~1e-18 years ahead, which QUAD refuses ("below the lattice's time resolution") and
+    every other engine decides at the valuation instant all over again. ``ObservationSchedule.time_shift`` keeps it
+    on purpose (lifecycle ageing byte-identical, theta spec R2); the tracker owns the day rule, so it drops it here.
+    """
+    if config is None:
+        return None
+    changes = {}
+    for name in ("ko_observation_schedule", "ki_observation_schedule"):
+        schedule = getattr(config, name)
+        kept = _without_residue(schedule)
+        if kept is not schedule:
+            changes[name] = kept
+    for name in ("ko_observation_dates", "ki_observation_dates"):
+        dates = getattr(config, name)
+        if dates:
+            kept = [t for t in dates if not (isinstance(t, (int, float)) and 0.0 < t and is_zero(t))]
+            if len(kept) != len(dates):
+                changes[name] = kept
+    return replace(config, **changes) if changes else config
 
 
 @dataclass(frozen=True)

@@ -28,7 +28,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.option_enums import PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
 
-from .autocallable import AutocallableLifecycleTracker, CalendarSchedule, DateResolver
+from .autocallable import AutocallableLifecycleTracker, CalendarSchedule, DateResolver, drop_observed_residue
 from .events import LifecycleEvent, LifecycleEventType
 from .snapping import is_off_day
 from .state import AutocallableLifecycleState
@@ -175,6 +175,8 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             product.post_barrier_config, _ = product.post_barrier_config.time_shift(
                 elapsed, date, pricing_env, keep_landing=keep_landing
             )
+            if not keep_landing:
+                product.post_barrier_config = drop_observed_residue(product.post_barrier_config)
             # schedule 2's explicit factors drop with its records, as KnockOutResetSnowballOption.time_shift drops
             # them (a copy whose factor list outlived its records fails validate(), which QUAD V2 calls)
             dropped = before - (product._get_observation_length_for_config(product.post_barrier_config) or 0)
