@@ -73,7 +73,8 @@ def main():
     print("=" * 66)
     K = 1.20
     tarf_open = FxTargetRedemptionForward(
-        strike=K, fixing_times=FIXINGS, target=float("inf"), currency_pair=PAIR)
+        strike=K, fixing_times=FIXINGS, target=float("inf"), currency_pair=PAIR,
+        state=TargetRedemptionState(0.0))
     eng = FxTarnForwardMCEngine(params=params)
     mc = eng.price(tarf_open, e)
     se = eng.get_last_result().std_error
@@ -85,7 +86,7 @@ def main():
 
     tarf_capped = FxTargetRedemptionForward(
         strike=K, fixing_times=FIXINGS, target=0.04, gearing=2.0,
-        currency_pair=PAIR)
+        currency_pair=PAIR, state=TargetRedemptionState(0.0))
     capped = eng.price(tarf_capped, e)
     frac = eng.get_last_result().mean_redemption_fraction
     print(f"  target=0.04, gearing=2 (leveraged):")

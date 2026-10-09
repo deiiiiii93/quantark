@@ -24,21 +24,23 @@ priced by :class:`FxTarnForwardMCEngine`.
 """
 
 import math
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from quantark.util.exceptions import ValidationError
-from ..base_fx_product import BaseFxProduct
 from ..currency_pair import CurrencyPair
+from .target_redemption_base import TargetRedemptionProduct
+from .target_redemption_state import TargetRedemptionState
 
 
-class FxTargetRedemptionForward(BaseFxProduct):
+class FxTargetRedemptionForward(TargetRedemptionProduct):
     """
     FX Target Redemption Forward (geared forward strip with target redemption).
 
     Attributes:
         strike: Forward strike ``K`` (quote per base).
-        fixing_times: Ascending, unique, strictly-positive year-fraction fixing
-            times.
+        fixing_times: Ascending, unique year-fraction fixing times of the
+            fixings not yet banked; a non-positive time is an unbanked past
+            fixing. An empty list is a terminal booking.
         pay_times: Per-fixing settlement times (defaults to ``fixing_times``);
             each must be on or after its fixing.
         notional: Base-currency notional (cashflows are in domestic currency).
@@ -47,36 +49,37 @@ class FxTargetRedemptionForward(BaseFxProduct):
         gearing: Multiplier on the unfavorable side (default 1.0).
         is_buy_base: True buys the base ccy at ``K`` (favorable when ``S>K``);
             False sells it (favorable when ``S<K``).
+        state: Mandatory realized state (``TargetRedemptionState(0.0)`` for a
+            contract booked at inception).
     """
 
     def __init__(
         self,
         strike: float,
-        fixing_times: List[float],
+        fixing_times: Optional[List[float]] = None,
         notional: float = 1.0,
         target: float = math.inf,
         gearing: float = 1.0,
         is_buy_base: bool = True,
         pay_times: Optional[List[float]] = None,
         currency_pair: Optional[CurrencyPair] = None,
+        *,
+        state: Optional[TargetRedemptionState] = None,
     ):
-        fixings = [float(t) for t in fixing_times]
-        pays = [float(t) for t in pay_times] if pay_times is not None else list(fixings)
-        super().__init__(
-            currency_pair=currency_pair,
-            maturity=fixings[-1] if fixings else None,
-            delivery=max(pays) if pays else None,
-        )
         self.strike = strike
-        self.fixing_times = fixings
-        self.pay_times = pays
         self.notional = notional
         self.target = float(target)
         self.gearing = gearing
         self.is_buy_base = bool(is_buy_base)
+        state = self._require_state(state)
+        if fixing_times is None:
+            raise ValidationError("fixing_times is required")
+        self._init_numeric([float(t) for t in fixing_times], pay_times, currency_pair, state)
         self.validate()
+        self._refresh_numeric_horizon()
+        self._warn_if_terminal_booking()
 
-    def validate(self) -> None:
+    def _validate_terms(self) -> None:
         for name, v in (("strike", self.strike), ("notional", self.notional)):
             if not math.isfinite(v) or v <= 0:
                 raise ValidationError(f"{name} must be positive and finite, got {v}")
@@ -86,29 +89,15 @@ class FxTargetRedemptionForward(BaseFxProduct):
             )
         if not (self.target > 0):  # rejects 0, negatives, and NaN; inf passes
             raise ValidationError(f"target must be positive, got {self.target}")
-        self._validate_schedule()
 
-    def _validate_schedule(self) -> None:
-        fixings, pays = self.fixing_times, self.pay_times
-        if not fixings:
-            raise ValidationError("fixing_times must be non-empty")
-        if list(fixings) != sorted(fixings):
-            raise ValidationError("fixing_times must be ascending")
-        if len(set(fixings)) != len(fixings):
-            raise ValidationError("fixing_times must be unique")
-        if any((not math.isfinite(t)) or t <= 0.0 for t in fixings):
-            raise ValidationError("fixing_times must be positive and finite")
-        if len(pays) != len(fixings):
-            raise ValidationError("pay_times must align 1:1 with fixing_times")
-        for tf, tp in zip(fixings, pays):
-            if not math.isfinite(tp):
-                raise ValidationError(f"pay time {tp} must be finite")
-            if tp < tf:
-                raise ValidationError(
-                    f"pay time {tp} precedes its fixing {tf}"
-                )
-        if list(pays) != sorted(pays):
-            raise ValidationError("pay_times must be non-decreasing")
+    def _fixing_outcome(self, factor, spot, accumulated) -> Tuple[float, float]:
+        """The engine's arithmetic for one fixing: favourable amount clipped to the remaining target, net cash."""
+        sign = 1.0 if self.is_buy_base else -1.0
+        diff = sign * (spot - self.strike)
+        fav = self.notional * max(diff, 0.0)
+        unf = self.notional * max(-diff, 0.0)
+        fav_eff = min(fav, self.target - accumulated)
+        return fav_eff, fav_eff - self.gearing * unf
 
     def time_shift(self, time_bump: float) -> None:
         """Roll fixing/pay times (and maturity/delivery) forward for theta."""
@@ -130,10 +119,6 @@ class FxTargetRedemptionForward(BaseFxProduct):
     def get_payoff(self, spot: float) -> float:
         """Per-fixing net cashflow at ``spot`` (see :meth:`period_cashflow`)."""
         return self.period_cashflow(spot)
-
-    @property
-    def is_unbounded_target(self) -> bool:
-        return math.isinf(self.target)
 
     def __repr__(self):
         tgt = "inf" if self.is_unbounded_target else f"{self.target:.4g}"

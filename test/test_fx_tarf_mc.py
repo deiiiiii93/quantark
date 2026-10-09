@@ -22,6 +22,7 @@ from quantark.asset.fx.product.option import (
     FxTargetRedemptionForward,
     FxVanillaOption,
 )
+from quantark.asset.fx.product.option.target_redemption_state import TargetRedemptionState
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum import OptionType
@@ -43,7 +44,7 @@ def _env(vol=0.10, spot=1.20, rd=0.05, rf=0.03):
 
 def _tarf(**kw):
     base = dict(strike=1.20, fixing_times=[0.25, 0.5, 0.75, 1.0],
-               currency_pair=_PAIR)
+               currency_pair=_PAIR, state=TargetRedemptionState(0.0))
     base.update(kw)
     return FxTargetRedemptionForward(**base)
 

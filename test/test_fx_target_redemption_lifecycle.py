@@ -6,8 +6,8 @@ import warnings
 
 import pytest
 
-from fx_target_redemption_fixtures import FIX, INCEPTION, PAIR, env, note
-from quantark.asset.fx.product.option import FxTargetRedemptionNote
+from fx_target_redemption_fixtures import FIX, INCEPTION, PAIR, env, note, tarf
+from quantark.asset.fx.product.option import FxTargetRedemptionForward, FxTargetRedemptionNote
 from quantark.asset.fx.product.option.target_redemption_state import (
     PendingPayment,
     TargetRedemptionState,
@@ -71,10 +71,9 @@ def test_r2_numeric_state_refuses_as_of_and_pay_dates():
     from datetime import datetime
     with pytest.raises(ValidationError, match="as_of"):
         note(state=TargetRedemptionState(0.0, as_of=datetime(2026, 6, 1)))
-    dated_pending = TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=datetime(2026, 7, 1)),),
-                                          as_of=datetime(2026, 6, 1))
-    with pytest.raises(ValidationError):
-        note(state=dated_pending, target=3.0)
+    with pytest.raises(ValidationError, match="dated pending cash"):
+        note(state=TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=datetime(2026, 7, 1)),)),
+             target=3.0)
 
 
 def test_r2_missing_state_is_a_validation_error_not_a_type_error():
@@ -117,3 +116,29 @@ def test_deepcopy_does_not_warn_and_keeps_the_state():
         warnings.simplefilter("error", TerminalBookingWarning)
         c = copy.deepcopy(n)
     assert c.state == n.state and c.lifecycle_events == ()
+
+
+@pytest.mark.parametrize("kw, match", [
+    (dict(state=None), "state is required"),
+    (dict(state=TargetRedemptionState(0.2 + 1e-9), target=0.2), "exceeds the target"),
+    (dict(state=TargetRedemptionState(0.2), target=0.2), "redeemed"),
+])
+def test_r2_numeric_tarf_refusals(kw, match):
+    with pytest.raises(ValidationError, match=match):
+        tarf(**kw)
+
+
+def test_tarf_pending_may_be_negative():
+    f = tarf(gearing=2.0, target=0.2, state=TargetRedemptionState(0.0, pending=(PendingPayment(-0.1, pay_time=0.01),)))
+    assert f.state.pending[0].amount == -0.1
+
+
+def test_tarf_terminal_booking_warns():
+    with pytest.warns(TerminalBookingWarning):
+        f = tarf(fix=[], target=0.2, state=TargetRedemptionState(0.05))
+    assert f.is_terminal and not f.is_redeemed and f.maturity == 0.0
+
+
+def test_tarf_inception_horizon_is_unchanged():
+    f = tarf(pay_times=[t + 0.02 for t in FIX])
+    assert f.maturity == FIX[-1] and f.delivery == FIX[-1] + 0.02 and f.hit_tol == 0.0

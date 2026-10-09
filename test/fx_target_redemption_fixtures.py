@@ -47,3 +47,9 @@ def engine_for(product, n=20_000, seed=7, method=None):
     if isinstance(product, FxTargetRedemptionNote):
         return FxTargetRedemptionNoteMCEngine(params)
     return FxTarnForwardMCEngine(params)
+
+
+def tarf(fix=FIX, state=INCEPTION, **kw):
+    base = dict(strike=1.15, fixing_times=fix, notional=1.0, currency_pair=PAIR, state=state)
+    base.update(kw)
+    return FxTargetRedemptionForward(**base)

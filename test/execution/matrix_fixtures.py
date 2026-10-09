@@ -932,12 +932,13 @@ def _build_fx():
     def fx_tarf():
         from quantark.asset.fx.engine.mc import FxTarnForwardMCEngine
         from quantark.asset.fx.product.option import FxTargetRedemptionForward
+        from quantark.asset.fx.product.option.target_redemption_state import TargetRedemptionState
 
         return (
             FxTarnForwardMCEngine(params=_fx_params(num_paths=2_000, seed=7)),
             FxTargetRedemptionForward(
                 strike=1.20, fixing_times=[0.25, 0.5, 0.75, 1.0],
-                currency_pair=_pair(),
+                currency_pair=_pair(), state=TargetRedemptionState(0.0),
             ),
             _fx_flat_env(), "product_env",
         )
