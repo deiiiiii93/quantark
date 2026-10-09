@@ -24,6 +24,12 @@ backtest and FX dynamic scenario.
   fraction in the environment's day count (a weekend date under `BUSINESS_DAYS`) is refused with `ValidationError`.
 - `resolve(fx_env)` (the engines' one input), `lifecycle_events`, `is_redeemed`, `is_terminal`, `hit_tol`,
   `pending_pv(fx_env)` on both products.
+- TARN / TARF take part in the missing-fixing fill protocol (`missing_fixing_fills`, `with_fixings_recorded`,
+  `with_missing_fixings_filled`, user decision 2026-10-09): an unbanked passed fixing's RATE is recorded once at the
+  base environment's quoted spot, on a copy, so `BaseFxEngine.calculate_greeks`, VaR, stress, dynamic scenarios and
+  backtests bank it at the base spot under every bump and shock (one `MissingFixingWarning` per call, none per bump).
+  Banking (`record_passed_fixings`, `resolve`) uses a recorded rate in place of the quoted spot; a rate recorded for a
+  fixing still after valuation is refused with `ValidationError`.
 
 ### Changed
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
@@ -34,6 +40,11 @@ backtest and FX dynamic scenario.
   factors bitwise.
 - A non-positive fixing time is accepted (an unbanked past fixing) and an empty `fixing_times` is a terminal booking
   (`TerminalBookingWarning`, valued at the PV of its pending cash).
+- FX finite-difference theta (`BaseFxEngine._fdm_theta`) steps a numeric (`maturity=`) product by the environment's
+  year fraction of `theta_days` calendar days instead of `theta_days / 365` (user decision Q7). Unchanged to the bit
+  under `CALENDAR_DAYS` / `ACT_365`; under `BUSINESS_DAYS` a Friday or holiday theta is 0.0 and `ACT_360` steps 1/360,
+  matching the dated product. Values that move are listed in
+  `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`.
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be

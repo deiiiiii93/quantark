@@ -39,7 +39,7 @@ from quantark.param import SpotQuote
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import MissingFixingWarning
+from quantark.util.fixings import MissingFixingWarning, freeze_missing_fixings
 from quantark.util.numerical import is_close
 
 FIXING, PAYMENT = TargetRedemptionEventType.FIXING, TargetRedemptionEventType.PAYMENT
@@ -574,6 +574,17 @@ def test_d4_theta_twins_agree_calendar_days(kind, inside_bump):
     assert abs(gd["theta"] - gn["theta"]) <= 1e-12 * abs(gd["price"])  # Ruling R5
 
 
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+@pytest.mark.parametrize("val", [datetime(2026, 6, 12), datetime(2026, 6, 15)])  # Friday, Monday
+def test_d4_theta_twins_agree_business_days(kind, val):
+    e = env(val=val, **BUS)
+    dated = _dated(kind, dates=BUS_DATES, **({"initial_date": val} if kind != "tarf" else {}))
+    twin = _numeric_twin(dated, e)
+    gd = engine_for(dated).calculate_greeks(dated, e)
+    gn = engine_for(twin).calculate_greeks(twin, e)
+    assert abs(gd["theta"] - gn["theta"]) <= 1e-12 * abs(gd["price"])  # Ruling R5
+
 # --- D5: dated accrual factors -------------------------------------------------------------------------------------
 
 def test_d5_initial_date_gives_act_365_factors():
@@ -732,3 +743,154 @@ def test_dated_tarn_without_factors_points_coupon_queries_at_resolve():
     for query in (lambda: d.full_coupon(0), lambda: d.get_payoff(1.20)):
         with pytest.raises(ValidationError, match=r"resolve\(fx_env\)"):
             query()
+
+
+# --- W5 protocol: a filled past fixing stays at the base spot under bumps and shocks (user decision 2026-10-09) -----
+# The fill of an unbanked passed TARN / TARF fixing is its fixing RATE, the env's quoted spot (Q3). It is decided
+# once at the base environment (freeze_missing_fixings, at the top of BaseFxEngine.calculate_greeks) and every bumped
+# or shocked repricing banks the fixing at that rate: the Greeks equal those of the contract with the fixing banked
+# at the base spot, and the warning fires once per call, never per bump.
+
+FILL_VAL = FIX_DATES[0] + timedelta(days=2)  # one dated fixing passed and unbanked
+
+
+def _numeric_unbanked(kind, tau=0.125, **kw):
+    product = note(target=3.0, **kw) if kind == "tarn" else tarf(target=0.20, **kw)
+    product.time_shift(tau)  # FIX[0] (and FIX[1] for tau > 1/6) now passed, unbanked
+    return product
+
+
+def _dated_unbanked(kind, **kw):
+    return dated_note(target=3.0, **kw) if kind == "tarn" else dated_tarf(target=0.20, **kw)
+
+
+def _unbanked(form, kind, **kw):
+    return _numeric_unbanked(kind, **kw) if form == "numeric" else _dated_unbanked(kind, **kw)
+
+
+def _fill_env(form, spot=1.20):
+    return env(spot=spot) if form == "numeric" else env(spot=spot, val=FILL_VAL)
+
+
+def _banked_at(product, e):
+    banked = copy.deepcopy(product)
+    banked.record_passed_fixings(e)
+    return banked
+
+
+def _missing(fn, *args, **kwargs):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = fn(*args, **kwargs)
+    return result, [w for w in caught if issubclass(w.category, MissingFixingWarning)]
+
+
+def _greeks(product, e):
+    return engine_for(product, n=4_000).calculate_greeks(product, e)
+
+
+FILL_FORMS = pytest.mark.parametrize("form", ["numeric", "dated"])
+FILL_KINDS = pytest.mark.parametrize("kind", ["tarn", "tarf"])
+
+
+@FILL_FORMS
+@FILL_KINDS
+def test_fill_greeks_equal_the_contract_banked_at_the_base_spot(form, kind):
+    product, e = _unbanked(form, kind), _fill_env(form)
+    greeks, caught = _missing(_greeks, product, e)
+    assert len(caught) == 1  # (b) once for the base valuation, never once per bump
+    explicit, explicit_caught = _missing(_greeks, _banked_at(product, e), e)
+    assert explicit_caught == []
+    assert greeks == explicit  # (a) bitwise: the fixing is banked at the base rate under every bump
+
+
+@FILL_FORMS
+@pytest.mark.parametrize("spot", [1.0990, 1.0999, 1.1001, 1.1010])
+def test_fill_near_the_strike_has_no_delta_jump(form, spot):
+    # (c) one 0.1% spot bump crosses the 1.10 coupon strike: a fill that followed the bumped spot would flip the coupon
+    product, e = _unbanked(form, "tarn"), _fill_env(form, spot)
+    greeks, caught = _missing(_greeks, product, e)
+    assert len(caught) == 1
+    assert greeks == _greeks(_banked_at(product, e), e)
+
+
+@FILL_FORMS
+@FILL_KINDS
+def test_freeze_records_the_base_rate_on_a_copy(form, kind):
+    product, e = _unbanked(form, kind), _fill_env(form)
+    snapshot = copy.deepcopy(product)
+    assert product.missing_fixing_fills(e) == {0: 1.20}
+    frozen, caught = _missing(freeze_missing_fixings, product, e)
+    assert len(caught) == 1 and "#0" in str(caught[0].message)
+    assert frozen is not product
+    assert (product.state, product.lifecycle_events, product.missing_fixing_fills(e)) == (
+        snapshot.state, snapshot.lifecycle_events, {0: 1.20})
+    assert frozen.missing_fixing_fills(e) == {}
+    again, caught = _missing(freeze_missing_fixings, frozen, _fill_env(form, 1.05))
+    assert again is frozen and caught == []
+    shocked = _fill_env(form, 1.05)  # history does not move under a shocked spot
+    assert _price(frozen, e=shocked) == _price(_banked_at(product, e), e=shocked)
+    assert frozen.with_fixings_recorded({0: 1.05}) is frozen  # a recorded rate is never overwritten
+
+
+@FILL_FORMS
+@FILL_KINDS
+def test_nothing_unbanked_returns_the_product_itself(form, kind):
+    product = _banked_at(_unbanked(form, kind), _fill_env(form))
+    e = _fill_env(form)
+    assert product.missing_fixing_fills(e) == {}
+    frozen, caught = _missing(product.with_missing_fixings_filled, e)
+    assert frozen is product and caught == []
+    assert product.with_fixings_recorded({}) is product
+
+
+@FILL_KINDS
+def test_numeric_fills_two_passed_fixings_in_order(kind):
+    product, e = _numeric_unbanked(kind, tau=0.2), env(spot=1.20)
+    assert product.missing_fixing_fills(e) == {0: 1.20, 1: 1.20}
+    frozen = product.with_missing_fixings_filled(e, warn=False)
+    shocked = env(spot=1.05)
+    assert _price(frozen, e=shocked) == _price(_banked_at(product, e), e=shocked)
+
+
+def test_fill_that_redeems_lists_only_the_fixings_banked():
+    product, e = _numeric_unbanked("tarn", tau=0.2, notional=100.0), env(spot=1.20)
+    product.target = 0.5  # the first coupon (1.0) hits the target: fixing #1 is dead
+    assert product.missing_fixing_fills(e) == {0: 1.20}
+    frozen = product.with_missing_fixings_filled(e, warn=False)
+    assert frozen.resolve(_fill_env("numeric", 1.05)).terminal
+
+
+@FILL_FORMS
+def test_carried_fills_bank_at_the_first_valuations_rate(form):
+    # multi-day callers decide at the first valuation and carry {index: rate} to later contracts
+    product, e0 = _unbanked(form, "tarn"), _fill_env(form)
+    fills = product.missing_fixing_fills(e0)
+    later = product.with_fixings_recorded(fills)
+    e1 = _fill_env(form, 1.05)
+    view, caught = _missing(later.resolve, e1)
+    assert caught == []
+    assert view == _banked_at(product, e0).resolve(e1)
+
+
+@FILL_FORMS
+def test_resolve_keeps_the_recorded_rate(form):
+    frozen = _unbanked(form, "tarn").with_missing_fixings_filled(_fill_env(form), warn=False)
+    snapshot = copy.deepcopy(frozen)
+    frozen.resolve(_fill_env(form, 1.05))
+    assert frozen.missing_fixing_fills(_fill_env(form)) == {}
+    assert (frozen.state, frozen.lifecycle_events) == (snapshot.state, snapshot.lifecycle_events)
+    assert _price(frozen, e=_fill_env(form, 1.05)) == _price(snapshot, e=_fill_env(form, 1.05))
+
+
+@FILL_FORMS
+def test_a_rate_recorded_for_a_future_fixing_is_refused(form):
+    product = (note(target=3.0) if form == "numeric" else dated_note(target=3.0)).with_fixings_recorded({0: 1.2})
+    with pytest.raises(ValidationError, match="future"):
+        product.resolve(env())
+
+
+@pytest.mark.parametrize("rate", [0.0, -1.2, float("nan"), float("inf")])
+def test_a_recorded_rate_must_be_positive_and_finite(rate):
+    with pytest.raises(ValidationError, match="rate"):
+        _numeric_unbanked("tarn").with_fixings_recorded({0: rate})

@@ -5,6 +5,7 @@ Base class for FX pricing engines.
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Dict, Optional
 
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
@@ -16,6 +17,7 @@ from quantark.param.vol.vannavolga import (
 )
 from quantark.param.rrf import ParallelShiftRateCurve
 from quantark.priceenv import FxPricingEnvironment
+from quantark.util.calendar import calculate_year_fraction
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError
 from quantark.util.fixings import freeze_missing_fixings
@@ -228,17 +230,20 @@ class BaseFxEngine(ABC):
         base_price: float,
     ) -> float:
         days = self.params.theta_days
-        dt = days / 365.0
+        future_date = fx_env.valuation_date + timedelta(days=days)
 
         shifted = deepcopy(product)
         if product.maturity is not None:
-            shifted.time_shift(dt)
+            # Q7 (user decision 2026-10-09): a numeric product ages by the environment's year fraction of the bump,
+            # the step its dated twin's times take when the env date moves; days/365 bitwise under CALENDAR_DAYS /
+            # ACT_365.
+            shifted.time_shift(calculate_year_fraction(
+                fx_env.valuation_date, future_date, fx_env.day_count_convention, fx_env.bus_days_in_year,
+                calendar=fx_env.calendar))
             env_future = fx_env
         else:
-            from datetime import timedelta
-
             env_future = deepcopy(fx_env)
-            env_future.valuation_date = fx_env.valuation_date + timedelta(days=days)
+            env_future.valuation_date = future_date
         shifted.record_passed_fixings(env_future)
         future_price = self.price(shifted, env_future)
 

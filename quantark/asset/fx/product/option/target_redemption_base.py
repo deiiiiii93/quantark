@@ -6,6 +6,12 @@ state (``state``: the amount banked towards the target and the determined cash s
 before valuation is an unbanked past fixing. In the DATED form ``fixing_dates`` / ``pay_dates`` list the whole
 contractual schedule and ``state.as_of`` says through which date the fixings are banked; times resolve against the
 environment at pricing. Only the two concrete products are instantiated.
+
+A passed fixing's history is its fixing RATE. An unbanked passed fixing without one is banked at the quoted spot of
+whatever environment prices it (spec Q3, one ``MissingFixingWarning``); the W5 fill protocol
+(``missing_fixing_fills`` / ``with_fixings_recorded`` / ``with_missing_fixings_filled``) records that rate once, at
+the BASE environment, on a copy, so bumped and shocked repricings bank the fixing at the base spot (user decision
+2026-10-09: a filled past fixing is history and does not move).
 """
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ import warnings
 from copy import deepcopy
 from datetime import datetime
 from types import SimpleNamespace
-from typing import List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
@@ -114,6 +120,7 @@ class TargetRedemptionProduct(BaseFxProduct):
         self.pay_times = None
         self.state = state
         self.lifecycle_events = ()
+        self._recorded_rates: Dict[int, float] = {}
 
     def _refresh_dated_horizon(self) -> None:
         """``expiry_date`` = last fixing date, ``delivery_date`` = last pay date; ``maturity`` stays None."""
@@ -128,6 +135,7 @@ class TargetRedemptionProduct(BaseFxProduct):
         self.pay_dates = None
         self.state = state
         self.lifecycle_events = ()
+        self._recorded_rates: Dict[int, float] = {}
 
     def _refresh_numeric_horizon(self) -> None:
         """``maturity`` = last listed fixing, else the last pending pay time, else 0.0; ``delivery`` alike."""
@@ -305,17 +313,30 @@ class TargetRedemptionProduct(BaseFxProduct):
         self.validate()
 
     def record_passed_fixings(self, fx_env) -> None:
-        """Bank every unbanked fixing at or before valuation, in order, at the QUOTED ``fx_env.spot`` (spec Q3),
-        stopping once the contract is terminal; append the events; re-validate. Dated: ``state.as_of`` becomes the
-        valuation date and pending cash dated on or before it leaves as a PAYMENT event."""
-        if self.is_numeric:
-            self._record_numeric(fx_env)
-        else:
-            self._record_dated(fx_env)
+        """Bank every unbanked fixing at or before valuation, in order, at its recorded rate (``with_fixings_recorded``)
+        or else the QUOTED ``fx_env.spot`` (spec Q3), stopping once the contract is terminal; append the events;
+        re-validate. Dated: ``state.as_of`` becomes the valuation date and pending cash dated on or before it leaves
+        as a PAYMENT event."""
+        self._bank_passed(fx_env)
         self.validate()
 
-    def _record_numeric(self, fx_env) -> None:
-        spot = fx_env.spot
+    def _bank_passed(self, fx_env) -> List[Tuple[int, str]]:
+        """``record_passed_fixings`` without the re-validation; returns ``(index, label)`` of every fixing banked at
+        ``fx_env.spot`` because it had no recorded rate (the fills; index into the schedule as it was listed)."""
+        if self.is_numeric:
+            return self._record_numeric(fx_env)
+        return self._record_dated(fx_env)
+
+    def _rate(self, index: int, fx_env, filled: List[Tuple[int, str]], label: str) -> float:
+        """Fixing ``index``'s recorded rate, else the quoted spot (noted in ``filled``)."""
+        rate = self._recorded_rates.get(index)
+        if rate is not None:
+            return rate
+        filled.append((index, label))
+        return fx_env.spot
+
+    def _record_numeric(self, fx_env) -> List[Tuple[int, str]]:
+        filled: List[Tuple[int, str]] = []
         acc = self.state.accumulated
         pending = list(self.state.pending)
         events: List[TargetRedemptionEvent] = []
@@ -324,11 +345,12 @@ class TargetRedemptionProduct(BaseFxProduct):
         banked = 0
         while banked < len(fixings) and is_passed_time(fixings[banked]):
             t, tp = fixings[banked], pays[banked]
+            label = event_label(banked, time=t)
+            spot = self._rate(banked, fx_env, filled, label)
             added, cash = self._fixing_outcome(factors[banked] if factors is not None else None, spot, acc)
             acc = acc + added
             hit = is_target_hit(acc, self.target)
             ends = hit or banked == len(fixings) - 1
-            label = event_label(banked, time=t)
             events.append(TargetRedemptionEvent(TargetRedemptionEventType.FIXING, cash, fixing=spot, time=t,
                                                 redeemed=ends, label=label))
             self._settle_numeric(cash, tp, label, pending, events)
@@ -342,9 +364,12 @@ class TargetRedemptionProduct(BaseFxProduct):
         self.pay_times = pays[banked:]
         if factors is not None:
             self.accrual_factors = factors[banked:]
+        # the listed schedule lost its first ``banked`` fixings: recorded rates follow their fixings
+        self._recorded_rates = {i - banked: r for i, r in self._recorded_rates.items() if i >= banked}
         self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_time)))
         self.lifecycle_events = self.lifecycle_events + tuple(events)
         self._refresh_numeric_horizon()
+        return filled
 
     @staticmethod
     def _settle_numeric(amount: float, pay_time: float, label: str, pending: list, events: list) -> None:
@@ -357,9 +382,10 @@ class TargetRedemptionProduct(BaseFxProduct):
         else:
             pending.append(PendingPayment(amount, pay_time=pay_time))
 
-    def _record_dated(self, fx_env) -> None:
+    def _record_dated(self, fx_env) -> List[Tuple[int, str]]:
         self._check_as_of(fx_env)
-        val, spot, st = fx_env.valuation_date, fx_env.spot, self.state
+        filled: List[Tuple[int, str]] = []
+        val, st = fx_env.valuation_date, self.state
         events: List[TargetRedemptionEvent] = []
         pending: list = []
         for p in st.pending:  # cash due by the valuation date was paid
@@ -377,11 +403,12 @@ class TargetRedemptionProduct(BaseFxProduct):
                 if fd > val:
                     break
                 t = signed_year_fraction(fd, fx_env)
+                label = event_label(i, date=fd)
+                spot = self._rate(i, fx_env, filled, label)
                 added, cash = self._fixing_outcome(self._dated_factor(i, fx_env), spot, acc)
                 acc = acc + added
                 hit = is_target_hit(acc, self.target)
                 ends = hit or i == last
-                label = event_label(i, date=fd)
                 events.append(TargetRedemptionEvent(TargetRedemptionEventType.FIXING, cash, fixing=spot, time=t,
                                                     redeemed=ends, label=label))
                 self._settle_dated(cash, self.pay_dates[i], label, fx_env, pending, events)
@@ -390,6 +417,10 @@ class TargetRedemptionProduct(BaseFxProduct):
                     break  # every later fixing is dead (or there is none)
         self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)), as_of=val)
         self.lifecycle_events = self.lifecycle_events + tuple(events)
+        # a banked or dead fixing's recorded rate is spent
+        self._recorded_rates = {i: r for i, r in self._recorded_rates.items()
+                                if not self.is_terminal and self._is_unbanked(i)}
+        return filled
 
     @staticmethod
     def _settle_dated(amount: float, pay_date: datetime, label: str, fx_env, pending: list, events: list) -> None:
@@ -404,18 +435,67 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     # -- resolved view (spec section 5.1) ----------------------------------------------------------------------
     def resolve(self, fx_env, *, warn_missing_fixings: bool = True) -> ResolvedTargetRedemption:
-        """The engines' only input. Unbanked fixings at or before valuation are banked on a COPY at the quoted spot
-        (``record_passed_fixings``) with one ``MissingFixingWarning`` naming them (W5); the product is unchanged."""
+        """The engines' only input. Unbanked fixings at or before valuation are banked on a COPY
+        (``record_passed_fixings``): at their recorded rate, else at the quoted spot with one ``MissingFixingWarning``
+        naming those (W5); the product is unchanged."""
         if self._has_unbanked_passed(fx_env):
             banked = deepcopy(self)
-            start = len(banked.lifecycle_events)
-            banked.record_passed_fixings(fx_env)
+            filled = banked._bank_passed(fx_env)
+            banked.validate()
             if warn_missing_fixings:
-                labels = [e.label for e in banked.lifecycle_events[start:]
-                          if e.event_type is TargetRedemptionEventType.FIXING]
-                warn_filled_fixings(type(self).__name__, "a banked outcome", labels)
+                warn_filled_fixings(type(self).__name__, "a banked outcome", [label for _, label in filled])
             return banked._view(fx_env)
         return self._view(fx_env)
+
+    # -- W5 fill protocol (user decision 2026-10-09: a filled past fixing does not move) ------------------------
+    def missing_fixing_fills(self, fx_env) -> Dict[int, float]:
+        """``{index: fx_env.spot}`` for every unbanked passed fixing that banking would fill at the quoted spot (no
+        recorded rate; fixings dead after a redemption inside the fill are not listed). ``index`` is the fixing's
+        position in ``fixing_times`` (numeric: the unbanked fixings listed now) or ``fixing_dates`` (dated). No
+        warning; the product is unchanged."""
+        return {index: fx_env.spot for index, _ in self._passed_fills(fx_env)}
+
+    def _passed_fills(self, fx_env) -> List[Tuple[int, str]]:
+        """``(index, label)`` of the fixings banking at ``fx_env`` would fill at its spot, found on a probe copy."""
+        if not self._has_unbanked_passed(fx_env):
+            return []
+        return deepcopy(self)._bank_passed(fx_env)
+
+    def with_fixings_recorded(self, fills: Mapping[int, float]) -> "TargetRedemptionProduct":
+        """A COPY with each listed unbanked fixing's RATE recorded from ``fills`` (``{index: rate}``, indexed as in
+        ``missing_fixing_fills``); banking (``record_passed_fixings``, ``resolve``) then uses that rate, so the
+        outcome follows the contract's state at banking (a recorded fill can redeem it). A fixing that already has a
+        recorded rate keeps it; a banked or out-of-range index is skipped. Returns ``self`` when nothing changes; the
+        product is never changed. A rate recorded for a fixing still after valuation is refused at ``resolve``."""
+        rates = dict(self._recorded_rates)
+        for index, rate in fills.items():
+            if index in rates or not self._is_listed_unbanked(index):
+                continue
+            rate = float(rate)
+            if not math.isfinite(rate) or rate <= 0.0:
+                raise ValidationError(f"a recorded fixing rate must be positive and finite, got {rate}")
+            rates[index] = rate
+        if rates == self._recorded_rates:
+            return self
+        recorded = deepcopy(self)
+        recorded._recorded_rates = rates
+        return recorded
+
+    def with_missing_fixings_filled(self, fx_env, *, warn: bool = True) -> "TargetRedemptionProduct":
+        """This contract with every unbanked passed fixing's rate recorded at ``fx_env``'s QUOTED spot (Q3), on a
+        COPY, so that bumped and shocked repricings bank it at the base spot. One ``MissingFixingWarning`` names the
+        fixings filled (``warn=False`` skips it). Returns ``self`` when nothing is missing; never mutates."""
+        filled = self._passed_fills(fx_env)
+        if not filled:
+            return self
+        if warn:
+            warn_filled_fixings(type(self).__name__, "a banked outcome", [label for _, label in filled])
+        return self.with_fixings_recorded({index: fx_env.spot for index, _ in filled})
+
+    def _is_listed_unbanked(self, index: int) -> bool:
+        if self.is_numeric:
+            return 0 <= index < len(self.fixing_times)
+        return 0 <= index < len(self.fixing_dates) and not self.is_terminal and self._is_unbanked(index)
 
     def _has_unbanked_passed(self, fx_env) -> bool:
         if self.is_numeric:
@@ -427,6 +507,10 @@ class TargetRedemptionProduct(BaseFxProduct):
         return any(self._is_unbanked(i) and d <= val for i, d in enumerate(self.fixing_dates))
 
     def _view(self, fx_env) -> ResolvedTargetRedemption:
+        if self._recorded_rates and not self.is_terminal:  # every passed fixing is banked by now
+            raise ValidationError(
+                f"a fixing rate is recorded for future fixing(s) {sorted(self._recorded_rates)}: only a fixing at or "
+                "before valuation has a rate")
         if not self.is_numeric:
             return self._dated_view(fx_env)
         st = self.state
