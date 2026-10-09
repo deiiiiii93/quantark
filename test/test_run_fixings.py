@@ -511,3 +511,64 @@ def test_step_fixings_decides_each_live_index_at_its_own_spot_and_a_gap_at_prev_
         assert run_fills == {0: out(100.0)} and prod.observation_records == before and recorded is not prod
         results.append((new, [getattr(r, outcome) for r in recorded.observation_records]))
     assert results[0] == results[1]                                       # X2 bitwise
+
+
+# ---------------------------------------------------------------- Task 5: hooks for product-held state (spec §6)
+class _Stub:
+    """A participating product holding run state, like W4b's TARN: events appended when a fixing is recorded."""
+
+    has_run_fixings = True
+
+    def __init__(self, matured=False, events=(), recorded=()):
+        self.matured, self.lifecycle_events, self.recorded = matured, list(events), dict(recorded)
+
+    def matured_before(self, env):
+        return self.matured
+
+    def missing_fixing_fills(self, env):
+        return {0: float(env.spot)} if 0 not in self.recorded and env.valuation_date > F.START + timedelta(days=4) else {}
+
+    def open_fixings(self, env):
+        return {} if 0 in self.recorded else {0: (0.0 if env.valuation_date == F.START + timedelta(days=4) else 1.0, "#0")}
+
+    def with_fixings_recorded(self, fills):
+        if not fills or 0 in self.recorded:
+            return self
+        return _Stub(self.matured, self.lifecycle_events + [("FIXING", fills[0])], {**self.recorded, **fills})
+
+    def with_time_elapsed(self, dt):
+        return self
+
+    def with_missing_fixings_filled(self, env, *, warn=True):
+        return self
+
+    def pending_pv(self, env):
+        return 2.0 * len(self.lifecycle_events)
+
+
+class _DuckBook:
+    """The duck-typed portfolio the recorder needs (positions, pricing_environments, remove_position)."""
+
+    def __init__(self, **products):
+        from types import SimpleNamespace
+        self.pricing_environments = {F.UNDERLYING: F.eq_env(0)}
+        self.positions = {pid: SimpleNamespace(product=p, quantity=q, underlying=F.UNDERLYING)
+                          for pid, (p, q) in products.items()}
+
+    def remove_position(self, pid):
+        return self.positions.pop(pid, None)
+
+
+def test_hooks_matured_events_pending_pv():
+    from quantark.asset.equity.lifecycle.autocallable import MaturedBeforeRunWarning
+    pf = _DuckBook(keep=(_Stub(), -3.0), gone=(_Stub(matured=True), 1.0))
+    rec = RunFixingRecorder()
+    with pytest.warns(MaturedBeforeRunWarning):
+        day0 = rec.register(pf)
+    assert "gone" not in pf.positions and day0.pending_pv == 0.0
+    days = []
+    for k in range(1, 7):
+        F.move(pf, k)
+        days.append(rec.advance(pf))
+    assert days[4].product_events == (("keep", -3.0, ("FIXING", 105.0)),)  # the step to day 5
+    assert days[4].pending_pv == -3.0 * 2.0 and days[5].product_events == ()

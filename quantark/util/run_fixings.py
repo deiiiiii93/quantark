@@ -17,6 +17,7 @@ the clock never goes back; R10 the run's working positions get copies, the booke
 from __future__ import annotations
 
 import dataclasses
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple
@@ -154,16 +155,32 @@ class RunFixingRecorder:
         positions = getattr(portfolio, "positions", None) or {}
         return [(pid, pos) for pid, pos in list(positions.items()) if participates(getattr(pos, "product", None))]
 
-    def _register_position(self, pid: str, position: Any, env: Any) -> None:
-        """R5 for one position: W5b's freeze (one ``MissingFixingWarning``) and its live set at this instant."""
+    def _register_position(self, portfolio, pid: str, position: Any, env: Any) -> bool:
+        """R5 for one position; False when it matured before the run and left the working portfolio (spec §6)."""
+        matured_before = getattr(position.product, "matured_before", None)
+        if callable(matured_before) and matured_before(env):
+            from quantark.asset.equity.lifecycle.autocallable import MaturedBeforeRunWarning  # lazy: util -> asset
+            warnings.warn(MaturedBeforeRunWarning(
+                f"position {pid} ({type(position.product).__name__}) matured before the run start "
+                f"{env.valuation_date}: it is not settled in the run, books no cash and is valued at zero"),
+                stacklevel=3)
+            portfolio.remove_position(pid)
+            return False
         frozen = freeze_missing_fixings(position.product, env)
         if frozen is not position.product:
             position.product = frozen
         self._live[pid] = update_live(frozen.open_fixings(env), env.valuation_date, env.spot)
+        return True
 
-    def _day(self, portfolio, participants, fixings) -> RunFixingDay:
+    def _day(self, portfolio, participants, fixings, events=()) -> RunFixingDay:
         dates = [portfolio.pricing_environments[pos.underlying].valuation_date for _, pos in participants]
-        day = RunFixingDay(date=max(dates) if dates else None, fixings=tuple(fixings))
+        pending = 0.0
+        for pid, pos in participants:
+            hook = getattr(pos.product, "pending_pv", None)
+            if pid in portfolio.positions and callable(hook):
+                pending += float(pos.quantity) * float(hook(portfolio.pricing_environments[pos.underlying]))
+        day = RunFixingDay(date=max(dates) if dates else None, fixings=tuple(fixings),
+                           product_events=tuple(events), pending_pv=pending)
         self._days.append(day)
         return day
 
@@ -173,15 +190,16 @@ class RunFixingRecorder:
         envs = portfolio.pricing_environments
         for pid, position in participants:
             env = envs[position.underlying]
-            self._register_position(pid, position, env)
-            self._last.setdefault(position.underlying, (env.valuation_date, float(env.spot)))
-        return self._day(portfolio, participants, ())
+            if self._register_position(portfolio, pid, position, env):
+                self._last.setdefault(position.underlying, (env.valuation_date, float(env.spot)))
+        return self._day(portfolio, self._participants(portfolio), ())
 
     def advance(self, portfolio) -> RunFixingDay:
         """One path instant later (R3/R4/R6/R8/R9); a position first seen here is registered here (Ruling 8)."""
         participants = self._participants(portfolio)
         envs = portfolio.pricing_environments
         fixings: List[RecordedFixing] = []
+        events: List[Tuple[str, float, Any]] = []
         for underlying in sorted({pos.underlying for _, pos in participants}):
             env = envs[underlying]
             if underlying in self._last:
@@ -195,7 +213,7 @@ class RunFixingRecorder:
             env = envs[position.underlying]
             last = self._last.get(position.underlying)
             if pid not in self._live or last is None:
-                self._register_position(pid, position, env)
+                self._register_position(portfolio, pid, position, env)
                 continue
             prev_date, prev_spot = last
             live = self._live[pid]
@@ -215,6 +233,10 @@ class RunFixingRecorder:
                                               spot=float(live[index][1]) if index in live else float(prev_spot),
                                               gap=index not in live))
             self._live[pid] = update_live(labels, env.valuation_date, env.spot, before=live, exclude=new)
+            prev_events = getattr(position.product, "lifecycle_events", None)
+            new_events = getattr(recorded, "lifecycle_events", None)
+            if prev_events is not None and new_events is not None:
+                events.extend((pid, float(position.quantity), ev) for ev in list(new_events)[len(prev_events):])
             if recorded is not position.product:
                 position.product = recorded
         for _, position in participants:
@@ -223,4 +245,5 @@ class RunFixingRecorder:
         live_ids = {pid for pid, _ in participants}
         for pid in [p for p in self._live if p not in live_ids]:
             del self._live[pid]
-        return self._day(portfolio, participants, fixings)
+        return self._day(portfolio, [(p, x) for p, x in participants if p in portfolio.positions],
+                         fixings, events)

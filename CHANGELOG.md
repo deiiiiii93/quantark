@@ -27,6 +27,8 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   `gap=True` when no instant fell on it; numeric contracts age by the environment's year fraction; time-of-day
   instants and a backwards clock are refused), the stateless `step_fixings`, `update_live`, `participates`,
   `run_step_dt`, `at_spot`, `require_date_instant`, `RecordedFixing`, `RunFixingDay`.
+  Optional product hooks `matured_before(env)`, `lifecycle_events` and `pending_pv(env)` feed `RunFixingDay.product_events` /
+  `pending_pv` (for FX TARN / TARF, W4b).
 - `AccrualPeriod`, `AccrualBasis`, `KnockInAnchor` and the resolver: `ko_accrual_factor`, `coupon_period_fraction`,
   `contract_tenor`, `knock_in_anchor_for`. `ObservationRecord.accrual` holds a record's period.
 - `AccrualConfig.accrual_end` (`AccrualEndType.OBSERVATION`, the default, or `SETTLEMENT`: a record accrues to its
