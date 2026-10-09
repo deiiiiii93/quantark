@@ -544,6 +544,11 @@ class ProductReplay:
         calibration or the lifecycle tracker: a bump that re-derived any of
         those would measure the rebuild, not the risk.
         """
+        # The day's contract already carries the run's first-valuation fills (product_for_date); a fixing that
+        # passed during the run is decided here once, at the day's spot, so the carry bumps do not move it (user
+        # decision 2026-10-09; the day's own pricing has warned). TODO(lifecycle, W6): record a fixing that passes
+        # during the run at its own day's real spot.
+        product = freeze_missing_fixings(product, env, warn=False)
 
         def price_at(spot: float, dividend: Any) -> float:
             return float(

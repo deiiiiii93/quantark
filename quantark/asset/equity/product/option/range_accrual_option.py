@@ -15,7 +15,7 @@ from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import ExerciseType, OptionType, TenorEnd
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import fixing_label, warn_filled_fixings
+from quantark.util.fixings import fixing_label, is_history, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
 from .base_equity_option import BaseEquityOption
@@ -547,7 +547,8 @@ class RangeAccrualOption(BaseEquityOption):
         return past_observations, future_observations, total_weights
 
     def missing_fixing_fills(self, pricing_env: "PricingEnvironment") -> Dict[int, bool]:
-        """``{index: outcome}`` for every past observation without ``observed_in_range``, decided at the spot.
+        """``{index: outcome}`` for every STRICTLY past observation (``is_history``; one at t = 0 is live) without
+        ``observed_in_range``, decided at the spot.
 
         The decision ``resolve_observations`` makes (``is_in_range`` at ``pricing_env.spot``: per-record barriers,
         reverse mode), without the warning.
@@ -556,7 +557,7 @@ class RangeAccrualOption(BaseEquityOption):
         return {
             idx: self.is_in_range(spot, idx, rec)
             for idx, rec in enumerate(self.get_observation_records())
-            if rec.observed_in_range is None and rec.resolve_time(pricing_env) <= 0
+            if rec.observed_in_range is None and is_history(rec.resolve_time(pricing_env))
         }
 
     def with_fixings_recorded(self, fills: Mapping[int, bool]) -> "RangeAccrualOption":

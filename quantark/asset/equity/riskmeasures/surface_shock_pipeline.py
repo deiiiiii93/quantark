@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional, Tuple
 
+from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.exceptions import NumericalError, ValidationError
 
 SHOCK_LAYER = "cleaned_market_iv_nodes"
@@ -181,6 +182,8 @@ def run_surface_shock_pipeline(
 
     if model == "local_vol":
         base_env = base_env_builder(base_surface)
+        # A missing past fixing is decided once, at the base env, for the base and the shocked reprices
+        product = freeze_missing_fixings(product, base_env)
         base_lv = build_dupire_local_vol(
             base_surface, spot=spot, rate_curve=rate_curve,
             div_yield=base_env.get_div_yield,
@@ -248,6 +251,8 @@ def run_surface_shock_pipeline(
             "feller_policy": dict(base_calib.config["feller_policy"]),
         }
         base_env = base_env_builder(base_surface)
+        # A missing past fixing is decided once, at the base env, for the base and the shocked reprices
+        product = freeze_missing_fixings(product, base_env)
         base_engine = engine_factory(model, base_calib.params)
         pv_base = float(base_engine.price(product, base_env))
         if mode is SurfaceShockMode.FROZEN:

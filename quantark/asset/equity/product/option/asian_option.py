@@ -21,7 +21,7 @@ from quantark.util.enum import (
     TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import fixing_label, warn_filled_fixings
+from quantark.util.fixings import fixing_label, is_history, warn_filled_fixings
 from quantark.util.numerical import is_zero, is_close, safe_log, safe_exp
 
 from .base_equity_option import BaseEquityOption
@@ -435,15 +435,16 @@ class AsianOption(BaseEquityOption):
         return past_prices, past_weights, future_times, future_weights, total_observations
 
     def missing_fixing_fills(self, pricing_env: "PricingEnvironment") -> Dict[int, float]:
-        """``{index: spot}`` for every past record without ``observed_price`` (the fill ``resolve_observations``
-        makes, without the warning). Empty for a legacy schedule, which has no past records."""
+        """``{index: spot}`` for every STRICTLY past record (``is_history``; one at t = 0 is live) without
+        ``observed_price`` (the fill ``resolve_observations`` makes, without the warning). Empty for a legacy
+        schedule, which has no past records."""
         if self.observation_records is None:
             return {}
         spot = float(pricing_env.spot)
         return {
             idx: spot
             for idx, rec in enumerate(self.observation_records)
-            if rec.observed_price is None and rec.resolve_time(pricing_env) <= 0
+            if rec.observed_price is None and is_history(rec.resolve_time(pricing_env))
         }
 
     def with_fixings_recorded(self, fills: Mapping[int, float]) -> "AsianOption":

@@ -319,10 +319,10 @@ class BaseEngine(ABC):
         spots = np.asarray([float(spot) for spot in spot_levels], dtype=float)
         if spots.size == 0:
             return []
-        # Every ladder row keeps the base valuation's fills, as the one-solve engine grid below does
-        product = freeze_missing_fixings(product, pricing_env)
         if not np.all(np.isfinite(spots)) or np.any(spots <= 0.0):
             raise ValueError("spot levels must be positive and finite")
+        # Every ladder row keeps the base valuation's fills, as the one-solve engine grid below does
+        product = freeze_missing_fixings(product, pricing_env)
         if self.supports_spot_greeks_grid:
             self._last_spot_greeks_grid = None
             self.price(product, pricing_env)

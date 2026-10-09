@@ -9,6 +9,7 @@ import time
 import pandas as pd
 
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import freeze_missing_fixings
 from .config import (
     AutocallableEngineConfig,
     HedgeSpec,
@@ -46,6 +47,13 @@ def _book_price_callback(alive_specs, env):
     quantity, exactly once, so the audit's scenario value is the same book
     the risk was aggregated from.
     """
+    # Each day's contract already carries the run's first-valuation fills; a fixing that passed during the run is
+    # decided once at the day's spot so the carry scenarios do not move it (user decision 2026-10-09).
+    # TODO(lifecycle, W6): record a fixing that passes during the run at its own day's real spot.
+    alive_specs = [
+        (quantity, replay, engine, freeze_missing_fixings(product, env, warn=False), delta, price)
+        for quantity, replay, engine, product, delta, price in alive_specs
+    ]
 
     def price_at(spot: float, dividend) -> float:
         total = 0.0

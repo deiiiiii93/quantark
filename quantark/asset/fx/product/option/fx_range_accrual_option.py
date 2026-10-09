@@ -25,7 +25,7 @@ from typing import Dict, List, Mapping, Optional, Tuple, TYPE_CHECKING
 
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import fixing_label, warn_filled_fixings
+from quantark.util.fixings import fixing_label, is_history, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
 from ..base_fx_product import BaseFxProduct
@@ -381,12 +381,13 @@ class FxRangeAccrualOption(BaseFxProduct):
         self._set_records(records)
 
     def missing_fixing_fills(self, fx_env: "FxPricingEnvironment") -> Dict[int, bool]:
-        """``{index: outcome}`` for every past fixing without ``observed_in_range``, decided at ``fx_env.spot``
+        """``{index: outcome}`` for every STRICTLY past fixing (``is_history``; one at t = 0 is live) without
+        ``observed_in_range``, decided at ``fx_env.spot``
         (the decision ``resolve_observations`` and ``record_passed_fixings`` make, without the warning)."""
         return {
             idx: self.is_in_range(fx_env.spot, idx, rec)
             for idx, rec in enumerate(self.get_observation_records())
-            if rec.observed_in_range is None and rec.resolve_time(fx_env) <= 0
+            if rec.observed_in_range is None and is_history(rec.resolve_time(fx_env))
         }
 
     def with_fixings_recorded(self, fills: Mapping[int, bool]) -> "FxRangeAccrualOption":

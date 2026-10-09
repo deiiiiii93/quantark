@@ -15,9 +15,21 @@ import copy
 import warnings
 from typing import Sequence
 
+from quantark.util.numerical import is_zero
+
 
 class MissingFixingWarning(UserWarning):
     """A past fixing without a recorded outcome was decided at the current spot."""
+
+
+def is_history(observation_time: float) -> bool:
+    """True for a fixing STRICTLY before the valuation instant (``t < 0`` and not zero).
+
+    Only history is frozen at the base spot. A fixing at exactly ``t = 0`` (today, not yet printed) is live: it
+    moves with spot bumps and shocks (user decision 2026-10-09), though pricing still decides it at the current
+    spot as ``resolve_observations`` does.
+    """
+    return observation_time < 0 and not is_zero(observation_time)
 
 
 def fixing_label(index: int, record) -> str:
