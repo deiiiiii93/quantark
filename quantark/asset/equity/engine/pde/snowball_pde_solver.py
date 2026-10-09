@@ -47,6 +47,7 @@ from quantark.asset.equity.engine.event_stats import AutocallableEventStats, Sta
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.accrual import leg_annualized
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
@@ -1392,7 +1393,7 @@ class SnowballPDESolver(BasePDESolver):
             product.payoff_config.call_rebate_enabled
             and product.payoff_config.call_strike is not None
         )
-        if product.accrual_config.is_annualized_rebate and not call_rebate:
+        if leg_annualized(product, "rebate") and not call_rebate:
             # the fixed rebate the contract pays (get_maturity_payoff_v0's fixed branch): annualized over the V0
             # contract tenor. A call-rebate contract pays no fixed rebate; its rows are left as they were (see
             # docs/superpowers/specs/2026-10-08-accrual-scope-followups-findings.md, item 7).
@@ -1435,7 +1436,7 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 tenor_factor = (
                     product.get_contract_tenor(pricing_env)
-                    if product.accrual_config.is_annualized_rebate
+                    if leg_annualized(product, "rebate")
                     else 1.0
                 )
                 participation *= tenor_factor

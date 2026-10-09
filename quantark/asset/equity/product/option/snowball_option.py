@@ -29,7 +29,7 @@ from quantark.util.enum import (
 )
 from quantark.util.exceptions import ValidationError
 
-from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor
+from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor, leg_annualized
 from .accrual_build import build_contract_accrual
 from .observation_schedule import (
     at_valuation_instant,
@@ -98,7 +98,8 @@ class SnowballOption(BaseEquityOption):
 
     Accrual Attributes (via accrual_config):
         coupon_pay_type: INSTANT (at KO date) or EXPIRY (discounted to maturity)
-        is_annualized: Flag for annualized accruals
+        is_annualized: Default for the KO coupon and the rebate when their own flags are unset; the knock-in
+            payoff stays flat unless is_annualized_ki is set (see AccrualConfig)
 
     Airbag Attributes (via airbag_config):
         airbag_barrier: Barrier level for airbag protection
@@ -274,21 +275,9 @@ class SnowballOption(BaseEquityOption):
             raise ValidationError(
                 "maturity_date or exercise_date required when tenor_end is MATURITY"
             )
-        if (
-            self.tenor is None
-            and any(
-                [
-                    self.accrual_config.is_annualized_ko,
-                    self.accrual_config.is_annualized_ki,
-                    self.accrual_config.is_annualized_rebate,
-                ]
-            )
-            and self.initial_date is None
-            and self.settlement_date is None
-        ):
-            raise ValidationError(
-                "initial_date or settlement_date required for annualized accruals when tenor is not provided"
-            )
+        # Whether annualized cash has an accrual start is the accrual spec's R5, checked on the EFFECTIVE leg flags
+        # when the periods are derived (accrual_build): a dated contract needs initial_date, a numeric one accrues
+        # on its own clock (accrued_offset + maturity).
 
     def _validate_barrier_parameters(self) -> None:
         """Validate barrier configurations (KO/KI barriers and rates)."""
@@ -714,12 +703,12 @@ class SnowballOption(BaseEquityOption):
                 * self.contract_multiplier
                 * call_payoff
             )
-            if self.accrual_config.is_annualized_rebate:
+            if leg_annualized(self, "rebate"):
                 contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
                 rebate *= contract_tenor
         else:
             # Fixed rebate: the tenor is read only when the rebate is annualized
-            if self.accrual_config.is_annualized_rebate:
+            if leg_annualized(self, "rebate"):
                 contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
                 rebate = (
                     self.payoff_config.rebate_rate
@@ -791,7 +780,7 @@ class SnowballOption(BaseEquityOption):
         downside = (
             participation_rate * min(raw_diff, 0.0) * self.contract_multiplier
         )
-        if self.accrual_config.is_annualized_ki:
+        if leg_annualized(self, "knock_in"):
             contract_tenor = self.get_contract_tenor(pricing_env)
             downside *= contract_tenor
 

@@ -251,10 +251,16 @@ class AccrualConfig:
 
     Attributes:
         coupon_pay_type: INSTANT (at KO date) or EXPIRY (discounted to maturity)
-        is_annualized: Backward-compatible flag for annualized accruals (default for all)
-        is_annualized_ko: If True, KO return accrues with year fraction
-        is_annualized_ki: If True, KI return accrues with year fraction
-        is_annualized_rebate: If True, rebate accrues with year fraction
+        is_annualized: The contract's default for the legs whose own flag is unset (None): the knock-out
+            coupon, the rebate (V0) and the Phoenix coupon follow it. It never governs the knock-in payoff,
+            which is flat unless ``is_annualized_ki`` says otherwise. Resolved in one place:
+            ``accrual.leg_annualized`` (Phoenix coupon: ``PhoenixOption.is_coupon_rate_annualized``)
+        is_annualized_ko: If set, whether the KO coupon accrues with the year fraction; None follows
+            ``is_annualized``
+        is_annualized_ki: If set, whether the knock-in payoff (V1) is scaled by the contract tenor; None is
+            flat (not annualized)
+        is_annualized_rebate: If set, whether the rebate (V0) is scaled by the contract tenor; None follows
+            ``is_annualized``
         is_annualized_coupon: If True, a Phoenix coupon rate is per annum and the
             coupon pays principal x rate x the period's year fraction; if False the
             rate IS the period's amount and its fraction is 1

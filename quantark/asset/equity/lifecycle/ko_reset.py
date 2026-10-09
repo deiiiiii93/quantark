@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing_at
-from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
+from quantark.asset.equity.product.option.accrual import knock_in_anchor_for, leg_annualized
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.option_enums import PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
@@ -211,7 +211,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     def pre_contract_tenor(self, env: PricingEnvironment) -> Optional[float]:
         """Schedule 1's contract length (V0's tenor); ``None`` when the rebate is not annualized, which reads none (a
         non-accruing contract has no tenor to resolve)."""
-        if not self.product.accrual_config.is_annualized_rebate:
+        if not leg_annualized(self.product, "rebate"):
             return None
         return float(self.product._resolve_pre_contract_tenor(self._schedule_resolution_env(self.product, env)))
 
@@ -220,7 +220,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         reads none (a non-accruing REBASED contract has no anchor, so its tenor cannot be resolved -- and is not
         needed). The Monte Carlo route gates it the same way."""
         contract = self.contract()
-        if not contract.accrual_config.is_annualized_ki:
+        if not leg_annualized(contract, "knock_in"):
             return None
         return float(contract._resolve_post_contract_tenor(self._schedule_resolution_env(contract, env)))
 

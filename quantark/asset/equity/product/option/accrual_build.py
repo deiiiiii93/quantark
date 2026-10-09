@@ -16,7 +16,7 @@ from quantark.util.calendar import BusinessDayConvention
 from quantark.util.enum import AccrualEndType, CouponPayType, PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
 
-from .accrual import BUSINESS_DAYS_TERMS, AccrualBasis, AccrualKind, AccrualPeriod
+from .accrual import BUSINESS_DAYS_TERMS, AccrualBasis, AccrualKind, AccrualPeriod, leg_annualized
 from .observation_schedule import ObservationRecord, ObservationSchedule
 
 R5 = ("a dated contract whose annualized cash needs an accrual start needs initial_date (accrual time spec R5): "
@@ -84,7 +84,7 @@ class _Terms:
         coupon = getattr(product, "coupon_config", None)
         self.period_basis = (self.basis if coupon is None else
                              AccrualBasis(coupon.day_count_convention, ac.accrual_calendar, ac.accrual_bus_days_in_year))
-        self.ko_annualized = bool(product._effective_annualized_flag(ac.is_annualized_ko))
+        self.ko_annualized = leg_annualized(product, "ko")
         self.coupon_annualized = coupon is not None and bool(product.is_coupon_rate_annualized)
         self.fixed = None if coupon is None else coupon.fixed_coupon_year_fraction
         if self.settlement and (ac.coupon_pay_type is CouponPayType.EXPIRY
@@ -276,8 +276,8 @@ def _contract_terminal(product, terms: _Terms) -> AccrualPeriod:
 
 def _terminals(product, terms: _Terms, stored: Optional[Dict[str, AccrualPeriod]]) -> Dict[str, AccrualPeriod]:
     """The terminal periods (§4.4). A stored terminal is kept while the one derived from today's terms agrees with
-    it, and when its schedule has aged out (nothing left to derive it from); otherwise today's replaces it."""
-    ac = product.accrual_config
+    it, and when its schedule has aged out (nothing left to derive it from); otherwise today's replaces it. A
+    terminal whose leg is annualized (the effective flag) and that has no accrual start is refused (R5)."""
     stored = stored or {}
 
     def settle(leg: str, candidate: Optional[AccrualPeriod]) -> Optional[AccrualPeriod]:
@@ -302,7 +302,7 @@ def _terminals(product, terms: _Terms, stored: Optional[Dict[str, AccrualPeriod]
             out["post"] = settle("post", _schedule_terminal(post_records, terms)) or out["pre"]
     v0 = "pre" if post_config is not None else "contract"
     v1 = "post" if post_config is not None else "contract"
-    for leg, needed in ((v0, bool(ac.is_annualized_rebate)), (v1, bool(ac.is_annualized_ki))):
+    for leg, needed in ((v0, leg_annualized(product, "rebate")), (v1, leg_annualized(product, "knock_in"))):
         period = out[leg]
         if period.cumulative_fraction is None and not period.relative:
             terms.require(period.kind, needed)
@@ -352,7 +352,7 @@ def build_contract_accrual(product) -> None:
     if ki is not None:
         # a REBASED contract reads its knock-in's accrual for the knock-out leg and the knocked-in (V1) tenor
         _fill_ki(ki.records, terms,
-                 anchor_needed=rebased and (terms.ko_annualized or bool(ac.is_annualized_ki)))
+                 anchor_needed=rebased and (terms.ko_annualized or leg_annualized(product, "knock_in")))
     product.barrier_config = replace(bc, ko_observation_schedule=ko, ki_observation_schedule=ki)
     if post_config is not None:
         post = _detach(post_config.ko_observation_schedule)

@@ -44,7 +44,7 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
-from quantark.asset.equity.product.option.accrual import knock_in_anchor_for
+from quantark.asset.equity.product.option.accrual import knock_in_anchor_for, leg_annualized
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord
 from quantark.asset.equity.settlement import (
     CashflowKind,
@@ -2187,7 +2187,7 @@ class SnowballMCEngine(BaseEngine):
                     [post_indices_by_ki[int(first_ki_idx[i])][last] for i in v1_paths], dtype=int
                 )
                 terminal_spots = paths[v1_paths, nodes + 1]
-                if product.accrual_config.is_annualized_ki:
+                if leg_annualized(product, "knock_in"):
                     # a REBASED knocked-in tenor hangs from the path's knock-in (accrual spec §4.4, §5.1)
                     anchors = self._knock_in_anchors(grid)
                     by_ki = np.array(

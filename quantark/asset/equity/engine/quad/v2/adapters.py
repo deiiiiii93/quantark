@@ -4,6 +4,7 @@ import math
 from copy import copy
 import numpy as np
 
+from quantark.asset.equity.product.option.accrual import leg_annualized
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
@@ -27,7 +28,7 @@ def terminal_breaks(product, env):
     annual = 1.0
     if (
         not isinstance(product, PhoenixOption)
-        and product.accrual_config.is_annualized_ki
+        and leg_annualized(product, "knock_in")
     ):
         annual = (
             product._resolve_post_contract_tenor(env)

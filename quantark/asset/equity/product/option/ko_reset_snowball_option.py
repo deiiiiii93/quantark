@@ -35,7 +35,8 @@ from .observation_schedule import (
     ResolvedObservationRecord,
 )
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
-from .accrual import AccrualKind, AccrualPeriod, KnockInAnchor, contract_tenor as _contract_tenor, ko_accrual_factor
+from .accrual import (AccrualKind, AccrualPeriod, KnockInAnchor, contract_tenor as _contract_tenor, ko_accrual_factor,
+                      leg_annualized)
 from .accrual_build import snapshot_terms
 from .snowball_option import SnowballOption
 
@@ -542,13 +543,13 @@ class KnockOutResetSnowballOption(SnowballOption):
                 * self.contract_multiplier
                 * call_payoff
             )
-            if self.accrual_config.is_annualized_rebate:
+            if leg_annualized(self, "rebate"):
                 contract_tenor = contract_tenor or self._resolve_pre_contract_tenor(
                     pricing_env
                 )
                 rebate *= contract_tenor
         else:
-            if self.accrual_config.is_annualized_rebate:
+            if leg_annualized(self, "rebate"):
                 contract_tenor = contract_tenor or self._resolve_pre_contract_tenor(
                     pricing_env
                 )
@@ -612,7 +613,7 @@ class KnockOutResetSnowballOption(SnowballOption):
         downside = (
             participation_rate * min(raw_diff, 0.0) * self.contract_multiplier
         )
-        if self.accrual_config.is_annualized_ki:
+        if leg_annualized(self, "knock_in"):
             if contract_tenor is None:
                 contract_tenor = self._resolve_post_contract_tenor(
                     pricing_env, knock_in=getattr(self, "_otc_lifecycle_knock_in_anchor", None)

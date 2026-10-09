@@ -276,13 +276,36 @@ def _guard_current(product, period: AccrualPeriod) -> None:
                               "product.validate() to derive them again")
 
 
+#: Each cash leg's own flag, and what an unset (``None``) flag means: ``True`` follows ``is_annualized``, ``False``
+#: is flat. The knock-out coupon and the rebate (V0) follow the contract; the knock-in payoff (V1) is flat unless
+#: the contract says so (user decision 2026-10-09, accrual follow-ups §6).
+_LEG_FLAGS = {
+    "ko": ("is_annualized_ko", True),
+    "rebate": ("is_annualized_rebate", True),
+    "knock_in": ("is_annualized_ki", False),
+}
+
+
+def leg_annualized(product, leg: str) -> bool:
+    """Whether a cash leg (``ko``, ``rebate`` or ``knock_in``) is scaled by its year fraction: the leg's explicit
+    flag when set, else its default (``_LEG_FLAGS``). The only place a leg's annualization flag is resolved."""
+    if leg not in _LEG_FLAGS:
+        raise ValidationError(f"unknown annualized leg {leg!r}: expected one of {sorted(_LEG_FLAGS)}")
+    name, follows_contract = _LEG_FLAGS[leg]
+    ac = product.accrual_config
+    flag = getattr(ac, name)
+    if flag is not None:
+        return bool(flag)
+    return bool(ac.is_annualized) if follows_contract else False
+
+
 def ko_accrual_factor(product, record, env=None, *, knock_in: Optional[KnockInAnchor] = None) -> float:
     """The knock-out leg, in today's precedence: explicit factor, then the annualization flag, then the period."""
     period = _period_of(record)
     _guard_current(product, period)
     if period.cumulative_fraction is not None:
         return float(period.cumulative_fraction)
-    if not product._effective_annualized_flag(product.accrual_config.is_annualized_ko):
+    if not leg_annualized(product, "ko"):
         return 1.0
     return cumulative_accrual(period, knock_in=knock_in)
 

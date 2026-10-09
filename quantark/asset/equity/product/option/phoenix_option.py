@@ -30,7 +30,7 @@ from quantark.util.enum import (
 )
 from quantark.util.exceptions import ValidationError
 
-from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor
+from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor, leg_annualized
 from .accrual_build import build_contract_accrual
 from .observation_schedule import (
     at_valuation_instant,
@@ -1074,12 +1074,12 @@ class PhoenixOption(BaseEquityOption):
                 * self.contract_multiplier
                 * call_payoff
             )
-            if self.accrual_config.is_annualized_rebate:
+            if leg_annualized(self, "rebate"):
                 contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
                 rebate *= contract_tenor
         else:
             # Fixed rebate: the tenor is read only when the rebate is annualized
-            if self.accrual_config.is_annualized_rebate:
+            if leg_annualized(self, "rebate"):
                 contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
                 rebate = (
                     self.payoff_config.rebate_rate
