@@ -934,7 +934,10 @@ class TestValidationErrors:
             )
 
     def test_missing_maturity_and_exercise_date_passes(self):
-        """Test that exercise_date alone is sufficient (no maturity needed)."""
+        """Test that exercise_date alone is sufficient (no maturity needed).
+
+        The rebate is flat: an unset rebate flag follows is_annualized, and an annualized rebate on a contract
+        dated by exercise_date alone has no accrual start (R5, see the next test)."""
         barrier_config = create_basic_barrier_config()
 
         # Should work with exercise_date alone
@@ -944,8 +947,20 @@ class TestValidationErrors:
             barrier_config=barrier_config,
             contract_multiplier=10_000.0,
             exercise_date=datetime(2025, 1, 1),
+            accrual_config=AccrualConfig(is_annualized_rebate=False),
         )
         assert snowball.exercise_date == datetime(2025, 1, 1)
+
+    def test_exercise_date_alone_with_an_annualized_rebate_is_refused_by_r5(self):
+        """The default rebate follows is_annualized=True: its tenor needs initial_date (accrual spec R5)."""
+        with pytest.raises(ValidationError, match="R5"):
+            SnowballOption(
+                initial_price=100.0,
+                strike=100.0,
+                barrier_config=create_basic_barrier_config(),
+                contract_multiplier=10_000.0,
+                exercise_date=datetime(2025, 1, 1),
+            )
 
     def test_discrete_ko_without_dates_raises(self):
         """Test that discrete KO without observation dates raises ValidationError."""
@@ -995,6 +1010,7 @@ class TestValidationErrors:
             barrier_config=barrier_config,
             contract_multiplier=10_000.0,
             exercise_date=datetime(2024, 1, 1),
+            accrual_config=AccrualConfig(is_annualized_rebate=False),
         )
         pricing_env = PricingEnvironment(
             rate_curve=FlatRateCurve(rate=0.01),
