@@ -530,10 +530,20 @@ class AsianOption(BaseEquityOption):
         """Age for theta (``BaseEquityOption.time_shift``), then record at the held spot every record the bump left
         strictly past without a price: the theta bump holds the spot, so this is the fill pricing would make at the
         bumped instant (value-neutral), recorded so it is not reported as missing (spec 2026-10-09 run fixings §3.4,
-        the range accrual's theta rule). A record landing on the bumped instant (t = 0) stays live."""
+        the range accrual's theta rule). A record landing on the bumped instant (t = 0) stays live.
+
+        A numeric record contract (the form ``with_time_elapsed`` ages) moves every numeric record time by
+        ``-time_bump`` with its maturity, snapped to exactly 0.0 when zero, so its theta equals its dated twin's."""
+        numeric = self.exercise_date is None and self.maturity is not None
         super().time_shift(time_bump, bumped_date, pricing_env, keep_landing=keep_landing)
         if self.observation_records is None:
             return
+        if numeric:
+            self.observation_records = [
+                replace(rec, observation_time=snap_time(rec.observation_time - time_bump))
+                if rec.observation_time is not None else rec
+                for rec in self.observation_records
+            ]
         spot = float(pricing_env.spot)
         self.observation_records = [
             replace(rec, observed_price=spot)

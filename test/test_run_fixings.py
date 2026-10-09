@@ -174,13 +174,48 @@ def test_asian_time_shift_records_only_the_stepped_over_dated_record():
     assert prices[0] == 107.0 and all(p is None for p in prices[1:])
 
 
-def test_asian_numeric_theta_does_not_move_record_times_so_records_nothing():
-    # Pre-existing, out of scope (Task 2 brief): numeric record times are not moved by the theta bump, so no numeric
-    # record is stepped over and none is recorded. Pinned so a change to it is deliberate.
-    prod = F.asian_numeric()
+def test_asian_numeric_time_shift_moves_record_times_and_records_the_stepped_over_record():
+    # Standing twin rule (final review Important #2): the theta bump moves numeric record times by -time_bump
+    # (snapped, as with_time_elapsed), then records what it left strictly past at the held spot, as the dated twin.
+    prod = _aged(F.asian_numeric(), F.FIX_DAY)
     env = F.eq_env(F.FIX_DAY, spot=107.0)
+    times = [r.observation_time for r in prod.observation_records]
     prod.time_shift(DAY, env.valuation_date + timedelta(days=1), env)
+    assert [r.observation_time for r in prod.observation_records] == [snap_time(t - DAY) for t in times]
+    prices = [r.observed_price for r in prod.observation_records]
+    assert prices[0] == 107.0 and all(p is None for p in prices[1:])
+
+
+def test_asian_numeric_time_shift_landing_on_the_bumped_instant_stays_live():
+    prod = _aged(F.asian_numeric(), F.FIX_DAY - 1)
+    env = F.eq_env(F.FIX_DAY - 1, spot=107.0)
+    prod.time_shift(DAY, env.valuation_date + timedelta(days=1), env)
+    assert prod.observation_records[0].observation_time == 0.0
     assert all(r.observed_price is None for r in prod.observation_records)
+
+
+@pytest.mark.parametrize("kind", ["asian", "ra"])
+@pytest.mark.parametrize("day", [0, 3, F.FIX_DAY, 10, 17, F.FIX2_DAY])
+def test_run_twins_have_equal_theta(kind, day):
+    # Standing twin rule: after the run recorder aged both twins to ``day``, every Greek (theta included) agrees.
+    from quantark.asset.equity.riskmeasures import GreeksCalculator
+
+    greeks = {}
+    for form in ("dated", "numeric"):
+        pf = F.eq_book(F.MAKERS[(kind, form)]())
+        rec = RunFixingRecorder()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", MissingFixingWarning)
+            rec.register(pf)
+            for d in range(1, day + 1):
+                F.move(pf, d)
+                rec.advance(pf)
+            greeks[form] = pf.get_portfolio_greeks(GreeksCalculator(), use_analytical=False)
+    for name in ("delta", "vega", "theta"):
+        assert is_close(greeks["dated"][name], greeks["numeric"][name], rel_tol=1e-12, abs_tol=1e-14), name
+    # Bump gamma's second difference divides a few-ulp bumped-price difference by h^2 (Asian day 18: prices bitwise
+    # equal, gamma 0.005408640383963937 vs 0.005408640383953902, rel 1.9e-12).
+    assert is_close(greeks["dated"]["gamma"], greeks["numeric"]["gamma"], rel_tol=1e-9, abs_tol=1e-14)
 
 
 # ---------------------------------------------------------------- Task 3: FX protocol
