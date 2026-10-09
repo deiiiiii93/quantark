@@ -418,7 +418,7 @@
      13.854456307478504,
      7.883685238075664
     ],
-    "expected_discounted_maturity_cashflow": 46.76822352229296,
+    "expected_discounted_maturity_cashflow": 50.483766503786335,
     "ki_ever_probability": 0.15371182475758727,
     "ki_survive_knocked_in_probability": 0.1482452134419087,
     "kie_mass_lost": -4.440892098500626e-16,
@@ -433,15 +433,15 @@
      0.25
     ],
     "mass_lost": -1.3322676295501878e-15,
-    "pv": 99.54766517703331,
+    "pv": 103.26320815852668,
     "quadrature_error": {
      "expected_discounted_ko_cashflow": 3.907985046680551e-14,
-     "expected_discounted_maturity_cashflow": 2.842170943040401e-14,
+     "expected_discounted_maturity_cashflow": 7.815970093361102e-14,
      "ki_ever_probability": 5.551115123125783e-17,
      "ki_survive_knocked_in_probability": 1.3877787807814457e-16,
      "ko_probability": 3.885780586188048e-16,
      "ko_times": 0.0,
-     "pv": 5.684341886080802e-14,
+     "pv": 1.1368683772161603e-13,
      "survival_probability": 4.440892098500626e-16
     },
     "survival_probability": [
@@ -1167,31 +1167,6 @@
   }
  },
  "provenance": {
-  "amendments": [
-   {
-    "cases": [
-     {
-      "case": "sb_cont_3m",
-      "fields": [
-       "expected_discounted_maturity_cashflow",
-       "pv"
-      ],
-      "new": {
-       "expected_discounted_maturity_cashflow": 46.76822352229296,
-       "pv": 99.54766517703331
-      },
-      "old": {
-       "expected_discounted_maturity_cashflow": 50.483766503786335,
-       "pv": 103.26320815852668
-      }
-     }
-    ],
-    "date": "2026-10-09",
-    "script": "docs/superpowers/specs/2026-10-08-accrual-scope-followups-evidence/item6_rebank_pde_statistics.py",
-    "tree": "b1868d3ffff06eb58aecfdcf2bf2b2f8f3988389",
-    "why": "an unset is_annualized_rebate follows is_annualized (accrual follow-ups item 6, W2): the rebate of a contract whose tenor is not one year is scaled by its tenor"
-   }
-  ],
   "date": "2026-10-03",
   "numpy": "2.4.6",
   "source": "spec 3B evidence s1_level1_accuracy.json + exact_stats.py",

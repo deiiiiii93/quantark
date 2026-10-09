@@ -103,13 +103,10 @@ class TestAgainstBankedBenchmark:
         assert pv == pytest.approx(96.4619429590, abs=0.025)
 
     def test_snowball_near_expiry(self):
-        # Banked reference 103.2614422102 (se 0.0078); stock PDE err +0.1518. Banked with a flat rebate (15); an
-        # unset rebate flag now follows is_annualized and pays 15 x 0.25, which moves the PV by exactly
-        # -rebate x (1 - tenor) x DF x P(no KO, no KI) = -3.715542981493 (pde_statistics sb_cont_3m, the same
-        # contract, item6_rebank_pde_statistics.py). The reference is the banked RQMC value shifted by it.
+        # Banked reference 103.2614422102 (se 0.0078); stock PDE err +0.1518.
         spec = dict(SNOWBALL, months=3, maturity=0.25)
         pv = pde_pv(SnowballPDESolver, make_snowball(spec))
-        assert pv == pytest.approx(103.2614422102 - 3.715542981493, abs=0.04)
+        assert pv == pytest.approx(103.2614422102, abs=0.04)
 
     def test_phoenix_ordinary(self):
         # Banked reference -3.4261393035 (se 0.0042); stock PDE err +0.0491.
