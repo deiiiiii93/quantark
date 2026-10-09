@@ -47,6 +47,11 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - A fixing at exactly t = 0 (today's, unprinted) that pricing decides at the current spot no longer counts as
   missing: `MissingFixingWarning` names only strictly past fills (`RangeAccrualOption`, `FxRangeAccrualOption` and
   its variants, `AsianOption`; spec 2026-10-09 run fixings §3.2). Prices are unchanged.
+- The equity `BacktestEngine` records a range accrual's / record Asian's fixing once, at the spot of the run day it
+  was live, when the clock moves past it (`BacktestEngine.run_fixings`), instead of re-deciding it at every later
+  day's spot; numeric contracts age with their records (no more constant-maturity "no roll rule" warning for them).
+  A run whose instants carry a time of day (`frequency="H"`) and holds such a product is refused. Measured on the
+  spec fixture: a dated range accrual on day 10, 2.744374 -> 4.649441 (= the contract with the day-4 fixing recorded).
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
 - A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.

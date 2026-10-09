@@ -32,8 +32,10 @@ The manager also ages untracked *schedule-free* float-maturity contracts
 first sees the position, so a ``maturity=1.0`` vanilla is not repriced as a
 one-year option on every day of the run. Untracked products with a float
 maturity and no roll rule (schedule-bearing contracts) are repriced with a
-constant maturity and warn once; float-maturity ``Futures`` hedges are a
-constant-maturity proxy by design and never warn.
+constant maturity and warn once; run-fixings participants (range accruals,
+record Asians) are aged by ``quantark.util.run_fixings`` instead;
+float-maturity ``Futures`` hedges are a constant-maturity proxy by design and
+never warn.
 """
 
 from __future__ import annotations
@@ -48,6 +50,7 @@ import pandas as pd
 
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.util.run_fixings import participates
 
 from .autocallable import AutocallableLifecycleTracker
 from .barrier import TRACKED_BARRIER_PRODUCTS, BarrierLifecycleTracker
@@ -185,6 +188,8 @@ class PortfolioLifecycleManager:
         a constant maturity; warn once per position so the choice is visible.
         """
         product = position.product
+        if participates(product):
+            return None          # aged and fixed by the run's RunFixingRecorder (spec 2026-10-09 run fixings §3.5)
         if not is_float_rollable(product):
             if has_unrolled_float_maturity(product) and position_id not in self._unrolled_warned:
                 self._unrolled_warned.add(position_id)
