@@ -224,7 +224,10 @@ moves. So on a wrapped environment `vol_pts` is a move of the trading-quoted
 - Untracked products carry no cashflow ledger. Futures hedges and
   schedule-bearing untracked products are repriced with a constant maturity
   (declared via `contract_roll_days=0`); schedule-free float contracts are
-  rolled.
+  rolled. Run-fixings participants (range accruals, record-schedule Asians)
+  are rolled by the run clock (`quantark.util.run_fixings`); a fixing that
+  passes strictly inside a step is decided at t0's spot, and any difference
+  from t1's own record shows in the `fixing_refill` row.
 - Engines are used as given (mutated in place by the backtests).
 - Taylor on clock-wrapped environments is rejected (waterfall only).
 - Bucketed mode is experimental and never on the default path.

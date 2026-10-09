@@ -145,7 +145,7 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   accrual at 109.5 -> 111 -> 111.5 (quantity 2) sum to the PV change exactly (-3.8965), with a re-fill row of
   -3.8054 on the first day. The roll check runs on the contracts as supplied, before any fill. Multi-day runs (equity and FX dynamic scenarios, equity and
   FX backtests, the replay book) fill once at the FIRST valuation and keep it; a fixing that passes during a run
-  is still decided at each day's spot (TODO, a lifecycle matter). Delta near a barrier no longer carries the
+  is recorded once at the spot of the day it was live (run fixings, below). Delta near a barrier no longer carries the
   fill's jump: a numeric range accrual at spot 109.5 under a 110 barrier, delta -0.8914 -> -0.0227 and gamma
   -1.588 -> -0.00106 (equal to the contract with the fixing recorded); an FX range accrual at 1.2995 under 1.30,
   delta -5.906e6 -> -4.991e4. Prices are unchanged (48 prices bit-identical to main); the warning fires once per
