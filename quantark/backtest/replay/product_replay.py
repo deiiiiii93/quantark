@@ -196,6 +196,11 @@ class ProductReplay:
     def start_date(self, value: Optional[pd.Timestamp]) -> None:
         self._tracker.start_date = value
 
+    def retire_if_matured_before_run(self, env: PricingEnvironment) -> bool:
+        """The tracker's ``retire_if_matured_before_run``: a contract matured before the run is dead from its
+        start, with no cash and a zero value (user ruling 2026-10-09)."""
+        return self._tracker.retire_if_matured_before_run(env)
+
     def product_for_lifecycle(self):
         return self._tracker.product_for_lifecycle()
 

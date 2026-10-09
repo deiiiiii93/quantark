@@ -66,10 +66,11 @@ class EnsembleBacktestEngine:
         pricers = self._make_pricers(cache, dates)
         gate_reports: List[GateReport] = []
         schedule_env = self._schedule_env(dates[0])
-        schedules = [
-            self._tracker(bp, dates[0]).resolve_calendar_schedule(dates, schedule_env)
-            for bp in cfg.products
-        ]
+        trackers = [self._tracker(bp, dates[0]) for bp in cfg.products]
+        for tracker in trackers:
+            tracker.retire_if_matured_before_run(schedule_env)     # warns once for a contract matured before the run
+        schedules = [tracker.resolve_calendar_schedule(dates, schedule_env) for tracker in trackers]
+        self._matured = [bool(s.matured_before_run) for s in schedules]
         self._check_calendar(schedules, n_days)
 
         lifecycle_cls = (KOResetVectorLifecycle if any(isinstance(s, KOResetCalendarSchedule) for s in schedules)
@@ -110,7 +111,9 @@ class EnsembleBacktestEngine:
                 # a provider that cannot hold its budget at the start state
                 # fails the cell up front, not after a day of work.
                 everyone = np.arange(n_paths)
-                for bp, pricer in zip(cfg.products, pricers):
+                for bp, pricer, matured in zip(cfg.products, pricers, self._matured):
+                    if matured:
+                        continue                # never priced: zero value on every day
                     states = self._states_for(day, d, everyone, np.zeros(n_paths, dtype=bool),
                                               spot, vol, rate, q_T, div_yield, basis, env_key, initial=True)
                     gate_reports.append(pricer.verify(
@@ -335,7 +338,9 @@ class EnsembleBacktestEngine:
         """
         total = np.zeros(spot.size)
         everyone = np.arange(spot.size)
-        for bp, quantity, pricer in zip(self.config.products, self.quantities, pricers):
+        for bp, quantity, pricer, matured in zip(self.config.products, self.quantities, pricers, self._matured):
+            if matured:
+                continue                        # matured before the run: zero value (user ruling 2026-10-09)
             if bp.initial_price is not None:
                 total += float(quantity) * float(bp.initial_price)
                 continue

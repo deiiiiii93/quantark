@@ -268,6 +268,14 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             cashflow_id="ko_reset_v1_terminal",
         )
 
+    def terminal_date(self, env: PricingEnvironment) -> Optional[pd.Timestamp]:
+        """The KO-reset's maturity: V1 at the knocked-in contract's end once knocked in, else V0 at schedule 1's last
+        record (R2), the day ``settle_maturity_if_due`` books it."""
+        if self.lifecycle.knocked_in:
+            return self._timing_date(self._final_timing(env))
+        last = self._last_pre_record(self.product, env)
+        return None if last["date"] is None else pd.Timestamp(last["date"]).normalize()
+
     def _due_at_previous_close(self, product: Any, record: Dict[str, Any]) -> bool:
         """Whether ``record`` was already due at the previous observed close (none: nothing was)."""
         if self._previous_close is None:
@@ -285,7 +293,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         """Schedule-1 knock-out, then the knock-in, then schedule 2 (the knock-in close included)."""
         valuation_point = self._valuation_point(date, product)
         self.lifecycle.valuation_point = valuation_point
-        if not self.lifecycle.alive or not self.has_lifecycle:
+        if self.retire_if_matured_before_run(env) or not self.lifecycle.alive or not self.has_lifecycle:
             return []
         events: List[LifecycleEvent] = []
         try:
@@ -418,7 +426,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         """V0 at schedule 1's last observation (R2), or V1 at the knocked-in contract's end."""
         valuation_point = self._valuation_point(date, product)
         self.lifecycle.valuation_point = valuation_point
-        if not self.lifecycle.alive:
+        if self.retire_if_matured_before_run(env) or not self.lifecycle.alive:
             return None
         if self.lifecycle.knocked_in:
             timing = self._final_timing(env)

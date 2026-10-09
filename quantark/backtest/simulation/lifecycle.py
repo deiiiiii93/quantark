@@ -80,6 +80,12 @@ class VectorLifecycle:
         self.observed_ki = [
             np.zeros((self.n_paths, s.ki_due_day.size), dtype=bool) for s in self.schedules
         ]
+        # a contract matured before the run is dead from day 0: no event, no cash (user ruling 2026-10-09)
+        for p, s in enumerate(self.schedules):
+            if s.matured_before_run:
+                self.alive[p] = False
+                self.matured[p] = True
+                self.settled[p] = True
 
     def step(self, day_index: int, spot: np.ndarray, payoff_fn: PayoffFn) -> List[LifecycleRecord]:
         """Advance one day; returns the events that fired.

@@ -121,8 +121,13 @@ class PortfolioLifecycleManager:
         float-maturity products present here have their roll measured from
         ``base_date`` (the trackers' convention); others roll from the first
         day the manager sees them.
+
+        A tracked contract that matured before ``base_date`` leaves the book here, before the run prices it: its
+        tracker warns (``MaturedBeforeRunWarning``) and the run books no cash for it and values it at zero (user
+        ruling 2026-10-09).
         """
-        for position_id, position in portfolio.positions.items():
+        matured: List[str] = []
+        for position_id, position in list(portfolio.positions.items()):
             product = position.product
             if isinstance(product, (SnowballOption, PhoenixOption)):
                 # A KO-reset (a SnowballOption) gets its own tracker (spec 2026-10-08); an un-knocked
@@ -136,12 +141,15 @@ class PortfolioLifecycleManager:
                     quantity=position.quantity,
                     start_date=self.base_date,
                 )
+                env = deepcopy(portfolio.pricing_environments[position.underlying])
+                if tracker.retire_if_matured_before_run(env):
+                    matured.append(position_id)
+                    continue
                 self._autocallable[position_id] = tracker
                 position.lifecycle_state = tracker.lifecycle
                 # The position is valued from the tracker's initial copy from the start (review finding I2):
                 # the snapped contract, its carried state, and a knocked-in REBASED contract already the
                 # ABSOLUTE one it has become; the booked product is not what the run prices.
-                env = deepcopy(portfolio.pricing_environments[position.underlying])
                 position.product = tracker.product_for_pricing(self.base_date, env, initial=True)
             elif isinstance(product, TRACKED_BARRIER_PRODUCTS):
                 tracker = BarrierLifecycleTracker(
@@ -153,6 +161,8 @@ class PortfolioLifecycleManager:
                 position.lifecycle_state = tracker.state
             elif is_float_rollable(product):
                 self._float_roller.register(position_id, product, self.base_date)
+        for position_id in matured:
+            portfolio.remove_position(position_id)
 
     def register_float_rolls(self, portfolio) -> None:
         """Anchor every schedule-free float-maturity position at ``base_date``.

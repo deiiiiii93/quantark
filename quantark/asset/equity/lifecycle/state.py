@@ -67,6 +67,17 @@ class AutocallableLifecycleState:
     #: one, or for a non-accruing record. ``ki_date`` (the close it was observed on) stays the reset's timing.
     knock_in_anchor: Optional["KnockInAnchor"] = None
 
+    def mark_matured_before_run(self, maturity_date: datetime) -> bool:
+        """The contract matured before the run started (user ruling 2026-10-09): dead, matured and settled, with no
+        ledger entry -- the run books no terminal cash and values it at zero. False when it is already dead."""
+        if not self.alive:
+            return False
+        self.alive = False
+        self.matured = True
+        self.maturity_date = maturity_date
+        self.settled = True
+        return True
+
     def mark_ki(self, timestamp: datetime, anchor: Optional["KnockInAnchor"] = None) -> bool:
         if self.knocked_in or self.knocked_out:
             return False

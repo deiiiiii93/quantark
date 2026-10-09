@@ -391,7 +391,10 @@ class ReplayBacktestEngine:
                 for bp, replay, engine in zip(
                     self.config.products, self._replays, self._pricing_engines
                 ):
-                    if bp.initial_price is not None:
+                    if replay.retire_if_matured_before_run(env):
+                        # matured before the run (user ruling 2026-10-09): no cash, zero value every day
+                        initial_price = 0.0
+                    elif bp.initial_price is not None:
                         initial_price = float(bp.initial_price)
                     else:
                         # before the first close: a record due today is still pending (spec 2026-10-08 4a)

@@ -29,6 +29,12 @@ carry as observed, was observed before the run. It is marked observed and never
 tested against the run's first close: it did not knock out or knock in, and a
 coupon there is history (a memory coupon was paid, so nothing is memorized). A
 record dated ON ``start_date`` is today's and is tested on that close.
+
+A contract whose maturity falls before ``start_date`` (user ruling
+2026-10-09, the same strictly-before rule) matured before the run: it is never
+settled in it. The tracker warns once (``MaturedBeforeRunWarning``) and marks
+it dead with no ledger entry, so the run books no terminal cash and values it at
+zero on every day (``retire_if_matured_before_run``).
 """
 
 from __future__ import annotations
@@ -37,6 +43,8 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional
+
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -66,6 +74,11 @@ DateResolver = Callable[[pd.Timestamp], pd.Timestamp]
 
 def _identity_date_resolver(date: pd.Timestamp) -> pd.Timestamp:
     return pd.Timestamp(date).normalize()
+
+
+class MaturedBeforeRunWarning(UserWarning):
+    """A contract matured before the run's ``start_date``: it is not settled in the run, books no cash and is valued
+    at zero on every day (user ruling 2026-10-09)."""
 
 
 def lifecycle_clock_origin(product: Any, start_date) -> Optional[pd.Timestamp]:
@@ -105,6 +118,8 @@ class AutocallableLifecycleTracker:
         self.start_date = start_date
         self.has_lifecycle = has_lifecycle
         self._date_resolver = date_resolver or _identity_date_resolver
+        self._matured_before_run = False
+        self._maturity_checked_for: Optional[pd.Timestamp] = None
 
     # ------------------------------------------------------------------
     # Pricing-product construction (mirrors ProductReplay)
@@ -121,6 +136,58 @@ class AutocallableLifecycleTracker:
         if record.get("date") is None or self.start_date is None:
             return False
         return pd.Timestamp(record["date"]).normalize() < pd.Timestamp(self.start_date).normalize()
+
+    def _timing_date(self, timing) -> Optional[pd.Timestamp]:
+        """The close a terminal timing falls due on: its determination date, or the clock origin plus its
+        determination time in whole days (``_timing_is_due``'s rule)."""
+        if timing.determination_date is not None:
+            return pd.Timestamp(timing.determination_date).normalize()
+        origin = self.clock_origin
+        if origin is None:
+            return None
+        return origin.normalize() + timedelta(days=int(round(float(timing.determination_time) * 365.0)))
+
+    def terminal_date(self, env: PricingEnvironment) -> Optional[pd.Timestamp]:
+        """The day the contract's terminal falls due on (its maturity)."""
+        product = self.product
+        return self._timing_date(resolve_terminal_timing(product, self._schedule_resolution_env(product, env)))
+
+    def matured_before_run(self, env: PricingEnvironment) -> bool:
+        """Whether the contract's terminal falls due strictly before ``start_date`` (the decision-2 rule): it matured
+        before the run. A maturity ON ``start_date`` is settled on the first close."""
+        if self.start_date is None:
+            return False
+        maturity = self.terminal_date(env)
+        return maturity is not None and maturity < pd.Timestamp(self.start_date).normalize()
+
+    def retire_if_matured_before_run(self, env: PricingEnvironment) -> bool:
+        """Retire a live contract that matured before the run (user ruling 2026-10-09): warn once, and mark it dead
+        with no ledger entry, so the run books no terminal cash and values it at zero. True when the contract is
+        (now, or already) retired by this rule; idempotent."""
+        if self._matured_before_run:
+            return True
+        if not self.lifecycle.alive or self.start_date is None:
+            return False
+        # Checked once per run start: an event in the run can only move the maturity later (a KO-reset's knock-in
+        # on a close of the run), never before the start.
+        start = pd.Timestamp(self.start_date).normalize()
+        if self._maturity_checked_for == start:
+            return False
+        self._maturity_checked_for = start
+        if not self.matured_before_run(env):
+            return False
+        maturity = self.terminal_date(env)
+        warnings.warn(
+            MaturedBeforeRunWarning(
+                f"{type(self.product).__name__} matured on {maturity.date()}, before the run start "
+                f"{pd.Timestamp(self.start_date).date()}: it is not settled in the run, books no cash and is "
+                "valued at zero"
+            ),
+            stacklevel=2,
+        )
+        self.lifecycle.mark_matured_before_run(maturity.to_pydatetime())
+        self._matured_before_run = True
+        return True
 
     @property
     def lifecycle_contract(self) -> Any:
@@ -221,6 +288,8 @@ class AutocallableLifecycleTracker:
         timestamp = pd.Timestamp(date).to_pydatetime()
         valuation_point = self._valuation_point(date, product)
         self.lifecycle.valuation_point = valuation_point
+        if self.retire_if_matured_before_run(env):
+            return []
         if not self.lifecycle.alive:
             return []
         if not self.has_lifecycle:
@@ -485,15 +554,12 @@ class AutocallableLifecycleTracker:
         """Determine the terminal payoff once contractual maturity is reached."""
         valuation_point = self._valuation_point(date, product)
         self.lifecycle.valuation_point = valuation_point
-        if not self.lifecycle.alive:
+        if self.retire_if_matured_before_run(env) or not self.lifecycle.alive:
             return None
         schedule_env = self._schedule_resolution_env(product, env)
         timing = resolve_terminal_timing(product, schedule_env)
         if not self._timing_is_due(date, valuation_point, timing):
             return None
-        # TODO(tracker clock decision 2): a terminal dated BEFORE the run (a contract that matured before it, not
-        # carried as matured) is still determined on the run's first close, off that close's spot. Decision 2 rules
-        # only on barrier and coupon records; the terminal awaits a ruling.
 
         if isinstance(product, PhoenixOption):
             # Phoenix takes the knock-in state second and the environment by keyword; the snowball
@@ -627,6 +693,7 @@ class AutocallableLifecycleTracker:
             ko_settlement_delay=np.array(ko_delay, dtype=float),
             terminal_settlement_delay=terminal_delay,
             clock_origin=None if self.clock_origin is None else self.clock_origin.normalize(),
+            matured_before_run=bool(self.matured_before_run(env)),
         )
 
     def _calendar_terminal(self, product, env, first_due, settlement_position, terminal_payment_date):
@@ -993,7 +1060,9 @@ class CalendarSchedule:
     product (``_uses_date_timing``). ``clock_origin`` is the day its numeric
     times run from (``lifecycle_clock_origin``, normalized): the numeric
     valuation point of position ``d`` is ``(dates[d] - clock_origin).days /
-    365``.  On the numeric clock a terminal
+    365``. ``matured_before_run``: the contract's maturity lies before the
+    run's start, so it is dead from day 0 with no cash (user ruling
+    2026-10-09).  On the numeric clock a terminal
     cashflow's payment time is its determination time plus the record's
     ``settlement_time - time`` (``ko_settlement_delay`` per observation,
     ``terminal_settlement_delay`` for maturity), and that is what the ledger
@@ -1017,3 +1086,4 @@ class CalendarSchedule:
     ko_settlement_delay: np.ndarray
     terminal_settlement_delay: float
     clock_origin: Optional[pd.Timestamp]
+    matured_before_run: bool
