@@ -217,3 +217,45 @@ rest are byte-identical, every `book_*` frame included.
  test/replay_golden/data/scalar_bsm_surfaces.csv            | 30 +++++++++++-----------
  9 files changed, 31 insertions(+), 31 deletions(-)
 ```
+
+## 2026-10-09 regeneration: an unset rebate flag follows `is_annualized` (accrual follow-ups item 6, W2)
+
+**What changed in the library.** `AccrualConfig.is_annualized_rebate=None` used to mean a flat rebate; it now
+follows `is_annualized` (default True), as the knock-out coupon always did (`accrual.leg_annualized`). The
+knock-in payoff stays flat when its flag is unset. The fixtures' snowball (`create_standard_snowball`, maturity
+6/365, rebate 2% = ko_rate, multiplier 100) leaves both flags unset, so its V0 rebate falls from 200 to
+200 x 6/365 = 3.29. It knocks in on 2024-01-03, so only the one not-knocked-in day, 2024-01-02, re-prices; every
+later P&L row moves by that day's offset. The hedge rounds to the same futures quantity: `trades`, `rebalances`,
+`actions`, the event-probability frames and `localvol_surfaces` are byte-identical.
+
+Closed-form check of the moved maturity cash on 2024-01-02: new - old = -200 x (1 - 6/365) x DF x P(no KO, no
+KI), with P(no KO, no KI) = `survival_probability - ki_probability_to_maturity` from the same row:
+
+| fixture | P(no KO, no KI) | moved maturity cash | closed form | relative gap |
+|---|---|---|---|---|
+| scalar_bsm (PDE) | 0.796930 | -156.714983 | -156.714480 | 3.2e-6 |
+| localvol (PDE) | 0.883636 | -173.765536 | -173.764937 | 3.5e-6 |
+| book (QUAD, per unit) | 0.796874 | -156.620879 | -156.703421 | -5.3e-4 |
+
+The PDE gaps are the discount factor at `6/365` against the engine's own maturity time. The QUAD gap is that
+engine's event-statistics lattice against its pricing lattice.
+
+| file | moved (2024-01-02 unless stated) |
+|---|---|
+| `scalar_bsm_states.csv` | `portfolio_value` / `product_mtm` / `contingent_product_mtm` -10131.703047 -> -9974.988063 (+1.55%); `product_pnl`, `total_pnl` from 2024-01-03 by -156.714983 (final 130.607156 -> -26.107827) |
+| `scalar_bsm_greeks.csv` | `price` 10131.703047 -> 9974.988063; `delta` 19.839205 -> 25.844113 (+30%); `gamma` -44.135198 -> -22.566893 (+49%), with every position/hedge/cash column derived from them |
+| `scalar_bsm_surfaces.csv` | all 15 cells of the 2024-01-02 spot x q grid: `price` -0.04% to -1.55%; `delta`, `gamma` and their cash columns up to 104% relative (largest: delta 173.789 -> 119.860) |
+| `scalar_bsm_daily_event_summary.csv` | `pv` 10131.703047 -> 9974.988063; `expected_discounted_maturity_cashflow` 8753.095376 -> 8596.380393 |
+| `scalar_bsm_summary.json` | `initial_portfolio_value` -10131.703047 -> -9974.988063; `total_pnl` 130.607156 -> -26.107827 |
+| `localvol_states.csv` | value -10156.459290 -> -9986.251675 (+1.68%); P&L from 2024-01-03 by -170.207615 (final 155.363400 -> -14.844215) |
+| `localvol_greeks.csv` | `price` 10156.459290 -> 9986.251675; `delta` 10.805165 -> 18.035711 (+67%); `gamma` -42.861620 -> -20.458421 (+52%), and derived columns |
+| `localvol_daily_event_summary.csv` | `pv` 10162.262890 -> 9988.497354; `expected_discounted_maturity_cashflow` 9314.727758 -> 9140.962222 |
+| `localvol_summary.json` | `initial_portfolio_value` -10156.459290 -> -9986.251675; `total_pnl` 155.363400 -> -14.844215 |
+| `book_states.csv` | value -30394.824769 -> -29924.962133 (+1.55%); `product_pnl` from 2024-01-03 by -469.862636 (final 391.537098 -> -78.325538); `total_pnl` final 2815.537098 -> 2345.674462 |
+| `book_greeks.csv` | `delta` -70.398201 -> -85.608339 (-22%); `gamma` 135.035855 -> 69.668384 (-48%), and derived columns |
+| `book_daily_event_summary.csv` | both positions' rows: `pv` 10131.608256 -> 9974.987378; `expected_discounted_maturity_cashflow` 8749.035908 -> 8592.415030 |
+| `book_summary.json` | `initial_portfolio_value` -30394.824769 -> -29924.962133; `product_pnl` 391.537098 -> -78.325538; `total_pnl` 2815.537098 -> 2345.674462 |
+
+```
+ 13 files changed, 42 insertions(+), 42 deletions(-)
+```

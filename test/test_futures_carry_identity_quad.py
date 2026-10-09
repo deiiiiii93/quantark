@@ -78,5 +78,8 @@ def test_worst_historical_date_closes_local_identity_while_preserving_secant_gap
     assert abs(result.pricing_delta_local_gap_hands) > .1
     assert abs(result.net_delta_audit_error_hands) < 1e-9
     if readout == "legacy_linear":
-        assert result.finite_bump_identity_residual_hands == pytest.approx(.5482832642, abs=1e-7)
-        assert pricing_delta / 200 == pytest.approx(-91.4013448101, abs=1e-7)
+        # Re-pinned 2026-10-09: the rebate (flag unset) now follows is_annualized and pays coupon x the contract
+        # tenor (1.00822 years) instead of the flat coupon: .5482832642 -> .5491942645, -91.4013448101 ->
+        # -91.5027056047 (accrual follow-ups item 6).
+        assert result.finite_bump_identity_residual_hands == pytest.approx(.5491942645, abs=1e-7)
+        assert pricing_delta / 200 == pytest.approx(-91.5027056047, abs=1e-7)

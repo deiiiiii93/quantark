@@ -80,6 +80,10 @@ def short_snowball(maturity_days: int = 6, *, ko_days=(2, 5), ki_days=(1, 3), co
     contract (the numeric clock: the schedule is in year fractions, so the
     tracker keeps a time-based valuation point).  The factory does not take
     a convention, so it is set after construction and re-validated.
+
+    The rebate is flat (``is_annualized_rebate=False``): an unset rebate flag follows ``is_annualized`` and would
+    pay 20% x 6/365, and the book's delta would then round to zero hands every day on the conformance paths, so
+    the hedge these tests exist to check would never trade.
     """
     from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
 
@@ -90,7 +94,7 @@ def short_snowball(maturity_days: int = 6, *, ko_days=(2, 5), ki_days=(1, 3), co
         ki_observation_type=ObservationType.CONTINUOUS if continuous_ki else ObservationType.DISCRETE,
         ki_continuous=continuous_ki,
         ki_observation_dates=None if continuous_ki else [d / 365.0 for d in ki_days],
-        include_principal=True,
+        include_principal=True, is_annualized_rebate=False,
     )
     # The factory routes kwargs into the sub-configs and does not take this one.
     product.initial_date = INCEPTION
