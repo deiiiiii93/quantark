@@ -68,8 +68,11 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   unchanged. A certain-V0 contract prices at its closed form (100 + rebate x tenor) e^{-rT} on QUAD, QUAD V2, MC
   and PDE (`test/accrual_time/test_leg_flags.py`). Re-pinned: the replay goldens (13 frames; a 6-day snowball's
   2% rebate falls from 200 to 3.29 per contract: initial value -10131.703047 -> -9974.988063 on `scalar_bsm`,
-  see `test/replay_golden/README.md`), the `pde_statistics` 3-month reference (PV 103.263208 -> 99.547665,
-  equal to the closed-form shift), the first-passage near-expiry benchmark and the carry-identity QUAD pins.
+  see `test/replay_golden/README.md`) and the carry-identity QUAD pins. The modelvalidation snowball builders
+  (`equity_snowball.make_snowball`, `equity_snowball_vol.make_snowball`) state `is_annualized_rebate=False`: the
+  banked certificates keep the terms they were certified on (user decision 2026-10-09, no re-certification),
+  every anchor reproduces exactly, and the test cases built by them (the `pde_statistics` references, the
+  first-passage benchmarks) keep their original banks.
 - `SnowballOption` no longer refuses an annualized contract with neither `tenor`, `initial_date` nor
   `settlement_date` at construction. R5 is the one rule, read on the effective flags: a dated contract whose
   annualized cash needs an accrual start without `initial_date` is refused (now including one whose rebate

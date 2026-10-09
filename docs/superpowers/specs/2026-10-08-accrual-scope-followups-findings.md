@@ -123,16 +123,15 @@ The user chose neither A nor B as written: an unset **rebate** flag follows `is_
   autocallable: 6 failed (3 banked certificates, the first-passage near-expiry benchmark, the carry-identity
   QUAD pins, the simulation deliberate-disagreement test). All 6 pass with the rebate default reverted (a
   pytest plugin setting the rebate leg's unset default to flat), so the rebate rule alone moves them.
-- Re-pinned with closed-form checks (`item6_rebank_pde_statistics.py`, `test/replay_golden/README.md`). **Not
-  re-pinned: `adi2d-snowball-greeks`, `snowball-flat-bsm` and `snowball-localvol-1d` (all 2026-10-06) no longer
-  reproduce 41 anchors** (their near-expiry/sub-year cells; e.g. `equity.snowball.quad/near_expiry/pv` 103.262509
-  -> 99.547329). A code change needs a full re-certification (release procedure); refreshing anchors is
-  forbidden. That is the user's call before landing.
-- **User decision 2026-10-09: no re-certification; the certified contracts keep their terms.** The modelvalidation
-  snowball builders (`equity_snowball.make_snowball`, also used by the local-vol study, and
-  `equity_snowball_vol.make_snowball`) now state `is_annualized_rebate=False`; every banked certificate's
-  anchors reproduce exactly (same machine, `==`). Every test contract built by these builders is flat again, so
-  the `sb_cont_3m` re-bank and the first-passage near-expiry re-pin go back to their dcea77b6 values.
+- Re-pinned with closed-form checks: the replay goldens (`test/replay_golden/README.md`), the carry-identity
+  QUAD pins and the R5 tests; the simulation fixture states a flat rebate.
+- The `sb_cont_3m` cases, the first-passage near-expiry benchmark and the three banked certificates
+  (`adi2d-snowball-greeks`, `snowball-flat-bsm`, `snowball-localvol-1d`, 2026-10-06: 41 anchors, e.g.
+  `equity.snowball.quad/near_expiry/pv` 103.262509 -> 99.547329 under the new default) all build their contract
+  through the modelvalidation snowball builders. **User decision 2026-10-09: no re-certification; the certified
+  contracts keep their terms.** The builders (`equity_snowball.make_snowball`, also used by the local-vol study,
+  and `equity_snowball_vol.make_snowball`) state `is_annualized_rebate=False`: every anchor reproduces exactly
+  (same machine, `==`), and those test cases keep their original (dcea77b6) banks.
 
 ---
 
