@@ -181,3 +181,48 @@ def test_asian_numeric_theta_does_not_move_record_times_so_records_nothing():
     env = F.eq_env(F.FIX_DAY, spot=107.0)
     prod.time_shift(DAY, env.valuation_date + timedelta(days=1), env)
     assert all(r.observed_price is None for r in prod.observation_records)
+
+
+# ---------------------------------------------------------------- Task 3: FX protocol
+FX_KINDS = ["domestic", "foreign", "quanto"]
+
+
+@pytest.mark.parametrize("kind", FX_KINDS)
+def test_fx_protocol_and_ageing(kind):
+    dated, numeric = F.fx_ra(kind, "dated"), F.fx_ra(kind, "numeric")
+    assert dated.has_run_fixings and dated.with_time_elapsed(DAY) is dated
+    before = copy.deepcopy(numeric)
+    aged = _aged(numeric, F.FIX_DAY)
+    assert type(aged) is type(numeric) and numeric.observation_records == before.observation_records
+    assert aged.observation_records[0].observation_time == 0.0
+    assert is_close(aged.accrued_offset, F.FIX_DAY * DAY, rel_tol=1e-15)
+    assert aged.open_fixings(F.fx_env(F.FIX_DAY))[0] == (0.0, "#0 t=0")
+    assert dated.open_fixings(F.fx_env(F.FIX_DAY))[0] == (0.0, "#0 2024-01-05")
+
+
+def test_fx_ageing_moves_a_numeric_delivery():
+    prod = F.fx_ra("domestic", "numeric")
+    prod.delivery = 1.0 + 2 * DAY
+    assert prod.with_time_elapsed(DAY).delivery == 1.0 + 2 * DAY - DAY
+
+
+@pytest.mark.parametrize("kind", FX_KINDS)
+@pytest.mark.parametrize("day", [3, 4, 5, 10, 24])
+def test_fx_numeric_twin_aged_prices_as_the_dated_contract(kind, day):
+    engine = F.FX_CLASSES[kind][1]()
+    outcomes = F.fx_hand_outcomes(kind, day - 1)
+    env = F.fx_env(day, quanto=(kind == "quanto"))
+    dated = F.fx_ra(kind, "dated", outcomes)
+    numeric = _aged(F.fx_ra(kind, "numeric", outcomes), day)
+    assert is_close(F.quiet_price(engine, numeric, env), F.quiet_price(engine, dated, env), rel_tol=1e-12)
+
+
+@pytest.mark.parametrize("kind", FX_KINDS)
+def test_fx_t0_fill_is_silent_and_a_past_fill_warns(kind):
+    engine = F.FX_CLASSES[kind][1]()
+    q = kind == "quanto"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        engine.price(F.fx_ra(kind, "dated"), F.fx_env(F.FIX_DAY, quanto=q))
+    with pytest.warns(MissingFixingWarning, match="1 past fixing"):
+        engine.price(F.fx_ra(kind, "dated"), F.fx_env(F.FIX_DAY + 1, quanto=q))

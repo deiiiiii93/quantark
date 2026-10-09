@@ -167,3 +167,85 @@ class DailyAdapter:
             vol_data=frame("volatility", [VOL] * len(idx)), rate_data=frame("rate", [RATE] * len(idx)),
             div_yield_data=frame("div_yield", [DIV] * len(idx)),
         )
+
+
+# ---------------------------------------------------------------- FX (EURUSD range [1.10, 1.30], notional 1e6)
+import numpy as np  # noqa: E402
+
+from quantark.asset.fx.engine.analytical import (  # noqa: E402
+    FxQuantoRangeAccrualAnalyticalEngine, FxRangeAccrualAnalyticalEngine,
+)
+from quantark.asset.fx.engine.analytical.fx_foreign_range_accrual_engine import (  # noqa: E402
+    FxForeignRangeAccrualAnalyticalEngine,
+)
+from quantark.asset.fx.product import CurrencyPair  # noqa: E402
+from quantark.asset.fx.product.option import (  # noqa: E402
+    FxQuantoRangeAccrualOption, FxRangeAccrualConfig, FxRangeAccrualObservationRecord, FxRangeAccrualOption,
+)
+from quantark.asset.fx.product.option.fx_foreign_range_accrual_option import FxForeignRangeAccrualOption  # noqa: E402
+from quantark.portfolio.fx import FXPortfolio  # noqa: E402
+from quantark.priceenv import FxPricingEnvironment  # noqa: E402
+from quantark.priceenv.fx_pricing_environment import FxQuantoMarketData, QuantoConversionOrientation  # noqa: E402
+
+PAIR = CurrencyPair("EUR", "USD")
+FX_CLASSES = {
+    "domestic": (FxRangeAccrualOption, FxRangeAccrualAnalyticalEngine),
+    "foreign": (FxForeignRangeAccrualOption, FxForeignRangeAccrualAnalyticalEngine),
+    "quanto": (FxQuantoRangeAccrualOption, FxQuantoRangeAccrualAnalyticalEngine),
+}
+
+
+def fx_spot(day: int) -> float:
+    return 1.25 if day <= FIX_DAY else 1.25 + 0.01 * (day - FIX_DAY)
+
+
+def fx_env(day: int, *, spot: Optional[float] = None, quanto: bool = False, date: Optional[datetime] = None,
+           **kw) -> FxPricingEnvironment:
+    q = FxQuantoMarketData(settlement_curve=FlatRateCurve(rate=0.01), quanto_vol=0.08, correlation=0.3,
+                           conversion_orientation=QuantoConversionOrientation.SETTLEMENT_PER_DOMESTIC)
+    return FxPricingEnvironment(
+        valuation_date=date if date is not None else START + timedelta(days=day),
+        spot_quote=SpotQuote(spot=fx_spot(day) if spot is None else spot),
+        domestic_curve=FlatRateCurve(rate=0.05), foreign_curve=FlatRateCurve(rate=0.03),
+        vol_surface=FlatVolSurface(volatility=0.10), quanto=q if quanto else None, **kw,
+    )
+
+
+def fx_ra(kind: str, form: str, outcomes: Optional[Dict[int, bool]] = None,
+          dates: Optional[List[datetime]] = None, times: Optional[List[float]] = None):
+    outcomes = outcomes or {}
+    cls = FX_CLASSES[kind][0]
+    extra = {"quanto_fx_rate": 110.0} if kind == "quanto" else {}
+    cfg = FxRangeAccrualConfig(upper_barrier=1.30, lower_barrier=1.10, accrual_rate=0.04)
+    if form == "dated":
+        recs = [FxRangeAccrualObservationRecord(observation_date=d, observed_in_range=outcomes.get(i))
+                for i, d in enumerate(dates or fixing_dates())]
+        return cls(notional=1_000_000.0, range_config=cfg, currency_pair=PAIR, expiry_date=START + timedelta(days=365),
+                   initial_date=START, observation_records=recs, **extra)
+    times = times if times is not None else [day_of(d) / 365.0 for d in fixing_dates()]
+    recs = [FxRangeAccrualObservationRecord(observation_time=t, observed_in_range=outcomes.get(i))
+            for i, t in enumerate(times)]
+    return cls(notional=1_000_000.0, range_config=cfg, currency_pair=PAIR, maturity=1.0, observation_records=recs,
+               **extra)
+
+
+def fx_hand_outcomes(kind: str, last_day: int, spot_of: Callable[[int], float] = fx_spot) -> Dict[int, bool]:
+    prod = fx_ra(kind, "dated")
+    recs = prod.get_observation_records()
+    return {i: prod.is_in_range(spot_of(day_of(d)), i, recs[i])
+            for i, d in enumerate(fixing_dates()) if day_of(d) <= last_day}
+
+
+def fx_book(*products, env: Optional[FxPricingEnvironment] = None) -> FXPortfolio:
+    pf = FXPortfolio(portfolio_name="w6fx", pricing_environments={"EURUSD": env or fx_env(0)})
+    for p in products:
+        kind = next(k for k, (cls, _) in FX_CLASSES.items() if type(p) is cls)
+        pf.add_position(product=p, quantity=1.0, entry_price=0.0, underlying="EURUSD", engine=FX_CLASSES[kind][1]())
+    return pf
+
+
+def fx_path(index, spot_of: Callable[[int], float] = fx_spot) -> pd.DataFrame:
+    days = [(pd.Timestamp(t).to_pydatetime() - START).days for t in index]
+    n = len(index)
+    return pd.DataFrame({"EURUSD_spot": [spot_of(k) for k in days], "EURUSD_vol": np.full(n, 0.10),
+                         "EURUSD_dom_rate": np.full(n, 0.05), "EURUSD_for_rate": np.full(n, 0.03)}, index=index)

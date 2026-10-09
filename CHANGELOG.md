@@ -16,7 +16,8 @@ snapping an observation time or rebasing a schedule moves observation timing and
 record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period).
 
 ### Added
-- Run-fixings protocol on `RangeAccrualOption` and record-schedule `AsianOption`: `has_run_fixings`,
+- Run-fixings protocol on `RangeAccrualOption`, `FxRangeAccrualOption` (and its foreign / quanto subclasses) and
+  record-schedule `AsianOption`: `has_run_fixings`,
   `open_fixings(env)` and `with_time_elapsed(dt)` (the run clock's step: a numeric contract's record times and
   maturity move by `dt`, snapped to exactly 0.0 when zero; records nothing; a dated contract returns itself).
   `quantark.util.fixings.snap_time`.
@@ -36,7 +37,7 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - `AsianOption.time_shift` (theta) records, at the held spot, a dated record its bump steps over; the bumped price is
   unchanged (pricing filled the same spot) and theta on a fixing day no longer warns `MissingFixingWarning`.
 - A fixing at exactly t = 0 (today's, unprinted) that pricing decides at the current spot no longer counts as
-  missing: `MissingFixingWarning` names only strictly past fills (`RangeAccrualOption`, `AsianOption`; spec
+  missing: `MissingFixingWarning` names only strictly past fills (`RangeAccrualOption`, `FxRangeAccrualOption` and its variants, `AsianOption`; spec
   2026-10-09 run fixings §3.2). Prices are unchanged.
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.

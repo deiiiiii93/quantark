@@ -25,7 +25,7 @@ from typing import Dict, List, Mapping, Optional, Tuple, TYPE_CHECKING
 
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import fixing_label, is_history, warn_filled_fixings
+from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
 from ..base_fx_product import BaseFxProduct
@@ -255,7 +255,8 @@ class FxRangeAccrualOption(BaseFxProduct):
 
         A past fixing without ``observed_in_range`` is decided at ``fx_env.spot`` through ``is_in_range`` (its own
         barriers, reverse mode), as ``record_passed_fixings`` would fix it, and one ``MissingFixingWarning`` names
-        every fixing so filled (``warn_missing_fixings=False`` skips it). The product is not changed. A future
+        every STRICTLY past (``is_history``) fixing so filled; one at t = 0 is today's live fixing and is filled silently
+        (``warn_missing_fixings=False`` skips the warning). The product is not changed. A future
         fixing must not carry an outcome.
         """
         records = self.get_observation_records()
@@ -270,9 +271,11 @@ class FxRangeAccrualOption(BaseFxProduct):
             if t <= 0:
                 in_range = rec.observed_in_range
                 if in_range is None:
-                    # A missing past fixing is decided at the current spot (user ruling 2026-10-09)
+                    # A past fixing without its outcome is decided at the current spot (user ruling 2026-10-09); at
+                    # t = 0 it is today's live fixing (D1), so only history is named in the warning.
                     in_range = self.is_in_range(fx_env.spot, idx, rec)
-                    filled.append(fixing_label(idx, rec))
+                    if is_history(t):
+                        filled.append(fixing_label(idx, rec))
                 past.append((rec.weight, in_range))
             else:
                 if rec.observed_in_range is not None:
@@ -428,6 +431,38 @@ class FxRangeAccrualOption(BaseFxProduct):
                 type(self).__name__, "observed_in_range", [fixing_label(idx, records[idx]) for idx in fills]
             )
         return self.with_fixings_recorded(fills)
+
+    @property
+    def has_run_fixings(self) -> bool:
+        """Takes part in run fixings (``quantark.util.run_fixings``), with the foreign and quanto variants."""
+        return True
+
+    def open_fixings(self, fx_env: "FxPricingEnvironment") -> Dict[int, Tuple[float, str]]:
+        """``{index: (time, label)}`` for every fixing without ``observed_in_range`` (time resolved at ``fx_env``)."""
+        return {
+            idx: (rec.resolve_time(fx_env), fixing_label(idx, rec))
+            for idx, rec in enumerate(self.get_observation_records())
+            if rec.observed_in_range is None
+        }
+
+    def with_time_elapsed(self, dt: float) -> "FxRangeAccrualOption":
+        """The run clock's step (spec 2026-10-09 run fixings §3.2): a COPY of a numeric contract with its fixing
+        times, ``maturity`` and ``delivery`` moved by ``dt`` (snapped to exactly 0.0 when ``is_zero``) and ``dt``
+        banked in ``accrued_offset``, as ``time_shift`` does, but without mutating and without recording anything.
+        A dated contract, or ``dt`` of zero, returns ``self``."""
+        if self.maturity is None or is_zero(dt):
+            return self
+        records = [replace(rec) for rec in self.get_observation_records()]
+        for rec in records:
+            if rec.observation_time is not None:
+                rec.observation_time = snap_time(rec.observation_time - dt)
+        aged = copy.deepcopy(self)
+        aged._set_records(records)
+        aged.maturity = snap_time(self.maturity - dt)
+        if self.delivery is not None:
+            aged.delivery = snap_time(self.delivery - dt)
+        aged.accrued_offset = self.accrued_offset + dt
+        return aged
 
     def _set_records(self, records: List[FxRangeAccrualObservationRecord]) -> None:
         self.observation_records = records
