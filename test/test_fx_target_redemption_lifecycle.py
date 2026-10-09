@@ -1,12 +1,31 @@
 """FX TARN / TARF lifecycle: construction, ageing, pricing, dated twins (spec 2026-10-09-fx-tarn-lifecycle-design.md,
 section 10)."""
 import copy
+import dataclasses
 import math
 import warnings
+from datetime import datetime, timedelta
 
 import pytest
 
-from fx_target_redemption_fixtures import FIX, INCEPTION, PAIR, engine_for, env, mc, note, tarf
+from fx_target_redemption_fixtures import (
+    FIX,
+    FIX_DATES,
+    INCEPTION,
+    LAG2,
+    PAIR,
+    TARGET_CAL,
+    VAL,
+    _numeric_twin,
+    dated_note,
+    dated_tarf,
+    engine_for,
+    env,
+    following,
+    mc,
+    note,
+    tarf,
+)
 from quantark.asset.fx.engine.mc import FxTargetRedemptionNoteMCEngine, FxTarnForwardMCEngine, FxTarnMCResult
 from quantark.asset.fx.product.option import FxTargetRedemptionForward, FxTargetRedemptionNote
 from quantark.asset.fx.product.option.target_redemption_state import (
@@ -16,6 +35,8 @@ from quantark.asset.fx.product.option.target_redemption_state import (
     TargetRedemptionState,
     TerminalBookingWarning,
 )
+from quantark.param import SpotQuote
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import MissingFixingWarning
@@ -75,7 +96,6 @@ def test_r2_numeric_tarn_refusals(kw, match):
 
 
 def test_r2_numeric_state_refuses_as_of_and_pay_dates():
-    from datetime import datetime
     with pytest.raises(ValidationError, match="as_of"):
         note(state=TargetRedemptionState(0.0, as_of=datetime(2026, 6, 1)))
     with pytest.raises(ValidationError, match="dated pending cash"):
@@ -481,3 +501,234 @@ def test_t2_terminal_theta_is_pure_carry():
     base = 0.0 + 100.5 * e.get_domestic_df(30 / 365)
     future = 0.0 + 100.5 * e.get_domestic_df(30 / 365 - 1 / 365)
     assert g["price"] == base and g["theta"] == (future - base) / 1.0
+
+
+BUS = dict(dc=DayCountConvention.BUSINESS_DAYS, calendar=TARGET_CAL)
+BUS_DATES = [following(d) for d in FIX_DATES]
+
+
+def _dated(kind, dates=FIX_DATES, **kw):
+    if kind == "tarf":
+        return dated_tarf(fixing_dates=dates, target=kw.pop("target", 0.20), **kw)
+    return dated_note(fixing_dates=dates, target=kw.pop("target", 3.0), include_principal=(kind == "tarn"), **kw)
+
+
+def _at(e, days, spot=None):
+    changes = {"valuation_date": e.valuation_date + timedelta(days=days)}
+    if spot is not None:
+        changes["spot_quote"] = SpotQuote(spot=spot)
+    return dataclasses.replace(e, **changes)
+
+
+# --- D1: twins bitwise at booking ----------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("calendar", ["calendar", "business"])
+@pytest.mark.parametrize("method", [PSEUDO, QUASI])
+@pytest.mark.parametrize("kind", ["tarn", "tarn_no_principal", "tarf"])
+def test_d1_twin_prices_bitwise_at_booking(kind, method, calendar):
+    e = env() if calendar == "calendar" else env(**BUS)
+    dated = _dated(kind, dates=FIX_DATES if calendar == "calendar" else BUS_DATES)
+    twin = _numeric_twin(dated, e)
+    assert _price(dated, method, e) == _price(twin, method, e)
+
+
+# --- D3: a dated booking rebuilt mid-life equals the aged contract -------------------------------------------------
+
+@pytest.mark.parametrize("days", [61, 100])  # 61: on the 2nd fixing, its coupon pending; 100: redeemed and paid
+def test_d3_dated_rebuild_mid_life_equals_aged_and_so_does_its_twin(days):
+    e0 = env(spot=1.20)
+    aged = dated_note(target=3.0, pay_dates=LAG2)
+    twin = _numeric_twin(aged, e0)
+    for k in range(1, days + 1):
+        ek = _at(e0, k)
+        aged.record_passed_fixings(ek)
+        twin.time_shift(1 / 365)
+        twin.record_passed_fixings(ek)
+    mid = _at(e0, days)
+    assert aged.is_terminal == (days == 100) and bool(aged.state.pending) == (days == 61)
+    with warnings.catch_warnings(record=True) as rec:  # WARN1: only the terminal rebuild is a terminal booking
+        warnings.simplefilter("always", TerminalBookingWarning)
+        rebuilt = dated_note(target=3.0, pay_dates=LAG2, state=aged.state)
+        rebuilt_twin = _numeric_twin(rebuilt, mid)
+    assert len([w for w in rec if issubclass(w.category, TerminalBookingWarning)]) == (2 if days == 100 else 0)
+    assert rebuilt.state == aged.state and aged.state.as_of == mid.valuation_date
+    assert is_close(_price(rebuilt, e=mid), _price(aged, e=mid), rel_tol=1e-12)
+    assert rebuilt_twin.state.accumulated == twin.state.accumulated
+    assert [p.amount for p in rebuilt_twin.state.pending] == [p.amount for p in twin.state.pending]
+    assert is_close(_price(rebuilt_twin, e=mid), _price(twin, e=mid), rel_tol=1e-12)
+
+
+# --- D4 (CALENDAR_DAYS): theta twins agree, including a fixing inside the bump -------------------------------------
+
+@pytest.mark.parametrize("inside_bump", [False, True])
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_d4_theta_twins_agree_calendar_days(kind, inside_bump):
+    dates = ([VAL + timedelta(days=1)] + FIX_DATES[1:]) if inside_bump else FIX_DATES
+    kw = {"initial_date": VAL - timedelta(days=29)} if (inside_bump and kind == "tarn") else {}
+    dated = _dated(kind, dates=dates, **kw)
+    e = env()
+    twin = _numeric_twin(dated, e)
+    gd = engine_for(dated).calculate_greeks(dated, e)
+    gn = engine_for(twin).calculate_greeks(twin, e)
+    assert gd["price"] == gn["price"]
+    assert abs(gd["theta"] - gn["theta"]) <= 1e-12 * abs(gd["price"])  # Ruling R5
+
+
+# --- D5: dated accrual factors -------------------------------------------------------------------------------------
+
+def test_d5_initial_date_gives_act_365_factors():
+    view = dated_note().resolve(env())
+    starts = [VAL] + FIX_DATES[:-1]
+    assert view.accrual_factors == tuple(
+        calculate_year_fraction(s, d, DayCountConvention.ACT_365, 252) for s, d in zip(starts, FIX_DATES))
+
+
+def test_d5_business_days_contract_count_reads_the_environment_calendar():
+    dated = dated_note(fixing_dates=BUS_DATES, day_count_convention=DayCountConvention.BUSINESS_DAYS)
+    view = dated.resolve(env(calendar=TARGET_CAL))
+    starts = [VAL] + BUS_DATES[:-1]
+    assert view.accrual_factors == tuple(
+        calculate_year_fraction(s, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=TARGET_CAL)
+        for s, d in zip(starts, BUS_DATES))
+    with pytest.raises(ValidationError, match="calendar"):
+        dated.resolve(env())  # no calendar on the environment
+
+
+def test_d5_both_period_sources_refused():
+    with pytest.raises(ValidationError, match="not both"):
+        dated_note(initial_date=VAL, accrual_factors=[1 / 12] * 12)
+
+
+def test_d5_neither_period_source_refused():
+    with pytest.raises(ValidationError, match="initial_date"):
+        FxTargetRedemptionNote(fixing_dates=FIX_DATES, coupon_rate=0.12, strike=1.10, state=INCEPTION)
+
+
+# --- R2 (dated and mixed forms) ------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("kw", [
+    dict(fixing_times=FIX),                                   # both schedules
+    dict(pay_times=FIX),                                      # numeric pay with dates
+    dict(accrual_start=0.0),                                  # numeric start with dates
+    dict(accrual_factors=[1 / 12] * 12, day_count_convention=DayCountConvention.ACT_365, initial_date=None),
+    dict(initial_date=FIX_DATES[0]),                          # initial_date not before the first fixing
+    dict(fixing_dates=[]),
+    dict(fixing_dates=list(reversed(FIX_DATES))),
+    dict(fixing_dates=FIX_DATES[:1] * 2),
+    dict(pay_dates=FIX_DATES[:-1]),
+    dict(pay_dates=[d - timedelta(days=1) for d in FIX_DATES]),
+    dict(state=TargetRedemptionState(1.0)),                   # accumulated > 0 with as_of None
+    dict(state=TargetRedemptionState(1.0, as_of=VAL)),        # as_of before the first fixing
+])
+def test_r2_dated_refusals(kw):
+    with pytest.raises(ValidationError):
+        dated_note(**kw)
+
+
+@pytest.mark.parametrize("kw", [
+    dict(pay_dates=FIX_DATES), dict(initial_date=VAL), dict(day_count_convention=DayCountConvention.ACT_365)])
+def test_r2_dated_terms_refused_on_the_numeric_form(kw):
+    with pytest.raises(ValidationError, match="dated form"):
+        note(**kw)
+
+
+def test_r2_neither_schedule_refused():
+    with pytest.raises(ValidationError, match="schedule"):
+        FxTargetRedemptionForward(strike=1.15, state=INCEPTION)
+
+
+def test_r2_dated_pending_must_follow_as_of():
+    with pytest.raises(ValidationError, match="after as_of"):
+        dated_note(state=TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=FIX_DATES[0]),),
+                                               as_of=FIX_DATES[0]))
+
+
+def test_r2_as_of_after_valuation_is_refused_at_pricing():
+    booked = dated_note(state=TargetRedemptionState(0.0, as_of=FIX_DATES[1]))
+    with pytest.raises(ValidationError, match="as_of"):
+        _price(booked, e=env())
+
+
+def test_future_fixing_with_zero_year_fraction_is_refused():
+    friday = datetime(2026, 8, 14)
+    saturday_fixing = dated_note(fixing_dates=[datetime(2026, 8, 15), datetime(2026, 9, 15)],
+                                 initial_date=datetime(2026, 7, 15))
+    with pytest.raises(ValidationError, match="zero year fraction"):
+        saturday_fixing.resolve(env(val=friday, **BUS))
+
+
+def test_pending_pay_date_with_zero_year_fraction_is_refused():
+    friday, saturday = datetime(2026, 8, 14), datetime(2026, 8, 15)
+    c = 1.0
+    owed = dated_note(fixing_dates=[datetime(2026, 8, 13), datetime(2026, 9, 15)],
+                      pay_dates=[saturday, datetime(2026, 9, 17)], initial_date=datetime(2026, 7, 15), target=3.0,
+                      state=TargetRedemptionState(c, pending=(PendingPayment(c, pay_date=saturday),),
+                                                  as_of=datetime(2026, 8, 13)))
+    with pytest.raises(ValidationError, match="zero year fraction"):
+        owed.resolve(env(val=friday, **BUS))
+
+
+# --- dated record semantics, maturity ------------------------------------------------------------------------------
+
+def test_dated_record_banks_through_the_valuation_date_and_sweeps_paid_cash():
+    d = dated_note(target=3.0, pay_dates=LAG2)
+    d.record_passed_fixings(env(val=FIX_DATES[0]))
+    coupon = 100.0 * 0.12 * calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.ACT_365, 252)
+    assert d.state == TargetRedemptionState(coupon, pending=(PendingPayment(coupon, pay_date=LAG2[0]),),
+                                            as_of=FIX_DATES[0])
+    d.record_passed_fixings(env(val=LAG2[0]))
+    assert d.state.pending == () and d.lifecycle_events[-1].event_type is PAYMENT
+    assert d.state.as_of == LAG2[0]
+
+
+def test_dated_time_shift_is_a_noop():
+    d = dated_note()
+    d.time_shift(0.5)
+    assert d.state == INCEPTION and d.lifecycle_events == ()
+
+
+def test_dated_maturity_and_delivery_after_the_end_are_zero():
+    with pytest.warns(TerminalBookingWarning):
+        done = dated_note(target=3.0, pay_dates=LAG2, state=TargetRedemptionState(1.0, as_of=FIX_DATES[-1]))
+    late = env(val=LAG2[-1] + timedelta(days=5))
+    assert done.get_maturity(late) == 0.0 and done.get_delivery(late) == 0.0
+    assert done.get_maturity(env()) == calculate_year_fraction(VAL, FIX_DATES[-1],
+                                                                DayCountConvention.CALENDAR_DAYS, 252)
+
+
+# --- WARN1 / WARN3 (dated) -----------------------------------------------------------------------------------------
+
+def test_warn1_dated_terminal_bookings():
+    e = env(val=FIX_DATES[-1] + timedelta(days=1))
+    with pytest.warns(TerminalBookingWarning):
+        all_banked = dated_note(target=3.0, pay_dates=LAG2, state=TargetRedemptionState(
+            1.0, pending=(PendingPayment(100.0, pay_date=LAG2[-1]),), as_of=FIX_DATES[-1]))
+    with pytest.warns(TerminalBookingWarning):
+        redeemed = dated_note(target=1.5, pay_dates=LAG2, state=TargetRedemptionState(1.5, as_of=FIX_DATES[1]))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", TerminalBookingWarning)
+        t = calculate_year_fraction(e.valuation_date, LAG2[-1], DayCountConvention.CALENDAR_DAYS, 252)
+        assert _price(all_banked, e=e) == 0.0 + 100.0 * e.get_domestic_df(t)
+        assert _price(redeemed, e=e) == 0.0
+        engine_for(all_banked).calculate_greeks(all_banked, e)
+
+
+def test_warn3_dated_passed_fixing_is_filled_with_one_warning():
+    d = dated_note(target=3.0)
+    snapshot = copy.deepcopy(d)
+    e = env(val=FIX_DATES[0] + timedelta(days=5), spot=1.20)
+    with pytest.warns(MissingFixingWarning) as rec:
+        p = _price(d, e=e)
+    missing = [w for w in rec if issubclass(w.category, MissingFixingWarning)]
+    assert len(missing) == 1 and FIX_DATES[0].date().isoformat() in str(missing[0].message)
+    recorded = copy.deepcopy(d)
+    recorded.record_passed_fixings(e)
+    assert p == _price(recorded, e=e)
+    assert d.state == snapshot.state and d.lifecycle_events == snapshot.lifecycle_events
+
+
+def test_dated_tarn_without_factors_points_coupon_queries_at_resolve():
+    d = dated_note()
+    for query in (lambda: d.full_coupon(0), lambda: d.get_payoff(1.20)):
+        with pytest.raises(ValidationError, match=r"resolve\(fx_env\)"):
+            query()

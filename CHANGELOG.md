@@ -17,6 +17,13 @@ backtest and FX dynamic scenario.
   target, determined `PendingPayment`s, dated `as_of`), `TargetRedemptionEvent` / `TargetRedemptionEventType`,
   `TerminalBookingWarning`, `ResolvedTargetRedemption`, and `TARGET_HIT_RTOL` (1e-12, moved from the two TARN/TARF
   engines with its value unchanged).
+- Dated `FxTargetRedemptionNote` / `FxTargetRedemptionForward`: `fixing_dates` (the whole contractual schedule),
+  `pay_dates`, `state.as_of`; the TARN derives its periods from `initial_date` (or explicit `accrual_factors`) in its
+  `day_count_convention` (default ACT/365). Times resolve in the environment's convention; a numeric contract and its
+  dated twin price identically. A fixing or pending pay date after the valuation date that resolves to a zero year
+  fraction in the environment's day count (a weekend date under `BUSINESS_DAYS`) is refused with `ValidationError`.
+- `resolve(fx_env)` (the engines' one input), `lifecycle_events`, `is_redeemed`, `is_terminal`, `hit_tol`,
+  `pending_pv(fx_env)` on both products.
 
 ### Changed
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`

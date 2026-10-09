@@ -24,6 +24,7 @@ priced by :class:`FxTarnForwardMCEngine`.
 """
 
 import math
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 from quantark.util.exceptions import ValidationError
@@ -51,6 +52,9 @@ class FxTargetRedemptionForward(TargetRedemptionProduct):
             False sells it (favorable when ``S<K``).
         state: Mandatory realized state (``TargetRedemptionState(0.0)`` for a
             contract booked at inception).
+        fixing_dates, pay_dates: Dated form (exclusive with ``fixing_times`` /
+            ``pay_times``): the whole contractual schedule; ``state.as_of`` is
+            the date through which fixings are banked.
     """
 
     def __init__(
@@ -65,6 +69,8 @@ class FxTargetRedemptionForward(TargetRedemptionProduct):
         currency_pair: Optional[CurrencyPair] = None,
         *,
         state: Optional[TargetRedemptionState] = None,
+        fixing_dates: Optional[List[datetime]] = None,
+        pay_dates: Optional[List[datetime]] = None,
     ):
         self.strike = strike
         self.notional = notional
@@ -72,11 +78,18 @@ class FxTargetRedemptionForward(TargetRedemptionProduct):
         self.gearing = gearing
         self.is_buy_base = bool(is_buy_base)
         state = self._require_state(state)
-        if fixing_times is None:
-            raise ValidationError("fixing_times is required")
-        self._init_numeric([float(t) for t in fixing_times], pay_times, currency_pair, state)
-        self.validate()
-        self._refresh_numeric_horizon()
+        if self._schedule_form(fixing_times, fixing_dates):
+            if pay_times is not None:
+                raise ValidationError("pay_times belongs to the numeric form; a dated TARF takes pay_dates")
+            self._init_dated(fixing_dates, pay_dates, currency_pair, state)
+            self.validate()
+            self._refresh_dated_horizon()
+        else:
+            if pay_dates is not None:
+                raise ValidationError("pay_dates belongs to the dated form; a numeric TARF takes pay_times")
+            self._init_numeric([float(t) for t in fixing_times], pay_times, currency_pair, state)
+            self.validate()
+            self._refresh_numeric_horizon()
         self._warn_if_terminal_booking()
 
     def _validate_terms(self) -> None:
@@ -119,6 +132,6 @@ class FxTargetRedemptionForward(TargetRedemptionProduct):
         side = "buy" if self.is_buy_base else "sell"
         return (
             f"FxTargetRedemptionForward({self.currency_pair}, {side}-base, "
-            f"K={self.strike:.6f}, n_fix={len(self.fixing_times)}, "
+            f"K={self.strike:.6f}, n_fix={len(self.fixing_times if self.is_numeric else self.fixing_dates)}, "
             f"target={tgt}, gearing={self.gearing})"
         )

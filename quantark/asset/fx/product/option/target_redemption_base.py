@@ -3,7 +3,9 @@
 Spec: docs/superpowers/specs/2026-10-09-fx-tarn-lifecycle-design.md, sections 3-6. A contract carries its realized
 state (``state``: the amount banked towards the target and the determined cash still to pay). In the NUMERIC form
 ``fixing_times`` / ``pay_times`` are years from valuation and list ONLY the fixings not yet banked; a time at or
-before valuation is an unbanked past fixing. Only the two concrete products are instantiated.
+before valuation is an unbanked past fixing. In the DATED form ``fixing_dates`` / ``pay_dates`` list the whole
+contractual schedule and ``state.as_of`` says through which date the fixings are banked; times resolve against the
+environment at pricing. Only the two concrete products are instantiated.
 """
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
+from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import fixing_label, warn_filled_fixings
 from quantark.util.numerical import is_zero
@@ -37,6 +40,19 @@ def is_passed_time(t: float) -> bool:
     return t <= 0.0 or is_zero(t)
 
 
+def signed_year_fraction(date: datetime, fx_env) -> float:
+    """Signed year fraction from ``fx_env.valuation_date`` to ``date`` in the ENVIRONMENT's convention: 0.0 on the
+    valuation date, negative before it (``FxRangeAccrualObservationRecord.resolve_time``'s rule)."""
+    val = fx_env.valuation_date
+    if date == val:
+        return 0.0
+    if date > val:
+        return calculate_year_fraction(val, date, fx_env.day_count_convention, fx_env.bus_days_in_year,
+                                       calendar=fx_env.calendar)
+    return -calculate_year_fraction(date, val, fx_env.day_count_convention, fx_env.bus_days_in_year,
+                                    calendar=fx_env.calendar)
+
+
 def event_label(index: int, *, time: Optional[float] = None, date: Optional[datetime] = None) -> str:
     """W5 ``fixing_label`` text (``#i t=<time>`` numeric, ``#i <date>`` dated) for a TARN/TARF fixing."""
     return fixing_label(index, SimpleNamespace(observation_time=time, observation_date=date))
@@ -53,6 +69,8 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     fixing_times: Optional[List[float]]
     pay_times: Optional[List[float]]
+    fixing_dates: Optional[List[datetime]]
+    pay_dates: Optional[List[datetime]]
     lifecycle_events: Tuple[TargetRedemptionEvent, ...]
 
     # -- subclass contract --------------------------------------------------------------------------------------
@@ -78,6 +96,29 @@ class TargetRedemptionProduct(BaseFxProduct):
         if not isinstance(state, TargetRedemptionState):
             raise ValidationError(f"state must be a TargetRedemptionState, got {type(state).__name__}")
         return state
+
+    @staticmethod
+    def _schedule_form(fixing_times, fixing_dates) -> bool:
+        """True for the dated form; exactly one schedule is required."""
+        if fixing_times is not None and fixing_dates is not None:
+            raise ValidationError("give fixing_times (numeric form) or fixing_dates (dated form), not both")
+        if fixing_times is None and fixing_dates is None:
+            raise ValidationError("a schedule is required: fixing_times (numeric form) or fixing_dates (dated form)")
+        return fixing_dates is not None
+
+    def _init_dated(self, fixing_dates, pay_dates, currency_pair, state: TargetRedemptionState) -> None:
+        BaseFxProduct.__init__(self, currency_pair=currency_pair)
+        self.fixing_dates = list(fixing_dates)
+        self.pay_dates = list(pay_dates) if pay_dates is not None else list(self.fixing_dates)
+        self.fixing_times = None
+        self.pay_times = None
+        self.state = state
+        self.lifecycle_events = ()
+
+    def _refresh_dated_horizon(self) -> None:
+        """``expiry_date`` = last fixing date, ``delivery_date`` = last pay date; ``maturity`` stays None."""
+        self.expiry_date = self.fixing_dates[-1]
+        self.delivery_date = max(self.pay_dates)
 
     def _init_numeric(self, fixings: List[float], pay_times, currency_pair, state: TargetRedemptionState) -> None:
         BaseFxProduct.__init__(self, currency_pair=currency_pair)
@@ -128,13 +169,42 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     @property
     def is_terminal(self) -> bool:
-        return not self.fixing_times or self.is_redeemed
+        """Redeemed, or no fixing left: numeric - an empty list; dated - ``as_of`` on or after the last fixing."""
+        if self.is_numeric:
+            return not self.fixing_times or self.is_redeemed
+        as_of = self.state.as_of
+        return self.is_redeemed or (as_of is not None and as_of >= self.fixing_dates[-1])
 
     # -- validation ---------------------------------------------------------------------------------------------
     def validate(self) -> None:
         self._validate_terms()
-        self._validate_numeric_schedule()
+        if self.is_numeric:
+            self._validate_numeric_schedule()
+        else:
+            self._validate_dated_schedule()
         self._validate_state()
+
+    def _validate_dated_accrual(self) -> None:
+        """TARN hook: the dated period source."""
+
+    def _validate_dated_schedule(self) -> None:
+        dates, pays = self.fixing_dates, self.pay_dates
+        if not dates:
+            raise ValidationError("fixing_dates must be non-empty: the dated form lists the whole schedule")
+        if any(not isinstance(d, datetime) for d in list(dates) + list(pays)):
+            raise ValidationError("fixing_dates and pay_dates must be datetimes")
+        if dates != sorted(dates):
+            raise ValidationError("fixing_dates must be ascending")
+        if len(set(dates)) != len(dates):
+            raise ValidationError("fixing_dates must be unique")
+        if len(pays) != len(dates):
+            raise ValidationError("pay_dates must align 1:1 with fixing_dates")
+        for f, p in zip(dates, pays):
+            if p < f:
+                raise ValidationError(f"pay date {p.date()} precedes its fixing {f.date()}")
+        if pays != sorted(pays):
+            raise ValidationError("pay_dates must be non-decreasing")
+        self._validate_dated_accrual()
 
     def _validate_numeric_schedule(self) -> None:
         fixings, pays = self.fixing_times, self.pay_times
@@ -168,12 +238,50 @@ class TargetRedemptionProduct(BaseFxProduct):
             raise ValidationError(
                 "pending amounts must be positive: a TARN's determined cash is a coupon or its principal"
             )
-        if st.as_of is not None:
-            raise ValidationError("state.as_of belongs to the dated form: a numeric state lists only unbanked fixings")
-        if any(p.pay_date is not None for p in st.pending):
-            raise ValidationError("a numeric contract's pending payments take pay_time, not pay_date")
-        if self.is_redeemed and self.fixing_times:
-            raise ValidationError("a redeemed state cannot list fixings: every fixing after the target hit is dead")
+        if self.is_numeric:
+            if st.as_of is not None:
+                raise ValidationError(
+                    "state.as_of belongs to the dated form: a numeric state lists only unbanked fixings")
+            if any(p.pay_date is not None for p in st.pending):
+                raise ValidationError("a numeric contract's pending payments take pay_time, not pay_date")
+            if self.is_redeemed and self.fixing_times:
+                raise ValidationError(
+                    "a redeemed state cannot list fixings: every fixing after the target hit is dead")
+            return
+        if any(p.pay_time is not None for p in st.pending):
+            raise ValidationError("a dated contract's pending payments take pay_date, not pay_time")
+        if (st.accumulated > 0.0 or st.pending) and (st.as_of is None or st.as_of < self.fixing_dates[0]):
+            raise ValidationError(
+                "accumulated or pending cash needs state.as_of on or after the first fixing date")
+
+    # -- dated helpers ------------------------------------------------------------------------------------------
+    def _dated_factor(self, index: int, fx_env) -> Optional[float]:
+        """TARN hook: the accrual factor of scheduled period ``index``; None for the TARF."""
+        return None
+
+    def _is_unbanked(self, index: int) -> bool:
+        """Dated: fixing ``index`` is banked iff it is dated on or before ``state.as_of``."""
+        as_of = self.state.as_of
+        return as_of is None or self.fixing_dates[index] > as_of
+
+    def _check_as_of(self, fx_env) -> None:
+        as_of = self.state.as_of
+        if as_of is not None and as_of > fx_env.valuation_date:
+            raise ValidationError(
+                f"state.as_of {as_of} is after the valuation date {fx_env.valuation_date}: the state claims "
+                "fixings that have not happened")
+
+    def get_maturity(self, fx_env=None) -> float:
+        """Dated: 0.0 once valuation is past the last fixing date (an aged contract still answers FX consumers)."""
+        if self.expiry_date is not None and fx_env is not None and fx_env.valuation_date > self.expiry_date:
+            return 0.0
+        return super().get_maturity(fx_env)
+
+    def get_delivery(self, fx_env=None) -> float:
+        """Dated: 0.0 once valuation is past the last pay date (Ruling R8: ``calculate_greeks`` reads it)."""
+        if self.delivery_date is not None and fx_env is not None and fx_env.valuation_date > self.delivery_date:
+            return 0.0
+        return super().get_delivery(fx_env)
 
     # -- ageing (spec section 6) --------------------------------------------------------------------------------
     def time_shift(self, time_bump: float) -> None:
@@ -198,8 +306,12 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     def record_passed_fixings(self, fx_env) -> None:
         """Bank every unbanked fixing at or before valuation, in order, at the QUOTED ``fx_env.spot`` (spec Q3),
-        stopping once the contract is terminal; append the events; re-validate."""
-        self._record_numeric(fx_env)
+        stopping once the contract is terminal; append the events; re-validate. Dated: ``state.as_of`` becomes the
+        valuation date and pending cash dated on or before it leaves as a PAYMENT event."""
+        if self.is_numeric:
+            self._record_numeric(fx_env)
+        else:
+            self._record_dated(fx_env)
         self.validate()
 
     def _record_numeric(self, fx_env) -> None:
@@ -245,6 +357,51 @@ class TargetRedemptionProduct(BaseFxProduct):
         else:
             pending.append(PendingPayment(amount, pay_time=pay_time))
 
+    def _record_dated(self, fx_env) -> None:
+        self._check_as_of(fx_env)
+        val, spot, st = fx_env.valuation_date, fx_env.spot, self.state
+        events: List[TargetRedemptionEvent] = []
+        pending: list = []
+        for p in st.pending:  # cash due by the valuation date was paid
+            if p.pay_date <= val:
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount,
+                                                    time=signed_year_fraction(p.pay_date, fx_env)))
+            else:
+                pending.append(p)
+        acc = st.accumulated
+        if not self.is_terminal:
+            last = len(self.fixing_dates) - 1
+            for i, fd in enumerate(self.fixing_dates):
+                if not self._is_unbanked(i):
+                    continue
+                if fd > val:
+                    break
+                t = signed_year_fraction(fd, fx_env)
+                added, cash = self._fixing_outcome(self._dated_factor(i, fx_env), spot, acc)
+                acc = acc + added
+                hit = is_target_hit(acc, self.target)
+                ends = hit or i == last
+                label = event_label(i, date=fd)
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.FIXING, cash, fixing=spot, time=t,
+                                                    redeemed=ends, label=label))
+                self._settle_dated(cash, self.pay_dates[i], label, fx_env, pending, events)
+                if ends:
+                    self._settle_dated(self._principal_amount(), self.pay_dates[i], label, fx_env, pending, events)
+                    break  # every later fixing is dead (or there is none)
+        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)), as_of=val)
+        self.lifecycle_events = self.lifecycle_events + tuple(events)
+
+    @staticmethod
+    def _settle_dated(amount: float, pay_date: datetime, label: str, fx_env, pending: list, events: list) -> None:
+        """Dated twin of ``_settle_numeric``: paid now when ``pay_date`` is on or before valuation, else pending."""
+        if is_zero(amount):
+            return
+        if pay_date <= fx_env.valuation_date:
+            events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, amount,
+                                                time=signed_year_fraction(pay_date, fx_env), label=label))
+        else:
+            pending.append(PendingPayment(amount, pay_date=pay_date))
+
     # -- resolved view (spec section 5.1) ----------------------------------------------------------------------
     def resolve(self, fx_env, *, warn_missing_fixings: bool = True) -> ResolvedTargetRedemption:
         """The engines' only input. Unbanked fixings at or before valuation are banked on a COPY at the quoted spot
@@ -261,9 +418,17 @@ class TargetRedemptionProduct(BaseFxProduct):
         return self._view(fx_env)
 
     def _has_unbanked_passed(self, fx_env) -> bool:
-        return bool(self.fixing_times) and is_passed_time(self.fixing_times[0])
+        if self.is_numeric:
+            return bool(self.fixing_times) and is_passed_time(self.fixing_times[0])
+        self._check_as_of(fx_env)
+        if self.is_terminal:
+            return False
+        val = fx_env.valuation_date
+        return any(self._is_unbanked(i) and d <= val for i, d in enumerate(self.fixing_dates))
 
     def _view(self, fx_env) -> ResolvedTargetRedemption:
+        if not self.is_numeric:
+            return self._dated_view(fx_env)
         st = self.state
         return ResolvedTargetRedemption(
             fixing_times=tuple(self.fixing_times),
@@ -271,6 +436,47 @@ class TargetRedemptionProduct(BaseFxProduct):
             accrual_factors=tuple(self.accrual_factors) if self._has_accrual else None,
             accumulated=st.accumulated,
             pending=tuple((p.pay_time, p.amount) for p in st.pending),
+            redeemed=self.is_redeemed,
+            terminal=self.is_terminal,
+        )
+
+    def _dated_view(self, fx_env) -> ResolvedTargetRedemption:
+        """Unbanked fixings (all after valuation once ``resolve`` has banked the passed ones), their pay times and
+        factors resolved against ``fx_env``; pending cash dated after valuation. Dead fixings of a redeemed
+        contract are dropped."""
+        val, st = fx_env.valuation_date, self.state
+        fix_t: List[float] = []
+        pay_t: List[float] = []
+        factors: List[float] = []
+        if not self.is_terminal:
+            for i, d in enumerate(self.fixing_dates):
+                if not self._is_unbanked(i):
+                    continue
+                t = signed_year_fraction(d, fx_env)
+                if is_passed_time(t):  # Ruling R7: after valuation by date, zero by the environment's day count
+                    raise ValidationError(
+                        f"fixing date {d.date()} is after the valuation date {val} but resolves to a zero year "
+                        f"fraction under the environment's {fx_env.day_count_convention.name} day count")
+                fix_t.append(t)
+                pay_t.append(signed_year_fraction(self.pay_dates[i], fx_env))
+                if self._has_accrual:
+                    factors.append(self._dated_factor(i, fx_env))
+        pending: List[Tuple[float, float]] = []
+        for p in st.pending:
+            if p.pay_date <= val:
+                continue  # paid: booked, not pending
+            t = signed_year_fraction(p.pay_date, fx_env)
+            if is_passed_time(t):  # Ruling R7 applied to cash: unpaid by date, paid by the numeric rule
+                raise ValidationError(
+                    f"pending pay date {p.pay_date.date()} is after the valuation date {val} but resolves to a zero "
+                    f"year fraction under the environment's {fx_env.day_count_convention.name} day count")
+            pending.append((t, p.amount))
+        return ResolvedTargetRedemption(
+            fixing_times=tuple(fix_t),
+            pay_times=tuple(pay_t),
+            accrual_factors=tuple(factors) if self._has_accrual else None,
+            accumulated=st.accumulated,
+            pending=tuple(pending),
             redeemed=self.is_redeemed,
             terminal=self.is_terminal,
         )
