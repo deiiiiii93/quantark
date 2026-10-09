@@ -415,3 +415,41 @@ def test_replay_x1b_the_fixing_does_not_move_later():
     a, _, _ = _replay(F.asian_dated(), n=10)
     b, _, _ = _replay(F.asian_dated(), n=10, spot_of=other)
     assert a._replays[0]._run_fills[0] == b._replays[0]._run_fills[0] == 105.0
+
+
+# ================================================================ X3i: the run explain recorders
+def _refill_and_chain(explain_df, recon_df, values):
+    refill = explain_df[explain_df["factor"] == "fixing_refill"]
+    assert len(refill) > 0 and (refill["pnl"] == 0.0).all()
+    assert recon_df["ok"].all()                                                  # the rows sum to each day's PnL
+    pos = recon_df[(recon_df["level"] == "position") & (recon_df["method"] == "waterfall")]
+    assert is_close(pos["expected"].sum(), values[-1] - values[0], rel_tol=0.0, abs_tol=1e-9)   # pv_t1(N) == pv_t0(N+1)
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_x3i_equity_backtest_explain(kind, form, tmp_path):
+    """Plan drift 7 / spec E5: a fixing passing mid-run no longer reads as a contract replacement."""
+    from quantark.backtest import BacktestConfig, BacktestEngine, ZeroCostModel
+    from quantark.backtest.strategy import DeltaNeutralStrategy
+    from quantark.pnlexplain import ExplainMethod, PnLExplainConfig
+    from quantark.portfolio import Position
+
+    adapter = F.DailyAdapter(12)
+    cfg = BacktestConfig(
+        strategy=DeltaNeutralStrategy(delta_threshold=1e12), start_date=F.START,
+        end_date=adapter.dates[-1].to_pydatetime(), underlying=F.UNDERLYING,
+        initial_positions=[Position(product=F.MAKERS[(kind, form)](), quantity=1.0, entry_price=0.0,
+                                    underlying=F.UNDERLYING, engine=F.ENGINES[kind](), entry_timestamp=F.START)],
+        market_data_adapter=adapter, transaction_cost_model=ZeroCostModel(), handle_lifecycle_events=False,
+        results_path=str(tmp_path), pnl_explain=PnLExplainConfig(methods=(ExplainMethod.WATERFALL,)),
+    )
+    res = BacktestEngine(cfg).run()
+    _refill_and_chain(res.explain_df, res.explain_reconciliation_df, res.get_value_series().tolist())
+
+
+def test_x3i_replay_explain():
+    from quantark.pnlexplain import ExplainMethod, PnLExplainConfig
+
+    _, res, mtm = _replay(F.asian_dated(), n=12, explain=PnLExplainConfig(methods=(ExplainMethod.WATERFALL,)))
+    _refill_and_chain(res.explain_df(), res.explain_reconciliation_df(), mtm)   # book results: methods

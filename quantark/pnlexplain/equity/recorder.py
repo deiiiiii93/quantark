@@ -21,6 +21,7 @@ from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal
 from quantark.pnlexplain.equity.trades import ExplainTrade
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close, is_zero
+from quantark.util.run_fixings import participates
 
 RECON_COLUMNS = ["date", "method", "level", "position_id", "expected", "explained", "gap", "ok",
                  "expected_states", "gap_states"]
@@ -58,9 +59,15 @@ def _is_unrolled_float_contract(product_alive: Any, product_held: Any) -> bool:
     Futures hedges (static maturity by design) and schedule-bearing untracked
     products are repriced with a constant maturity; schedule-free contracts are
     rolled by the lifecycle manager and arrive as new objects (patch spec §4).
+
+    A run-fixings product is never unrolled: the run clock aged it (``RunFixingRecorder.advance``, before
+    ``begin_day``) and replaced the held contract, so the pair takes the full-step roll check on the run clock
+    (spec 2026-10-09 run fixings E5, plan Ruling 5 and drift 7).
     """
     if product_alive is not product_held:
         return False                      # a tracker rolled it (a new object)
+    if participates(product_held):
+        return False                      # aged by the run clock, not repriced unrolled
     if getattr(product_held, "maturity", None) is None:
         return False
     return getattr(product_held, "exercise_date", None) is None \

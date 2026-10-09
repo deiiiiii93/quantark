@@ -15,6 +15,7 @@ from quantark.pnlexplain.equity.fingerprints import check_contract_roll, engines
 from quantark.pnlexplain.equity.snapshot import ValuationSnapshot, is_terminal
 from quantark.util.calendar import DayCountConvention
 from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.run_fixings import participates, run_step_dt
 
 
 def _validate_event(event: Any) -> None:
@@ -118,6 +119,14 @@ def float_maturity_decrement(pricing_env, start: datetime, days: int) -> Optiona
     return trading_days / float(pricing_env.bus_days_in_year)
 
 
+def _roll_decrement(snap0: ValuationSnapshot, snap1: ValuationSnapshot, roll_days: int, calendar_days: int):
+    """A run-fixings product ages on the run clock (R6) over a full step; every other contract keeps
+    ``float_maturity_decrement``."""
+    if participates(snap0.product) and roll_days == calendar_days:
+        return run_step_dt(snap0.pricing_env.valuation_date, snap1.pricing_env)
+    return float_maturity_decrement(snap0.pricing_env, snap0.date, roll_days)
+
+
 def resolve_transition(
     snap0: ValuationSnapshot,
     snap1: ValuationSnapshot,
@@ -136,8 +145,8 @@ def resolve_transition(
         if not is_terminal(snap0.lifecycle_state):    # a terminal position has no contract to roll (spec §8)
             check_contract_roll(
                 snap0.product, snap1.product, calendar_days,
-                expected_decrement=float_maturity_decrement(
-                    snap0.pricing_env, snap0.date, calendar_days))
+                expected_decrement=_roll_decrement(snap0, snap1, calendar_days, calendar_days),
+                pricing_env_t1=snap1.pricing_env)
         return LifecycleTransition(
             product_alive_t1=snap1.product, engine_alive_t1=snap1.engine,
             state_before=snap0.lifecycle_state, state_after=snap1.lifecycle_state, events=(),
@@ -155,8 +164,8 @@ def resolve_transition(
     if not terminal_t0:
         check_contract_roll(
             snap0.product, transition.product_alive_t1, roll_days,
-            expected_decrement=float_maturity_decrement(
-                snap0.pricing_env, snap0.date, roll_days))
+            expected_decrement=_roll_decrement(snap0, snap1, roll_days, calendar_days),
+            pricing_env_t1=snap1.pricing_env)
     if fp0 == fp1:
         if transition.events:
             raise ValidationError("transition carries events but the lifecycle state is unchanged")
@@ -166,7 +175,7 @@ def resolve_transition(
                 "set engine_alive_t1 to snapshot_t1.engine"
             )
         if not terminal_t0:
-            check_contract_roll(transition.product_alive_t1, snap1.product, 0)
+            check_contract_roll(transition.product_alive_t1, snap1.product, 0, pricing_env_t1=snap1.pricing_env)
         return transition
     if not transition.events:
         raise ValidationError("lifecycle state changed but the transition carries no events")
@@ -213,7 +222,7 @@ def event_summary(transition: LifecycleTransition) -> Tuple[Dict[str, Any], ...]
 
 
 def event_row(cache: Any, transition: LifecycleTransition, level: str = "instrument") -> ExplainRow:
-    # The t1 endpoint with t0's missing-fixing decisions kept: a re-decided fixing is FIXING_REFILL, not an event
+    # The t1 endpoint with the pair's fixing decisions kept: a re-decided fixing is FIXING_REFILL, not an event
     carried = getattr(cache, "value_t1_carried", None)
     t1 = carried() if carried is not None else cache.value_t1()
     pnl = t1.total - cache.all_market().total
@@ -225,14 +234,16 @@ def event_row(cache: Any, transition: LifecycleTransition, level: str = "instrum
 
 
 def fixing_refill_row(cache: Any, level: str = "instrument") -> ExplainRow:
-    """A missing past fixing decided at t0's spot and again at t1's (user decision 2026-10-09).
+    """A fixing the pair decided at t0's spot — one missing at t0 (W5b) or one that passed inside the step (run
+    fixings E2) — that the t1 snapshot decides differently (user decisions D4, D7). ``value_t1 − value_t1_carried``;
+    zero when t1 agrees.
 
-    The shocked states keep t0's decision; ``pv_t1`` is the t1 snapshot's own value, which decides the still-missing
-    fixing at t1's spot. The difference is this row's PnL, so a re-decided fixing is attributed, not hidden.
+    The shocked states keep the pair's decision; ``pv_t1`` is the t1 snapshot's own value (its record, or its fill at
+    t1's spot). The difference is this row's PnL, so a re-decided fixing is attributed, not hidden.
     """
     return ExplainRow(
         factor=Factor.FIXING_REFILL, term=Factor.FIXING_REFILL.value,
         method=ExplainMethod.SHARED, kind=RowKind.COMPONENT, level=level,
         pnl=cache.value_t1().total - cache.value_t1_carried().total,
-        metadata={"label": "missing fixing re-filled"},
+        metadata={"label": "fixing decided by the pair at t0's spot, decided differently at t1"},
     )

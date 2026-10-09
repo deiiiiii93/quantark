@@ -23,6 +23,7 @@ from quantark.asset.equity.lifecycle.cashflows import LifecycleCashflowLedger, V
 from quantark.util.calendar.business_calendar import Calendar
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
+from quantark.util.run_fixings import participates
 
 LIFECYCLE_FINGERPRINT_VERSION = "v2"    # v2: type-tagged normalisation
 ROLL_TOL = 1e-12        # spec §5.3 roll equation tolerance
@@ -33,6 +34,8 @@ SCHEDULE_FIELDS = frozenset({
 })
 _TIMING_TOKENS = ("date", "time")      # leaf names the trackers advance daily
 MATURITY_FLOOR = 1e-8   # the trackers clamp a rolled float maturity here
+OUTCOME_FIELDS = frozenset({"observed_in_range", "observed_price"})   # a fixing's recorded outcome (run fixings E5)
+_CLOCK_LEAVES = frozenset({"observation_time", "accrued_offset"})     # numeric clock terms the run clock moves
 
 
 def calendars_equal(a: Any, b: Any) -> bool:
@@ -299,6 +302,57 @@ def _rolled_equal(a: Any, b: Any) -> bool:
     return a == b
 
 
+def _clock_equal(a: Any, b: Any) -> bool:
+    xa, xb = _float_leaf(a), _float_leaf(b)
+    if xa is None or xb is None:
+        return a == b
+    return is_close(xa, xb, rel_tol=0.0, abs_tol=ROLL_TOL)
+
+
+def _fixing_records_equal(a: Any, b: Any, allowed: frozenset) -> bool:
+    """Normalised ``observation_records``: equal except clock leaves within ROLL_TOL and an outcome that is open in
+    ``a`` and recorded in ``b`` on a record index in ``allowed`` (spec 2026-10-09 run fixings E5)."""
+    if a is None or b is None or not (isinstance(a, tuple) and a[:1] == ("seq",) and b[:1] == ("seq",)):
+        return a == b
+    if len(a[1]) != len(b[1]):
+        return False
+    for i, (ra, rb) in enumerate(zip(a[1], b[1])):
+        if ra[0] != rb[0] or len(ra[1]) != len(rb[1]):
+            return False
+        for (na, va), (nb, vb) in zip(ra[1], rb[1]):
+            if na != nb:
+                return False
+            if na in OUTCOME_FIELDS:
+                if va != vb and not (va is None and vb is not None and i in allowed):
+                    return False
+            elif na in _CLOCK_LEAVES:
+                if not _clock_equal(va, vb):
+                    return False
+            elif va != vb:
+                return False
+    return True
+
+
+def _run_fixings_roll_equal(expected: Any, alive: Any, allowed: frozenset) -> bool:
+    fa, fb = contract_fingerprint(expected), contract_fingerprint(alive)
+    if fa[0] != fb[0]:
+        return False
+    ia, ib = dict(fa[1]), dict(fb[1])
+    if set(ia) != set(ib):
+        return False
+    for name, va in ia.items():
+        vb = ib[name]
+        if name == "observation_records":
+            if not _fixing_records_equal(va, vb, allowed):
+                return False
+        elif name in _CLOCK_LEAVES:
+            if not _clock_equal(va, vb):
+                return False
+        elif va != vb:
+            return False
+    return True
+
+
 def _float_maturity(value: Any, what: str) -> float:
     try:
         m = float(value)
@@ -315,6 +369,7 @@ def check_contract_roll(
     calendar_days: int,
     *,
     expected_decrement: Optional[float] = None,
+    pricing_env_t1: Any = None,
 ) -> None:
     """Raise unless product_alive_t1 is product_t0 rolled forward calendar_days (spec §5.3).
 
@@ -332,9 +387,25 @@ def check_contract_roll(
     number from calendar days / 365, and the caller is the only one who knows
     the clock: a float maturity carries none of its own (see
     ``PricingEnvironment``, whose convention a float maturity bypasses).
+
+    A run-fixings product (``participates``; spec 2026-10-09 run fixings E5, plan Ruling 5) is compared with
+    ``product_t0.with_time_elapsed(decrement)``: exact on every term except the numeric clock leaves
+    (``observation_time``, ``accrued_offset``), which match within ``ROLL_TOL``, and an outcome open in the t0
+    contract and recorded in the alive contract on a record strictly past at t1 — a fixing, not a replacement.
+    ``pricing_env_t1`` is the t1 environment that says which records are strictly past there; without it no
+    outcome may change. A changed t0-recorded outcome is still refused.
     """
-    fp0, fp1 = contract_fingerprint(product_t0), contract_fingerprint(product_alive_t1)
-    same = fp0 == fp1 if int(calendar_days) == 0 else _rolled_equal(fp0, fp1)
+    if participates(product_t0):
+        days0 = int(calendar_days) == 0
+        decrement = 0.0 if days0 else (calendar_days / 365.0 if expected_decrement is None
+                                       else float(expected_decrement))
+        expected = product_t0.with_time_elapsed(decrement)
+        allowed = (frozenset(expected.missing_fixing_fills(pricing_env_t1)) if pricing_env_t1 is not None
+                   else frozenset())
+        same = _run_fixings_roll_equal(expected, product_alive_t1, allowed)
+    else:
+        fp0, fp1 = contract_fingerprint(product_t0), contract_fingerprint(product_alive_t1)
+        same = fp0 == fp1 if int(calendar_days) == 0 else _rolled_equal(fp0, fp1)
     if not same:
         raise ValidationError("contract replacement is not a time step")
     date_based = getattr(product_t0, "exercise_date", None) is not None \

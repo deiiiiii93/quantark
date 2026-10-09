@@ -21,6 +21,7 @@ from quantark.pnlexplain.equity.waterfall import sequential_rows, shapley_rows
 from quantark.util.exceptions import NumericalError
 from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.numerical import is_close
+from quantark.util.run_fixings import at_spot, participates, run_step_dt
 
 LEVEL = "instrument"
 RECONCILE_TOL = 1e-10
@@ -52,32 +53,35 @@ def _freeze_pair_fixings(
     snapshot_t1: ValuationSnapshot,
     transition: LifecycleTransition,
 ) -> Tuple[ValuationSnapshot, LifecycleTransition, Optional[ValuationSnapshot]]:
-    """The t0 snapshot and the alive-at-t1 contract with t0's missing past fixings recorded at t0's spot.
+    """The pair's fixing decisions (spec 2026-10-09 run fixings §4.3 E2; W5b; user decisions D2, D3, D4, D7).
 
-    A fixing already missing at t0 is history (user decision 2026-10-09): every shocked or intermediate state of
-    the explain - the waterfall states, the Taylor greeks, the alive-at-t1 contract - prices t0's decision.
-    ``snapshot_t1`` itself is NOT changed: ``pv_t1`` is the t1 snapshot's own value, so consecutive daily explains
-    chain. Returns ``(snapshot_t0, transition, snapshot_t1_carried)``; the last is the t1 snapshot with t0's
-    decision carried (None when nothing was missing), against which ``FIXING_REFILL`` measures a re-decided fixing.
-
-    TODO(lifecycle, W6): a fixing that passes between t0 and t1 is decided at the spot of each revaluation that sees
-    it as past; it should be recorded once at its own day's real spot.
+    t0's missing past fixings are recorded at t0's spot on the t0 contract (history; every t0-dated state prices
+    it, a fixing at t0 itself stays live). For a run-fixings product, every record strictly past at t1 and open in
+    the t0 contract — dated t0 or strictly inside the step — is decided ONCE at t0's spot (S0), never by a shocked
+    state's spot; the pair contract (Ruling 6: the t0 contract aged by the run clock, with every decision recorded)
+    is the alive-at-t1 contract and the carried t1 snapshot's. ``snapshot_t1`` itself is unchanged: ``pv_t1`` is its
+    own value, and ``FIXING_REFILL`` measures any disagreement with the pair. Returns ``(snapshot_t0, transition,
+    snapshot_t1_carried)``; the last is None when the pair decided nothing.
     """
     product_t0 = snapshot_t0.product
+    env0, env1 = snapshot_t0.pricing_env, snapshot_t1.pricing_env
     fills_of = getattr(product_t0, "missing_fixing_fills", None)
-    fills = fills_of(snapshot_t0.pricing_env) if fills_of is not None else {}
-    if not fills:
+    t0_fills = fills_of(env0) if fills_of is not None else {}
+    pair = None
+    step_fills: Dict[int, Any] = {}
+    if participates(product_t0):
+        aged = product_t0.with_fixings_recorded(t0_fills).with_time_elapsed(
+            run_step_dt(env0.valuation_date, env1))
+        step_fills = aged.missing_fixing_fills(at_spot(env1, float(env0.spot)))
+        pair = aged.with_fixings_recorded(step_fills)
+    if not t0_fills and not step_fills:
         return snapshot_t0, transition, None
-    snapshot_t0 = dataclasses.replace(
-        snapshot_t0, product=freeze_missing_fixings(product_t0, snapshot_t0.pricing_env)
-    )
-    transition = dataclasses.replace(
-        transition, product_alive_t1=_carry_fills(transition.product_alive_t1, fills)
-    )
-    snapshot_t1_carried = dataclasses.replace(
-        snapshot_t1, product=_carry_fills(snapshot_t1.product, fills)
-    )
-    return snapshot_t0, transition, snapshot_t1_carried
+    if t0_fills:
+        snapshot_t0 = dataclasses.replace(snapshot_t0, product=freeze_missing_fixings(product_t0, env0))
+    alive = pair if pair is not None else _carry_fills(transition.product_alive_t1, t0_fills)
+    carried = pair if pair is not None else _carry_fills(snapshot_t1.product, t0_fills)
+    transition = dataclasses.replace(transition, product_alive_t1=alive)
+    return snapshot_t0, transition, dataclasses.replace(snapshot_t1, product=carried)
 
 
 def explain(

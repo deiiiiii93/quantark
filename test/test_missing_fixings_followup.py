@@ -100,6 +100,10 @@ def _explain_chain(product_of, spots, quantity=2.0):
     return snaps, [explain(a, b, config=config) for a, b in zip(snaps, snaps[1:])]
 
 
+# W5b's warning for _ra_dated()'s record #1 (dated VAL - 31 days), left without an outcome
+_MISSING_31D = r"RangeAccrualOption: 1 past fixing without observed_in_range \(#1 2024-12-01\)"
+
+
 def _row(result, factor):
     rows = [r for r in result.rows if r.factor is factor]
     assert len(rows) <= 1
@@ -112,7 +116,9 @@ def test_daily_explains_chain_and_the_refill_is_attributed():
     spots = (109.5, 111.0, 111.5)
     (snaps, results), _ = _count_missing(_explain_chain, _ra_dated, spots)
     engine = RangeAccrualAnalyticalEngine()
-    own = [2.0 * engine.price(s.product, s.pricing_env) for s in snaps]
+    with pytest.warns(MissingFixingWarning, match=_MISSING_31D) as caught:   # each snapshot's own value fills #1
+        own = [2.0 * engine.price(s.product, s.pricing_env) for s in snaps]
+    assert len(caught) == len(snaps) == 3
     for k, res in enumerate(results):
         assert res.pv_t0.total == own[k] and res.pv_t1.total == own[k + 1]  # each endpoint is its own value
         assert res.reconcile(ExplainMethod.WATERFALL) == pytest.approx(0.0, abs=1e-10)
@@ -133,7 +139,9 @@ def test_explain_market_rows_keep_the_t0_fill():
     """Shocked / intermediate states price the t0 decision: every market row equals the pair recorded at t0."""
     from quantark.pnlexplain.base import MARKET_FACTORS, Factor
 
-    _, (got,) = _explain_chain(_ra_dated, (109.5, 111.0))
+    with pytest.warns(MissingFixingWarning, match=_MISSING_31D) as caught:
+        _, (got,) = _explain_chain(_ra_dated, (109.5, 111.0))
+    assert len(caught) == 2     # the pair's t0 freeze, and pv_t1 = the t1 snapshot's own fill
     _, (recorded,) = _explain_chain(lambda: _ra_dated(True), (109.5, 111.0))
     pick = lambda res: [(r.factor, r.method, r.pnl) for r in res.rows if r.factor in MARKET_FACTORS]  # noqa: E731
     assert pick(got) == pick(recorded)
@@ -357,3 +365,142 @@ def test_replay_carry_reprices_keep_the_days_fill():
         book = _book_price_callback([(2.0, replay, engine, _ra_dated(), 0.0, 0.0)], env)
         assert single(111.0, env.div_yield) == want
         assert book(111.0, env.div_yield) == 2.0 * want
+
+
+# =============================================================================
+# 3. Run fixings in PnL explain (spec 2026-10-09 run fixings §4, X5): a fixing that passes inside the step
+# =============================================================================
+import run_fixings_fixtures as RF  # noqa: E402
+from quantark.util.numerical import is_close  # noqa: E402
+
+
+def _rf_explain(product_t0, day_t0, product_t1, day_t1):
+    from quantark.pnlexplain import explain
+    from quantark.pnlexplain.base import ExplainMethod
+    from quantark.pnlexplain.config import PnLExplainConfig
+    from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
+
+    engine = RangeAccrualAnalyticalEngine()
+    e0, e1 = RF.eq_env(day_t0), RF.eq_env(day_t1)
+    s0 = ValuationSnapshot(product_t0, engine, e0, date=e0.valuation_date, quantity=1.0)
+    s1 = ValuationSnapshot(product_t1, engine, e1, date=e1.valuation_date, quantity=1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        return explain(s0, s1, config=PnLExplainConfig(methods=(ExplainMethod.WATERFALL, ExplainMethod.TAYLOR)))
+
+
+def _close6(a, b):
+    return is_close(a, b, rel_tol=0.0, abs_tol=5e-7)
+
+
+def _rf_ra(form, day, outcomes=None):
+    """The §2.1 range accrual as held on run day ``day``: the dated contract, or its numeric twin aged by the run
+    clock (ACT/365 calendar days) to that day."""
+    if form == "dated":
+        return RF.ra_dated(outcomes)
+    return RF.ra_numeric(outcomes).with_time_elapsed(day / 365.0)
+
+
+FORMS = pytest.mark.parametrize("form", ["dated", "numeric"])
+
+
+@FORMS
+@pytest.mark.parametrize("t1_outcomes, pv_t1, refill", [
+    ({}, 2.744374, -1.905067),          # P1
+    ({0: True}, 4.649441, 0.0),         # P2
+    ({0: False}, 2.744374, -1.905067),  # P2b
+], ids=["P1", "P2", "P2b"])
+def test_x5_a_fixing_dated_t0_is_fixed_at_s0_for_the_pair(form, t1_outcomes, pv_t1, refill):
+    from quantark.pnlexplain.base import ExplainMethod, Factor
+
+    res = _rf_explain(_rf_ra(form, 4), 4, _rf_ra(form, 10, t1_outcomes), 10)
+    alive = RF.quiet_price(RangeAccrualAnalyticalEngine(), RF.ra_dated({0: True}), RF.eq_env(10))
+    assert is_close(res.pv_alive_t1.total, alive, rel_tol=0.0, abs_tol=1e-12) and _close6(alive, 4.649441)
+    assert _close6(res.pv_t1.total, pv_t1) and _close6(res.pv_t0.total, 5.707299)
+    row = _row(res, Factor.FIXING_REFILL)
+    assert row is not None and _close6(row.pnl, refill)
+    assert is_close(row.pnl, res.pv_t1.total - res.pv_alive_t1.total - _row(res, Factor.LIFECYCLE_EVENT).pnl,
+                    rel_tol=0.0, abs_tol=1e-12)
+    for m in (ExplainMethod.WATERFALL, ExplainMethod.TAYLOR):
+        assert res.reconcile(m) == pytest.approx(0.0, abs=1e-10)
+
+
+@FORMS
+@pytest.mark.parametrize("t1_outcomes", [{}, {0: True}], ids=["P3", "P3b"])
+def test_x5_a_fixing_strictly_inside_the_step_is_fixed_at_s0(form, t1_outcomes):
+    from quantark.pnlexplain.base import Factor
+
+    res = _rf_explain(_rf_ra(form, 3), 3, _rf_ra(form, 5, t1_outcomes), 5)
+    assert _close6(res.pv_t1.total, 5.592668) and _row(res, Factor.FIXING_REFILL).pnl == 0.0
+
+
+def test_x5_p4_missing_at_t0_is_unchanged():
+    from quantark.pnlexplain import explain
+    from quantark.pnlexplain.base import ExplainMethod, Factor
+    from quantark.pnlexplain.config import PnLExplainConfig
+    from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
+
+    def prod():
+        return RangeAccrualOption(
+            initial_price=100.0, range_config=RangeAccrualConfig(upper_barrier=110.0, lower_barrier=90.0,
+                                                                 accrual_rate=0.10),
+            exercise_date=RF.START + timedelta(days=365), initial_date=RF.START - timedelta(days=10),
+            observation_records=[RangeAccrualObservationRecord(observation_date=RF.START - timedelta(days=3))]
+            + [RangeAccrualObservationRecord(observation_date=d) for d in RF.fixing_dates()[2:]])
+    engine = RangeAccrualAnalyticalEngine()
+    e0, e1 = RF.eq_env(0, spot=105.0), RF.eq_env(6, spot=111.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        res = explain(ValuationSnapshot(prod(), engine, e0, date=e0.valuation_date, quantity=1.0),
+                      ValuationSnapshot(prod(), engine, e1, date=e1.valuation_date, quantity=1.0),
+                      config=PnLExplainConfig(methods=(ExplainMethod.WATERFALL, ExplainMethod.TAYLOR)))
+    assert _close6(_row(res, Factor.FIXING_REFILL).pnl, -2.380029)
+
+
+@FORMS
+def test_x5_changing_a_recorded_fixing_is_still_refused(form):
+    with pytest.raises(ValidationError, match="contract replacement is not a time step"):
+        _rf_explain(_rf_ra(form, 5, {0: True}), 5, _rf_ra(form, 10, {0: False}), 10)
+
+
+@FORMS
+def test_x5_an_outcome_on_a_future_record_is_still_refused(form):
+    with pytest.raises(ValidationError, match="contract replacement is not a time step"):
+        _rf_explain(_rf_ra(form, 4), 4, _rf_ra(form, 10, {1: True}), 10)   # #1 is dated day 18
+
+
+@FORMS
+def test_a_fixing_dated_t1_stays_live_in_the_pair(form):
+    """Review Focus 5."""
+    from quantark.pnlexplain.base import Factor
+
+    res = _rf_explain(_rf_ra(form, 3), 3, _rf_ra(form, 4), 4)
+    assert _row(res, Factor.FIXING_REFILL) is None
+    assert res.pv_alive_t1.total == pytest.approx(res.pv_t1.total, abs=1e-12)
+
+
+def test_x5_numeric_participants_roll_through_the_check():
+    from quantark.pnlexplain.base import Factor
+
+    day = 1.0 / 365.0
+    t0 = RF.ra_numeric()
+    for _ in range(3):
+        t0 = t0.with_time_elapsed(day)
+    t1 = t0
+    for _ in range(2):
+        t1 = t1.with_time_elapsed(day)
+    res = _rf_explain(t0, 3, t1, 5)                                             # #0 (day 4) passes inside
+    assert is_close(_row(res, Factor.FIXING_REFILL).pnl, 0.0, rel_tol=0.0, abs_tol=1e-12)
+
+
+@pytest.mark.parametrize("d0, d1, t1_outcomes", [(4, 10, {}), (4, 10, {0: False}), (3, 5, {}), (3, 4, {})],
+                         ids=["P1", "P2b", "P3", "t1-live"])
+def test_x5_the_numeric_twin_explains_as_the_dated_contract(d0, d1, t1_outcomes):
+    dated = _rf_explain(_rf_ra("dated", d0), d0, _rf_ra("dated", d1, t1_outcomes), d1)
+    numeric = _rf_explain(_rf_ra("numeric", d0), d0, _rf_ra("numeric", d1, t1_outcomes), d1)
+    key = lambda res: [(r.factor, r.method, r.term) for r in res.rows]  # noqa: E731
+    assert key(numeric) == key(dated)
+    for a, b in zip(numeric.rows, dated.rows):
+        assert is_close(a.pnl, b.pnl, rel_tol=1e-12, abs_tol=1e-12), (a.factor, a.pnl, b.pnl)
+    for name in ("pv_t0", "pv_alive_t1", "pv_t1"):
+        assert is_close(getattr(numeric, name).total, getattr(dated, name).total, rel_tol=1e-12)

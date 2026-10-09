@@ -66,6 +66,17 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   back", R9). A book without one runs as before.
 - The replay book records a fixing on the date it passes (at that date's spot) and ages a numeric record Asian's
   records with its maturity (spec fixture day 4: numeric 7.807415 -> 7.686469 = the dated twin).
+- PnL explain: a range accrual / Asian fixing that passes inside the step (dated t0, or strictly between t0 and t1)
+  is decided once at t0's spot for every revaluation of the pair; the t1 snapshot's own decision (its record, or its
+  fill at t1's spot) shows in the `fixing_refill` row, now emitted whenever the pair decided a fixing (label: 'fixing
+  decided by the pair at t0's spot, decided differently at t1'). A t1 contract that records a fixing the t0 contract
+  left open is no longer refused (a t0-recorded outcome that changes still is), and an aged numeric contract passes
+  the roll check (`check_contract_roll(..., pricing_env_t1=...)`). The equity `BacktestEngine` explain recorder no
+  longer declares a run-fixings product unrolled (`contract_roll_days=0`): the run clock aged it. An equity backtest
+  or replay with `pnl_explain` holding a range accrual / record Asian whose fixing passes mid-run explains again
+  (it raised "contract replacement is not a time step"), with a `fixing_refill` of exactly 0.0. Spec probe P1:
+  pv_alive_t1 2.744374 -> 4.649441, `fixing_refill` −1.905067, waterfall spot −3.126644 -> −1.221578, total
+  unchanged −2.962925.
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
 - A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.
