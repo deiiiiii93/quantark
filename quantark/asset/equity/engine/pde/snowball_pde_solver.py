@@ -49,6 +49,7 @@ from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.accrual import leg_annualized
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
@@ -58,6 +59,7 @@ from quantark.util.numerical import (
     Tolerance,
     is_close,
     is_greater_than_or_close,
+    is_less_than_or_close,
 )
 
 
@@ -1395,27 +1397,21 @@ class SnowballPDESolver(BasePDESolver):
         )
         if leg_annualized(product, "rebate") and not call_rebate:
             # the fixed rebate the contract pays (get_maturity_payoff_v0's fixed branch): annualized over the V0
-            # contract tenor. A call-rebate contract pays no fixed rebate; its rows are left as they were (see
-            # docs/superpowers/specs/2026-10-08-accrual-scope-followups-findings.md, item 7).
+            # contract tenor. A call-rebate contract pays no fixed rebate: ``rebate`` reaches no row of it.
             rebate *= product.get_contract_tenor(pricing_env)
 
-        # Lower boundary (S -> 0)
-        # For V0, if continuous KI, it will transition to V1
-        # Otherwise, discounted principal + rebate
-        if self._ki_continuous and product.has_ki_barrier:
-            # Will be overwritten by KI jump
-            lower = EdgeRow(
-                self._grid_v1[0, t_idx] if self._grid_v1 is not None else 0.0,
-                "v0_lower_copy_ki", copy_from_ki=True,
-            )
-        else:
-            v = (principal + rebate) * df_to_maturity
-            lower = EdgeRow(v, "v0_lower_principal_rebate", (RowTerm("M", v),))
+        # Each edge is the knock-out side (S -> inf on a standard product, S -> 0 on a reverse one) or the knock-in
+        # side; an edge that lies beyond neither barrier carries the contract's no-event V0 value there.
+        reverse = bool(product.is_reverse)
+        edges = {}
+        ko_edge, ki_edge = ("lower", "upper") if reverse else ("upper", "lower")
 
-        # Upper boundary (S -> ∞)
-        # Check if above all KO barriers - if so, value is KO payoff
-        max_ko_barrier = self._get_max_ko_barrier(product)
-        if s_vec[-1] >= max_ko_barrier:
+        # The knock-out edge: the current KO payoff once it lies beyond every KO level
+        if reverse:
+            ko_edge_beyond = is_less_than_or_close(float(s_vec[0]), self._get_min_ko_barrier(product))
+        else:
+            ko_edge_beyond = s_vec[-1] >= self._get_max_ko_barrier(product)
+        if ko_edge_beyond:
             # Use current KO payoff, allocated to the knock-out unit of the record it pays
             rec = self._next_ko_record_at_time(product, pricing_env, current_time, t_idx)
             payoff = float(rec.payoff or 0.0) if rec is not None else 0.0
@@ -1425,32 +1421,70 @@ class SnowballPDESolver(BasePDESolver):
             # returns float(cash) * df (or float(cash)) and the unit is that df (or 1.0), so the product is
             # the same float -- one record scan and one discount per row
             ko_payoff = payoff * unit if rec is not None else 0.0
-            upper = EdgeRow(ko_payoff, "v0_upper_ko",
-                            (RowTerm("KO", unit, None if rec is None else float(rec.observation_time), payoff),))
-        else:
-            if call_rebate:
-                df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
-                participation = (
-                    product.payoff_config.call_participation_rate
-                    * product.contract_multiplier
-                )
-                tenor_factor = (
-                    product.get_contract_tenor(pricing_env)
-                    if leg_annualized(product, "rebate")
-                    else 1.0
-                )
-                participation *= tenor_factor
-                strike = product.payoff_config.call_strike
-                v = (
-                    principal * df
-                    + participation * (s_vec[-1] * df_div - strike * df)
-                )
-                upper = EdgeRow(v, "v0_upper_call_rebate", (RowTerm("M", v),))
-            else:
-                # Deep OTM: principal + rebate (discounted)
-                v = (principal + rebate) * df_to_maturity
-                upper = EdgeRow(v, "v0_upper_principal_rebate", (RowTerm("M", v),))
+            edges[ko_edge] = EdgeRow(
+                ko_payoff, f"v0_{ko_edge}_ko",
+                (RowTerm("KO", unit, None if rec is None else float(rec.observation_time), payoff),))
+
+        # The knock-in edge under continuous KI: the knocked-in row (the KI jump overwrites it), once it lies at or
+        # beyond the knock-in level. Discrete KI: _knock_in_side_row below.
+        if self._ki_continuous and product.has_ki_barrier and self._edge_beyond_knock_in(product, s_vec):
+            row = -1 if reverse else 0
+            edges[ki_edge] = EdgeRow(
+                self._grid_v1[row, t_idx] if self._grid_v1 is not None else 0.0,
+                f"v0_{ki_edge}_copy_ki", copy_from_ki=True,
+            )
+
+        for edge in ("lower", "upper"):
+            if edge not in edges:
+                edges[edge] = self._v0_no_event_row(edge, tau, product, pricing_env, s_vec, principal, rebate,
+                                                    df_to_maturity, call_rebate)
+        lower, upper = edges["lower"], edges["upper"]
         return self._knock_in_side_row(t_idx, tau, product, pricing_env, s_vec, lower, upper)
+
+    def _v0_no_event_row(self, edge, tau, product, pricing_env, s_vec, principal, rebate, df_to_maturity,
+                         call_rebate):
+        """V0's row at ``edge`` ("lower": S -> 0, "upper": S -> inf) when the edge reaches neither barrier: the
+        discounted asymptote of the V0 maturity payoff (``get_maturity_payoff_v0``). A call-rebate contract pays
+        principal + participation x intrinsic (x tenor when annualized) and NO fixed rebate; its intrinsic is a call
+        (a put on a reverse Phoenix), worth its forward intrinsic value on the edge where it is in the money and 0 on
+        the other. A fixed-rebate contract pays principal + rebate on both edges."""
+        if not call_rebate:
+            v = (principal + rebate) * df_to_maturity
+            return EdgeRow(v, f"v0_{edge}_principal_rebate", (RowTerm("M", v),))
+        is_put = isinstance(product, PhoenixOption) and product.is_reverse
+        in_the_money = (edge == "lower") if is_put else (edge == "upper")
+        if not in_the_money:
+            v = principal * df_to_maturity
+            return EdgeRow(v, f"v0_{edge}_call_rebate", (RowTerm("M", v),))
+        df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
+        participation = (
+            product.payoff_config.call_participation_rate
+            * product.contract_multiplier
+        )
+        tenor_factor = (
+            product.get_contract_tenor(pricing_env)
+            if leg_annualized(product, "rebate")
+            else 1.0
+        )
+        participation *= tenor_factor
+        strike = product.payoff_config.call_strike
+        if is_put:
+            v = principal * df + participation * (strike * df - s_vec[0] * df_div)
+        else:
+            v = (
+                principal * df
+                + participation * (s_vec[-1] * df_div - strike * df)
+            )
+        return EdgeRow(v, f"v0_{edge}_call_rebate", (RowTerm("M", v),))
+
+    def _edge_beyond_knock_in(self, product, s_vec) -> bool:
+        """Whether the knock-in edge (lower on a standard product, upper on a reverse one) lies at or beyond every
+        knock-in level, where a continuously monitored knock-in is certain."""
+        barrier = product.barrier_config.ki_barrier
+        levels = [float(b) for b in barrier] if isinstance(barrier, (list, tuple)) else [float(barrier)]
+        if product.is_reverse:
+            return is_greater_than_or_close(float(s_vec[-1]), max(levels))
+        return is_less_than_or_close(float(s_vec[0]), min(levels))
 
     def _knock_in_side_row(self, t_idx, tau, product, pricing_env, s_vec, lower, upper):
         """Under discretely observed knock-in (European included), keyed on the contract, the not-knocked-in row on
@@ -1763,6 +1797,13 @@ class SnowballPDESolver(BasePDESolver):
         fp = self._ki_fp
         if fp is not None and 0 < t_idx < num_t - 1:
             fp.add_correction(t_idx, s_vec, ki_barrier, v0, v1)
+
+    def _get_min_ko_barrier(self, product: SnowballOption) -> float:
+        """Get the minimum KO barrier level (a reverse product's knock-out edge lies below every one)."""
+        ko_barrier = product.barrier_config.ko_barrier
+        if isinstance(ko_barrier, list):
+            return min(ko_barrier)
+        return ko_barrier
 
     def _get_max_ko_barrier(self, product: SnowballOption) -> float:
         """Get the maximum KO barrier level."""

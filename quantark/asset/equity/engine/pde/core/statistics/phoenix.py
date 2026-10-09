@@ -59,8 +59,8 @@ class PhoenixBreach(SnowballBreach):
 
 class PhoenixStatistics(SnowballStatistics):
 
-    #: PhoenixAdapter never sets ``solver._grid_v1``: the value's alive lower row under continuous KI is 0.0
-    _alive_lower_copies_ki = False
+    #: PhoenixAdapter never sets ``solver._grid_v1``: the value's alive knock-in-side row under continuous KI is 0.0
+    _alive_ki_edge_copies_ki = False
 
     def __init__(self, prepared, streams):
         super().__init__(prepared, streams)

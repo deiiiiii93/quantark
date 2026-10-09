@@ -30,8 +30,15 @@ SNOWBALLS = {
                                        call_participation_rate=0.5),
     "reverse_full": dict(SNOWBALL, is_reverse=True, ko_barrier=97.0, ki_barrier=115.0, protection_type="full"),
     # discrete knock-in on the upper side (spec 3C §5.5): the upper not-knocked-in edge takes the knocked-in row, the
-    # lower stays the principal + rebate row that the standard discrete product's lower edge no longer reaches
+    # lower (the reverse product's knock-out edge, below every knock-out level) the knock-out row
     "reverse_disc": dict(SNOWBALL, is_reverse=True, ko_barrier=97.0, ki_barrier=115.0, ki_monitoring="discrete"),
+    # a continuous knock-in the grid never reaches: the knock-in edge carries the no-event value (principal + rebate;
+    # a call rebate's lower edge pays principal and no fixed rebate)
+    "unreachable_ki": dict(SNOWBALL, ki_barrier=1.0),
+    "call_rebate_unreachable_ki": dict(SNOWBALL, ki_barrier=1.0, call_rebate=True, call_strike=105.0,
+                                       call_participation_rate=0.5),
+    "reverse_call_rebate": dict(SNOWBALL, is_reverse=True, ko_barrier=97.0, ki_barrier=115.0, call_rebate=True,
+                                call_strike=105.0, call_participation_rate=0.5),
 }
 
 
@@ -66,6 +73,7 @@ def test_every_snowball_branch_is_covered():
     assert seen >= {
         "v0_lower_copy_ki", "v0_lower_principal_rebate", "v0_upper_ko", "v0_upper_principal_rebate",
         "v0_upper_call_rebate", "v0_lower_certain_ki", "v0_upper_certain_ki",
+        "v0_lower_ko", "v0_upper_copy_ki", "v0_lower_call_rebate",
         "v1_lower_reverse", "v1_lower_none_slope", "v1_lower_max_loss",
         "v1_upper_reverse_none", "v1_upper_reverse_partial", "v1_upper_reverse_full", "v1_upper_principal",
     }

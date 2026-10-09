@@ -155,21 +155,22 @@ class SnowballStatistics(RollingStatistics):
         r_lo0, r_lo1, r_up0, r_up1 = lower[:w], lower[w:], upper[:w], upper[w:]
         self._fill_cash(r_lo1, lo1, "ki")
         self._fill_cash(r_up1, up1, "ki")
-        self._fill_cash(r_up0, up0, "alive")
-        if lo0.copy_from_ki:
-            # continuous KI: the value's alive lower row is the knocked-in row (copied, allocation and
-            # all) -- or 0.0 on a family whose value never exposes that row (``_alive_lower_copies_ki``)
-            if self._alive_lower_copies_ki:
-                r_lo0[:] = r_lo1
-        else:
-            self._fill_cash(r_lo0, lo0, "alive")
+        for r0, r1, edge in ((r_up0, r_up1, up0), (r_lo0, r_lo1, lo0)):
+            if edge.copy_from_ki:
+                # continuous KI: the value's alive knock-in-side row (lower; upper on a reverse product) is the
+                # knocked-in row (copied, allocation and all) -- or 0.0 on a family whose value never exposes that
+                # row (``_alive_ki_edge_copies_ki``)
+                if self._alive_ki_edge_copies_ki:
+                    r0[:] = r1
+            else:
+                self._fill_cash(r0, edge, "alive")
         if self.layout.kis is not None:
             self._ki_rows(current, r_lo0, r_up0, r_lo1, r_up1)
         self._probability_rows(j, current, (r_lo0, r_up0, r_lo1, r_up1), (lo0, up0, lo1, up1))
         return lower, upper
 
-    #: SnowballAdapter.allocate exposes the knocked-in grid to the alive lower row (``solver._grid_v1``)
-    _alive_lower_copies_ki = True
+    #: SnowballAdapter.allocate exposes the knocked-in grid to the alive knock-in-side row (``solver._grid_v1``)
+    _alive_ki_edge_copies_ki = True
 
     def _value_rows(self, which, j, tau_rem):
         """The surface's EdgeRows at step ``j``: the very rows the value group set this step when it

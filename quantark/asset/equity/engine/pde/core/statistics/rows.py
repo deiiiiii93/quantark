@@ -30,4 +30,4 @@ class EdgeRow(NamedTuple):
     value: float                     # exactly what the value surface receives
     branch: str                      # the code branch that produced it (test_rows enumerates them)
     terms: tuple = ()                # sum(t.value * t.operand) == value, bit for bit, for one-term rows
-    copy_from_ki: bool = False       # continuous KI: the alive lower row is the knocked-in row
+    copy_from_ki: bool = False       # continuous KI: the alive knock-in-side row is the knocked-in row
