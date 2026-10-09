@@ -491,6 +491,9 @@ class AutocallableLifecycleTracker:
         timing = resolve_terminal_timing(product, schedule_env)
         if not self._timing_is_due(date, valuation_point, timing):
             return None
+        # TODO(tracker clock decision 2): a terminal dated BEFORE the run (a contract that matured before it, not
+        # carried as matured) is still determined on the run's first close, off that close's spot. Decision 2 rules
+        # only on barrier and coupon records; the terminal awaits a ruling.
 
         if isinstance(product, PhoenixOption):
             # Phoenix takes the knock-in state second and the environment by keyword; the snowball
