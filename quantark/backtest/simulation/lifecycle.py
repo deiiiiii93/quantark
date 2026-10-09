@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Sequence, Tuple
 
 import numpy as np
+import pandas as pd
 
 from quantark.asset.equity.lifecycle.autocallable import CalendarSchedule
 from quantark.asset.equity.settlement import _TIME_TOLERANCE  # the resolver's own bound, for bit-identity
@@ -107,8 +108,10 @@ class VectorLifecycle:
 
     @staticmethod
     def elapsed_time(schedule: CalendarSchedule, d: int) -> float:
-        """``AutocallableLifecycleTracker._valuation_point``'s time for day ``d``."""
-        days = (schedule.dates[d].normalize() - schedule.dates[0].normalize()).days
+        """``AutocallableLifecycleTracker._valuation_point``'s time for day ``d``: years since the tracker's clock
+        origin (the contract's ``initial_date`` when set, else the run's first day)."""
+        origin = schedule.clock_origin if schedule.clock_origin is not None else schedule.dates[0]
+        days = (schedule.dates[d].normalize() - pd.Timestamp(origin).normalize()).days
         return max(0.0, days / 365.0)
 
     # -- the day's three blocks, in the tracker's order -----------------

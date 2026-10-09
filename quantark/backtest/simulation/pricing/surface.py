@@ -1,7 +1,9 @@
 """The PDE life surface: one solve per bucket, read along every path (spec 7.2).
 
-A snowball's remaining life on day ``d`` is the start-date solve's slab at
-the node for ``d``.  Solving once with a node on every simulation day and
+A snowball's remaining life on day ``d`` is the inception solve's slab at
+the node for ``d``: the surface's time axis runs from the tracker's clock
+origin (the contract's ``initial_date`` when set, else the run's start), so a
+contract issued before the run is read at its own age.  Solving once with a node on every simulation day and
 interpolating in log-spot replaces one engine call per path per day with
 one solve per (vol, q, rate) bucket; the gate measures what that costs.
 """
@@ -16,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from quantark.asset.equity.lifecycle import snap_contract
+from quantark.asset.equity.lifecycle.autocallable import lifecycle_clock_origin
 from quantark.backtest.replay.engine_factory import create_pricing_engine
 from quantark.backtest.replay.market import SignedDividendYield
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
@@ -205,6 +208,8 @@ class LifeSurfacePricer:
         self.compact = bool(compact)
         self.engine_config = engine_config
         self.start_date = pd.Timestamp(start_date).normalize()
+        # the tracker's one clock (decision A, 2026-10-09): the solve's t = 0 is the contract's own origin
+        self.clock_origin = lifecycle_clock_origin(product, self.start_date).normalize()
         self.dates = pd.DatetimeIndex(dates)
         self.underlying = underlying
         self.vol_step = float(vol_step)
@@ -229,7 +234,7 @@ class LifeSurfacePricer:
         ).hexdigest()
         self._maturity = float(self.product.maturity)
         self._extra_times = tuple(
-            t for t in (self.elapsed(d) for d in range(1, len(self.dates)))
+            t for t in (self.elapsed(d) for d in range(len(self.dates)))
             if 0.0 < t < self._maturity
         )
         self._solves = 0
@@ -258,8 +263,8 @@ class LifeSurfacePricer:
         return self._exact.aged_product(date, knocked_in=knocked_in)
 
     def elapsed(self, d: int) -> float:
-        """The tracker's elapsed-time convention: ``(date - start).days / 365``."""
-        return max(0.0, (self.dates[d].normalize() - self.start_date).days / 365.0)
+        """The tracker's elapsed-time convention: ``(date - clock_origin).days / 365``."""
+        return max(0.0, (self.dates[d].normalize() - self.clock_origin).days / 365.0)
 
     # -- surfaces -------------------------------------------------------
 
@@ -271,7 +276,7 @@ class LifeSurfacePricer:
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=float(self.product.initial_price), asset_name=self.underlying),
             vol_surface=FlatVolSurface(volatility=float(vol)), rate_curve=FlatRateCurve(rate=float(rate)),
-            div_yield=SignedDividendYield(float(q)), valuation_date=self.start_date.to_pydatetime(),
+            div_yield=SignedDividendYield(float(q)), valuation_date=self.clock_origin.to_pydatetime(),
         )
         try:
             sol = self._engine.solve_life_surface(self.product, env, extra_times=self._extra_times)
@@ -296,8 +301,10 @@ class LifeSurfacePricer:
         """Column 0, the terminal column, and the node of every calendar day up to maturity."""
         columns = {0, int(surface.t.size - 1)}
         tau = float(surface.t[-1])
-        for d in range(1, len(self.dates)):
+        for d in range(len(self.dates)):
             elapsed = self.elapsed(d)
+            if elapsed == 0.0:
+                continue                    # column 0 (day 0 of a run that starts on the contract's origin)
             if elapsed > tau and not is_close(elapsed, tau):
                 break
             columns.add(surface.node(elapsed))
@@ -455,7 +462,7 @@ class LifeSurfacePricer:
         """The knock-in observation times, or every day when it is continuous."""
         config = self.product.barrier_config
         if getattr(config, "ki_continuous", False):
-            return [self.elapsed(d) for d in range(1, len(self.dates))]
+            return [t for t in (self.elapsed(d) for d in range(len(self.dates))) if t > 0.0]
         return [float(t) for t in (config.ki_observation_dates or ())]
 
     def _stress_days(self) -> List[int]:

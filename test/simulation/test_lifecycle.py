@@ -184,3 +184,62 @@ def test_the_schedule_carries_the_delays():
     plain = _tracker(short_snowball()).resolve_calendar_schedule(DATES, _env(DATES[0]))
     assert plain.ko_settlement_delay == pytest.approx([0.0, 0.0])
     assert plain.terminal_settlement_delay == 0.0
+
+
+# -- a contract issued before the run (tracker clock decisions A and 2, 2026-10-09) ----------------------------------
+
+def _issued_early(gap_days: int, **kwargs):
+    """``short_snowball`` issued ``gap_days`` before the run: its records fall ``gap_days`` earlier on the run
+    calendar, and a record dated before ``DATES[0]`` is never tested."""
+    product = short_snowball(**kwargs)
+    product.initial_date = (DATES[0] - pd.Timedelta(days=gap_days)).to_pydatetime()
+    return product
+
+
+@pytest.mark.parametrize("gap", [1, 2])
+@pytest.mark.parametrize("name, spots", [
+    ("never_touches", [SPOT] * 8),
+    ("ko_on_the_first_close", [KO + 1.0] * 8),
+    ("ki_on_the_first_close", [KI - 1.0, SPOT, SPOT, SPOT, SPOT, SPOT * 0.8, SPOT * 0.8, SPOT * 0.8]),
+    ("ki_then_maturity", [SPOT, KI - 1.0, SPOT, SPOT, SPOT, SPOT * 0.8, SPOT * 0.8, SPOT * 0.8]),
+])
+def test_an_early_issued_contract_matches_the_tracker_day_by_day(gap, name, spots):
+    product = _issued_early(gap)
+    expected = _walk_tracker(product, spots)
+    actual = _walk_vector(product, spots)
+    for d, (e, a) in enumerate(zip(expected, actual)):
+        assert a == pytest.approx(e), f"{name} gap {gap} day {d}: {a} != {e}"
+
+
+@pytest.mark.parametrize("gap", [1, 2])
+def test_an_early_issued_contract_books_the_trackers_ledger_times(gap):
+    """The numeric clock runs from ``initial_date``: the vector lifecycle's determination and payment times, and
+    the receivable it discounts, are the tracker ledger's. Gap 1 knocks out on its day-2 record (run day 1); gap 2
+    tests that record on the run's first close, below the barrier, and matures on contract day 6 (run day 4)."""
+    product = _issued_early(gap, settlement_lag_days=2)
+    spots = [SPOT, KO + 1.0, KO + 1.0, SPOT, SPOT, SPOT, SPOT, SPOT]
+    tracker = _tracker(product)
+    lifecycle_product = tracker.product_for_lifecycle()
+    vec = _vector(product)
+    rate = np.array([0.02])
+    for d, (day, spot) in enumerate(zip(DATES, spots)):
+        env = _env(day)
+        tracker.observe(day, lifecycle_product, env, float(spot))
+        tracker.settle_maturity_if_due(day, lifecycle_product, env, float(spot))
+        vec.step(d, np.array([float(spot)]), lambda p, paths, ki, spot=spot, env=env: np.array(
+            [float(product.get_payoff(float(spot), env, knocked_in=bool(k))) for k in ki]))
+        point = tracker.lifecycle.valuation_point
+        assert receivable_pv(vec, rate, d)[0] == float(tracker.lifecycle.ledger.pending_pv(point, env)), f"day {d}"
+    (flow,) = tracker.lifecycle.ledger.cashflows
+    assert vec.determination_time[0, 0] == flow.determination_time
+    assert vec.payment_time[0, 0] == flow.payment_time
+    assert flow.determination_time == (2 if gap == 1 else 6) / 365.0
+    assert flow.payment_time == flow.determination_time + 2 / 365.0
+
+
+def test_a_record_before_the_run_is_due_on_no_day():
+    schedule = _tracker(_issued_early(2)).resolve_calendar_schedule(DATES, _env(DATES[0]))
+    assert list(schedule.ki_due_day) == [-1, 1]          # KI days 1 and 3: day 1 lies before the run
+    assert list(schedule.ko_due_day) == [0, 3]           # KO days 2 and 5: day 2 is the run start
+    assert schedule.clock_origin == DATES[0] - pd.Timedelta(days=2)
+    assert VectorLifecycle.elapsed_time(schedule, 0) == 2 / 365.0

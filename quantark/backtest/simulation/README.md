@@ -239,11 +239,12 @@ no engine call at all, and an exact-mode run of the same book finds them.
 
 The `life_surface` provider (PDE engines only) solves each product once per
 `(vol, q, rate)` bucket instead of once per state.  The solve is the
-ordinary snowball two-surface solve at the start date, for the whole life,
+ordinary snowball two-surface solve at the tracker's clock origin (the
+contract's `initial_date` when set, else the run's start), for the whole life,
 with an extra time node on every simulation day inside `(0, maturity)`; the
 engine hands back both value slabs, alive and knocked-in, on every node
 (`SnowballPDESolver.solve_life_surface`).  A day's readout picks the node
-at the tracker's elapsed time `(date − start).days / 365`, the knocked-in
+at the tracker's elapsed time `(date − clock origin).days / 365`, the knocked-in
 slab for a knocked-in path, else the alive one, and interpolates PV, delta
 and gamma linearly in `ln S`; delta and gamma per node come from the
 solver's own non-uniform three-point stencil applied to every interior node
