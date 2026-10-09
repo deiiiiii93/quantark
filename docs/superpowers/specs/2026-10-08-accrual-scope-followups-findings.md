@@ -7,7 +7,7 @@ Evidence scripts: `2026-10-08-accrual-scope-followups-evidence/`. Each one runs 
 
 | item | verdict | change |
 |---|---|---|
-| 6. rebate/KI flags read raw | Working as coded, but the defaults are inconsistent. Following the effective flag would move cash on most default contracts | none: the user decides (§6) |
+| 6. rebate/KI flags read raw | Working as coded, but the defaults are inconsistent. Following the effective flag would move cash on most default contracts | user decided 2026-10-09 (rebate follows, KI flat); branch `w2-rebate-flag`, see §6 status |
 | 7. PDE V0 boundary rebate not tenor-scaled | **bug, proven and fixed** | f4eeb5af |
 | 8. `get_tenor` and BUSINESS_DAYS | **bug, proven and fixed** (no production caller, no price moves) | ad0ef5ac |
 | 9. range accrual annualizes by the remaining maturity | **bug, proven** (same class as accrual spec §3.1) | none: design proposal (§9) |
@@ -105,6 +105,29 @@ would answer those contracts, so the check is stricter than the tenor rule it gu
 
 Either way the flag resolution should live in one place, `accrual.py`, beside `ko_accrual_factor`. Fourteen call
 sites (13 cash readers and the validation) read the raw flags today. Only the knock-out leg goes through `_effective_annualized_flag`.
+
+**Status 2026-10-09 (branch `w2-rebate-flag`, from dcea77b6; not merged, awaiting sign-off on the moved values).**
+The user chose neither A nor B as written: an unset **rebate** flag follows `is_annualized` (B for V0), an unset
+**knock-in** flag stays flat (A for V1), the KO coupon is unchanged, an explicit flag always wins.
+- One resolver, `accrual.leg_annualized(product, leg)`; all 13 cash readers above, the REBASED knock-in anchor in
+  `accrual_build` and the two KO-reset lifecycle tenor gates (`lifecycle/ko_reset.py`, not in the list above)
+  read it.
+- `_validate_maturity_parameters`' annualization check is deleted; R5 in `accrual_build` (on the effective flags)
+  is the one construction rule. A contract dated by `exercise_date`/`maturity_date` alone with a default rebate
+  is now refused by R5.
+- `item6_cash_deltas.py` after the change: snowball T=0.5 V0 15 -> 7.5, QUAD 5.413997 -> 3.107317; T=2 15 -> 30,
+  0.810672 -> 1.217247; T=3 15 -> 45, 1.517037 -> 1.677312; V1 unchanged everywhere; T=1, Phoenix and KO-reset
+  rows unchanged.
+- The 59 paths above plus `test/lifecycle_ko_reset`: 17 failed (13 replay goldens, 2 `pde_statistics`
+  sb_cont_3m, 2 `test_snowball_option` R5 refusals). A second sweep of 161 further files that build an
+  autocallable: 6 failed (3 banked certificates, the first-passage near-expiry benchmark, the carry-identity
+  QUAD pins, the simulation deliberate-disagreement test). All 6 pass with the rebate default reverted (a
+  pytest plugin setting the rebate leg's unset default to flat), so the rebate rule alone moves them.
+- Re-pinned with closed-form checks (`item6_rebank_pde_statistics.py`, `test/replay_golden/README.md`). **Not
+  re-pinned: `adi2d-snowball-greeks`, `snowball-flat-bsm` and `snowball-localvol-1d` (all 2026-10-06) no longer
+  reproduce 41 anchors** (their near-expiry/sub-year cells; e.g. `equity.snowball.quad/near_expiry/pv` 103.262509
+  -> 99.547329). A code change needs a full re-certification (release procedure); refreshing anchors is
+  forbidden. That is the user's call before landing.
 
 ---
 

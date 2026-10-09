@@ -56,6 +56,25 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   product is not changed, so pricing equals pricing the same contract with those fixings recorded at the spot. A
   future fixing that carries an outcome is still refused. `resolve_observations(..., warn_missing_fixings=False)`
   skips the warning for a caller that has already warned.
+- **An unset `is_annualized_rebate` now follows `is_annualized`** (default True), as the knock-out coupon always
+  did; it used to mean a flat rebate. The knock-in payoff is unchanged: an unset `is_annualized_ki` stays flat. An
+  explicit True/False always wins. One resolver, `accrual.leg_annualized(product, "ko" | "rebate" | "knock_in")`,
+  answers every cash reader (snowball, Phoenix and KO-reset V0/V1, the terminal periods, QUAD V2 terminal
+  breaks, the Monte Carlo REBASED V1 tenor, the snowball PDE V0 rows, the KO-reset lifecycle tenors). Every
+  factory default contract whose tenor is not one year moves: the V0 rebate is scaled by the tenor. Measured
+  (`create_standard_snowball`, rebate = ko_rate 15%, QUAD at spot 100, vol 20%, r 2%): T=0.5 V0 15 -> 7.5, price
+  5.413997 -> 3.107317; T=2 V0 15 -> 30, price 0.810672 -> 1.217247; T=3 V0 15 -> 45, price 1.517037 ->
+  1.677312; one-year contracts, Phoenix factory defaults (no rebate) and KO-reset schedule 1 of one year are
+  unchanged. A certain-V0 contract prices at its closed form (100 + rebate x tenor) e^{-rT} on QUAD, QUAD V2, MC
+  and PDE (`test/accrual_time/test_leg_flags.py`). Re-pinned: the replay goldens (13 frames; a 6-day snowball's
+  2% rebate falls from 200 to 3.29 per contract: initial value -10131.703047 -> -9974.988063 on `scalar_bsm`,
+  see `test/replay_golden/README.md`), the `pde_statistics` 3-month reference (PV 103.263208 -> 99.547665,
+  equal to the closed-form shift), the first-passage near-expiry benchmark and the carry-identity QUAD pins.
+- `SnowballOption` no longer refuses an annualized contract with neither `tenor`, `initial_date` nor
+  `settlement_date` at construction. R5 is the one rule, read on the effective flags: a dated contract whose
+  annualized cash needs an accrual start without `initial_date` is refused (now including one whose rebate
+  annualizes by default, e.g. dated by `exercise_date` alone); a numeric contract accrues on its own clock
+  (`accrued_offset` + maturity) and is accepted.
 
 ### Fixed
 - Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract
