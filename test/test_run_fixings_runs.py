@@ -87,6 +87,40 @@ def test_equity_backtest_numeric_participant_no_longer_warns_constant_maturity(t
     assert not [w for w in caught if "no roll rule" in str(w.message)]
 
 
+def _short(kind, form, expiry_day=10):
+    """A twin expiring on run day ``expiry_day`` with fixings on days 4 and 8."""
+    from quantark.asset.equity.product.option import RangeAccrualObservationRecord, RangeAccrualOption
+    from quantark.asset.equity.product.option.asian_option import AsianObservationRecord, AsianOption
+    from quantark.util.enum import AsianStrikeType, AveragingType, OptionType
+
+    days = (4, 8)
+    if form == "dated":
+        term = dict(exercise_date=F.START + timedelta(days=expiry_day))
+        when = [dict(observation_date=F.START + timedelta(days=d)) for d in days]
+    else:
+        term = dict(maturity=expiry_day / 365.0)
+        when = [dict(observation_time=d / 365.0) for d in days]
+    if kind == "ra":
+        extra = dict(initial_date=F.START) if form == "dated" else {}
+        return RangeAccrualOption(initial_price=100.0, range_config=F._range_config(), **term, **extra,
+                                  observation_records=[RangeAccrualObservationRecord(**w) for w in when])
+    return AsianOption(strike=100.0, option_type=OptionType.CALL, asian_strike_type=AsianStrikeType.FIXED,
+                       averaging_type=AveragingType.ARITHMETIC, **term,
+                       observation_records=[AsianObservationRecord(**w) for w in when])
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_equity_backtest_twins_refuse_a_run_past_the_maturity(kind, form, tmp_path):
+    # A numeric participant now ages, so a run past its maturity is refused as the dated twin's always was (spec §8
+    # row 2 + standing twin rule; settlement in runs is a follow-up, spec §10). Both run up to the day before it.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _backtest(_short(kind, form), kind, F.DailyAdapter(10), tmp_path)        # days 0..9
+        with pytest.raises(ValidationError):
+            _backtest(_short(kind, form), kind, F.DailyAdapter(14), tmp_path)    # days 0..13
+
+
 # ================================================================ equity dynamic scenario
 def _eq_dynamic(products, spot_of=F.spot_on, n=F.DAYS, start=F.START, env=None):
     import contextlib

@@ -144,10 +144,13 @@ class RunFixingRecorder:
 
     @property
     def days(self) -> Tuple[RunFixingDay, ...]:
+        """One ``RunFixingDay`` per ``register`` / ``advance`` call, in call order (a day may record nothing)."""
         return tuple(self._days)
 
     @property
     def recorded(self) -> Tuple[RecordedFixing, ...]:
+        """Every fixing the clock recorded so far (R3/R4), in ``days`` order. The first valuation's R5 fills are not
+        listed: they are frozen into the product at ``register``, as W5b did."""
         return tuple(f for day in self._days for f in day.fixings)
 
     @staticmethod

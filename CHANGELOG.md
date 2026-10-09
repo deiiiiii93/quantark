@@ -44,6 +44,9 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 ### Changed
 - `AsianOption.time_shift` (theta) records, at the held spot, a dated record its bump steps over; the bumped price is
   unchanged (pricing filled the same spot) and theta on a fixing day no longer warns `MissingFixingWarning`.
+  On a numeric record schedule it now also moves every record's `observation_time` with the maturity (snapped to
+  0.0 when zero, as `with_time_elapsed`), so numeric record Asian theta equals the dated twin's (spec fixture, day 3:
+  +0.00109532 -> -0.03081166; it used to age the maturity only).
 - A fixing at exactly t = 0 (today's, unprinted) that pricing decides at the current spot no longer counts as
   missing: `MissingFixingWarning` names only strictly past fills (`RangeAccrualOption`, `FxRangeAccrualOption` and
   its variants, `AsianOption`; spec 2026-10-09 run fixings §3.2). Prices are unchanged.
@@ -54,8 +57,13 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   spec fixture: a dated range accrual on day 10, 2.744374 -> 4.649441 (= the contract with the day-4 fixing recorded).
 - `DynamicScenarioEngine` (equity): the same run-fixings recording on a dated path (`DynamicScenarioEngine.run_fixings`);
   registered on the working copy, so the input portfolio is never touched; numeric range accruals / record Asians now
-  age on a dated path (they were frozen). An undated path records nothing; a dated path whose dates carry a time of
-  day and that holds such a product is refused.
+  age on a dated path (they were frozen). An undated path records nothing; a dated path (or an environment) whose
+  dates carry a time of day and that holds such a product is refused (R8), and so is a path whose `start_date`
+  precedes the environment's valuation date ("the run clock cannot go back", R9).
+- A run holding a NUMERIC range accrual / record Asian / FX range accrual that continues past the contract's maturity
+  now raises `ValidationError` on the first instant past it, as the dated twin already did (measured: equity
+  backtest, equity dynamic scenario, FX backtest); it used to run on with frozen values. Settlement in runs is a
+  follow-up.
 - `FXBacktestEngine` and `FXDynamicScenarioEngine` record FX range accrual fixings (domestic, foreign, quanto) on the
   run day they pass, at the quoted spot (`run_fixings`); numeric FX range accruals age in FX runs (they were frozen).
   FX range accrual on the spec fixture, day 10: 11,385.19 -> 19,005.46. The FX dynamic scenario registers on its
@@ -69,14 +77,14 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - PnL explain: a range accrual / Asian fixing that passes inside the step (dated t0, or strictly between t0 and t1)
   is decided once at t0's spot for every revaluation of the pair; the t1 snapshot's own decision (its record, or its
   fill at t1's spot) shows in the `fixing_refill` row, now emitted whenever the pair decided a fixing (label: 'fixing
-  decided by the pair at t0's spot, decided differently at t1'). A t1 contract that records a fixing the t0 contract
-  left open is no longer refused (a t0-recorded outcome that changes still is), and an aged numeric contract passes
-  the roll check (`check_contract_roll(..., pricing_env_t1=...)`). The equity `BacktestEngine` explain recorder no
-  longer declares a run-fixings product unrolled (`contract_roll_days=0`): the run clock aged it. An equity backtest
-  or replay with `pnl_explain` holding a range accrual / record Asian whose fixing passes mid-run explains again
-  (it raised "contract replacement is not a time step"), with a `fixing_refill` of exactly 0.0. Spec probe P1:
-  pv_alive_t1 2.744374 -> 4.649441, `fixing_refill` −1.905067, waterfall spot −3.126644 -> −1.221578, total
-  unchanged −2.962925.
+  decided by the pair at t0's spot, decided differently at t1', was 'missing fixing re-filled'). A t1 contract that
+  records a fixing the t0 contract left open is no longer refused (a t0-recorded outcome that changes still is), and
+  an aged numeric contract passes the roll check (`check_contract_roll(..., pricing_env_t1=...)`). The equity
+  `BacktestEngine` explain recorder no longer declares a run-fixings product unrolled (`contract_roll_days=0`): the
+  run clock aged it. An equity backtest or replay with `pnl_explain` holding a range accrual / record Asian whose
+  fixing passes mid-run explains again (it raised "contract replacement is not a time step"), with a
+  `fixing_refill` of exactly 0.0. Spec probe P1: pv_alive_t1 2.744374 -> 4.649441, `fixing_refill` −1.905067,
+  waterfall spot −3.126644 -> −1.221578, total unchanged −2.962925.
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
 - A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.
