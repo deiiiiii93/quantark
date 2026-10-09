@@ -947,12 +947,14 @@ def _build_fx():
     def fx_tarn():
         from quantark.asset.fx.engine.mc import FxTargetRedemptionNoteMCEngine
         from quantark.asset.fx.product.option import FxTargetRedemptionNote
+        from quantark.asset.fx.product.option.target_redemption_state import TargetRedemptionState
 
         return (
             FxTargetRedemptionNoteMCEngine(params=_fx_params(num_paths=2_000, seed=11)),
             FxTargetRedemptionNote(
                 fixing_times=[0.25, 0.5, 0.75, 1.0], coupon_rate=0.08,
                 notional=1.0, strike=1.20, currency_pair=_pair(),
+                state=TargetRedemptionState(0.0), accrual_start=0.0,
             ),
             _fx_flat_env(), "product_env",
         )

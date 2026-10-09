@@ -18,6 +18,16 @@ backtest and FX dynamic scenario.
   `TerminalBookingWarning`, `ResolvedTargetRedemption`, and `TARGET_HIT_RTOL` (1e-12, moved from the two TARN/TARF
   engines with its value unchanged).
 
+### Changed
+- **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
+  (`TargetRedemptionState(0.0)` for a contract booked at inception); omitting it raises `ValidationError`.
+- **Breaking:** a numeric `FxTargetRedemptionNote` states when its first listed period began: `accrual_start` (years
+  from valuation) or explicit `accrual_factors`, exactly one. The old default (`t_0 = 0`, the first period starting at
+  the valuation instant) halved the first coupon of a contract rebuilt mid-life. `accrual_start=0.0` reproduces the old
+  factors bitwise.
+- A non-positive fixing time is accepted (an unbanked past fixing) and an empty `fixing_times` is a terminal booking
+  (`TerminalBookingWarning`, valued at the PV of its pending cash).
+
 Accrual time, separate from observation time (spec: `docs/superpowers/specs/2026-10-08-accrual-time-design.md`).
 An autocallable's observation is a trading-day quantity (when the market is checked); its accrual is a calendar
 quantity in the contract's interest basis (how much it owes). Every snowball, Phoenix and KO-reset record now

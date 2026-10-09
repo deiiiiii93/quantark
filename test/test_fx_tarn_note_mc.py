@@ -28,6 +28,7 @@ from quantark.asset.fx.product.option import (
     FxTargetRedemptionNote,
     FxVanillaOption,
 )
+from quantark.asset.fx.product.option.target_redemption_state import TargetRedemptionState
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum import FxPayoutCurrency, OptionType
@@ -49,7 +50,10 @@ def _env(vol=0.10, spot=1.20, rd=0.05, rf=0.03):
 
 def _note(**kw):
     base = dict(fixing_times=[0.25, 0.5, 0.75, 1.0], coupon_rate=0.08,
-               notional=1.0, strike=1.20, currency_pair=_PAIR)
+               notional=1.0, strike=1.20, currency_pair=_PAIR,
+               state=TargetRedemptionState(0.0))
+    if "accrual_factors" not in kw:
+        base["accrual_start"] = 0.0
     base.update(kw)
     return FxTargetRedemptionNote(**base)
 

@@ -23,6 +23,7 @@ from quantark.asset.fx.product.option import (
     FxDigitalOption,
     FxTargetRedemptionForward,
     FxTargetRedemptionNote,
+    TargetRedemptionState,
 )
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import FxPricingEnvironment
@@ -96,7 +97,8 @@ def main():
     print("=" * 66)
     note_open = FxTargetRedemptionNote(
         fixing_times=FIXINGS, coupon_rate=0.08, strike=1.20,
-        target=float("inf"), include_principal=False, currency_pair=PAIR)
+        target=float("inf"), include_principal=False, currency_pair=PAIR,
+        state=TargetRedemptionState(0.0), accrual_start=0.0)
     neng = FxTargetRedemptionNoteMCEngine(params=params)
     nmc = neng.price(note_open, e)
     nse = neng.get_last_result().std_error
@@ -108,7 +110,8 @@ def main():
 
     note_full = FxTargetRedemptionNote(
         fixing_times=FIXINGS, coupon_rate=0.08, strike=1.20,
-        target=0.10, include_principal=True, currency_pair=PAIR)
+        target=0.10, include_principal=True, currency_pair=PAIR,
+        state=TargetRedemptionState(0.0), accrual_start=0.0)
     full = neng.price(note_full, e)
     nfrac = neng.get_last_result().mean_redemption_fraction
     print(f"  target=0.10, with principal:")
