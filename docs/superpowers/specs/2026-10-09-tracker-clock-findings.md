@@ -1,8 +1,9 @@
 # Tracker clock findings: a numeric contract whose `initial_date` precedes the run
 
 Date: 2026-10-09. Branch `tracker-clock-findings`, from `ko-reset-lifecycle-v2` at b419bfc7.
-Status: **findings and a decision request. No library behaviour is changed on this branch.** The option patches
-below exist only as a runtime pytest plugin in the evidence directory.
+Status: **implemented (A)** on branch `w1-tracker-clock` (from main dcea77b6), with decision 2 (records dated before
+the run). See section 6. The text below is the original findings and decision request; the option patches it
+describes exist only as a runtime pytest plugin in the evidence directory.
 
 Evidence: `docs/superpowers/specs/2026-10-09-tracker-clock-findings-evidence/`
 (`measure_clock_mismatch.py` + `measure_clock_mismatch*.json`, `dated_catch_up.py`, `tracker_clock_options.py`,
@@ -220,3 +221,44 @@ itself, so that case is correct. Under N = 100, records 0-2 (days -70, -39, -9) 
 A real mid-life run should carry those observations in `observed_*_indices` (or carried KI state), or the tracker
 should refuse a run whose uncarried records lie before `start_date`. Option A does not change this. It applies
 equally to dated contracts today.
+
+## 6. Status: implemented (A), with decision 2
+
+Branch `w1-tracker-clock` from main dcea77b6 (commits bf649ef9, e9990119, 93b8d63b and this note).
+
+**One clock.** `lifecycle_clock_origin(product, start_date)` (`lifecycle/autocallable.py`) is the contract's
+`initial_date` when set, else `start_date`. The tracker exposes it as `clock_origin`. It drives the record dates,
+`_terminal_payment_date`, `_schedule_resolution_env`, the pricing copy's ageing (in whole days), `_valuation_point`
+(the numeric terminal's due day and the ledger times), and the KO-reset `_schedule_two_base` / `knock_in_time`. The
+`_schedule_two_base` docstring is corrected. Consumers that re-derive the clock use the same function:
+`CalendarSchedule.clock_origin` -> `VectorLifecycle.elapsed_time`; `LifeSurfacePricer` (its elapsed time, its
+day-0 node and its solve's valuation date); the manager's run ledger (each flow on its own tracker's origin); the
+replay dashboard copy; and the PnL-explain recorder's valuation point (autocallable states only).
+
+**Decision 2.** A KO / KI / coupon record dated before `start_date` and not carried as observed is marked observed
+and never tested. KO and KI did not fire. A coupon there is history: no cash, and nothing is memorized. A record
+dated on `start_date` is tested on the first close. `resolve_calendar_schedule` maps such a record to due day -1.
+This applies to numeric and dated contracts alike. No warning is printed (ruling: every mid-life run has such
+records, and the carried-state fields are the channel for a real pre-run event). A terminal dated before the run
+is unchanged: it is still determined on the first close (TODO in `settle_maturity_if_due`, no ruling yet).
+
+**Parity** (`test/test_tracker_clock_parity.py`): a snowball, a memory Phoenix and a KO-reset (ABSOLUTE and REBASED),
+each written numerically (k/12 + `initial_date`) and on dates (`initial_date + round(k/12*365)`), are run with
+N = 0, 30 and 100 on quiet, knock-out and knock-in paths. The event days, the ledger cash and the determination and
+payment instants are identical. The copy PVs (PDE) agree to 1.0e-12 per 100 notional at worst, the ulp-level
+difference between a snapped time aged by days and a day count of two dates. Each contract day prices the same at
+every N. Cash that accrues cannot agree across the forms: a numeric record accrues k/12 and a dated one d_k/365, so
+an annualized 15% snowball's record 0 pays 1.25 against 1.2329 already at N = 0. The annualized variants are
+therefore held to identical timing, and to cash that does not depend on N within each form.
+
+**What moved.** Test list: the findings' 125 files, plus every test file that mentions
+lifecycle/replay/backtest/simulation/dynamicscenario/pnlexplain/intraday/tracker (227 files, excluding mo_volmodels,
+modelvalidation, volcalibration, fx_volmodels and pde_bitwise). Baseline dcea77b6: 3561 passed, 61 skipped. The
+branch: 3677 passed (the 116 new tests), 61 skipped, 0 failed. **No existing expected value changed.** The
+simulation surface on a contract issued 2 days early: the readout against exact repricing was 268.5 bp off on the
+old clock and is 0.40 bp off now.
+
+**Pre-existing, not changed here.** (1) The replay dashboard ages the unsnapped booked contract, so an off-day
+numeric time sits up to half a day from the tracker copy's. (2) A numeric delayed maturity never sets the state's
+scalar `settlement_date`, so a walk that settles by date disagrees with `VectorLifecycle` once the maturity's payment
+day falls inside the calendar. This happens at N = 0 as well.
