@@ -8,7 +8,7 @@ Evidence scripts: `2026-10-08-accrual-scope-followups-evidence/`. Each one runs 
 | item | verdict | change |
 |---|---|---|
 | 6. rebate/KI flags read raw | Working as coded, but the defaults are inconsistent. Following the effective flag would move cash on most default contracts | user decided 2026-10-09 (rebate follows, KI flat); branch `w2-rebate-flag`, see §6 status |
-| 7. PDE V0 boundary rebate not tenor-scaled | **bug, proven and fixed** | f4eeb5af |
+| 7. PDE V0 boundary rebate not tenor-scaled | **bug, proven and fixed**; the call-rebate and reverse rows left alone then are fixed by D7 (§7 status) | f4eeb5af; branch `w3-pde-rows` |
 | 8. `get_tenor` and BUSINESS_DAYS | **bug, proven and fixed** (no production caller, no price moves) | ad0ef5ac |
 | 9. range accrual annualizes by the remaining maturity | **bug, proven** (same class as accrual spec §3.1) | none: design proposal (§9) |
 | 10. DCN / FX TARN / cashleg own accrual | DCN is correct. The TARN is correct when aged, wrong when rebuilt mid-life. The cashleg `day_count` field is never read | none: design note (§10) |
@@ -209,6 +209,37 @@ The only repo contracts with `is_annualized_rebate=True` are in:
     against 1e−7 for the standard orientation.
   - Probe: scratch script, not kept. Reproduce it with `item7_pde_v0_boundary_rebate.product(T, annual,
     reverse=True)`.
+
+**Status 2026-10-09 (user decision D7, "fix both PDE row bugs"): both FIXED on branch `w3-pde-rows`.**
+- **The cancelling error was QUAD's, not the PDE's.** Against the closed form (100 e^{-rT} + 0.2 x tenor x BS call;
+  `item7_v0_rows_by_edge.py`), with `rebate_rate` 0 (the correct row) the PDE is already +4.0e−6 flat / +7.2e−6
+  annualized, while QUAD is +4.36e−4 / +8.71e−4. QUAD's gap is grid discretization of the call leg on its default
+  1001 points: 2001 → 1.36e−4, 4001 → 1.43e−5, 8001 → 7.2e−6 (flat). The phantom rebate pushed the PDE up by
+  +3.4e−4, towards QUAD. No library change on the QUAD side: its default grid is a resolution choice, and it
+  converges to the closed form.
+- **Fix** (`SnowballPDESolver._boundary_rows_v0`, shared by the 1D adapter, Phoenix, KO-reset, local vol and the 2D
+  Heston/SLV boundary hook): each edge is the knock-out side or the knock-in side by orientation. The knock-out edge
+  pays the knock-out record once it lies beyond every KO level (`v0_{edge}_ko`). Under continuous KI the knock-in
+  edge copies the knocked-in row once it lies at or beyond the KI level (`v0_{edge}_copy_ki`; the statistics group
+  copies it on either edge). Otherwise the edge carries the no-event V0 asymptote (`_v0_no_event_row`): principal +
+  fixed rebate, or principal + the call rebate's forward intrinsic value (a put on a reverse Phoenix, as
+  `PhoenixOption.get_maturity_payoff_v0` pays) and no fixed rebate.
+- **A third row defect, fixed with them:** the continuous-KI copy was unconditional, so a KI barrier the grid never
+  reaches (KI at 1% of spot) still knocked in the lower edge: certain-V0 PDE − cf −2.66e−3 flat / −3.00e−3
+  annualized → 2.4e−6 / 2.5e−6. It is the same rule the reverse knock-in edge needed.
+- **After** (PDE − closed form, flat / annualized; QUAD in brackets): fixed rebate standard 8.3e−7 / 7.3e−7
+  (unchanged), reverse 6.7e−7 / 6.6e−7 (QUAD 9e−8 / 4e−8); call rebate standard 4.0e−6 / 7.2e−6 for both
+  `rebate_rate` 0 and 0.10, reverse 6.7e−6 / 1.3e−5 (QUAD 4.4e−4 / 8.7e−4). Local vol 1D reproduces BSM. The call
+  rebate does not reach 1e−7: its kink at the spot leaves a PDE floor that neither `accuracy="high"` nor 800 / 1600
+  points removes (standard annualized 7.2e−6 → 1.6e−5), the European PDE misprices the same call by 1.7e−4.
+- **Moved values: none.** Every live banked certificate anchor reproduces bit for bit (exact, banking machine),
+  including `snowball-flat-bsm` pde/`reverse` and pde/`call_rebate` and `phoenix-flat-bsm` pde/`reverse`, whose rows
+  changed: their edges lie too far from the spot for the change to reach the price. Replay goldens,
+  `pde_statistics` references and the targeted PDE suites (2021 tests) pass unchanged. PDE byte book (713 rows,
+  33201993 vs the branch, same machine): 0 diffs, the same 10 rows raising on both sides.
+- **Left alone:** the 2D Heston certain-V0 control is off by +3.8e−3 standard / +8.7e−3 reverse at n_x=96, n_t=48
+  (+2.1e−3 / +6.9e−3 at 192 x 192) with the rows right; the rows moved it by 3e−6. A 2D solver finding of its own.
+  The 2D solvers' continuous-KI copy reads `_grid_v1`, which they never set, so it copies 0.0 (unchanged).
 
 ---
 

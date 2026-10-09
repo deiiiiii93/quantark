@@ -104,6 +104,24 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   base valuation instead of once per repricing.
 
 ### Fixed
+- Snowball / Phoenix / KO-reset PDE (1D BSM and local vol, 2D Heston and SLV): the not-knocked-in (V0) Dirichlet
+  rows are built by edge. The knock-out edge is the upper row on a standard product and the LOWER row on a reverse
+  one; it carries the knock-out payoff once it lies beyond every knock-out level. A reverse product used to price
+  its upper (knock-in side) row as the knock-out payoff and its lower (knock-out side) row as principal + rebate.
+  A call-rebate contract's no-event rows pay principal + the participation's forward intrinsic value (a put on a
+  reverse Phoenix) and no fixed rebate; the lower row used to add `rebate_rate x S0` (the factory sets it to the KO
+  rate). Under continuous knock-in the knock-in edge copies the knocked-in row only when it lies at or beyond the
+  knock-in level; it used to copy it unconditionally, so a knock-in barrier the grid never reaches still knocked in
+  the edge. Certain-V0 controls (`docs/superpowers/specs/2026-10-08-accrual-scope-followups-evidence/
+  item7_v0_rows_by_edge.py`, PDE - closed form, flat / annualized): reverse fixed rebate +1.1e-3 / +5.0e-4 ->
+  6.7e-7 / 6.6e-7; standard call rebate with `rebate_rate` 0.10 +3.4e-4 / +3.5e-4 -> 4.0e-6 / 7.2e-6; reverse call
+  rebate -9.2e-4 / -3.6e-3 -> 6.7e-6 / 1.3e-5; continuous KI off the grid -2.7e-3 / -3.0e-3 -> 2.4e-6 / 2.5e-6.
+  The earlier "cancellation" on the call-rebate rows was QUAD's: on its default 1001-point grid QUAD overprices the
+  call leg by 4.4e-4 / 8.7e-4 against the closed form (2001 points 1.4e-4, 4001 1.4e-5, 8001 7.2e-6), so PDE - QUAD
+  read better with the phantom rebate. Every banked certificate anchor, `pde_statistics` reference and replay golden
+  reproduces bit for bit (the cert reverse and call-rebate cells' edges lie too far from the spot to reach the price),
+  and so does the PDE byte book (`test/pde_bitwise/capture_book.py`, 713 rows, 33201993 vs this branch, same machine:
+  0 diffs; the same 10 rows raise on both sides).
 - Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract
   aged).
 - Phoenix `get_ko_payoff` keeps `accrued_offset`.
