@@ -59,7 +59,11 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - `FXBacktestEngine` and `FXDynamicScenarioEngine` record FX range accrual fixings (domestic, foreign, quanto) on the
   run day they pass, at the quoted spot (`run_fixings`); numeric FX range accruals age in FX runs (they were frozen).
   FX range accrual on the spec fixture, day 10: 11,385.19 -> 19,005.46. The FX dynamic scenario registers on its
-  working copy (the input portfolio is never touched) and records nothing on an undated path.
+  working copy (the input portfolio is never touched) and records nothing on an undated path. New refusals
+  (`ValidationError`) for an FX run holding an FX range accrual: a path instant carrying a time of day (an FX backtest
+  row stamped 15:00, an FX dynamic path whose `start_date` has a time) is refused at its first step (R8), and an FX
+  dynamic path whose `start_date` precedes the environment's valuation date is refused ("the run clock cannot go
+  back", R9). A book without one runs as before.
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
 - A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.

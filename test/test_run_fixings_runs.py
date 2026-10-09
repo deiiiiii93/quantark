@@ -214,14 +214,51 @@ def _fx_hand_rows(kind, spot_of=F.fx_spot):
     return [(i, outs[i], spot_of(F.day_of(F.fixing_dates()[i])), False) for i in sorted(outs)]
 
 
+def _spy_last_advanced(monkeypatch):
+    """Record the portfolio of every ``RunFixingRecorder.advance`` (the run's working copy), calling the original."""
+    from quantark.util.run_fixings import RunFixingRecorder
+    seen = []
+    original = RunFixingRecorder.advance
+
+    def spy(self, portfolio):
+        seen.append(portfolio)
+        return original(self, portfolio)
+
+    monkeypatch.setattr(RunFixingRecorder, "advance", spy)
+    return seen
+
+
+def _final_product(seen):
+    pf = seen[-1]
+    (position,) = pf.positions.values()
+    return position.product
+
+
+def _assert_x6(final, want, aged_by=0.0):
+    """X6 record by record: outcomes and every field bitwise; a numeric record's time to its aged hand time."""
+    import dataclasses
+    got_recs, want_recs = final.get_observation_records(), want.get_observation_records()
+    assert len(got_recs) == len(want_recs)
+    for got, ref in zip(got_recs, want_recs):
+        g, w = dataclasses.asdict(got), dataclasses.asdict(ref)
+        if w["observation_time"] is not None:
+            assert is_close(g.pop("observation_time"), w.pop("observation_time") - aged_by, rel_tol=0.0,
+                            abs_tol=1e-15)
+        assert g == w
+
+
 @pytest.mark.parametrize("run", [_fx_backtest, _fx_dynamic], ids=["backtest", "dynamic"])
 @pytest.mark.parametrize("kind", FX_KINDS)
-def test_fx_runs_x1_x2_x3g_x6(run, kind):
+def test_fx_runs_x1_x2_x3g_x6(run, kind, monkeypatch):
     q = kind == "quanto"
     booked = F.fx_ra(kind, "dated")
+    booked_n = F.fx_ra(kind, "numeric")
     before = copy.deepcopy(booked)
+    seen = _spy_last_advanced(monkeypatch)
     (eng_d, values_d, pf, spots), warns = F.count_missing(run, [booked], env=F.fx_env(0, quanto=q))
-    eng_n, values_n, _, spots_n = run([F.fx_ra(kind, "numeric")], env=F.fx_env(0, quanto=q))
+    final_d = _final_product(seen)
+    eng_n, values_n, _, spots_n = run([booked_n], env=F.fx_env(0, quanto=q))
+    final_n = _final_product(seen)
     assert spots_n == spots and all(is_close(s, F.fx_spot(k), rel_tol=1e-15) for k, s in enumerate(spots))
     spot_of = spots.__getitem__
     engine = F.FX_CLASSES[kind][1]()
@@ -232,8 +269,13 @@ def test_fx_runs_x1_x2_x3g_x6(run, kind):
         assert is_close(values_n[k], ref, rel_tol=1e-12)                         # X2
     assert warns == 0                                                            # X1c
     assert _rows(eng_d.run_fixings) == _rows(eng_n.run_fixings) == _fx_hand_rows(kind, spot_of)
+    hand = F.fx_hand_outcomes(kind, F.DAYS - 2, spot_of)                         # X6, both forms
+    _assert_x6(final_d, booked.with_fixings_recorded(hand))
+    _assert_x6(final_n, booked_n.with_fixings_recorded(hand), aged_by=(F.DAYS - 1) / 365.0)
+    assert is_close(final_n.maturity, 1.0 - (F.DAYS - 1) / 365.0, rel_tol=0.0, abs_tol=1e-15)
     assert pf.positions[list(pf.positions)[0]].product is booked
     assert booked.observation_records == before.observation_records             # X3g
+    assert booked_n.observation_records == F.fx_ra(kind, "numeric").observation_records
 
 
 def test_fx_backtest_x1b_the_fixing_does_not_move_later():
@@ -287,7 +329,39 @@ def test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant(
 
 
 def test_fx_dynamic_x3d_undated_path_records_nothing():
-    eng, values, *_ = _fx_dynamic([F.fx_ra("domestic", "dated")], start=None)
+    eng, values, _, spots = _fx_dynamic([F.fx_ra("domestic", "dated")], start=None)
     assert eng.run_fixings.recorded == ()
     assert values[10] == F.quiet_price(F.FX_CLASSES["domestic"][1](), F.fx_ra("domestic", "dated"),
-                                       F.fx_env(0, spot=F.fx_spot(10)))
+                                       F.fx_env(0, spot=spots[10]))
+
+
+def test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday():
+    """Ruling 2: on BUSINESS_DAYS a Saturday record is t = 0 on Friday (no weekend rows on the path): recorded at
+    Friday's spot with gap=False, dated and numeric twins identical."""
+    sat = F.START + timedelta(days=5)                                           # 2024-01-06
+    numeric, dated = _business_twin([sat] + F.fixing_dates()[1:])
+    env, _ = _business_env()
+    index = pd.bdate_range(F.START, periods=10)
+    spot_of = lambda k: 1.20 + 0.01 * k                                         # noqa: E731
+    (eng_d, values_d, *_), warns = F.count_missing(_fx_backtest, [dated], index=index, env=env, spot_of=spot_of)
+    eng_n, values_n, *_ = _fx_backtest([numeric], index=index, env=env, spot_of=spot_of)
+    assert warns == 0
+    assert _rows(eng_d.run_fixings)[0] == _rows(eng_n.run_fixings)[0] == (0, True, spot_of(4), False)
+    assert _rows(eng_d.run_fixings) == _rows(eng_n.run_fixings)
+    assert all(is_close(a, b, rel_tol=1e-12) for a, b in zip(values_d, values_n))
+
+
+def test_fx_backtest_x3e_a_15h_path_refuses_a_participant():
+    index = pd.date_range(F.START + timedelta(hours=15), periods=3, freq="D")
+    with pytest.raises(ValidationError, match="time of day"):
+        _fx_backtest([F.fx_ra("domestic", "dated")], index=index)
+
+
+def test_fx_dynamic_x3e_time_stamped_dates_refuse_a_participant():
+    with pytest.raises(ValidationError, match="time of day"):
+        _fx_dynamic([F.fx_ra("domestic", "dated")], start=F.START + timedelta(hours=15))
+
+
+def test_fx_dynamic_x3f_a_path_before_the_env_date_refuses_a_participant():
+    with pytest.raises(ValidationError, match="cannot go back"):
+        _fx_dynamic([F.fx_ra("domestic", "dated")], start=F.START - timedelta(days=1))
