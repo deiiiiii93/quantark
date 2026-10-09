@@ -16,7 +16,9 @@ from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.cashleg.leg_schedule import LegSchedule
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import Calendar
 from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.exceptions import ValidationError
 
 
 def _env(rate=0.05):
@@ -119,3 +121,130 @@ def test_complete_period_basis_uses_end_survival():
         dist, _env(), 0.0
     )
     assert complete < enter
+
+
+# ---------------------------------------------------------------------------
+# day_count is read when the schedule carries period dates (W4a, findings §10)
+# ---------------------------------------------------------------------------
+
+_QUARTER_DATES = [
+    datetime(2026, 1, 1),
+    datetime(2026, 4, 1),
+    datetime(2026, 7, 1),
+    datetime(2026, 10, 1),
+    datetime(2027, 1, 1),
+]
+_QUARTER_DAYS = [90, 91, 92, 92]
+_PAY_TIMES = [0.25, 0.5, 0.75, 1.0]
+
+
+def _dated_quarterly_schedule_1y():
+    return LegSchedule(
+        period_starts=np.array([0.0, 0.25, 0.5, 0.75]),
+        period_ends=np.array([0.25, 0.5, 0.75, 1.0]),
+        payment_times=np.array(_PAY_TIMES),
+        period_start_dates=_QUARTER_DATES[:-1],
+        period_end_dates=_QUARTER_DATES[1:],
+    )
+
+
+def _annuity(fractions, rate=0.05):
+    return sum(
+        0.04 * 1_000_000.0 * f * math.exp(-rate * t)
+        for f, t in zip(fractions, _PAY_TIMES)
+    )
+
+
+def test_times_only_schedule_ignores_day_count():
+    """No dates: the accrual stays ``end - start`` whatever the day count."""
+
+    for dc in (
+        DayCountConvention.ACT_365,
+        DayCountConvention.ACT_360,
+        DayCountConvention.THIRTY_360_US,
+    ):
+        pv = _leg(day_count=dc).value(EventDistribution.trivial(1.0), _env(), 0.0)
+        assert pv == pytest.approx(38773.115547, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "day_count, fractions",
+    [
+        (DayCountConvention.ACT_360, [d / 360.0 for d in _QUARTER_DAYS]),
+        (DayCountConvention.ACT_365, [d / 365.0 for d in _QUARTER_DAYS]),
+        (DayCountConvention.THIRTY_360_US, [0.25, 0.25, 0.25, 0.25]),
+    ],
+)
+def test_dated_schedule_accrues_by_day_count(day_count, fractions):
+    leg = _leg(schedule=_dated_quarterly_schedule_1y(), day_count=day_count)
+    pv = leg.value(EventDistribution.trivial(1.0), _env(), 0.0)
+    assert pv == pytest.approx(_annuity(fractions), rel=1e-12)
+
+
+def test_dated_act_360_is_365_over_360_of_act_365():
+    dist = EventDistribution.trivial(1.0)
+    sched = _dated_quarterly_schedule_1y()
+    pv_360 = _leg(schedule=sched, day_count=DayCountConvention.ACT_360).value(
+        dist, _env(), 0.0
+    )
+    pv_365 = _leg(schedule=sched, day_count=DayCountConvention.ACT_365).value(
+        dist, _env(), 0.0
+    )
+    assert pv_360 == pytest.approx(pv_365 * 365.0 / 360.0, rel=1e-12)
+
+
+def test_dated_business_days_without_calendar_is_refused():
+    with pytest.raises(ValidationError, match="BUSINESS_DAYS"):
+        _leg(
+            schedule=_dated_quarterly_schedule_1y(),
+            day_count=DayCountConvention.BUSINESS_DAYS,
+        )
+
+
+def test_dated_business_days_without_year_length_is_refused():
+    with pytest.raises(ValidationError, match="bus_days_in_year"):
+        _leg(
+            schedule=_dated_quarterly_schedule_1y(),
+            day_count=DayCountConvention.BUSINESS_DAYS,
+            calendar=Calendar(name="weekends"),
+        )
+
+
+def test_dated_business_days_counts_calendar_days_over_year_length():
+    cal = Calendar(name="weekends")
+    leg = _leg(
+        schedule=_dated_quarterly_schedule_1y(),
+        day_count=DayCountConvention.BUSINESS_DAYS,
+        calendar=cal,
+        bus_days_in_year=250,
+    )
+    counts = [
+        cal.count_business_days(s, e, include_start=False, include_end=True)
+        for s, e in zip(_QUARTER_DATES[:-1], _QUARTER_DATES[1:])
+    ]
+    pv = leg.value(EventDistribution.trivial(1.0), _env(), 0.0)
+    assert pv == pytest.approx(_annuity([c / 250.0 for c in counts]), rel=1e-12)
+
+
+def test_calendar_on_a_leg_that_never_reads_it_is_refused():
+    with pytest.raises(ValidationError, match="calendar"):
+        _leg(calendar=Calendar(name="weekends"), bus_days_in_year=252)
+    with pytest.raises(ValidationError, match="calendar"):
+        _leg(
+            schedule=_dated_quarterly_schedule_1y(),
+            day_count=DayCountConvention.ACT_360,
+            calendar=Calendar(name="weekends"),
+        )
+
+
+@pytest.mark.parametrize(
+    "day_count",
+    [
+        DayCountConvention.ACT_ACT_ISMA,
+        DayCountConvention.ACT_ACT_BOND,
+        DayCountConvention.ACT_ACT_CHINABOND,
+    ],
+)
+def test_dated_coupon_frequency_conventions_are_refused(day_count):
+    with pytest.raises(ValidationError, match="frequency"):
+        _leg(schedule=_dated_quarterly_schedule_1y(), day_count=day_count)

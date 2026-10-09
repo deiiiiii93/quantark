@@ -14,7 +14,17 @@ from quantark.util.numerical.constants import Tolerance
 
 @dataclass(frozen=True)
 class LegSchedule:
-    """Independent accrual period and payment schedule for cash legs."""
+    """Independent accrual period and payment schedule for cash legs.
+
+    ``period_starts`` / ``period_ends`` / ``payment_times`` are year fractions
+    from valuation; they drive survival lookups and discounting. The optional
+    ``period_start_dates`` / ``period_end_dates`` are the contractual accrual
+    dates: when present, an ``AccrualLeg`` accrues each period by its
+    ``day_count`` over these dates instead of ``end - start`` in times. They
+    come as a pair, one ``datetime`` per period, each end strictly after its
+    start; a schedule with dates for some periods and not others is refused.
+    The dates are not reconciled against the times (no clock is known here).
+    """
 
     period_starts: np.ndarray
     period_ends: np.ndarray
@@ -64,6 +74,38 @@ class LegSchedule:
         self._validate_optional_dates("period_start_dates", self.period_start_dates, n)
         self._validate_optional_dates("period_end_dates", self.period_end_dates, n)
         self._validate_optional_dates("payment_dates", self.payment_dates, n)
+        self._validate_period_dates()
+
+    def has_period_dates(self) -> bool:
+        """Whether the periods carry contractual accrual dates."""
+
+        return self.period_start_dates is not None
+
+    def _validate_period_dates(self) -> None:
+        starts, ends = self.period_start_dates, self.period_end_dates
+        if (starts is None) != (ends is None):
+            raise ValidationError(
+                "period_start_dates and period_end_dates must be given together "
+                "(both or neither)"
+            )
+        if starts is None:
+            return
+        for i, (start, end) in enumerate(zip(starts, ends)):
+            if start is None or end is None:
+                raise ValidationError(
+                    "period dates must be given for every period or for none; "
+                    f"period {i} has start={start!r}, end={end!r}"
+                )
+            if not isinstance(start, datetime) or not isinstance(end, datetime):
+                raise ValidationError(
+                    f"period dates must be datetime; period {i} has "
+                    f"start={type(start).__name__}, end={type(end).__name__}"
+                )
+            if not end > start:
+                raise ValidationError(
+                    f"period_end_dates[{i}] ({end:%Y-%m-%d}) must be after "
+                    f"period_start_dates[{i}] ({start:%Y-%m-%d})"
+                )
 
     def last_period_end(self) -> float:
         """Return the final accrual period end time."""
