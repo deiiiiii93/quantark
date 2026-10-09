@@ -2066,7 +2066,7 @@ Spec §3.5 row 5, §3.6, X1 (Asian, drift 1), X2, X3g, X6.
 
 **Interfaces:**
 - Consumes: `participates`, `step_fixings` (Task 4); `with_time_elapsed` (Task 1).
-- Produces: `ProductReplay._last: Optional[Tuple[pd.Timestamp, float]]` beside `_run_fills`; `product_for_date` steps when a later date is first seen.
+- Produces: `ProductReplay._last: Optional[Tuple[pd.Timestamp, float]]` and `ProductReplay._live: Dict[int, Tuple]` (Ruling 4, via Task 4 `update_live`) beside `_run_fills`; `product_for_date` steps when a later date is first seen.
 
 - [ ] **Step 1: Write the failing tests** (append)
 
