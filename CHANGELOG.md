@@ -56,6 +56,10 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   registered on the working copy, so the input portfolio is never touched; numeric range accruals / record Asians now
   age on a dated path (they were frozen). An undated path records nothing; a dated path whose dates carry a time of
   day and that holds such a product is refused.
+- `FXBacktestEngine` and `FXDynamicScenarioEngine` record FX range accrual fixings (domestic, foreign, quanto) on the
+  run day they pass, at the quoted spot (`run_fixings`); numeric FX range accruals age in FX runs (they were frozen).
+  FX range accrual on the spec fixture, day 10: 11,385.19 -> 19,005.46. The FX dynamic scenario registers on its
+  working copy (the input portfolio is never touched) and records nothing on an undated path.
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
 - A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.

@@ -212,7 +212,7 @@ def fx_env(day: int, *, spot: Optional[float] = None, quanto: bool = False, date
 
 
 def fx_ra(kind: str, form: str, outcomes: Optional[Dict[int, bool]] = None,
-          dates: Optional[List[datetime]] = None, times: Optional[List[float]] = None):
+          dates: Optional[List[datetime]] = None, times: Optional[List[float]] = None, maturity: float = 1.0):
     outcomes = outcomes or {}
     cls = FX_CLASSES[kind][0]
     extra = {"quanto_fx_rate": 110.0} if kind == "quanto" else {}
@@ -225,7 +225,7 @@ def fx_ra(kind: str, form: str, outcomes: Optional[Dict[int, bool]] = None,
     times = times if times is not None else [day_of(d) / 365.0 for d in fixing_dates()]
     recs = [FxRangeAccrualObservationRecord(observation_time=t, observed_in_range=outcomes.get(i))
             for i, t in enumerate(times)]
-    return cls(notional=1_000_000.0, range_config=cfg, currency_pair=PAIR, maturity=1.0, observation_records=recs,
+    return cls(notional=1_000_000.0, range_config=cfg, currency_pair=PAIR, maturity=maturity, observation_records=recs,
                **extra)
 
 

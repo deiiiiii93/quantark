@@ -17,7 +17,7 @@ from quantark.backtest.fx.results import FXBacktestResults
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.portfolio.fx import FXPortfolio
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import freeze_portfolio_fixings
+from quantark.util.run_fixings import RunFixingRecorder
 
 
 class FXBacktestEngine:
@@ -26,6 +26,7 @@ class FXBacktestEngine:
     def __init__(self, config: FXBacktestConfig):
         self.config = config
         self._calc = FxGreeksCalculator()
+        self.run_fixings: RunFixingRecorder = RunFixingRecorder()   # the last run's (spec 2026-10-09 run fixings)
 
     def run(self) -> FXBacktestResults:
         cfg = self.config
@@ -43,11 +44,11 @@ class FXBacktestEngine:
         # Apply first row, establish baseline.
         first_ts = path.index[0]
         self._apply_row(portfolio, pairs, path.iloc[0], first_ts)
-        # A fixing already missing at the first valuation is history: filled once at its spot and kept for the
-        # whole run (user decision 2026-10-09).
-        # TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every
-        # repricing; it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
-        portfolio = freeze_portfolio_fixings(portfolio)
+        # Run fixings (spec 2026-10-09 run fixings §3.5): the first row is W5b's freeze (R5); each row's ``advance``
+        # records the fixings the clock moved past at the previous row's quoted spot (the first row repeats the date
+        # and only refreshes it).
+        self.run_fixings = RunFixingRecorder()
+        self.run_fixings.register(portfolio)
         initial_value = portfolio.get_portfolio_value()
 
         hedge: Dict[str, float] = {pair: 0.0 for pair in pairs}
@@ -62,6 +63,7 @@ class FXBacktestEngine:
 
         for ts, row in path.iterrows():
             self._apply_row(portfolio, pairs, row, ts)
+            self.run_fixings.advance(portfolio)
 
             # Mark the existing hedge to the new spot before rebalancing.
             for pair in pairs:

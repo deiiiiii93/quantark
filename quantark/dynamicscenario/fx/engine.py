@@ -26,7 +26,7 @@ from quantark.stresstest.stress.stress_types import StressLevel
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import pnl_pct_of_abs_baseline
 from quantark.var.fx.revaluation import bump_env
-from quantark.util.fixings import freeze_portfolio_fixings
+from quantark.util.run_fixings import RunFixingRecorder
 
 _CORE_GREEKS = ("delta", "gamma", "vega", "theta", "rho_dom", "rho_for")
 
@@ -50,6 +50,7 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
     def __init__(self, config: Optional[FXDynamicScenarioConfig] = None):
         self.config = config or FXDynamicScenarioConfig()
         self._calc = FxGreeksCalculator()
+        self.run_fixings: RunFixingRecorder = RunFixingRecorder()   # the last run's (spec 2026-10-09 run fixings)
 
     def supports_portfolio(self, portfolio: Any) -> bool:
         return isinstance(portfolio, FXPortfolio)
@@ -64,11 +65,6 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
         hedge_strategy: Optional[Any] = None,
         transaction_cost_model: Optional[Any] = None,
     ) -> DynamicScenarioResults:
-        # A fixing already missing at the first valuation is history: filled once at its spot and kept for the
-        # whole run (user decision 2026-10-09).
-        # TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every
-        # repricing; it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
-        portfolio = freeze_portfolio_fixings(portfolio)
         if not self.supports_portfolio(portfolio):
             raise ValidationError("FXDynamicScenarioEngine requires an FXPortfolio")
         if len(portfolio) == 0:
@@ -83,6 +79,10 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
 
         start_time = time.time()
         working = self._clone_portfolio(portfolio)
+        # Run fixings (spec 2026-10-09 run fixings §3.5): registered on the WORKING copy at the first valuation (the
+        # input portfolio is never touched); a fixing already missing is filled once at the baseline spot (R5).
+        self.run_fixings = RunFixingRecorder()
+        self.run_fixings.register(working)
         baseline_value = working.get_portfolio_value()
         previous_value = baseline_value
         day_results: List[DayResult] = []
@@ -93,6 +93,9 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
             if day_date is not None:
                 for env in working.pricing_environments.values():
                     env.valuation_date = day_date
+                # the clock moved: record the fixings it passed at the previous instant's spot (R3/R4); an undated
+                # path never moves the date, so nothing passes and nothing is advanced (R7)
+                self.run_fixings.advance(working)
 
             value = working.get_portfolio_value()
             daily_pnl = value - previous_value
