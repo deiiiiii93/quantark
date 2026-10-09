@@ -262,9 +262,11 @@ def test_equity_backtest_fills_once_at_the_first_valuation():
 # =============================================================================
 
 
-def test_pnl_explain_keeps_the_t0_fill_across_the_pair():
+def test_pnl_explain_shocked_states_keep_the_t0_fill():
+    """The waterfall's shocked states and the Taylor greeks price t0's fill; ``pv_t1`` is the t1 snapshot's own
+    value and a re-decided fixing is its own row (test_missing_fixings_followup.py)."""
     from quantark.pnlexplain import explain
-    from quantark.pnlexplain.base import ExplainMethod
+    from quantark.pnlexplain.base import MARKET_FACTORS, ExplainMethod, Factor
     from quantark.pnlexplain.config import PnLExplainConfig
     from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
 
@@ -279,10 +281,13 @@ def test_pnl_explain_keeps_the_t0_fill_across_the_pair():
         return explain(s0, s1, config=config)
 
     got, count = _count_missing(run, False)
-    assert count == 1
+    assert count == 2  # t0's freeze and t1's own valuation
     want = run(True)
-    assert got.pv_t0 == want.pv_t0 and got.pv_alive_t1 == want.pv_alive_t1 and got.pv_t1 == want.pv_t1
-    assert [(r.factor, r.method, r.pnl) for r in got.rows] == [(r.factor, r.method, r.pnl) for r in want.rows]
+    assert got.pv_t0 == want.pv_t0 and got.pv_alive_t1 == want.pv_alive_t1
+    picked = [Factor.UNEXPLAINED, Factor.LIFECYCLE_EVENT, *MARKET_FACTORS]
+    assert [(r.factor, r.method, r.pnl) for r in got.rows if r.factor in picked] == [
+        (r.factor, r.method, r.pnl) for r in want.rows if r.factor in picked
+    ]
 
 
 # =============================================================================
@@ -367,9 +372,18 @@ def test_fx_var_keeps_the_base_fill(kind):
 
     cls = {"parametric": FXParametricVaREngine, "historical": FXHistoricalVaREngine, "mc": FXMonteCarloVaREngine}[kind]
     config = VaRConfig(confidence_level=0.95, lookback_days=250, mc_num_simulations=300, mc_seed=5)
-    got, count = _count_missing(cls(config).calculate_var, _fx_book(False), _fx_history())
-    assert count == 2
-    want = cls(config).calculate_var(_fx_book(True), _fx_history())
+
+    def book(explicit):
+        # One long numeric contract 0.005% under the 1.30 barrier: the parametric 1e-4 spot bump and about half the
+        # historical / MC scenarios cross it, so a fill that followed the shocked spot would flip in the loss tail.
+        pf = FXPortfolio(portfolio_name="fx", pricing_environments={"EURUSD": _fx_env(spot=1.29995)})
+        pf.add_position(product=_fx_numeric(True if explicit else None), quantity=1.0, entry_price=0.0,
+                        underlying="EURUSD", engine=FxRangeAccrualAnalyticalEngine())
+        return pf
+
+    got, count = _count_missing(cls(config).calculate_var, book(False), _fx_history())
+    assert count == 1
+    want = cls(config).calculate_var(book(True), _fx_history())
     assert got.var == want.var and got.cvar == want.cvar
 
 

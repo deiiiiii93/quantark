@@ -79,7 +79,9 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   annualizes by default, e.g. dated by `exercise_date` alone); a numeric contract accrues on its own clock
   (`accrued_offset` + maturity) and is accepted.
 - A filled missing past fixing is history (user decision 2026-10-09): it is decided ONCE, at the base valuation's
-  spot, and no bump or scenario shock moves it. `quantark.util.fixings.freeze_missing_fixings(product, env)`
+  spot, and no bump or scenario shock moves it. Only a STRICTLY past fixing is history
+  (`quantark.util.fixings.is_history`); one at exactly t = 0 (today, unprinted) is live and moves with spot bumps
+  and shocks as before (pricing still decides it at the current spot). `quantark.util.fixings.freeze_missing_fixings(product, env)`
   returns a copy with those fixings recorded (`with_missing_fixings_filled`; `missing_fixing_fills` /
   `with_fixings_recorded` on `RangeAccrualOption`, `AsianOption`, `FxRangeAccrualOption` and its subclasses) and
   warns once; `freeze_portfolio_fixings(portfolio)` does it per position. Applied at: every public
@@ -87,8 +89,13 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   and `calculate_spot_greeks_curve` (ladder rows keep the base fill, as the engine-grid ladder does),
   `BaseFxEngine.calculate_greeks` (FX calculator, two-rate greeks), `EquityPosition.get_trade_greeks` /
   `get_trade_risk`, the execution-framework spot cells, equity and FX VaR (parametric, historical, Monte Carlo,
-  incremental), equity and FX stress tests, SA-CVA (trades and hedges), and PnL explain (the t0 fill is carried
-  to `pv_t1`, the waterfall and the Taylor greeks). Multi-day runs (equity and FX dynamic scenarios, equity and
+  incremental), equity and FX stress tests, SA-CVA (trades and hedges), the surface-shock pipeline (one warning),
+  the replay book's carry reprices, and PnL explain. In PnL explain the waterfall's shocked states, the
+  alive-at-t1 contract and the Taylor greeks price t0's fill, while `pv_t1` stays the t1 snapshot's OWN value so
+  consecutive daily explains chain; a fixing decided differently at t1 shows as a new `Factor.FIXING_REFILL`
+  row ("missing fixing re-filled"), present only when t0 had a missing fixing. Three daily explains of a range
+  accrual at 109.5 -> 111 -> 111.5 (quantity 2) sum to the PV change exactly (-3.8965), with a re-fill row of
+  -3.8054 on the first day. The roll check runs on the contracts as supplied, before any fill. Multi-day runs (equity and FX dynamic scenarios, equity and
   FX backtests, the replay book) fill once at the FIRST valuation and keep it; a fixing that passes during a run
   is still decided at each day's spot (TODO, a lifecycle matter). Delta near a barrier no longer carries the
   fill's jump: a numeric range accrual at spot 109.5 under a 110 barrier, delta -0.8914 -> -0.0227 and gamma

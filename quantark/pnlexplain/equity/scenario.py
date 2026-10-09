@@ -19,8 +19,11 @@ class ScenarioCache:
     """All scenario values of one explain call come from this one object."""
 
     def __init__(self, snap0: ValuationSnapshot, snap1: ValuationSnapshot,
-                 transition: LifecycleTransition, moves: FactorMoves, config: PnLExplainConfig):
+                 transition: LifecycleTransition, moves: FactorMoves, config: PnLExplainConfig,
+                 snap1_carried: Optional[ValuationSnapshot] = None):
         self.snap0, self.snap1, self.transition, self.moves, self.config = snap0, snap1, transition, moves, config
+        # The t1 snapshot with t0's missing-fixing decisions carried (None: nothing was missing at t0)
+        self.snap1_carried = snap1_carried
         self.effective: FrozenSet[Factor] = frozenset(
             f for f in MARKET_FACTORS if f in moves.changed and f in moves.coordinate.applicable
         )
@@ -48,6 +51,7 @@ class ScenarioCache:
         self.bump_engine_t1 = context(snap1.engine)
         self._memo: Dict[FrozenSet[Factor], ValueBreakdown] = {}
         self._t1: Optional[ValueBreakdown] = None
+        self._t1_carried: Optional[ValueBreakdown] = None
 
     def normalize(self, applied: Iterable[Factor]) -> FrozenSet[Factor]:
         return frozenset(applied) & self.effective
@@ -96,6 +100,14 @@ class ScenarioCache:
         if self._t1 is None:
             self._t1 = value(self.snap1, engine=self.bump_engine_t1)
         return self._t1
+
+    def value_t1_carried(self) -> ValueBreakdown:
+        """The t1 endpoint with t0's missing-fixing decisions kept (``value_t1`` when nothing was missing)."""
+        if self.snap1_carried is None:
+            return self.value_t1()
+        if self._t1_carried is None:
+            self._t1_carried = value(self.snap1_carried, engine=self.bump_engine_t1)
+        return self._t1_carried
 
     def time_pure(self) -> float:
         return self.value_for((Factor.TIME,)).total - self.value_for(()).total

@@ -213,9 +213,26 @@ def event_summary(transition: LifecycleTransition) -> Tuple[Dict[str, Any], ...]
 
 
 def event_row(cache: Any, transition: LifecycleTransition, level: str = "instrument") -> ExplainRow:
-    pnl = cache.value_t1().total - cache.all_market().total
+    # The t1 endpoint with t0's missing-fixing decisions kept: a re-decided fixing is FIXING_REFILL, not an event
+    carried = getattr(cache, "value_t1_carried", None)
+    t1 = carried() if carried is not None else cache.value_t1()
+    pnl = t1.total - cache.all_market().total
     return ExplainRow(
         factor=Factor.LIFECYCLE_EVENT, term=Factor.LIFECYCLE_EVENT.value,
         method=ExplainMethod.SHARED, kind=RowKind.COMPONENT, level=level, pnl=pnl,
         metadata={"changed": transition.changed, "events": event_summary(transition)},
+    )
+
+
+def fixing_refill_row(cache: Any, level: str = "instrument") -> ExplainRow:
+    """A missing past fixing decided at t0's spot and again at t1's (user decision 2026-10-09).
+
+    The shocked states keep t0's decision; ``pv_t1`` is the t1 snapshot's own value, which decides the still-missing
+    fixing at t1's spot. The difference is this row's PnL, so a re-decided fixing is attributed, not hidden.
+    """
+    return ExplainRow(
+        factor=Factor.FIXING_REFILL, term=Factor.FIXING_REFILL.value,
+        method=ExplainMethod.SHARED, kind=RowKind.COMPONENT, level=level,
+        pnl=cache.value_t1().total - cache.value_t1_carried().total,
+        metadata={"label": "missing fixing re-filled"},
     )

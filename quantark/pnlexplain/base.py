@@ -28,6 +28,7 @@ class Factor(Enum):
     BASIS = "basis"
     MODEL = "model"
     LIFECYCLE_EVENT = "lifecycle_event"
+    FIXING_REFILL = "fixing_refill"      # a missing past fixing decided at t0's spot and again at t1's
     TRADE = "trade"
     TRANSACTION_COST = "transaction_cost"
     UNEXPLAINED = "unexplained"
