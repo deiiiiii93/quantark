@@ -6,6 +6,7 @@ underlying stays within a defined price range. Supports weighted observations
 and historical tracking for partially observed products.
 """
 
+import copy
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import List, Optional, Tuple, TYPE_CHECKING
@@ -544,6 +545,36 @@ class RangeAccrualOption(BaseEquityOption):
         if warn_missing_fixings:
             warn_filled_fixings(type(self).__name__, "observed_in_range", filled)
         return past_observations, future_observations, total_weights
+
+    def with_missing_fixings_filled(self, pricing_env: "PricingEnvironment") -> "RangeAccrualOption":
+        """
+        This contract with every past observation lacking ``observed_in_range`` decided at ``pricing_env``'s spot.
+
+        The fill ``resolve_observations`` makes, recorded once on a COPY so that bumped and shocked repricings keep
+        it at the base spot (user decision 2026-10-09: a filled past fixing is history and does not move). One
+        ``MissingFixingWarning`` names the fixings filled. Returns ``self`` when nothing is missing; the product is
+        never changed.
+        """
+        records = self.get_observation_records()
+        missing = [
+            idx
+            for idx, rec in enumerate(records)
+            if rec.observed_in_range is None and rec.resolve_time(pricing_env) <= 0
+        ]
+        if not missing:
+            return self
+        spot = float(pricing_env.spot)
+        filled = [replace(rec) for rec in records]
+        for idx in missing:
+            filled[idx].observed_in_range = self.is_in_range(spot, idx, filled[idx])
+        frozen = copy.deepcopy(self)
+        frozen.observation_records = filled
+        frozen.observation_times = None
+        frozen.num_observations = None
+        warn_filled_fixings(
+            type(self).__name__, "observed_in_range", [fixing_label(idx, records[idx]) for idx in missing]
+        )
+        return frozen
 
     def has_past_observations(self, pricing_env: "PricingEnvironment") -> bool:
         """

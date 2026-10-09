@@ -18,6 +18,7 @@ correlation) and is intentionally left to a future extension rather than
 approximated here.
 """
 
+import copy
 from dataclasses import replace
 from datetime import datetime
 from typing import List, Optional, Tuple, TYPE_CHECKING
@@ -378,6 +379,28 @@ class FxRangeAccrualOption(BaseFxProduct):
             if rec.observed_in_range is None and rec.resolve_time(fx_env) <= 0:
                 rec.observed_in_range = self.is_in_range(fx_env.spot, idx, rec)
         self._set_records(records)
+
+    def with_missing_fixings_filled(self, fx_env: "FxPricingEnvironment") -> "FxRangeAccrualOption":
+        """
+        This contract with every past fixing lacking ``observed_in_range`` decided at ``fx_env``'s spot.
+
+        The fill ``resolve_observations`` makes, recorded once on a COPY (``record_passed_fixings`` on it) so that
+        bumped and shocked repricings keep it at the base spot (user decision 2026-10-09: a filled past fixing is
+        history and does not move). One ``MissingFixingWarning`` names the fixings filled. Returns ``self`` when
+        nothing is missing; the product is never changed.
+        """
+        records = self.get_observation_records()
+        labels = [
+            fixing_label(idx, rec)
+            for idx, rec in enumerate(records)
+            if rec.observed_in_range is None and rec.resolve_time(fx_env) <= 0
+        ]
+        if not labels:
+            return self
+        frozen = copy.deepcopy(self)
+        frozen.record_passed_fixings(fx_env)
+        warn_filled_fixings(type(self).__name__, "observed_in_range", labels)
+        return frozen
 
     def _set_records(self, records: List[FxRangeAccrualObservationRecord]) -> None:
         self.observation_records = records

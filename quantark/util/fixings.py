@@ -4,6 +4,9 @@ A past fixing (an observation on or before the valuation instant) that carries n
 the pricing environment's current spot for that pricing call, and the products say so with one
 :class:`MissingFixingWarning` per call that names every fixing filled. The product itself is never changed: the
 fill lives only in what ``resolve_observations`` returns.
+
+Bump Greeks and scenario revaluations first take :func:`freeze_missing_fixings` at the BASE environment, so the
+fill is made once at the base spot and does not follow a bumped or shocked spot (user decision 2026-10-09).
 """
 
 from __future__ import annotations
@@ -38,3 +41,17 @@ def warn_filled_fixings(
         MissingFixingWarning,
         stacklevel=stacklevel,
     )
+
+
+def freeze_missing_fixings(product, env):
+    """``product`` with its missing past fixings recorded at ``env``'s spot, for every revaluation that follows.
+
+    User decision 2026-10-09: a filled past fixing is history - every bump Greek and every scenario shock keeps it
+    at the BASE spot. Call this once at the base environment, before bumping or shocking, and reprice the result:
+    the fill and its one ``MissingFixingWarning`` happen here, and the repricings find nothing left to fill.
+    Returns ``product`` itself when it has no such fixings (or no ``with_missing_fixings_filled``); never mutates it.
+    """
+    fill = getattr(product, "with_missing_fixings_filled", None)
+    if fill is None:
+        return product
+    return fill(env)

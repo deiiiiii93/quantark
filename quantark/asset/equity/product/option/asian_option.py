@@ -5,7 +5,8 @@ Asian options are path-dependent options where the payoff depends on the average
 price of the underlying asset over a specified observation period.
 """
 
-from dataclasses import dataclass, field
+import copy
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 import numpy as np
@@ -432,6 +433,35 @@ class AsianOption(BaseEquityOption):
         if warn_missing_fixings:
             warn_filled_fixings(type(self).__name__, "observed_price", filled, stacklevel=4)
         return past_prices, past_weights, future_times, future_weights, total_observations
+
+    def with_missing_fixings_filled(self, pricing_env: "PricingEnvironment") -> "AsianOption":
+        """
+        This contract with every past record lacking ``observed_price`` set to ``pricing_env``'s spot.
+
+        The fill ``resolve_observations`` makes, recorded once on a COPY so that bumped and shocked repricings keep
+        it at the base spot (user decision 2026-10-09: a filled past fixing is history and does not move). One
+        ``MissingFixingWarning`` names the fixings filled. Returns ``self`` when nothing is missing (a legacy schedule
+        has no past records); the product is never changed.
+        """
+        if self.observation_records is None:
+            return self
+        missing = [
+            idx
+            for idx, rec in enumerate(self.observation_records)
+            if rec.observed_price is None and rec.resolve_time(pricing_env) <= 0
+        ]
+        if not missing:
+            return self
+        frozen = copy.deepcopy(self)
+        spot = float(pricing_env.spot)
+        for idx in missing:
+            frozen.observation_records[idx] = replace(frozen.observation_records[idx], observed_price=spot)
+        warn_filled_fixings(
+            type(self).__name__,
+            "observed_price",
+            [fixing_label(idx, self.observation_records[idx]) for idx in missing],
+        )
+        return frozen
 
     def _resolve_from_legacy(
         self,

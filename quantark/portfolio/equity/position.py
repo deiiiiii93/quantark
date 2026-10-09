@@ -1,6 +1,7 @@
 """
 Equity position class for tracking individual equity derivative positions.
 """
+import copy
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -17,6 +18,7 @@ from quantark.cashleg import (
     value_leg,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import freeze_missing_fixings
 
 
 @dataclass
@@ -180,6 +182,19 @@ class EquityPosition:
             leg_pvs=leg_pvs,
         )
 
+    def with_past_fixings_frozen(self, pricing_env: PricingEnvironment) -> "EquityPosition":
+        """This position on its product with missing past fixings recorded at ``pricing_env``'s spot.
+
+        A filled past fixing is history (user decision 2026-10-09): bumps and scenario shocks reprice this copy so
+        the fill stays at the base spot. Returns ``self`` when the product has nothing to fill.
+        """
+        product = freeze_missing_fixings(self.product, pricing_env)
+        if product is self.product:
+            return self
+        frozen = copy.copy(self)
+        frozen.product = product
+        return frozen
+
     def get_trade_greeks(
         self,
         pricing_env: PricingEnvironment,
@@ -187,6 +202,10 @@ class EquityPosition:
     ) -> Dict[str, float]:
         """Calculate trade-level Greeks by bumping get_trade_value()."""
         from copy import deepcopy
+
+        frozen = self.with_past_fixings_frozen(pricing_env)
+        if frozen is not self:
+            return frozen.get_trade_greeks(pricing_env, greeks_calculator)
         from quantark.asset.equity.riskmeasures.greeks.bump_envs import (
             build_rate_bumped_env,
         )
@@ -249,6 +268,10 @@ class EquityPosition:
         direction and are not scaled by the note quantity sign.
         """
         from copy import deepcopy
+
+        frozen = self.with_past_fixings_frozen(pricing_env)
+        if frozen is not self:
+            return frozen.get_trade_risk(pricing_env, greeks_calculator, greeks)
 
         gc = greeks_calculator
         bc = gc._bump_config

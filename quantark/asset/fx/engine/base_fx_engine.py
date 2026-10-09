@@ -18,6 +18,7 @@ from quantark.param.rrf import ParallelShiftRateCurve
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError
+from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.numerical import is_zero, safe_exp
 
 
@@ -82,7 +83,11 @@ class BaseFxEngine(ABC):
             - vega: per 1% vol change
             - theta: daily time decay V(t+1d) - V(t)
             - rho_dom, rho_for: dV/dr / 100
+
+        A past fixing without its outcome is decided once at the base spot and kept under every bump (user decision
+        2026-10-09).
         """
+        product = freeze_missing_fixings(product, fx_env)
         base_price = self.price(product, fx_env)
         greeks: Dict[str, float] = {"price": base_price}
 

@@ -2,6 +2,7 @@
 Greeks calculation for equity derivatives.
 """
 
+import functools
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -33,6 +34,21 @@ from quantark.asset.equity.riskmeasures.bucketed_greeks import (
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import EngineType, GreeksCalculationMode
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import freeze_missing_fixings
+
+
+def _past_fixings_unbumped(method):
+    """Run ``method`` on the product with its missing past fixings recorded at the BASE env's spot.
+
+    User decision 2026-10-09: a filled past fixing is history, so every bump this calculator makes reprices the
+    same frozen fill (and the warning fires once, here). Idempotent: nested public calls find nothing left to fill.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, product, pricing_env, *args, **kwargs):
+        return method(self, freeze_missing_fixings(product, pricing_env), pricing_env, *args, **kwargs)
+
+    return wrapper
 
 
 class GreeksCalculator:
@@ -109,6 +125,7 @@ class GreeksCalculator:
         self._bump_config = self.params.get_effective_bump_config()
         self.greeks_mode = greeks_mode
 
+    @_past_fixings_unbumped
     def calculate(
         self,
         product: BaseEquityProduct,
@@ -306,6 +323,7 @@ class GreeksCalculator:
             )
         return mode
 
+    @_past_fixings_unbumped
     def calculate_bucketed_greeks(
         self,
         product: BaseEquityProduct,
@@ -456,6 +474,7 @@ class GreeksCalculator:
             time_bump_mode=getattr(self._bump_config, "time_bump_mode", "auto"),
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_greeks(
         self,
         product: BaseEquityProduct,
@@ -882,6 +901,7 @@ class GreeksCalculator:
         }
         return memo[key]
 
+    @_past_fixings_unbumped
     def calculate_numerical_delta(
         self,
         product: BaseEquityProduct,
@@ -902,6 +922,7 @@ class GreeksCalculator:
             bump=bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_gamma(
         self,
         product: BaseEquityProduct,
@@ -922,6 +943,7 @@ class GreeksCalculator:
             bump=bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_vega(
         self,
         product: BaseEquityProduct,
@@ -936,6 +958,7 @@ class GreeksCalculator:
             base_price=base_price, vol_bump=vol_bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_volga(
         self,
         product: BaseEquityProduct,
@@ -950,6 +973,7 @@ class GreeksCalculator:
             base_price=base_price, vol_bump=vol_bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_vanna(
         self,
         product: BaseEquityProduct,
@@ -964,6 +988,7 @@ class GreeksCalculator:
             base_price=base_price, vol_bump=vol_bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_theta(
         self,
         product: BaseEquityProduct,
@@ -1009,6 +1034,7 @@ class GreeksCalculator:
         """Resolve auto theta mode against the pricing environment."""
         return bump_envs.resolve_theta_bump_mode(pricing_env, time_bump_mode)
 
+    @_past_fixings_unbumped
     def calculate_numerical_rho(
         self,
         product: BaseEquityProduct,
@@ -1023,6 +1049,7 @@ class GreeksCalculator:
             base_price=base_price, rate_bump=rate_bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_dividend_rho(
         self,
         product: BaseEquityProduct,
@@ -1037,6 +1064,7 @@ class GreeksCalculator:
             base_price=base_price, div_bump=div_bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_delta_q(
         self,
         product: BaseEquityProduct,
@@ -1052,6 +1080,7 @@ class GreeksCalculator:
             base_price=base_price, div_bump=div_bump, base_delta=base_delta,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_charm(
         self,
         product: BaseEquityProduct,
@@ -1066,6 +1095,7 @@ class GreeksCalculator:
             base_price=base_price, clock=clock,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_color(
         self,
         product: BaseEquityProduct,
@@ -1080,6 +1110,7 @@ class GreeksCalculator:
             base_price=base_price, clock=clock,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_vega_theta(
         self,
         product: BaseEquityProduct,
@@ -1094,6 +1125,7 @@ class GreeksCalculator:
             base_price=base_price, clock=clock,
         )
 
+    @_past_fixings_unbumped
     def calculate_gamma_theta(
         self,
         product: BaseEquityProduct,
@@ -1109,6 +1141,7 @@ class GreeksCalculator:
             base_price=base_price, gamma=gamma, clock=clock,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_speed(
         self,
         product: BaseEquityProduct,
@@ -1128,6 +1161,7 @@ class GreeksCalculator:
             base_price=base_price, bump=bump, spot_prices=spot_prices,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_zomma(
         self,
         product: BaseEquityProduct,
@@ -1142,6 +1176,7 @@ class GreeksCalculator:
             base_price=base_price, vol_bump=vol_bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_numerical_dividend_volga(
         self,
         product: BaseEquityProduct,
@@ -1156,6 +1191,7 @@ class GreeksCalculator:
             base_price=base_price, div_bump=div_bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_futures_delta_buckets(
         self,
         product: BaseEquityProduct,
@@ -1177,6 +1213,7 @@ class GreeksCalculator:
             price_bump=price_bump,
         )
 
+    @_past_fixings_unbumped
     def calculate_futures_rhoq_buckets(
         self,
         product: BaseEquityProduct,

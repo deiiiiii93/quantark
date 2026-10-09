@@ -15,6 +15,7 @@ from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.util.enum.engine_enums import EngineType
+from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.numerical import is_close
 
 if TYPE_CHECKING:
@@ -246,6 +247,8 @@ class BaseEngine(ABC):
         """
         from copy import deepcopy
 
+        # A missing past fixing is history: decided once at the base spot, never re-filled at a bumped spot
+        product = freeze_missing_fixings(product, pricing_env)
         bump_config = self.params.get_effective_bump_config()
         spot_bump = bump_config.spot_bump
         gamma_bump = (
@@ -316,6 +319,8 @@ class BaseEngine(ABC):
         spots = np.asarray([float(spot) for spot in spot_levels], dtype=float)
         if spots.size == 0:
             return []
+        # Every ladder row keeps the base valuation's fills, as the one-solve engine grid below does
+        product = freeze_missing_fixings(product, pricing_env)
         if not np.all(np.isfinite(spots)) or np.any(spots <= 0.0):
             raise ValueError("spot levels must be positive and finite")
         if self.supports_spot_greeks_grid:
