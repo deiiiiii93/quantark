@@ -524,6 +524,23 @@ class AsianOption(BaseEquityOption):
         aged.maturity = snap_time(self.maturity - dt)
         return aged
 
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> None:
+        """Age for theta (``BaseEquityOption.time_shift``), then record at the held spot every record the bump left
+        strictly past without a price: the theta bump holds the spot, so this is the fill pricing would make at the
+        bumped instant (value-neutral), recorded so it is not reported as missing (spec 2026-10-09 run fixings §3.4,
+        the range accrual's theta rule). A record landing on the bumped instant (t = 0) stays live."""
+        super().time_shift(time_bump, bumped_date, pricing_env, keep_landing=keep_landing)
+        if self.observation_records is None:
+            return
+        spot = float(pricing_env.spot)
+        self.observation_records = [
+            replace(rec, observed_price=spot)
+            if rec.observed_price is None and is_history(rec.resolve_time(pricing_env)) else rec
+            for rec in self.observation_records
+        ]
+
     def _resolve_from_legacy(
         self,
         pricing_env: "PricingEnvironment",

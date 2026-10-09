@@ -33,6 +33,8 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - `BaseFxProduct.record_passed_fixings(fx_env)`: FX theta fixes the fixings its bump steps over (a no-op by default).
 
 ### Changed
+- `AsianOption.time_shift` (theta) records, at the held spot, a dated record its bump steps over; the bumped price is
+  unchanged (pricing filled the same spot) and theta on a fixing day no longer warns `MissingFixingWarning`.
 - A fixing at exactly t = 0 (today's, unprinted) that pricing decides at the current spot no longer counts as
   missing: `MissingFixingWarning` names only strictly past fills (`RangeAccrualOption`, `AsianOption`; spec
   2026-10-09 run fixings §3.2). Prices are unchanged.

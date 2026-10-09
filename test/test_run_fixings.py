@@ -139,3 +139,45 @@ def test_a_t0_fill_is_silent_and_a_past_fill_warns(kind, form):
         engine.price(past, F.eq_env(F.FIX_DAY + 1))
     assert "#0" in str(rec[0].message)
     assert prod.missing_fixing_fills(F.eq_env(F.FIX_DAY)) == {}          # w5b regression: t = 0 is not history
+
+
+# ---------------------------------------------------------------- Task 2: Asian theta records what it steps over
+def test_asian_theta_step_records_the_stepped_over_fixing_at_the_held_spot():
+    from quantark.asset.equity.riskmeasures.greeks.theta_shift import shift_for_theta
+
+    prod = F.asian_dated()
+    env = F.eq_env(F.FIX_DAY, spot=107.0)
+    bumped = env.valuation_date + timedelta(days=1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        shift = shift_for_theta(prod, env, DAY, bumped)
+        theta_price = F.ENGINES["asian"]().price(shift.product, shift.env)
+    assert shift.product.observation_records[0].observed_price == 107.0
+    assert prod.observation_records[0].observed_price is None                 # the booked contract is untouched
+    env_t1 = F.eq_env(F.FIX_DAY + 1, spot=107.0)
+    assert theta_price == F.quiet_price(F.ENGINES["asian"](), prod, env_t1)   # value-neutral: pricing filled 107 too
+
+
+def test_asian_greeks_on_a_fixing_day_are_silent():
+    from quantark.asset.equity.riskmeasures import GreeksCalculator
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        GreeksCalculator().calculate(F.asian_dated(), F.eq_env(F.FIX_DAY), F.ENGINES["asian"]())
+
+
+def test_asian_time_shift_records_only_the_stepped_over_dated_record():
+    prod = F.asian_dated()
+    env = F.eq_env(F.FIX_DAY, spot=107.0)
+    prod.time_shift(DAY, env.valuation_date + timedelta(days=1), env)
+    prices = [r.observed_price for r in prod.observation_records]
+    assert prices[0] == 107.0 and all(p is None for p in prices[1:])
+
+
+def test_asian_numeric_theta_does_not_move_record_times_so_records_nothing():
+    # Pre-existing, out of scope (Task 2 brief): numeric record times are not moved by the theta bump, so no numeric
+    # record is stepped over and none is recorded. Pinned so a change to it is deliberate.
+    prod = F.asian_numeric()
+    env = F.eq_env(F.FIX_DAY, spot=107.0)
+    prod.time_shift(DAY, env.valuation_date + timedelta(days=1), env)
+    assert all(r.observed_price is None for r in prod.observation_records)
