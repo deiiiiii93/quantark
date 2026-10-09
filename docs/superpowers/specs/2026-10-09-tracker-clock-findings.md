@@ -239,8 +239,24 @@ replay dashboard copy; and the PnL-explain recorder's valuation point (autocalla
 and never tested. KO and KI did not fire. A coupon there is history: no cash, and nothing is memorized. A record
 dated on `start_date` is tested on the first close. `resolve_calendar_schedule` maps such a record to due day -1.
 This applies to numeric and dated contracts alike. No warning is printed (ruling: every mid-life run has such
-records, and the carried-state fields are the channel for a real pre-run event). A terminal dated before the run
-is unchanged: it is still determined on the first close (TODO in `settle_maturity_if_due`, no ruling yet).
+records, and the carried-state fields are the channel for a real pre-run event). Rulings 1-4 of the hand-back were
+signed by the user on 2026-10-09.
+
+**Matured before the run** (user ruling 2026-10-09: "print a maturity warning, and return zeroes"; commit 510bf6a7).
+A contract whose maturity falls strictly before `start_date` is never settled in the run. The maturity date is the
+terminal's due day under the decision-2 rule. For a snowball or Phoenix it is the terminal timing's determination date,
+or on the numeric clock the origin plus round(t*365) days. For a KO-reset it is V0 at schedule 1's last record (R2),
+or V1 at the knocked-in end once knocked in, carried or not. The tracker emits `MaturedBeforeRunWarning` (a
+`UserWarning`) once per tracker, naming the contract, the maturity date and the run start. It then marks the state
+dead, matured and settled, with no ledger entry. Every consumer values the contract at zero on every day:
+- `PortfolioLifecycleManager.register_positions` drops the position before the first valuation.
+- The replay prices the initial book value at 0 and never marks the contract.
+- The ensemble flags it (`CalendarSchedule.matured_before_run`): `VectorLifecycle` starts it dead, and the day-0 gate
+  and the initial book value skip it.
+
+A maturity on `start_date` is still settled on the first close. Numeric and dated twins behave identically
+(`test/test_matured_before_run.py`, 25 tests). After this change the same 229-file list gives 3702 passed and 61
+skipped, with 0 failed. No existing expected value changed.
 
 **Parity** (`test/test_tracker_clock_parity.py`): a snowball, a memory Phoenix and a KO-reset (ABSOLUTE and REBASED),
 each written numerically (k/12 + `initial_date`) and on dates (`initial_date + round(k/12*365)`), are run with
