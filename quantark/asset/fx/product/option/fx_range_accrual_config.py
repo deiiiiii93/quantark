@@ -27,8 +27,9 @@ class FxRangeAccrualObservationRecord:
     """
     A single fixing of an FX range accrual.
 
-    For past fixings set ``observed_in_range`` to the realised outcome; for
-    future fixings leave it ``None``. Per-fixing barriers override the config
+    For past fixings set ``observed_in_range`` to the realised outcome (one
+    left ``None`` is decided at the current spot at pricing time, with a
+    ``MissingFixingWarning``); for future fixings leave it ``None``. Per-fixing barriers override the config
     barriers when supplied (used for stepped/ratchet ranges).
 
     Attributes:

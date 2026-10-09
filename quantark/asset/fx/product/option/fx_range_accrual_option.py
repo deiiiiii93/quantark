@@ -24,6 +24,7 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import fixing_label, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
 from ..base_fx_product import BaseFxProduct
@@ -238,7 +239,7 @@ class FxRangeAccrualOption(BaseFxProduct):
         raise ValidationError("Cannot materialise observation records")
 
     def resolve_observations(
-        self, fx_env: "FxPricingEnvironment"
+        self, fx_env: "FxPricingEnvironment", *, warn_missing_fixings: bool = True
     ) -> Tuple[
         List[Tuple[float, bool]],
         List[Tuple[float, float, int]],
@@ -250,22 +251,28 @@ class FxRangeAccrualOption(BaseFxProduct):
         Returns ``(past, future, total_weights)`` where ``past`` holds
         ``(weight, in_range)`` for fixings on/before the valuation date and
         ``future`` holds ``(weight, time, obs_idx)`` for fixings strictly after.
+
+        A past fixing without ``observed_in_range`` is decided at ``fx_env.spot`` through ``is_in_range`` (its own
+        barriers, reverse mode), as ``record_passed_fixings`` would fix it, and one ``MissingFixingWarning`` names
+        every fixing so filled (``warn_missing_fixings=False`` skips it). The product is not changed. A future
+        fixing must not carry an outcome.
         """
         records = self.get_observation_records()
         past: List[Tuple[float, bool]] = []
         future: List[Tuple[float, float, int]] = []
         total_weights = 0.0
+        filled: List[str] = []
 
         for idx, rec in enumerate(records):
             t = rec.resolve_time(fx_env)
             total_weights += rec.weight
             if t <= 0:
-                if rec.observed_in_range is None:
-                    raise ValidationError(
-                        f"Past fixing at index {idx} (t={t}) must set "
-                        "observed_in_range"
-                    )
-                past.append((rec.weight, rec.observed_in_range))
+                in_range = rec.observed_in_range
+                if in_range is None:
+                    # A missing past fixing is decided at the current spot (user ruling 2026-10-09)
+                    in_range = self.is_in_range(fx_env.spot, idx, rec)
+                    filled.append(fixing_label(idx, rec))
+                past.append((rec.weight, in_range))
             else:
                 if rec.observed_in_range is not None:
                     raise ValidationError(
@@ -274,6 +281,8 @@ class FxRangeAccrualOption(BaseFxProduct):
                     )
                 future.append((rec.weight, t, idx))
 
+        if warn_missing_fixings:
+            warn_filled_fixings(type(self).__name__, "observed_in_range", filled)
         return past, future, total_weights
 
     def get_total_weights(self) -> float:

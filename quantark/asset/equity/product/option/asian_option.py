@@ -20,6 +20,7 @@ from quantark.util.enum import (
     TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import fixing_label, warn_filled_fixings
 from quantark.util.numerical import is_zero, is_close, safe_log, safe_exp
 
 from .base_equity_option import BaseEquityOption
@@ -32,7 +33,8 @@ class AsianObservationRecord:
     """
     Single observation entry for Asian option averaging.
 
-    For past observations (before valuation_date), observed_price should be set.
+    For past observations (before valuation_date), observed_price should be set; one left None takes the
+    current spot at pricing time, with a MissingFixingWarning.
     For future observations, observed_price should be None.
 
     Attributes:
@@ -317,6 +319,8 @@ class AsianOption(BaseEquityOption):
     def resolve_observations(
         self,
         pricing_env: "PricingEnvironment",
+        *,
+        warn_missing_fixings: bool = True,
     ) -> Tuple[List[float], List[float], List[float], List[float], int]:
         """
         Resolve observation records into past and future observations.
@@ -331,8 +335,14 @@ class AsianOption(BaseEquityOption):
         Averaging weights are normalized across ALL observations (past + future)
         so that they sum to 1. Unweighted schedules yield uniform 1/n weights.
 
+        A past observation record without ``observed_price`` takes the environment's current spot, and one
+        ``MissingFixingWarning`` names every record so filled. The product is not changed. A future record must
+        not carry a price.
+
         Args:
             pricing_env: Pricing environment with valuation date
+            warn_missing_fixings: False skips the warning, for a caller that has already warned in this pricing
+                call
 
         Returns:
             Tuple of:
@@ -343,7 +353,7 @@ class AsianOption(BaseEquityOption):
             - total_observations: Total number of observations for averaging
         """
         if self.observation_records is not None:
-            return self._resolve_from_records(pricing_env)
+            return self._resolve_from_records(pricing_env, warn_missing_fixings)
         else:
             return self._resolve_from_legacy(pricing_env)
 
@@ -383,6 +393,7 @@ class AsianOption(BaseEquityOption):
     def _resolve_from_records(
         self,
         pricing_env: "PricingEnvironment",
+        warn_missing_fixings: bool = True,
     ) -> Tuple[List[float], List[float], List[float], List[float], int]:
         """Resolve observations from observation_records."""
         past_prices: List[float] = []
@@ -390,17 +401,18 @@ class AsianOption(BaseEquityOption):
         # Track each observation's slot so normalized weights stay aligned.
         is_past: List[bool] = []
         raw_weights: List[Optional[float]] = []
+        filled: List[str] = []
 
-        for rec in self.observation_records:
+        for idx, rec in enumerate(self.observation_records):
             t = rec.resolve_time(pricing_env)
 
             if t <= 0:
-                # Past observation - must have observed price
-                if rec.observed_price is None:
-                    raise ValidationError(
-                        f"Past observation (t={t}) must have observed_price set"
-                    )
-                past_prices.append(rec.observed_price)
+                price = rec.observed_price
+                if price is None:
+                    # A missing past fixing takes the current spot (user ruling 2026-10-09)
+                    price = float(pricing_env.spot)
+                    filled.append(fixing_label(idx, rec))
+                past_prices.append(price)
                 is_past.append(True)
             else:
                 # Future observation
@@ -417,6 +429,8 @@ class AsianOption(BaseEquityOption):
         future_weights = [w for w, past in zip(norm, is_past) if not past]
 
         total_observations = len(past_prices) + len(future_times)
+        if warn_missing_fixings:
+            warn_filled_fixings(type(self).__name__, "observed_price", filled, stacklevel=4)
         return past_prices, past_weights, future_times, future_weights, total_observations
 
     def _resolve_from_legacy(

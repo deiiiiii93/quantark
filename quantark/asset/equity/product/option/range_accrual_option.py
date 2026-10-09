@@ -14,6 +14,7 @@ from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import ExerciseType, OptionType, TenorEnd
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import fixing_label, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
 from .base_equity_option import BaseEquityOption
@@ -407,7 +408,7 @@ class RangeAccrualOption(BaseEquityOption):
 
         Numeric records move with the clock (a record on the bumped instant to exactly 0.0); a record that becomes
         past, or lands on the bumped instant, without a fixing gets one decided on the spot - the spot is held over
-        a theta bump, and a record at or before the as-of instant must carry ``observed_in_range``. Dated records
+        a theta bump, so this is the fill ``resolve_observations`` makes, recorded without a warning. Dated records
         resolve against the bumped valuation date; those on or before its calendar day get the same fixing. The
         schedule is written out as explicit records first (a ``num_observations`` schedule follows the maturity).
         A numeric contract banks the elapsed time in ``accrued_offset``, so its annualized coupon keeps the whole
@@ -485,6 +486,8 @@ class RangeAccrualOption(BaseEquityOption):
     def resolve_observations(
         self,
         pricing_env: "PricingEnvironment",
+        *,
+        warn_missing_fixings: bool = True,
     ) -> Tuple[
         List[Tuple[float, bool]],  # past: (weight, in_range)
         List[Tuple[float, float, int]],  # future: (weight, time, obs_idx)
@@ -496,8 +499,14 @@ class RangeAccrualOption(BaseEquityOption):
         This method separates already-observed outcomes from future observations,
         accounting for the valuation date in pricing_env.
 
+        A past observation (t <= 0) without ``observed_in_range`` is decided at the environment's current spot
+        through ``is_in_range`` (its own barriers, reverse mode) and one ``MissingFixingWarning`` names every
+        observation so filled. The product is not changed. A future observation must not carry an outcome.
+
         Args:
             pricing_env: Pricing environment with valuation date
+            warn_missing_fixings: False skips the warning, for a caller that has already warned in this pricing
+                call
 
         Returns:
             Tuple of:
@@ -510,19 +519,19 @@ class RangeAccrualOption(BaseEquityOption):
         past_observations: List[Tuple[float, bool]] = []
         future_observations: List[Tuple[float, float, int]] = []
         total_weights = 0.0
+        filled: List[str] = []
 
         for idx, rec in enumerate(records):
             t = rec.resolve_time(pricing_env)
             total_weights += rec.weight
 
             if t <= 0:
-                # Past observation - must have observed_in_range set
-                if rec.observed_in_range is None:
-                    raise ValidationError(
-                        f"Past observation at index {idx} (t={t}) must have "
-                        "observed_in_range set"
-                    )
-                past_observations.append((rec.weight, rec.observed_in_range))
+                in_range = rec.observed_in_range
+                if in_range is None:
+                    # A missing past fixing is decided at the current spot (user ruling 2026-10-09)
+                    in_range = self.is_in_range(float(pricing_env.spot), idx, rec)
+                    filled.append(fixing_label(idx, rec))
+                past_observations.append((rec.weight, in_range))
             else:
                 # Future observation
                 if rec.observed_in_range is not None:
@@ -532,6 +541,8 @@ class RangeAccrualOption(BaseEquityOption):
                     )
                 future_observations.append((rec.weight, t, idx))
 
+        if warn_missing_fixings:
+            warn_filled_fixings(type(self).__name__, "observed_in_range", filled)
         return past_observations, future_observations, total_weights
 
     def has_past_observations(self, pricing_env: "PricingEnvironment") -> bool:

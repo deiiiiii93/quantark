@@ -32,6 +32,7 @@ from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum import CouponPayType, FxRangeAccrualMethod
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.fixings import MissingFixingWarning
 
 VAL = datetime(2026, 6, 15)
 SPOT = 1.20
@@ -322,13 +323,22 @@ class TestValidation:
                 config={"upper_barrier": [1.30, 1.31], "lower_barrier": LOWER},
             )
 
-    def test_past_fixing_without_outcome_rejected(self):
-        option = make_option(
+    def test_past_fixing_without_outcome_decided_at_spot(self):
+        records = [
+            FxRangeAccrualObservationRecord(observation_time=-0.25),
+            FxRangeAccrualObservationRecord(observation_time=1.0),
+        ]
+        option = make_option(num_observations=None, observation_records=records)
+        engine = FxRangeAccrualAnalyticalEngine()
+        with pytest.warns(MissingFixingWarning, match="1 past fixing without observed_in_range"):
+            price = engine.price(option, flat_env())
+        assert engine.get_last_result().past_in_range_weights == pytest.approx(1.0)  # spot 1.20 in [1.10, 1.30]
+        assert records[0].observed_in_range is None
+        explicit = make_option(
             num_observations=None,
             observation_records=[
-                FxRangeAccrualObservationRecord(observation_time=-0.25),
+                FxRangeAccrualObservationRecord(observation_time=-0.25, observed_in_range=True),
                 FxRangeAccrualObservationRecord(observation_time=1.0),
             ],
         )
-        with pytest.raises(ValidationError):
-            FxRangeAccrualAnalyticalEngine().price(option, flat_env())
+        assert price == FxRangeAccrualAnalyticalEngine().price(explicit, flat_env())

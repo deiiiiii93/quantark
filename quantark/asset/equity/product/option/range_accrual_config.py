@@ -28,7 +28,8 @@ class RangeAccrualObservationRecord:
     """
     Single observation entry for Range Accrual option.
 
-    For past observations: set observed_in_range to True/False
+    For past observations: set observed_in_range to True/False (one left None is decided at the current spot at
+    pricing time, with a MissingFixingWarning)
     For future observations: leave observed_in_range as None
 
     Attributes:

@@ -48,6 +48,14 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   asset classes; it used to accrue from the valuation date. So is an annualized NUMERIC one booked mid-life (a
   fixing at a negative `observation_time`) without `tenor`: its `maturity` is only the remaining life. Unannualized
   contracts, and numeric ones aged by `time_shift` (which banks the elapsed time), are unaffected.
+- A past fixing without its recorded outcome no longer raises. Equity `RangeAccrualOption` and
+  `FxRangeAccrualOption` (and the FX foreign / quanto variants) decide a past record without `observed_in_range`
+  at the environment's current spot through the product's own range test (per-record barriers, reverse mode); an
+  `AsianOption` past record without `observed_price` takes the current spot. One
+  `quantark.util.fixings.MissingFixingWarning` (a `UserWarning`) per pricing call names every fixing filled; the
+  product is not changed, so pricing equals pricing the same contract with those fixings recorded at the spot. A
+  future fixing that carries an outcome is still refused. `resolve_observations(..., warn_missing_fixings=False)`
+  skips the warning for a caller that has already warned.
 
 ### Fixed
 - Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract

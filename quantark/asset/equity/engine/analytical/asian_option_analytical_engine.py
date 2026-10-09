@@ -227,7 +227,8 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         )
         n = n_total
         m = len(past_prices)
-        S_A = product.get_past_average(pricing_env) if m > 0 else 0.0
+        # The past average from the fixings just resolved (get_past_average would resolve, and warn, again)
+        S_A = product.get_average(past_prices, weights=past_weights) if m > 0 else 0.0
         t1 = future_times[0] if future_times else 0.0
 
         return {

@@ -360,7 +360,10 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
             greeks["gamma"] = 0.0
             return greeks
 
-        _, future_obs, total_weights = product.resolve_observations(pricing_env)
+        # price() above already warned about any past fixing it decided at the spot
+        _, future_obs, total_weights = product.resolve_observations(
+            pricing_env, warn_missing_fixings=False
+        )
 
         if len(future_obs) == 0 or is_zero(total_weights):
             greeks["delta"] = 0.0

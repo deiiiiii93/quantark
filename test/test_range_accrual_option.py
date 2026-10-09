@@ -28,6 +28,7 @@ from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve
 from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import CouponPayType, ObservationFrequency
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import MissingFixingWarning
 
 
 # =============================================================================
@@ -549,7 +550,7 @@ class TestHistoricalObservations:
         assert past_total == 5.0
 
     def test_resolve_past_observation_missing_data(self, basic_pricing_env, basic_range_config):
-        """Test error when past observation lacks observed_in_range."""
+        """A past observation without observed_in_range is decided at the current spot, with a warning."""
         records = [
             RangeAccrualObservationRecord(
                 observation_time=-0.1, weight=1.0
@@ -564,8 +565,11 @@ class TestHistoricalObservations:
             tenor=1.25,  # booked mid-life: the contract's length, not the remaining maturity
             observation_records=records,
         )
-        with pytest.raises(ValidationError, match="must have observed_in_range set"):
-            option.resolve_observations(basic_pricing_env)
+        with pytest.warns(MissingFixingWarning, match=r"1 past fixing without observed_in_range \(#0 t=-0\.1\)"):
+            past, future, _ = option.resolve_observations(basic_pricing_env)
+        assert past == [(1.0, True)]  # spot 100 inside [90, 110]
+        assert len(future) == 1
+        assert records[0].observed_in_range is None  # the product is not changed
 
     def test_resolve_future_observation_with_data(self, basic_pricing_env, basic_range_config):
         """Test error when future observation has observed_in_range set."""
