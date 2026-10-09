@@ -43,6 +43,7 @@ from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.param.engine_params import BumpConfig
 from quantark.asset.equity.product.option.snowball_config import (
+    AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
@@ -233,6 +234,9 @@ def make_snowball(spec: Mapping[str, Any]) -> SnowballOption:
             include_principal=False,
             rebate_rate=float(spec.get("rebate_rate", 0.15)),
         ),
+        # The certified rebate is flat, stated: an unset rebate flag now follows is_annualized (accrual
+        # follow-ups item 6, user decision 2026-10-09), which would change the banked contract.
+        accrual_config=AccrualConfig(is_annualized_rebate=False),
         barrier_config=BarrierConfig(
             ko_barrier=float(spec["ko_barrier"]),
             ko_rate=float(spec.get("ko_rate", 0.15)),

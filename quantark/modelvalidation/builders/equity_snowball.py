@@ -217,14 +217,15 @@ def _payoff_config(spec: Mapping[str, Any]) -> PayoffConfig:
     return PayoffConfig(**kwargs)
 
 
-def _accrual_config(spec: Mapping[str, Any]) -> Optional[AccrualConfig]:
-    """Only built when a knob asks for it, so the certified cells keep the
-    product's own default accrual object rather than an equal-looking copy."""
-    if "coupon_pay_type" not in spec and "is_annualized" not in spec:
-        return None
+def _accrual_config(spec: Mapping[str, Any]) -> AccrualConfig:
+    """The certified contract's accrual terms. The rebate is flat (``is_annualized_rebate=False``) and stated: the
+    banked studies were certified when an unset rebate flag meant a flat rebate, and an unset flag now follows
+    ``is_annualized`` (accrual follow-ups item 6, user decision 2026-10-09), so leaving it unset would change the
+    certified contract."""
     return AccrualConfig(
         coupon_pay_type=_COUPON_PAY[str(spec.get("coupon_pay_type", "instant"))],
         is_annualized=bool(spec.get("is_annualized", True)),
+        is_annualized_rebate=False,
     )
 
 
@@ -325,10 +326,7 @@ def make_snowball(spec: Mapping[str, Any]) -> SnowballOption:
         **_ki_monitoring(spec),
     )
 
-    optional: dict[str, Any] = {}
-    accrual = _accrual_config(spec)
-    if accrual is not None:
-        optional["accrual_config"] = accrual
+    optional: dict[str, Any] = {"accrual_config": _accrual_config(spec)}
     airbag = _airbag_config(spec)
     if airbag is not None:
         optional["airbag_config"] = airbag

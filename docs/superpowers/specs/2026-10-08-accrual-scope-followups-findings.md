@@ -128,6 +128,11 @@ The user chose neither A nor B as written: an unset **rebate** flag follows `is_
   reproduce 41 anchors** (their near-expiry/sub-year cells; e.g. `equity.snowball.quad/near_expiry/pv` 103.262509
   -> 99.547329). A code change needs a full re-certification (release procedure); refreshing anchors is
   forbidden. That is the user's call before landing.
+- **User decision 2026-10-09: no re-certification; the certified contracts keep their terms.** The modelvalidation
+  snowball builders (`equity_snowball.make_snowball`, also used by the local-vol study, and
+  `equity_snowball_vol.make_snowball`) now state `is_annualized_rebate=False`; every banked certificate's
+  anchors reproduce exactly (same machine, `==`). Every test contract built by these builders is flat again, so
+  the `sb_cont_3m` re-bank and the first-passage near-expiry re-pin go back to their dcea77b6 values.
 
 ---
 
