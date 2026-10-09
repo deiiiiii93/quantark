@@ -1,0 +1,18 @@
+std KO103/KI75 cont: 1D BSM PDE (1600 pts, 8 steps/day) = 99.415890
+  BSM limit n=(96, 24, 48): as-is 99.548230  patched 99.548230  patched-as-is +0.000e+00 2D-1D: as-is +1.323e-01 patched +1.323e-01
+  BSM limit n=(192, 48, 192): as-is 99.424255  patched 99.424255  patched-as-is +0.000e+00 2D-1D: as-is +8.365e-03 patched +8.365e-03
+  BSM limit n=(384, 48, 384): as-is 99.415550  patched 99.415550  patched-as-is +0.000e+00 2D-1D: as-is -3.397e-04 patched -3.397e-04
+  Heston HP n=(96, 24, 48): as-is 99.571453  patched 99.571453  patched-as-is +3.979e-13
+  Heston HP n=(192, 48, 192): as-is 99.557434  patched 99.557434  patched-as-is +8.527e-14
+  Heston HP n=(384, 48, 384): as-is 99.555619  patched 99.555619  patched-as-is +0.000e+00
+    as-is   t0 rows: lower=0.000000 (v0_lower_copy_ki)  upper=100.997191 (v0_upper_ko)
+    patched t0 rows: lower=10.200416 (v0_lower_copy_ki)  upper=100.997191 (v0_upper_ko)
+rev KO97/KI125 cont: 1D BSM PDE (1600 pts, 8 steps/day) = 95.356561
+  BSM limit n=(96, 24, 48): as-is 95.340444  patched 95.340444  patched-as-is +0.000e+00 2D-1D: as-is -1.612e-02 patched -1.612e-02
+  BSM limit n=(192, 48, 192): as-is 95.357781  patched 95.357781  patched-as-is +0.000e+00 2D-1D: as-is +1.220e-03 patched +1.220e-03
+  BSM limit n=(384, 48, 384): as-is 95.356017  patched 95.356017  patched-as-is +0.000e+00 2D-1D: as-is -5.442e-04 patched -5.442e-04
+  Heston HP n=(96, 24, 48): as-is 95.658096  patched 95.658096  patched-as-is -1.279e-13
+  Heston HP n=(192, 48, 192): as-is 95.438369  patched 95.438369  patched-as-is +0.000e+00
+  Heston HP n=(384, 48, 384): as-is -38276174596648788043509407522898581751812464108051803775728028867228888851787482603148826253436217938255889693228251026875009923154458925561034711586965719147562822217589849244452918250295222846164827776003080192.000000  patched -38276174596648788043509407522898581751812464108051803775728028867228888851787482603148826253436217938255889693228251026875009923154458925561034711586965719147562822217589849244452918250295222846164827776003080192.000000  patched-as-is +0.000e+00
+    as-is   t0 rows: lower=100.997191 (v0_lower_ko)  upper=0.000000 (v0_upper_copy_ki)
+    patched t0 rows: lower=100.997191 (v0_lower_ko)  upper=-791.999284 (v0_upper_copy_ki)

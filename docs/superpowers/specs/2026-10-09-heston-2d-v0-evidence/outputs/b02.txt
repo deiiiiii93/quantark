@@ -1,0 +1,60 @@
+std KO=  300.0 PDE-cf=+4.498e-03  S=[10.20,980.35] rows v0_lower_principal_rebate | v0_upper_ko
+std KO=  500.0 PDE-cf=+3.827e-03  S=[10.20,980.35] rows v0_lower_principal_rebate | v0_upper_ko
+std KO=  700.0 PDE-cf=+3.826e-03  S=[10.20,980.35] rows v0_lower_principal_rebate | v0_upper_ko
+std KO=  900.0 PDE-cf=+3.826e-03  S=[10.20,980.35] rows v0_lower_principal_rebate | v0_upper_ko
+std KO= 5000.0 PDE-cf=+3.826e-03  S=[10.20,5075.45] rows v0_lower_principal_rebate | v0_upper_ko
+rev KO=   40.0 PDE-cf=+1.509e-01  S=[10.20,980.35] rows v0_lower_ko | v0_upper_principal_rebate
+rev KO=   20.0 PDE-cf=+8.742e-03  S=[10.20,980.35] rows v0_lower_ko | v0_upper_principal_rebate
+rev KO=   15.0 PDE-cf=+4.996e-03  S=[10.20,980.35] rows v0_lower_ko | v0_upper_principal_rebate
+rev KO=   11.0 PDE-cf=+4.086e-03  S=[10.20,980.35] rows v0_lower_ko | v0_upper_principal_rebate
+rev KO=    2.0 PDE-cf=+3.826e-03  S=[1.97,980.35] rows v0_lower_ko | v0_upper_principal_rebate
+standard KO 500, V(S~100, v)-cf by v:
+   v=0.00000  +3.832e-03
+   v=0.00020  +3.832e-03
+   v=0.00111  +3.832e-03
+   v=0.00307  +3.832e-03
+   v=0.00631  +3.831e-03
+   v=0.01102  +3.830e-03
+   v=0.01738  +3.830e-03
+   v=0.02555  +3.829e-03
+   v=0.03568  +3.827e-03
+   v=0.04789  +3.826e-03
+   v=0.06232  +3.825e-03
+   v=0.07909  +3.825e-03
+   v=0.09831  +3.828e-03
+   v=0.12009  +3.835e-03
+   v=0.14453  +3.853e-03
+   v=0.17174  +3.894e-03
+   v=0.20181  +3.986e-03
+   v=0.23484  +4.177e-03
+   v=0.27091  +4.558e-03
+   v=0.31012  +5.274e-03
+   v=0.35255  +6.543e-03
+   v=0.39829  +8.679e-03
+   v=0.44741  +1.245e-02
+   v=0.50000  +1.245e-02
+reverse KO 20, V(S~100, v)-cf by v:
+   v=0.00000  +5.076e-03
+   v=0.00020  +5.088e-03
+   v=0.00111  +5.143e-03
+   v=0.00307  +5.264e-03
+   v=0.00631  +5.477e-03
+   v=0.01102  +5.817e-03
+   v=0.01738  +6.330e-03
+   v=0.02555  +7.085e-03
+   v=0.03568  +8.179e-03
+   v=0.04789  +9.750e-03
+   v=0.06232  +1.199e-02
+   v=0.07909  +1.513e-02
+   v=0.09831  +1.952e-02
+   v=0.12009  +2.557e-02
+   v=0.14453  +3.376e-02
+   v=0.17174  +4.471e-02
+   v=0.20181  +5.906e-02
+   v=0.23484  +7.754e-02
+   v=0.27091  +1.009e-01
+   v=0.31012  +1.296e-01
+   v=0.35255  +1.641e-01
+   v=0.39829  +2.028e-01
+   v=0.44741  +2.384e-01
+   v=0.50000  +2.384e-01

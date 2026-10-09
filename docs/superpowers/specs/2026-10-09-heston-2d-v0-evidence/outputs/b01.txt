@@ -1,0 +1,12 @@
+n=(96,24,48) std flat PDE-cf=+3.827e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_principal_rebate=103.59410 | v0_upper_ko=100.99719
+n=(96,24,48) std ann  PDE-cf=+4.174e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_principal_rebate=113.01174 | v0_upper_ko=100.99719
+n=(96,24,48) rev flat PDE-cf=+8.742e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_ko=100.99719 | v0_upper_principal_rebate=103.59410
+n=(96,24,48) rev ann  PDE-cf=+6.108e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_ko=100.99719 | v0_upper_principal_rebate=113.01174
+n=(192,24,192) std flat PDE-cf=+2.096e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_principal_rebate=103.59410 | v0_upper_ko=100.99719
+n=(192,24,192) std ann  PDE-cf=+2.286e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_principal_rebate=113.01174 | v0_upper_ko=100.99719
+n=(192,24,192) rev flat PDE-cf=+6.931e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_ko=100.99719 | v0_upper_principal_rebate=103.59410
+n=(192,24,192) rev ann  PDE-cf=+4.211e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_ko=100.99719 | v0_upper_principal_rebate=113.01174
+n=(192,192,192) std flat PDE-cf=+2.365e-04  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_principal_rebate=103.59410 | v0_upper_ko=100.99719
+n=(192,192,192) std ann  PDE-cf=+2.579e-04  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_principal_rebate=113.01174 | v0_upper_ko=100.99719
+n=(192,192,192) rev flat PDE-cf=+5.031e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_ko=100.99719 | v0_upper_principal_rebate=103.59410
+n=(192,192,192) rev ann  PDE-cf=+2.171e-03  S=[10.200,980.352] V=[0.0000,0.5000] rows v0_lower_ko=100.99719 | v0_upper_principal_rebate=113.01174

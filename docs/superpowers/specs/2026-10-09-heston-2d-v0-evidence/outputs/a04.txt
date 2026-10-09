@@ -1,0 +1,8 @@
+KI= 10.5 n=(96, 24, 48): 1D ref 104.90508945  2D before-ref +1.924e-01  after-ref +1.924e-01  after-before +6.693e-11
+KI= 10.5 n=(192, 48, 192): 1D ref 104.90508945  2D before-ref +8.447e-03  after-ref +8.447e-03  after-before -2.842e-14
+KI= 11.0 n=(96, 24, 48): 1D ref 104.90493094  2D before-ref +1.922e-01  after-ref +1.922e-01  after-before +2.765e-11
+KI= 11.0 n=(192, 48, 192): 1D ref 104.90493094  2D before-ref +8.383e-03  after-ref +8.383e-03  after-before +7.105e-14
+KI= 12.0 n=(96, 24, 48): 1D ref 104.90488321  2D before-ref +1.923e-01  after-ref +1.923e-01  after-before +5.656e-12
+KI= 12.0 n=(192, 48, 192): 1D ref 104.90488321  2D before-ref +8.718e-03  after-ref +8.718e-03  after-before +0.000e+00
+KI= 15.0 n=(96, 24, 48): 1D ref 104.90503078  2D before-ref +1.926e-01  after-ref +1.926e-01  after-before +1.990e-13
+KI= 15.0 n=(192, 48, 192): 1D ref 104.90503078  2D before-ref +8.504e-03  after-ref +8.504e-03  after-before +0.000e+00

@@ -1,0 +1,24 @@
+std base (96,24,48)                            as-is +3.8270e-03   patched +3.7613e-03
+std event damping 0                            as-is +2.4525e-03   patched +3.9532e-05
+std r=q=0.03, event damping 0                  as-is +2.4524e-03   patched +3.9447e-05
+std r=0, q=0.03, event damping 0               as-is -1.8385e-07   patched -1.8385e-07
+std n_v=48, event damping 0                    as-is +2.2363e-04   patched +3.9629e-05
+std n_v=96, event damping 0                    as-is +5.6208e-05   patched +3.9654e-05
+std n_v=192, event damping 0                   as-is +4.1246e-05   patched +3.9661e-05
+std n_t=96                                     as-is +2.1915e-03   patched +9.4041e-04
+std n_t=192                                    as-is +2.0957e-03   patched +2.3508e-04
+std n_t=384                                    as-is +2.2269e-03   patched +5.8732e-05
+std (192,24,192)                               as-is +2.0958e-03   patched +2.3520e-04
+std (192,192,192)                              as-is +2.3654e-04   patched +2.3531e-04
+rev base (96,24,48)                            as-is +8.7420e-03   patched +8.6763e-03
+rev event damping 0                            as-is +7.4960e-03   patched +5.0831e-03
+rev r=q=0.03, event damping 0                  as-is +9.6991e-03   patched +7.2862e-03
+rev r=0, q=0.03, event damping 0               as-is +9.6705e-03   patched +9.6705e-03
+rev n_v=48, event damping 0                    as-is +5.2315e-03   patched +5.0475e-03
+rev n_v=96, event damping 0                    as-is +5.0613e-03   patched +5.0447e-03
+rev n_v=192, event damping 0                   as-is +5.0446e-03   patched +5.0430e-03
+rev n_t=96                                     as-is +7.2691e-03   patched +6.0180e-03
+rev n_t=192                                    as-is +7.2169e-03   patched +5.3562e-03
+rev n_t=384                                    as-is +7.3595e-03   patched +5.1913e-03
+rev (192,24,192)                               as-is +6.9308e-03   patched +5.0702e-03
+rev (192,192,192)                              as-is +5.0305e-03   patched +5.0293e-03

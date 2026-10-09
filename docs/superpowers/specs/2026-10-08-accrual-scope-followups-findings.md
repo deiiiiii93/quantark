@@ -241,6 +241,30 @@ The only repo contracts with `is_annualized_rebate=True` are in:
   (+2.1e−3 / +6.9e−3 at 192 x 192) with the rows right; the rows moved it by 3e−6. A 2D solver finding of its own.
   The 2D solvers' continuous-KI copy reads `_grid_v1`, which they never set, so it copies 0.0 (unchanged).
 
+**Status 2026-10-09 (W7, user ruling "schedule them now"; standalone evidence scripts
+and their outputs in `2026-10-09-heston-2d-v0-evidence/`):**
+- **The 2D continuous-KI copy row: FIXED on branch `w7-heston-2d-rows`.** The 2D Heston/SLV snowball and Phoenix
+  hooks now compute V1's rows of the step first and expose them to the copy row
+  (`SnowballPDESolver._set_boundary_conditions_v0_beside_v1_rows`), as the 1D adapter does. The edge row was 0.0;
+  it is now the knocked-in row (standard lower edge 10.2004, reverse upper edge −791.999 at t = 0). The price moves
+  at round-off (|move| ≤ 4e−13) on the desk-like contracts measured, and by up to 8.1e−5 only when the KI sits just
+  inside the grid's lower edge (KI 10.5, S_min 10.2). Discrete KI never takes the new path. The 1D Phoenix has the
+  same defect (its adapter never sets `_grid_v1`); left alone: the same fix moves the banked `phoenix-flat-bsm`
+  pde/near_expiry anchors by −2.8e−16 (pv) / +6.9e−17 (delta) and short-dated prices by up to 1.7e−5 (`a05`, `a06`).
+- **The certain-V0 control gap: diagnosed, NOT fixed (gate: the cause is a broad ADI-core change).** Three parts at
+  n = (96, 24, 48):
+  1. `HestonSLVADICore._A1` skips the degenerate v = 0 column while the implicit S-solve applies the S-drift and
+     −rU there, so that row evolves under θ·A1 on every Craig–Sneyd step: +2.45e−3 with event damping off,
+     independent of n_t, gone with n_v (2.2e−4 at n_v = 48). This is the part that did not converge in n_t.
+  2. The 2D default damping (full_step, 1, 2) runs 46 of the 48 steps as fully implicit Douglas steps. Their
+     1/(1 + r dt) discount predicts 46 c (r dt)²/2 = +3.72e−3, second order in dt at a fixed event count.
+  3. The reverse control is not certain under Heston: the knock-out at 20 has a real premium, +4.90e−3 ± 2.0e−4
+     (independent Heston MC, P(KO) = 3.1e−4).
+  With the proposed `_A1` patch (`adi_core_v0_column.patch`), the standard gap matches the damping prediction to
+  2e−6, and is −9.3e−7 with damping off. It would move every `adi2d-snowball-greeks` anchor: low_feller delta
+  +2.7e−4 (Heston) / +2.6e−4 (SLV), sigma_collapse delta −1.2e−5, the rest ≤ 5e−10. low_feller moves towards the
+  banked MC reference (|error| 1.93e−3 → 1.67e−3 Heston, 2.88e−3 → 2.63e−3 SLV) (`b06`). Awaiting a decision.
+
 ---
 
 ## 8. `get_tenor` passes no calendar to a BUSINESS_DAYS year fraction: BUG, fixed in ad0ef5ac

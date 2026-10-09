@@ -1,0 +1,8 @@
+rev KO= 20.0 sub=10 paths=2000000  true-cf = +4.9728e-03 (SE 2.0e-04)  P(KO)=3.16e-04
+rev KO= 20.0 sub=40 paths=2000000  true-cf = +4.9016e-03 (SE 2.0e-04)  P(KO)=3.11e-04
+std KO=500.0 sub=10 paths=2000000  true-cf = +0.0000e+00 (SE 0.0e+00)  P(KO)=0.00e+00
+std KO=500.0 sub=40 paths=2000000  true-cf = +0.0000e+00 (SE 0.0e+00)  P(KO)=0.00e+00
+rev KO= 15.0 sub=10 paths=2000000  true-cf = +1.0863e-03 (SE 9.5e-05)  P(KO)=6.70e-05
+rev KO= 15.0 sub=40 paths=2000000  true-cf = +1.0542e-03 (SE 9.4e-05)  P(KO)=6.50e-05
+
+[exited with code 0]

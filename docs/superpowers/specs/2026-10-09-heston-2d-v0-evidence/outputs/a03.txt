@@ -1,0 +1,15 @@
+heston snowball std (96, 24, 48)               MOVED  before=99.5714531628685 after=99.57145316286889 diff=3.979039320256561e-13
+heston snowball rev (96, 24, 48)               MOVED  before=95.65809619352738 after=95.65809619352726 diff=-1.2789769243681803e-13
+slv snowball std (96, 24, 48)                  MOVED  before=99.5714531628685 after=99.57145316286889 diff=3.979039320256561e-13
+heston phoenix std (96, 24, 48)                MOVED  before=99.6584285663212 after=99.65842856632156 diff=3.552713678800501e-13
+heston phoenix rev (96, 24, 48)                MOVED  before=95.80583366487876 after=95.8058336648786 diff=-1.5631940186722204e-13
+heston snowball std (192, 48, 192)             MOVED  before=99.55743408254703 after=99.55743408254712 diff=8.526512829121202e-14
+heston snowball rev (192, 48, 192)             bit-identical  95.43836889681646
+slv snowball std (192, 48, 192)                MOVED  before=99.55743408254703 after=99.55743408254712 diff=8.526512829121202e-14
+heston phoenix std (192, 48, 192)              bit-identical  99.66087925957936
+heston phoenix rev (192, 48, 192)              MOVED  before=95.7019158885206 after=95.70191588852057 diff=-2.842170943040401e-14
+heston snowball std KI=10.5 (96,24,48)         MOVED  before=104.98156721955854 after=104.9816481668728 diff=8.09473142595607e-05
+heston snowball std KI=11.0 (96,24,48)         MOVED  before=104.98068353806138 after=104.98073934965694 diff=5.581159555845261e-05
+heston snowball std KI=12.0 (96,24,48)         MOVED  before=104.97981888450174 after=104.97984435191866 diff=2.546741691844545e-05
+heston snowball std KI=15.0 (96,24,48)         MOVED  before=104.97550604648768 after=104.97550996842557 diff=3.921937889117544e-06
+heston snowball std delta,gamma (96,24,48)     MOVED  before=(0.21807874654821546, -0.03417010492799477) after=(0.21807874654820125, -0.03417010492802319) diff=[-1.42108547e-14 -2.84217094e-14]

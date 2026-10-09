@@ -1,0 +1,12 @@
+n=(192, 48, 192): rev cont 95.438369 | rev disc 95.815107 | std cont 99.557434 | rev cont BSM-limit 95.357781
+n=(384, 48, 192): rev cont DIVERGED -1.649e+158 | rev disc 95.813304 | std cont 99.557546 | rev cont BSM-limit 95.357158
+n=(192, 48, 384): rev cont 95.425554 | rev disc 95.800582 | std cont 99.555531 | rev cont BSM-limit 95.356438
+n=(384, 48, 384): rev cont DIVERGED -3.828e+211 | rev disc 95.798810 | std cont 99.555619 | rev cont BSM-limit 95.356017
+  U_xx = (U[:-2, 1:-1] * wm2[:, None] + U[1:-1, 1:-1] * w02[:, None]
+  + U[2:, 1:-1] * wp2[:, None])
+  U_xv = Ux[:, :-2] * wvm + Ux[:, 1:-1] * wv0 + Ux[:, 2:] * wvp
+  U_xv = Ux[:, :-2] * wvm + Ux[:, 1:-1] * wv0 + Ux[:, 2:] * wvp
+  rhs = source - theta_loc * dt_step * A1U                    # (N_S, N_V), fresh array
+n=(384, 96, 384): rev cont DIVERGED nan | rev disc 95.799192 | std cont 99.557209 | rev cont BSM-limit 95.356017
+n=(288, 48, 288): rev cont 95.427389 | rev disc 95.803576 | std cont 99.555576 | rev cont BSM-limit 95.356343
+n=(384, 24, 384): rev cont DIVERGED nan | rev disc 95.810073 | std cont 99.555868 | rev cont BSM-limit 95.356017

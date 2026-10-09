@@ -1,0 +1,31 @@
+std base                                     PDE-cf=+3.8270e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std r=q=0                                    PDE-cf=-2.7683e-08  damped= 46/48   implicit-Euler prediction=+0.0000e+00
+std r=q=0.03 (carry 0, discount on)          PDE-cf=+3.8259e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std annualized rebate                        PDE-cf=+4.1742e-03  damped= 46/48   implicit-Euler prediction=+4.0614e-03
+std event damping 0                          PDE-cf=+2.4525e-03  damped=  0/48   implicit-Euler prediction=+0.0000e+00
+std event+terminal damping 0                 PDE-cf=+2.4777e-03  damped=  0/48   implicit-Euler prediction=+0.0000e+00
+std event damping 1                          PDE-cf=+3.1147e-03  damped= 23/48   implicit-Euler prediction=+1.8615e-03
+std event_theta 0.5 (damped steps = CN)      PDE-cf=+2.4528e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std n_obs 4 (fewer events)                   PDE-cf=+2.5930e-03  damped=  6/48   implicit-Euler prediction=+4.8560e-04
+std BSM limit (sigma 1e-4, v0=theta)         PDE-cf=+3.7648e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std BSM limit, event damping 0               PDE-cf=+4.1287e-05  damped=  0/48   implicit-Euler prediction=+0.0000e+00
+std scheme DOUGLAS                           PDE-cf=+3.8270e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std v_drift centered                         PDE-cf=+3.8554e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std v_drift semi_lagrangian                  PDE-cf=+3.9747e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std v0_boundary neumann                      PDE-cf=+3.7613e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std n_t=96                                   PDE-cf=+2.1915e-03  damped= 46/96   implicit-Euler prediction=+9.3073e-04
+std n_t=192                                  PDE-cf=+2.0957e-03  damped= 46/192  implicit-Euler prediction=+2.3268e-04
+std n_t=384                                  PDE-cf=+2.2269e-03  damped= 46/384  implicit-Euler prediction=+5.8171e-05
+std n_v=48                                   PDE-cf=+3.7666e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std n_v=96                                   PDE-cf=+3.7620e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std n_v=192                                  PDE-cf=+3.7616e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std n_x=192                                  PDE-cf=+3.8271e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std n_x=384                                  PDE-cf=+3.8271e-03  damped= 46/48   implicit-Euler prediction=+3.7229e-03
+std n_t=96, event damping 0                  PDE-cf=+2.4549e-03  damped=  0/96   implicit-Euler prediction=+0.0000e+00
+std n_t=192, event damping 0                 PDE-cf=+2.4635e-03  damped=  0/192  implicit-Euler prediction=+0.0000e+00
+std n_t=384, event damping 0                 PDE-cf=+2.4697e-03  damped=  0/384  implicit-Euler prediction=+0.0000e+00
+std n_v=48, event damping 0                  PDE-cf=+2.2363e-04  damped=  0/48   implicit-Euler prediction=+0.0000e+00
+std n_v=96, event damping 0                  PDE-cf=+5.6208e-05  damped=  0/48   implicit-Euler prediction=+0.0000e+00
+std n_v=192, event damping 0                 PDE-cf=+4.1246e-05  damped=  0/48   implicit-Euler prediction=+0.0000e+00
+std n_x=192, event damping 0                 PDE-cf=+2.4526e-03  damped=  0/48   implicit-Euler prediction=+0.0000e+00
+std n_x=384, event damping 0                 PDE-cf=+2.4526e-03  damped=  0/48   implicit-Euler prediction=+0.0000e+00

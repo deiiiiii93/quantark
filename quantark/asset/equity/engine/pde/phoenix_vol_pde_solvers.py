@@ -563,7 +563,8 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
                     grid, core.X_grid, core.S_grid, 0, float(tau), product, env
                 )
             else:
-                self._set_boundary_conditions_v0(
+                # V1 is solved first, so it keeps no grid beside V0: the continuous-KI copy row reads V1's rows
+                self._set_boundary_conditions_v0_beside_v1_rows(
                     grid, core.X_grid, core.S_grid, 0, float(tau), product, env
                 )
             U[0, :] = grid[0, 0]

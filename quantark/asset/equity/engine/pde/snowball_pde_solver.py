@@ -1379,6 +1379,23 @@ class SnowballPDESolver(BasePDESolver):
         grid[0, t_idx] = lower.value
         grid[-1, t_idx] = upper.value
 
+    def _set_boundary_conditions_v0_beside_v1_rows(self, grid, x_vec, s_vec, t_idx, tau, product, pricing_env):
+        """``_set_boundary_conditions_v0`` for a march that keeps no knocked-in grid beside V0 (the 2D Heston/SLV
+        hooks solve V1 to completion first). Under continuous KI the knock-in-side V0 row copies the knocked-in
+        row of the same step (``_boundary_rows_v0``, ``v0_{edge}_copy_ki``): V1's rows of the step are set first,
+        as ``SnowballAdapter.boundaries`` does, and exposed as ``_grid_v1`` for that row only."""
+        if not (self._ki_continuous and product.has_ki_barrier):
+            self._set_boundary_conditions_v0(grid, x_vec, s_vec, t_idx, tau, product, pricing_env)
+            return
+        knocked_in = np.zeros_like(grid)
+        lower, upper = self._boundary_rows_v1(t_idx, tau, product, pricing_env, s_vec)
+        knocked_in[0, t_idx], knocked_in[-1, t_idx] = lower.value, upper.value
+        saved, self._grid_v1 = self._grid_v1, knocked_in
+        try:
+            self._set_boundary_conditions_v0(grid, x_vec, s_vec, t_idx, tau, product, pricing_env)
+        finally:
+            self._grid_v1 = saved
+
     def _boundary_rows_v0(self, t_idx, tau, product, pricing_env, s_vec):
         """V0's Dirichlet rows at ``t_idx`` with their allocation (spec 3B §5.1): ``(lower, upper)``."""
         current_time = self._total_tau - tau

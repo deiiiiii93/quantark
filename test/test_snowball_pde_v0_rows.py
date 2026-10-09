@@ -242,3 +242,59 @@ class TestHeston2DRows:
         lower, _ = _t0_rows(solver)
         assert lower.branch == "v0_lower_call_rebate"
         assert lower.value == pytest.approx(S0 * math.exp(-R * T), rel=1e-14)
+
+
+class TestHeston2DContinuousKICopyRow:
+    """Under continuous KI the V0 knock-in-side edge copies the knocked-in row (``v0_{edge}_copy_ki``).
+
+    The 1D ``SnowballAdapter`` sets V1's rows of the step first and exposes its grid as ``_grid_v1``. The 2D
+    Heston/SLV hooks march V1 to completion before V0 and kept no ``_grid_v1``, so the row read 0.0 (W7 defect A).
+    The edge row must be the knocked-in surface's own row at the same time, on every variance column.
+    """
+
+    HP = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.3, rho=-0.5)
+
+    @staticmethod
+    def _snowball(reverse):
+        ko, ki = (97.0, 125.0) if reverse else (103.0, 75.0)
+        return SnowballOption(
+            initial_price=S0, strike=S0, barrier_config=_barrier(ko, ki, continuous=True),
+            payoff_config=PayoffConfig(rebate_rate=0.15, include_principal=True), maturity=T, tenor=T,
+            is_reverse=reverse)
+
+    @ORIENTATION
+    def test_snowball_edge_row_is_the_knocked_in_surface_row(self, reverse):
+        env = _env()
+        product = self._snowball(reverse)
+        solver = HestonSnowballPDESolver(model_params=self.HP, n_x=96, n_v=24, n_t=48)
+        solver.price(product, env)
+        lower, upper = _t0_rows(solver)
+        ki_edge, row = (upper, -1) if reverse else (lower, 0)
+        assert ki_edge.branch == ("v0_upper_copy_ki" if reverse else "v0_lower_copy_ki")
+        assert ki_edge.copy_from_ki
+        core, knocked_in = solver._solve_live_surface(product, env, T, knocked_in=True)
+        np.testing.assert_array_equal(knocked_in[row, :], np.full(core.V_grid.size, ki_edge.value))
+        # and the hook writes it across the variance axis
+        hooked = solver._boundary_hook(core, product, env, knocked_in=False)(
+            np.zeros((core.S_grid.size, core.V_grid.size)), T)
+        np.testing.assert_array_equal(hooked[row, :], knocked_in[row, :])
+
+    def test_phoenix_edge_row_is_the_knocked_in_row(self):
+        from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import HestonPhoenixPDESolver
+
+        env = _env()
+        product = PhoenixOption(
+            initial_price=S0, strike=S0, maturity=T, contract_multiplier=1.0,
+            barrier_config=_barrier(103.0, 75.0, continuous=True),
+            coupon_config=CouponBarrierConfig(coupon_barrier=75.0, coupon_rate=0.01, memory_coupon=False,
+                                              coupon_pay_type=CouponPayType.INSTANT,
+                                              day_count_convention=DayCountConvention.ACT_365),
+            payoff_config=PayoffConfig(rebate_rate=0.0, include_principal=True))
+        solver = HestonPhoenixPDESolver(model_params=self.HP, n_x=96, n_v=24, n_t=48)
+        solver.price(product, env)
+        lower, _ = _t0_rows(solver)
+        assert lower.branch == "v0_lower_copy_ki"
+        core = solver._make_core(product, env, T)
+        knocked_in_lower, _ = solver._boundary_rows_v1(0, T, product, env, core.S_grid)
+        assert lower.value == knocked_in_lower.value
+        assert lower.value != 0.0

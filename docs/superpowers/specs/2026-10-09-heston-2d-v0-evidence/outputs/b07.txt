@@ -1,0 +1,9 @@
+n_t=48   default (46 event-damped steps + Rannacher)    patched PDE-cf +3.7613e-03  predicted +3.7634e-03  residual -2.06e-06
+n_t=48   event damping 0 (Rannacher only)               patched PDE-cf +3.9532e-05  predicted +4.0466e-05  residual -9.34e-07
+n_t=48   event + terminal damping 0                     patched PDE-cf -9.3121e-07  predicted +0.0000e+00  residual -9.31e-07
+n_t=96   default (46 event-damped steps + Rannacher)    patched PDE-cf +9.4041e-04  predicted +9.4084e-04  residual -4.34e-07
+n_t=96   event damping 0 (Rannacher only)               patched PDE-cf +9.8429e-06  predicted +1.0117e-05  residual -2.74e-07
+n_t=96   event + terminal damping 0                     patched PDE-cf -2.7293e-07  predicted +0.0000e+00  residual -2.73e-07
+n_t=192  default (46 event-damped steps + Rannacher)    patched PDE-cf +2.3508e-04  predicted +2.3521e-04  residual -1.27e-07
+n_t=192  event damping 0 (Rannacher only)               patched PDE-cf +2.4181e-06  predicted +2.5292e-06  residual -1.11e-07
+n_t=192  event + terminal damping 0                     patched PDE-cf -1.1081e-07  predicted +0.0000e+00  residual -1.11e-07

@@ -397,6 +397,13 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   reproduces bit for bit (the cert reverse and call-rebate cells' edges lie too far from the spot to reach the price),
   and so does the PDE byte book (`test/pde_bitwise/capture_book.py`, 713 rows, 33201993 vs this branch, same machine:
   0 diffs; the same 10 rows raise on both sides).
+- Snowball / Phoenix PDE, 2D Heston and SLV: under continuous knock-in, the not-knocked-in edge that lies beyond the
+  knock-in level copies the knocked-in surface's row of the same step. The 2D hooks solve V1 to completion before V0
+  and kept no `_grid_v1`, so the edge row was 0.0 (standard lower edge, KO 103 / KI 75: 0.0 -> 10.2004; reverse
+  upper edge, KO 97 / KI 125: 0.0 -> -791.999). They now compute V1's rows first, as the 1D adapter does
+  (`SnowballPDESolver._set_boundary_conditions_v0_beside_v1_rows`). Prices move at round-off (|move| <= 4e-13) on
+  the contracts measured, and by up to 8.1e-5 only when the knock-in level sits just inside the grid's lower edge.
+  Discrete knock-in is untouched (`docs/superpowers/specs/2026-10-09-heston-2d-v0-evidence/`).
 - Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract
   aged).
 - Phoenix `get_ko_payoff` keeps `accrued_offset`.
