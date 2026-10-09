@@ -8,7 +8,9 @@ redeems.
 
 Validated under a flat surface against closed forms: ``target=inf, gearing=1``
 reduces to a plain forward strip, and ``target=inf, gearing!=1`` to a forward
-strip minus ``(gearing-1)`` x a GK vanilla put/call strip.
+strip minus ``(gearing-1)`` x a GK vanilla put/call strip. The walk starts
+from the product's realized state (``resolve``); a terminal contract is the PV
+of its pending cash.
 """
 
 from __future__ import annotations
@@ -25,6 +27,9 @@ from quantark.asset.fx.process.fx_gk_path_generator import FxGKPathGenerator
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.asset.fx.product.option.fx_target_redemption_forward import (
     FxTargetRedemptionForward,
+)
+from quantark.asset.fx.product.option.target_redemption_state import (
+    pending_present_value,
 )
 from quantark.montecarlo.qmc_sobol import (
     PseudoRandomNormalGenerator,
@@ -51,7 +56,6 @@ class FxTarnForwardMCEngine(BaseFxEngine):
     """Constant-vol GK Monte Carlo for FxTargetRedemptionForward."""
 
     engine_type = EngineType.MONTE_CARLO
-    _HIT_RTOL = 1e-12
 
     def __init__(
         self,
@@ -72,21 +76,31 @@ class FxTarnForwardMCEngine(BaseFxEngine):
                 "use PSEUDO or QUASI."
             )
 
+        view = opt.resolve(fx_env)
+        pv_pending = pending_present_value(view.pending, fx_env)
+        if view.terminal:  # spec 5.2 step 2: no simulation, no vol lookup
+            self._last_result = FxTarnMCResult(
+                pv_pending, 0.0, 0, 0.0, 1.0 if view.redeemed else 0.0
+            )
+            return pv_pending
+
         spot = fx_env.effective_spot()
         if spot <= 0:
             raise ValidationError(f"Spot must be positive, got {spot}")
-        T = float(opt.get_maturity(fx_env))
+        T = float(view.fixing_times[-1])  # == opt.get_maturity at a numeric inception, bitwise
         sigma = float(fx_env.get_vol(fx_env.get_forward(T), T))
         if sigma <= 0:
             raise ValidationError(f"vol must be positive, got {sigma}")
 
-        fixings = np.asarray(opt.fixing_times, dtype=float)
+        fixings = np.asarray(view.fixing_times, dtype=float)
         df_pay = np.array(
-            [fx_env.get_domestic_df(float(t)) for t in opt.pay_times]
+            [fx_env.get_domestic_df(float(t)) for t in view.pay_times]
         )
         spots = self._simulate(fx_env, spot, sigma, fixings)  # (P, M)
 
-        pv, redeemed = self._accumulate(opt, spots, df_pay)
+        pv, redeemed = self._accumulate(opt, view, spots, df_pay)
+        if view.pending:
+            pv = pv + pv_pending
         price = float(pv.mean())
         if self.mc.method == MonteCarloMethod.QUASI:
             std_error: Optional[float] = None
@@ -121,20 +135,20 @@ class FxTarnForwardMCEngine(BaseFxEngine):
 
     # -- pathwise target redemption -------------------------------------
 
-    def _accumulate(self, opt, spots: np.ndarray, df_pay: np.ndarray):
-        """Walk periods pathwise; return (pv_per_path, early_redemption_mask)."""
+    def _accumulate(self, opt, view, spots: np.ndarray, df_pay: np.ndarray):
+        """Walk the view's periods pathwise from its banked amount; return (pv_per_path, early_redemption_mask)."""
         n_paths, n_periods = spots.shape
         sign = 1.0 if opt.is_buy_base else -1.0
         diff = sign * (spots - opt.strike)  # (P, M); >0 favorable
         favorable = opt.notional * np.maximum(diff, 0.0)
         unfavorable = opt.notional * np.maximum(-diff, 0.0)
 
-        acc = np.zeros(n_paths)
+        acc = np.full(n_paths, view.accumulated)
         alive = np.ones(n_paths, dtype=bool)
         pv = np.zeros(n_paths)
         early = np.zeros(n_paths, dtype=bool)
         target = opt.target
-        tol = self._hit_tol(target)
+        tol = opt.hit_tol
 
         for i in range(n_periods):
             fav_i, unf_i = favorable[:, i], unfavorable[:, i]
@@ -152,11 +166,6 @@ class FxTarnForwardMCEngine(BaseFxEngine):
             alive = alive & ~hit
 
         return pv, early
-
-    @staticmethod
-    def _hit_tol(target: float) -> float:
-        """Target-relative hit tolerance; 0 for an unbounded target."""
-        return 0.0 if math.isinf(target) else abs(target) * FxTarnForwardMCEngine._HIT_RTOL
 
     # -- helpers ---------------------------------------------------------
 

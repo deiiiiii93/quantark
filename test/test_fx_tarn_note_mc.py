@@ -69,8 +69,8 @@ def _mc(**kw):
 # ---------------------------------------------------------------------------
 
 
-def _det_pv(forwards, df_pay, opt):
-    acc, pv, alive = 0.0, 0.0, True
+def _det_pv(forwards, df_pay, opt, acc0=0.0):
+    acc, pv, alive = acc0, 0.0, True
     for i, (F, df) in enumerate(zip(forwards, df_pay)):
         if not alive:
             break
@@ -126,6 +126,21 @@ class TestDeterministicLimit:
 
     def test_single_period(self):
         self._check(_note(fixing_times=[1.0], target=math.inf))
+
+    def test_landing_fixing_theta_matches_forward_path(self):
+        from copy import deepcopy
+        env = _env(vol=1e-7)
+        fix = [0.5 / 365, 0.25, 0.5, 0.75, 1.0]
+        opt = _note(fixing_times=fix)
+        theta = FxTargetRedemptionNoteMCEngine(params=_mc(num_paths=20_000)).calculate_greeks(opt, env)["theta"]
+        fwd, df = _forwards_and_df(env, opt)
+        base = _det_pv(fwd, df, opt)
+        aged = deepcopy(opt)
+        aged.time_shift(1 / 365)
+        aged.record_passed_fixings(env)
+        fwd_a, df_a = _forwards_and_df(env, aged)
+        future = _det_pv(fwd_a, df_a, aged, acc0=aged.state.accumulated) + aged.pending_pv(env)
+        assert theta == pytest.approx(future - base, abs=1e-6, rel=1e-6)
 
 
 # ---------------------------------------------------------------------------

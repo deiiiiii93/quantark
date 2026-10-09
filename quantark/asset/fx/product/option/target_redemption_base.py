@@ -9,22 +9,25 @@ from __future__ import annotations
 
 import math
 import warnings
+from copy import deepcopy
 from datetime import datetime
 from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import fixing_label
+from quantark.util.fixings import fixing_label, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
 from ..base_fx_product import BaseFxProduct
 from .target_redemption_state import (
     PendingPayment,
+    ResolvedTargetRedemption,
     TargetRedemptionEvent,
     TargetRedemptionEventType,
     TargetRedemptionState,
     TerminalBookingWarning,
     is_target_hit,
+    pending_present_value,
     target_hit_tol,
 )
 
@@ -241,3 +244,37 @@ class TargetRedemptionProduct(BaseFxProduct):
                                                 label=label))
         else:
             pending.append(PendingPayment(amount, pay_time=pay_time))
+
+    # -- resolved view (spec section 5.1) ----------------------------------------------------------------------
+    def resolve(self, fx_env, *, warn_missing_fixings: bool = True) -> ResolvedTargetRedemption:
+        """The engines' only input. Unbanked fixings at or before valuation are banked on a COPY at the quoted spot
+        (``record_passed_fixings``) with one ``MissingFixingWarning`` naming them (W5); the product is unchanged."""
+        if self._has_unbanked_passed(fx_env):
+            banked = deepcopy(self)
+            start = len(banked.lifecycle_events)
+            banked.record_passed_fixings(fx_env)
+            if warn_missing_fixings:
+                labels = [e.label for e in banked.lifecycle_events[start:]
+                          if e.event_type is TargetRedemptionEventType.FIXING]
+                warn_filled_fixings(type(self).__name__, "a banked outcome", labels)
+            return banked._view(fx_env)
+        return self._view(fx_env)
+
+    def _has_unbanked_passed(self, fx_env) -> bool:
+        return bool(self.fixing_times) and is_passed_time(self.fixing_times[0])
+
+    def _view(self, fx_env) -> ResolvedTargetRedemption:
+        st = self.state
+        return ResolvedTargetRedemption(
+            fixing_times=tuple(self.fixing_times),
+            pay_times=tuple(self.pay_times),
+            accrual_factors=tuple(self.accrual_factors) if self._has_accrual else None,
+            accumulated=st.accumulated,
+            pending=tuple((p.pay_time, p.amount) for p in st.pending),
+            redeemed=self.is_redeemed,
+            terminal=self.is_terminal,
+        )
+
+    def pending_pv(self, fx_env) -> float:
+        """PV of the pending cash still due after valuation (no warning: callers have banked the passed fixings)."""
+        return pending_present_value(self.resolve(fx_env, warn_missing_fixings=False).pending, fx_env)

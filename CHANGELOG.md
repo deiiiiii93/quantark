@@ -28,6 +28,14 @@ backtest and FX dynamic scenario.
 - A non-positive fixing time is accepted (an unbanked past fixing) and an empty `fixing_times` is a terminal booking
   (`TerminalBookingWarning`, valued at the PV of its pending cash).
 
+### Fixed
+- FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be
+  strictly increasing and positive`); the stepped-over fixing is now banked at the held spot and theta is finite.
+- Pricing a TARN / TARF after a bare `time_shift` past a fixing raised; the passed fixing is now filled at the quoted
+  spot on a copy with one `MissingFixingWarning`.
+- A rebuilt mid-life contract no longer prices with the full target: the engines start from `state.accumulated` and
+  add the PV of `state.pending`. Inception prices and Greeks are unchanged to the bit.
+
 Accrual time, separate from observation time (spec: `docs/superpowers/specs/2026-10-08-accrual-time-design.md`).
 An autocallable's observation is a trading-day quantity (when the market is checked); its accrual is a calendar
 quantity in the contract's interest basis (how much it owes). Every snowball, Phoenix and KO-reset record now
