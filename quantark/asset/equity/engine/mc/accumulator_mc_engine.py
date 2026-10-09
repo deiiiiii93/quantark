@@ -19,7 +19,11 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
-from quantark.asset.equity.engine.accumulator_valuation import realized_value, settle_valuation_instant
+from quantark.asset.equity.engine.accumulator_valuation import (
+    realized_value,
+    settle_at_expiry,
+    settle_valuation_instant,
+)
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -125,15 +129,24 @@ class AccumulatorMCEngine(BaseEngine):
         terminal_timing = resolve_terminal_timing(product, pricing_env)
 
         if is_zero(maturity):
-            # At expiry only locked-in accrual and the deterministic terminal
-            # extra-shares leg remain -- no rate/dividend/volatility needed.
+            # At expiry only the locked-in accrual, the observation at the maturity instant (live, decided on
+            # the spot) and the deterministic terminal extra-shares leg remain -- no rate/dividend/volatility needed.
             self._last_std_error = 0.0
             realized = realized_value(product, pricing_env, terminal_timing)
+            settled_now, ended = settle_at_expiry(
+                product,
+                spot,
+                self._resolve_observation_legs(product, pricing_env, terminal_timing.payment_df),
+            )
+            pending = pending_receivable_pv(lifecycle_state, pricing_env)
+            if ended:
+                return realized + settled_now + pending
             return (
                 realized
+                + settled_now
                 + self._extra_shares_intrinsic(product, spot)
                 * terminal_timing.delay_df
-                + pending_receivable_pv(lifecycle_state, pricing_env)
+                + pending
             )
 
         rate = pricing_env.get_rate(maturity)

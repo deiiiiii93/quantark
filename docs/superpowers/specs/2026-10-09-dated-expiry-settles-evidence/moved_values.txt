@@ -1,0 +1,51 @@
+Moved values -- branch w8-dated-expiry-settles (from main e4271b6d), user ruling 2026-10-09 option (a)
+=========================================================================================================
+
+Certificate anchors, replay goldens (test/replay_golden, test/test_replay_goldens.py), pde_bitwise captures:
+  NONE moved. test/replay_golden + replay/simulation/backtest/lifecycle suites pass unchanged (see REPORT.md, Runs).
+
+Existing test expectations changed (3, all in test/test_accumulator_mc_engine.py)
+--------------------------------------------------------------------------------
+Reason (all three): a numeric accumulator at maturity 1e-12 (is_zero) still holds its last observation at t = 1e-12,
+i.e. AT the valuation instant. The engines' expiry shortcut dropped it; it is now decided on the spot exactly as
+``settle_valuation_instant`` decides an observation at the valuation instant on every other day (theta boundary R1,
+ruling D2: a fixing at t = 0 is live). Without this the dated accumulator on its exercise date (now priced) would
+silently pay nothing for its last day.
+
+  test_mc_near_expiry_returns_realized_accrual   spot 100, K 95, SINGLE_DAY, locked-in +5
+      5.0  ->  10.0     (+5: today's observation, one share x (100 - 95))
+  test_mc_zero_maturity_includes_extra_shares    spot 90, K 95, gearing 2, 1 extra share
+     -5.0  -> -15.0     (-10: today's observation, 2 shares x (90 - 95))
+  test_mc_expired_does_not_require_volatility    same contract, zero-vol-near-expiry surface
+     -5.0  -> -15.0     (same)
+
+Behaviour changes with no existing test anchored to them
+--------------------------------------------------------
+1. Dated equity options valued ON the exercise date (valuation_date == exercise_date): ValidationError -> the settled
+   value, on every route the numeric twin prices (154 of the 188 measured cells; table in REPORT.md / after_branch.txt).
+2. Asian MC, numeric twin at maturity 0.0 with recorded fixings (AsianOptionMCEngine expiry shortcut):
+   averaged the spot alone -> averages the recorded fixings and the live one (the analytical engine's value).
+     11 fixings 101..111 recorded + today live, K 100:  spot 110: 10.0 -> 6.333333333333;  spot 90: 0.0 -> 4.666666666667
+   Legacy / continuous Asian schedules (no recorded fixing) are unchanged (average = spot).
+3. Accumulator analytical + MC, numeric twin at maturity 0.0 holding an observation at t = 0 (TERMINATION, KO 108,
+   2% rebate on 100, 3 extra shares):  spot 100: 0 -> 5;  spot 90: -15 -> -25;  spot 110 (knocked out today): 0 -> 2
+   (rebate; the extra-shares leg then pays nothing, as on the non-zero path).
+   An aged numeric accumulator whose landing record was dropped (time_shift without keep_landing) is unchanged.
+4. Error text, valuation strictly AFTER the exercise date (still ValidationError):
+     BaseEquityOption.get_maturity  "Valuation date (v) must be before exercise date (e)"
+                                 -> "Valuation date (v) must be on or before exercise date (e)"
+     OneTouchOption / DoubleOneTouchOption.get_maturity  "end_date (e) must be after start_date (v)"  -> the same new text
+   Many routes resolve the terminal settlement timing first and keep raising its own message (unchanged).
+5. QUAD V2 on a dated snowball / Phoenix / KO-reset ON its exercise date: refused before by get_maturity, refused now
+   by compile_contract with "QUAD V2 does not price a contract at its maturity instant ..." (TODO(dated-expiry));
+   its numeric twin keeps its refusal ("Maturity must be positive, got 0.0" from validate()).
+6. Replay (ProductReplay.recorded maturity) and ensemble (EnsembleBacktestEngine._pricing_q) dividend-pillar readout on
+   a DATED product's maturity day: get_maturity now returns 0.0 there, so both map it to the same 1e-8 pillar they used
+   when it raised -- readout unchanged (a carry-implied yield refuses T <= 0).
+
+Checked and NOT moved
+---------------------
+- Greeks on the exercise date (price, delta, gamma, theta, vega, rho): dated == numeric on 13 routes
+  (greeks_on_exercise_date.txt).
+- Accumulator theta on the day before its last observation: 0 in both trees (numerical_theta returns 0.0 when
+  current_maturity <= time_bump; the expiry shortcut is not reached) -- accumulator_theta.txt.

@@ -201,6 +201,8 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
             self._last_std_error = 0.0
             return (remaining_replication(product).price(env)
                     + pending_receivable_pv(lifecycle_state, env))
+        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
+        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
@@ -262,6 +264,8 @@ class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
         if fixed_pv is not None:
             self._last_std_error = 0.0
             return fixed_pv
+        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
+        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
@@ -312,6 +316,8 @@ class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
         if fixed_pv is not None:
             self._last_std_error = 0.0
             return fixed_pv
+        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
+        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)

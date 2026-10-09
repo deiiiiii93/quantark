@@ -1,0 +1,20 @@
+# TODAY main e4271b6d
+form | engine | spot | price (day before) | theta (1 day)
+numeric | analytical | 100 | 5.005068119 | 0
+numeric | analytical | 90 | -9.989315664 | 0
+numeric | mc | 100 | 4.989121209 | 0
+numeric | mc | 90 | -10.01802024 | 0
+dated | analytical | 100 | 5.005068119 | 0
+dated | analytical | 90 | -9.989315664 | 0
+dated | mc | 100 | 4.989121209 | 0
+dated | mc | 90 | -10.01802024 | 0
+# AFTER branch w8-dated-expiry-settles
+form | engine | spot | price (day before) | theta (1 day)
+numeric | analytical | 100 | 5.005068119 | 0
+numeric | analytical | 90 | -9.989315664 | 0
+numeric | mc | 100 | 4.989121209 | 0
+numeric | mc | 90 | -10.01802024 | 0
+dated | analytical | 100 | 5.005068119 | 0
+dated | analytical | 90 | -9.989315664 | 0
+dated | mc | 100 | 4.989121209 | 0
+dated | mc | 90 | -10.01802024 | 0

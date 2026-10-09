@@ -200,6 +200,8 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
         settlement_scale = _settlement_scale(self, product, env)
         if self.model_params.sigma < _SIGMA_MIN:
             return self._deterministic_limit(product, env)
+        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
+        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env))
         t_grid = np.linspace(0.0, T, self.n_t + 1)
         market = TermMarketContext.from_env(
@@ -246,6 +248,8 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
         settlement_scale = _settlement_scale(self, product, env)
         if self.model_params.sigma < _SIGMA_MIN:
             return self._deterministic_limit(product, env, self.leverage_surface)
+        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
+        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env))
         t_grid = np.linspace(0.0, T, self.n_t + 1)
         market = TermMarketContext.from_env(

@@ -20,6 +20,7 @@ from quantark.backtest.replay.market import ImpliedBasisYield, derive_implied_di
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 from .carry import day_chain
 from .config import EnsembleConfig
@@ -313,9 +314,13 @@ class EnsembleBacktestEngine:
             return implied_q.copy()
         probe = self._schedule_env(day)
         try:
-            remaining = float(pricer.aged_product(day, knocked_in=False).get_maturity(probe))
+            product = pricer.aged_product(day, knocked_in=False)
+            remaining = float(product.get_maturity(probe))
         except ValidationError:
             remaining = 1e-8      # on/after a date-based maturity: the replay's shortest pillar
+        else:
+            if is_zero(remaining) and getattr(product, "exercise_date", None) is not None:
+                remaining = 1e-8  # ON it (0.0 since 2026-10-09, it used to raise): the same pillar, readout unchanged
         return np.array([float(div.get_yield(remaining)) for div in div_yield])
 
     # -- pricing -------------------------------------------------------

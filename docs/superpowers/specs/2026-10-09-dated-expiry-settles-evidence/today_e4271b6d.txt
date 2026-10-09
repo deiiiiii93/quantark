@@ -1,0 +1,190 @@
+# TODAY: main e4271b6d: valuation 2026-01-05 == exercise date
+family | engine | spot | dated | numeric(T=0) | settled | dated==numeric | numeric==settled
+european_call | analytical_bs | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+european_call | analytical_bs | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+european_call | mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+european_call | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+european_call | pde | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+european_call | pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+european_call | quad | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+european_call | quad | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+european_call | heston_analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: maturity must be positive | 10 | NO | NO
+european_call | heston_analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: maturity must be positive | 0 | NO | NO
+european_call | lv_mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: maturity must be positive | 10 | NO | NO
+european_call | lv_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: maturity must be positive | 0 | NO | NO
+european_call | lv_pde | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+european_call | lv_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+european_call | heston_mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: maturity must be positive | 10 | NO | NO
+european_call | heston_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: maturity must be positive | 0 | NO | NO
+european_call | heston_pde | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: maturity must be positive | 10 | NO | NO
+european_call | heston_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: maturity must be positive | 0 | NO | NO
+american_put | analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+american_put | analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+american_put | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+american_put | mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+american_put | pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+american_put | pde | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+digital_call | analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+digital_call | analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+digital_call | mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+digital_call | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+asian_fixed_call | analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 6.33333333333 | 6.33333333333 | NO | yes
+asian_fixed_call | analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 4.66666666667 | 4.66666666667 | NO | yes
+asian_fixed_call | mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 6.33333333333 | NO | NO
+asian_fixed_call | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 4.66666666667 | NO | NO
+barrier_up_out_call | analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+barrier_up_out_call | analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+barrier_up_out_call | analytical | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+barrier_up_out_call | mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+barrier_up_out_call | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+barrier_up_out_call | mc | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+barrier_up_out_call | pde | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+barrier_up_out_call | pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+barrier_up_out_call | pde | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+barrier_up_out_call | quad | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+barrier_up_out_call | quad | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+barrier_up_out_call | quad | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+barrier_up_out_call | lv_mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 10 | NO | NO
+barrier_up_out_call | lv_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 0 | NO | NO
+barrier_up_out_call | lv_mc | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 5 | NO | NO
+barrier_up_out_call | lv_pde | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+barrier_up_out_call | lv_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+barrier_up_out_call | lv_pde | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+barrier_up_out_call | heston_mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 10 | NO | NO
+barrier_up_out_call | heston_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 0 | NO | NO
+barrier_up_out_call | heston_mc | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 5 | NO | NO
+barrier_up_out_call | heston_pde | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 10 | NO | NO
+barrier_up_out_call | heston_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 0 | NO | NO
+barrier_up_out_call | heston_pde | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: t_grid must be strictly increasing | 5 | NO | NO
+double_barrier_out_call | analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+double_barrier_out_call | analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+double_barrier_out_call | analytical | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+double_barrier_out_call | pde | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+double_barrier_out_call | pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+double_barrier_out_call | pde | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+one_touch_up | analytical | 110 | RAISES ValidationError: end_date (2026-01-05 00:00:00) must be after start_date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+one_touch_up | analytical | 135 | RAISES ValidationError: end_date (2026-01-05 00:00:00) must be after start_date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+one_touch_up | pde | 110 | RAISES ValidationError: end_date (2026-01-05 00:00:00) must be after start_date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+one_touch_up | pde | 135 | RAISES ValidationError: end_date (2026-01-05 00:00:00) must be after start_date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+one_touch_up | quad | 110 | RAISES ValidationError: end_date (2026-01-05 00:00:00) must be after start_date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+one_touch_up | quad | 135 | RAISES ValidationError: end_date (2026-01-05 00:00:00) must be after start_date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+double_one_touch | pde | 110 | RAISES ValidationError: end_date (2026-01-05 00:00:00) must be after start_date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+double_one_touch | pde | 135 | RAISES ValidationError: end_date (2026-01-05 00:00:00) must be after start_date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+single_sharkfin_call | analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+single_sharkfin_call | analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+single_sharkfin_call | analytical | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+single_sharkfin_call | mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+single_sharkfin_call | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+single_sharkfin_call | mc | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+double_sharkfin_call | analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+double_sharkfin_call | analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+double_sharkfin_call | analytical | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+double_sharkfin_call | mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+double_sharkfin_call | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+double_sharkfin_call | mc | 135 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 5 | 5 | NO | yes
+range_accrual | analytical | 100 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+range_accrual | analytical | 120 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 9.16666666667 | 9.16666666667 | NO | yes
+range_accrual | mc | 100 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 10 | 10 | NO | yes
+range_accrual | mc | 120 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 9.16666666667 | 9.16666666667 | NO | yes
+accumulator | analytical | 100 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 5 | NO | NO
+accumulator | analytical | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -15 | -25 | NO | NO
+accumulator | analytical | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 2 | NO | NO
+accumulator | mc | 100 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 5 | NO | NO
+accumulator | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -15 | -25 | NO | NO
+accumulator | mc | 110 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 2 | NO | NO
+snowball | mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | mc | 70 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -30 | -30 | NO | yes
+snowball | pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | pde | 70 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -30 | -30 | NO | yes
+snowball | quad_v1 | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | quad_v1 | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | quad_v1 | 70 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -30 | -30 | NO | yes
+snowball | quad_v2 | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 15 | NO | NO
+snowball | quad_v2 | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 15 | NO | NO
+snowball | quad_v2 | 70 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | -30 | NO | NO
+snowball | lv_mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | lv_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | lv_mc | 70 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -30 | -30 | NO | yes
+snowball | lv_pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | lv_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | lv_pde | 70 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -30 | -30 | NO | yes
+snowball | heston_mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | heston_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | heston_mc | 70 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -30 | -30 | NO | yes
+snowball | heston_pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | heston_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 15 | 15 | NO | yes
+snowball | heston_pde | 70 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -30 | -30 | NO | yes
+phoenix | mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | mc | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix | mc | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix | pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | pde | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix | pde | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix | quad_v1 | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | quad_v1 | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | quad_v1 | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix | quad_v1 | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix | quad_v2 | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 1 | NO | NO
+phoenix | quad_v2 | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 1 | NO | NO
+phoenix | quad_v2 | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 0 | NO | NO
+phoenix | quad_v2 | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | -40 | NO | NO
+phoenix | lv_mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | lv_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | lv_mc | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix | lv_mc | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix | lv_pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | lv_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | lv_pde | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix | lv_pde | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix | heston_mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | heston_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix | heston_mc | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix | heston_mc | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix | heston_pde | 104 | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | 1 | NO | NO
+phoenix | heston_pde | 90 | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | 1 | NO | NO
+phoenix | heston_pde | 75 | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | 0 | NO | NO
+phoenix | heston_pde | 60 | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | -40 | NO | NO
+phoenix_no_memory | mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | mc | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix_no_memory | mc | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix_no_memory | pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | pde | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix_no_memory | pde | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix_no_memory | quad_v1 | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | quad_v1 | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | quad_v1 | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix_no_memory | quad_v1 | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix_no_memory | quad_v2 | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 1 | NO | NO
+phoenix_no_memory | quad_v2 | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 1 | NO | NO
+phoenix_no_memory | quad_v2 | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 0 | NO | NO
+phoenix_no_memory | quad_v2 | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | -40 | NO | NO
+phoenix_no_memory | lv_mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | lv_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | lv_mc | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix_no_memory | lv_mc | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix_no_memory | lv_pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | lv_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | lv_pde | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix_no_memory | lv_pde | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix_no_memory | heston_mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | heston_mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | heston_mc | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix_no_memory | heston_mc | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+phoenix_no_memory | heston_pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | heston_pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 1 | 1 | NO | yes
+phoenix_no_memory | heston_pde | 75 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 0 | 0 | NO | yes
+phoenix_no_memory | heston_pde | 60 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -40 | -40 | NO | yes
+ko_reset_absolute_knocked_in | mc | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 3 | 3 | NO | yes
+ko_reset_absolute_knocked_in | mc | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -10 | -10 | NO | yes
+ko_reset_absolute_knocked_in | pde | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 3 | 3 | NO | yes
+ko_reset_absolute_knocked_in | pde | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -10 | -10 | NO | yes
+ko_reset_absolute_knocked_in | quad_v1 | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | 3 | 3 | NO | yes
+ko_reset_absolute_knocked_in | quad_v1 | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | -10 | -10 | NO | yes
+ko_reset_absolute_knocked_in | quad_v2 | 104 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | 3 | NO | NO
+ko_reset_absolute_knocked_in | quad_v2 | 90 | RAISES ValidationError: Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00) | RAISES ValidationError: Maturity must be positive, got 0.0 | -10 | NO | NO

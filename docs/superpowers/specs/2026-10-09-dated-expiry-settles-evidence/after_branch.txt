@@ -1,0 +1,190 @@
+# AFTER: branch w8-dated-expiry-settles: valuation 2026-01-05 == exercise date
+family | engine | spot | dated | numeric(T=0) | settled | dated==numeric | numeric==settled
+european_call | analytical_bs | 110 | 10 | 10 | 10 | yes | yes
+european_call | analytical_bs | 90 | 0 | 0 | 0 | yes | yes
+european_call | mc | 110 | 10 | 10 | 10 | yes | yes
+european_call | mc | 90 | 0 | 0 | 0 | yes | yes
+european_call | pde | 110 | 10 | 10 | 10 | yes | yes
+european_call | pde | 90 | 0 | 0 | 0 | yes | yes
+european_call | quad | 110 | 10 | 10 | 10 | yes | yes
+european_call | quad | 90 | 0 | 0 | 0 | yes | yes
+european_call | heston_analytical | 110 | RAISES ValidationError: maturity must be positive | RAISES ValidationError: maturity must be positive | 10 | NO | NO
+european_call | heston_analytical | 90 | RAISES ValidationError: maturity must be positive | RAISES ValidationError: maturity must be positive | 0 | NO | NO
+european_call | lv_mc | 110 | RAISES ValidationError: maturity must be positive | RAISES ValidationError: maturity must be positive | 10 | NO | NO
+european_call | lv_mc | 90 | RAISES ValidationError: maturity must be positive | RAISES ValidationError: maturity must be positive | 0 | NO | NO
+european_call | lv_pde | 110 | 10 | 10 | 10 | yes | yes
+european_call | lv_pde | 90 | 0 | 0 | 0 | yes | yes
+european_call | heston_mc | 110 | RAISES ValidationError: maturity must be positive | RAISES ValidationError: maturity must be positive | 10 | NO | NO
+european_call | heston_mc | 90 | RAISES ValidationError: maturity must be positive | RAISES ValidationError: maturity must be positive | 0 | NO | NO
+european_call | heston_pde | 110 | RAISES ValidationError: maturity must be positive | RAISES ValidationError: maturity must be positive | 10 | NO | NO
+european_call | heston_pde | 90 | RAISES ValidationError: maturity must be positive | RAISES ValidationError: maturity must be positive | 0 | NO | NO
+american_put | analytical | 90 | 10 | 10 | 10 | yes | yes
+american_put | analytical | 110 | 0 | 0 | 0 | yes | yes
+american_put | mc | 90 | 10 | 10 | 10 | yes | yes
+american_put | mc | 110 | 0 | 0 | 0 | yes | yes
+american_put | pde | 90 | 10 | 10 | 10 | yes | yes
+american_put | pde | 110 | 0 | 0 | 0 | yes | yes
+digital_call | analytical | 110 | 10 | 10 | 10 | yes | yes
+digital_call | analytical | 90 | 0 | 0 | 0 | yes | yes
+digital_call | mc | 110 | 10 | 10 | 10 | yes | yes
+digital_call | mc | 90 | 0 | 0 | 0 | yes | yes
+asian_fixed_call | analytical | 110 | 6.33333333333 | 6.33333333333 | 6.33333333333 | yes | yes
+asian_fixed_call | analytical | 90 | 4.66666666667 | 4.66666666667 | 4.66666666667 | yes | yes
+asian_fixed_call | mc | 110 | 6.33333333333 | 6.33333333333 | 6.33333333333 | yes | yes
+asian_fixed_call | mc | 90 | 4.66666666667 | 4.66666666667 | 4.66666666667 | yes | yes
+barrier_up_out_call | analytical | 110 | 10 | 10 | 10 | yes | yes
+barrier_up_out_call | analytical | 90 | 0 | 0 | 0 | yes | yes
+barrier_up_out_call | analytical | 135 | 5 | 5 | 5 | yes | yes
+barrier_up_out_call | mc | 110 | 10 | 10 | 10 | yes | yes
+barrier_up_out_call | mc | 90 | 0 | 0 | 0 | yes | yes
+barrier_up_out_call | mc | 135 | 5 | 5 | 5 | yes | yes
+barrier_up_out_call | pde | 110 | 10 | 10 | 10 | yes | yes
+barrier_up_out_call | pde | 90 | 0 | 0 | 0 | yes | yes
+barrier_up_out_call | pde | 135 | 5 | 5 | 5 | yes | yes
+barrier_up_out_call | quad | 110 | 10 | 10 | 10 | yes | yes
+barrier_up_out_call | quad | 90 | 0 | 0 | 0 | yes | yes
+barrier_up_out_call | quad | 135 | 5 | 5 | 5 | yes | yes
+barrier_up_out_call | lv_mc | 110 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 10 | NO | NO
+barrier_up_out_call | lv_mc | 90 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 0 | NO | NO
+barrier_up_out_call | lv_mc | 135 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 5 | NO | NO
+barrier_up_out_call | lv_pde | 110 | 10 | 10 | 10 | yes | yes
+barrier_up_out_call | lv_pde | 90 | 0 | 0 | 0 | yes | yes
+barrier_up_out_call | lv_pde | 135 | 5 | 5 | 5 | yes | yes
+barrier_up_out_call | heston_mc | 110 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 10 | NO | NO
+barrier_up_out_call | heston_mc | 90 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 0 | NO | NO
+barrier_up_out_call | heston_mc | 135 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 5 | NO | NO
+barrier_up_out_call | heston_pde | 110 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 10 | NO | NO
+barrier_up_out_call | heston_pde | 90 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 0 | NO | NO
+barrier_up_out_call | heston_pde | 135 | RAISES ValidationError: t_grid must be strictly increasing | RAISES ValidationError: t_grid must be strictly increasing | 5 | NO | NO
+double_barrier_out_call | analytical | 110 | 10 | 10 | 10 | yes | yes
+double_barrier_out_call | analytical | 90 | 0 | 0 | 0 | yes | yes
+double_barrier_out_call | analytical | 135 | 5 | 5 | 5 | yes | yes
+double_barrier_out_call | pde | 110 | 10 | 10 | 10 | yes | yes
+double_barrier_out_call | pde | 90 | 0 | 0 | 0 | yes | yes
+double_barrier_out_call | pde | 135 | 5 | 5 | 5 | yes | yes
+one_touch_up | analytical | 110 | 0 | 0 | 0 | yes | yes
+one_touch_up | analytical | 135 | 10 | 10 | 10 | yes | yes
+one_touch_up | pde | 110 | 0 | 0 | 0 | yes | yes
+one_touch_up | pde | 135 | 10 | 10 | 10 | yes | yes
+one_touch_up | quad | 110 | 0 | 0 | 0 | yes | yes
+one_touch_up | quad | 135 | 10 | 10 | 10 | yes | yes
+double_one_touch | pde | 110 | 0 | 0 | 0 | yes | yes
+double_one_touch | pde | 135 | 10 | 10 | 10 | yes | yes
+single_sharkfin_call | analytical | 110 | 10 | 10 | 10 | yes | yes
+single_sharkfin_call | analytical | 90 | 0 | 0 | 0 | yes | yes
+single_sharkfin_call | analytical | 135 | 5 | 5 | 5 | yes | yes
+single_sharkfin_call | mc | 110 | 10 | 10 | 10 | yes | yes
+single_sharkfin_call | mc | 90 | 0 | 0 | 0 | yes | yes
+single_sharkfin_call | mc | 135 | 5 | 5 | 5 | yes | yes
+double_sharkfin_call | analytical | 110 | 10 | 10 | 10 | yes | yes
+double_sharkfin_call | analytical | 90 | 0 | 0 | 0 | yes | yes
+double_sharkfin_call | analytical | 135 | 5 | 5 | 5 | yes | yes
+double_sharkfin_call | mc | 110 | 10 | 10 | 10 | yes | yes
+double_sharkfin_call | mc | 90 | 0 | 0 | 0 | yes | yes
+double_sharkfin_call | mc | 135 | 5 | 5 | 5 | yes | yes
+range_accrual | analytical | 100 | 10 | 10 | 10 | yes | yes
+range_accrual | analytical | 120 | 9.16666666667 | 9.16666666667 | 9.16666666667 | yes | yes
+range_accrual | mc | 100 | 10 | 10 | 10 | yes | yes
+range_accrual | mc | 120 | 9.16666666667 | 9.16666666667 | 9.16666666667 | yes | yes
+accumulator | analytical | 100 | 5 | 5 | 5 | yes | yes
+accumulator | analytical | 90 | -25 | -25 | -25 | yes | yes
+accumulator | analytical | 110 | 2 | 2 | 2 | yes | yes
+accumulator | mc | 100 | 5 | 5 | 5 | yes | yes
+accumulator | mc | 90 | -25 | -25 | -25 | yes | yes
+accumulator | mc | 110 | 2 | 2 | 2 | yes | yes
+snowball | mc | 104 | 15 | 15 | 15 | yes | yes
+snowball | mc | 90 | 15 | 15 | 15 | yes | yes
+snowball | mc | 70 | -30 | -30 | -30 | yes | yes
+snowball | pde | 104 | 15 | 15 | 15 | yes | yes
+snowball | pde | 90 | 15 | 15 | 15 | yes | yes
+snowball | pde | 70 | -30 | -30 | -30 | yes | yes
+snowball | quad_v1 | 104 | 15 | 15 | 15 | yes | yes
+snowball | quad_v1 | 90 | 15 | 15 | 15 | yes | yes
+snowball | quad_v1 | 70 | -30 | -30 | -30 | yes | yes
+snowball | quad_v2 | 104 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 15 | NO | NO
+snowball | quad_v2 | 90 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 15 | NO | NO
+snowball | quad_v2 | 70 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | -30 | NO | NO
+snowball | lv_mc | 104 | 15 | 15 | 15 | yes | yes
+snowball | lv_mc | 90 | 15 | 15 | 15 | yes | yes
+snowball | lv_mc | 70 | -30 | -30 | -30 | yes | yes
+snowball | lv_pde | 104 | 15 | 15 | 15 | yes | yes
+snowball | lv_pde | 90 | 15 | 15 | 15 | yes | yes
+snowball | lv_pde | 70 | -30 | -30 | -30 | yes | yes
+snowball | heston_mc | 104 | 15 | 15 | 15 | yes | yes
+snowball | heston_mc | 90 | 15 | 15 | 15 | yes | yes
+snowball | heston_mc | 70 | -30 | -30 | -30 | yes | yes
+snowball | heston_pde | 104 | 15 | 15 | 15 | yes | yes
+snowball | heston_pde | 90 | 15 | 15 | 15 | yes | yes
+snowball | heston_pde | 70 | -30 | -30 | -30 | yes | yes
+phoenix | mc | 104 | 1 | 1 | 1 | yes | yes
+phoenix | mc | 90 | 1 | 1 | 1 | yes | yes
+phoenix | mc | 75 | 0 | 0 | 0 | yes | yes
+phoenix | mc | 60 | -40 | -40 | -40 | yes | yes
+phoenix | pde | 104 | 1 | 1 | 1 | yes | yes
+phoenix | pde | 90 | 1 | 1 | 1 | yes | yes
+phoenix | pde | 75 | 0 | 0 | 0 | yes | yes
+phoenix | pde | 60 | -40 | -40 | -40 | yes | yes
+phoenix | quad_v1 | 104 | 1 | 1 | 1 | yes | yes
+phoenix | quad_v1 | 90 | 1 | 1 | 1 | yes | yes
+phoenix | quad_v1 | 75 | 0 | 0 | 0 | yes | yes
+phoenix | quad_v1 | 60 | -40 | -40 | -40 | yes | yes
+phoenix | quad_v2 | 104 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 1 | NO | NO
+phoenix | quad_v2 | 90 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 1 | NO | NO
+phoenix | quad_v2 | 75 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 0 | NO | NO
+phoenix | quad_v2 | 60 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | -40 | NO | NO
+phoenix | lv_mc | 104 | 1 | 1 | 1 | yes | yes
+phoenix | lv_mc | 90 | 1 | 1 | 1 | yes | yes
+phoenix | lv_mc | 75 | 0 | 0 | 0 | yes | yes
+phoenix | lv_mc | 60 | -40 | -40 | -40 | yes | yes
+phoenix | lv_pde | 104 | 1 | 1 | 1 | yes | yes
+phoenix | lv_pde | 90 | 1 | 1 | 1 | yes | yes
+phoenix | lv_pde | 75 | 0 | 0 | 0 | yes | yes
+phoenix | lv_pde | 60 | -40 | -40 | -40 | yes | yes
+phoenix | heston_mc | 104 | 1 | 1 | 1 | yes | yes
+phoenix | heston_mc | 90 | 1 | 1 | 1 | yes | yes
+phoenix | heston_mc | 75 | 0 | 0 | 0 | yes | yes
+phoenix | heston_mc | 60 | -40 | -40 | -40 | yes | yes
+phoenix | heston_pde | 104 | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | 1 | NO | NO
+phoenix | heston_pde | 90 | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | 1 | NO | NO
+phoenix | heston_pde | 75 | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | 0 | NO | NO
+phoenix | heston_pde | 60 | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | RAISES ValidationError: HestonPhoenixPDESolver supports non-memory Phoenix coupons only; use PhoenixPDESolver or a Phoenix MC engine f | -40 | NO | NO
+phoenix_no_memory | mc | 104 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | mc | 90 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | mc | 75 | 0 | 0 | 0 | yes | yes
+phoenix_no_memory | mc | 60 | -40 | -40 | -40 | yes | yes
+phoenix_no_memory | pde | 104 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | pde | 90 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | pde | 75 | 0 | 0 | 0 | yes | yes
+phoenix_no_memory | pde | 60 | -40 | -40 | -40 | yes | yes
+phoenix_no_memory | quad_v1 | 104 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | quad_v1 | 90 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | quad_v1 | 75 | 0 | 0 | 0 | yes | yes
+phoenix_no_memory | quad_v1 | 60 | -40 | -40 | -40 | yes | yes
+phoenix_no_memory | quad_v2 | 104 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 1 | NO | NO
+phoenix_no_memory | quad_v2 | 90 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 1 | NO | NO
+phoenix_no_memory | quad_v2 | 75 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 0 | NO | NO
+phoenix_no_memory | quad_v2 | 60 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | -40 | NO | NO
+phoenix_no_memory | lv_mc | 104 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | lv_mc | 90 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | lv_mc | 75 | 0 | 0 | 0 | yes | yes
+phoenix_no_memory | lv_mc | 60 | -40 | -40 | -40 | yes | yes
+phoenix_no_memory | lv_pde | 104 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | lv_pde | 90 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | lv_pde | 75 | 0 | 0 | 0 | yes | yes
+phoenix_no_memory | lv_pde | 60 | -40 | -40 | -40 | yes | yes
+phoenix_no_memory | heston_mc | 104 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | heston_mc | 90 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | heston_mc | 75 | 0 | 0 | 0 | yes | yes
+phoenix_no_memory | heston_mc | 60 | -40 | -40 | -40 | yes | yes
+phoenix_no_memory | heston_pde | 104 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | heston_pde | 90 | 1 | 1 | 1 | yes | yes
+phoenix_no_memory | heston_pde | 75 | 0 | 0 | 0 | yes | yes
+phoenix_no_memory | heston_pde | 60 | -40 | -40 | -40 | yes | yes
+ko_reset_absolute_knocked_in | mc | 104 | 3 | 3 | 3 | yes | yes
+ko_reset_absolute_knocked_in | mc | 90 | -10 | -10 | -10 | yes | yes
+ko_reset_absolute_knocked_in | pde | 104 | 3 | 3 | 3 | yes | yes
+ko_reset_absolute_knocked_in | pde | 90 | -10 | -10 | -10 | yes | yes
+ko_reset_absolute_knocked_in | quad_v1 | 104 | 3 | 3 | 3 | yes | yes
+ko_reset_absolute_knocked_in | quad_v1 | 90 | -10 | -10 | -10 | yes | yes
+ko_reset_absolute_knocked_in | quad_v2 | 104 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | 3 | NO | NO
+ko_reset_absolute_knocked_in | quad_v2 | 90 | RAISES ValidationError: QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin is refused b | RAISES ValidationError: Maturity must be positive, got 0.0 | -10 | NO | NO

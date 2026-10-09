@@ -10,9 +10,10 @@ from __future__ import annotations
 from typing import List, Sequence, Tuple
 
 from quantark.util.enum import AccumulatorKnockOutType
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
 
-__all__ = ["realized_value", "settle_valuation_instant"]
+__all__ = ["realized_value", "settle_at_expiry", "settle_valuation_instant"]
 
 
 def realized_value(product, pricing_env, terminal_timing=None) -> float:
@@ -52,3 +53,26 @@ def settle_valuation_instant(product, spot: float, legs: Sequence[tuple]) -> Tup
             value += product.get_observation_payoff(spot) * payment_df
         index += 1
     return value, list(legs[index:]), False
+
+
+def settle_at_expiry(product, spot: float, legs: Sequence[tuple]) -> Tuple[float, bool]:
+    """Settle an accumulator at its maturity instant (maturity 0.0): every remaining observation is AT the instant.
+
+    The observation on the last day (a dated contract valued on its exercise date, or a numeric one aged onto it
+    keeping the landing record) is live and decided on ``spot``, exactly as ``settle_valuation_instant`` decides it
+    at any other instant (user ruling 2026-10-09, option (a)).
+
+    Returns:
+        ``(value, ended)``: the settled observations' present value and whether a TERMINATION knock-out ended the
+        contract now (the terminal extra-shares leg then pays nothing).
+
+    Raises:
+        ValidationError: an observation after the maturity instant, which no settled value can include.
+    """
+    value, remaining, ended = settle_valuation_instant(product, spot, legs)
+    if remaining:
+        raise ValidationError(
+            f"Accumulator observations after the maturity instant (t = {[float(leg[0]) for leg in remaining]}) "
+            "cannot be settled at expiry"
+        )
+    return value, ended

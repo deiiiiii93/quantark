@@ -18,6 +18,7 @@ from quantark.util.enum import (
     PostKOScheduleMode,
 )
 from quantark.util.exceptions import ValidationError, NumericalError
+from quantark.util.numerical import is_zero
 from .contract import Action, Event, CompiledContract
 
 
@@ -146,6 +147,15 @@ def compile_contract(
     maturity = float(product.get_maturity(env))
     if not math.isfinite(maturity) or maturity < 0:
         raise ValidationError("maturity must be finite and nonnegative")
+    if is_zero(maturity) and getattr(product, "exercise_date", None) is not None:
+        # TODO(dated-expiry): QUAD V2 cannot be handed the numeric twin at maturity 0.0 (``validate()`` above refuses
+        # a non-positive numeric maturity), so the dated contract on its exercise date is refused too: a numeric
+        # contract must show no difference from its dated twin (user ruling 2026-10-09). The dated twin would
+        # price its settled value here (measured, docs/superpowers/specs/2026-10-09-dated-expiry-settles-evidence).
+        raise ValidationError(
+            "QUAD V2 does not price a contract at its maturity instant (time to maturity 0.0; its numeric twin "
+            "is refused by product validation); use the V1 QUAD, PDE or MC engine"
+        )
     if reset:
         # A contract past its first schedule and not knocked in has matured (rule 2 of
         # KnockOutResetSnowballOption); only a knock-in carried into the valuation keeps it alive.

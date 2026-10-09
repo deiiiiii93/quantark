@@ -303,7 +303,9 @@ class BaseEquityOption(BaseEquityProduct):
 
         Raises:
             ValidationError: If date-based but no pricing_env provided, or if
-                           valuation date is on or after exercise date
+                           valuation date is strictly after exercise date (valued
+                           ON the exercise date the option has 0.0 left and prices
+                           its settled value, like its numeric twin at maturity 0.0)
         """
         if self.exercise_date is not None:
             if pricing_env is None:
@@ -311,20 +313,7 @@ class BaseEquityOption(BaseEquityProduct):
                     "PricingEnvironment required for date-based maturity calculation"
                 )
 
-            # Validate valuation date is before exercise date
-            if pricing_env.valuation_date >= self.exercise_date:
-                raise ValidationError(
-                    f"Valuation date ({pricing_env.valuation_date}) must be before "
-                    f"exercise date ({self.exercise_date})"
-                )
-
-            return calculate_year_fraction(
-                pricing_env.valuation_date,
-                self.exercise_date,
-                pricing_env.day_count_convention,
-                pricing_env.bus_days_in_year,
-                calendar=getattr(pricing_env, "calendar", None),
-            )
+            return time_to_exercise(self.exercise_date, pricing_env)
         else:
             if self.maturity is None:
                 raise ValidationError("Maturity is not set")
@@ -718,3 +707,27 @@ def _refresh_observation_dates(product) -> None:
     schedule = product.observation_schedule
     if hasattr(product, "observation_dates") and (schedule.uses_times() or schedule.monitoring_ended):
         product.observation_dates = schedule.times
+
+
+def time_to_exercise(exercise_date: datetime, pricing_env) -> float:
+    """Years from ``pricing_env.valuation_date`` to a dated contract's ``exercise_date``.
+
+    Valued ON the exercise date (the same instant) the contract has 0.0 left: it prices its settled value, exactly
+    as its numeric twin aged to ``maturity == 0.0`` does (user ruling 2026-10-09, option (a)). A valuation strictly
+    after the exercise date is refused -- the contract has expired.
+    """
+    valuation_date = pricing_env.valuation_date
+    if valuation_date == exercise_date:
+        return 0.0
+    if valuation_date > exercise_date:
+        raise ValidationError(
+            f"Valuation date ({valuation_date}) must be on or before "
+            f"exercise date ({exercise_date})"
+        )
+    return calculate_year_fraction(
+        valuation_date,
+        exercise_date,
+        pricing_env.day_count_convention,
+        pricing_env.bus_days_in_year,
+        calendar=getattr(pricing_env, "calendar", None),
+    )

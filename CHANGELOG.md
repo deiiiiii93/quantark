@@ -158,6 +158,23 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   -1.588 -> -0.00106 (equal to the contract with the fixing recorded); an FX range accrual at 1.2995 under 1.30,
   delta -5.906e6 -> -4.991e4. Prices are unchanged (48 prices bit-identical to main); the warning fires once per
   base valuation instead of once per repricing.
+- A dated equity option valued ON its exercise date (the same instant) prices its settled value, identical to its
+  numeric twin aged to `maturity == 0.0` (user ruling 2026-10-09, option (a)): `get_maturity` returns 0.0 there
+  instead of raising `Valuation date (...) must be before exercise date (...)` (`BaseEquityOption`, `OneTouchOption`,
+  `DoubleOneTouchOption`, through the new `time_to_exercise`). The settled value is the payoff at the valuation spot
+  with every past fixing or event as recorded and a fixing dated the exercise date live (t = 0, fixed at the spot).
+  Measured on 16 families x their engines (188 cells, `docs/superpowers/specs/2026-10-09-dated-expiry-settles-evidence/`):
+  on the 154 cells whose numeric twin prices, dated == numeric == the hand settled value to 1e-12, e.g. a range accrual (notional 100, 10%, every fixing in range)
+  10.0, a snowball knocked out at 104 15.0. A valuation strictly AFTER the exercise date still raises (now "must be
+  on or before exercise date"). Routes with no T = 0 value in either form keep refusing, with `TODO(dated-expiry)`:
+  the Heston analytical / MC / PDE and local-vol MC European engines ("maturity must be positive"), the local-vol,
+  Heston and SLV barrier MC and Heston / SLV barrier PDE (`t_grid must be strictly increasing`), and QUAD V2 (it refuses the numeric twin in `validate()`, so it refuses the dated contract on
+  its exercise date too). The replay / ensemble dividend-pillar readout on a dated maturity day is unchanged (1e-8).
+- Asian MC at maturity 0.0 averages the recorded fixings and the live one at the spot (as the analytical engine
+  does) instead of the spot alone: 11 fixings 101..111 recorded, spot 110, strike 100: 10.0 -> 6.3333.
+- Accumulator analytical and MC at maturity 0.0 settle the observation at the maturity instant on the spot (as at
+  every other instant, `settle_valuation_instant`) instead of dropping it: spot 100, strike 95, one share: 0 -> 5;
+  `test_accumulator_mc_engine` expiry cases 5.0 -> 10.0 and -5.0 -> -15.0.
 
 ### Fixed
 - Snowball / Phoenix / KO-reset PDE (1D BSM and local vol, 2D Heston and SLV): the not-knocked-in (V0) Dirichlet

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
-from .base_equity_option import _refresh_observation_dates
+from .base_equity_option import _refresh_observation_dates, time_to_exercise
 from .observation_schedule import ObservationRecord, ObservationSchedule, refuse_accumulate
 from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.enum import (
@@ -213,15 +213,7 @@ class OneTouchOption(BaseEquityProduct):
                 raise ValidationError(
                     "PricingEnvironment required for date-based maturity calculation"
                 )
-            from quantark.util.calendar import calculate_year_fraction
-
-            return calculate_year_fraction(
-                pricing_env.valuation_date,
-                self.exercise_date,
-                pricing_env.day_count_convention,
-                pricing_env.bus_days_in_year,
-                calendar=getattr(pricing_env, "calendar", None),
-            )
+            return time_to_exercise(self.exercise_date, pricing_env)
         else:
             return self.maturity
 

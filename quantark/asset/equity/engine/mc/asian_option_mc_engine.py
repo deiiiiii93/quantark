@@ -220,9 +220,11 @@ class AsianOptionMCEngine(BaseEngine):
 
         # Handle near-expiry case
         if is_zero(T):
-            # At expiry, return payoff with current spot as both spot and average
+            # At expiry every fixing is decided: the recorded ones at their prices, one at the valuation
+            # instant (t = 0, live) at the spot -- the settled average, as the analytical engine reads it.
             return (
-                product.get_payoff(S, average=S) * timing.delay_df
+                product.get_payoff(S, average=self._settled_average(product, pricing_env, S))
+                * timing.delay_df
                 + pending_receivable_pv(lifecycle_state, pricing_env)
             )
 
@@ -243,6 +245,22 @@ class AsianOptionMCEngine(BaseEngine):
             raise PricingError(f"Negative price computed: {result.price}")
 
         return result.price
+
+    @staticmethod
+    def _settled_average(product: AsianOption, pricing_env: PricingEnvironment, S: float) -> float:
+        """The average at maturity 0.0: every fixing is at or before the valuation instant.
+
+        Recorded fixings count at their prices and a fixing at t = 0 at the spot (``resolve_observations`` fills
+        it); a schedule with no recorded fixing (legacy or continuous averaging) averages the spot alone.
+        """
+        past_prices, past_weights, future_times, _, _ = product.resolve_observations(pricing_env)
+        if not past_prices:
+            return S
+        if future_times:
+            raise ValidationError(
+                f"Asian fixings after the maturity (t = {future_times}) cannot be settled at expiry"
+            )
+        return product.get_average(past_prices, weights=past_weights)
 
     def _validate_inputs(
         self,

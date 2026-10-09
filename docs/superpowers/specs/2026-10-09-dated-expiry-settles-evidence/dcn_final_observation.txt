@@ -1,0 +1,4 @@
+knocked_in=False spot=6600 | build: 0 | mc: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde: RAISES ValidationError: tau must be positive, got 0.0
+knocked_in=False spot=5000 | build: 0 | mc: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde: RAISES ValidationError: tau must be positive, got 0.0
+knocked_in=True spot=6600 | build: 0 | mc: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde: RAISES ValidationError: tau must be positive, got 0.0
+knocked_in=True spot=5000 | build: 0 | mc: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde: RAISES ValidationError: tau must be positive, got 0.0

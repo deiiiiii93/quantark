@@ -62,6 +62,8 @@ class HestonMCEngine(BaseEngine):
         if not isinstance(product, EuropeanVanillaOption):
             raise PricingError("HestonMCEngine supports EuropeanVanillaOption only")
         T = float(product.get_maturity(env))
+        # TODO(dated-expiry): no T = 0 settled value on this route (the numeric twin at maturity 0.0 is refused
+        # too); kept refusing -- docs/superpowers/specs/2026-10-09-dated-expiry-settles-evidence/REPORT.md
         if T <= 0:
             raise ValidationError("maturity must be positive")
         n = int(self.params.time_steps)

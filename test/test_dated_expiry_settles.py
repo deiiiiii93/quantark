@@ -1,0 +1,515 @@
+"""A dated equity option valued ON its exercise date prices its settled value (user ruling 2026-10-09, option (a)).
+
+The standing rule: a numeric contract shows no difference from its dated twin. The numeric twin aged to exactly its
+maturity (``maturity == 0.0``) already prices the settled value -- the contract payoff at the valuation spot with every
+past fixing or event as recorded, and a fixing dated the valuation instant live (t = 0, fixed at the spot; ruling D2).
+Until this change the dated contract refused the same instant (``Valuation date ... must be before exercise date``).
+
+Every family below is written twice, on dates (``exercise_date`` == the valuation date, fixings and observations on
+``INITIAL + round(k / 12 * 365)`` days) and numerically (``maturity`` 0.0, the same fixings at ``k / 12 - 1`` years), and
+priced by every engine that routes it. The two must agree to rel 1e-12 and equal the hand settled value. A valuation
+strictly AFTER the exercise date still raises.
+
+``FAMILIES`` is also the evidence script's inventory (docs/superpowers/specs/2026-10-09-dated-expiry-settles-evidence).
+"""
+from __future__ import annotations
+
+import warnings
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
+from typing import Callable, Dict, List, Sequence, Tuple
+
+import numpy as np
+import pytest
+
+from quantark.asset.equity.engine.analytical import (
+    AccumulatorAnalyticalEngine,
+    AmericanOptionAnalyticalEngine,
+    AsianOptionAnalyticalEngine,
+    BarrierAnalyticalEngine,
+    BlackScholesEngine,
+    DigitalOptionAnalyticalEngine,
+    DoubleBarrierOptionAnalyticalEngine,
+    DoubleSharkfinOptionAnalyticalEngine,
+    OneTouchAnalyticalEngine,
+    RangeAccrualAnalyticalEngine,
+    SingleSharkfinOptionAnalyticalEngine,
+)
+from quantark.asset.equity.engine.analytical import HestonAnalyticalEngine
+from quantark.asset.equity.engine.mc import (
+    AccumulatorMCEngine,
+    HestonBarrierMCEngine,
+    HestonMCEngine,
+    HestonPhoenixMCEngine,
+    HestonSnowballMCEngine,
+    LocalVolBarrierMCEngine,
+    LocalVolMCEngine,
+    LocalVolPhoenixMCEngine,
+    LocalVolSnowballMCEngine,
+    AmericanOptionMCEngine,
+    AsianOptionMCEngine,
+    BarrierOptionMCEngine,
+    DigitalOptionMCEngine,
+    DoubleSharkfinOptionMCEngine,
+    EuropeanMCEngine,
+    PhoenixMCEngine,
+    RangeAccrualMCEngine,
+    SingleSharkfinOptionMCEngine,
+    SnowballMCEngine,
+)
+from quantark.asset.equity.engine.pde import (
+    HestonBarrierPDESolver,
+    HestonPDESolver,
+    HestonPhoenixPDESolver,
+    HestonSnowballPDESolver,
+    LocalVolBarrierPDESolver,
+    LocalVolPDESolver,
+    LocalVolPhoenixPDESolver,
+    LocalVolSnowballPDESolver,
+)
+from quantark.asset.equity.engine.pde.american_pde_solver import AmericanPDESolver
+from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver
+from quantark.asset.equity.engine.pde.double_barrier_pde_solver import DoubleBarrierPDESolver
+from quantark.asset.equity.engine.pde.double_one_touch_pde_solver import DoubleOneTouchPDESolver
+from quantark.asset.equity.engine.pde.european_pde_solver import EuropeanPDESolver
+from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
+from quantark.asset.equity.engine.pde.one_touch_pde_solver import OneTouchPDESolver
+from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.quad import (
+    BarrierQuadEngine,
+    EuropeanQuadEngine,
+    KOResetSnowballQuadEngine,
+    KOResetSnowballQuadEngineV2,
+    OneTouchQuadEngine,
+    PhoenixQuadEngine,
+    PhoenixQuadEngineV2,
+    SnowballQuadEngine,
+    SnowballQuadEngineV2,
+)
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option import (
+    AccumulatorOption,
+    AmericanOption,
+    BarrierOption,
+    CashOrNothingDigitalOption,
+    DoubleBarrierOption,
+    DoubleOneTouchOption,
+    DoubleSharkfinOption,
+    EuropeanVanillaOption,
+    OneTouchOption,
+    RangeAccrualConfig,
+    RangeAccrualObservationRecord,
+    RangeAccrualOption,
+    SingleSharkfinOption,
+)
+from quantark.asset.equity.product.option.asian_option import AsianObservationRecord, AsianOption
+from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, GridVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import (
+    AccumulatorKnockOutType,
+    AsianStrikeType,
+    AveragingType,
+    BarrierDirection,
+    BarrierType,
+    DoubleBarrierType,
+    ObservationType,
+    OptionType,
+    TouchType,
+)
+from quantark.util.enum.option_enums import ObservationAggregation, PostKOScheduleMode
+from quantark.util.exceptions import ValidationError
+from quantark.volmodels.heston import HestonParams
+
+#: the valuation instant == the exercise date; the contract started a year (365 days) earlier
+VALUATION = datetime(2026, 1, 5)
+INITIAL = datetime(2025, 1, 5)
+#: twelve monthly fixings: the contract's ``k / 12`` years on the snapped day ``round(k / 12 * 365)``; the last is today
+K12 = range(1, 13)
+
+
+def day(k: int) -> datetime:
+    return INITIAL + timedelta(days=round(k / 12 * 365))
+
+
+def numeric_time(k: int) -> float:
+    """The fixing's time from the valuation instant: ``k / 12 - 1`` (exactly 0.0 for k = 12)."""
+    return k / 12.0 - 1.0
+
+
+def env(spot: float, valuation: datetime = VALUATION, grid: bool = False) -> PricingEnvironment:
+    """Flat 20% vol, 3% rate, 1% yield; ``grid`` gives the local-vol routes the same flat vol as a market IV grid."""
+    vol = (GridVolSurface(list(100.0 * np.exp(np.linspace(-1.5, 1.5, 13))), [0.25, 0.5, 1.0, 1.5, 2.0],
+                          np.full((5, 13), 0.20)) if grid else FlatVolSurface(volatility=0.20))
+    return PricingEnvironment(spot_quote=SpotQuote(spot=spot), vol_surface=vol, rate_curve=FlatRateCurve(rate=0.03),
+                              div_yield=ContinuousDividendYield(0.01), valuation_date=valuation)
+
+
+def env_for(engine_name: str, spot: float, valuation: datetime = VALUATION) -> PricingEnvironment:
+    return env(spot, valuation, grid=engine_name.startswith("lv_"))
+
+
+def _age(product, years: float = 1.0):
+    """The numeric contract aged to exactly its maturity, keeping the record on the landing instant (ruling D2)."""
+    product.time_shift(years, VALUATION, env(100.0), keep_landing=True)
+    return product
+
+
+@dataclass(frozen=True)
+class Family:
+    """One product family: its two forms, the hand settled value and the engines that route it."""
+
+    name: str
+    build: Callable[[str], object]                      # form ("dated" | "numeric") -> product
+    settled: Callable[[float], float]                   # spot -> the contract's settled value
+    spots: Tuple[float, ...]
+    engines: Tuple[Tuple[str, Callable[[], object]], ...]
+
+
+def _mc():
+    return MCParams(seed=7, num_paths=256)
+
+
+#: a Heston model for the vol-model routes (the settled value cannot depend on it)
+HESTON = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.3, rho=-0.5)
+_ADI = dict(n_x=64, n_v=16, n_t=16)
+
+
+# -- vanillas ------------------------------------------------------------------------------------------------------
+
+def _vanilla(cls, option_type, **kw):
+    def build(form):
+        if form == "dated":
+            return cls(strike=100.0, option_type=option_type, exercise_date=VALUATION, initial_date=INITIAL, **kw)
+        return _age(cls(strike=100.0, option_type=option_type, maturity=1.0, **kw))
+    return build
+
+
+EUROPEAN = Family(
+    "european_call", _vanilla(EuropeanVanillaOption, OptionType.CALL), lambda s: max(s - 100.0, 0.0), (110.0, 90.0),
+    (("analytical_bs", BlackScholesEngine), ("mc", lambda: EuropeanMCEngine(params=_mc())),
+     ("pde", lambda: EuropeanPDESolver(PDEParams())), ("quad", lambda: EuropeanQuadEngine()),
+     ("heston_analytical", lambda: HestonAnalyticalEngine(HESTON)), ("lv_mc", lambda: LocalVolMCEngine(params=_mc())),
+     ("lv_pde", lambda: LocalVolPDESolver()), ("heston_mc", lambda: HestonMCEngine(HESTON, params=_mc())),
+     ("heston_pde", lambda: HestonPDESolver(HESTON, **_ADI))))
+
+AMERICAN = Family(
+    "american_put", _vanilla(AmericanOption, OptionType.PUT), lambda s: max(100.0 - s, 0.0), (90.0, 110.0),
+    (("analytical", AmericanOptionAnalyticalEngine), ("mc", lambda: AmericanOptionMCEngine(params=_mc())),
+     ("pde", lambda: AmericanPDESolver(PDEParams()))))
+
+DIGITAL = Family(
+    "digital_call", _vanilla(CashOrNothingDigitalOption, OptionType.CALL, payout=10.0),
+    lambda s: 10.0 if s > 100.0 else 0.0, (110.0, 90.0),
+    (("analytical", DigitalOptionAnalyticalEngine), ("mc", lambda: DigitalOptionMCEngine(params=_mc()))))
+
+
+# -- Asian: eleven recorded fixings 101..111, the twelfth (today) live at the spot ----------------------------------
+
+def _asian(form):
+    if form == "dated":
+        records = [AsianObservationRecord(observation_date=day(k), observed_price=100.0 + k if k < 12 else None)
+                   for k in K12]
+        return AsianOption(strike=100.0, option_type=OptionType.CALL, asian_strike_type=AsianStrikeType.FIXED,
+                           averaging_type=AveragingType.ARITHMETIC, exercise_date=VALUATION, initial_date=INITIAL,
+                           observation_records=records, initial_price=100.0)
+    records = [AsianObservationRecord(observation_time=numeric_time(k), observed_price=100.0 + k if k < 12 else None)
+               for k in K12]
+    product = AsianOption(strike=100.0, option_type=OptionType.CALL, asian_strike_type=AsianStrikeType.FIXED,
+                          averaging_type=AveragingType.ARITHMETIC, maturity=1.0, observation_records=records,
+                          initial_price=100.0)
+    product.maturity = 0.0
+    return product
+
+
+ASIAN = Family(
+    "asian_fixed_call", _asian, lambda s: max((sum(100.0 + k for k in range(1, 12)) + s) / 12.0 - 100.0, 0.0),
+    (110.0, 90.0),
+    (("analytical", AsianOptionAnalyticalEngine), ("mc", lambda: AsianOptionMCEngine(params=_mc()))))
+
+
+# -- barrier family (continuous monitoring) ------------------------------------------------------------------------
+
+def _barrier(form):
+    kw = dict(strike=100.0, option_type=OptionType.CALL, barrier=130.0, barrier_type=BarrierType.UP_OUT, rebate=5.0,
+              observation_type=ObservationType.CONTINUOUS)
+    if form == "dated":
+        return BarrierOption(exercise_date=VALUATION, initial_date=INITIAL, **kw)
+    return _age(BarrierOption(maturity=1.0, **kw))
+
+
+BARRIER = Family(
+    "barrier_up_out_call", _barrier, lambda s: 5.0 if s >= 130.0 else max(s - 100.0, 0.0), (110.0, 90.0, 135.0),
+    (("analytical", BarrierAnalyticalEngine), ("mc", lambda: BarrierOptionMCEngine(params=_mc())),
+     ("pde", lambda: BarrierPDESolver(PDEParams())), ("quad", lambda: BarrierQuadEngine()),
+     ("lv_mc", lambda: LocalVolBarrierMCEngine(params=_mc())), ("lv_pde", lambda: LocalVolBarrierPDESolver()),
+     ("heston_mc", lambda: HestonBarrierMCEngine(HESTON, params=_mc())),
+     ("heston_pde", lambda: HestonBarrierPDESolver(HESTON, **_ADI))))
+
+
+def _double_barrier(form):
+    kw = dict(strike=100.0, option_type=OptionType.CALL, upper_barrier=130.0, lower_barrier=80.0,
+              barrier_type=DoubleBarrierType.KNOCK_OUT, rebate=5.0, observation_type=ObservationType.CONTINUOUS)
+    if form == "dated":
+        return DoubleBarrierOption(exercise_date=VALUATION, initial_date=INITIAL, **kw)
+    return _age(DoubleBarrierOption(maturity=1.0, **kw))
+
+
+DOUBLE_BARRIER = Family(
+    "double_barrier_out_call", _double_barrier,
+    lambda s: 5.0 if (s >= 130.0 or s <= 80.0) else max(s - 100.0, 0.0), (110.0, 90.0, 135.0),
+    (("analytical", DoubleBarrierOptionAnalyticalEngine), ("pde", lambda: DoubleBarrierPDESolver(PDEParams()))))
+
+
+def _one_touch(form):
+    kw = dict(barrier=130.0, barrier_direction=BarrierDirection.UP, rebate=10.0, touch_type=TouchType.ONE_TOUCH,
+              observation_type=ObservationType.CONTINUOUS)
+    if form == "dated":
+        return OneTouchOption(exercise_date=VALUATION, **kw)
+    return _age(OneTouchOption(maturity=1.0, **kw))
+
+
+ONE_TOUCH = Family(
+    "one_touch_up", _one_touch, lambda s: 10.0 if s >= 130.0 else 0.0, (110.0, 135.0),
+    (("analytical", OneTouchAnalyticalEngine), ("pde", lambda: OneTouchPDESolver(PDEParams())),
+     ("quad", lambda: OneTouchQuadEngine())))
+
+
+def _double_one_touch(form):
+    kw = dict(upper_barrier=130.0, lower_barrier=80.0, rebate=10.0, touch_type=TouchType.DOUBLE_ONE_TOUCH,
+              observation_type=ObservationType.CONTINUOUS)
+    if form == "dated":
+        return DoubleOneTouchOption(exercise_date=VALUATION, **kw)
+    return _age(DoubleOneTouchOption(maturity=1.0, **kw))
+
+
+DOUBLE_ONE_TOUCH = Family(
+    "double_one_touch", _double_one_touch, lambda s: 10.0 if (s >= 130.0 or s <= 80.0) else 0.0, (110.0, 135.0),
+    (("pde", lambda: DoubleOneTouchPDESolver(PDEParams())),))
+
+
+def _sharkfin(form):
+    kw = dict(strike=100.0, option_type=OptionType.CALL, barrier=130.0, participation_rate=1.0,
+              knock_out_rebate=5.0, observation_type=ObservationType.CONTINUOUS)
+    if form == "dated":
+        return SingleSharkfinOption(exercise_date=VALUATION, initial_date=INITIAL, **kw)
+    return _age(SingleSharkfinOption(maturity=1.0, **kw))
+
+
+SHARKFIN = Family(
+    "single_sharkfin_call", _sharkfin, lambda s: 5.0 if s >= 130.0 else max(s - 100.0, 0.0), (110.0, 90.0, 135.0),
+    (("analytical", SingleSharkfinOptionAnalyticalEngine),
+     ("mc", lambda: SingleSharkfinOptionMCEngine(params=_mc()))))
+
+
+def _double_sharkfin(form):
+    kw = dict(strike=100.0, option_type=OptionType.CALL, upper_barrier=130.0, lower_barrier=80.0,
+              participation_rate=1.0, knock_out_rebate=5.0, observation_type=ObservationType.CONTINUOUS)
+    if form == "dated":
+        return DoubleSharkfinOption(exercise_date=VALUATION, initial_date=INITIAL, **kw)
+    return _age(DoubleSharkfinOption(maturity=1.0, **kw))
+
+
+DOUBLE_SHARKFIN = Family(
+    "double_sharkfin_call", _double_sharkfin,
+    lambda s: 5.0 if (s >= 130.0 or s <= 80.0) else max(s - 100.0, 0.0), (110.0, 90.0, 135.0),
+    (("analytical", DoubleSharkfinOptionAnalyticalEngine),
+     ("mc", lambda: DoubleSharkfinOptionMCEngine(params=_mc()))))
+
+
+# -- range accrual: notional 100 at 10% over the one-year tenor; eleven recorded in range, today live --------------
+
+def _range_accrual(form):
+    config = RangeAccrualConfig(upper_barrier=110.0, lower_barrier=90.0, accrual_rate=0.10)
+    if form == "dated":
+        records = [RangeAccrualObservationRecord(observation_date=day(k), observed_in_range=True if k < 12 else None)
+                   for k in K12]
+        return RangeAccrualOption(initial_price=100.0, range_config=config, exercise_date=VALUATION,
+                                  initial_date=INITIAL, observation_records=records)
+    records = [RangeAccrualObservationRecord(observation_time=numeric_time(k),
+                                             observed_in_range=True if k < 12 else None) for k in K12]
+    product = RangeAccrualOption(initial_price=100.0, range_config=config, maturity=1.0, tenor=1.0,
+                                 observation_records=records)
+    product.maturity = 0.0
+    return product
+
+
+RANGE_ACCRUAL = Family(
+    "range_accrual", _range_accrual, lambda s: 10.0 * (12.0 if 90.0 <= s <= 110.0 else 11.0) / 12.0, (100.0, 120.0),
+    (("analytical", RangeAccrualAnalyticalEngine), ("mc", lambda: RangeAccrualMCEngine(params=_mc()))))
+
+
+# -- accumulator: one remaining observation, today ----------------------------------------------------------------
+
+def _accumulator(form):
+    kw = dict(strike=95.0, knock_out_barrier=108.0, option_type=OptionType.CALL, daily_share_accumulation=1.0,
+              gearing=2.0, knock_out_type=AccumulatorKnockOutType.TERMINATION, knock_out_rebate_rate=0.02,
+              notional=100.0, extra_shares_at_expiry=3.0, observation_type=ObservationType.DISCRETE)
+    if form == "dated":
+        schedule = ObservationSchedule(records=[ObservationRecord(observation_date=VALUATION, barrier=108.0)],
+                                       aggregation_mode=ObservationAggregation.STOP_FIRST_HIT)
+        return AccumulatorOption(exercise_date=VALUATION, initial_date=INITIAL, observation_schedule=schedule, **kw)
+    return _age(AccumulatorOption(maturity=1.0, observation_dates=[1.0], **kw))
+
+
+def _accumulator_settled(s):
+    """Today's observation decided on the spot: at or above the 108 knock-out the TERMINATION rebate (2% of 100)
+    and nothing else; otherwise one share's gain, or two shares' loss below 95, plus 3 extra shares' put at 95."""
+    if s >= 108.0:
+        return 2.0
+    return (s - 95.0 if s >= 95.0 else 2.0 * (s - 95.0)) - 3.0 * max(95.0 - s, 0.0)
+
+
+ACCUMULATOR = Family(
+    "accumulator", _accumulator, _accumulator_settled, (100.0, 90.0, 110.0),
+    (("analytical", AccumulatorAnalyticalEngine), ("mc", lambda: AccumulatorMCEngine(params=_mc()))))
+
+
+# -- autocallables: the tracker-clock parity contracts (flat cash, so the two forms are the same contract) ----------
+
+def _autocallable(kind, knocked_in=False):
+    from test_tracker_clock_parity import KINDS, phoenix
+    import pandas as pd
+
+    builder = phoenix(annualized=False, memory=False) if kind == "phoenix_plain" else KINDS[kind]
+
+    def build(form):
+        product = builder(form, pd.Timestamp(INITIAL))
+        if knocked_in:      # a knock-in carried into the valuation (schedule 1, contract day 152)
+            product._otc_lifecycle_knocked_in = True
+            product._otc_lifecycle_knock_in_date = INITIAL + timedelta(days=152)
+        return product if form == "dated" else _age(product, 1.0)
+    return build
+
+
+def _snowball_settled(s):
+    """KO 103 pays the flat 15% coupon; no KI (continuous 75) pays the 15% dividend coupon; KI pays s - 100."""
+    return -30.0 if s <= 75.0 else 15.0
+
+
+def _phoenix_settled(s):
+    """KO 103 / coupon barrier 80 pays the 1% coupon (memory carries nothing: past coupons treated as paid); below
+    the continuous KI 70 the principal loss s - 100."""
+    return (s - 100.0) if s <= 70.0 else (1.0 if s >= 80.0 else 0.0)
+
+
+_AUTOCALL_ENGINES = {
+    "snowball": (("mc", lambda: SnowballMCEngine(params=_mc())), ("pde", lambda: SnowballPDESolver(PDEParams())),
+                 ("quad_v1", lambda: SnowballQuadEngine(params=QuadParams(grid_points=1001))),
+                 ("quad_v2", lambda: SnowballQuadEngineV2()),
+                 ("lv_mc", lambda: LocalVolSnowballMCEngine(params=_mc())), ("lv_pde", LocalVolSnowballPDESolver),
+                 ("heston_mc", lambda: HestonSnowballMCEngine(HESTON, params=_mc())),
+                 ("heston_pde", lambda: HestonSnowballPDESolver(HESTON, **_ADI))),
+    "phoenix": (("mc", lambda: PhoenixMCEngine(params=_mc())), ("pde", lambda: PhoenixPDESolver(PDEParams())),
+                ("quad_v1", lambda: PhoenixQuadEngine(params=QuadParams(grid_points=1001))),
+                ("quad_v2", lambda: PhoenixQuadEngineV2()),
+                ("lv_mc", lambda: LocalVolPhoenixMCEngine(params=_mc())), ("lv_pde", LocalVolPhoenixPDESolver),
+                ("heston_mc", lambda: HestonPhoenixMCEngine(HESTON, params=_mc())),
+                ("heston_pde", lambda: HestonPhoenixPDESolver(HESTON, **_ADI))),
+    "ko_reset_absolute": (("mc", lambda: SnowballMCEngine(params=_mc())),
+                          ("pde", lambda: KOResetSnowballPDESolver(PDEParams())),
+                          ("quad_v1", lambda: KOResetSnowballQuadEngine(params=QuadParams(grid_points=1001))),
+                          ("quad_v2", lambda: KOResetSnowballQuadEngineV2())),
+}
+
+SNOWBALL = Family("snowball", _autocallable("snowball"), _snowball_settled, (104.0, 90.0, 70.0),
+                  _AUTOCALL_ENGINES["snowball"])
+PHOENIX = Family("phoenix", _autocallable("phoenix"), _phoenix_settled, (104.0, 90.0, 75.0, 60.0),
+                 _AUTOCALL_ENGINES["phoenix"])
+
+PHOENIX_PLAIN = Family("phoenix_no_memory", _autocallable("phoenix_plain"), _phoenix_settled, (104.0, 90.0, 75.0, 60.0),
+                       _AUTOCALL_ENGINES["phoenix"])
+
+
+def _ko_reset_settled(s):
+    """Knocked in on schedule 1, so schedule 2 (KO 95, flat 3%) runs to contract day 365: its last record knocks out
+    at 95 and pays 3; below it the knocked-in terminal pays s - 100 (no principal)."""
+    return 3.0 if s >= 95.0 else s - 100.0
+
+
+KO_RESET = Family("ko_reset_absolute_knocked_in", _autocallable("ko_reset_absolute", knocked_in=True),
+                  _ko_reset_settled, (104.0, 90.0), _AUTOCALL_ENGINES["ko_reset_absolute"])
+
+FAMILIES: Tuple[Family, ...] = (
+    EUROPEAN, AMERICAN, DIGITAL, ASIAN, BARRIER, DOUBLE_BARRIER, ONE_TOUCH, DOUBLE_ONE_TOUCH, SHARKFIN,
+    DOUBLE_SHARKFIN, RANGE_ACCRUAL, ACCUMULATOR, SNOWBALL, PHOENIX, PHOENIX_PLAIN, KO_RESET,
+)
+
+
+def price(family: Family, name: str, engine_factory, form: str, spot: float,
+          valuation: datetime = VALUATION) -> float:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return float(engine_factory().price(family.build(form), env_for(name, spot, valuation)))
+
+
+#: Routes that price NEITHER form at maturity 0.0, kept refusing on both (``TODO(dated-expiry)`` at each site):
+#: (family, engine) -> why
+REFUSING: Dict[Tuple[str, str], str] = {
+    **{("european_call", e): "vol-model European: 'maturity must be positive'"
+       for e in ("heston_analytical", "lv_mc", "heston_mc", "heston_pde")},
+    **{("barrier_up_out_call", e): "vol-model barrier: the time grid collapses ('t_grid must be strictly increasing')"
+       for e in ("lv_mc", "heston_mc", "heston_pde")},
+    **{(f, "quad_v2"): "QUAD V2: validate() refuses the numeric maturity 0.0; the dated twin refuses with it"
+       for f in ("snowball", "phoenix", "phoenix_no_memory")},
+    ("ko_reset_absolute_knocked_in", "quad_v2"): "QUAD V2 refuses a dated KO-reset with past schedule-1 dates at any "
+                                                 "valuation date (pre-existing), and the numeric maturity 0.0",
+    ("phoenix", "heston_pde"): "HestonPhoenixPDESolver refuses memory coupons at any maturity (pre-existing)",
+}
+
+CASES = [(f, name, factory, spot) for f in FAMILIES for name, factory in f.engines for spot in f.spots]
+SETTLING = [c for c in CASES if (c[0].name, c[1]) not in REFUSING]
+REFUSED = [c for c in CASES if (c[0].name, c[1]) in REFUSING]
+
+
+def _ids(cases):
+    return [f"{f.name}-{name}-{spot:g}" for f, name, _, spot in cases]
+
+
+@pytest.mark.parametrize("family,name,factory,spot", SETTLING, ids=_ids(SETTLING))
+def test_dated_contract_on_its_exercise_date_prices_its_numeric_twins_settled_value(family, name, factory, spot):
+    dated = price(family, name, factory, "dated", spot)
+    numeric = price(family, name, factory, "numeric", spot)
+    assert dated == pytest.approx(numeric, rel=1e-12, abs=1e-12)
+    assert numeric == pytest.approx(family.settled(spot), rel=1e-12, abs=1e-12)
+
+
+@pytest.mark.parametrize("family,name,factory,spot", REFUSED, ids=_ids(REFUSED))
+def test_a_route_without_a_settled_value_refuses_both_forms(family, name, factory, spot):
+    for form in ("dated", "numeric"):
+        with pytest.raises(Exception):
+            price(family, name, factory, form, spot)
+
+
+AFTER = VALUATION + timedelta(days=1)
+
+
+@pytest.mark.parametrize("family,name,factory", [
+    (EUROPEAN, "analytical_bs", BlackScholesEngine),
+    (BARRIER, "pde", lambda: BarrierPDESolver(PDEParams())),
+    (ONE_TOUCH, "analytical", OneTouchAnalyticalEngine),
+    (DOUBLE_ONE_TOUCH, "pde", lambda: DoubleOneTouchPDESolver(PDEParams())),
+    (RANGE_ACCRUAL, "analytical", RangeAccrualAnalyticalEngine),
+    (SNOWBALL, "pde", lambda: SnowballPDESolver(PDEParams())),
+], ids=["european", "barrier", "one_touch", "double_one_touch", "range_accrual", "snowball"])
+def test_a_valuation_strictly_after_the_exercise_date_still_raises(family, name, factory):
+    """Refused as before (the terminal settlement timing or ``get_maturity``, whichever the route reads first)."""
+    with pytest.raises(ValidationError):
+        price(family, name, factory, "dated", 110.0, valuation=AFTER)
+
+
+def test_time_to_exercise_is_zero_on_the_instant_and_positive_before():
+    from quantark.asset.equity.product.option.base_equity_option import time_to_exercise
+
+    assert time_to_exercise(VALUATION, env(100.0)) == 0.0
+    assert time_to_exercise(VALUATION, env(100.0, VALUATION - timedelta(days=73))) == pytest.approx(0.2, rel=1e-15)
+    with pytest.raises(ValidationError, match="must be on or before exercise date"):
+        time_to_exercise(VALUATION, env(100.0, AFTER))
+
+
+def test_an_instant_later_on_the_exercise_date_is_after_it():
+    """The rule is the same INSTANT: a valuation timestamp later on the exercise day is after the exercise."""
+    with pytest.raises(ValidationError):
+        price(EUROPEAN, "analytical_bs", BlackScholesEngine, "dated", 110.0,
+              valuation=VALUATION + timedelta(hours=15))

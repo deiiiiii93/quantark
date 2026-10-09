@@ -1,0 +1,14 @@
+family | engine | spot | dated | numeric | equal
+european_call | analytical_bs | 110 | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+european_call | mc | 110 | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+european_call | pde | 110 | {'price': 10.0, 'delta': 1.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 1.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+european_call | quad | 110 | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+barrier_up_out_call | analytical | 110 | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+barrier_up_out_call | mc | 110 | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+barrier_up_out_call | pde | 110 | {'price': 10.0, 'delta': 1.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 1.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+barrier_up_out_call | quad | 110 | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 0.9999999999999948, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+range_accrual | analytical | 100 | {'price': 10.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+range_accrual | mc | 100 | {'price': 10.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 10.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+snowball | mc | 90 | {'price': 15.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 15.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+snowball | pde | 90 | {'price': 15.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 15.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes
+snowball | quad_v1 | 90 | {'price': 15.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | {'price': 15.0, 'delta': 0.0, 'gamma': 0.0, 'theta': 0.0, 'vega': 0.0, 'rho': 0.0} | yes

@@ -82,7 +82,9 @@ def test_mc_near_expiry_returns_realized_accrual():
         past_observations=[(-0.2, 100.0)],  # locked-in +5
     )
     price = AccumulatorMCEngine().price(acc, env)
-    assert price == pytest.approx(5.0, abs=1e-9)
+    # locked-in +5, and the observation at the maturity instant (t = 1e-12, live) decided on the spot 100: +5
+    # (user ruling 2026-10-09, option (a): the settled value; it was dropped before, 5.0)
+    assert price == pytest.approx(10.0, abs=1e-9)
 
 
 def test_mc_matches_analytical_no_barrier_termination():
@@ -172,8 +174,9 @@ def test_mc_zero_maturity_includes_extra_shares():
         extra_shares_at_expiry=1.0,
     )
     price = AccumulatorMCEngine().price(acc, env)
-    # short up-and-out put: -(K - S)+ = -(95 - 90) = -5
-    assert price == pytest.approx(-5.0, abs=1e-9)
+    # short up-and-out put: -(K - S)+ = -(95 - 90) = -5, plus the observation at the maturity instant decided on
+    # the spot 90: gearing 2 x (90 - 95) = -10 (user ruling 2026-10-09, option (a); it was dropped before, -5.0)
+    assert price == pytest.approx(-15.0, abs=1e-9)
 
 
 def test_mc_empty_observations_still_prices_extra_shares():
@@ -218,8 +221,9 @@ def test_mc_expired_does_not_require_volatility():
         knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
         extra_shares_at_expiry=1.0,
     )
-    # short up-and-out put at expiry: -(95 - 90) = -5 (no vol needed)
-    assert AccumulatorMCEngine().price(acc, env) == pytest.approx(-5.0, abs=1e-9)
+    # short up-and-out put at expiry: -(95 - 90) = -5, plus the observation at the maturity instant: -10 (no vol
+    # needed; user ruling 2026-10-09, option (a) -- it was dropped before, -5.0)
+    assert AccumulatorMCEngine().price(acc, env) == pytest.approx(-15.0, abs=1e-9)
 
 
 def test_mc_contract_multiplier_scales_price():

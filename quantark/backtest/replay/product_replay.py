@@ -34,7 +34,7 @@ from quantark.param.div.forward_carry_curve import ForwardCarryCurve
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.fixings import freeze_missing_fixings
-from quantark.util.numerical import is_close
+from quantark.util.numerical import is_close, is_zero
 from quantark.util.run_fixings import participates, step_fixings, update_live
 
 from .carry_context import SUPPORTED_EXTRAPOLATIONS, CarryCurveContext
@@ -522,11 +522,16 @@ class ProductReplay:
         )
         product = self._tracker.product_for_pricing(date, probe_env)
         try:
-            return float(product.get_maturity(probe_env))
+            remaining = float(product.get_maturity(probe_env))
         except ValidationError:
             # Valuation date on/after a date-based final maturity: sample the
             # shortest pillar (the product settles today; its price is unused).
             return 1e-8
+        if is_zero(remaining) and getattr(product, "exercise_date", None) is not None:
+            # ON a date-based final maturity get_maturity is 0.0 (2026-10-09; it
+            # used to raise): the same pillar, so the readout is unchanged.
+            return 1e-8
+        return remaining
 
     def pricing_dividend_yield(self, implied_q: float) -> float:
         if self.fixed_dividend_yield is not None:
