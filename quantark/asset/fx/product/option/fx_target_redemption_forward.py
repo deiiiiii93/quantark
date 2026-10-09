@@ -99,12 +99,6 @@ class FxTargetRedemptionForward(TargetRedemptionProduct):
         fav_eff = min(fav, self.target - accumulated)
         return fav_eff, fav_eff - self.gearing * unf
 
-    def time_shift(self, time_bump: float) -> None:
-        """Roll fixing/pay times (and maturity/delivery) forward for theta."""
-        super().time_shift(time_bump)
-        self.fixing_times = [t - time_bump for t in self.fixing_times]
-        self.pay_times = [t - time_bump for t in self.pay_times]
-
     def period_cashflow(self, spot: float) -> float:
         """Undiscounted single-fixing net cashflow (favorable - geared unfavorable).
 

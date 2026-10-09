@@ -10,11 +10,15 @@ from fx_target_redemption_fixtures import FIX, INCEPTION, PAIR, env, note, tarf
 from quantark.asset.fx.product.option import FxTargetRedemptionForward, FxTargetRedemptionNote
 from quantark.asset.fx.product.option.target_redemption_state import (
     PendingPayment,
+    TargetRedemptionEvent,
+    TargetRedemptionEventType,
     TargetRedemptionState,
     TerminalBookingWarning,
 )
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
+
+FIXING, PAYMENT = TargetRedemptionEventType.FIXING, TargetRedemptionEventType.PAYMENT
 
 
 # --- R1 (findings section 10): the period start is a contract term -------------------------------------------------
@@ -142,3 +146,127 @@ def test_tarf_terminal_booking_warns():
 def test_tarf_inception_horizon_is_unchanged():
     f = tarf(pay_times=[t + 0.02 for t in FIX])
     assert f.maturity == FIX[-1] and f.delivery == FIX[-1] + 0.02 and f.hit_tol == 0.0
+
+
+# --- numeric ageing hooks (spec section 6, Q3) ---------------------------------------------------------------
+
+LAG = [t + 0.02 for t in FIX]
+
+
+def _kinds(events):
+    return [(e.event_type, e.amount, e.fixing, e.time, e.redeemed) for e in events]
+
+
+def test_time_shift_keeps_a_passed_fixing_unbanked():
+    n = note(target=3.0, pay_times=LAG)
+    a = copy.deepcopy(n)
+    a.time_shift(0.1)
+    assert a.fixing_times == [t - 0.1 for t in FIX] and a.pay_times == [t - 0.1 for t in LAG]
+    assert a.state == n.state and a.lifecycle_events == ()
+    assert a.maturity == FIX[-1] - 0.1
+
+
+def test_record_banks_the_passed_fixing_at_the_held_spot():
+    n = note(target=3.0, pay_times=LAG)
+    a = copy.deepcopy(n)
+    a.time_shift(0.1)
+    a.record_passed_fixings(env(spot=1.20))
+    c = n.full_coupon(0)
+    assert a.state == TargetRedemptionState(c, pending=(PendingPayment(c, pay_time=LAG[0] - 0.1),))
+    assert a.fixing_times == [t - 0.1 for t in FIX[1:]] and a.accrual_factors == n.accrual_factors[1:]
+    assert _kinds(a.lifecycle_events) == [(FIXING, c, 1.20, FIX[0] - 0.1, False)]
+    assert a.lifecycle_events[0].label.startswith("#0 t=")
+
+
+def test_pending_cash_leaves_when_a_later_shift_reaches_its_pay_time():
+    n = note(target=3.0, pay_times=LAG)
+    a = copy.deepcopy(n)
+    a.time_shift(0.1)
+    a.record_passed_fixings(env())
+    a.time_shift(0.01)
+    c = n.full_coupon(0)
+    assert a.state.pending == ()
+    assert _kinds(a.lifecycle_events[-1:]) == [(PAYMENT, c, None, (LAG[0] - 0.1) - 0.01, False)]
+
+
+def test_redemption_clips_the_coupon_and_settles_the_principal():
+    n = note(target=1.5, pay_times=LAG)
+    a = copy.deepcopy(n)
+    a.time_shift(0.175)
+    a.record_passed_fixings(env(spot=1.20))
+    c0 = n.full_coupon(0)
+    c1 = min(n.full_coupon(1), 1.5 - c0)
+    t_pay = LAG[1] - 0.175
+    assert a.is_redeemed and a.is_terminal
+    assert a.fixing_times == [] and a.pay_times == [] and a.accrual_factors == []
+    assert a.state == TargetRedemptionState(c0 + c1, pending=(PendingPayment(c1, pay_time=t_pay),
+                                                              PendingPayment(100.0, pay_time=t_pay)))
+    assert _kinds(a.lifecycle_events) == [
+        (FIXING, c0, 1.20, FIX[0] - 0.175, False),
+        (PAYMENT, c0, None, LAG[0] - 0.175, False),
+        (FIXING, c1, 1.20, FIX[1] - 0.175, True),
+    ]
+    assert a.lifecycle_events[1].label == a.lifecycle_events[0].label
+    assert a.maturity == t_pay
+
+
+def test_quiet_fixing_banks_zero_and_no_cash():
+    a = note(target=3.0, pay_times=LAG)
+    a.time_shift(0.1)
+    a.record_passed_fixings(env(spot=1.05))
+    assert a.state == TargetRedemptionState(0.0)
+    assert _kinds(a.lifecycle_events) == [(FIXING, 0.0, 1.05, FIX[0] - 0.1, False)]
+
+
+@pytest.mark.parametrize("principal", [True, False])
+def test_last_fixing_without_a_hit_settles_the_principal(principal):
+    a = note(fix=[0.05], pay_times=[0.07], include_principal=principal)
+    a.time_shift(0.06)
+    a.record_passed_fixings(env(spot=1.05))
+    assert a.is_terminal and not a.is_redeemed
+    assert a.state.pending == ((PendingPayment(100.0, pay_time=0.07 - 0.06),) if principal else ())
+    assert _kinds(a.lifecycle_events) == [(FIXING, 0.0, 1.05, 0.05 - 0.06, True)]
+
+
+def test_tarf_unfavourable_fixing_is_negative_pending_cash():
+    a = tarf(gearing=2.0, target=0.2, pay_times=LAG)
+    a.time_shift(0.1)
+    a.record_passed_fixings(env(spot=1.10))
+    diff = 1.0 * (1.10 - 1.15)
+    cf = 0.0 - 2.0 * (1.0 * max(-diff, 0.0))
+    assert cf < 0.0
+    assert a.state == TargetRedemptionState(0.0, pending=(PendingPayment(cf, pay_time=LAG[0] - 0.1),))
+
+
+def test_tarf_redeems_on_target():
+    a = tarf(target=0.075, pay_times=LAG)
+    a.time_shift(0.175)
+    a.record_passed_fixings(env(spot=1.20))
+    fav = 1.0 * max(1.0 * (1.20 - 1.15), 0.0)
+    second = min(fav, 0.075 - fav)
+    assert a.is_redeemed and a.fixing_times == []
+    assert a.state.accumulated == fav + second
+    assert a.state.pending == (PendingPayment(second, pay_time=LAG[1] - 0.175),)  # gearing 1, favourable fixing
+
+
+def test_record_before_the_first_fixing_changes_nothing():
+    a = note(target=3.0)
+    before = copy.deepcopy(a)
+    a.record_passed_fixings(env())
+    assert a.fixing_times == before.fixing_times and a.state == before.state and a.lifecycle_events == ()
+
+
+def test_lifecycle_events_survive_deepcopy():
+    a = note(target=3.0)
+    a.time_shift(0.1)
+    a.record_passed_fixings(env())
+    assert copy.deepcopy(a).lifecycle_events == a.lifecycle_events
+
+
+def test_banking_uses_quoted_spot_not_effective_spot():
+    e = env(spot=1.20, spot_days=2)
+    assert e.effective_spot() != e.spot
+    a = note(target=3.0)
+    a.time_shift(0.1)
+    a.record_passed_fixings(e)
+    assert a.lifecycle_events[0].fixing == e.spot

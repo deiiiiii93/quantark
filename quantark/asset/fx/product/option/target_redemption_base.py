@@ -19,7 +19,9 @@ from quantark.util.numerical import is_zero
 
 from ..base_fx_product import BaseFxProduct
 from .target_redemption_state import (
+    PendingPayment,
     TargetRedemptionEvent,
+    TargetRedemptionEventType,
     TargetRedemptionState,
     TerminalBookingWarning,
     is_target_hit,
@@ -169,3 +171,73 @@ class TargetRedemptionProduct(BaseFxProduct):
             raise ValidationError("a numeric contract's pending payments take pay_time, not pay_date")
         if self.is_redeemed and self.fixing_times:
             raise ValidationError("a redeemed state cannot list fixings: every fixing after the target hit is dead")
+
+    # -- ageing (spec section 6) --------------------------------------------------------------------------------
+    def time_shift(self, time_bump: float) -> None:
+        """Numeric form: move every fixing, pay and pending time by ``time_bump``. Pending cash now at or before
+        valuation was paid within the bump and leaves as a PAYMENT event; fixings stepped over stay unbanked until
+        :meth:`record_passed_fixings`. The dated form ages by its environment's date, so this is a no-op for it."""
+        if not self.is_numeric:
+            return
+        self.fixing_times = [t - time_bump for t in self.fixing_times]
+        self.pay_times = [t - time_bump for t in self.pay_times]
+        kept, events = [], []
+        for p in self.state.pending:
+            t = p.pay_time - time_bump
+            if is_passed_time(t):
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount, time=t))
+            else:
+                kept.append(PendingPayment(p.amount, pay_time=t))
+        self.state = TargetRedemptionState(self.state.accumulated, pending=tuple(kept))
+        self.lifecycle_events = self.lifecycle_events + tuple(events)
+        self._refresh_numeric_horizon()
+        self.validate()
+
+    def record_passed_fixings(self, fx_env) -> None:
+        """Bank every unbanked fixing at or before valuation, in order, at the QUOTED ``fx_env.spot`` (spec Q3),
+        stopping once the contract is terminal; append the events; re-validate."""
+        self._record_numeric(fx_env)
+        self.validate()
+
+    def _record_numeric(self, fx_env) -> None:
+        spot = fx_env.spot
+        acc = self.state.accumulated
+        pending = list(self.state.pending)
+        events: List[TargetRedemptionEvent] = []
+        fixings, pays = self.fixing_times, self.pay_times
+        factors = self.accrual_factors if self._has_accrual else None
+        banked = 0
+        while banked < len(fixings) and is_passed_time(fixings[banked]):
+            t, tp = fixings[banked], pays[banked]
+            added, cash = self._fixing_outcome(factors[banked] if factors is not None else None, spot, acc)
+            acc = acc + added
+            hit = is_target_hit(acc, self.target)
+            ends = hit or banked == len(fixings) - 1
+            label = event_label(banked, time=t)
+            events.append(TargetRedemptionEvent(TargetRedemptionEventType.FIXING, cash, fixing=spot, time=t,
+                                                redeemed=ends, label=label))
+            self._settle_numeric(cash, tp, label, pending, events)
+            if ends:
+                self._settle_numeric(self._principal_amount(), tp, label, pending, events)
+            banked += 1
+            if hit:
+                banked = len(fixings)  # every later fixing is dead
+                break
+        self.fixing_times = fixings[banked:]
+        self.pay_times = pays[banked:]
+        if factors is not None:
+            self.accrual_factors = factors[banked:]
+        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_time)))
+        self.lifecycle_events = self.lifecycle_events + tuple(events)
+        self._refresh_numeric_horizon()
+
+    @staticmethod
+    def _settle_numeric(amount: float, pay_time: float, label: str, pending: list, events: list) -> None:
+        """Determined cash: paid now (PAYMENT, the fixing's label) when its pay time has passed, else pending."""
+        if is_zero(amount):
+            return
+        if is_passed_time(pay_time):
+            events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, amount, time=pay_time,
+                                                label=label))
+        else:
+            pending.append(PendingPayment(amount, pay_time=pay_time))

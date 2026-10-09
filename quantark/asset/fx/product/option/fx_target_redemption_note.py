@@ -193,12 +193,6 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
             return self.lower <= spot <= self.upper
         return spot >= self.strike if self.is_above else spot <= self.strike
 
-    def time_shift(self, time_bump: float) -> None:
-        """Roll fixing/pay times (and maturity/delivery) forward for theta."""
-        super().time_shift(time_bump)
-        self.fixing_times = [t - time_bump for t in self.fixing_times]
-        self.pay_times = [t - time_bump for t in self.pay_times]
-
     def __repr__(self):
         tgt = "inf" if self.is_unbounded_target else f"{self.target:.4g}"
         cond = (
