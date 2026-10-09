@@ -502,7 +502,8 @@ class RangeAccrualOption(BaseEquityOption):
 
         A past observation (t <= 0) without ``observed_in_range`` is decided at the environment's current spot
         through ``is_in_range`` (its own barriers, reverse mode) and one ``MissingFixingWarning`` names every
-        STRICTLY past observation so filled (one at t = 0 is today's live fixing). The product is not changed. A future observation must not carry an outcome.
+        STRICTLY past observation so filled (one at t = 0 is today's live fixing).
+        The product is not changed. A future observation must not carry an outcome.
 
         Args:
             pricing_env: Pricing environment with valuation date

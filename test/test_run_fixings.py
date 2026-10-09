@@ -61,10 +61,13 @@ def test_range_accrual_ageing_banks_the_elapsed_time():
     assert aged.get_year_fraction(F.eq_env(5)) == pytest.approx(1.0, abs=1e-15)
 
 
-def test_a_fixing_lands_on_exactly_zero():
-    aged = _aged(F.ra_numeric(), F.FIX_DAY)
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_a_fixing_lands_on_exactly_zero(kind):
+    aged = _aged(F.MAKERS[(kind, "numeric")](), F.FIX_DAY)
     assert aged.observation_records[0].observation_time == 0.0           # not an ulp either side
     assert aged.open_fixings(F.eq_env(F.FIX_DAY))[0] == (0.0, "#0 t=0")
+    dated = F.MAKERS[(kind, "dated")]()                                  # a dated contract has no times to snap
+    assert _aged(dated, F.FIX_DAY) is dated
 
 
 def test_num_observations_schedule_is_written_out_before_the_maturity_moves():
@@ -79,15 +82,23 @@ def test_num_observations_schedule_is_written_out_before_the_maturity_moves():
 def test_legacy_asian_cannot_age():
     with pytest.raises(ValidationError, match="legacy"):
         AsianOption(strike=100.0, maturity=1.0, num_observations=12).with_time_elapsed(DAY)
+    with pytest.raises(ValidationError, match="legacy"):                  # the dated form refuses too
+        AsianOption(strike=100.0, exercise_date=F.START + timedelta(days=365), initial_date=F.START,
+                    num_observations=12).with_time_elapsed(DAY)
 
 
 @pytest.mark.parametrize("kind", ["ra", "asian"])
-def test_open_fixings_lists_unrecorded_records_with_time_and_label(kind):
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_open_fixings_lists_unrecorded_records_with_time_and_label(kind, form):
     env = F.eq_env(F.FIX_DAY)
-    dated = F.MAKERS[(kind, "dated")]({0: True} if kind == "ra" else {0: 105.0})
-    got = dated.open_fixings(env)
+    prod = F.MAKERS[(kind, form)]({0: True} if kind == "ra" else {0: 105.0})
+    got = prod.open_fixings(env)
     assert 0 not in got and sorted(got) == [1, 2, 3, 4]
-    assert got[1] == (dated.observation_records[1].resolve_time(env), "#1 2024-01-19")
+    rec = prod.observation_records[1]
+    label = "#1 2024-01-19" if form == "dated" else f"#1 t={rec.observation_time:.6g}"
+    assert got[1] == (rec.resolve_time(env), label)
+    if form == "numeric":
+        assert got[1][0] == rec.observation_time
 
 
 @pytest.mark.parametrize("kind", ["ra", "asian"])
