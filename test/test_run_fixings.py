@@ -232,3 +232,220 @@ def test_fx_t0_fill_is_silent_and_a_past_fill_warns(kind, form):
     past = prod.with_time_elapsed(DAY) if form == "numeric" else prod
     with pytest.warns(MissingFixingWarning, match="1 past fixing"):
         engine.price(past, F.fx_env(F.FIX_DAY + 1, quanto=q))
+
+
+# ---------------------------------------------------------------- Task 4: recorder
+from quantark.util.run_fixings import (  # noqa: E402
+    RecordedFixing, RunFixingRecorder, participates, run_step_dt, step_fixings,
+)
+
+
+def _rows(rec, pid):
+    return [(f.index, f.outcome, f.spot, f.gap) for f in rec.recorded if f.position_id == pid]
+
+
+def _drive(pf, rec, days, spot_of=F.spot_on):
+    for k in days:
+        F.move(pf, k, spot_of(k))
+        rec.advance(pf)
+
+
+def test_participates():
+    assert participates(F.ra_dated()) and participates(F.asian_numeric()) and participates(F.fx_ra("quanto", "dated"))
+    assert not participates(AsianOption(strike=100.0, maturity=1.0, num_observations=12))
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    from quantark.util.enum import OptionType
+    assert not participates(EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0))
+
+
+def test_run_step_dt():
+    env = F.eq_env(5)
+    assert run_step_dt(F.START + timedelta(days=4), env) == 1 / 365.0
+    assert run_step_dt(env.valuation_date, env) == 0.0
+    with pytest.raises(ValidationError, match="back"):
+        run_step_dt(F.START + timedelta(days=6), env)
+
+
+def test_step_fixings_is_stateless_and_skips_run_fills():
+    env = F.eq_env(5)
+    fills = {}
+    prod, new = step_fixings(F.ra_dated(), env, prev_date=F.START + timedelta(days=4), prev_spot=105.0, run_fills=fills)
+    assert new == {0: True} and prod.observation_records[0].observed_in_range is True and fills == {}
+    again, new2 = step_fixings(F.ra_dated(), env, prev_date=env.valuation_date, prev_spot=200.0, run_fills={0: True})
+    assert new2 == {} and again.observation_records[0].observed_in_range is True
+
+
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_d2_the_clock_fixes_a_fixing_at_the_spot_of_the_day_it_was_live(kind):
+    dated, numeric = F.MAKERS[(kind, "dated")](), F.MAKERS[(kind, "numeric")]()
+    pf = F.eq_book(dated, numeric)
+    pid_d, pid_n = list(pf.positions)
+    rec = RunFixingRecorder()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        rec.register(pf)
+        _drive(pf, rec, range(0, 12))
+    want_out = True if kind == "ra" else 105.0
+    assert _rows(rec, pid_d) == [(0, want_out, 105.0, False)]
+    assert _rows(rec, pid_d) == _rows(rec, pid_n)                         # X2 bitwise
+    assert pf.positions[pid_d].product is not dated and dated.observation_records[0] == F.MAKERS[(kind, "dated")]().observation_records[0]
+    day5 = next(d for d in rec.days if d.fixings)
+    assert day5.date == F.START + timedelta(days=5)
+
+
+def test_r4_a_gap_fixing_takes_the_previous_instants_spot():
+    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=[4.5 / 365.0, 18 / 365.0, 120 / 365.0, 240 / 365.0, 1.0]))
+    pid_d, pid_n = list(pf.positions)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        _drive(pf, rec, [0, 1, 2, 3, 6], spot_of=lambda k: 100.0 + k)     # day 4 and 5 skipped
+    assert _rows(rec, pid_d) == [(0, True, 103.0, True)]
+    assert _rows(rec, pid_n) == [(0, True, 103.0, True)]
+
+
+def test_r5_history_at_the_first_valuation_warns_once_per_position_and_the_first_day_is_live():
+    dates = [F.START - timedelta(days=3), F.START] + F.fixing_dates()[1:]
+    pf = F.eq_book(F.ra_dated(dates=dates, initial_date=F.START - timedelta(days=10)),
+                   F.ra_dated(dates=dates, initial_date=F.START - timedelta(days=10)), env=F.eq_env(0, spot=100.0))
+    rec = RunFixingRecorder()
+    with pytest.warns(MissingFixingWarning) as caught:
+        day0 = rec.register(pf)
+    assert len([w for w in caught if issubclass(w.category, MissingFixingWarning)]) == 2 and day0.fixings == ()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        F.move(pf, 0, 105.0)
+        rec.advance(pf)                                                   # same date: refresh day 0's spot (Ruling 9)
+        F.move(pf, 1, 120.0)
+        rec.advance(pf)
+    pid = list(pf.positions)[0]
+    assert _rows(rec, pid) == [(1, True, 105.0, False)]                  # the START record, at day 0's market spot
+    assert pf.positions[pid].product.observation_records[0].observed_in_range is True   # R5 fill at 100
+
+
+def test_r8_a_time_of_day_instant_is_refused():
+    pf = F.eq_book(F.ra_dated())
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    F.move(pf, 1, date=F.START + timedelta(days=1, hours=15))
+    with pytest.raises(ValidationError, match="time of day"):
+        rec.advance(pf)
+
+
+def test_r8_r9_do_not_apply_without_a_participant():
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    from quantark.asset.equity.engine.analytical import BlackScholesEngine
+    from quantark.util.enum import OptionType
+    pf = F.eq_book()
+    pf.add_position(product=EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0),
+                    quantity=1.0, entry_price=0.0, underlying=F.UNDERLYING, engine=BlackScholesEngine())
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    F.move(pf, 1, date=F.START + timedelta(days=1, hours=15))
+    assert rec.advance(pf).fixings == ()
+
+
+def test_r9_the_clock_cannot_go_back():
+    pf = F.eq_book(F.ra_dated())
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    _drive(pf, rec, [2])
+    F.move(pf, 1)
+    with pytest.raises(ValidationError, match="back"):
+        rec.advance(pf)
+
+
+def test_non_participants_are_untouched():
+    legacy = AsianOption(strike=100.0, maturity=1.0, num_observations=12)
+    pf = F.eq_book(legacy)
+    pid = list(pf.positions)[0]
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    _drive(pf, rec, range(1, 8))
+    assert pf.positions[pid].product is legacy and rec.recorded == ()
+
+
+def test_each_underlying_records_at_its_own_previous_spot():
+    """Review Focus 1."""
+    pf = F.eq_book(F.ra_dated(), underlying="IDX_A")
+    pf.pricing_environments["IDX_B"] = F.eq_env(0)
+    pf.add_position(product=F.ra_dated(), quantity=1.0, entry_price=0.0, underlying="IDX_B",
+                    engine=F.ENGINES["ra"]())
+    pid_a, pid_b = list(pf.positions)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    for k in range(1, 6):
+        F.move(pf, k, 105.0, underlying="IDX_A")
+        F.move(pf, k, 120.0 if k == 4 else 105.0, underlying="IDX_B")
+        rec.advance(pf)
+    assert _rows(rec, pid_a) == [(0, True, 105.0, False)]
+    assert _rows(rec, pid_b) == [(0, False, 120.0, False)]
+
+
+def test_a_fixing_live_for_several_instants_takes_the_first_live_instants_spot():
+    """Review Focus 4 / Ruling 4 (user-approved): on a business-day clock with weekend rows Friday's fixing is t = 0
+    on Friday, Saturday and Sunday and is decided on Monday at FRIDAY's spot (a same-date refresh on Friday counts),
+    dated and numeric twins identical."""
+    from quantark.util.calendar import CalendarType, DayCountConvention, calculate_year_fraction, create_calendar
+    cal = create_calendar(CalendarType.NONE, year_range=(2024, 2025))
+    kw = dict(day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=252, calendar=cal)
+    times = [calculate_year_fraction(F.START, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=cal)
+             for d in F.fixing_dates()]
+    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, spot=105.0, **kw))
+    pid_d, pid_n = list(pf.positions)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    spots = {1: 105.0, 2: 105.0, 3: 105.0, 4: 120.0, 5: 120.0, 6: 120.0, 7: 120.0}   # day 4 = Friday
+    for k in range(1, 8):
+        F.move(pf, k, spots[k])
+        rec.advance(pf)
+        if k == 4:                                          # same-date refresh: Friday's market is 105 after all
+            F.move(pf, 4, 105.0)
+            rec.advance(pf)
+    assert _rows(rec, pid_d) == _rows(rec, pid_n) == [(0, True, 105.0, False)]   # Friday's spot, not Sunday's 120
+    assert next(d for d in rec.days if d.fixings).date == F.START + timedelta(days=7)   # recorded on Monday
+
+
+def test_a_position_first_seen_at_advance_is_registered_there():
+    """Review Focus 3 (Ruling 8)."""
+    pf = F.eq_book(F.ra_dated())
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    _drive(pf, rec, range(1, 6))
+    late = F.ra_dated(dates=[F.START + timedelta(days=2)] + F.fixing_dates()[1:])
+    pf.add_position(product=late, quantity=1.0, entry_price=0.0, underlying=F.UNDERLYING, engine=F.ENGINES["ra"]())
+    pid = list(pf.positions)[-1]
+    F.move(pf, 6)
+    with pytest.warns(MissingFixingWarning):
+        rec.advance(pf)                                                   # its first valuation: day 2 is history
+    assert pf.positions[pid].product.observation_records[0].observed_in_range is True    # filled at 107 (in range)
+    _drive(pf, rec, range(7, 20))
+    assert _rows(rec, pid) == [(1, False, 119.0, False)]                 # day 18 at day 18's spot
+
+
+def test_reverse_mode_is_decided_by_the_products_own_test():
+    prod = F.ra_dated()
+    prod.range_config = RangeAccrualConfig(upper_barrier=110.0, lower_barrier=90.0, accrual_rate=0.10, is_reverse=True)
+    pf = F.eq_book(prod)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    _drive(pf, rec, range(1, 6))
+    assert _rows(rec, list(pf.positions)[0]) == [(0, False, 105.0, False)]
+
+
+def test_business_day_clock_twins_age_identically():
+    """X2 on BUSINESS_DAYS at recorder level (drift 3)."""
+    from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
+    cal = create_calendar(CalendarType.NONE, year_range=(2024, 2025))
+    kw = dict(day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=252, calendar=cal)
+    from quantark.util.calendar import calculate_year_fraction
+    times = [calculate_year_fraction(F.START, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=cal)
+             for d in F.fixing_dates()]
+    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, **kw))
+    pid_d, pid_n = list(pf.positions)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    days = [k for k in range(0, 26) if (F.START + timedelta(days=k)).weekday() < 5]
+    _drive(pf, rec, days)
+    assert _rows(rec, pid_d) == _rows(rec, pid_n) and len(_rows(rec, pid_d)) == 2

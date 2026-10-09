@@ -21,6 +21,12 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   `open_fixings(env)` and `with_time_elapsed(dt)` (the run clock's step: a numeric contract's record times and
   maturity move by `dt`, snapped to exactly 0.0 when zero; records nothing; a dated contract returns itself).
   `quantark.util.fixings.snap_time`.
+- `quantark.util.run_fixings` (spec `docs/superpowers/specs/2026-10-09-run-fixings-design.md`): `RunFixingRecorder`
+  (`register` at a run's first valuation = W5b's freeze; `advance` at every later path instant records each fixing
+  the clock moved past at the spot of the first instant it was live, or at the previous instant's spot with
+  `gap=True` when no instant fell on it; numeric contracts age by the environment's year fraction; time-of-day
+  instants and a backwards clock are refused), the stateless `step_fixings`, `update_live`, `participates`,
+  `run_step_dt`, `at_spot`, `require_date_instant`, `RecordedFixing`, `RunFixingDay`.
 - `AccrualPeriod`, `AccrualBasis`, `KnockInAnchor` and the resolver: `ko_accrual_factor`, `coupon_period_fraction`,
   `contract_tenor`, `knock_in_anchor_for`. `ObservationRecord.accrual` holds a record's period.
 - `AccrualConfig.accrual_end` (`AccrualEndType.OBSERVATION`, the default, or `SETTLEMENT`: a record accrues to its
