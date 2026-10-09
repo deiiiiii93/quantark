@@ -9,7 +9,7 @@ and historical tracking for partially observed products.
 import copy
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Mapping, Optional, Tuple, TYPE_CHECKING
 
 from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
@@ -546,35 +546,59 @@ class RangeAccrualOption(BaseEquityOption):
             warn_filled_fixings(type(self).__name__, "observed_in_range", filled)
         return past_observations, future_observations, total_weights
 
-    def with_missing_fixings_filled(self, pricing_env: "PricingEnvironment") -> "RangeAccrualOption":
+    def missing_fixing_fills(self, pricing_env: "PricingEnvironment") -> Dict[int, bool]:
+        """``{index: outcome}`` for every past observation without ``observed_in_range``, decided at the spot.
+
+        The decision ``resolve_observations`` makes (``is_in_range`` at ``pricing_env.spot``: per-record barriers,
+        reverse mode), without the warning.
+        """
+        spot = float(pricing_env.spot)
+        return {
+            idx: self.is_in_range(spot, idx, rec)
+            for idx, rec in enumerate(self.get_observation_records())
+            if rec.observed_in_range is None and rec.resolve_time(pricing_env) <= 0
+        }
+
+    def with_fixings_recorded(self, fills: Mapping[int, bool]) -> "RangeAccrualOption":
+        """A COPY with ``observed_in_range`` recorded from ``fills`` on every listed record still without one.
+
+        A record that already carries an outcome keeps it. Returns ``self`` when nothing changes; the schedule is
+        written out as explicit records on the copy. The product is never changed.
+        """
+        records = [replace(rec) for rec in self.get_observation_records()]
+        changed = False
+        for idx, outcome in fills.items():
+            if 0 <= idx < len(records) and records[idx].observed_in_range is None:
+                records[idx].observed_in_range = bool(outcome)
+                changed = True
+        if not changed:
+            return self
+        frozen = copy.deepcopy(self)
+        frozen.observation_records = records
+        frozen.observation_times = None
+        frozen.num_observations = None
+        return frozen
+
+    def with_missing_fixings_filled(
+        self, pricing_env: "PricingEnvironment", *, warn: bool = True
+    ) -> "RangeAccrualOption":
         """
         This contract with every past observation lacking ``observed_in_range`` decided at ``pricing_env``'s spot.
 
         The fill ``resolve_observations`` makes, recorded once on a COPY so that bumped and shocked repricings keep
         it at the base spot (user decision 2026-10-09: a filled past fixing is history and does not move). One
-        ``MissingFixingWarning`` names the fixings filled. Returns ``self`` when nothing is missing; the product is
-        never changed.
+        ``MissingFixingWarning`` names the fixings filled (``warn=False`` skips it). Returns ``self`` when nothing
+        is missing; the product is never changed.
         """
-        records = self.get_observation_records()
-        missing = [
-            idx
-            for idx, rec in enumerate(records)
-            if rec.observed_in_range is None and rec.resolve_time(pricing_env) <= 0
-        ]
-        if not missing:
+        fills = self.missing_fixing_fills(pricing_env)
+        if not fills:
             return self
-        spot = float(pricing_env.spot)
-        filled = [replace(rec) for rec in records]
-        for idx in missing:
-            filled[idx].observed_in_range = self.is_in_range(spot, idx, filled[idx])
-        frozen = copy.deepcopy(self)
-        frozen.observation_records = filled
-        frozen.observation_times = None
-        frozen.num_observations = None
-        warn_filled_fixings(
-            type(self).__name__, "observed_in_range", [fixing_label(idx, records[idx]) for idx in missing]
-        )
-        return frozen
+        if warn:
+            records = self.get_observation_records()
+            warn_filled_fixings(
+                type(self).__name__, "observed_in_range", [fixing_label(idx, records[idx]) for idx in fills]
+            )
+        return self.with_fixings_recorded(fills)
 
     def has_past_observations(self, pricing_env: "PricingEnvironment") -> bool:
         """

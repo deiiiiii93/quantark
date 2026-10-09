@@ -17,6 +17,7 @@ from copy import deepcopy
 from typing import Sequence
 
 from quantark.execution.scenario import registries
+from quantark.util.fixings import freeze_missing_fixings
 
 __all__ = [
     "GREEK_BUMP_TRANSFORMER_ID",
@@ -121,7 +122,10 @@ def apply_greek_bump(bump_id: str, state: TradeState, gc) -> TradeState:
         direction = 1.0 if bump_id == "spot_up" else -1.0
         env2 = deepcopy(env)
         env2.spot_quote.spot *= 1.0 + direction * bc.spot_bump
-        return dataclasses.replace(state, pricing_env=env2)
+        # A missing past fixing is history: decided at the BASE spot, never the bumped one (user decision
+        # 2026-10-09). The base cell's own pricing has already warned about it.
+        product2 = freeze_missing_fixings(product, env, warn=False)
+        return dataclasses.replace(state, pricing_env=env2, product=product2)
     T = product.get_maturity(env)
     if bump_id == "vol_up":
         strike = getattr(product, "strike", env.spot)

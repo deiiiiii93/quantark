@@ -11,6 +11,7 @@ fill is made once at the base spot and does not follow a bumped or shocked spot 
 
 from __future__ import annotations
 
+import copy
 import warnings
 from typing import Sequence
 
@@ -43,15 +44,48 @@ def warn_filled_fixings(
     )
 
 
-def freeze_missing_fixings(product, env):
+def freeze_missing_fixings(product, env, *, warn: bool = True):
     """``product`` with its missing past fixings recorded at ``env``'s spot, for every revaluation that follows.
 
     User decision 2026-10-09: a filled past fixing is history - every bump Greek and every scenario shock keeps it
     at the BASE spot. Call this once at the base environment, before bumping or shocking, and reprice the result:
     the fill and its one ``MissingFixingWarning`` happen here, and the repricings find nothing left to fill.
     Returns ``product`` itself when it has no such fixings (or no ``with_missing_fixings_filled``); never mutates it.
+    ``warn=False`` for a caller whose base valuation has already warned.
     """
     fill = getattr(product, "with_missing_fixings_filled", None)
     if fill is None:
         return product
-    return fill(env)
+    return fill(env, warn=warn)
+
+
+def freeze_portfolio_fixings(portfolio):
+    """``portfolio`` with every position's missing past fixings recorded at its BASE environment's spot.
+
+    For scenario revaluations (VaR, stress, dynamic scenarios, backtests): call once on the unshocked portfolio,
+    before any environment is shocked or rolled, so a fill stays at the base spot for the whole run (user decision
+    2026-10-09: history does not move). Positions are found in ``portfolio.positions`` and priced against
+    ``portfolio.pricing_environments[position.underlying]``. Returns ``portfolio`` itself when nothing is filled;
+    otherwise a shallow copy whose changed positions are shallow copies holding the frozen product. Neither the
+    portfolio, its positions nor their products are mutated.
+    """
+    positions = getattr(portfolio, "positions", None)
+    envs = getattr(portfolio, "pricing_environments", None)
+    if not positions or envs is None:
+        return portfolio
+    frozen_positions = {}
+    changed = False
+    for key, position in positions.items():
+        product = getattr(position, "product", None)
+        env = envs.get(getattr(position, "underlying", None))
+        frozen = product if product is None or env is None else freeze_missing_fixings(product, env)
+        if frozen is not product:
+            position = copy.copy(position)
+            position.product = frozen
+            changed = True
+        frozen_positions[key] = position
+    if not changed:
+        return portfolio
+    out = copy.copy(portfolio)
+    out.positions = frozen_positions
+    return out

@@ -21,7 +21,7 @@ approximated here.
 import copy
 from dataclasses import replace
 from datetime import datetime
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Mapping, Optional, Tuple, TYPE_CHECKING
 
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
@@ -380,27 +380,53 @@ class FxRangeAccrualOption(BaseFxProduct):
                 rec.observed_in_range = self.is_in_range(fx_env.spot, idx, rec)
         self._set_records(records)
 
-    def with_missing_fixings_filled(self, fx_env: "FxPricingEnvironment") -> "FxRangeAccrualOption":
+    def missing_fixing_fills(self, fx_env: "FxPricingEnvironment") -> Dict[int, bool]:
+        """``{index: outcome}`` for every past fixing without ``observed_in_range``, decided at ``fx_env.spot``
+        (the decision ``resolve_observations`` and ``record_passed_fixings`` make, without the warning)."""
+        return {
+            idx: self.is_in_range(fx_env.spot, idx, rec)
+            for idx, rec in enumerate(self.get_observation_records())
+            if rec.observed_in_range is None and rec.resolve_time(fx_env) <= 0
+        }
+
+    def with_fixings_recorded(self, fills: Mapping[int, bool]) -> "FxRangeAccrualOption":
+        """A COPY with ``observed_in_range`` recorded from ``fills`` on every listed fixing still without one.
+
+        A fixing that already carries an outcome keeps it. Returns ``self`` when nothing changes; the schedule is
+        written out as explicit records on the copy. The product is never changed.
+        """
+        records = [replace(rec) for rec in self.get_observation_records()]
+        changed = False
+        for idx, outcome in fills.items():
+            if 0 <= idx < len(records) and records[idx].observed_in_range is None:
+                records[idx].observed_in_range = bool(outcome)
+                changed = True
+        if not changed:
+            return self
+        frozen = copy.deepcopy(self)
+        frozen._set_records(records)
+        return frozen
+
+    def with_missing_fixings_filled(
+        self, fx_env: "FxPricingEnvironment", *, warn: bool = True
+    ) -> "FxRangeAccrualOption":
         """
         This contract with every past fixing lacking ``observed_in_range`` decided at ``fx_env``'s spot.
 
-        The fill ``resolve_observations`` makes, recorded once on a COPY (``record_passed_fixings`` on it) so that
-        bumped and shocked repricings keep it at the base spot (user decision 2026-10-09: a filled past fixing is
-        history and does not move). One ``MissingFixingWarning`` names the fixings filled. Returns ``self`` when
-        nothing is missing; the product is never changed.
+        The fill ``resolve_observations`` makes, recorded once on a COPY so that bumped and shocked repricings keep
+        it at the base spot (user decision 2026-10-09: a filled past fixing is history and does not move). One
+        ``MissingFixingWarning`` names the fixings filled (``warn=False`` skips it). Returns ``self`` when nothing
+        is missing; the product is never changed.
         """
-        records = self.get_observation_records()
-        labels = [
-            fixing_label(idx, rec)
-            for idx, rec in enumerate(records)
-            if rec.observed_in_range is None and rec.resolve_time(fx_env) <= 0
-        ]
-        if not labels:
+        fills = self.missing_fixing_fills(fx_env)
+        if not fills:
             return self
-        frozen = copy.deepcopy(self)
-        frozen.record_passed_fixings(fx_env)
-        warn_filled_fixings(type(self).__name__, "observed_in_range", labels)
-        return frozen
+        if warn:
+            records = self.get_observation_records()
+            warn_filled_fixings(
+                type(self).__name__, "observed_in_range", [fixing_label(idx, records[idx]) for idx in fills]
+            )
+        return self.with_fixings_recorded(fills)
 
     def _set_records(self, records: List[FxRangeAccrualObservationRecord]) -> None:
         self.observation_records = records
