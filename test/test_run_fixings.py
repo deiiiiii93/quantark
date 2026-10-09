@@ -200,8 +200,9 @@ def test_fx_protocol_and_ageing(kind):
     assert dated.open_fixings(F.fx_env(F.FIX_DAY))[0] == (0.0, "#0 2024-01-05")
 
 
-def test_fx_ageing_moves_a_numeric_delivery():
-    prod = F.fx_ra("domestic", "numeric")
+@pytest.mark.parametrize("kind", FX_KINDS)
+def test_fx_ageing_moves_a_numeric_delivery(kind):
+    prod = F.fx_ra(kind, "numeric")
     prod.delivery = 1.0 + 2 * DAY
     assert prod.with_time_elapsed(DAY).delivery == 1.0 + 2 * DAY - DAY
 
@@ -218,11 +219,16 @@ def test_fx_numeric_twin_aged_prices_as_the_dated_contract(kind, day):
 
 
 @pytest.mark.parametrize("kind", FX_KINDS)
-def test_fx_t0_fill_is_silent_and_a_past_fill_warns(kind):
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_fx_t0_fill_is_silent_and_a_past_fill_warns(kind, form):
     engine = F.FX_CLASSES[kind][1]()
     q = kind == "quanto"
+    prod = F.fx_ra(kind, form)
+    if form == "numeric":
+        prod = _aged(prod, F.FIX_DAY)                                     # record #0 at t = 0
     with warnings.catch_warnings():
         warnings.simplefilter("error", MissingFixingWarning)
-        engine.price(F.fx_ra(kind, "dated"), F.fx_env(F.FIX_DAY, quanto=q))
+        engine.price(prod, F.fx_env(F.FIX_DAY, quanto=q))                # t = 0: live, decided silently
+    past = prod.with_time_elapsed(DAY) if form == "numeric" else prod
     with pytest.warns(MissingFixingWarning, match="1 past fixing"):
-        engine.price(F.fx_ra(kind, "dated"), F.fx_env(F.FIX_DAY + 1, quanto=q))
+        engine.price(past, F.fx_env(F.FIX_DAY + 1, quanto=q))

@@ -37,8 +37,8 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - `AsianOption.time_shift` (theta) records, at the held spot, a dated record its bump steps over; the bumped price is
   unchanged (pricing filled the same spot) and theta on a fixing day no longer warns `MissingFixingWarning`.
 - A fixing at exactly t = 0 (today's, unprinted) that pricing decides at the current spot no longer counts as
-  missing: `MissingFixingWarning` names only strictly past fills (`RangeAccrualOption`, `FxRangeAccrualOption` and its variants, `AsianOption`; spec
-  2026-10-09 run fixings §3.2). Prices are unchanged.
+  missing: `MissingFixingWarning` names only strictly past fills (`RangeAccrualOption`, `FxRangeAccrualOption` and
+  its variants, `AsianOption`; spec 2026-10-09 run fixings §3.2). Prices are unchanged.
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
 - A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.
