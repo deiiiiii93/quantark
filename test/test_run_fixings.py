@@ -449,3 +449,65 @@ def test_business_day_clock_twins_age_identically():
     days = [k for k in range(0, 26) if (F.START + timedelta(days=k)).weekday() < 5]
     _drive(pf, rec, days)
     assert _rows(rec, pid_d) == _rows(rec, pid_n) and len(_rows(rec, pid_d)) == 2
+
+
+def test_a_same_date_refresh_on_a_later_instant_keeps_the_first_live_instants_spot():
+    """Ruling 4 / Ruling 9, negative side: a same-date refresh on SATURDAY refreshes only the records that went live
+    on Saturday; Friday's record (live since Friday) is still recorded at Friday's spot, dated and numeric twins."""
+    from quantark.util.calendar import CalendarType, DayCountConvention, calculate_year_fraction, create_calendar
+    cal = create_calendar(CalendarType.NONE, year_range=(2024, 2025))
+    kw = dict(day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=252, calendar=cal)
+    times = [calculate_year_fraction(F.START, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=cal)
+             for d in F.fixing_dates()]
+    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, spot=105.0, **kw))
+    pid_d, pid_n = list(pf.positions)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    spots = {1: 105.0, 2: 105.0, 3: 105.0, 4: 105.0, 5: 120.0, 6: 120.0, 7: 120.0}   # day 4 = Friday
+    for k in range(1, 8):
+        F.move(pf, k, spots[k])
+        rec.advance(pf)
+        if k == 5:                                          # same-date refresh on Saturday, at a moved spot
+            F.move(pf, 5, 130.0)
+            rec.advance(pf)
+    assert _rows(rec, pid_d) == _rows(rec, pid_n) == [(0, True, 105.0, False)]   # Friday's spot, not Saturday's
+    assert next(d for d in rec.days if d.fixings).date == F.START + timedelta(days=7)
+
+
+def _stateless_twin(kind, form):
+    days = (0, 1, 2, 3, 18, 120, 240, 365)
+    if kind == "ra":
+        if form == "dated":
+            return F.ra_dated(dates=[F.START + timedelta(days=d) for d in days])
+        return F.ra_numeric(times=[d / 365.0 for d in days]).with_time_elapsed(5 * DAY)
+    if form == "dated":
+        recs = [AsianObservationRecord(observation_date=F.START + timedelta(days=d)) for d in days]
+        extra = dict(exercise_date=F.START + timedelta(days=365))
+    else:
+        recs = [AsianObservationRecord(observation_time=d / 365.0) for d in days]
+        extra = dict(maturity=1.0)
+    prod = AsianOption(strike=100.0, option_type=F.OptionType.CALL, asian_strike_type=F.AsianStrikeType.FIXED,
+                       averaging_type=F.AveragingType.ARITHMETIC, observation_records=recs, **extra)
+    return prod if form == "dated" else prod.with_time_elapsed(5 * DAY)
+
+
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_step_fixings_decides_each_live_index_at_its_own_spot_and_a_gap_at_prev_spot(kind):
+    """Ruling 4, stateless: two live indices at two different first-live spots, one gap at ``prev_spot``; an index in
+    ``run_fills`` is not re-decided; ``run_fills`` and the product passed in are untouched; twins identical."""
+    out = (lambda s: 90.0 <= s <= 110.0) if kind == "ra" else (lambda s: s)
+    outcome = "observed_in_range" if kind == "ra" else "observed_price"
+    env = F.eq_env(5)
+    results = []
+    for form in ("dated", "numeric"):
+        prod = _stateless_twin(kind, form)
+        before = copy.deepcopy(prod.observation_records)
+        run_fills = {0: out(100.0)}
+        recorded, new = step_fixings(prod, env, prev_date=F.START + timedelta(days=4), prev_spot=95.0,
+                                     run_fills=run_fills, live_spots={1: 105.0, 2: 120.0})
+        assert new == {1: out(105.0), 2: out(120.0), 3: out(95.0)}
+        assert [getattr(r, outcome) for r in recorded.observation_records[:5]] == [
+            out(100.0), out(105.0), out(120.0), out(95.0), None]
+        assert run_fills == {0: out(100.0)} and prod.observation_records == before and recorded is not prod
+        results.append((new, [getattr(r, outcome) for r in recorded.observation_records]))
+    assert results[0] == results[1]                                       # X2 bitwise

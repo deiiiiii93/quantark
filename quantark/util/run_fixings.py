@@ -7,17 +7,19 @@ Spec: docs/superpowers/specs/2026-10-09-run-fixings-design.md (W6). Asset-neutra
 A product takes part when ``has_run_fixings`` is true and it has the protocol methods ``missing_fixing_fills``,
 ``with_fixings_recorded`` (W5b), ``with_time_elapsed`` and ``open_fixings``. Rules (spec §3.3): R1 the run's quoted
 spot; R2 t = 0 is live, t < 0 is history; R3 when the clock moves from path instant P to P', every record strictly
-past at P' without an outcome is recorded at P's spot; R4 a record no instant fell on takes the previous instant's
-spot, ``gap=True``; R5 the first valuation is W5b's freeze; R6 a numeric contract ages by the environment's year
-fraction; R7 an undated run never advances; R8 time-of-day instants are refused; R9 the clock never goes back; R10
-the run's working positions get copies, the booked product is never mutated.
+past at P' without an outcome is recorded at the spot of the FIRST instant it was live (t = 0) — P's spot on a
+calendar-day clock, where a record is live at one instant only (R3 amendment / Ruling 4: a Friday fixing on a
+``BUSINESS_DAYS`` clock with weekend rows is recorded at Friday's spot); R4 a record no instant fell on (never live)
+takes the previous instant's spot, ``gap=True``; R5 the first valuation is W5b's freeze; R6 a numeric contract
+ages by the environment's year fraction; R7 an undated run never advances; R8 time-of-day instants are refused; R9
+the clock never goes back; R10 the run's working positions get copies, the booked product is never mutated.
 """
 from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
@@ -37,7 +39,7 @@ class RecordedFixing:
     index: int            # record index (records are never dropped by these products)
     label: str            # W5b ``fixing_label`` at the step's instant
     outcome: Any          # bool (range accrual) or price / rate (Asian, TARN, TARF)
-    spot: float           # the spot it was fixed at: the previous path instant's
+    spot: float           # the spot it was fixed at: its first live instant's (Ruling 4); a gap: the previous one's
     gap: bool             # True when it was not live (t = 0) at that instant (R4)
 
 
@@ -116,7 +118,7 @@ def step_fixings(product: Any, env: Any, *, prev_date: Any, prev_spot: float,
 
 def update_live(open_fixings: Mapping[int, Tuple[float, str]], date: Any, spot: float,
                 before: Optional[Mapping[int, Tuple[Any, float]]] = None,
-                exclude=()) -> Dict[int, Tuple[Any, float]]:
+                exclude: Collection[int] = ()) -> Dict[int, Tuple[Any, float]]:
     """``{index: (date, spot)}`` of the instant each live (t = 0) record first went live (Ruling 4)."""
     before = before or {}
     return {i: before.get(i, (date, float(spot)))
@@ -129,6 +131,9 @@ class RunFixingRecorder:
     Call ``register(portfolio)`` once, after the first valuation's market is applied (it replaces W5b's
     ``freeze_portfolio_fixings`` in the run engines), and ``advance(portfolio)`` after every later path instant's
     market and date are applied, before anything is priced.
+
+    Precondition: between ``register`` and ``advance`` a run must not replace a participant's product except with a
+    copy that keeps its records (outcomes included); a reset to the booked product would re-record its fixings.
     """
 
     def __init__(self) -> None:
