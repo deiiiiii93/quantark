@@ -1,6 +1,8 @@
 """M1: the w5b explain test's fixture (test_missing_fixings_scenarios.py::test_pnl_explain_keeps_the_t0_fill_across_the_pair)
 under the user's 2026-10-09 explain decision (pv_t1 = the t1 snapshot's OWN value; a change of a filled missing
-fixing is its own row). Today pv_t1 carries the t0 fill; the t1 snapshot's own value fills at t1's spot."""
+fixing is its own row). On b376cc18 (spec rev 1) pv_t1 carried the t0 fill: pv_t1 7.089709, total -0.063420, i.e. a
+re-fill of -3.806482 hidden from the total. On 20a02bc9 (spec rev 2) w5b already implements the decision: pv_t1 is the
+t1 snapshot's own value, so the "proposed" line below must equal the "today" line (re-fill difference 0)."""
 import warnings
 from datetime import timedelta
 

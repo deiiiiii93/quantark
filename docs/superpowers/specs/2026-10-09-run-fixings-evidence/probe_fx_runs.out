@@ -1,6 +1,6 @@
 
 === F1 FXBacktestEngine (daily calendar path, quantity 1, notional 1e6) ===
-[domestic] MissingFixingWarning count over the run: dated 64, numeric 0
+[domestic] MissingFixingWarning count over the run: dated 81, numeric 0
  day   spot      run dated        by hand     run-hand    run numeric
    0  1.250     28832.3152     28832.3152       0.0000     28832.3152
    3  1.250     29004.2331     29004.2331       0.0000     28832.3152
@@ -11,7 +11,7 @@
   18  1.390      3433.2064     11061.8289   -7628.6225      3626.1964
   20  1.410      2543.2161     10173.9290   -7630.7128      2741.2610
   24  1.450      1342.5651      8977.4603   -7634.8952      1517.3860
-[foreign] MissingFixingWarning count over the run: dated 64, numeric 0
+[foreign] MissingFixingWarning count over the run: dated 81, numeric 0
  day   spot      run dated        by hand     run-hand    run numeric
    0  1.250     36095.5733     36095.5733       0.0000     36095.5733
    3  1.250     36318.6128     36318.6128       0.0000     36095.5733
@@ -24,7 +24,7 @@
   24  1.450      1687.0178     12966.4138  -11279.3960      1905.6488
 
 === F2 FXDynamicScenarioEngine (dated DayPath) ===
-[domestic] MissingFixingWarning count over the run: dated 64, numeric 0
+[domestic] MissingFixingWarning count over the run: dated 81, numeric 0
  day   spot      run dated        by hand     run-hand    run numeric
    0  1.250     28832.3152     28832.3152       0.0000     28832.3152
    3  1.250     29004.2331     29004.2331       0.0000     28832.3152
@@ -35,7 +35,7 @@
   18  1.390      3433.2064     11061.8289   -7628.6225      3626.1964
   20  1.410      2543.2161     10173.9290   -7630.7128      2741.2610
   24  1.450      1342.5651      8977.4603   -7634.8952      1517.3860
-[foreign] MissingFixingWarning count over the run: dated 64, numeric 0
+[foreign] MissingFixingWarning count over the run: dated 81, numeric 0
  day   spot      run dated        by hand     run-hand    run numeric
    0  1.250     36095.5733     36095.5733       0.0000     36095.5733
    3  1.250     36318.6128     36318.6128       0.0000     36095.5733

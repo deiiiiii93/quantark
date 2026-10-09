@@ -1,8 +1,9 @@
 """G1: a fixing dated exactly on the valuation date (t = 0, today's unprinted fixing) under w5b's freeze.
 
-User decision 2026-10-09 (late): t = 0 is LIVE - it moves with spot bumps; only t < 0 is frozen. w5b's
-``missing_fixing_fills`` selects ``resolve_time <= 0``, so ``freeze_missing_fixings`` records the t = 0 fixing at
-the base spot and every bump keeps it. Dated range accrual on day 4 (fixing #0 dated day 4), spot 109.9 under the
+User decision 2026-10-09 (late): t = 0 is LIVE - it moves with spot bumps; only t < 0 is frozen. On b376cc18
+(spec rev 1) ``missing_fixing_fills`` selected ``resolve_time <= 0``, so the freeze recorded the t = 0 fixing (True) and
+the calculator's delta was -0.191889. On 20a02bc9 (spec rev 2, ``is_history``) it is left open (None) and the delta is
+the live one. Dated range accrual on day 4 (fixing #0 dated day 4), spot 109.9 under the
 110 barrier.
 """
 import warnings

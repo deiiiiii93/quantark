@@ -5,7 +5,7 @@ P2  same pair, t1's contract RECORDS #0 (in range, at day 4's spot 105) - the da
 P2b same pair, t1 records #0 OUT of range (a real fixing that differs from the t0 fill).
 P3  t0 = day 3, t1 = day 5: #0 falls strictly inside the step; t1's contract does not record it.
 P3b same step, t1 records #0 (in range).
-P4  a fixing already missing at t0 (strictly past): w5b carries the t0 fill into pv_t1; compare with t1's own value.
+P4  a fixing already missing at t0 (strictly past): the shocked states keep the t0 fill; pv_t1 vs t1's own value.
 """
 import warnings
 from datetime import timedelta

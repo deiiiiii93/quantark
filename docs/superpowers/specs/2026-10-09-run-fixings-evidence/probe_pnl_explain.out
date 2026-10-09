@@ -1,8 +1,8 @@
 
 --- P1 t0 = day 4 (#0 live), t1 = day 10, t1 unrecorded
-pv_t0 5.707299  pv_alive_t1 4.649441  pv_t1 4.649441  t1 snapshot's own value 2.744374  total_pnl -1.057859  MissingFixingWarning x1
+pv_t0 5.707299  pv_alive_t1 2.744374  pv_t1 2.744374  t1 snapshot's own value 2.744374  total_pnl -2.962925  MissingFixingWarning x16
    waterfall time                       0.163719
-   waterfall spot                      -1.221578
+   waterfall spot                      -3.126644
    waterfall vol                        0.000000
    waterfall rate                       0.000000
    waterfall dividend                   0.000000
@@ -22,34 +22,11 @@ pv_t0 5.707299  pv_alive_t1 4.649441  pv_t1 4.649441  t1 snapshot's own value 2.
       taylor gamma                     -0.396658
       taylor volga                      0.000000
       taylor vanna                      0.000000
-      taylor unexplained               -0.072200
-      shared total                     -1.057859
+      taylor unexplained               -1.977266
+      shared total                     -2.962925
 
 --- P2 t0 = day 4, t1 = day 10, t1 records #0 = in range
-pv_t0 5.707299  pv_alive_t1 4.649441  pv_t1 4.649441  t1 snapshot's own value 4.649441  total_pnl -1.057859  MissingFixingWarning x1
-   waterfall time                       0.163719
-   waterfall spot                      -1.221578
-   waterfall vol                        0.000000
-   waterfall rate                       0.000000
-   waterfall dividend                   0.000000
-   waterfall basis                      0.000000
-   waterfall model                      0.000000
-      shared lifecycle_event            0.000000
-      taylor delta                     -0.752720
-      taylor vega                      -0.000000
-      taylor theta                      0.163719
-      taylor theta_contract             0.163719
-      taylor ledger_carry               0.000000
-      taylor r_theta                    0.006407
-      taylor q_theta                   -0.000686
-      taylor convexity_theta            0.157998
-      taylor rho                       -0.000000
-      taylor dividend_rho               0.000000
-      taylor gamma                     -0.396658
-      taylor volga                      0.000000
-      taylor vanna                      0.000000
-      taylor unexplained               -0.072200
-      shared total                     -1.057859
+RAISES ValidationError: contract replacement is not a time step
 
 --- P2b t0 = day 4, t1 = day 10, t1 records #0 = OUT of range (a real fixing that differs from t0's spot)
 RAISES ValidationError: contract replacement is not a time step
@@ -84,7 +61,7 @@ pv_t0 5.684708  pv_alive_t1 5.592668  pv_t1 5.592668  t1 snapshot's own value 5.
 RAISES ValidationError: contract replacement is not a time step
 
 --- P4 fixing missing at t0 (strictly past), t0 spot 105, t1 = day 6 at spot 111
-pv_t0 5.135560  pv_alive_t1 4.833192  pv_t1 4.833192  t1 snapshot's own value 2.453163  total_pnl -0.302368  MissingFixingWarning x1
+pv_t0 5.135560  pv_alive_t1 4.833192  pv_t1 2.453163  t1 snapshot's own value 2.453163  total_pnl -2.682397  MissingFixingWarning x2
    waterfall time                       0.041518
    waterfall spot                      -0.343887
    waterfall vol                        0.000000
@@ -93,6 +70,7 @@ pv_t0 5.135560  pv_alive_t1 4.833192  pv_t1 4.833192  t1 snapshot's own value 2.
    waterfall basis                      0.000000
    waterfall model                      0.000000
       shared lifecycle_event            0.000000
+      shared fixing_refill             -2.380029
       taylor delta                     -0.237505
       taylor vega                      -0.000000
       taylor theta                      0.041518
@@ -107,4 +85,4 @@ pv_t0 5.135560  pv_alive_t1 4.833192  pv_t1 4.833192  t1 snapshot's own value 2.
       taylor volga                      0.000000
       taylor vanna                      0.000000
       taylor unexplained                0.002855
-      shared total                     -0.302368
+      shared total                     -2.682397

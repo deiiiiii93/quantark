@@ -1,2 +1,2 @@
-today: pv_t0 7.153128 pv_t1 7.089709 total_pnl -0.063420
-t1 snapshot's own value 3.283227; proposed total_pnl -3.869901; proposed fixing-fill row -3.806482
+today: pv_t0 7.153128 pv_t1 3.283227 total_pnl -3.869901
+t1 snapshot's own value 3.283227; proposed total_pnl -3.869901; proposed fixing-fill row 0.000000

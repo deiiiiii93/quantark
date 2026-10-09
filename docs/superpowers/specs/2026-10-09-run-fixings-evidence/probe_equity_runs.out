@@ -1,5 +1,5 @@
 === E1 equity BacktestEngine (daily calendar path, value = position MTM) ===
-[ra] MissingFixingWarning count over the run: dated 64, numeric 0
+[ra] MissingFixingWarning count over the run: dated 75, numeric 0
  day   spot    run dated      by hand     run-hand  run numeric
    0  105.0     5.552080     5.552080     0.000000     5.552080
    3  105.0     5.684708     5.684708     0.000000     5.552080
@@ -10,7 +10,7 @@
   18  119.0     1.479992     3.387147    -1.907156     1.631879
   20  121.0     1.350069     3.257747    -1.907678     1.445195
   24  125.0     1.101815     3.010538    -1.908724     1.160861
-[asian] MissingFixingWarning count over the run: dated 66, numeric 0
+[asian] MissingFixingWarning count over the run: dated 79, numeric 0
  day   spot    run dated      by hand     run-hand  run numeric
    0  105.0     8.086867     8.086867     0.000000     8.086867
    3  105.0     7.995320     7.995320     0.000000     8.086867
@@ -22,7 +22,7 @@
   20  121.0    21.410536    18.119426     3.291109    21.585827
   24  125.0    25.194120    20.347729     4.846391    25.344518
 === E2 equity DynamicScenarioEngine (dated DayPath) ===
-[ra] MissingFixingWarning count over the run: dated 106, numeric 0
+[ra] MissingFixingWarning count over the run: dated 128, numeric 0
  day   spot    run dated      by hand     run-hand  run numeric
    0  105.0     5.552080     5.552080     0.000000     5.552080
    3  105.0     5.684708     5.684708     0.000000     5.552080
@@ -33,7 +33,7 @@
   18  119.0     1.479992     3.387147    -1.907156     1.631879
   20  121.0     1.350069     3.257747    -1.907678     1.445195
   24  125.0     1.101815     3.010538    -1.908724     1.160861
-[asian] MissingFixingWarning count over the run: dated 110, numeric 0
+[asian] MissingFixingWarning count over the run: dated 136, numeric 0
  day   spot    run dated      by hand     run-hand  run numeric
    0  105.0     8.086867     8.086867     0.000000     8.086867
    3  105.0     7.995320     7.995320     0.000000     8.086867
@@ -45,7 +45,7 @@
   20  121.0    21.410536    18.119426     3.291109    21.585827
   24  125.0    25.194120    20.347729     4.846391    25.344518
 === E3 ReplayBacktestEngine (analytical route, product_mtm) ===
-[asian] MissingFixingWarning count over the run: dated 42, numeric 0
+[asian] MissingFixingWarning count over the run: dated 47, numeric 0
  day   spot    run dated      by hand     run-hand  run numeric
    0  105.0     7.768558     7.768558     0.000000     7.768558
    3  105.0     7.706980     7.706980     0.000000     7.797323
