@@ -1,0 +1,41 @@
+FX backtest, flat market, valuation_date 2026-06-15 -> 2026-09-14
+  vanilla numeric            day0       0.058424  day91       0.058424  frozen(bitwise) True
+  vanilla DATED (control)    day0       0.058424  day91       0.049584  frozen(bitwise) False
+  digital numeric            day0       0.532325  day91       0.532325  frozen(bitwise) True
+  quanto vanilla numeric     day0       0.058495  day91       0.058495  frozen(bitwise) True
+  barrier numeric            day0       0.014386  day91       0.014386  frozen(bitwise) True
+  sharkfin numeric           day0       0.014386  day91       0.014386  frozen(bitwise) True
+  range accrual numeric      day0       0.029024  day91       0.029024  frozen(bitwise) True
+  quanto digital numeric     day0       0.539241  day91       0.539241  frozen(bitwise) True
+  quanto range acc. numeric  day0       0.029953  day91       0.029953  frozen(bitwise) True
+  foreign range acc. numeric day0       0.035244  day91       0.035244  frozen(bitwise) True
+  TARN numeric               day0     101.645083  day91     101.645083  frozen(bitwise) True
+  TARF numeric               day0      -0.011336  day91      -0.011336  frozen(bitwise) True
+  portfolio_pnl on day 91: -0.008841
+FX dynamic scenario, start_date=2026-06-15: day0 date 2026-06-15 day91 date 2026-09-14; total_pnl -0.008841
+  vanilla numeric            day0       0.058424  day91       0.058424  frozen(bitwise) True
+  vanilla DATED (control)    day0       0.058424  day91       0.049584  frozen(bitwise) False
+  digital numeric            day0       0.532325  day91       0.532325  frozen(bitwise) True
+  quanto vanilla numeric     day0       0.058495  day91       0.058495  frozen(bitwise) True
+  barrier numeric            day0       0.014386  day91       0.014386  frozen(bitwise) True
+  sharkfin numeric           day0       0.014386  day91       0.014386  frozen(bitwise) True
+  range accrual numeric      day0       0.029024  day91       0.029024  frozen(bitwise) True
+  quanto digital numeric     day0       0.539241  day91       0.539241  frozen(bitwise) True
+  quanto range acc. numeric  day0       0.029953  day91       0.029953  frozen(bitwise) True
+  foreign range acc. numeric day0       0.035244  day91       0.035244  frozen(bitwise) True
+  TARN numeric               day0     101.645083  day91     101.645083  frozen(bitwise) True
+  TARF numeric               day0      -0.011336  day91      -0.011336  frozen(bitwise) True
+FX dynamic scenario, start_date=None: day0 date 2026-06-15 day91 date 2026-06-15; total_pnl 0.000000
+  vanilla numeric            day0       0.058424  day91       0.058424  frozen(bitwise) True
+  vanilla DATED (control)    day0       0.058424  day91       0.058424  frozen(bitwise) True
+  digital numeric            day0       0.532325  day91       0.532325  frozen(bitwise) True
+  quanto vanilla numeric     day0       0.058495  day91       0.058495  frozen(bitwise) True
+  barrier numeric            day0       0.014386  day91       0.014386  frozen(bitwise) True
+  sharkfin numeric           day0       0.014386  day91       0.014386  frozen(bitwise) True
+  range accrual numeric      day0       0.029024  day91       0.029024  frozen(bitwise) True
+  quanto digital numeric     day0       0.539241  day91       0.539241  frozen(bitwise) True
+  quanto range acc. numeric  day0       0.029953  day91       0.029953  frozen(bitwise) True
+  foreign range acc. numeric day0       0.035244  day91       0.035244  frozen(bitwise) True
+  TARN numeric               day0     101.645083  day91     101.645083  frozen(bitwise) True
+  TARF numeric               day0      -0.011336  day91      -0.011336  frozen(bitwise) True
+one-touch numeric (structural, VV surface needed to price): get_maturity 1.000000 -> 1.000000 after the env date moves 91 days

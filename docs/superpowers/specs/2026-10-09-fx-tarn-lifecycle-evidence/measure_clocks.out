@@ -1,0 +1,14 @@
+C1 theta (1 day) numeric vs dated vanilla, expiry V+365d, valuation Friday 2026-06-12
+  CALENDAR_DAYS T=1.000000  price numeric 0.058424477055 dated 0.058424477055  theta numeric -9.193e-05 dated -9.193e-05
+  BUSINESS_DAYS T=1.015873  price numeric 0.058955116174 dated 0.058955116174  theta numeric -9.135e-05 dated 0.000e+00
+C2 sum of 91 daily year fractions vs the direct one
+  CALENDAR_DAYS   sum 0.24931506849315024 direct 0.24931506849315069 diff -4.441e-16
+  BUSINESS_DAYS   sum 0.25793650793650746 direct 0.25793650793650796 diff -4.996e-16
+  ACT_365         sum 0.24931506849315024 direct 0.24931506849315069 diff -4.441e-16
+  ACT_360         sum 0.25277777777777738 direct 0.25277777777777777 diff -3.886e-16
+  THIRTY_360_US   sum 0.24722222222222184 direct 0.24722222222222223 diff -3.886e-16
+  ACT_ACT_ISDA    sum 0.24931506849315024 direct 0.24931506849315069 diff -4.441e-16
+C3 dated time yf(V+k, D) vs numeric twin aged by sequential daily shifts (CALENDAR_DAYS)
+  max |numeric - dated| over 91 days = 1.110e-15; non-bitwise (day, fixing) pairs: 988
+C4 accrual factors on monthly dates: ACT_365 vs CALENDAR_DAYS
+  max |ACT_365 - CALENDAR_DAYS| = 0.000e+00; first factors [0.082192, 0.084932, 0.084932]
