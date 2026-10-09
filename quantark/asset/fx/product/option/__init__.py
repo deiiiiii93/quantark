@@ -17,6 +17,13 @@ from .fx_range_accrual_config import (
     FxRangeAccrualConfig,
     FxRangeAccrualObservationRecord,
 )
+from .target_redemption_state import (
+    PendingPayment,
+    TargetRedemptionEvent,
+    TargetRedemptionEventType,
+    TargetRedemptionState,
+    TerminalBookingWarning,
+)
 
 __all__ = [
     'FxVanillaOption',
@@ -33,4 +40,9 @@ __all__ = [
     'FxForeignRangeAccrualOption',
     'FxRangeAccrualConfig',
     'FxRangeAccrualObservationRecord',
+    'PendingPayment',
+    'TargetRedemptionEvent',
+    'TargetRedemptionEventType',
+    'TargetRedemptionState',
+    'TerminalBookingWarning',
 ]

@@ -7,6 +7,17 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+FX TARN / TARF mid-life booking, dated form and ageing (spec:
+`docs/superpowers/specs/2026-10-09-fx-tarn-lifecycle-design.md`). A target-redemption contract carries its realized
+state, can be booked by dates, ages through `time_shift` / `record_passed_fixings`, and is aged day by day in the FX
+backtest and FX dynamic scenario.
+
+### Added
+- `quantark.asset.fx.product.option.target_redemption_state`: `TargetRedemptionState` (amount banked towards the
+  target, determined `PendingPayment`s, dated `as_of`), `TargetRedemptionEvent` / `TargetRedemptionEventType`,
+  `TerminalBookingWarning`, `ResolvedTargetRedemption`, and `TARGET_HIT_RTOL` (1e-12, moved from the two TARN/TARF
+  engines with its value unchanged).
+
 Accrual time, separate from observation time (spec: `docs/superpowers/specs/2026-10-08-accrual-time-design.md`).
 An autocallable's observation is a trading-day quantity (when the market is checked); its accrual is a calendar
 quantity in the contract's interest basis (how much it owes). Every snowball, Phoenix and KO-reset record now
