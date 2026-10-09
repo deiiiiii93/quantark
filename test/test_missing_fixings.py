@@ -136,8 +136,9 @@ class TestEquityRangeAccrualFill:
         assert past == [(1.0, True), (1.0, True)]
         assert len(caught) == 1
         message = str(caught[0].message)
-        assert "2 past fixings" in message
-        assert "#0 2024-12-20" in message and "#1 2025-01-01" in message
+        # #1 is dated on the valuation date: t = 0 is live, not history (run fixings §3.2), so only #0 is named
+        assert "1 past fixing" in message
+        assert "#0 2024-12-20" in message and "#1" not in message
 
     def test_get_past_accrual_fills(self):
         (accrual, caught) = _missing_fixing_warnings(_eq_option(_eq_records()).get_past_accrual, _eq_env(120.0))
@@ -195,7 +196,7 @@ class TestEquityRangeAccrualFill:
         ]
         option = _eq_option(records, maturity=1e-12)
         price, caught = _missing_fixing_warnings(make_engine().price, option, _eq_env(120.0))
-        assert len(caught) == 1
+        assert len(caught) == 0  # both records are at t = 0: live, not history (run fixings §3.2)
         explicit = _eq_option(
             [
                 RangeAccrualObservationRecord(observation_time=0.0, observed_in_range=True),

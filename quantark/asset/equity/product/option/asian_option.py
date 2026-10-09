@@ -21,7 +21,7 @@ from quantark.util.enum import (
     TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import fixing_label, is_history, warn_filled_fixings
+from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings
 from quantark.util.numerical import is_zero, is_close, safe_log, safe_exp
 
 from .base_equity_option import BaseEquityOption
@@ -410,9 +410,11 @@ class AsianOption(BaseEquityOption):
             if t <= 0:
                 price = rec.observed_price
                 if price is None:
-                    # A missing past fixing takes the current spot (user ruling 2026-10-09)
+                    # A past fixing without its price takes the current spot (user ruling 2026-10-09); at t = 0 it is
+                    # today's live fixing (D1), so only history is named in the warning.
                     price = float(pricing_env.spot)
-                    filled.append(fixing_label(idx, rec))
+                    if is_history(t):
+                        filled.append(fixing_label(idx, rec))
                 past_prices.append(price)
                 is_past.append(True)
             else:
@@ -486,6 +488,41 @@ class AsianOption(BaseEquityOption):
                 [fixing_label(idx, self.observation_records[idx]) for idx in fills],
             )
         return self.with_fixings_recorded(fills)
+
+    @property
+    def has_run_fixings(self) -> bool:
+        """A record schedule takes part in run fixings; a legacy schedule has no past fixing to record (spec §5.2)."""
+        return self.observation_records is not None
+
+    def open_fixings(self, pricing_env: "PricingEnvironment") -> Dict[int, Tuple[float, str]]:
+        """``{index: (time, label)}`` for every record without ``observed_price`` (empty for a legacy schedule)."""
+        if self.observation_records is None:
+            return {}
+        return {
+            idx: (rec.resolve_time(pricing_env), fixing_label(idx, rec))
+            for idx, rec in enumerate(self.observation_records)
+            if rec.observed_price is None
+        }
+
+    def with_time_elapsed(self, dt: float) -> "AsianOption":
+        """The run clock's step: a COPY of a numeric record contract with every numeric record time and the maturity
+        moved by ``dt`` (snapped to 0.0 when ``is_zero``). Records nothing. A dated contract, or ``dt`` of zero,
+        returns ``self``. A legacy schedule has no records to move: refused."""
+        if self.observation_records is None:
+            raise ValidationError(
+                "a legacy Asian schedule (no observation_records) cannot age by the run clock; book records "
+                "(spec 2026-10-09 run fixings §5.2)"
+            )
+        if self.exercise_date is not None or self.maturity is None or is_zero(dt):
+            return self
+        aged = copy.deepcopy(self)
+        aged.observation_records = [
+            replace(rec, observation_time=snap_time(rec.observation_time - dt))
+            if rec.observation_time is not None else rec
+            for rec in aged.observation_records
+        ]
+        aged.maturity = snap_time(self.maturity - dt)
+        return aged
 
     def _resolve_from_legacy(
         self,

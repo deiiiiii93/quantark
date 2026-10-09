@@ -32,6 +32,12 @@ def is_history(observation_time: float) -> bool:
     return observation_time < 0 and not is_zero(observation_time)
 
 
+def snap_time(t: float) -> float:
+    """``t`` with a time indistinguishable from zero (``is_zero``) made exactly ``0.0``: an aged numeric fixing lands
+    on t = 0 on its own day, not an ulp either side (spec 2026-10-09 run fixings §3.2)."""
+    return 0.0 if is_zero(t) else t
+
+
 def fixing_label(index: int, record) -> str:
     """``#<index> t=<time>`` for a numeric record, ``#<index> <date>`` for a dated one (the time wins, as in
     ``resolve_time``)."""

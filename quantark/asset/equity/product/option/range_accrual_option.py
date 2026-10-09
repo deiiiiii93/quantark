@@ -15,7 +15,7 @@ from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import ExerciseType, OptionType, TenorEnd
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import fixing_label, is_history, warn_filled_fixings
+from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
 from .base_equity_option import BaseEquityOption
@@ -502,7 +502,7 @@ class RangeAccrualOption(BaseEquityOption):
 
         A past observation (t <= 0) without ``observed_in_range`` is decided at the environment's current spot
         through ``is_in_range`` (its own barriers, reverse mode) and one ``MissingFixingWarning`` names every
-        observation so filled. The product is not changed. A future observation must not carry an outcome.
+        STRICTLY past observation so filled (one at t = 0 is today's live fixing). The product is not changed. A future observation must not carry an outcome.
 
         Args:
             pricing_env: Pricing environment with valuation date
@@ -529,9 +529,11 @@ class RangeAccrualOption(BaseEquityOption):
             if t <= 0:
                 in_range = rec.observed_in_range
                 if in_range is None:
-                    # A missing past fixing is decided at the current spot (user ruling 2026-10-09)
+                    # A past fixing without its outcome is decided at the current spot (user ruling 2026-10-09). At
+                    # t = 0 it is today's live fixing (D1), not a missing one: only history is named in the warning.
                     in_range = self.is_in_range(float(pricing_env.spot), idx, rec)
-                    filled.append(fixing_label(idx, rec))
+                    if is_history(t):
+                        filled.append(fixing_label(idx, rec))
                 past_observations.append((rec.weight, in_range))
             else:
                 # Future observation
@@ -600,6 +602,40 @@ class RangeAccrualOption(BaseEquityOption):
                 type(self).__name__, "observed_in_range", [fixing_label(idx, records[idx]) for idx in fills]
             )
         return self.with_fixings_recorded(fills)
+
+    @property
+    def has_run_fixings(self) -> bool:
+        """Takes part in run fixings (``quantark.util.run_fixings``): every schedule form becomes records."""
+        return True
+
+    def open_fixings(self, pricing_env: "PricingEnvironment") -> Dict[int, Tuple[float, str]]:
+        """``{index: (time, label)}`` for every observation without ``observed_in_range``: its time resolved at
+        ``pricing_env`` (negative when past) and its W5b label."""
+        return {
+            idx: (rec.resolve_time(pricing_env), fixing_label(idx, rec))
+            for idx, rec in enumerate(self.get_observation_records())
+            if rec.observed_in_range is None
+        }
+
+    def with_time_elapsed(self, dt: float) -> "RangeAccrualOption":
+        """The run clock's step (spec 2026-10-09 run fixings §3.2): a COPY of a numeric contract with every numeric
+        observation time and the maturity moved by ``dt`` (each snapped to exactly 0.0 when ``is_zero``) and ``dt``
+        banked in ``accrued_offset``, as ``time_shift`` banks it. Records NOTHING (unlike ``time_shift``, which fixes
+        a landing fixing at the held spot for theta): a fixing landing on t = 0 stays live. A legacy schedule is
+        written out as records first. A dated contract, or ``dt`` of zero, returns ``self``."""
+        if self.exercise_date is not None or self.maturity is None or is_zero(dt):
+            return self
+        records = [replace(rec) for rec in self.get_observation_records()]
+        for rec in records:
+            if rec.observation_time is not None:
+                rec.observation_time = snap_time(rec.observation_time - dt)
+        aged = copy.deepcopy(self)
+        aged.observation_records = records
+        aged.observation_times = None
+        aged.num_observations = None
+        aged.maturity = snap_time(self.maturity - dt)
+        aged.accrued_offset = self.accrued_offset + dt
+        return aged
 
     def has_past_observations(self, pricing_env: "PricingEnvironment") -> bool:
         """

@@ -1,0 +1,3 @@
+# Run fixings (W6): existing expected values that moved. Format: test :: what : old -> new  [reason]
+test/test_missing_fixings.py::TestEquityRangeAccrualFill::test_near_expiry_fills[analytical,mc] :: MissingFixingWarning count : 1 -> 0  [spec §3.2/§8: a t = 0 fill is live, not missing; price unchanged]
+test/test_missing_fixings.py::TestEquityRangeAccrualFill::test_dated_fixing_named_by_date :: MissingFixingWarning message : '2 past fixings (#0 2024-12-20, #1 2025-01-01)' -> '1 past fixing (#0 2024-12-20)'  [spec §3.2/§8: #1 is dated on the valuation date, t = 0 is live; price unchanged]
