@@ -285,42 +285,6 @@ class RangeAccrualOption(BaseEquityOption):
             "observation_times, or num_observations with maturity"
         )
 
-    def time_shift(
-        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
-    ) -> None:
-        """Age the range accrual by ``time_bump`` (spec 2026-10-07 theta boundary).
-
-        Numeric records move with the clock (a record on the bumped instant to exactly 0.0); a record that becomes
-        past, or lands on the bumped instant, without a fixing gets one decided on the spot - the spot is held over
-        a theta bump, and a record at or before the as-of instant must carry ``observed_in_range``. Dated records
-        resolve against the bumped valuation date; those on or before its calendar day get the same fixing. The
-        schedule is written out as explicit records first (a ``num_observations`` schedule follows the maturity).
-        ``keep_landing`` changes nothing here: a range accrual observation is always a fixing, never skipped.
-        """
-        from copy import deepcopy
-
-        from quantark.util.numerical import is_zero
-
-        records = [deepcopy(rec) for rec in self.get_observation_records()]
-        spot = float(pricing_env.spot)
-        for idx, rec in enumerate(records):
-            past = False
-            if rec.observation_time is not None:
-                shifted = rec.observation_time - time_bump
-                rec.observation_time = 0.0 if is_zero(shifted) else shifted
-                past = rec.observation_time <= 0.0
-            elif rec.observation_date is not None and bumped_date is not None:
-                past = rec.observation_date.date() <= bumped_date.date()
-            if past and rec.observed_in_range is None:
-                rec.observed_in_range = self.is_in_range(spot, idx, rec)
-        self.observation_records = records
-        self.observation_times = None
-        self.num_observations = None
-        if self.exercise_date is None and self.maturity is not None:
-            self.maturity -= time_bump
-        else:
-            pricing_env.valuation_date = bumped_date
-
     def get_observation_records(self) -> List[RangeAccrualObservationRecord]:
         """
         Get observation records, building from legacy inputs if needed.
@@ -435,34 +399,41 @@ class RangeAccrualOption(BaseEquityOption):
         """The time ``time_shift`` has aged a numeric contract by (see ``BaseEquityOption.get_tenor``)."""
         return self.accrued_offset
 
-    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
+    def time_shift(
+        self, time_bump: float, bumped_date: datetime, pricing_env, *, keep_landing: bool = False
+    ) -> None:
         """
-        Age the contract for a theta bump.
+        Age the range accrual by ``time_bump`` (spec 2026-10-07 theta boundary).
 
-        A numeric contract's maturity and fixing times move with the clock and the elapsed time is banked, so its
-        coupon keeps the whole contract's year fraction. A fixing the bump steps over, numeric or dated, is fixed at
-        the environment's spot -- the spot a theta bump holds -- so it counts as observed, in range or not.
-
-        Returns False: an expired schedule still owes its coupon at expiry.
+        Numeric records move with the clock (a record on the bumped instant to exactly 0.0); a record that becomes
+        past, or lands on the bumped instant, without a fixing gets one decided on the spot - the spot is held over
+        a theta bump, and a record at or before the as-of instant must carry ``observed_in_range``. Dated records
+        resolve against the bumped valuation date; those on or before its calendar day get the same fixing. The
+        schedule is written out as explicit records first (a ``num_observations`` schedule follows the maturity).
+        A numeric contract banks the elapsed time in ``accrued_offset``, so its annualized coupon keeps the whole
+        contract's year fraction. ``keep_landing`` changes nothing here: a range accrual observation is always a
+        fixing, never skipped.
         """
         records = [replace(rec) for rec in self.get_observation_records()]
-        super().time_shift(time_bump, bumped_date, pricing_env)
-        if self.exercise_date is None:
-            self.accrued_offset += time_bump
-            for rec in records:
-                if rec.observation_time is not None:
-                    rec.observation_time -= time_bump
-        else:
-            pricing_env.valuation_date = bumped_date
-
+        spot = float(pricing_env.spot)
         for idx, rec in enumerate(records):
-            if rec.observed_in_range is None and rec.resolve_time(pricing_env) <= 0:
-                rec.observed_in_range = self.is_in_range(pricing_env.spot, idx, rec)
-
+            past = False
+            if rec.observation_time is not None:
+                shifted = rec.observation_time - time_bump
+                rec.observation_time = 0.0 if is_zero(shifted) else shifted
+                past = rec.observation_time <= 0.0
+            elif rec.observation_date is not None and bumped_date is not None:
+                past = rec.observation_date.date() <= bumped_date.date()
+            if past and rec.observed_in_range is None:
+                rec.observed_in_range = self.is_in_range(spot, idx, rec)
         self.observation_records = records
         self.observation_times = None
         self.num_observations = None
-        return False
+        if self.exercise_date is None and self.maturity is not None:
+            self.maturity -= time_bump
+            self.accrued_offset += time_bump
+        else:
+            pricing_env.valuation_date = bumped_date
 
     def get_payoff(
         self,
