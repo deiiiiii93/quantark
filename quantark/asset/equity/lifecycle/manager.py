@@ -91,6 +91,9 @@ class PortfolioLifecycleManager:
         self.pending_receivable_pv: float = 0.0
         self.paid_cash: float = 0.0
         self._cashflow_underlyings: Dict[str, str] = {}
+        # A time-based flow's times run from its tracker's clock origin (the contract's initial_date when set,
+        # tracker clock decision A, 2026-10-09), not from base_date: each flow is valued on its own clock.
+        self._cashflow_origins: Dict[str, pd.Timestamp] = {}
         self._autocallable: Dict[str, AutocallableLifecycleTracker] = {}
         self._barrier: Dict[str, BarrierLifecycleTracker] = {}
         # Untracked schedule-free float-maturity contracts (patch spec 2026-09-03 §4)
@@ -264,6 +267,7 @@ class PortfolioLifecycleManager:
             position_id,
             position.underlying,
             events,
+            clock_origin=tracker.clock_origin,
         )
         # Capture context BEFORE mutating/removing the position so product_type
         # reflects the product at event time.
@@ -307,8 +311,12 @@ class PortfolioLifecycleManager:
         position_id: str,
         underlying: str,
         events: List[LifecycleEvent],
+        clock_origin: Optional[pd.Timestamp] = None,
     ) -> tuple[List[LifecycleEvent], bool]:
-        """Register determined cashflows and namespace their portfolio IDs."""
+        """Register determined cashflows and namespace their portfolio IDs.
+
+        ``clock_origin`` is the day the tracker's time-based flows are measured from (``base_date`` when omitted).
+        """
         managed_events: List[LifecycleEvent] = []
         terminated = False
         for event in events:
@@ -329,6 +337,9 @@ class PortfolioLifecycleManager:
                 )
                 self.ledger.register(ledger_cashflow)
                 self._cashflow_underlyings[global_id] = underlying
+                self._cashflow_origins[global_id] = (
+                    self.base_date if clock_origin is None else pd.Timestamp(clock_origin).normalize()
+                )
                 event = replace(
                     event,
                     realized_cashflow=ledger_cashflow,
@@ -340,13 +351,7 @@ class PortfolioLifecycleManager:
     def _revalue_ledger(self, portfolio, date: pd.Timestamp) -> None:
         pending_pv = 0.0
         paid_cash = 0.0
-        elapsed = max(
-            0.0,
-            (
-                pd.Timestamp(date).normalize() - self.base_date
-            ).days
-            / 365.0,
-        )
+        day = pd.Timestamp(date).normalize()
         for cashflow in self.ledger.cashflows:
             underlying = self._cashflow_underlyings[cashflow.cashflow_id]
             env = portfolio.pricing_environments[underlying]
@@ -359,7 +364,8 @@ class PortfolioLifecycleManager:
                     valuation_env = deepcopy(env)
                     valuation_env.valuation_date = point.date
             else:
-                point = ValuationPoint(time=elapsed)
+                origin = self._cashflow_origins.get(cashflow.cashflow_id, self.base_date)
+                point = ValuationPoint(time=max(0.0, (day - origin).days / 365.0))
                 valuation_env = env
 
             single = LifecycleCashflowLedger([cashflow])

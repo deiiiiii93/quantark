@@ -15,6 +15,20 @@ event-detection logic is unchanged. Differences from the original:
 ``start_date`` may be ``None`` at construction and assigned later (the OTC
 backtest engine sets it at the top of ``run()``); it must be set before any
 observation method is called.
+
+One clock (tracker clock decision A, 2026-10-09): every time the tracker
+measures -- a numeric record's date, the pricing copy's ageing, the numeric
+valuation point, the terminal's due day, a ledger entry's time -- runs from
+``lifecycle_clock_origin``: the contract's ``initial_date`` when it has one,
+else the run's ``start_date``. A numeric contract therefore books what its
+dated twin books, whenever the run starts.
+
+Records dated before ``start_date`` (decision 2): a knock-out, knock-in or
+coupon record whose date lies before the run, and that the caller did not
+carry as observed, was observed before the run. It is marked observed and never
+tested against the run's first close: it did not knock out or knock in, and a
+coupon there is history (a memory coupon was paid, so nothing is memorized). A
+record dated ON ``start_date`` is today's and is tested on that close.
 """
 
 from __future__ import annotations
@@ -54,6 +68,19 @@ def _identity_date_resolver(date: pd.Timestamp) -> pd.Timestamp:
     return pd.Timestamp(date).normalize()
 
 
+def lifecycle_clock_origin(product: Any, start_date) -> Optional[pd.Timestamp]:
+    """The day a lifecycle measures every time from: ``product.initial_date`` when set, else ``start_date``.
+
+    The tracker's one clock (decision A, 2026-10-09). Numeric records are dated from it, the pricing copy is aged by
+    the time since it, and a numeric valuation point, terminal and ledger entry read their times off it, so a numeric
+    contract is timed exactly like its dated twin. ``None`` when neither date is known. The value is returned as
+    given (not normalized): each consumer keeps its own day arithmetic.
+    """
+    initial = getattr(product, "initial_date", None)
+    origin = initial if initial is not None else start_date
+    return None if origin is None else pd.Timestamp(origin)
+
+
 class AutocallableLifecycleTracker:
     """
     Tracks realized lifecycle state of one autocallable product and detects
@@ -82,6 +109,18 @@ class AutocallableLifecycleTracker:
     # ------------------------------------------------------------------
     # Pricing-product construction (mirrors ProductReplay)
     # ------------------------------------------------------------------
+
+    @property
+    def clock_origin(self) -> Optional[pd.Timestamp]:
+        """The tracker's one clock origin (``lifecycle_clock_origin`` of its contract and ``start_date``)."""
+        return lifecycle_clock_origin(self.product, self.start_date)
+
+    def _before_run(self, record: Dict[str, Any]) -> bool:
+        """Whether ``record`` is dated before the run's ``start_date`` (decision 2: observed before the run, never
+        tested). A record dated on ``start_date`` is not: it is tested on the first close."""
+        if record.get("date") is None or self.start_date is None:
+            return False
+        return pd.Timestamp(record["date"]).normalize() < pd.Timestamp(self.start_date).normalize()
 
     @property
     def lifecycle_contract(self) -> Any:
@@ -116,10 +155,11 @@ class AutocallableLifecycleTracker:
         """
         Return a time-decayed copy of the product for pricing on ``date``.
 
-        ``start_date`` must be set before calling this method; if it is
-        ``None`` no time decay or barrier-schedule shift is applied (elapsed
-        defaults to 0.0). The returned product's ``_otc_lifecycle_knocked_in``
-        attribute reflects the current lifecycle state.
+        The copy is aged by the time since ``clock_origin`` (the contract's
+        ``initial_date`` when set, else ``start_date``); with neither, no time
+        decay or barrier-schedule shift is applied (elapsed defaults to 0.0).
+        The returned product's ``_otc_lifecycle_knocked_in`` attribute
+        reflects the current lifecycle state.
 
         ``initial`` is the run's first valuation, before its first close is
         observed: a record due that day is still pending and kept at time 0.
@@ -127,21 +167,17 @@ class AutocallableLifecycleTracker:
         applied and are gone.
         """
         product = self._contract_for_pricing()
+        origin = self.clock_origin
+        # whole days, as ``_valuation_point`` and the record dates count them: a booked ``initial_date`` carrying a
+        # time of day must not age the copy one day less than the close that books the record
+        elapsed = 0.0 if origin is None else max(
+            0.0, (pd.Timestamp(date).normalize() - origin.normalize()).days / 365.0)
         if (
             getattr(product, "exercise_date", None) is None
             and getattr(product, "maturity", None) is not None
-            and self.start_date is not None
+            and origin is not None
         ):
-            elapsed = max(
-                0.0, (pd.Timestamp(date) - pd.Timestamp(self.start_date)).days / 365.0
-            )
             product.maturity = max(float(product.maturity) - elapsed, 1e-8)
-        elif self.start_date is not None:
-            elapsed = max(
-                0.0, (pd.Timestamp(date) - pd.Timestamp(self.start_date)).days / 365.0
-            )
-        else:
-            elapsed = 0.0
         barrier_config = getattr(product, "barrier_config", None)
         if barrier_config is not None and hasattr(barrier_config, "time_shift"):
             # The shift is kept even when nothing survives it.  An aged
@@ -203,6 +239,11 @@ class AutocallableLifecycleTracker:
                 if not self._record_is_due(date, valuation_point, rec):
                     continue
                 self.lifecycle.observed_ko_indices.add(idx)
+                if self._before_run(rec):
+                    # observed before the run: not knocked out, and its coupon (a Phoenix's) is history
+                    if isinstance(product, PhoenixOption):
+                        self.lifecycle.observed_coupon_indices.add(idx)
+                    continue
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=True):
                     # A Phoenix knock-out settles this period's coupon too (the engines add
                     # it to the knock-out payoff), and it is the last chance for memorized
@@ -300,6 +341,8 @@ class AutocallableLifecycleTracker:
                 if not self._record_is_due(date, valuation_point, rec):
                     continue
                 self.lifecycle.observed_ki_indices.add(idx)
+                if self._before_run(rec):
+                    continue                    # observed before the run: not knocked in
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=False):
                     before = self._state_snapshot()
                     # the anchor is the record whose test fired, at its contractual fixing (spec §5.1)
@@ -325,6 +368,10 @@ class AutocallableLifecycleTracker:
                 if idx in self.lifecycle.observed_coupon_indices:
                     continue
                 if not self._record_is_due(date, valuation_point, rec):
+                    continue
+                if self._before_run(rec):
+                    # a coupon dated before the run is history: paid (memory) or not owed, nothing memorized
+                    self.lifecycle.observed_coupon_indices.add(idx)
                     continue
                 event = self._observe_phoenix_coupon(
                     product, idx, rec, date, spot, valuation_point
@@ -528,7 +575,7 @@ class AutocallableLifecycleTracker:
         ko_records = self._scheduled_records(product, env, "ko")
         ko_due, ko_barrier, ko_payoff, ko_settle, ko_delay = [], [], [], [], []
         for rec in ko_records:
-            due = first_due(lambda day, vp, rec=rec: self._record_is_due(day, vp, rec))
+            due = self._record_first_due(dates, rec, product)
             ko_due.append(due)
             ko_barrier.append(float(rec["barrier"]) if rec["barrier"] is not None else np.nan)
             ko_payoff.append(float(rec["payoff"]))
@@ -552,7 +599,7 @@ class AutocallableLifecycleTracker:
             continuous_barrier = float(barrier)
         else:
             for rec in self._scheduled_records(product, env, "ki"):
-                ki_due.append(first_due(lambda day, vp, rec=rec: self._record_is_due(day, vp, rec)))
+                ki_due.append(self._record_first_due(dates, rec, product))
                 ki_barrier.append(float(rec["barrier"]) if rec["barrier"] is not None else np.nan)
 
         terminal_due, terminal_settle, terminal_delay = self._calendar_terminal(
@@ -576,6 +623,7 @@ class AutocallableLifecycleTracker:
             uses_date_timing=bool(self._uses_date_timing(product)),
             ko_settlement_delay=np.array(ko_delay, dtype=float),
             terminal_settlement_delay=terminal_delay,
+            clock_origin=None if self.clock_origin is None else self.clock_origin.normalize(),
         )
 
     def _calendar_terminal(self, product, env, first_due, settlement_position, terminal_payment_date):
@@ -591,6 +639,13 @@ class AutocallableLifecycleTracker:
             if is_due(day, self._valuation_point(day, product)):
                 return d
         return -1
+
+    def _record_first_due(self, dates: pd.DatetimeIndex, record: Dict[str, Any], product: Any) -> int:
+        """The position in ``dates`` whose close tests ``record``: -1 past the end, and -1 for a record dated before
+        the run, which ``observe`` never tests (decision 2)."""
+        if self._before_run(record):
+            return -1
+        return self._first_due(dates, lambda day, vp: self._record_is_due(day, vp, record), product)
 
     @staticmethod
     def _settlement_position(dates: pd.DatetimeIndex, settlement_date, due_day: int) -> int:
@@ -608,7 +663,7 @@ class AutocallableLifecycleTracker:
         if getattr(timing, "payment_date", None) is not None:
             return pd.Timestamp(timing.payment_date).normalize()
         if base is None:
-            base = getattr(product, "initial_date", None) or self.start_date
+            base = lifecycle_clock_origin(product, self.start_date)
         if base is None:
             return None
         payment_time = float(timing.payment_time)
@@ -633,8 +688,8 @@ class AutocallableLifecycleTracker:
     def _schedule_resolution_env(
         self, product: Any, env: PricingEnvironment
     ) -> PricingEnvironment:
-        """Resolve lifecycle schedules from the contract issue date."""
-        base_date = getattr(product, "initial_date", None) or self.start_date
+        """Resolve lifecycle schedules from the contract issue date (the clock origin)."""
+        base_date = lifecycle_clock_origin(product, self.start_date)
         if base_date is None:
             return env
 
@@ -671,8 +726,8 @@ class AutocallableLifecycleTracker:
         self, product: Any, resolved, payoffs: Optional[List[float]] = None, base=None
     ) -> List[Dict[str, Any]]:
         """The replay-clock record dicts of resolved observations; ``payoffs`` overrides each ``rec.payoff``.
-        ``base`` dates numeric records from another day than the product's (the KO-reset tracker's REBASED schedule
-        2, timed from the knock-in close on the pricing clock)."""
+        ``base`` dates numeric records from another day than the product's clock origin (the KO-reset tracker's
+        REBASED schedule 2 passes the tracker's own origin, ``_schedule_two_base``)."""
         records: List[Dict[str, Any]] = []
         # Replay clock: a numeric schedule still plays out on real calendar
         # days of this run, so dates absent from the schedule are derived from
@@ -680,7 +735,7 @@ class AutocallableLifecycleTracker:
         # this is the replay layer's own calendar, and it is what date-based
         # due checks, pending settlement, and run termination key on.
         if base is None:
-            base = getattr(product, "initial_date", None) or self.start_date
+            base = lifecycle_clock_origin(product, self.start_date)
         base_date = pd.Timestamp(base) if base is not None else None
         for position, rec in enumerate(resolved):
             obs_time = float(rec.observation_time)
@@ -733,14 +788,12 @@ class AutocallableLifecycleTracker:
     ) -> ValuationPoint:
         if self._uses_date_timing(product):
             return ValuationPoint(date=pd.Timestamp(date).to_pydatetime())
-        if self.start_date is None:
+        origin = self.clock_origin
+        if origin is None:
             raise ValueError(
                 "start_date is required for numeric lifecycle schedules"
             )
-        elapsed_days = (
-            pd.Timestamp(date).normalize()
-            - pd.Timestamp(self.start_date).normalize()
-        ).days
+        elapsed_days = (pd.Timestamp(date).normalize() - origin.normalize()).days
         return ValuationPoint(time=max(0.0, elapsed_days / 365.0))
 
     @staticmethod
@@ -930,8 +983,14 @@ class CalendarSchedule:
     same records and due rule ``observe`` uses, so a caller that fires on
     these days fires exactly when the tracker does.
 
+    A record dated before the run's ``start_date`` is due on no day (``-1``):
+    the tracker marks it observed and never tests it (decision 2).
+
     ``uses_date_timing`` says which clock the tracker keeps for this
-    product (``_uses_date_timing``).  On the numeric clock a terminal
+    product (``_uses_date_timing``). ``clock_origin`` is the day its numeric
+    times run from (``lifecycle_clock_origin``, normalized): the numeric
+    valuation point of position ``d`` is ``(dates[d] - clock_origin).days /
+    365``.  On the numeric clock a terminal
     cashflow's payment time is its determination time plus the record's
     ``settlement_time - time`` (``ko_settlement_delay`` per observation,
     ``terminal_settlement_delay`` for maturity), and that is what the ledger
@@ -954,3 +1013,4 @@ class CalendarSchedule:
     uses_date_timing: bool
     ko_settlement_delay: np.ndarray
     terminal_settlement_delay: float
+    clock_origin: Optional[pd.Timestamp]

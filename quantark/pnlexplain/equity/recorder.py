@@ -8,7 +8,9 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 
+from quantark.asset.equity.lifecycle.autocallable import lifecycle_clock_origin
 from quantark.asset.equity.lifecycle.cashflows import ValuationPoint
+from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
 from quantark.pnlexplain.base import ExplainMethod, component_sum, rows_to_frame
 from quantark.pnlexplain.config import PnLExplainConfig
 from quantark.pnlexplain.equity.lifecycle import LifecycleTransition
@@ -65,19 +67,26 @@ def _is_unrolled_float_contract(product_alive: Any, product_held: Any) -> bool:
         and getattr(product_held, "maturity_date", None) is None
 
 
-def _state_point(state: Any, ts: datetime, base_date: Optional[datetime]) -> Optional[ValuationPoint]:
+def _state_point(state: Any, ts: datetime, base_date: Optional[datetime],
+                 product: Any = None) -> Optional[ValuationPoint]:
     """The ledger valuation point of a lifecycle state on ``ts``.
 
-    Float-schedule products keep their ledger in contract time; the manager
-    values them at ``(date - base_date) / 365`` and so does this recorder.
-    Date-based (or unobserved) states read at the snapshot date (None).
+    Float-schedule products keep their ledger in contract time, measured from
+    their tracker's clock origin: an autocallable's is its contract's
+    ``initial_date`` when set (``lifecycle_clock_origin``, tracker clock
+    decision A), every other tracker's the manager's ``base_date``. The
+    manager values them on that clock and so does this recorder. Date-based
+    (or unobserved) states read at the snapshot date (None).
     """
     vp = getattr(state, "valuation_point", None)
     if vp is None or vp.time is None:
         return None
     if base_date is None:
         raise ValidationError("a contract-time lifecycle state needs the manager's base_date")
-    elapsed = (pd.Timestamp(ts).normalize() - pd.Timestamp(base_date).normalize()).days
+    origin = pd.Timestamp(base_date)
+    if isinstance(state, AutocallableLifecycleState) and product is not None:
+        origin = lifecycle_clock_origin(product, base_date)
+    elapsed = (pd.Timestamp(ts).normalize() - origin.normalize()).days
     return ValuationPoint(time=max(0.0, elapsed / 365.0))
 
 
@@ -195,7 +204,7 @@ class PnLExplainRecorder:
             state = deepcopy(getattr(pos, "lifecycle_state", None))
             snap = ValuationSnapshot(product=pos.product, engine=pos.engine, pricing_env=envs[pos.underlying],
                                      date=ts, quantity=float(pos.quantity), lifecycle_state=state,
-                                     valuation_point=_state_point(state, ts, base), label=pid)
+                                     valuation_point=_state_point(state, ts, base, pos.product), label=pid)
             live[pid] = PositionSnapshot(pid, pos.underlying, snap)
         if self._prev_book is None:
             self._prev_book = BookSnapshot(date=ts, positions=live, environments=envs)
@@ -222,7 +231,8 @@ class PnLExplainRecorder:
             if is_terminal(state_after):
                 snap = ValuationSnapshot(pend["product_alive"], pend["engine_alive"], env, date=ts,
                                          quantity=pend["quantity"], lifecycle_state=state_after,
-                                         valuation_point=_state_point(state_after, ts, base), label=pid)
+                                         valuation_point=_state_point(state_after, ts, base, pend["product_alive"]),
+                                         label=pid)
             elif pid in traded_ids:
                 snap = ValuationSnapshot(pend["product_alive"], pend["engine_alive"], env, date=ts,
                                          quantity=pend["quantity"], lifecycle_state=None, label=pid)
@@ -236,7 +246,7 @@ class PnLExplainRecorder:
             state = deepcopy(snap.lifecycle_state)
             tombstones[pid] = PositionSnapshot(pid, old.underlying, ValuationSnapshot(
                 snap.product, snap.engine, envs[old.underlying], date=ts, quantity=snap.quantity,
-                lifecycle_state=state, valuation_point=_state_point(state, ts, base), label=pid),
+                lifecycle_state=state, valuation_point=_state_point(state, ts, base, snap.product), label=pid),
                 tombstone=True)
 
         book_t1 = BookSnapshot(date=ts, positions={**live, **tombstones}, environments=envs)
@@ -350,9 +360,10 @@ class ReplayPnLExplainRecorder:
         for replay, day_engine, qty in zip(engine._replays, engine._pricing_engines, engine._quantities):
             pid = self._pid(replay)
             state = deepcopy(replay.lifecycle)
-            snap = ValuationSnapshot(replay.product_for_date(date, env), day_engine, env_copy, date=ts,
+            product = replay.product_for_date(date, env)
+            snap = ValuationSnapshot(product, day_engine, env_copy, date=ts,
                                      quantity=float(qty), lifecycle_state=state,
-                                     valuation_point=_state_point(state, ts, base), label=pid)
+                                     valuation_point=_state_point(state, ts, base, product), label=pid)
             live[pid] = PositionSnapshot(pid, underlying, snap)
 
         trades = [t for t in (_replay_trade(r, ts) for r in trades_today) if t is not None]

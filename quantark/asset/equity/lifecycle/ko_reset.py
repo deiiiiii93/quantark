@@ -80,8 +80,9 @@ class KOResetCalendarSchedule(CalendarSchedule):
 class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     """Tracks one ``KnockOutResetSnowballOption`` under rules R1-R4 (see the module docstring).
 
-    The knock-in close is the state's ``ki_date`` (set by ``mark_ki``); on the numeric clock the knock-in time
-    is ``(ki_date - start_date).days / 365``. It is the reset's TIMING. The reset's ACCRUAL hangs from the state's
+    The knock-in close is the state's ``ki_date`` (set by ``mark_ki``); the knock-in time is
+    ``(ki_date - clock_origin).days / 365`` on the tracker's one clock (``clock_origin``: ``initial_date`` when set,
+    else ``start_date``). It is the reset's TIMING. The reset's ACCRUAL hangs from the state's
     ``knock_in_anchor``: the knock-in record that fired, at its contractual fixing, resolved once at the knock-in
     (accrual time spec §5.1). Without a ``lifecycle`` the starting state is the product's carried one:
     ``_otc_lifecycle_knocked_in``, ``_otc_lifecycle_knock_in_date`` and ``_otc_lifecycle_knock_in_anchor``.
@@ -132,27 +133,28 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
     # ------------------------------------------------------------------
 
     def _schedule_two_base(self) -> Optional[pd.Timestamp]:
-        """The day a REBASED contract's converted schedule 2 and its knocked-in end are dated from: ``start_date``,
-        the origin ``product_for_pricing`` ages numeric times from (``None`` for ABSOLUTE, whose numeric records are
-        contract times dated like schedule 1's).
+        """The day a REBASED contract's converted schedule 2 and its knocked-in end are dated from: the tracker's
+        ``clock_origin`` (``initial_date`` when set, else ``start_date``), the origin ``product_for_pricing`` ages
+        every numeric time from and ``knock_in_time`` is measured from. ``None`` for ABSOLUTE, whose numeric records
+        are contract times dated like schedule 1's.
 
-        One clock for schedule 2's events and its pricing copy (independent review, Critical): measured from
-        ``initial_date`` the copy held schedule 2 ``start_date - initial_date`` too far ahead; measured from
-        ``start_date`` but dated from ``initial_date`` (``_record_dicts``' default) it fell due that much early
-        (final review C1). Timed from the knock-in close either way; the accrual is the anchor's (§5.1).
+        One clock for schedule 2's events and its pricing copy (tracker clock decision A, 2026-10-09): the converted
+        records sit at ``knock_in_time + offset`` from this origin, are dated from it and are aged from it, so each
+        hangs ``offset`` after the knock-in close in every consumer. The accrual is the anchor's (§5.1).
         """
-        if self.product.post_ko_mode != PostKOScheduleMode.REBASED or self.start_date is None:
+        origin = self.clock_origin
+        if self.product.post_ko_mode != PostKOScheduleMode.REBASED or origin is None:
             return None
-        return pd.Timestamp(self.start_date).normalize()
+        return origin.normalize()
 
     def knock_in_time(self) -> Optional[float]:
-        """Years from ``start_date`` (the pricing clock's origin) to the knock-in close; ``None`` while not knocked
-        in. A REBASED schedule 2 is placed at ``knock_in_time + offset`` and dated from ``start_date`` too
+        """Years from the clock origin (``clock_origin``) to the knock-in close; ``None`` while not knocked in. A
+        REBASED schedule 2 is placed at ``knock_in_time + offset`` and dated from the same origin
         (``_schedule_two_base``), so it hangs from the knock-in close in every consumer."""
-        if not self.lifecycle.knocked_in or self.lifecycle.ki_date is None or self.start_date is None:
+        origin = self.clock_origin
+        if not self.lifecycle.knocked_in or self.lifecycle.ki_date is None or origin is None:
             return None
-        return (pd.Timestamp(self.lifecycle.ki_date).normalize() - pd.Timestamp(self.start_date).normalize()).days \
-            / DAYS_PER_YEAR
+        return (pd.Timestamp(self.lifecycle.ki_date).normalize() - origin.normalize()).days / DAYS_PER_YEAR
 
     def contract(self) -> Any:
         """The snapped contract, or the ABSOLUTE contract a knocked-in REBASED one has become."""
@@ -314,6 +316,8 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
             if idx in observed or not self._record_is_due(date, valuation_point, rec):
                 continue
             observed.add(idx)
+            if self._before_run(rec):
+                continue                    # observed before the run: not knocked out (decision 2)
             if not self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=True):
                 continue
             before = self._state_snapshot()
@@ -372,6 +376,8 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
                 if idx in self.lifecycle.observed_ki_indices or not self._record_is_due(date, valuation_point, rec):
                     continue
                 self.lifecycle.observed_ki_indices.add(idx)
+                if self._before_run(rec):
+                    continue                # observed before the run: not knocked in (decision 2)
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=False):
                     hits.append((idx, rec["barrier"]))
             metadata = {"schedule": 1}
@@ -448,10 +454,7 @@ class KOResetLifecycleTracker(AutocallableLifecycleTracker):
         if not product.knock_in_anchor_required():
             return None
         records = self._scheduled_records(product, env, "ki")
-        due = [
-            index for index, rec in enumerate(records)
-            if self._first_due(dates, lambda day, vp, r=rec: self._record_is_due(day, vp, r), product) == knock_in_day
-        ]
+        due = [index for index, rec in enumerate(records) if self._record_first_due(dates, rec, product) == knock_in_day]
         if not due:
             raise ValidationError(f"KO-reset snowball: no knock-in record is due on run day {knock_in_day}")
         index = due[0]
@@ -470,7 +473,7 @@ def _resolve_calendar_schedule(tracker: KOResetLifecycleTracker, dates, env) -> 
 
     def records_on_calendar(owner, contract, config):
         recs = owner._schedule_records(contract, env, config)
-        due = [owner._first_due(dates, lambda day, vp, r=r: owner._record_is_due(day, vp, r), contract) for r in recs]
+        due = [owner._record_first_due(dates, r, contract) for r in recs]
         return (
             np.array(due, dtype=np.int64),
             np.array([float(r["barrier"]) if r["barrier"] is not None else np.nan for r in recs], dtype=float),

@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 from plotly.offline import get_plotlyjs
 
+from quantark.asset.equity.lifecycle.autocallable import lifecycle_clock_origin
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.asset.equity.report.autocallable_risk_report import (
     build_snowball_risk_snapshot,
@@ -251,9 +252,11 @@ class AutocallableBacktestDashboard:
         start_date = self.results.config.start_date
         if start_date is None and not states.empty:
             start_date = pd.Timestamp(states.index.min()).to_pydatetime()
+        # the tracker's one clock (decision A, 2026-10-09): aged from the contract's initial_date when it has one
+        origin = lifecycle_clock_origin(product, start_date)
         elapsed = 0.0
-        if start_date is not None:
-            elapsed = max(0.0, (date - pd.Timestamp(start_date).normalize()).days / 365.0)
+        if origin is not None:
+            elapsed = max(0.0, (date - origin.normalize()).days / 365.0)
 
         if (
             getattr(product, "exercise_date", None) is None
