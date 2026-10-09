@@ -211,7 +211,19 @@ tests pass unchanged.
 
 ---
 
-## 9. Range accrual annualizes by the remaining maturity: BUG (same class as accrual spec §3.1), not changed
+## 9. Range accrual annualizes by the remaining maturity: BUG (same class as accrual spec §3.1), FIXED on branch `range-accrual-tenor`
+
+> **Status 2026-10-09: fixed** at the user's request ("fix this"; FX start field: "add start_date like the equity
+> product", so it is `initial_date`, the equity name). What shipped differs from the proposal below in two places:
+> the year fraction is resolved from the product's own terms on each call rather than frozen as an `AccrualPeriod`
+> (points 2 and 5 dropped: the terms are constants of the contract, so the answer cannot drift as it ages; only a
+> BUSINESS_DAYS count reads the environment's calendar, as `get_tenor` does), and FX theta fixes stepped-over fixings
+> through a new `BaseFxProduct.record_passed_fixings` hook. The fix review added one refusal: an annualized
+> numeric contract booked mid-life (a fixing before t = 0) without `tenor`, whose `maturity` is only what is left;
+> eight existing fixtures of that shape now pass `tenor` (one payoff assertion 7.5 -> 9.375). Tests: `test/test_range_accrual_contract_period.py`. The
+> table below measures the code BEFORE the fix; `item9_range_accrual_ageing.py` builds its FX contract without a
+> start, which the fixed code refuses.
+
 
 **Today.**
 - Equity: `RangeAccrualOption.get_year_fraction` returns `self.maturity`, else `get_maturity(env)`, the time from

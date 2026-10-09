@@ -25,6 +25,8 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   accrual reads the pricing environment.
 - `AutocallableLifecycleState.knock_in_anchor`, set at the knock-in from the record whose test fired, carried on
   pricing copies as `_otc_lifecycle_knock_in_anchor`.
+- `FxRangeAccrualOption(initial_date=..., tenor=...)`, the contract's start and length, as on the equity product.
+- `BaseFxProduct.record_passed_fixings(fx_env)`: FX theta fixes the fixings its bump steps over (a no-op by default).
 
 ### Changed
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
@@ -42,6 +44,10 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   and the twin no longer back-solves `accrual_factors` or banks one `accrued_offset`.
 - Monte Carlo REBASED KO-reset reads each path's knock-in anchor for the knock-out accrual and the knocked-in tenor
   (an annualized V1 used to raise).
+- An annualized DATED range accrual with neither `initial_date` nor `tenor` is refused at construction, on both
+  asset classes; it used to accrue from the valuation date. So is an annualized NUMERIC one booked mid-life (a
+  fixing at a negative `observation_time`) without `tenor`: its `maturity` is only the remaining life. Unannualized
+  contracts, and numeric ones aged by `time_shift` (which banks the elapsed time), are unaffected.
 
 ### Fixed
 - Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract
@@ -63,6 +69,18 @@ the original quoted end instead of `(offset + bump) + (t - bump)`). 27 KO-reset 
 above: relative 2e-2 to 1.6e-1 on the standard alive rows (e.g. `ko_reset|flat|standard` +0.02480 -> +0.02707),
 up to a sign change on knocked-in and near-barrier rows (`3a|class|ko_reset|cont|knocked_in` -0.01807 ->
 +0.04887, `3a|bumpcross|ko_reset|cont|85.5` -0.14185 -> +0.00369).
+
+- Range accrual (equity `RangeAccrualOption`, FX `FxRangeAccrualOption` and its foreign and quanto variants): an
+  annualized coupon accrues over the WHOLE contract -- `tenor`, else `initial_date` -> expiry in
+  `range_config.day_count_convention` (which was never read), else a numeric contract's `maturity` plus the time
+  `time_shift` has aged it by. It used to accrue over the REMAINING maturity while the in-range ratio counted every
+  fixing, past and future, so the coupon shrank as the contract aged: a one-year 10% contract certain to pay 10.0
+  priced at 7.34 after 91 days and 0.027 one day before expiry; it now prices at 10 x DF on every date. Inception
+  prices are unchanged when the config's day count is the one the environment used.
+- Range accrual theta: `time_shift` moves a numeric contract's fixing times with its maturity (they stayed put, so
+  past fixings looked future), and a fixing the theta bump steps over is fixed at the held spot (a dated FX one used
+  to be refused as an unrecorded past fixing). Theta on a certain coupon is now the discount roll (+8e-4 per day on
+  the control) instead of a day's accrual lost (-0.026).
 
 ### Removed
 - `AccrualConfig.accrual_dates` (it had no reader).

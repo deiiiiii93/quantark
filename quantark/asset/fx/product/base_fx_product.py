@@ -117,6 +117,14 @@ class BaseFxProduct(ABC):
         if self.delivery is not None:
             self.delivery -= time_bump
 
+    def record_passed_fixings(self, fx_env: "FxPricingEnvironment") -> None:
+        """
+        Fix the fixings a theta bump has stepped over, at ``fx_env``'s spot.
+
+        A theta bump holds the spot, so a fixing that falls between the valuation date and the bumped one fixes at
+        it. Products whose fixings carry no recorded outcome have nothing to fix; this default does nothing.
+        """
+
     def _year_fraction_to(
         self, target_date: datetime, fx_env: Optional["FxPricingEnvironment"]
     ) -> float:

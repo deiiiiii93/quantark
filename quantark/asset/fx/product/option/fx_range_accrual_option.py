@@ -18,9 +18,11 @@ correlation) and is intentionally left to a future extension rather than
 approximated here.
 """
 
+from dataclasses import replace
 from datetime import datetime
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
+from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
 
@@ -66,7 +68,15 @@ class FxRangeAccrualOption(BaseFxProduct):
         observation_records: Optional[List[FxRangeAccrualObservationRecord]] = None,
         observation_times: Optional[List[float]] = None,
         num_observations: Optional[int] = None,
+        initial_date: Optional[datetime] = None,
+        tenor: Optional[float] = None,
     ):
+        # Set before the base constructor validates. An annualized coupon accrues over the whole contract: ``tenor``,
+        # or ``initial_date`` -> ``expiry_date``; on a numeric contract ``maturity`` plus the time ``time_shift`` has
+        # aged it by, banked in ``accrued_offset``.
+        self.initial_date = initial_date
+        self.tenor = tenor
+        self.accrued_offset = 0.0
         super().__init__(
             currency_pair=currency_pair,
             maturity=maturity,
@@ -93,8 +103,51 @@ class FxRangeAccrualOption(BaseFxProduct):
         if self.range_config is None:
             raise ValidationError("range_config is required")
         self._validate_maturity_inputs()
+        self._validate_accrual_period()
         self._validate_schedule()
+        self._validate_mid_life_booking()
         self._validate_barrier_lengths()
+
+    def _validate_accrual_period(self) -> None:
+        if self.tenor is not None and self.tenor <= 0:
+            raise ValidationError(f"tenor must be positive, got {self.tenor}")
+        if (
+            self.initial_date is not None
+            and self.expiry_date is not None
+            and self.initial_date >= self.expiry_date
+        ):
+            raise ValidationError(
+                f"initial_date ({self.initial_date}) must be before expiry_date ({self.expiry_date})"
+            )
+        # A dated contract that names no start would have to start its accrual at the valuation date, so its
+        # coupon would shrink every day it ages; refuse it instead.
+        if (
+            self.range_config.is_rate_annualized
+            and self.maturity is None
+            and self.tenor is None
+            and self.initial_date is None
+        ):
+            raise ValidationError(
+                "An annualized dated FX range accrual needs initial_date or tenor: its coupon accrues over the "
+                "whole contract, not from the valuation date"
+            )
+
+    def _validate_mid_life_booking(self) -> None:
+        # A numeric contract with a fixing already behind it was booked mid-life: its maturity is only what is left,
+        # so the contract's length cannot be read off it. Ageing (``time_shift``) banks what it removes; a booking
+        # has to say how long the contract is.
+        if (
+            self.range_config.is_rate_annualized
+            and self.maturity is not None
+            and self.tenor is None
+            and is_zero(self.accrued_offset)
+            and self.observation_records is not None
+            and any(rec.observation_time is not None and rec.observation_time < 0 for rec in self.observation_records)
+        ):
+            raise ValidationError(
+                "An annualized numeric FX range accrual with past fixings needs tenor: its maturity is only the "
+                "remaining life, and the coupon accrues over the whole contract"
+            )
 
     def _validate_schedule(self) -> None:
         has_records = self.observation_records is not None
@@ -268,14 +321,59 @@ class FxRangeAccrualOption(BaseFxProduct):
     def get_year_fraction(
         self, fx_env: Optional["FxPricingEnvironment"] = None
     ) -> float:
-        """Year fraction applied to the coupon (1.0 unless rate is annualized)."""
+        """
+        Year fraction the annualized coupon accrues over: the WHOLE contract.
+
+        The in-range ratio counts every fixing, past and future, so the year fraction it multiplies is the
+        contract's too: ``tenor`` when set, else ``initial_date`` -> ``expiry_date`` in the config's day count (a
+        BUSINESS_DAYS count reads the environment's calendar and year length), else a numeric contract's
+        ``maturity`` plus the time ``time_shift`` has aged it by. 1.0 unless the rate is annualized.
+        """
         if not self.range_config.is_rate_annualized:
             return 1.0
+        if self.tenor is not None:
+            return self.tenor
+        if self.initial_date is not None and self.expiry_date is not None:
+            return calculate_year_fraction(
+                self.initial_date,
+                self.expiry_date,
+                self.range_config.day_count_convention,
+                getattr(fx_env, "bus_days_in_year", 252),
+                calendar=getattr(fx_env, "calendar", None),
+            )
         if self.maturity is not None:
-            return self.maturity
-        if self.expiry_date is not None and fx_env is not None:
-            return self.get_maturity(fx_env)
-        return 1.0
+            return self.maturity + self.accrued_offset
+        raise ValidationError(
+            "An annualized dated FX range accrual needs initial_date or tenor to fix its accrual period"
+        )
+
+    def time_shift(self, time_bump: float) -> None:
+        """
+        Age a numeric contract for theta: maturity and fixing times move with the clock and the elapsed time is
+        banked, so the coupon keeps the whole contract's year fraction. Fixings stepped over stay unrecorded until
+        ``record_passed_fixings`` fixes them.
+        """
+        records = [replace(rec) for rec in self.get_observation_records()]
+        super().time_shift(time_bump)
+        if self.maturity is not None:
+            self.accrued_offset += time_bump
+            for rec in records:
+                if rec.observation_time is not None:
+                    rec.observation_time -= time_bump
+        self._set_records(records)
+
+    def record_passed_fixings(self, fx_env: "FxPricingEnvironment") -> None:
+        """Fix every unrecorded fixing at or before ``fx_env``'s valuation at its spot (see the base class)."""
+        records = [replace(rec) for rec in self.get_observation_records()]
+        for idx, rec in enumerate(records):
+            if rec.observed_in_range is None and rec.resolve_time(fx_env) <= 0:
+                rec.observed_in_range = self.is_in_range(fx_env.spot, idx, rec)
+        self._set_records(records)
+
+    def _set_records(self, records: List[FxRangeAccrualObservationRecord]) -> None:
+        self.observation_records = records
+        self.observation_times = None
+        self.num_observations = None
 
     def get_payoff(
         self,

@@ -6,12 +6,12 @@ underlying stays within a defined price range. Supports weighted observations
 and historical tracking for partially observed products.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
 from quantark.asset.equity.settlement import SettlementConvention
-from quantark.util.calendar import DayCountConvention
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import ExerciseType, OptionType, TenorEnd
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
@@ -93,6 +93,9 @@ class RangeAccrualOption(BaseEquityOption):
         self.observation_times = observation_times
         self.num_observations = num_observations
         self.initial_price = initial_price
+        # Time a numeric contract has been aged by ``time_shift``: its maturity is what is LEFT of the contract, and
+        # the annualized coupon accrues over the whole of it.
+        self.accrued_offset = 0.0
 
         # RangeAccrualOption doesn't use strike in the traditional sense
         # We use initial_price as the reference for barrier percentages
@@ -141,6 +144,19 @@ class RangeAccrualOption(BaseEquityOption):
         if self.range_config is None:
             raise ValidationError("range_config is required")
 
+        # An annualized coupon accrues from the contract's start. A dated contract that names none would have to
+        # start it at the valuation date, so its coupon would shrink every day it ages; refuse it instead.
+        if (
+            self.range_config.is_rate_annualized
+            and self.maturity is None
+            and self.tenor is None
+            and self.initial_date is None
+        ):
+            raise ValidationError(
+                "An annualized dated range accrual needs initial_date or tenor: its coupon accrues over the "
+                "whole contract, not from the valuation date"
+            )
+
         # Validate observation inputs are mutually exclusive
         has_records = self.observation_records is not None
         has_times = self.observation_times is not None
@@ -178,6 +194,22 @@ class RangeAccrualOption(BaseEquityOption):
         if self.num_observations is not None and self.num_observations < 1:
             raise ValidationError(
                 f"num_observations must be >= 1, got {self.num_observations}"
+            )
+
+        # A numeric contract with a fixing already behind it was booked mid-life: its maturity is only what is left,
+        # so the contract's length cannot be read off it. Ageing (``time_shift``) banks what it removes; a booking
+        # has to say how long the contract is.
+        if (
+            self.range_config.is_rate_annualized
+            and self.maturity is not None
+            and self.tenor is None
+            and is_zero(self.accrued_offset)
+            and self.observation_records is not None
+            and any(rec.observation_time is not None and rec.observation_time < 0 for rec in self.observation_records)
+        ):
+            raise ValidationError(
+                "An annualized numeric range accrual with past fixings needs tenor: its maturity is only the "
+                "remaining life, and the coupon accrues over the whole contract"
             )
 
         # Validate barrier list lengths match observation count if applicable
@@ -325,32 +357,76 @@ class RangeAccrualOption(BaseEquityOption):
 
     def get_year_fraction(self, pricing_env: Optional["PricingEnvironment"] = None) -> float:
         """
-        Calculate year fraction for payoff.
+        Year fraction the annualized coupon accrues over: the WHOLE contract.
 
-        If rate is not annualized, returns 1.0.
-        Otherwise calculates based on day count convention.
+        The accrual ratio counts every fixing, past and future, so the year fraction it multiplies is the contract's
+        too, constant over the deal's life:
+
+        1. ``tenor`` when set;
+        2. ``initial_date`` -> the tenor end date in ``range_config.day_count_convention`` (a BUSINESS_DAYS count
+           reads the environment's calendar and year length);
+        3. a numeric contract's ``maturity`` plus the time ``time_shift`` has aged it by.
+
+        Returns 1.0 when the rate is not annualized.
 
         Args:
-            pricing_env: Pricing environment (optional)
+            pricing_env: Pricing environment (its calendar for a BUSINESS_DAYS count)
 
         Returns:
             Year fraction for payoff calculation
         """
-        if self.range_config is None:
+        if self.range_config is None or not self.range_config.is_rate_annualized:
             return 1.0
-
-        if not self.range_config.is_rate_annualized:
-            return 1.0
-
-        # For annualized rate, use maturity as year fraction
+        if self.tenor is not None:
+            return self.tenor
+        if self.initial_date is not None:
+            end_date = self.get_tenor_end_date()
+            if end_date is not None:
+                return calculate_year_fraction(
+                    self.initial_date,
+                    end_date,
+                    self.range_config.day_count_convention,
+                    getattr(pricing_env, "bus_days_in_year", 252),
+                    calendar=getattr(pricing_env, "calendar", None),
+                )
         if self.maturity is not None:
-            return self.maturity
+            return self.maturity + self.accrued_offset
+        raise ValidationError(
+            "An annualized dated range accrual needs initial_date or tenor to fix its accrual period"
+        )
 
-        # If using dates, calculate from pricing_env
-        if pricing_env is not None and self.exercise_date is not None:
-            return self.get_maturity(pricing_env)
+    def _elapsed_since_origin(self) -> float:
+        """The time ``time_shift`` has aged a numeric contract by (see ``BaseEquityOption.get_tenor``)."""
+        return self.accrued_offset
 
-        return 1.0
+    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
+        """
+        Age the contract for a theta bump.
+
+        A numeric contract's maturity and fixing times move with the clock and the elapsed time is banked, so its
+        coupon keeps the whole contract's year fraction. A fixing the bump steps over, numeric or dated, is fixed at
+        the environment's spot -- the spot a theta bump holds -- so it counts as observed, in range or not.
+
+        Returns False: an expired schedule still owes its coupon at expiry.
+        """
+        records = [replace(rec) for rec in self.get_observation_records()]
+        super().time_shift(time_bump, bumped_date, pricing_env)
+        if self.exercise_date is None:
+            self.accrued_offset += time_bump
+            for rec in records:
+                if rec.observation_time is not None:
+                    rec.observation_time -= time_bump
+        else:
+            pricing_env.valuation_date = bumped_date
+
+        for idx, rec in enumerate(records):
+            if rec.observed_in_range is None and rec.resolve_time(pricing_env) <= 0:
+                rec.observed_in_range = self.is_in_range(pricing_env.spot, idx, rec)
+
+        self.observation_records = records
+        self.observation_times = None
+        self.num_observations = None
+        return False
 
     def get_payoff(
         self,

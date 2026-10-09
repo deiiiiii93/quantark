@@ -48,6 +48,8 @@ class FxQuantoRangeAccrualOption(FxRangeAccrualOption):
         observation_records: Optional[List[FxRangeAccrualObservationRecord]] = None,
         observation_times: Optional[List[float]] = None,
         num_observations: Optional[int] = None,
+        initial_date: Optional[datetime] = None,
+        tenor: Optional[float] = None,
         settlement_ccy: str = "SET",
     ):
         self.quanto_fx_rate = quanto_fx_rate
@@ -63,6 +65,8 @@ class FxQuantoRangeAccrualOption(FxRangeAccrualOption):
             observation_records=observation_records,
             observation_times=observation_times,
             num_observations=num_observations,
+            initial_date=initial_date,
+            tenor=tenor,
         )
 
     def validate(self) -> None:

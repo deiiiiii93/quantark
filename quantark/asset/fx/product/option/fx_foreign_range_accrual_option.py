@@ -46,6 +46,8 @@ class FxForeignRangeAccrualOption(FxRangeAccrualOption):
         observation_records: Optional[List[FxRangeAccrualObservationRecord]] = None,
         observation_times: Optional[List[float]] = None,
         num_observations: Optional[int] = None,
+        initial_date: Optional[datetime] = None,
+        tenor: Optional[float] = None,
     ):
         super().__init__(
             notional=notional,
@@ -58,6 +60,8 @@ class FxForeignRangeAccrualOption(FxRangeAccrualOption):
             observation_records=observation_records,
             observation_times=observation_times,
             num_observations=num_observations,
+            initial_date=initial_date,
+            tenor=tenor,
         )
 
     def __repr__(self) -> str:

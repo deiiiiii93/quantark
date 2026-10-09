@@ -225,16 +225,17 @@ class BaseFxEngine(ABC):
         days = self.params.theta_days
         dt = days / 365.0
 
+        shifted = deepcopy(product)
         if product.maturity is not None:
-            shifted = deepcopy(product)
             shifted.time_shift(dt)
-            future_price = self.price(shifted, fx_env)
+            env_future = fx_env
         else:
             from datetime import timedelta
 
             env_future = deepcopy(fx_env)
             env_future.valuation_date = fx_env.valuation_date + timedelta(days=days)
-            future_price = self.price(product, env_future)
+        shifted.record_passed_fixings(env_future)
+        future_price = self.price(shifted, env_future)
 
         # Forward difference: daily decay
         return (future_price - base_price) / days

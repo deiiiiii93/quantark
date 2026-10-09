@@ -292,6 +292,7 @@ class TestRangeAccrualMCEngineHistoricalObservations:
             range_config=standard_config,
             observation_records=records,
             maturity=0.5,
+            tenor=0.75,  # booked mid-life: the contract's length, not the remaining maturity
         )
 
         price = engine.price(option, pricing_env)
@@ -323,6 +324,7 @@ class TestRangeAccrualMCEngineHistoricalObservations:
             range_config=standard_config,
             observation_records=records,
             maturity=0.01,  # Very short maturity
+            tenor=0.75,  # booked mid-life: the contract's length, not the remaining maturity
         )
 
         price = engine.price(option, pricing_env)

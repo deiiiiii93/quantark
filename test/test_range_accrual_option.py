@@ -480,6 +480,7 @@ class TestHistoricalObservations:
             initial_price=100.0,
             range_config=basic_range_config,
             maturity=1.0,
+            tenor=1.25,  # booked mid-life: the contract's length, not the remaining maturity
             observation_records=records,
         )
         past, future, total_weights = option.resolve_observations(basic_pricing_env)
@@ -502,6 +503,7 @@ class TestHistoricalObservations:
             initial_price=100.0,
             range_config=basic_range_config,
             maturity=1.0,
+            tenor=1.25,  # booked mid-life: the contract's length, not the remaining maturity
             observation_records=records,
         )
         assert option.has_past_observations(basic_pricing_env) is True
@@ -538,6 +540,7 @@ class TestHistoricalObservations:
             initial_price=100.0,
             range_config=basic_range_config,
             maturity=1.0,
+            tenor=1.25,  # booked mid-life: the contract's length, not the remaining maturity
             observation_records=records,
         )
         in_range_weights, past_total = option.get_past_accrual(basic_pricing_env)
@@ -558,6 +561,7 @@ class TestHistoricalObservations:
             initial_price=100.0,
             range_config=basic_range_config,
             maturity=1.0,
+            tenor=1.25,  # booked mid-life: the contract's length, not the remaining maturity
             observation_records=records,
         )
         with pytest.raises(ValidationError, match="must have observed_in_range set"):
@@ -800,6 +804,7 @@ class TestRangeAccrualIntegration:
             initial_price=100.0,
             range_config=config,
             maturity=1.0,
+            tenor=1.25,  # booked mid-life: the contract's length, not the remaining maturity
             observation_records=records,
             contract_multiplier=1.0,
         )
@@ -825,8 +830,9 @@ class TestRangeAccrualIntegration:
             in_range_weights=final_in_range,
             total_weights=total,
         )
-        # Payoff = 100 * 1 * 0.10 * 0.75 * 1.0 = 7.5
-        assert abs(payoff - 7.5) < 1e-10
+        # Payoff = 100 * 1 * 0.10 * 0.75 * 1.25 = 9.375: the coupon accrues over the 1.25-year contract, not
+        # over the 1.0 year left of it
+        assert abs(payoff - 9.375) < 1e-10
 
     def test_repr(self, basic_range_config):
         """Test string representation."""

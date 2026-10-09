@@ -352,6 +352,7 @@ class TestHistoricalObservations:
             range_config=config,
             observation_records=records,
             maturity=0.5,
+            tenor=0.75,  # booked mid-life: the contract's length, not the remaining maturity
         )
         price = engine.price(opt, pricing_env)
         assert price > 0
