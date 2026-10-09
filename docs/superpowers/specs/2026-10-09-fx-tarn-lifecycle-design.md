@@ -100,8 +100,8 @@ Reading of the results:
 - **Twin arithmetic (M6, M10, M11).** A numeric twin aged day by day and its dated twin re-resolved each day agree to
   ~1e-15 in time, not bitwise; parity is therefore stated as bitwise at the twin's booking date and to a stated
   relative tolerance after ageing (§10).
-- **Theta clock (M9).** Under a non-calendar env day count the numeric and dated FX theta steps differ. This is shared
-  FX code; §12 Q7.
+- **Theta clock (M9).** Under a non-calendar env day count the numeric and dated FX theta steps differ. Decided (§12 Q7):
+  numeric theta steps by the environment's year fraction, which restores parity; shared FX code.
 
 ### 2.3 TARF: needs the realized state, not the accrual term (A1.4)
 
@@ -336,7 +336,8 @@ once the contract is terminal, at `S = fx_env.spot` (Q3):
 - The landing fixing is banked at the held spot rather than left at t = 0 for the engine (equity theta-boundary R1);
   the value is the same because the spot is held, and the mechanism follows the FX range accrual precedent.
 - Under a `CALENDAR_DAYS` or `ACT_365` environment the numeric step (`days/365`) equals the dated step (M9, M11), so
-  numeric and dated theta agree. Under other environment day counts they do not today (M9); §12 Q7.
+  numeric and dated theta agree. Under other environment day counts they do not today (M9); §12 Q7 makes
+  `_fdm_theta` step numeric products by the environment's year fraction, so they agree in every environment.
 
 ## 7. Ageing in the FX backtest and FX dynamic scenario (Q4 b)
 
@@ -421,8 +422,7 @@ is left exactly as today (§9).
   `spot` = the fixing, `payoff` = the amount it determined, `cashflow` = the quantity-scaled amount paid on the day,
   `terminates_position` = `redeemed`;
 - line 112: `final_value` includes `cum_paid`.
-- **Undated path** (`start_date is None`): no date to age by (M8). §12 Q8 decides; until then the spec's behaviour
-  is Q8's recommendation: before `register`, `run` raises a `ValidationError` naming `DayPath.start_date` when the
+- **Undated path** (`start_date is None`): no date to age by (M8). Decided (§12 Q8 a): before `register`, `run` raises a `ValidationError` naming `DayPath.start_date` when the
   book holds a TARN/TARF.
 
 **Dated TARN/TARF** need no clock of their own: the environment's date is the clock. The same `advance` call records
@@ -561,25 +561,16 @@ fixing, redeemed)`:
 - Local-vol, Heston or analytic TARN/TARF engines.
 - Business-day rolling of stated dates; a cash-interest account in the FX backtest.
 
-## 12. Open questions (rev 2)
+## 12. Decisions on the rev 2 questions (user, 2026-10-09)
 
-- **Q7 Which clock does numeric FX theta step by?** `_fdm_theta` steps a numeric product by `days/365` whatever the
-  environment's day count, while its dated twin moves the env date (M9: `BUSINESS_DAYS`, Friday: numeric
-  −9.135e-05 vs dated 0). The ageing hook (§7.2) already uses the environment's convention, so in a run the two
-  forms agree; only theta disagrees.
-  - Recommended: step numeric products by `calculate_year_fraction(V, V + days, env convention)` in
-    `_fdm_theta`. It is bitwise unchanged under `CALENDAR_DAYS`/`ACT_365` (1/365.0 either way) and restores
-    parity elsewhere.
-  - Cost if wrong: the change is in shared FX code, so every numeric FX product's theta moves under a non-calendar
-    environment (Fridays/holidays go to 0, `ACT_360` steps 1/360). Not doing it leaves D4 limited to calendar
-    environments and the standing parity rule unmet for theta.
-- **Q8 What does an undated `DayPath` do with a TARN/TARF?** Today it moves no date (M8), so nothing ages — neither
-  form. Every `FXPathLibrary` builder makes undated paths.
-  - Recommended: refuse with a `ValidationError` naming `DayPath.start_date` when the book holds a TARN/TARF and the
-    path is undated. Parity holds and no clock is invented.
-  - Alternative: the equity lifecycle rule (`asset/equity/lifecycle/manager.py:211-215`): day k = the environment's
-    date + k calendar days, and the FX scenario then sets every environment's date to it. Cost: every dated FX
-    product in an undated scenario starts showing theta (today frozen, M8) — a change outside this workstream's
-    two products.
-  - Cost if the recommendation is wrong: callers of `FXPathLibrary` with a TARN/TARF must set `start_date` (the
-    builders take no such argument today; the field is settable on the returned path).
+- **Q7 APPROVED.** Numeric FX theta steps by `calculate_year_fraction(V, V + days, env convention)` in
+  `_fdm_theta`, not by `days/365` (M9: `BUSINESS_DAYS`, Friday: numeric −9.135e-05 vs dated 0). Bitwise unchanged
+  under `CALENDAR_DAYS`/`ACT_365`; under a non-calendar environment every numeric FX product's theta moves
+  (Fridays/holidays go to 0, `ACT_360` steps 1/360). This is shared FX code: its moved values are listed for
+  sign-off before landing. With it, D4 parity holds for theta in every environment.
+- **Q8 (a).** An undated `DayPath` (`start_date is None`) with a TARN/TARF in the book: `run` raises a
+  `ValidationError` naming `DayPath.start_date` before `register` (§7). No clock is invented.
+  - **Follow-up (future, not this workstream):** an undated path ages nothing (M8), so every dated FX product in an
+    undated scenario is frozen too. The candidate cure is the equity lifecycle rule
+    (`asset/equity/lifecycle/manager.py:211-215`: day k = the environment's date + k calendar days). Decide it
+    together with the §9 finding (every numeric FX product frozen in the backtest and dynamic scenario).
