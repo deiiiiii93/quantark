@@ -1,0 +1,6 @@
+freeze_missing_fixings records the t=0 fixing: True (MissingFixingWarning x2)
+GreeksCalculator delta (t=0 fixing frozen at the base spot): -0.191889
+live central difference, h=0.05: delta -0.192955
+live central difference, h=0.2: delta -4.951676
+live central difference, h=1.0: delta -1.143823
+live central difference, h=1.099: delta -1.057904
