@@ -1,0 +1,26 @@
+M1 TARN accrual factors, 12 monthly fixings, notional 100 at 12%
+  inception first 2 factors [0.083333, 0.083333]
+  time_shift(0.125): 12 fixings kept, first t=-0.041667, factors [0.083333, 0.083333]
+  rebuilt from remaining 11 times: first factor 0.041667 -> coupon 0.5000 (contract 1.0000)
+M2 price after time_shift(0.125) + record_passed_fixings: the shift stepped over the first fixing
+  TARN: RAISES ValidationError: Time to maturity must be non-negative, got -0.04166666666666667
+  TARF: RAISES ValidationError: Time to maturity must be non-negative, got -0.04166666666666667
+M3 theta (theta_days=1) with the first fixing half a day / exactly one day / two days away
+  first fixing 0.5/365 TARN: calculate_greeks RAISES ValidationError: Time to maturity must be non-negative, got -0.0013698630136986301
+  first fixing 0.5/365 TARF: calculate_greeks RAISES ValidationError: Time to maturity must be non-negative, got -0.0013698630136986301
+  first fixing 1/365 TARN: calculate_greeks RAISES ValidationError: times must be strictly increasing and positive
+  first fixing 1/365 TARF: calculate_greeks RAISES ValidationError: times must be strictly increasing and positive
+  first fixing 2/365 TARN: theta 0.016861
+  first fixing 2/365 TARF: theta 0.003077
+M4 two months aged, both fixings paid; remaining 10 fixings, same seed
+  TARN include_principal=True: target 3.0 (no state) 101.652635  remaining target 1.000000 100.578131  diff +1.074504
+  TARN include_principal=False: target 3.0 (no state) 2.957940  remaining target 1.000000 0.995609  diff +1.962331
+  TARF target 0.20 (no state) 0.091663  remaining target 0.10 0.027251  diff +0.064413
+M5 env.valuation_date moved 91 days, product unchanged (the FX backtest / dynamic scenario clock)
+  TARN: get_maturity 1.000000 -> 1.000000; price 101.643148 -> 101.643148 (identical: True)
+  TARF: get_maturity 1.000000 -> 1.000000; price -0.011326 -> -0.011326 (identical: True)
+M6 factors derived from shifted times vs inception factors (11 surviving periods after the first)
+  tau=0.125000: max |derived - inception| = 0.000e+00; periods not bitwise equal: 0/11
+  tau=0.100000: max |derived - inception| = 5.551e-17; periods not bitwise equal: 2/11
+  tau=0.123288: max |derived - inception| = 1.110e-16; periods not bitwise equal: 4/11
+  tau=0.249315: max |derived - inception| = 2.776e-17; periods not bitwise equal: 2/11
