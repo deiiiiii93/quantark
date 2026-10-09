@@ -64,6 +64,8 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   row stamped 15:00, an FX dynamic path whose `start_date` has a time) is refused at its first step (R8), and an FX
   dynamic path whose `start_date` precedes the environment's valuation date is refused ("the run clock cannot go
   back", R9). A book without one runs as before.
+- The replay book records a fixing on the date it passes (at that date's spot) and ages a numeric record Asian's
+  records with its maturity (spec fixture day 4: numeric 7.807415 -> 7.686469 = the dated twin).
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
 - A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.

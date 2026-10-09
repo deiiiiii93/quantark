@@ -59,6 +59,7 @@ from quantark.asset.equity.settlement import SettlementLagUnit
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
+from quantark.util.run_fixings import participates
 
 from .events import LifecycleEvent, LifecycleEventType
 from .cashflows import RealizedCashflow, ValuationPoint
@@ -244,7 +245,13 @@ class AutocallableLifecycleTracker:
             and getattr(product, "maturity", None) is not None
             and origin is not None
         ):
-            product.maturity = max(float(product.maturity) - elapsed, 1e-8)
+            if participates(product):
+                # a run-fixings product's records move with its maturity (spec 2026-10-09 run fixings §3.5); the
+                # trackers' floor is kept (Ruling 12)
+                product = product.with_time_elapsed(elapsed)
+                product.maturity = max(float(product.maturity), 1e-8)
+            else:
+                product.maturity = max(float(product.maturity) - elapsed, 1e-8)
         barrier_config = getattr(product, "barrier_config", None)
         if barrier_config is not None and hasattr(barrier_config, "time_shift"):
             # The shift is kept even when nothing survives it.  An aged

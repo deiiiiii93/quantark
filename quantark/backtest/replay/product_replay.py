@@ -20,7 +20,7 @@ import logging
 
 from copy import deepcopy
 from datetime import timedelta
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.numerical import is_close
+from quantark.util.run_fixings import participates, step_fixings, update_live
 
 from .carry_context import SUPPORTED_EXTRAPOLATIONS, CarryCurveContext
 from .dividend_source import term_dividend_yield
@@ -190,6 +191,8 @@ class ProductReplay:
         self.lifecycle = self._tracker.lifecycle
         # The missing past fixings decided at the run's first valuation ({record index: outcome}); None until then
         self._run_fills: Optional[dict] = None
+        self._last: Optional[tuple] = None  # (date, spot) of the last date product_for_date first saw
+        self._live: Dict[int, tuple] = {}  # index -> (date, spot) first live (Ruling 4)
 
     @property
     def start_date(self) -> Optional[pd.Timestamp]:
@@ -210,16 +213,30 @@ class ProductReplay:
     def product_for_date(self, date: pd.Timestamp, pricing_env: PricingEnvironment, *, initial: bool = False):
         """The pricing copy for ``date``; ``initial`` before the run's first close is observed.
 
-        A fixing already missing at the run's first valuation (the first call) is history: it is decided once, at
-        that valuation's spot, and every later pricing copy carries the same decision (user decision 2026-10-09).
-        TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every repricing;
-        it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
+        The first call is the run's first valuation: a fixing already missing is decided once at its spot (W5b,
+        R5). Each later date seen for the first time records the fixings that became history since the last date at
+        that date's spot (spec 2026-10-09 run fixings §3.6, R3/R4); every pricing copy carries every decision.
         """
         product = self._tracker.product_for_pricing(date, pricing_env, initial=initial)
+        day = pd.Timestamp(date).normalize()
         if self._run_fills is None:
             fills_of = getattr(product, "missing_fixing_fills", None)
             self._run_fills = dict(fills_of(pricing_env)) if fills_of is not None else {}
-            return freeze_missing_fixings(product, pricing_env) if self._run_fills else product
+            self._last = (day, float(pricing_env.spot))
+            frozen = freeze_missing_fixings(product, pricing_env) if self._run_fills else product
+            if participates(frozen):
+                self._live = update_live(frozen.open_fixings(pricing_env), day, pricing_env.spot)
+            return frozen
+        if participates(product) and day != self._last[0]:
+            seen = product.with_fixings_recorded(self._run_fills) if self._run_fills else product
+            labels = seen.open_fixings(pricing_env)
+            product, new = step_fixings(product, pricing_env, prev_date=self._last[0], prev_spot=self._last[1],
+                                        run_fills=self._run_fills,
+                                        live_spots={i: s for i, (_d, s) in self._live.items()})
+            self._run_fills.update(new)
+            self._live = update_live(labels, day, pricing_env.spot, before=self._live, exclude=new)
+            self._last = (day, float(pricing_env.spot))
+            return product
         if self._run_fills:
             product = product.with_fixings_recorded(self._run_fills)
         return product
@@ -544,10 +561,8 @@ class ProductReplay:
         calibration or the lifecycle tracker: a bump that re-derived any of
         those would measure the rebuild, not the risk.
         """
-        # The day's contract already carries the run's first-valuation fills (product_for_date); a fixing that
-        # passed during the run is decided here once, at the day's spot, so the carry bumps do not move it (user
-        # decision 2026-10-09; the day's own pricing has warned). TODO(lifecycle, W6): record a fixing that passes
-        # during the run at its own day's real spot.
+        # The day's contract carries every fixing the run has recorded (product_for_date); this freeze finds nothing
+        # strictly past, and a fixing dated today stays live under the carry bumps (D1).
         product = freeze_missing_fixings(product, env, warn=False)
 
         def price_at(spot: float, dividend: Any) -> float:

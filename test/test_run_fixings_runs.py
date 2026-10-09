@@ -365,3 +365,53 @@ def test_fx_dynamic_x3e_time_stamped_dates_refuse_a_participant():
 def test_fx_dynamic_x3f_a_path_before_the_env_date_refuses_a_participant():
     with pytest.raises(ValidationError, match="cannot go back"):
         _fx_dynamic([F.fx_ra("domestic", "dated")], start=F.START - timedelta(days=1))
+
+
+# ================================================================ replay (the Asian: no range-accrual route, drift 1)
+def _replay(product, n=F.DAYS, first=0, spot_of=F.spot_on, explain=None):
+    from replay_golden import fixtures
+
+    from quantark.backtest.replay.config import AutocallableEngineConfig
+    from quantark.backtest.replay.engine import ReplayBacktestEngine
+    from quantark.backtest.replay.market import AutocallableMarketDataSet
+    from quantark.util.enum.engine_enums import EngineType
+
+    dates = pd.date_range(F.START + timedelta(days=first), periods=n, freq="D")
+    spots = [spot_of(first + k) for k in range(n)]
+    fut = [{"date": d, "contract": "IF2403", "futures_price": s * 1.004, "expiry_date": pd.Timestamp("2024-03-15"),
+            "multiplier": 300.0} for d, s in zip(dates, spots)]
+    cfg = fixtures.make_book_config()
+    cfg.market_data = AutocallableMarketDataSet.from_dataframes(
+        spot_data=pd.DataFrame({"date": dates, "spot": spots}),
+        vol_data=pd.DataFrame({"date": dates, "volatility": [F.VOL] * n}),
+        rate_data=pd.DataFrame({"date": dates, "rate": [F.RATE] * n}), futures_data=pd.DataFrame(fut))
+    cfg.products = [fixtures.BookProduct(product=product, quantity=1.0, position_id=1, has_lifecycle=False)]
+    cfg.calculate_event_probabilities = False
+    cfg.engine_config = AutocallableEngineConfig(pricing_engine_type=EngineType.ANALYTICAL)
+    if explain is not None:
+        cfg.pnl_explain = explain
+    engine = ReplayBacktestEngine(cfg)
+    res = engine.run()
+    return engine, res, res.states_df()["product_mtm"].tolist()
+
+
+def test_replay_x1_x2_x3g_x6():
+    booked = F.asian_dated()
+    before = copy.deepcopy(booked)
+    (eng_d, _, mtm_d), warns = F.count_missing(_replay, booked)
+    eng_n, _, mtm_n = _replay(F.asian_numeric())
+    for k in (0, 3, 4, 5, 10, 14, 18, 20, 24):
+        _, _, window = _replay(F.by_hand("asian", k - 1), n=2, first=k)          # X1a: a window starting at k
+        assert is_close(mtm_d[k], window[0], rel_tol=1e-12), k
+        assert is_close(mtm_n[k], mtm_d[k], rel_tol=1e-12), k                    # X2
+    assert warns == 0                                                            # X1c
+    fills_d, fills_n = eng_d._replays[0]._run_fills, eng_n._replays[0]._run_fills
+    assert fills_d == fills_n == F.hand_outcomes("asian", F.DAYS - 2)            # X1b / X2 / X6
+    assert booked.observation_records == before.observation_records             # X3g
+
+
+def test_replay_x1b_the_fixing_does_not_move_later():
+    other = lambda k: F.spot_on(k) if k <= 5 else 80.0                          # noqa: E731
+    a, _, _ = _replay(F.asian_dated(), n=10)
+    b, _, _ = _replay(F.asian_dated(), n=10, spot_of=other)
+    assert a._replays[0]._run_fills[0] == b._replays[0]._run_fills[0] == 105.0
