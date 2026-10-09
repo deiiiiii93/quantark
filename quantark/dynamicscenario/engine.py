@@ -46,7 +46,7 @@ from quantark.stresstest.stress.stress_types import (
 )
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import pnl_pct_of_abs_baseline
-from quantark.util.fixings import freeze_portfolio_fixings
+from quantark.util.run_fixings import RunFixingRecorder
 
 
 class DynamicScenarioEngine:
@@ -86,6 +86,7 @@ class DynamicScenarioEngine:
         self.config = config or DynamicScenarioConfig()
         self.greeks_calculator = GreeksCalculator() if self.config.calculate_greeks else None
         self._deltaone_engine = DeltaOneEngine()
+        self.run_fixings: RunFixingRecorder = RunFixingRecorder()   # the last run's (spec 2026-10-09 run fixings)
     
     def run(
         self,
@@ -112,11 +113,6 @@ class DynamicScenarioEngine:
         Raises:
             ValidationError: If portfolio or path is invalid
         """
-        # A fixing already missing at the first valuation is history: filled once at its spot and kept for the
-        # whole run (user decision 2026-10-09).
-        # TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every
-        # repricing; it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
-        portfolio = freeze_portfolio_fixings(portfolio)
         # Validate inputs
         if not portfolio or len(portfolio) == 0:
             raise ValidationError("Portfolio must contain at least one position")
@@ -155,6 +151,11 @@ class DynamicScenarioEngine:
             lifecycle_manager = LifecycleManager(base_date=base_date)
             lifecycle_manager.register_positions(working_portfolio)
 
+        # Run fixings (spec 2026-10-09 run fixings §3.5): registered on the WORKING copy at the first valuation (the
+        # input portfolio is never touched); a fixing already missing is filled once at the baseline spot (R5).
+        self.run_fixings = RunFixingRecorder()
+        self.run_fixings.register(working_portfolio)
+
         # Track state
         baseline_value = working_portfolio.get_portfolio_value()
         cumulative_transaction_costs = 0.0
@@ -185,6 +186,11 @@ class DynamicScenarioEngine:
             if day_date:
                 for env in working_portfolio.pricing_environments.values():
                     env.valuation_date = day_date
+
+            if day_date:
+                # the clock moved: record the fixings it passed at the previous instant's spot (R3/R4); an undated
+                # path never moves the date, so nothing passes (R7)
+                self.run_fixings.advance(working_portfolio)
 
             # Process lifecycle events on this day's close
             lifecycle_events_today: List[LifecycleEventSnapshot] = []

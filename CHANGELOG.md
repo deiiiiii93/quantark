@@ -52,6 +52,10 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   day's spot; numeric contracts age with their records (no more constant-maturity "no roll rule" warning for them).
   A run whose instants carry a time of day (`frequency="H"`) and holds such a product is refused. Measured on the
   spec fixture: a dated range accrual on day 10, 2.744374 -> 4.649441 (= the contract with the day-4 fixing recorded).
+- `DynamicScenarioEngine` (equity): the same run-fixings recording on a dated path (`DynamicScenarioEngine.run_fixings`);
+  registered on the working copy, so the input portfolio is never touched; numeric range accruals / record Asians now
+  age on a dated path (they were frozen). An undated path records nothing; a dated path whose dates carry a time of
+  day and that holds such a product is refused.
 - A dated contract whose annualized cash needs an accrual start but has no `initial_date` is refused at
   construction (R5); it used to accrue from the valuation date. A contract with no annualized leg is unchanged.
 - A `BUSINESS_DAYS`-annualized contract without `accrual_calendar` / `accrual_bus_days_in_year` is refused.
