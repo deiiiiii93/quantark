@@ -219,7 +219,10 @@ Implemented by: `RangeAccrualOption`, `AsianOption` (record schedules only; a le
 - **R3 The clock fixes it (D2).** When the run's clock moves from path instant P (date `d_P`, spot `S_P`) to the next
   path instant P′, every record that is strictly past at P′ and has no outcome is recorded at **`S_P`**. Those are
   exactly the records dated `d_P` (live at P) and the records dated strictly between `d_P` and `d_P′` (R4). Records
-  dated `d_P′` stay live at P′.
+  dated `d_P′` stay live at P′. **Amendment (user approved 2026-10-09):** a record that was live (t = 0) at more than
+  one instant — a Friday fixing on a `BUSINESS_DAYS` clock with weekend path rows is t = 0 on Friday, Saturday and
+  Sunday — is recorded at the spot of the FIRST instant it was live (the last path day on or before its date, Friday),
+  not at `S_P` (Sunday). On calendar-day clocks a record is live at exactly one instant, so this is the rule above.
 - **R4 Holidays and gaps (D5).** Path instants are whatever the path holds (business days, `W`/`M` equity backtest
   frequencies, sparse `DayPath`s, and every numeric `k/12` fixing on a daily path). A record dated strictly between two
   path instants was never live on the path; R3 records it at the spot of the PREVIOUS path instant, flags `gap=True`,

@@ -66,7 +66,7 @@ Every `file:line` the spec cites was checked; all TODO sites (§0 table), `range
 1. **Protocol = W5b's two + `with_time_elapsed(dt)` + `open_fixings(env)` + `has_run_fixings` (property).** — Gap (`gap=True`) must be decided from the record's time at the previous instant, identically for a numeric twin and its dated contract (X2 compares `gap` bitwise); only a time query answers it; `has_run_fixings` excludes legacy-schedule Asians per instance. — If wrong: one extra read-only method per product (W4b's TARN must implement it too); no value impact.
 2. **`gap` = "the record was not live (t = 0) at the previous path instant"**, computed from `open_fixings` times, not from calendar dates. On `CALENDAR_DAYS`/ACT this equals the spec's "no path instant fell on its date". On `BUSINESS_DAYS` a Saturday record resolves to t = 0 on the Friday (`calculate_year_fraction(Fri, Sat)` counts 0 business days), so it is live on Friday and recorded at Friday's spot with `gap=False`; its numeric twin (same business-day time as Friday) does the same. — X2 requires twin-identical `gap`. — If wrong: only the `gap` flag of non-business-day records on a business-day clock changes; outcomes and spots are the same.
 3. **`AsianOption.time_shift` records, at the held spot, every record the bump leaves strictly past without a price** (dated in practice). — Value-neutral (pricing filled the same spot), removes the theta-bump warning (drift 6), matches the range accrual's theta rule the spec cites (§3.4, R4). — If wrong: revert one override; X1c fails for the Asian on its fixing days.
-4. **On a `BUSINESS_DAYS` environment with non-business path instants (a calendar-day path with weekend rows), a Friday fixing is still t = 0 on Saturday and Sunday and is recorded on Monday at SUNDAY's spot** (the previous path instant, R3 literally). — The run rule is "the previous path instant's spot"; inventing a "last business instant" rule is unspecified. Pinned by a test so a later decision shows. — If wrong: the weekend rows' spot is used; paths that forward-fill Friday's spot (the usual case) are unaffected.
+4. **A fixing that was live is decided at the spot of the FIRST instant it was live (t = 0); a gap fixing (never live) at the previous instant's spot** (USER APPROVED 2026-10-09: "the spot of the last path day on or before its date"). On `CALENDAR_DAYS`/ACT a record is live at exactly one instant, so this is R3 unchanged. On a `BUSINESS_DAYS` environment with weekend path rows a Friday fixing stays t = 0 through Saturday and Sunday and is recorded on Monday at FRIDAY's spot; its numeric twin (same business-day time) went live on the same Friday, so twins stay identical. The recorder keeps, per position, `index -> (date, spot)` of the instant each open record first went live; a same-date `advance` (Ruling 9) refreshes the spot of the entries that went live on that date. `step_fixings` takes the map as `live_spots` (index -> spot) and decides each new fill in it at its own spot. — Measured design choice signed by the user; time-based, so X2 holds. — If wrong: only weekend-row paths on a business-day clock move; weekend VALUATIONS still price the live Friday record at the weekend row's spot (it is t = 0 there), recorded at Friday's on Monday.
 5. **E5 for a participant compares the alive contract with `product_t0.with_time_elapsed(decrement)`**: exact on every term except numeric clock leaves (`observation_time`, `accrued_offset`) within `ROLL_TOL` and an outcome open at t0 and set at t1 on a record strictly past at t1. `decrement` = `run_step_dt(t0 date, env_t1)` (R6's clock) when the transition rolls the full step. — Without it the equity backtest explain regresses on numeric range accruals (drift 7). — If wrong: explain refuses or accepts some hand-built numeric pairs differently; runs are unaffected.
 6. **The pair contract for a participant is `product_t0.with_fixings_recorded(t0_fills).with_time_elapsed(dt).with_fixings_recorded(step_fills)`**, used as `product_alive_t1` and as the carried t1 snapshot's product. — Reproduces §4.4 (P1, P2, P2b, P3, P3b) and is bitwise the run's own t1 contract in the equity backtest (same operations), so X3i's re-fill is exactly 0.0. — If wrong: P2b's alive value would follow t1's record instead of S0.
 7. **R8 (time-of-day refusal) is checked in `advance` (both instants of the step) and in `step_fixings`, not in `register`.** — A one-instant run passes nothing; an undated dynamic scenario (R7) never advances, so a time-stamped environment there keeps today's behaviour (X3d). An `H` backtest and a 15:00 FX path still refuse at their first advance. — If wrong: a single-instant time-stamped run is accepted instead of refused.
@@ -84,7 +84,7 @@ Inputs the spec implies but no acceptance test exercises, most likely to bite fi
 1. **Two underlyings in one equity book** (two range accruals on `IDX_A`/`IDX_B` stepping together): each fixing must be recorded at ITS underlying's previous spot, never the other's. Test: Task 4 `test_each_underlying_records_at_its_own_previous_spot`.
 2. **A numeric contract aged to exactly its maturity** inside a run: maturity must snap to exactly `0.0` and price as its dated twin on the expiry date. Test: Task 1 `test_ageing_to_maturity_snaps_and_prices_as_the_dated_twin`.
 3. **A participating position added mid-run** (a user strategy adding a range accrual on day 3): first-sight registration (Ruling 8), one warning, recorded thereafter. Test: Task 4 `test_a_position_first_seen_at_advance_is_registered_there`.
-4. **A `BUSINESS_DAYS` environment with weekend path rows**: Friday's fixing is live through the weekend and recorded on Monday at the last weekend instant's spot (Ruling 4), twins identical. Test: Task 8 `test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant`.
+4. **A `BUSINESS_DAYS` environment with weekend path rows**: Friday's fixing is live through the weekend and recorded on Monday at FRIDAY's spot (Ruling 4, user-approved), twins identical; a same-date refresh on the day it went live moves that spot. Tests: Task 8 `test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant` and Task 4 `test_a_fixing_live_for_several_instants_takes_the_first_live_instants_spot`.
 5. **An explain pair whose t1 is exactly a fixing date**: that fixing is live at t1 (D1) — not decided at S0, no re-fill row from it; pv_alive_t1 equals t1's own value. Test: Task 10 `test_a_fixing_dated_t1_stays_live_in_the_pair`.
 
 ## File Structure
@@ -937,7 +937,8 @@ Spec §3.1, §3.3 R1–R10, §3.4, X3c–X3f (unit level), Review Focus 1 and 3.
   def run_step_dt(prev_date, env) -> float          # 0.0 on the same date; ValidationError when env is earlier
   def at_spot(env, spot: float)                     # dataclasses.replace(env, spot_quote=replace(env.spot_quote, spot=spot))
   def require_date_instant(instant) -> None         # R8: ValidationError unless midnight
-  def step_fixings(product, env, *, prev_date, prev_spot, run_fills) -> Tuple[Any, Dict[int, Any]]
+  def step_fixings(product, env, *, prev_date, prev_spot, run_fills, live_spots=None) -> Tuple[Any, Dict[int, Any]]
+  def update_live(open_fixings, date, spot, before=None, exclude=()) -> Dict[int, Tuple[Any, float]]   # Ruling 4
   @dataclass(frozen=True) class RecordedFixing: position_id: str; index: int; label: str; outcome: Any; spot: float; gap: bool
   @dataclass(frozen=True) class RunFixingDay: date: Optional[datetime]; fixings: Tuple[RecordedFixing, ...];
                                                product_events: Tuple[Tuple[str, float, Any], ...] = (); pending_pv: float = 0.0
@@ -947,7 +948,7 @@ Spec §3.1, §3.3 R1–R10, §3.4, X3c–X3f (unit level), Review Focus 1 and 3.
       days: Tuple[RunFixingDay, ...]        # property, every day returned so far
       recorded: Tuple[RecordedFixing, ...]  # property, flattened
   ```
-  `step_fixings` does NOT age: the caller passes the product already aged to `env`'s date. It returns `(product with run_fills and the new fills recorded, new_fills)` where `new_fills = product_with_run_fills.missing_fixing_fills(at_spot(env, prev_spot))`; it never mutates `run_fills`.
+  `step_fixings` does NOT age: the caller passes the product already aged to `env`'s date. It returns `(product with run_fills and the new fills recorded, new_fills)` where `new_fills = product_with_run_fills.missing_fixing_fills(at_spot(env, prev_spot))`, except that a new fill whose index is in `live_spots` (index -> spot of the instant it first went live, Ruling 4) is decided at that spot; it never mutates `run_fills`. `update_live` returns `{index: (date, spot)}` for the records of `open_fixings` that are live (t = 0) and not in `exclude`, keeping the entry of `before` for a record already there and `(date, spot)` for a newly live one.
 
 - [ ] **Step 1: Write the failing tests** (append to `test/test_run_fixings.py`)
 
@@ -1101,6 +1102,30 @@ def test_each_underlying_records_at_its_own_previous_spot():
     assert _rows(rec, pid_b) == [(0, False, 120.0, False)]
 
 
+def test_a_fixing_live_for_several_instants_takes_the_first_live_instants_spot():
+    """Review Focus 4 / Ruling 4 (user-approved): on a business-day clock with weekend rows Friday's fixing is t = 0
+    on Friday, Saturday and Sunday and is decided on Monday at FRIDAY's spot (a same-date refresh on Friday counts),
+    dated and numeric twins identical."""
+    from quantark.util.calendar import CalendarType, DayCountConvention, calculate_year_fraction, create_calendar
+    cal = create_calendar(CalendarType.NONE, year_range=(2024, 2025))
+    kw = dict(day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=252, calendar=cal)
+    times = [calculate_year_fraction(F.START, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=cal)
+             for d in F.fixing_dates()]
+    pf = F.eq_book(F.ra_dated(), F.ra_numeric(times=times), env=F.eq_env(0, spot=105.0, **kw))
+    pid_d, pid_n = list(pf.positions)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    spots = {1: 105.0, 2: 105.0, 3: 105.0, 4: 120.0, 5: 120.0, 6: 120.0, 7: 120.0}   # day 4 = Friday
+    for k in range(1, 8):
+        F.move(pf, k, spots[k])
+        rec.advance(pf)
+        if k == 4:                                          # same-date refresh: Friday's market is 105 after all
+            F.move(pf, 4, 105.0)
+            rec.advance(pf)
+    assert _rows(rec, pid_d) == _rows(rec, pid_n) == [(0, True, 105.0, False)]   # Friday's spot, not Sunday's 120
+    assert next(d for d in rec.days if d.fixings).date == F.START + timedelta(days=7)   # recorded on Monday
+
+
 def test_a_position_first_seen_at_advance_is_registered_there():
     """Review Focus 3 (Ruling 8)."""
     pf = F.eq_book(F.ra_dated())
@@ -1174,7 +1199,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
@@ -1243,12 +1268,15 @@ def at_spot(env: Any, spot: float) -> Any:
 
 
 def step_fixings(product: Any, env: Any, *, prev_date: Any, prev_spot: float,
-                 run_fills: Mapping[int, Any]) -> Tuple[Any, Dict[int, Any]]:
+                 run_fills: Mapping[int, Any],
+                 live_spots: Optional[Mapping[int, float]] = None) -> Tuple[Any, Dict[int, Any]]:
     """R3/R4 for one product, stateless (the recorder and ``ProductReplay`` share it).
 
     ``product`` is already aged to ``env``'s date. Returns ``(recorded, new_fills)``: ``recorded`` carries
-    ``run_fills`` (decisions of earlier steps) and ``new_fills``, the records strictly past at ``env`` and still open,
-    decided at ``prev_spot`` (the previous path instant's spot). ``run_fills`` is not mutated.
+    ``run_fills`` (decisions of earlier steps) and ``new_fills``, the records strictly past at ``env`` and still open.
+    A record in ``live_spots`` was live at an earlier instant and is decided at the spot of the first instant it was
+    live (Ruling 4: the last path day on or before its date); any other (a gap) at ``prev_spot``. ``run_fills`` is
+    not mutated.
     """
     require_date_instant(prev_date)
     require_date_instant(env.valuation_date)
@@ -1257,11 +1285,24 @@ def step_fixings(product: Any, env: Any, *, prev_date: Any, prev_spot: float,
     if run_fills:
         product = product.with_fixings_recorded(dict(run_fills))
     new_fills = dict(product.missing_fixing_fills(at_spot(env, prev_spot)))
+    by_spot: Dict[float, List[int]] = {}
+    for index in new_fills:
+        if live_spots and index in live_spots:
+            by_spot.setdefault(float(live_spots[index]), []).append(index)
+    for spot, indices in by_spot.items():          # grouped by the stored value: one decision per distinct spot
+        at_live = product.missing_fixing_fills(at_spot(env, spot))
+        for index in indices:
+            new_fills[index] = at_live[index]
     return (product.with_fixings_recorded(new_fills) if new_fills else product), new_fills
 
 
-def _live(open_fixings: Mapping[int, Tuple[float, str]], exclude=()) -> FrozenSet[int]:
-    return frozenset(i for i, (t, _label) in open_fixings.items() if is_zero(t) and i not in exclude)
+def update_live(open_fixings: Mapping[int, Tuple[float, str]], date: Any, spot: float,
+                before: Optional[Mapping[int, Tuple[Any, float]]] = None,
+                exclude=()) -> Dict[int, Tuple[Any, float]]:
+    """``{index: (date, spot)}`` of the instant each live (t = 0) record first went live (Ruling 4)."""
+    before = before or {}
+    return {i: before.get(i, (date, float(spot)))
+            for i, (t, _label) in open_fixings.items() if is_zero(t) and i not in exclude}
 
 
 class RunFixingRecorder:
@@ -1274,7 +1315,7 @@ class RunFixingRecorder:
 
     def __init__(self) -> None:
         self._last: Dict[str, Tuple[Any, float]] = {}      # underlying -> (date, quoted spot) of the last instant
-        self._live: Dict[str, FrozenSet[int]] = {}         # position id -> records live (t = 0) at that instant
+        self._live: Dict[str, Dict[int, Tuple[Any, float]]] = {}   # position id -> index -> (date, spot) first live
         self._days: List[RunFixingDay] = []
 
     @property
@@ -1295,7 +1336,7 @@ class RunFixingRecorder:
         frozen = freeze_missing_fixings(position.product, env)
         if frozen is not position.product:
             position.product = frozen
-        self._live[pid] = _live(frozen.open_fixings(env))
+        self._live[pid] = update_live(frozen.open_fixings(env), env.valuation_date, env.spot)
 
     def _day(self, portfolio, participants, fixings) -> RunFixingDay:
         dates = [portfolio.pricing_environments[pos.underlying].valuation_date for _, pos in participants]
@@ -1334,16 +1375,23 @@ class RunFixingRecorder:
                 self._register_position(pid, position, env)
                 continue
             prev_date, prev_spot = last
+            live = self._live[pid]
             if pd.Timestamp(env.valuation_date) == pd.Timestamp(prev_date):
-                continue                                   # same instant: only its spot is refreshed (Ruling 9)
+                # same instant: only its spot is refreshed (Ruling 9), including records that went live on it
+                day = pd.Timestamp(env.valuation_date)
+                self._live[pid] = {i: ((d, float(env.spot)) if pd.Timestamp(d) == day else (d, s))
+                                   for i, (d, s) in live.items()}
+                continue
             aged = position.product.with_time_elapsed(run_step_dt(prev_date, env))
             labels = aged.open_fixings(env)
-            recorded, new = step_fixings(aged, env, prev_date=prev_date, prev_spot=prev_spot, run_fills={})
+            recorded, new = step_fixings(aged, env, prev_date=prev_date, prev_spot=prev_spot, run_fills={},
+                                         live_spots={i: s for i, (_d, s) in live.items()})
             for index in sorted(new):
                 fixings.append(RecordedFixing(position_id=pid, index=index, label=labels[index][1],
-                                              outcome=new[index], spot=float(prev_spot),
-                                              gap=index not in self._live[pid]))
-            self._live[pid] = _live(labels, exclude=new)
+                                              outcome=new[index],
+                                              spot=float(live[index][1]) if index in live else float(prev_spot),
+                                              gap=index not in live))
+            self._live[pid] = update_live(labels, env.valuation_date, env.spot, before=live, exclude=new)
             if recorded is not position.product:
                 position.product = recorded
         for _, position in participants:
@@ -1355,7 +1403,7 @@ class RunFixingRecorder:
         return self._day(portfolio, participants, fixings)
 ```
 
-Note on the live set after a step: `labels` was taken on the aged product BEFORE recording, so its t = 0 records minus the ones just recorded are exactly the records live at P' (the new fills are all `t < 0`, so `exclude=new` is defensive).
+Note on the live set after a step: `labels` was taken on the aged product BEFORE recording, so its t = 0 records minus the ones just recorded are exactly the records live at P' (the new fills are all `t < 0`, so `exclude=new` is defensive); a record already live keeps its first-live `(date, spot)` (Ruling 4).
 
 CHANGELOG `### Added`:
 
@@ -1486,7 +1534,7 @@ In `_register_position`, return a bool and check maturity first:
         frozen = freeze_missing_fixings(position.product, env)
         if frozen is not position.product:
             position.product = frozen
-        self._live[pid] = _live(frozen.open_fixings(env))
+        self._live[pid] = update_live(frozen.open_fixings(env), env.valuation_date, env.spot)
         return True
 ```
 
@@ -1950,7 +1998,7 @@ def test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant(
     spot_of = lambda k: 1.25 + 0.001 * k                                        # noqa: E731
     eng_d, _, _ = _fx_backtest([dated], env=env, spot_of=spot_of, index=pd.date_range(F.START, periods=10))
     eng_n, _, _ = _fx_backtest([numeric], env=env, spot_of=spot_of, index=pd.date_range(F.START, periods=10))
-    assert _rows(eng_d.run_fixings)[0] == _rows(eng_n.run_fixings)[0] == (0, True, spot_of(6), False)   # Sunday's
+    assert _rows(eng_d.run_fixings)[0] == _rows(eng_n.run_fixings)[0] == (0, True, spot_of(4), False)   # Friday's
 
 
 def test_fx_dynamic_x3d_undated_path_records_nothing():
@@ -2099,7 +2147,7 @@ Expected: FAIL (day 10: run − window ≈ +0.946551, §2.2 E3; numeric twin 7.8
 
 (`from quantark.util.run_fixings import participates`. `with_time_elapsed(0.0)` returns the tracker's own deep copy, which this method owns.)
 
-`product_replay.py`: import `from quantark.util.run_fixings import participates, step_fixings`; in `__init__` after `self._run_fills` add `self._last: Optional[tuple] = None  # (date, spot) of the last date product_for_date first saw`. Replace `product_for_date`:
+`product_replay.py`: import `from quantark.util.run_fixings import participates, step_fixings, update_live`; in `__init__` after `self._run_fills` add `self._last: Optional[tuple] = None  # (date, spot) of the last date product_for_date first saw` and `self._live: Dict[int, tuple] = {}  # index -> (date, spot) first live (Ruling 4)`. Replace `product_for_date`:
 
 ```python
     def product_for_date(self, date: pd.Timestamp, pricing_env: PricingEnvironment, *, initial: bool = False):
@@ -2115,11 +2163,18 @@ Expected: FAIL (day 10: run − window ≈ +0.946551, §2.2 E3; numeric twin 7.8
             fills_of = getattr(product, "missing_fixing_fills", None)
             self._run_fills = dict(fills_of(pricing_env)) if fills_of is not None else {}
             self._last = (day, float(pricing_env.spot))
-            return freeze_missing_fixings(product, pricing_env) if self._run_fills else product
+            frozen = freeze_missing_fixings(product, pricing_env) if self._run_fills else product
+            if participates(frozen):
+                self._live = update_live(frozen.open_fixings(pricing_env), day, pricing_env.spot)
+            return frozen
         if participates(product) and day != self._last[0]:
+            seen = product.with_fixings_recorded(self._run_fills) if self._run_fills else product
+            labels = seen.open_fixings(pricing_env)
             product, new = step_fixings(product, pricing_env, prev_date=self._last[0], prev_spot=self._last[1],
-                                        run_fills=self._run_fills)
+                                        run_fills=self._run_fills,
+                                        live_spots={i: s for i, (_d, s) in self._live.items()})
             self._run_fills.update(new)
+            self._live = update_live(labels, day, pricing_env.spot, before=self._live, exclude=new)
             self._last = (day, float(pricing_env.spot))
             return product
         if self._run_fills:
