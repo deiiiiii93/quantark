@@ -81,6 +81,16 @@ up to a sign change on knocked-in and near-barrier rows (`3a|class|ko_reset|cont
   past fixings looked future), and a fixing the theta bump steps over is fixed at the held spot (a dated FX one used
   to be refused as an unrecorded past fixing). Theta on a certain coupon is now the discount roll (+8e-4 per day on
   the control) instead of a day's accrual lost (-0.026).
+- cashleg `AccrualLeg`: `day_count` is now read. When the `LegSchedule` carries `period_start_dates` /
+  `period_end_dates`, each period accrues `calculate_year_fraction(start, end, day_count)`; with times only it keeps
+  `period_end - period_start` (bit-identical). The field used to be ignored and the dates never read, so ACT/365,
+  ACT/360 and 30/360 US gave the same PV. On a dated quarterly 2026 leg (4% on 1,000,000, r = 5%, no KO): ACT/360
+  38773.115547 -> 39306.910836 (+1.38%, = 365/360 x the dated ACT/365 value), ACT/365 -> 38768.460003 (90/91/92/92
+  days instead of four quarter-years), 30/360 US unchanged. No library, test or example caller builds a dated
+  schedule: every existing leg PV is bit-identical (14 caller configurations measured against dcea77b6). New
+  refusals: period dates given for only one side or only some periods, non-`datetime` dates, an end not after its
+  start; a dated `BUSINESS_DAYS` leg without the new `calendar` and `bus_days_in_year` fields (and those fields on
+  any leg that would not read them); ACT/ACT ISMA/BOND/CHINABOND on a dated leg (no coupon frequency).
 
 ### Removed
 - `AccrualConfig.accrual_dates` (it had no reader).

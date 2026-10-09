@@ -319,6 +319,16 @@ Measured by `item10_own_accrual_survey.py`.
     basis=day_count)` and read `coupon_period_fraction`; otherwise keep `TIME`. Alternatively delete the dead
     `day_count` field. Either is a user decision: the first moves every dated leg whose day count is not ACT/365 on
     times that came from ACT/365.
+  - **Status (2026-10-09, user decision B1, branch `w4a-cashleg-daycount`): FIXED — `day_count` is real.** A dated
+    period accrues `calculate_year_fraction(start_date, end_date, day_count)` directly (not via the equity
+    resolver: `AccrualPeriod` lives in the equity product package); times-only keeps `end − start`. Dates come as
+    a pair, one `datetime` per period, end strictly after start; partial or mixed dating is refused (no caller
+    mixes). Dated `BUSINESS_DAYS` needs the leg's new `calendar` + `bus_days_in_year` (no guess); ACT/ACT
+    ISMA/BOND/CHINABOND refused on a dated leg (TODO: no coupon frequency on the leg). Measured: no library, test
+    or example caller builds a dated schedule, so all 14 existing caller configurations (demo, event-emission,
+    required-streams, this survey's three day counts × trivial / QUAD-snowball distributions) are bit-identical
+    to dcea77b6. A dated quarterly 2026 leg moves: ACT/360 38773.115547 → 39306.910836, ACT/365 → 38768.460003,
+    30/360 US unchanged. Still no `time_shift`; dates are not reconciled against the times.
 
 ---
 
