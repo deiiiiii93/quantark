@@ -16,6 +16,7 @@ from quantark.util.exceptions import ValidationError, MarketDataError
 from quantark.util.marketdata.models import MarketDataSet
 from quantark.var.results import IncrementalVaRResult, VaRResult
 from quantark.var.config import VaRConfig, VaRMethod
+from quantark.util.fixings import freeze_portfolio_fixings
 
 
 class HistoricalVaREngine:
@@ -111,6 +112,8 @@ class HistoricalVaREngine:
         Returns:
             VaRResult with VaR metrics
         """
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         start_time = time.time()
 
         if len(portfolio.positions) == 0:
@@ -867,6 +870,8 @@ class HistoricalVaREngine:
             ValidationError: If portfolio is empty
             MarketDataError: If insufficient historical data
         """
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         from quantark.var.results.incremental_var_result import IncrementalVaRResult
 
         # Calculate full portfolio VaR first

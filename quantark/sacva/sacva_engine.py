@@ -40,6 +40,7 @@ from quantark.sacva.sensitivities.shifts import (
 )
 from quantark.param.rrf.rate_curve import InterpolatedRateCurve
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import freeze_missing_fixings
 
 _EQUITY_INDEX_BUCKETS = {12, 13}
 # 1% relative shift for equity/FX spot & vega (MAR50.59 FX, MAR50.70 equity); divisor 1e-2
@@ -298,6 +299,31 @@ class SACVAEngine:
             new_sets.append(replace(ns, trades=trades))
         return replace(cp, netting_sets=new_sets)
 
+    @staticmethod
+    def _freeze_fixings(portfolio):
+        """``portfolio`` with every trade's and hedge's missing past fixings recorded at its own env's spot.
+
+        A filled past fixing is history (user decision 2026-10-09): the spot-bumped and exposure revaluations reuse
+        the base fill. Returns ``portfolio`` itself when nothing is filled; nothing is mutated.
+        """
+
+        def frozen(trade):
+            product = freeze_missing_fixings(trade.product, trade.env)
+            return trade if product is trade.product else replace(trade, product=product)
+
+        counterparties = []
+        for cp in portfolio.counterparties:
+            sets = [replace(ns, trades=[frozen(t) for t in ns.trades]) for ns in cp.netting_sets]
+            if any(a is not b for ns0, ns1 in zip(cp.netting_sets, sets) for a, b in zip(ns0.trades, ns1.trades)):
+                cp = replace(cp, netting_sets=sets)
+            counterparties.append(cp)
+        hedges = [frozen(h) for h in portfolio.hedges]
+        if all(a is b for a, b in zip(portfolio.counterparties, counterparties)) and all(
+            a is b for a, b in zip(portfolio.hedges, hedges)
+        ):
+            return portfolio
+        return replace(portfolio, counterparties=counterparties, hedges=hedges)
+
     # -- entry point ------------------------------------------------------------
     def compute(self, portfolio):
         """Compute SA-CVA capital from a ``CVATradePortfolio``.
@@ -305,6 +331,7 @@ class SACVAEngine:
         Returns the SBA ``SACVAResult``; per-counterparty EE profiles and base CVA
         are attached for inspection/audit.
         """
+        portfolio = self._freeze_fixings(portfolio)
         self._validate_fx_identity(portfolio)
         sensitivities = []
         profiles = {}

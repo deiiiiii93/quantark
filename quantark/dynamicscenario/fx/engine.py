@@ -26,6 +26,7 @@ from quantark.stresstest.stress.stress_types import StressLevel
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import pnl_pct_of_abs_baseline
 from quantark.var.fx.revaluation import bump_env
+from quantark.util.fixings import freeze_portfolio_fixings
 
 _CORE_GREEKS = ("delta", "gamma", "vega", "theta", "rho_dom", "rho_for")
 
@@ -63,6 +64,11 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
         hedge_strategy: Optional[Any] = None,
         transaction_cost_model: Optional[Any] = None,
     ) -> DynamicScenarioResults:
+        # A fixing already missing at the first valuation is history: filled once at its spot and kept for the
+        # whole run (user decision 2026-10-09).
+        # TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every
+        # repricing; it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
+        portfolio = freeze_portfolio_fixings(portfolio)
         if not self.supports_portfolio(portfolio):
             raise ValidationError("FXDynamicScenarioEngine requires an FXPortfolio")
         if len(portfolio) == 0:

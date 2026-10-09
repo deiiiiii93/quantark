@@ -15,6 +15,7 @@ from quantark.stresstest.fx.fx_stress_applicator import FXStressApplicator
 from quantark.stresstest.scenario.scenario import Scenario
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import pnl_pct_of_abs_baseline
+from quantark.util.fixings import freeze_portfolio_fixings
 
 
 class FXStressMetricsAdapter(StressMetricsAdapter):
@@ -58,6 +59,8 @@ class FXStressEngine(BaseStressEngine, ScenarioRunner):
         scenarios: Sequence[Scenario],
         baseline_label: str = "Current Market",
     ) -> StressTestResults:
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         if not portfolio or len(portfolio) == 0:
             raise ValidationError("Portfolio must contain at least one position")
         if not scenarios:
@@ -89,6 +92,8 @@ class FXStressEngine(BaseStressEngine, ScenarioRunner):
         scenario: Scenario,
         baseline_value: float,
     ) -> ScenarioResult:
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         scenario_start = time.time()
 
         stressed_envs = FXStressApplicator.apply_scenario_to_portfolio(portfolio, scenario)

@@ -46,6 +46,7 @@ from quantark.stresstest.stress.stress_types import (
 )
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import pnl_pct_of_abs_baseline
+from quantark.util.fixings import freeze_portfolio_fixings
 
 
 class DynamicScenarioEngine:
@@ -111,6 +112,11 @@ class DynamicScenarioEngine:
         Raises:
             ValidationError: If portfolio or path is invalid
         """
+        # A fixing already missing at the first valuation is history: filled once at its spot and kept for the
+        # whole run (user decision 2026-10-09).
+        # TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every
+        # repricing; it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
+        portfolio = freeze_portfolio_fixings(portfolio)
         # Validate inputs
         if not portfolio or len(portfolio) == 0:
             raise ValidationError("Portfolio must contain at least one position")

@@ -20,6 +20,7 @@ from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousD
 from quantark.asset.equity.lifecycle import PortfolioLifecycleManager
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import freeze_portfolio_fixings
 from quantark.util.numerical import is_zero
 
 
@@ -93,6 +94,7 @@ class BacktestEngine:
         # Optional daily PnL explain (quantark.pnlexplain); None changes nothing
         self._explain_recorder = None
         self._last_net_pnl: float = 0.0
+        self._past_fixings_frozen: bool = False
         if getattr(config, "pnl_explain", None) is not None:
             from quantark.pnlexplain.equity.recorder import PnLExplainRecorder
             self._explain_recorder = PnLExplainRecorder(config.pnl_explain)
@@ -249,6 +251,13 @@ class BacktestEngine:
         """
         # Update pricing environment with current market data
         self._update_pricing_environment(timestamp)
+        if not self._past_fixings_frozen:
+            # A fixing already missing at the first market valuation is history: filled once at its spot and kept
+            # for the whole run (user decision 2026-10-09). The run's own position copies carry the fill.
+            # TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every
+            # repricing; it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
+            self.portfolio.positions = freeze_portfolio_fixings(self.portfolio).positions
+            self._past_fixings_frozen = True
 
         # PnL explain: capture today's alive contracts BEFORE lifecycle events
         if self._explain_recorder is not None:

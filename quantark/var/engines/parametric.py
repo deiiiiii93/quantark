@@ -22,6 +22,7 @@ from quantark.var.risk_factors import (
     RateShiftFactor,
     DivYieldShiftFactor,
 )
+from quantark.util.fixings import freeze_portfolio_fixings
 
 
 class ParametricVaREngine:
@@ -162,6 +163,8 @@ class ParametricVaREngine:
             ValidationError: If portfolio is empty or inputs invalid
             MarketDataError: If historical data insufficient
         """
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         start_time = time.time()
 
         if len(portfolio.positions) == 0:
@@ -1059,6 +1062,8 @@ class ParametricVaREngine:
             ValidationError: If portfolio is empty
             MarketDataError: If insufficient historical data
         """
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         from quantark.var.results.incremental_var_result import IncrementalVaRResult
 
         # Calculate full portfolio VaR first

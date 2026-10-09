@@ -17,6 +17,7 @@ from quantark.backtest.fx.results import FXBacktestResults
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.portfolio.fx import FXPortfolio
 from quantark.util.exceptions import ValidationError
+from quantark.util.fixings import freeze_portfolio_fixings
 
 
 class FXBacktestEngine:
@@ -42,6 +43,11 @@ class FXBacktestEngine:
         # Apply first row, establish baseline.
         first_ts = path.index[0]
         self._apply_row(portfolio, pairs, path.iloc[0], first_ts)
+        # A fixing already missing at the first valuation is history: filled once at its spot and kept for the
+        # whole run (user decision 2026-10-09).
+        # TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every
+        # repricing; it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
+        portfolio = freeze_portfolio_fixings(portfolio)
         initial_value = portfolio.get_portfolio_value()
 
         hedge: Dict[str, float] = {pair: 0.0 for pair in pairs}

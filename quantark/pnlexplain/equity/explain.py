@@ -1,7 +1,8 @@
 """Two-snapshot explain orchestrator (spec §5.6)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import dataclasses
+from typing import Any, Dict, List, Optional, Tuple
 
 from quantark.pnlexplain.base import (
     MARKET_FACTORS, ExplainMethod, ExplainRow, PnLExplainResult, RowKind, make_total_row,
@@ -16,6 +17,7 @@ from quantark.pnlexplain.equity.snapshot import ValuationSnapshot
 from quantark.pnlexplain.equity.taylor import taylor_rows
 from quantark.pnlexplain.equity.waterfall import sequential_rows, shapley_rows
 from quantark.util.exceptions import NumericalError
+from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.numerical import is_close
 
 LEVEL = "instrument"
@@ -35,6 +37,40 @@ def reconcile_scale(result: PnLExplainResult, method: ExplainMethod) -> float:
     return max(parts)
 
 
+def _freeze_pair_fixings(
+    snapshot_t0: ValuationSnapshot,
+    snapshot_t1: ValuationSnapshot,
+    transition: Optional[LifecycleTransition],
+) -> Tuple[ValuationSnapshot, ValuationSnapshot, Optional[LifecycleTransition]]:
+    """Both snapshots (and the alive-at-t1 contract) with the fixings missing at t0 recorded at t0's spot.
+
+    A fixing already missing at the first valuation of the pair is history (user decision 2026-10-09): it is decided
+    once, at ``snapshot_t0``'s spot, and every revaluation of the pair - the waterfall's shocked states, the Taylor
+    greeks and ``pv_t1`` - reuses that decision. Records are matched by index (the contract roll check holds the
+    contract fixed); a fixing the t1 contract has recorded keeps its recorded outcome.
+
+    TODO(lifecycle): a fixing that passes between t0 and t1 is still decided at the spot of each revaluation that
+    sees it as past; it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
+    """
+    product_t0 = snapshot_t0.product
+    fills_of = getattr(product_t0, "missing_fixing_fills", None)
+    fills = fills_of(snapshot_t0.pricing_env) if fills_of is not None else {}
+    if not fills:
+        return snapshot_t0, snapshot_t1, transition
+
+    def carried(product):
+        record = getattr(product, "with_fixings_recorded", None)
+        return product if record is None else record(fills)
+
+    snapshot_t0 = dataclasses.replace(
+        snapshot_t0, product=freeze_missing_fixings(product_t0, snapshot_t0.pricing_env)
+    )
+    snapshot_t1 = dataclasses.replace(snapshot_t1, product=carried(snapshot_t1.product))
+    if transition is not None:
+        transition = dataclasses.replace(transition, product_alive_t1=carried(transition.product_alive_t1))
+    return snapshot_t0, snapshot_t1, transition
+
+
 def explain(
     snapshot_t0: ValuationSnapshot,
     snapshot_t1: ValuationSnapshot,
@@ -43,6 +79,7 @@ def explain(
     transition: Optional[LifecycleTransition] = None,
 ) -> PnLExplainResult:
     config = config if config is not None else PnLExplainConfig()
+    snapshot_t0, snapshot_t1, transition = _freeze_pair_fixings(snapshot_t0, snapshot_t1, transition)
     validate_pair(snapshot_t0, snapshot_t1)
     days = (snapshot_t1.date - snapshot_t0.date).days
     transition = resolve_transition(snapshot_t0, snapshot_t1, transition, calendar_days=days)

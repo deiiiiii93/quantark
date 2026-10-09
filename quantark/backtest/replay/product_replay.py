@@ -33,6 +33,7 @@ from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.param.div.forward_carry_curve import ForwardCarryCurve
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.numerical import is_close
 
 from .carry_context import SUPPORTED_EXTRAPOLATIONS, CarryCurveContext
@@ -187,6 +188,8 @@ class ProductReplay:
             has_lifecycle=has_lifecycle,
         )
         self.lifecycle = self._tracker.lifecycle
+        # The missing past fixings decided at the run's first valuation ({record index: outcome}); None until then
+        self._run_fills: Optional[dict] = None
 
     @property
     def start_date(self) -> Optional[pd.Timestamp]:
@@ -205,8 +208,21 @@ class ProductReplay:
         return self._tracker.product_for_lifecycle()
 
     def product_for_date(self, date: pd.Timestamp, pricing_env: PricingEnvironment, *, initial: bool = False):
-        """The pricing copy for ``date``; ``initial`` before the run's first close is observed."""
-        return self._tracker.product_for_pricing(date, pricing_env, initial=initial)
+        """The pricing copy for ``date``; ``initial`` before the run's first close is observed.
+
+        A fixing already missing at the run's first valuation (the first call) is history: it is decided once, at
+        that valuation's spot, and every later pricing copy carries the same decision (user decision 2026-10-09).
+        TODO(lifecycle): a fixing that passes DURING the run is still decided at each day's spot by every repricing;
+        it should be recorded once at its own day's real spot (a lifecycle matter, not built here).
+        """
+        product = self._tracker.product_for_pricing(date, pricing_env, initial=initial)
+        if self._run_fills is None:
+            fills_of = getattr(product, "missing_fixing_fills", None)
+            self._run_fills = dict(fills_of(pricing_env)) if fills_of is not None else {}
+            return freeze_missing_fixings(product, pricing_env) if self._run_fills else product
+        if self._run_fills:
+            product = product.with_fixings_recorded(self._run_fills)
+        return product
 
     def build_env(
         self,

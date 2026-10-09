@@ -78,6 +78,23 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   annualized cash needs an accrual start without `initial_date` is refused (now including one whose rebate
   annualizes by default, e.g. dated by `exercise_date` alone); a numeric contract accrues on its own clock
   (`accrued_offset` + maturity) and is accepted.
+- A filled missing past fixing is history (user decision 2026-10-09): it is decided ONCE, at the base valuation's
+  spot, and no bump or scenario shock moves it. `quantark.util.fixings.freeze_missing_fixings(product, env)`
+  returns a copy with those fixings recorded (`with_missing_fixings_filled`; `missing_fixing_fills` /
+  `with_fixings_recorded` on `RangeAccrualOption`, `AsianOption`, `FxRangeAccrualOption` and its subclasses) and
+  warns once; `freeze_portfolio_fixings(portfolio)` does it per position. Applied at: every public
+  `GreeksCalculator` method (so `calculate`, bucketed, SIMM and parametric VaR greeks), `BaseEngine.calculate_greeks`
+  and `calculate_spot_greeks_curve` (ladder rows keep the base fill, as the engine-grid ladder does),
+  `BaseFxEngine.calculate_greeks` (FX calculator, two-rate greeks), `EquityPosition.get_trade_greeks` /
+  `get_trade_risk`, the execution-framework spot cells, equity and FX VaR (parametric, historical, Monte Carlo,
+  incremental), equity and FX stress tests, SA-CVA (trades and hedges), and PnL explain (the t0 fill is carried
+  to `pv_t1`, the waterfall and the Taylor greeks). Multi-day runs (equity and FX dynamic scenarios, equity and
+  FX backtests, the replay book) fill once at the FIRST valuation and keep it; a fixing that passes during a run
+  is still decided at each day's spot (TODO, a lifecycle matter). Delta near a barrier no longer carries the
+  fill's jump: a numeric range accrual at spot 109.5 under a 110 barrier, delta -0.8914 -> -0.0227 and gamma
+  -1.588 -> -0.00106 (equal to the contract with the fixing recorded); an FX range accrual at 1.2995 under 1.30,
+  delta -5.906e6 -> -4.991e4. Prices are unchanged (48 prices bit-identical to main); the warning fires once per
+  base valuation instead of once per repricing.
 
 ### Fixed
 - Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract

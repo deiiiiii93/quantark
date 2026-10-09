@@ -30,6 +30,7 @@ from quantark.var.config import VaRConfig, VaRMethod
 from quantark.var.fx.config import FXRiskFactorConfig
 from quantark.var.fx.revaluation import bump_env, portfolio_value
 from quantark.var.results import VaRResult
+from quantark.util.fixings import freeze_portfolio_fixings
 
 # Finite-difference bump sizes (small, central differences).
 _EPS = {"spot": 1e-4, "vol": 1e-4, "dom": 1e-4, "for": 1e-4}
@@ -209,6 +210,8 @@ class FXParametricVaREngine(_BaseFXVaREngine):
     """Variance-covariance FX VaR: ``VaR = z * sqrt(sᵀ Σ s)``."""
 
     def calculate_var(self, portfolio: FXPortfolio, historical_data: pd.DataFrame) -> VaRResult:
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         start = time.time()
         self._empty_check(portfolio)
 
@@ -256,6 +259,8 @@ class FXHistoricalVaREngine(_BaseFXVaREngine):
     """Historical-simulation FX VaR via full revaluation of past factor moves."""
 
     def calculate_var(self, portfolio: FXPortfolio, historical_data: pd.DataFrame) -> VaRResult:
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         start = time.time()
         self._empty_check(portfolio)
 
@@ -278,6 +283,8 @@ class FXMonteCarloVaREngine(_BaseFXVaREngine):
     """Monte-Carlo FX VaR: draw factor changes from N(mean, Σ), full revaluation."""
 
     def calculate_var(self, portfolio: FXPortfolio, historical_data: pd.DataFrame) -> VaRResult:
+        # A missing past fixing is history: filled once at the base spot, kept under every shock (2026-10-09)
+        portfolio = freeze_portfolio_fixings(portfolio)
         start = time.time()
         self._empty_check(portfolio)
 
