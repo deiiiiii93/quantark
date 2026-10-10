@@ -178,9 +178,16 @@ day's coupon 0.9863 already paid inside `resolve`) and 101.1319 the day after wi
    and R22 superseded, R24 and R25 added; new open question OQ-4.
 8. **User answers 2026-10-10: R24 approved; OQ-4 (b), generalised ("two period dates can share the same fixing
    date")** — new Task 8c (re-opens Tasks 3, 4, 6, 7: equal fixing dates / times accepted, engines simulate each
-   distinct time once, periods in schedule order with the spec §6 dead-after-hit rule, R26); Task 8b's OQ-4 pin is
+   distinct time once, periods in schedule order with the spec §6 dead-after-hit rule, R26 — since superseded,
+   item 9); Task 8b's OQ-4 pin is
    dropped; Task 9 gains a run-level shared-date test; Re-plan section, Task 12 sign-off, Review Focus 9 and
    Self-review follow.
+9. **User ruling 2026-10-10 on R26: option (b), replacing R26** — the TARN gets its own accrual period dates, separate
+   from its fixing dates. New **Task 8d** (re-opens Tasks 3 and 7, and narrows Task 8c's refusal):
+   `FxTargetRedemptionNote(..., accrual_end_dates=...)` (Rulings R27, R28); default = today's derivation, bitwise;
+   periods sharing a fixing date price with no `accrual_factors`. Task 8c's refusal is reworded (default derivation
+   only; its test matches "zero length", so 8d does not rewrite it); R26 superseded; new non-blocking OQ-5 / OQ-6;
+   Task 9 consumes 8d; Task 12 sign-off, Review Focus 10, Self-review and File Structure follow.
 
 ### Old Tasks 9–11 requirements: where each lives now
 
@@ -293,13 +300,35 @@ W8); stable indices across numeric banking (T9).
   it — that is what such a booking meant under spec §4.2, so every existing booking and test keeps its banked set — and
   the "cash needs a banked fixing" rule is stated by count (`as_of is None or banked count == 0` refused), which equals
   the old "`as_of` before the first fixing" refusal for every such booking — cost: none.
-- **R26** (Task 8c, OQ-4 b) A dated TARN whose periods derive from `initial_date` cannot share a fixing date: the
-  later period would run from a fixing date to the same date (zero accrual), so it is refused with `ValidationError`
-  asking for explicit `accrual_factors` — the user's "each period keeps its own cash" needs each period's own accrual,
-  and a zero-length derived period would be an invented coupon of 0; the numeric form already refuses the same case
-  (built "accrual_factors must be positive" check on `accrual_start`-derived factors) — cost: such a booking must state
-  its factors; a TARF and a TARN with explicit factors are unaffected; distinct dates resolving to one time keep their
-  positive derived factors.
+- ~~**R26**~~ **Superseded 2026-10-10 by the user's ruling (b)** (section "R26 replaced" below): a dated TARN that
+  shares a fixing date no longer needs explicit `accrual_factors`; it states its own accrual period dates
+  (`accrual_end_dates`, Task 8d). What survives is user-directed, not a ruling of this plan: under the DEFAULT
+  derivation (no period dates, no factors) a shared fixing date is still refused, because the later period would run
+  from a fixing date to the same date (a zero-length derived period) — Task 8c builds the refusal, Task 8d narrows it to
+  the default derivation.
+- **R27** (Task 8d, user ruling (b) on R26) The TARN's accrual period dates are stated as one **accrual END date per
+  period**, `accrual_end_dates`, 1:1 with `fixing_dates`; period `i` runs from the previous period's end
+  (`initial_date` for `i = 0`) to `accrual_end_dates[i]`, and `initial_date` stays the first period's start. No
+  separate start dates — this is the accrual-time spec's own dated rule (§4.3 Endpoints: "`end` is the observation
+  date (`OBSERVATION`) or the authoritative settlement date (`SETTLEMENT`). `start` is the previous record's `end`, or
+  `initial_date` for the first record") with the end freed from the fixing date, and it keeps the TARN spec's
+  contiguity premise (§4.1 consistency rules: "periods are contiguous"); the default (`accrual_end_dates=None` ⇒ each
+  end is its fixing date) is then exactly today's derivation, call for call — cost if wrong: a contract with gapped or
+  overlapping periods cannot be booked by dates (it still books with `accrual_factors`); adding start dates later is
+  additive (OQ-6).
+- **R28** (Task 8d) Validation of `accrual_end_dates`, each rule taken from a spec: (i) 1:1 with `fixing_dates`, datetimes
+  (as `pay_dates`); (ii) strictly increasing — a period accrues from the previous end, so an equal end is a zero-length
+  period, which the TARN refuses everywhere today ("accrual_factors must be positive", both forms) and which the numeric
+  twin could not carry; (iii) `fixing_dates[i] <= accrual_end_dates[i] <= pay_dates[i]` — the accrual-time spec defines
+  exactly two accrual ends, the observation (`OBSERVATION`) and the settlement date (`SETTLEMENT`, §4.5), so an end in
+  that window is defined and an end before its fixing or after its payment is not (OQ-5); (iv) `accrual_end_dates`
+  requires `initial_date` (the first start) and excludes `accrual_factors` (exactly one period source, as the TARN spec
+  §4.2 already rules for `initial_date` / `accrual_factors`); `day_count_convention` applies to it as to the default.
+  The year fraction is the TARN spec §4.2 call unchanged — `calculate_year_fraction(start, end, day_count_convention,
+  fx_env.bus_days_in_year, calendar=fx_env.calendar)` — so a `BUSINESS_DAYS` count still reads the environment's
+  calendar (TARN spec §4.2; the accrual-time spec's frozen basis terms, §4.7, are out of its own scope for the FX TARN,
+  §3 item 10 and §9) — cost if wrong: (ii)/(iii) refuse a booking that a future ruling could accept; nothing that
+  constructs today changes.
 - **Superseded** old R3 (clock origin): now W6 R6, same rule, held by the recorder. Old **R7** (refuse a dated future
   fixing or pay date at zero time): **superseded by the user's OQ-2 (b) answer, 2026-10-10 — reversed by Task 8b**.
 
@@ -380,17 +409,66 @@ cash) → 11 (FX dynamic cash, Q8) → 12 (final gate).
   paid" (the hitting period's own leg); spec §5.2: the engines' `alive` mask. A later period on the same date is a later
   fixing in schedule order, so it is dead: no coupon, no cash, no FIXING event; the principal pays at the hitting
   period's `pay_i`. No open question.
-- **Implemented by Task 8c** (re-opens Tasks 3, 4, 6, 7; Ruling R26). Moved values: contracts with equal fixing
+- **Implemented by Task 8c** (re-opens Tasks 3, 4, 6, 7). Moved values: contracts with equal fixing
   times / dates (and dated dates that resolve to one time, valued before it) go from `ValidationError` to a price equal
   to their twin; nothing else moves (a schedule of distinct times takes exactly the old engine path).
-  `test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2]` still raises, now by R26 instead of uniqueness.
+  `test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2]` still raises, now by the default derivation's zero-length
+  refusal instead of uniqueness (it states no period dates and no factors).
 
-No open question remains from this re-plan.
+### R26 replaced 2026-10-10: option (b), the TARN's own accrual period dates (user ruling)
+
+- **Ruling (user):** the TARN gets its own accrual PERIOD dates, separate from its fixing dates, as the accrual-time
+  spec (`2026-10-08-accrual-time-design.md`) separated accrual from observation for autocallables. Each period accrues
+  over its own period dates in the coupon day count; the fixing date is a separate date; any number of periods may
+  share one fixing date, and none needs explicit `accrual_factors`. Default (no period dates): today's derivation
+  (`initial_date` / previous fixing date → this fixing date), so every existing booking keeps its exact meaning and
+  value. Explicit `accrual_factors` stay an alternative. Pay dates stay per period. R26 is superseded.
+- **Design chosen (Rulings R27, R28):** one new keyword, `accrual_end_dates: Optional[List[datetime]]` on
+  `FxTargetRedemptionNote` (dated form only; the TARF has no accrual term, TARN spec §2.3). Naming follows the
+  accrual-time spec ("`end`: the accrual end", `AccrualEndType`, `AccrualConfig.accrual_end`); `initial_date` keeps its
+  meaning (the first period's start, the accrual-time spec's `origin`). Period `i` = [`E_{i−1}`, `E_i`] with
+  `E_{−1} = initial_date` and `E_i = accrual_end_dates[i]`, or `fixing_dates[i]` when `accrual_end_dates is None`.
+- **Precedence and exclusivity (dated TARN):** exactly one period SOURCE —
+  1. `accrual_factors` (explicit): excludes `initial_date`, `accrual_end_dates` and `day_count_convention` (the first
+     and last as today);
+  2. `initial_date` + `accrual_end_dates`: each period over its own dates;
+  3. `initial_date` alone: the default, ends = fixing dates (today's derivation, bitwise).
+  `accrual_end_dates` without `initial_date` is refused ("needs initial_date"); with `accrual_factors` it is refused
+  ("cannot be combined"); neither source is refused as today. The numeric form refuses `accrual_end_dates` ("belongs to
+  the dated form"). There is no override layering: a contract states one source, and that source gives every factor.
+- **Numeric form and the twin: nothing new.** The numeric TARN already takes per-period `accrual_factors`, and
+  `_numeric_twin` builds it with `accrual_factors=list(view.accrual_factors)` from `dated.resolve(env)`, which reads
+  `_dated_factor` — so a dated contract with period dates hands its twin exactly its per-period factors (pinned by
+  Task 8d), with its per-period pay times.
+- **Shared fixing date under the default derivation** stays refused (zero-length derived period) unless the contract
+  states `accrual_end_dates` or `accrual_factors` (Task 8c builds the refusal; Task 8d narrows it and names both cures in
+  its message).
+- **Implemented by Task 8d.** Moved values: none for existing bookings (`accrual_end_dates=None` is today's call with
+  today's dates; every existing test passes unmodified); new bookings (`accrual_end_dates` given, incl. periods sharing a
+  fixing date without factors) go from `TypeError` (unknown keyword) to priced.
+
+**Open questions from this ruling (non-blocking: Task 8d refuses both cases, so no value depends on the answer; a
+"yes" is additive):**
+- **OQ-5 — an accrual end outside [its fixing date, its pay date].** An end BEFORE its fixing (the coupon's period
+  closes, the rate is fixed later — a fixing lag) or AFTER its pay date (paid before it finishes accruing) is defined by
+  neither spec: the accrual-time spec's two ends are the observation and the settlement date, and the TARN spec's
+  derived end is the fixing date. Task 8d refuses both (R28 iii). **Recommendation: keep the refusal** until a term
+  sheet needs it — such a booking still books with explicit `accrual_factors`; lifting it later needs no engine change
+  (the factor is known at construction either way).
+- **OQ-6 — non-contiguous periods (gaps or overlaps, i.e. explicit start dates).** The TARN spec's premise is "periods
+  are contiguous" (§4.1) and the accrual-time spec derives each start from the previous end; neither defines a gap or an
+  overlap. Task 8d takes only end dates (R27). **Recommendation: no `accrual_start_dates` until a contract needs one**;
+  `accrual_factors` books such a contract meanwhile.
+
+**Task order now:** 1–8 (done) → **8a** (OQ-1 b) → **8b** (OQ-2 b + OQ-3 ruling) → **8c** (OQ-4 b) → **8d** (R26 (b):
+accrual period dates) → 9 → 10 → 11 → 12.
+
+No blocking open question remains from this re-plan (OQ-5 / OQ-6 above are non-blocking).
 
 ## Review Focus
 
 Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by the user's OQ-1 / OQ-2 answers
-(items 5, 7), the OQ-3 ruling (item 8) and the OQ-4 (b) answer (item 9).
+(items 5, 7), the OQ-3 ruling (item 8), the OQ-4 (b) answer (item 9) and the R26 (b) ruling (item 10).
 
 1. **A short position (negative quantity)** in a run: the recorder reports events and pending PV with the signed
    quantity, and paid cash scales by it — pinned by Task 9 `test_a_short_position_carries_its_signed_quantity` and
@@ -430,6 +508,16 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by
    `test_a_target_hit_by_the_first_of_two_same_date_periods_kills_the_second`,
    `test_friday_and_saturday_fixings_price_on_the_thursday_like_the_twin`, and Task 9
    `test_periods_sharing_a_fixing_date_are_recorded_and_banked_once_in_a_run`.
+10. **A TARN whose accrual periods are not its fixing intervals** (R26 (b), `accrual_end_dates`): stating the fixing
+   dates as the ends reproduces the default bitwise (factors and price, calendar and business-day counts); two periods
+   sharing a fixing date with their own period dates accrue their own factors, price like the numeric twin (which
+   carries those factors) and bank together with their own cash and pay dates; a shared fixing date under the default
+   derivation is still refused; ends that are not strictly increasing, outside [fixing, pay], unaligned, without
+   `initial_date`, with `accrual_factors` or on the numeric form are refused — pinned by Task 8d
+   `test_accrual_end_dates_on_the_fixing_dates_reproduce_the_default_bitwise`,
+   `test_two_periods_sharing_a_fixing_date_accrue_their_own_period_dates_like_the_twin`,
+   `test_a_shared_fixing_date_needs_period_dates_or_factors`, `test_accrual_end_dates_refusals`,
+   `test_accrual_end_dates_belong_to_the_dated_tarn_only`.
 ---
 
 ## File Structure
@@ -438,7 +526,7 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by
 |---|---|---|
 | `quantark/asset/fx/product/option/target_redemption_state.py` | Create (T2), extend (T8a, T8b `fixings_banked`, T10) | `TARGET_HIT_RTOL`, `target_hit_tol`, `is_target_hit`, `PendingPayment`, `TargetRedemptionState`, `TerminalBookingWarning`, `TargetRedemptionEventType`, `TargetRedemptionEvent`, `ResolvedTargetRedemption`, `pending_present_value`; `booked_cash` (T10) |
 | `quantark/asset/fx/product/option/target_redemption_base.py` | Create (T3), extend (T5, T6, T7, T8a, T8b, T8c, T9) | `TargetRedemptionProduct(BaseFxProduct)`: forms, validation, terminal warning, `time_shift`, `record_passed_fixings`, `resolve`, `pending_pv`, dated `get_maturity`/`get_delivery`; W5 fill protocol; run-fixings protocol (T9: `has_run_fixings`, `open_fixings`, `with_time_elapsed`, `with_history_settled`, `matured_before`, booking-relative indices); helpers `is_passed_time`, `event_label`, `signed_year_fraction` |
-| `quantark/asset/fx/product/option/fx_target_redemption_note.py` | Modify (T3, T5, T7, T8c R26) | TARN terms, period sources, `coupon_amount`, `_fixing_outcome`, `_dated_factor` |
+| `quantark/asset/fx/product/option/fx_target_redemption_note.py` | Modify (T3, T5, T7, T8c default-derivation refusal, T8d `accrual_end_dates`) | TARN terms, period sources (`accrual_factors` / `initial_date` [+ `accrual_end_dates`]), `coupon_amount`, `_fixing_outcome`, `_accrual_end`, `_dated_factor` |
 | `quantark/asset/fx/product/option/fx_target_redemption_forward.py` | Modify (T4, T5, T7, T8c docstring) | TARF terms, `_fixing_outcome` |
 | `quantark/asset/fx/product/option/__init__.py` | Modify (T2) | export the state names |
 | `quantark/asset/fx/engine/mc/fx_tarn_note_mc_engine.py`, `fx_tarf_mc_engine.py` | Modify (T6, T8c: one spot per distinct time) | read `resolve`; terminal; start `acc`; pending PV; product hit tolerance |
@@ -448,7 +536,7 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by
 | `quantark/dynamicscenario/fx/engine.py`, `quantark/dynamicscenario/results/dynamic_results.py` | Modify (T11) | Q8 refusal, cash fields and FIXING snapshots from `RunFixingDay` (register / advance are W6's) |
 | `test/test_fx_target_redemption_state.py` | Create (T2), modify (T8a, T8b) | state module; cash due today (T8a); `fixings_banked` (T8b) |
 | `test/fx_target_redemption_fixtures.py` | Create (T3), extend (T7, T9) | shared env/product builders, `_numeric_twin`, `book`, `drive` |
-| `test/test_fx_target_redemption_lifecycle.py` | Create (T3), extend (T4–T9, incl. T8a / T8b flips) | R1, R2, P1–P5, D1–D5, T1, T2, WARN1–3; run-fixings protocol unit tests (T9) |
+| `test/test_fx_target_redemption_lifecycle.py` | Create (T3), extend (T4–T9, incl. T8a / T8b flips, T8c shared dates, T8d accrual period dates) | R1, R2, P1–P5, D1–D5, T1, T2, WARN1–3; shared fixing dates (T8c); `accrual_end_dates` (T8d); run-fixings protocol unit tests (T9) |
 | `test/test_fx_target_redemption_runs.py` | Create (T9), extend (T10, T11) | recorder-level TARN/TARF rules, B1–B6, Q8, W8 twins, OQ-1 / OQ-2 (b) run tests |
 | `test/test_run_fixings.py` | Modify (T9) | one appended generic test of the settle hook (W6's file, otherwise untouched) |
 | `test/test_fx_tarn_note_mc.py`, `test/test_fx_tarf_mc.py`, `test/execution/matrix_fixtures.py`, `example/fx_tarn_demo.py` | Modify (T3, T4) | constructor arguments only (C1) |
@@ -4000,16 +4088,21 @@ resolve to one time, e.g. Friday + Saturday under `BUSINESS_DAYS`) are a legitim
   mask stops every later period's cash. The principal goes with the hitting period's `pay_i`.
 - Each period keeps its own pay date / pay time and its own cash (its own accrual factor for the TARN).
 - Per-fixing banking (OQ-3, Task 8b) banks every period sharing the date together, each once, by identity.
-- **Ruling R26:** a dated TARN whose periods derive from `initial_date` cannot share a fixing date (the second period
-  would run from a fixing date to the same date: zero accrual); it is refused with `ValidationError` asking for explicit
-  `accrual_factors`. The numeric form already refuses the same case through its built "accrual_factors must be
-  positive" check (factors `t_i − t_{i−1}` from `accrual_start`). Distinct dates that resolve to one time (Friday +
-  Saturday) keep their positive derived factors (ACT/365 by default).
+- **Default-derivation refusal (user ruling 2026-10-10 on R26, option (b); R26 itself is superseded):** a dated TARN
+  on the DEFAULT derivation (`initial_date`, then each previous fixing date → this fixing date) cannot share a fixing
+  date — the later period would run from a fixing date to the same date, a zero-length derived period — and is refused
+  with `ValidationError` ("... would have zero length ..."). A contract that states its own accrual is NOT refused:
+  explicit `accrual_factors` here, and from Task 8d its own period dates (`accrual_end_dates`). Task 8d narrows the
+  condition to the default derivation and names both cures in the message; the test below matches "zero length", which
+  both wordings carry, so Task 8d does not rewrite it. The numeric form already refuses the same case through its built
+  "accrual_factors must be positive" check (factors `t_i − t_{i−1}` from `accrual_start`). Distinct dates that resolve
+  to one time (Friday + Saturday) keep their positive derived factors (ACT/365 by default).
 
 **Files:**
 - Modify: `quantark/asset/fx/product/option/target_redemption_base.py` (`_validate_numeric_schedule`,
   `_validate_dated_schedule`: the uniqueness checks go), `quantark/asset/fx/product/option/fx_target_redemption_note.py`
-  (`_validate_dated_accrual`: R26; docstring), `quantark/asset/fx/product/option/fx_target_redemption_forward.py`
+  (`_validate_dated_accrual`: the default-derivation refusal; docstring),
+  `quantark/asset/fx/product/option/fx_target_redemption_forward.py`
   (docstring), `quantark/asset/fx/engine/mc/fx_tarn_note_mc_engine.py` and `fx_tarf_mc_engine.py` (`_simulate`),
   `CHANGELOG.md`, `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`
 - Test: `test/test_fx_target_redemption_lifecycle.py` (new tests; Task 8b's OQ-4 pin is not written — see the note in
@@ -4049,9 +4142,11 @@ def test_numeric_form_accepts_equal_fixing_times():
         note(fix=[FIX[1], FIX[0]] + FIX[2:], target=50.0)              # decreasing is still refused
 
 
-def test_r26_a_dated_tarn_derived_from_initial_date_cannot_share_a_fixing_date():
-    with pytest.raises(ValidationError, match="accrual_factors"):
+def test_the_default_derivation_cannot_share_a_fixing_date():
+    """User ruling 2026-10-10 on R26 (b): a zero-length DERIVED period is refused; a stated accrual is not."""
+    with pytest.raises(ValidationError, match="zero length"):
         dated_note(fixing_dates=[FIX_DATES[0]] + FIX_DATES, target=50.0)  # initial_date=VAL: a zero-length period
+    assert _shared_dated("tarn", target=50.0).fixing_dates[:2] == [FIX_DATES[0]] * 2  # explicit factors: accepted
 
 
 def test_engines_simulate_a_shared_time_once():
@@ -4120,10 +4215,11 @@ def test_friday_and_saturday_fixings_price_on_the_thursday_like_the_twin():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_lifecycle.py -k "equal_fixing_times or r26 or shared_time or one_fixing_date or same_date_periods or on_the_thursday" -n 2 -q`
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_lifecycle.py -k "equal_fixing_times or default_derivation_cannot or shared_time or one_fixing_date or same_date_periods or on_the_thursday" -n 2 -q`
 Expected: FAIL — `ValidationError: fixing_times must be unique` / `fixing_dates must be unique` (construction and the
-twins), `ValidationError: times must be strictly increasing and positive` (the engine `_simulate` test); the R26 test
-already raises (uniqueness) but on the wrong message (`accrual_factors` not matched).
+twins, and `_shared_dated` in the default-derivation test), `ValidationError: times must be strictly increasing and
+positive` (the engine `_simulate` test); the default-derivation test's first call already raises (uniqueness) but on
+the wrong message ("zero length" not matched).
 
 - [ ] **Step 3: Implement**
 
@@ -4136,10 +4232,12 @@ and `if len(set(fixings)) != len(fixings): raise ValidationError("fixing_times m
 
 ```python
         if self.initial_date is not None and len(set(self.fixing_dates)) != len(self.fixing_dates):
-            # Ruling R26: a period derived from the previous fixing date to a shared fixing date has zero length
+            # user ruling 2026-10-10 on R26 (b): the DEFAULT derivation's later period on a shared fixing date runs
+            # from that date to itself; a contract stating its own accrual is not refused (Task 8d narrows this
+            # condition to the default derivation and adds accrual_end_dates to the message)
             raise ValidationError(
-                "periods sharing a fixing date need explicit accrual_factors: a period derived from initial_date and "
-                "the previous fixing date would have zero length")
+                "periods sharing a fixing date need their own accrual: under the default derivation (initial_date, "
+                "then each previous fixing date) the later period would have zero length - state accrual_factors")
 ```
 Docstrings (`fx_target_redemption_note.py:59`, `fx_target_redemption_forward.py:42`): "Ascending (non-decreasing:
 periods may share a fixing time), finite year-fraction fixing times."
@@ -4168,8 +4266,9 @@ Append to the CHANGELOG `### Changed`:
 - FX TARN / TARF periods may share a fixing date or time (user decision OQ-4 b, 2026-10-10): `fixing_dates` /
   `fixing_times` must be non-decreasing instead of strictly increasing. Both MC engines simulate each distinct fixing
   time once and every period sharing it fixes at that spot; periods are accumulated in schedule order (a period after
-  the target hit is dead), each with its own pay date and cash. A dated TARN deriving its periods from `initial_date`
-  cannot share a fixing date (zero-length period): it states `accrual_factors`.
+  the target hit is dead), each with its own pay date and cash. A dated TARN on the default period derivation
+  (`initial_date`, then each previous fixing date) cannot share a fixing date (a zero-length period): it states its own
+  accrual.
 ```
 
 Append to `moved_values.txt`:
@@ -4182,7 +4281,8 @@ Append to `moved_values.txt`:
 # instant): ValidationError (unique / strictly increasing) -> priced, equal to the twin. Nothing else moves: a schedule
 # of distinct times takes exactly the old engine path (no reindexing).
 # Same refusal, new reason: test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] (initial_date-derived) still raises
-# ValidationError, now Ruling R26 (zero-length period; state accrual_factors) instead of "fixing_dates must be unique".
+# ValidationError, now the default derivation's zero-length refusal (user ruling 2026-10-10 on R26 (b)) instead of
+# "fixing_dates must be unique".
 ```
 
 - [ ] **Step 4: Run to verify they pass**
@@ -4197,6 +4297,285 @@ existing price, Greek and event is bitwise unchanged). Any other failure: STOP a
 git -C <WT> add quantark/asset/fx/product/option/target_redemption_base.py quantark/asset/fx/product/option/fx_target_redemption_note.py quantark/asset/fx/product/option/fx_target_redemption_forward.py quantark/asset/fx/engine/mc/fx_tarn_note_mc_engine.py quantark/asset/fx/engine/mc/fx_tarf_mc_engine.py test/test_fx_target_redemption_lifecycle.py CHANGELOG.md
 git -C <WT> add -f docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt
 git -C <WT> commit -m "feat(fx-tarn): periods may share a fixing date or time; one simulated spot per distinct time (OQ-4 b)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8d: The TARN's own accrual period dates, separate from its fixing dates (user ruling on R26: (b), 2026-10-10)
+
+Follow-up that re-opens built Tasks 3 and 7 and narrows Task 8c's refusal. User ruling (b), replacing R26: the TARN
+gets its own accrual PERIOD dates, separate from its fixing dates, as the accrual-time spec
+(`docs/superpowers/specs/2026-10-08-accrual-time-design.md`) separated accrual from observation. This amends TARN spec
+§4.2 (a new dated-form row; the "Accrual factors" bullet's end becomes the period's accrual end) and Q2 (a dated TARN
+has three period sources, exactly one stated). The TARF has no accrual term (TARN spec §2.3) and gets no new field.
+
+**Rules (user ruling; Rulings R27, R28; nothing invented — anything undefined is refused and listed as OQ-5 / OQ-6):**
+- New keyword `accrual_end_dates: Optional[List[datetime]]`, dated TARN only, 1:1 with `fixing_dates`. Period `i` runs
+  from `E_{i−1}` to `E_i`, with `E_{−1} = initial_date` and `E_i = accrual_end_dates[i]` — the accrual-time spec's
+  dated rule (§4.3 Endpoints: "`start` is the previous record's `end`, or `initial_date` for the first record") with
+  the end freed from the fixing date. The fixing date only fixes the spot; the pay date only pays.
+- Default `accrual_end_dates=None`: `E_i = fixing_dates[i]`, exactly today's derivation (`initial_date` / previous
+  fixing date → this fixing date): the same `calculate_year_fraction` call on the same date objects, so every existing
+  booking keeps its factors and value bitwise.
+- Factor: `calculate_year_fraction(E_{i−1}, E_i, day_count_convention or ACT_365, fx_env.bus_days_in_year,
+  calendar=fx_env.calendar)` — TARN spec §4.2's call unchanged (a `BUSINESS_DAYS` count reads the environment's
+  calendar, as today).
+- Precedence / exclusivity — exactly one period source: (1) `accrual_factors` (excludes `initial_date`,
+  `accrual_end_dates`, `day_count_convention`); (2) `initial_date` + `accrual_end_dates`; (3) `initial_date` alone (the
+  default). `accrual_end_dates` without `initial_date` is refused; with `accrual_factors` refused; on the numeric form
+  refused. No layering: the stated source gives every factor.
+- Validation (R28): aligned 1:1 and datetimes; strictly increasing (an equal end is a zero-length period, refused like
+  a non-positive factor in both forms today); `fixing_dates[i] <= accrual_end_dates[i] <= pay_dates[i]` (the
+  accrual-time spec's two ends are the observation and the settlement date; an end outside that window is undefined:
+  OQ-5). `initial_date < fixing_dates[0]` stays (so `initial_date < E_0`). No check is dropped.
+- Shared fixing date: with `accrual_end_dates` (or `accrual_factors`) periods may share a fixing date; under the
+  DEFAULT derivation a shared fixing date is still refused (zero-length derived period). This task narrows Task 8c's
+  refusal to the default derivation and names both cures in its message.
+- Numeric form and twin: nothing new. `_numeric_twin` builds the numeric TARN from `dated.resolve(env).accrual_factors`
+  (per-period factors from `_dated_factor`) and per-period pay times, so the twin carries each period's own factor.
+
+**Files:**
+- Modify: `quantark/asset/fx/product/option/fx_target_redemption_note.py` (`__init__` keyword and source checks,
+  `_validate_dated_accrual`, new `_validate_accrual_end_dates` and `_accrual_end`, `_dated_factor`, module and class
+  docstrings), `CHANGELOG.md`, `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`
+- Test: `test/test_fx_target_redemption_lifecycle.py` (new tests; every existing test, including D5, R2 and Task 8c's,
+  unmodified)
+
+**Interfaces:**
+- Consumes: Task 7 (`_dated_factor`, `_validate_dated_accrual`, `initial_date` / `accrual_factors` /
+  `day_count_convention`), Task 8b (`fixings_banked`), Task 8c (shared fixing dates; the default-derivation refusal).
+- Produces: `FxTargetRedemptionNote(..., *, accrual_end_dates: Optional[List[datetime]] = None)` (keyword-only, after
+  `day_count_convention`); attribute `accrual_end_dates: Optional[List[datetime]]` (`None` on the numeric form and on
+  the default); `_accrual_end(index) -> datetime`; `_dated_factor(index, fx_env) -> float` reading period ends.
+  `ResolvedTargetRedemption`, the engines and the numeric form are unchanged.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `test/test_fx_target_redemption_lifecycle.py`:
+
+```python
+# --- R26 (b), user ruling 2026-10-10: the TARN's own accrual period dates (accrual_end_dates) ---------------------
+
+def _by_period_dates(**kw):
+    """Twelve periods accruing VAL -> FIX_DATES[0] -> ... -> FIX_DATES[11] (the default contract's periods); periods 0
+    and 1 both FIX on FIX_DATES[0], period k >= 1 fixes on FIX_DATES[k - 1], and each pays at its accrual end."""
+    return dated_note(fixing_dates=[FIX_DATES[0]] + FIX_DATES[:-1], accrual_end_dates=list(FIX_DATES),
+                      pay_dates=list(FIX_DATES), target=kw.pop("target", 50.0), **kw)
+
+
+@pytest.mark.parametrize("calendar", ["calendar", "business"])
+def test_accrual_end_dates_on_the_fixing_dates_reproduce_the_default_bitwise(calendar):
+    if calendar == "calendar":
+        dates, e, kw, convention = FIX_DATES, env(), {}, DayCountConvention.ACT_365
+    else:
+        convention = DayCountConvention.BUSINESS_DAYS
+        dates, e, kw = BUS_DATES, env(**BUS), dict(day_count_convention=convention)
+    default = dated_note(fixing_dates=dates, **kw)
+    stated = dated_note(fixing_dates=dates, accrual_end_dates=list(dates), **kw)
+    assert default.accrual_end_dates is None
+    today = tuple(calculate_year_fraction(s, d, convention, e.bus_days_in_year, calendar=e.calendar)
+                  for s, d in zip([VAL] + dates[:-1], dates))
+    assert default.resolve(e).accrual_factors == today       # the default is today's derivation, call for call
+    assert stated.resolve(e).accrual_factors == today
+    assert _price(stated, e=e) == _price(default, e=e)
+
+
+def test_two_periods_sharing_a_fixing_date_accrue_their_own_period_dates_like_the_twin():
+    dated = _by_period_dates()
+    assert dated.fixing_dates[0] == dated.fixing_dates[1] and dated.accrual_factors is None   # no factors stated
+    view = dated.resolve(env())
+    own = tuple(calculate_year_fraction(s, d, DayCountConvention.ACT_365, 252)
+                for s, d in zip([VAL] + FIX_DATES[:-1], FIX_DATES))
+    assert view.accrual_factors == own                        # each period over its own dates, not its fixing interval
+    assert view.accrual_factors[0] != view.accrual_factors[1]  # 30 and 31 days on one fixing date
+    twin = _numeric_twin(dated, env())
+    assert twin.fixing_times[0] == twin.fixing_times[1]
+    assert twin.accrual_factors == list(own)                  # the twin carries the same per-period factors
+    assert twin.pay_times == list(view.pay_times)             # and the same per-period pay times
+    assert is_close(_price(twin), _price(dated), rel_tol=1e-12)
+    dated.record_passed_fixings(env(val=FIX_DATES[0]))        # both periods fix on FIX_DATES[0], at one spot
+    fixings = [x for x in dated.lifecycle_events if x.event_type is FIXING]
+    assert len(fixings) == 2 and fixings[0].fixing == fixings[1].fixing == 1.20
+    assert [x.amount for x in fixings] == [dated.coupon_amount(f) for f in own[:2]]   # each its own factor's coupon
+    assert dated.state.fixings_banked == 2
+    assert [(p.amount, p.pay_date) for p in dated.state.pending] == [
+        (fixings[0].amount, FIX_DATES[0]), (fixings[1].amount, FIX_DATES[1])]          # each its own pay date
+
+
+def test_a_shared_fixing_date_needs_period_dates_or_factors():
+    shared, pays = [FIX_DATES[0]] + FIX_DATES[:-1], list(FIX_DATES)
+    with pytest.raises(ValidationError, match="zero length - state accrual_end_dates or accrual_factors"):
+        dated_note(fixing_dates=shared, pay_dates=pays)       # default derivation: period 1 runs FIX_DATES[0] -> itself
+    assert _by_period_dates().accrual_end_dates == FIX_DATES  # its own period dates: accepted
+    assert dated_note(fixing_dates=shared, pay_dates=pays, accrual_factors=[1 / 12] * 12).accrual_end_dates is None
+
+
+_SHARED = [FIX_DATES[0]] + FIX_DATES[:-1]
+
+
+@pytest.mark.parametrize("kw, match", [
+    (dict(accrual_end_dates=FIX_DATES[:-1]), "align 1:1"),
+    (dict(accrual_end_dates=[d.date() for d in FIX_DATES]), "datetimes"),
+    (dict(fixing_dates=_SHARED, pay_dates=list(FIX_DATES), accrual_end_dates=list(_SHARED)), "strictly increasing"),
+    (dict(pay_dates=LAG2, accrual_end_dates=[FIX_DATES[1], FIX_DATES[0]] + FIX_DATES[2:]), "strictly increasing"),
+    (dict(accrual_end_dates=[FIX_DATES[0] - timedelta(days=1)] + FIX_DATES[1:]), "between its fixing date"),
+    (dict(pay_dates=LAG2, accrual_end_dates=[LAG2[0] + timedelta(days=1)] + FIX_DATES[1:]), "between its fixing date"),
+    (dict(accrual_end_dates=list(FIX_DATES), accrual_factors=[1 / 12] * 12), "cannot be combined"),
+    (dict(accrual_end_dates=list(FIX_DATES), initial_date=None), "needs initial_date"),
+], ids=["unaligned", "not_datetimes", "equal_end", "decreasing", "end_before_fixing", "end_after_pay",
+        "with_accrual_factors", "without_initial_date"])
+def test_accrual_end_dates_refusals(kw, match):
+    with pytest.raises(ValidationError, match=match):
+        dated_note(**kw)
+
+
+def test_accrual_end_dates_belong_to_the_dated_tarn_only():
+    with pytest.raises(ValidationError, match="belongs to the dated form"):
+        note(accrual_end_dates=list(FIX_DATES))
+    with pytest.raises(TypeError):                            # the TARF has no accrual term (TARN spec 2.3)
+        dated_tarf(accrual_end_dates=list(FIX_DATES))
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_lifecycle.py -k "accrual_end_dates or own_period_dates or needs_period_dates" -n 2 -q`
+Expected: FAIL — `TypeError: __init__() got an unexpected keyword argument 'accrual_end_dates'` (every test that
+passes the keyword to the TARN, including the numeric refusal, which expects `ValidationError`); the shared-date test's
+first call raises `ValidationError` but on Task 8c's wording (`... zero length - state accrual_factors`, the pattern
+not matched). The TARF `TypeError` assertion passes before and after (a guard, not a change).
+
+- [ ] **Step 3: Implement**
+
+`fx_target_redemption_note.py`, `__init__`: add the keyword after `day_count_convention`:
+
+```python
+        day_count_convention: Optional[DayCountConvention] = None,
+        accrual_end_dates: Optional[List[datetime]] = None,
+    ):
+```
+
+In the dated branch, after the numeric-keyword loop and BEFORE the existing "derives its periods from initial_date or
+states explicit accrual_factors" check:
+
+```python
+            if accrual_end_dates is not None and accrual_factors is not None:
+                raise ValidationError(
+                    "accrual_end_dates sets the derived accrual factors; it cannot be combined with explicit "
+                    "accrual_factors")
+            if accrual_end_dates is not None and initial_date is None:
+                raise ValidationError(
+                    "accrual_end_dates needs initial_date: the first period accrues from initial_date to "
+                    "accrual_end_dates[0]")
+```
+and, beside `self.day_count_convention = day_count_convention`:
+```python
+            self.accrual_end_dates = list(accrual_end_dates) if accrual_end_dates is not None else None
+```
+In the numeric branch, add `("accrual_end_dates", accrual_end_dates)` to the refused-keyword tuple (message: "...
+belongs to the dated form; a numeric TARN takes pay_times and accrual_start") and set `self.accrual_end_dates = None`
+beside `self.day_count_convention = None`.
+
+`_validate_dated_accrual`: replace Task 8c's block (the `len(set(self.fixing_dates))` refusal) with:
+
+```python
+        if self.accrual_end_dates is not None:
+            self._validate_accrual_end_dates()
+        elif self.initial_date is not None and len(set(self.fixing_dates)) != len(self.fixing_dates):
+            # user ruling 2026-10-10 on R26 (b): only the DEFAULT derivation's later period on a shared fixing date
+            # runs from that date to itself
+            raise ValidationError(
+                "periods sharing a fixing date need their own accrual: under the default derivation (initial_date, "
+                "then each previous fixing date) the later period would have zero length - state accrual_end_dates "
+                "or accrual_factors")
+```
+
+New methods, beside `_dated_factor`, and `_dated_factor` reading period ends:
+
+```python
+    def _validate_accrual_end_dates(self) -> None:
+        """One accrual end per period; period ``i`` runs from the previous end (``initial_date`` for the first). An
+        end lies between its fixing date (the observation end) and its pay date (the settlement end)."""
+        ends, dates, pays = self.accrual_end_dates, self.fixing_dates, self.pay_dates
+        if len(ends) != len(dates):
+            raise ValidationError("accrual_end_dates must align 1:1 with fixing_dates")
+        if any(not isinstance(e, datetime) for e in ends):
+            raise ValidationError("accrual_end_dates must be datetimes")
+        if any(not prev < e for prev, e in zip(ends, ends[1:])):
+            raise ValidationError(
+                "accrual_end_dates must be strictly increasing: each period accrues from the previous period's end, "
+                "so an equal end is a zero-length period")
+        for i, (f, e, p) in enumerate(zip(dates, ends, pays)):
+            if not f <= e <= p:
+                raise ValidationError(
+                    f"accrual end date {e.date()} of period {i} must lie between its fixing date {f.date()} and its "
+                    f"pay date {p.date()}")
+
+    def _accrual_end(self, index: int) -> datetime:
+        """Period ``index``'s accrual end: ``accrual_end_dates[index]``, else its fixing date (the default)."""
+        return self.fixing_dates[index] if self.accrual_end_dates is None else self.accrual_end_dates[index]
+
+    def _dated_factor(self, index: int, fx_env) -> float:
+        """Explicit factor, else ``initial_date`` / the previous period's accrual end -> this period's accrual end
+        (``accrual_end_dates``; default: the fixing dates) in the contract day count (``None`` = ACT_365), resolved
+        against the environment's calendar (a BUSINESS_DAYS count needs it)."""
+        if self.accrual_factors is not None:
+            return self.accrual_factors[index]
+        start = self.initial_date if index == 0 else self._accrual_end(index - 1)
+        convention = DayCountConvention.ACT_365 if self.day_count_convention is None else self.day_count_convention
+        return calculate_year_fraction(start, self._accrual_end(index), convention, fx_env.bus_days_in_year,
+                                       calendar=fx_env.calendar)
+```
+
+Docstrings: module "Accrual:" paragraph — "dated form - period ``i`` runs from ``initial_date`` / the previous
+period's accrual end to its own accrual end (``accrual_end_dates``; by default the fixing dates, i.e. the previous
+fixing date to this fixing date) in the contract ``day_count_convention`` (default ACT/365), or explicit factors."
+Class Attributes, after `day_count_convention`: "accrual_end_dates: Dated form: each period's accrual end, 1:1 with
+``fixing_dates``, strictly increasing, between the period's fixing and pay dates; requires ``initial_date``, excludes
+``accrual_factors``; ``None`` = the fixing dates (periods may then not share a fixing date)."
+
+Append to the CHANGELOG `### Added`:
+
+```markdown
+- `FxTargetRedemptionNote(accrual_end_dates=...)` (dated form; user ruling 2026-10-10 on R26, option (b)): each
+  period's own accrual end date, separate from its fixing date. Period `i` accrues from `initial_date` (first) or the
+  previous period's end to its own end in the contract day count, so periods may share a fixing date without explicit
+  `accrual_factors`. One end per fixing, strictly increasing, each between its fixing and pay dates; it requires
+  `initial_date` and excludes `accrual_factors`. Without it the ends are the fixing dates: every existing booking keeps
+  its factors and value exactly; such a contract still cannot share a fixing date (a zero-length period).
+```
+
+Append to `moved_values.txt`:
+
+```text
+#
+# Task 8d - user ruling 2026-10-10 on R26, option (b): the TARN's own accrual period dates (accrual_end_dates).
+# Existing bookings: no value moves (accrual_end_dates=None calls calculate_year_fraction with today's dates; pinned
+# bitwise by test_accrual_end_dates_on_the_fixing_dates_reproduce_the_default_bitwise, calendar and business-day).
+# New bookings: accrual_end_dates given (incl. periods sharing a fixing date without accrual_factors): TypeError ->
+# priced, equal to the numeric twin built from the per-period factors.
+# Narrowed refusal (Task 8c): a shared fixing date is refused only under the default derivation; message now names
+# accrual_end_dates or accrual_factors.
+# Refused pending OQ-5 / OQ-6 (non-blocking): an accrual end before its fixing date or after its pay date; gapped or
+# overlapping periods by dates. Both still book with accrual_factors.
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py test/test_fx_tarn_note_mc.py test/test_fx_tarf_mc.py -n 2 -q`
+Expected: all pass; every existing test unmodified — D5 (`test_d5_initial_date_gives_act_365_factors`,
+`test_d5_business_days_contract_count_reads_the_environment_calendar`, `test_d5_both_period_sources_refused`,
+`test_d5_neither_period_source_refused`), `test_r2_dated_refusals` (incl. `fixing_dates=FIX_DATES[:1] * 2`, now the
+narrowed default-derivation refusal) and Task 8c's `test_the_default_derivation_cannot_share_a_fixing_date` ("zero
+length" still matched). Any other failure: STOP and report it as an unlisted mover.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C <WT> add quantark/asset/fx/product/option/fx_target_redemption_note.py test/test_fx_target_redemption_lifecycle.py CHANGELOG.md
+git -C <WT> add -f docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt
+git -C <WT> commit -m "feat(fx-tarn): the TARN's own accrual period dates, separate from its fixing dates (R26 b)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -4218,7 +4597,8 @@ Rulings 2, 4, 8, 9, 10, 11. **No `quantark/asset/fx/lifecycle/` is built**: W6's
 
 **Interfaces:**
 - Consumes: Tasks 2–8, 8a (cash due today stays pending until its pay time is strictly past), 8c (periods may share a
-  fixing date / time) and 8b (dated fixings
+  fixing date / time), 8d (`accrual_end_dates`: factors only, nothing in the run protocol reads period dates) and 8b
+  (dated fixings
   banked per fixing — `fixings_banked`, `_banked_count`, `_is_unbanked` by identity, `as_of` = `_state_date`; a fixing
   or pay date at zero business time is passed/due by time); W6 `quantark.util.run_fixings` (`RunFixingRecorder.register(portfolio) -> RunFixingDay`,
   `.advance(portfolio) -> RunFixingDay`, `.days`, `.recorded`; `RunFixingDay(date, fixings, product_events,
@@ -5822,8 +6202,13 @@ Append to `moved_values.txt`:
 # R24 user-approved 2026-10-10.
 # OQ-4 (b), user 2026-10-10 (Task 8c block above): periods may share a fixing date / time. Contracts with equal fixing
 # times or dates, and dated dates resolving to one time valued before it: ValidationError -> priced (= twin). Nothing
-# else moves. test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] still refused (now Ruling R26, zero-length
-# initial_date-derived period).
+# else moves. test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] still refused (now the default derivation's
+# zero-length period; R26 superseded by the user's ruling (b)).
+# R26 (b), user 2026-10-10 (Task 8d block above): the TARN's own accrual period dates (accrual_end_dates). Existing
+# bookings: none move (no accrual_end_dates = today's derivation, bitwise). New bookings with accrual_end_dates
+# (including periods sharing a fixing date without accrual_factors): TypeError (unknown keyword) -> priced (= twin).
+# Refused, pending OQ-5 / OQ-6 (non-blocking): an accrual end before its fixing or after its pay date; gapped or
+# overlapping periods by dates (accrual_factors books both).
 ```
 Verify the CHANGELOG block has `### Added`, `### Changed`, `### Fixed` with the bullets from Tasks 2–11 and no empty
 heading.
@@ -5846,7 +6231,8 @@ the rebase); only then ff-merge.
 
 ## Self-review (done while writing)
 
-- **Spec coverage:** §3 → T2/T3; §4.1 → T3/T4; §4.2/§4.3 → T7; §5.1/§5.2 → T6/T7; §5.3 → T3/T4/T6/T7; §5.4 → T3/T6/T7;
+- **Spec coverage:** §3 → T2/T3; §4.1 → T3/T4; §4.2/§4.3 → T7 (§4.2 period sources amended by T8d, user ruling on R26
+  (b); §4.1/§4.2 uniqueness amended by T8c); §5.1/§5.2 → T6/T7; §5.3 → T3/T4/T6/T7; §5.4 → T3/T6/T7;
   §6 → T5/T7/T8 (cash rule amended by T8a); §7.2 → T9 (on W6's recorder, as amended by run-fixings spec §6); §7.3 →
   T10/T11; user OQ-1 (b) → T8a, OQ-2 (b) → T8b; §8 → T3/T4/T12; §10 P1–P5 → T6; D1/D3/D4/D5 → T7, D2 → T9, D4 business → T8;
   B1–B5 → T9/T10/T11, B6 → T1/T10/T11/T12; WARN1 → T3/T4/T6/T7, WARN2 → T6 (P3) and T10 (B2), WARN3 → T6/T7; R1/R2 →
@@ -5856,14 +6242,18 @@ the rebase); only then ff-merge.
   `with_time_elapsed(dt)`, `with_history_settled(fx_env)`, `booked_cash(product_events)`, W6's
   `RunFixingDay(date, fixings, product_events, pending_pv)` and `RecordedFixing(position_id, index, label, outcome,
   spot, gap)` are used with the same names in every task. (Re-plan 2026-10-10: `FxLifecycleDay` / `FxLifecycleEntry`
-  no longer exist.)
+  no longer exist.) Task 8d: `accrual_end_dates`, `_accrual_end(index)`, `_dated_factor(index, fx_env)` and
+  `_validate_accrual_end_dates()` are named the same in its Rules, Interfaces, tests, CHANGELOG and Review Focus 10.
 - **User answers (2026-10-10):** OQ-1 (b) → Task 8a (spec §3 / §5.1 / §6 cash rule amended; pins in 8a, 9, 10);
   OQ-2 (b) → Task 8b (Ruling R7 superseded; flips in 8b, twin pins in 9, 10, 11). OQ-3 ruling → Task 8b rewritten
   (per-fixing banked count; R15, R22 superseded; R24, R25 added) with the Friday + Saturday case in 8b and Task 9.
   Task 9's `_record_dated` replacement carries the 8a cash sweep and 8b's per-fixing loop, count and `_state_date`; no
   task relies on `as_of` as a banked high-water mark, and no task still pins an answered question's old behaviour.
   R24 user-approved. OQ-4 (b) → Task 8c (cites spec §6 "every later fixing is dead" for a period after the hit on the
-  same date; R26). No open question remains.
+  same date). R26 superseded by the user's ruling (b) → Task 8d (`accrual_end_dates`, R27 / R28; the default
+  derivation's shared-date refusal built in 8c, narrowed in 8d; nothing existing moves). Open, non-blocking: OQ-5
+  (an accrual end outside [fixing, pay]) and OQ-6 (non-contiguous periods), both refused by 8d with a recommendation
+  to keep the refusal.
 - **Re-plan self-check (2026-10-10):** every old Task 9–11 requirement is in the mapping table of "Re-plan 2026-10-10
   against W6"; W6 hand-off notes 1–5 map to Task 9 (protocol, hooks, append-only events, R4/R7/R8/R9/Ruling 9, W8),
   Task 10 (W8 twins) and Task 11 (R7 + Q8); W6 Ruling 2's time-based gap flag drives R16 and OQ-2; the user's weekend
