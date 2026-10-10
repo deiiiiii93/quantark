@@ -1388,3 +1388,121 @@ def test_distinct_fixing_times_take_the_old_engine_path_bitwise(name, method, mo
     assert np.array_equal(eng._simulate(e, 1.20, 0.10, times), live_spots)    # same machine: byte-identical
     assert _price(product, method=method, e=e, n=4_000) == live
     assert math.isclose(live, float.fromhex(_E2E07886_PRICES[name, method.name]), rel_tol=GOLDEN_REL_TOL)
+
+
+# --- Task 8c fix round 1 (controller rulings 2026-10-10) -----------------------------------------------------------
+
+_INTRADAY_PAIRS = {
+    "same_date_10h_15h": [datetime(2026, 7, 15, 10), datetime(2026, 7, 15, 15)],
+    "15h_to_next_day_9h": [datetime(2026, 7, 15, 15), datetime(2026, 7, 16, 9)],
+}
+
+
+@pytest.mark.parametrize("pair", sorted(_INTRADAY_PAIRS))
+def test_the_default_derivation_refuses_any_zero_derived_factor(pair):
+    """Ruling 1: the default derivation refuses when ANY derived factor is non-positive, not only on equal datetimes
+    (ACT/365 counts whole days: both pairs derive a 0.0 second factor; their numeric twins refuse it too)."""
+    dates = _INTRADAY_PAIRS[pair] + FIX_DATES[1:]
+    with pytest.raises(ValidationError, match="zero length"):
+        dated_note(fixing_dates=dates, target=50.0)
+    stated = dated_note(fixing_dates=dates, accrual_factors=SHARED_FACTORS, target=50.0)
+    assert stated.fixing_dates[:2] == _INTRADAY_PAIRS[pair]                    # a stated accrual is not refused
+
+
+def test_a_business_days_contract_count_refuses_a_zero_derived_factor_at_resolve():
+    """Ruling 1, environment-dependent count: Friday -> Saturday is zero business days, known only with the
+    environment's calendar, so the refusal is at resolve (pricing), with the same reason."""
+    d = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                   target=50.0, day_count_convention=DayCountConvention.BUSINESS_DAYS)
+    for e in (env(calendar=TARGET_CAL), env(val=THURSDAY, **BUS)):
+        with pytest.raises(ValidationError, match="zero length"):
+            d.resolve(e)
+        with pytest.raises(ValidationError, match="zero length"):
+            _price(d, e=e)
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_a_banked_count_that_splits_a_shared_date_is_refused(kind):
+    """Ruling 2: periods fixing on one calendar date bank together; a booking may not bank only some of them."""
+    with pytest.raises(ValidationError, match="splits"):
+        _shared_dated(kind, target=50.0, state=TargetRedemptionState(0.0, as_of=FIX_DATES[0], fixings_banked=1))
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+@pytest.mark.parametrize("k", [0, 2, 3])
+def test_a_banked_count_at_a_shared_date_boundary_is_accepted(kind, k):
+    as_of = FIX_DATES[0] if k <= 2 else FIX_DATES[1]
+    booked = _shared_dated(kind, target=50.0, state=TargetRedemptionState(0.0, as_of=as_of, fixings_banked=k))
+    assert booked.state.fixings_banked == k
+    if k == 0:                                                         # both shared-date fixings passed, unbanked
+        with pytest.warns(MissingFixingWarning, match="2 past fixings"):
+            _price(booked, e=env(val=as_of), n=2_000)
+    else:
+        _price(booked, e=env(val=as_of), n=2_000)
+
+
+def test_a_redeemed_state_may_stop_inside_a_shared_date():
+    """Ruling 2: the record loop's hit legitimately stops mid-group (the later same-date period is dead, spec 6), so a
+    redeemed state booking that count is accepted."""
+    recorded = _shared_dated("tarn", target=0.9)
+    recorded.record_passed_fixings(env(val=FIX_DATES[0]))
+    assert recorded.state.fixings_banked == 1 and recorded.is_redeemed
+    with pytest.warns(TerminalBookingWarning):
+        rebooked = _shared_dated("tarn", target=0.9, state=recorded.state)
+    assert rebooked.is_redeemed and rebooked.is_terminal
+    assert _price(rebooked, e=env(val=FIX_DATES[0])) == 0.9 + 100.0                  # the cash due that day, DF(0) = 1
+
+
+def test_friday_and_saturday_are_not_a_shared_date_group():
+    """Ruling 2: groups are calendar dates; Friday + Saturday (one business instant) may be banked 1 on the Friday."""
+    booked = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                        target=50.0, state=TargetRedemptionState(0.0, as_of=FRIDAY, fixings_banked=1))
+    assert booked.state.fixings_banked == 1
+    _price(booked, e=env(val=FRIDAY), n=2_000)
+
+
+def _final_shared(kind, form):
+    """Thirteen periods: the last two share the final fixing; vol 1e-7 hits the target at period 12 (index 11)."""
+    e = env(vol=1e-7)
+    if kind == "tarn":
+        c = dated_note(fixing_dates=FIX_DATES + FIX_DATES[-1:], accrual_factors=[1 / 12] * 12 + [1 / 24],
+                       target=11.5)
+    else:
+        times = [calculate_year_fraction(VAL, d, DayCountConvention.CALENDAR_DAYS, 252) for d in FIX_DATES]
+        amounts = [e.get_forward(t) - 1.15 for t in times]
+        c = dated_tarf(fixing_dates=FIX_DATES + FIX_DATES[-1:], target=sum(amounts[:11]) + 0.5 * amounts[11])
+    return (c if form == "dated" else _numeric_twin(c, e)), e
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_a_hit_at_the_first_of_two_final_periods_is_not_an_early_redemption(kind, form):
+    """Ruling 3: mean_redemption_fraction counts hits before the final fixing TIME; a hit by the first of two periods
+    sharing it is not one. Control: the same hit one fixing earlier (distinct times) still counts."""
+    c, e = _final_shared(kind, form)
+    eng = engine_for(c, n=2_000)
+    eng.price(c, e)
+    assert eng.get_last_result().mean_redemption_fraction == 0.0
+    control = note(target=10.5) if kind == "tarn" else tarf(target=sum(
+        e.get_forward(t) - 1.15 for t in FIX[:10]) + 0.5 * (e.get_forward(FIX[10]) - 1.15))
+    eng = engine_for(control, n=2_000)
+    eng.price(control, e)
+    assert eng.get_last_result().mean_redemption_fraction == 1.0
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_a_tarf_target_hit_by_the_first_of_two_same_date_periods_kills_the_second(form):
+    """Ruling 4 (TARN spec section 6, TARF bullet): one FIXING event, the second period's legs dead."""
+    dated = _shared_dated("tarf", target=0.03, gearing=2.0)
+    product = dated if form == "dated" else _numeric_twin(dated, env())
+    t = calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.CALENDAR_DAYS, 252)
+    e = env(vol=1e-7)
+    expected = 0.03 * e.get_domestic_df(t)                               # the clipped favourable leg only
+    assert is_close(_price(product, e=e), expected, rel_tol=1e-6)
+    assert is_close(expected, 0.029876965312926124, rel_tol=1e-12)        # the reviewer's probe value
+    if form == "numeric":
+        product.time_shift(t)
+    product.record_passed_fixings(env(val=FIX_DATES[0]))
+    (fixing,) = [x for x in product.lifecycle_events if x.event_type is FIXING]  # the second period never banks
+    assert fixing.amount == 0.03 and fixing.redeemed and product.is_redeemed and product.is_terminal
+    assert [p.amount for p in product.state.pending] == [0.03]           # no leg from the second period

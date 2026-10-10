@@ -60,7 +60,10 @@ backtest and FX dynamic scenario.
   time once and every period sharing it fixes at that spot; periods are accumulated in schedule order (a period after
   the target hit is dead), each with its own pay date and cash. A dated TARN on the default period derivation
   (`initial_date`, then each previous fixing date) cannot share a fixing date (a zero-length period): it states its own
-  accrual.
+  accrual. The default derivation refuses any non-positive derived factor (two fixings on one day under ACT/365, at
+  construction; a zero-business-day period under a `BUSINESS_DAYS` contract count, at resolve), which a dated contract
+  priced before. A dated state's `fixings_banked` may not stop inside the periods fixing on one calendar date unless
+  the target was hit. `mean_redemption_fraction` does not count a hit at the final fixing time as early.
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be

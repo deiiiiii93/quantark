@@ -174,28 +174,53 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
         if self.initial_date is not None and not self.initial_date < self.fixing_dates[0]:
             raise ValidationError(
                 f"initial_date {self.initial_date} must be before the first fixing date {self.fixing_dates[0]}")
-        if self.initial_date is not None and len(set(self.fixing_dates)) != len(self.fixing_dates):
-            # user ruling 2026-10-10 on R26 (b): the DEFAULT derivation's later period on a shared fixing date runs
-            # from that date to itself; a contract stating its own accrual is not refused (Task 8d narrows this
-            # condition to the default derivation and adds accrual_end_dates to the message)
-            raise ValidationError(
-                "periods sharing a fixing date need their own accrual: under the default derivation (initial_date, "
-                "then each previous fixing date) the later period would have zero length - state accrual_factors")
+        if self.initial_date is not None:
+            self._check_default_periods()
         if self.accrual_factors is not None:
             if len(self.accrual_factors) != len(self.fixing_dates):
                 raise ValidationError("accrual_factors must align 1:1 with fixing_dates")
             if any((not math.isfinite(a)) or a <= 0.0 for a in self.accrual_factors):
                 raise ValidationError("accrual_factors must be positive and finite")
 
+    def _check_default_periods(self) -> None:
+        """The default derivation refuses any non-positive derived factor (user ruling 2026-10-10 on R26 (b), by
+        factor - Task 8c fix round 1): a later period on the fixing date (or, ACT/365 counting whole days, the same
+        day) of the previous one has zero length. Decided here for every count that needs no environment; a
+        BUSINESS_DAYS count needs the environment's calendar and is decided at resolve (``_dated_factor``)."""
+        convention = self._derived_convention()
+        starts = [self.initial_date] + list(self.fixing_dates[:-1])
+        for index, (start, end) in enumerate(zip(starts, self.fixing_dates)):
+            if not start < end:
+                raise self._zero_length(index, 0.0)
+            if convention is not DayCountConvention.BUSINESS_DAYS:
+                factor = calculate_year_fraction(start, end, convention)
+                if not factor > 0.0:
+                    raise self._zero_length(index, factor)
+
+    def _derived_convention(self) -> DayCountConvention:
+        return DayCountConvention.ACT_365 if self.day_count_convention is None else self.day_count_convention
+
+    def _zero_length(self, index: int, factor: float) -> ValidationError:
+        # Task 8d narrows this condition to the default derivation and adds accrual_end_dates to the message
+        start = self.initial_date if index == 0 else self.fixing_dates[index - 1]
+        return ValidationError(
+            f"period {index} ({start} -> {self.fixing_dates[index]}) under the default derivation (initial_date, then "
+            f"each previous fixing date) would have zero length (derived accrual factor {factor} in "
+            f"{self._derived_convention().name}) - periods sharing a fixing date need their own accrual: state "
+            "accrual_factors")
+
     def _dated_factor(self, index: int, fx_env) -> float:
         """Explicit factor, else ``initial_date`` / previous fixing date -> this fixing date in the contract day count
-        (``None`` = ACT_365), resolved against the environment's calendar (a BUSINESS_DAYS count needs it)."""
+        (``None`` = ACT_365), resolved against the environment's calendar (a BUSINESS_DAYS count needs it). A
+        non-positive derived factor is refused (``_check_default_periods``)."""
         if self.accrual_factors is not None:
             return self.accrual_factors[index]
         start = self.initial_date if index == 0 else self.fixing_dates[index - 1]
-        convention = DayCountConvention.ACT_365 if self.day_count_convention is None else self.day_count_convention
-        return calculate_year_fraction(start, self.fixing_dates[index], convention, fx_env.bus_days_in_year,
-                                       calendar=fx_env.calendar)
+        factor = calculate_year_fraction(start, self.fixing_dates[index], self._derived_convention(),
+                                         fx_env.bus_days_in_year, calendar=fx_env.calendar)
+        if not factor > 0.0:
+            raise self._zero_length(index, factor)
+        return factor
 
     def _validate_terms(self) -> None:
         if self.coupon_rate is None:

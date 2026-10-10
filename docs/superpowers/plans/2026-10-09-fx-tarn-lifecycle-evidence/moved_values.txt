@@ -34,3 +34,24 @@
 # Same refusal, new reason: test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] (initial_date-derived) still raises
 # ValidationError, now the default derivation's zero-length refusal (user ruling 2026-10-10 on R26 (b)) instead of
 # "fixing_dates must be unique".
+#
+# Task 8c fix round 1 (controller rulings 2026-10-10). Prices: MC 20_000, seed 7, fixture env (1.20, r_d 5%, r_f 3%,
+# vol 10%), target 50, default derivation from initial_date = VAL; dates + FIX_DATES[1:].
+# Ruling 1 - the default derivation refuses ANY non-positive derived factor (was: equal fixing datetimes only):
+#   [2026-07-15 10:00, 2026-07-15 15:00]: e2e07886 refused at pricing ("times must be strictly increasing and
+#     positive"); ab37b432 priced 105.7506370588212 (a 0.0 second factor); now refused at construction ("... would
+#     have zero length (derived accrual factor 0.0 in ACT_365) ..."). Message change: engine time grid -> zero length.
+#   [2026-07-15 15:00, 2026-07-16 09:00]: e2e07886 and ab37b432 priced 105.71705108790938 (ACT/365 counts whole days:
+#     a 0.0 second factor, a dead coupon; its numeric twin refused "accrual_factors must be positive"); now refused at
+#     construction (zero length).
+#   BUSINESS_DAYS contract count, [Fri 2026-08-14, Sat 2026-08-15, 2026-09-15], initial_date 2026-07-15 (Fri -> Sat is
+#     zero business days, known only with the environment calendar): CALENDAR_DAYS env + TARGET calendar, valued VAL:
+#     e2e07886 and ab37b432 priced 100.77182723886511; BUSINESS_DAYS env valued Thu 2026-08-13: e2e07886 refused at
+#     pricing (strictly increasing), ab37b432 priced 101.63312584423342; now both refused at resolve (zero length).
+# Ruling 2 - an explicit state.fixings_banked strictly inside a calendar-date group of fixings (fixing k-1 and k on
+#   one .date()) is refused at construction unless the state is redeemed / terminal. ab37b432 accepted it (e2e07886
+#   could not book equal dates). A count at a group boundary, a redeemed mid-group count (the record loop's hit) and
+#   Friday + Saturday (two dates) are accepted.
+# Ruling 3 - mean_redemption_fraction: a hit by the first of several periods sharing the FINAL fixing time is not an
+#   early redemption: ab37b432 reported 1.0 -> 0.0 (13 periods, the last two on FIX_DATES[-1], hit at period 12, vol
+#   1e-7). Prices do not move. Distinct-time schedules: full engine results byte-identical to e2e07886 (22 results).

@@ -145,6 +145,10 @@ class FxTargetRedemptionNoteMCEngine(BaseFxEngine):
         tol = opt.hit_tol
         include_principal = opt.include_principal
 
+        # the first period at the final fixing time (n_periods - 1 for distinct times); exact equality, as np.unique
+        # groups the simulated times in _simulate
+        final = view.fixing_times[-1]
+        first_final = next(i for i, t in enumerate(view.fixing_times) if t == final)
         for i in range(n_periods):
             full_c = opt.coupon_amount(view.accrual_factors[i])
             coupon = np.where(cond[:, i], full_c, 0.0)
@@ -158,8 +162,8 @@ class FxTargetRedemptionNoteMCEngine(BaseFxEngine):
             newly = alive & hit
             if include_principal:
                 pv += newly * opt.notional * df_pay[i]
-            if i < n_periods - 1:
-                early |= newly  # a final-period hit is not an early redemption
+            if i < first_final:
+                early |= newly  # a hit at the final fixing time (any period sharing it) is not an early redemption
             alive = alive & ~hit
 
         # Paths that never redeemed early repay principal at final maturity.
