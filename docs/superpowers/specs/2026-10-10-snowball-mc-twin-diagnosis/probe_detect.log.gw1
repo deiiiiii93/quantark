@@ -1,0 +1,1 @@
+test/test_cashleg/test_ko_reset_distribution.py::test_mc_rebased_is_refused (call)	ko_reset:SnowballMCEngine	nodes=1156	min_step=2.776e-17

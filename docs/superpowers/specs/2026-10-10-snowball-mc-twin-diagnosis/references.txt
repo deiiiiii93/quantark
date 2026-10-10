@@ -1,0 +1,30 @@
+snowball day= 10 pde dated=10.6653051586 numeric=10.6653051586 gap=+0.00e+00 | quad dated=10.6666461194 numeric=10.6666461194 gap=+0.00e+00 | pde-quad(dated)=-1.34e-03
+snowball day= 14 pde dated=10.7551018403 numeric=10.7551018403 gap=+2.66e-14 | quad dated=10.7553855510 numeric=10.7553855510 gap=-1.78e-15 | pde-quad(dated)=-2.84e-04
+snowball day= 41 pde dated=11.0423639671 numeric=11.0423639671 gap=-8.88e-15 | quad dated=11.0444338520 numeric=11.0444338520 gap=+1.78e-15 | pde-quad(dated)=-2.07e-03
+snowball day= 45 pde dated=11.1360469094 numeric=11.1360469094 gap=+1.31e-13 | quad dated=11.1360782639 numeric=11.1360782639 gap=+0.00e+00 | pde-quad(dated)=-3.14e-05
+snowball day= 53 pde dated=11.2664021496 numeric=11.2664021496 gap=-7.11e-15 | quad dated=11.2650213526 numeric=11.2650213526 gap=-1.42e-14 | pde-quad(dated)=+1.38e-03
+snowball day= 90 pde dated=11.6298676366 numeric=11.6298676366 gap=+5.33e-15 | quad dated=11.6319764715 numeric=11.6319764715 gap=+7.11e-15 | pde-quad(dated)=-2.11e-03
+snowball day= 91 pde dated=11.6479875399 numeric=11.6479875399 gap=+0.00e+00 | quad dated=11.6534630655 numeric=11.6534630655 gap=-1.69e-11 | pde-quad(dated)=-5.48e-03
+snowball day= 92 pde dated=11.6736593339 numeric=11.6736593339 gap=+2.04e-13 | quad dated=11.6794076410 numeric=11.6794076410 gap=+0.00e+00 | pde-quad(dated)=-5.75e-03
+snowball day= 93 pde dated=11.6993194609 numeric=11.6993194609 gap=+2.42e-13 | quad dated=11.7053023630 numeric=11.7053023630 gap=+5.33e-15 | pde-quad(dated)=-5.98e-03
+snowball day=105 pde dated=12.0076623944 numeric=12.0076623944 gap=-1.56e-13 | quad dated=12.0055816193 numeric=12.0055816193 gap=+3.55e-15 | pde-quad(dated)=+2.08e-03
+snowball day=122 pde dated=12.1850065814 numeric=12.1850065814 gap=-2.54e-13 | quad dated=12.1904295368 numeric=12.1904295368 gap=-1.59e-11 | pde-quad(dated)=-5.42e-03
+snowball day=170 pde dated=13.1611834155 numeric=13.1611834155 gap=+9.59e-14 | quad dated=13.1656347602 numeric=13.1656347602 gap=-1.78e-14 | pde-quad(dated)=-4.45e-03
+snowball day=183 pde dated=13.3399163082 numeric=13.3399163082 gap=+5.33e-15 | quad dated=13.3405102877 numeric=13.3405102877 gap=+3.55e-15 | pde-quad(dated)=-5.94e-04
+snowball day=200 pde dated=13.7143866659 numeric=13.7143866659 gap=+5.77e-13 | quad dated=13.7143527045 numeric=13.7143527045 gap=+1.78e-15 | pde-quad(dated)=+3.40e-05
+snowball day=248 pde dated=14.4752608193 numeric=14.4752608193 gap=+6.70e-13 | quad dated=14.4731559241 numeric=14.4731559241 gap=+0.00e+00 | pde-quad(dated)=+2.10e-03
+phoenix  day= 10 pde dated=3.1342213721 numeric=3.1342213721 gap=+0.00e+00 | quad dated=3.1345396211 numeric=3.1345396211 gap=+0.00e+00 | pde-quad(dated)=-3.18e-04
+phoenix  day= 14 pde dated=3.2330334391 numeric=3.2330334391 gap=+1.82e-14 | quad dated=3.2321056494 numeric=3.2321056494 gap=+0.00e+00 | pde-quad(dated)=+9.28e-04
+phoenix  day= 41 pde dated=3.2056140956 numeric=3.2056140956 gap=-2.31e-14 | quad dated=3.2061521801 numeric=3.2061521801 gap=+0.00e+00 | pde-quad(dated)=-5.38e-04
+phoenix  day= 45 pde dated=3.3034446722 numeric=3.3034446722 gap=+1.95e-14 | quad dated=3.3025118324 numeric=3.3025118324 gap=-8.88e-16 | pde-quad(dated)=+9.33e-04
+phoenix  day= 53 pde dated=3.5693688490 numeric=3.5693688490 gap=+2.22e-15 | quad dated=3.5720096116 numeric=3.5720096116 gap=-3.11e-15 | pde-quad(dated)=-2.64e-03
+phoenix  day= 90 pde dated=4.0703197783 numeric=4.0703197783 gap=-8.88e-16 | quad dated=4.0750227087 numeric=4.0750227087 gap=-1.78e-15 | pde-quad(dated)=-4.70e-03
+phoenix  day= 91 pde dated=4.0985264949 numeric=3.0985264949 gap=+1.00e+00 | quad dated=4.0978126662 numeric=3.0978126663 gap=+1.00e+00 | pde-quad(dated)=+7.14e-04
+phoenix  day= 92 pde dated=3.1157922057 numeric=3.1157922057 gap=-1.14e-13 | quad dated=3.1148609931 numeric=3.1148609931 gap=+4.44e-16 | pde-quad(dated)=+9.31e-04
+phoenix  day= 93 pde dated=3.1332722023 numeric=3.1332722023 gap=+8.62e-14 | quad dated=3.1321326272 numeric=3.1321326272 gap=+1.33e-15 | pde-quad(dated)=+1.14e-03
+phoenix  day=105 pde dated=3.3714733895 numeric=3.3714733895 gap=+2.13e-14 | quad dated=3.3699667195 numeric=3.3699667195 gap=-4.44e-16 | pde-quad(dated)=+1.51e-03
+phoenix  day=122 pde dated=4.1284144116 numeric=3.1284144116 gap=+1.00e+00 | quad dated=4.1304851616 numeric=3.1304851617 gap=+1.00e+00 | pde-quad(dated)=-2.07e-03
+phoenix  day=170 pde dated=3.4513965097 numeric=3.4513965097 gap=+2.84e-14 | quad dated=3.4504799556 numeric=3.4504799556 gap=-2.66e-15 | pde-quad(dated)=+9.17e-04
+phoenix  day=183 pde dated=3.0400996723 numeric=3.0400996723 gap=-1.78e-15 | quad dated=3.0394311926 numeric=3.0394311926 gap=+2.66e-15 | pde-quad(dated)=+6.68e-04
+phoenix  day=200 pde dated=3.3197800845 numeric=3.3197800845 gap=+1.38e-13 | quad dated=3.3192591719 numeric=3.3192591719 gap=+1.33e-15 | pde-quad(dated)=+5.21e-04
+phoenix  day=248 pde dated=2.6447324967 numeric=2.6447324967 gap=+1.30e-13 | quad dated=2.6446153352 numeric=2.6446153352 gap=+0.00e+00 | pde-quad(dated)=+1.17e-04

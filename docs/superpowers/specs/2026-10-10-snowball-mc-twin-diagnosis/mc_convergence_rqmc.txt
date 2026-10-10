@@ -1,0 +1,36 @@
+  rqmc day=14 seed=7 dated=10.769525 (se 0.01852) numeric=10.782844 (se 0.01388) gap=-1.332e-02
+  rqmc day=14 seed=1007 dated=10.776442 (se 0.01882) numeric=10.729262 (se 0.01414) gap=+4.718e-02
+  rqmc day=14 seed=2007 dated=10.760408 (se 0.02345) numeric=10.743342 (se 0.01024) gap=+1.707e-02
+  rqmc day=14 seed=3007 dated=10.768264 (se 0.01976) numeric=10.752300 (se 0.00947) gap=+1.596e-02
+  rqmc day=14 seed=4007 dated=10.745619 (se 0.02431) numeric=10.758747 (se 0.01523) gap=-1.313e-02
+  rqmc day=14 seed=5007 dated=10.766519 (se 0.02427) numeric=10.738855 (se 0.01318) gap=+2.766e-02
+  rqmc day=14 seed=6007 dated=10.770230 (se 0.02068) numeric=10.736924 (se 0.01220) gap=+3.331e-02
+  rqmc day=14 seed=7007 dated=10.738112 (se 0.01919) numeric=10.771273 (se 0.01706) gap=-3.316e-02
+rqmc day=14: dated mean=10.76189 se=0.00469 | numeric mean=10.75169 se=0.00649 | paired gap mean=+1.020e-02 se=9.696e-03 max|gap|=4.718e-02 | dated-numeric of the means in pooled se: +1.27 bitwise-equal seeds=0/8 [25s]
+  rqmc day=45 seed=7 dated=11.139272 (se 0.01595) numeric=11.139272 (se 0.01595) gap=+0.000e+00
+  rqmc day=45 seed=1007 dated=11.138968 (se 0.01440) numeric=11.138968 (se 0.01440) gap=+1.776e-15
+  rqmc day=45 seed=2007 dated=11.153760 (se 0.01375) numeric=11.153760 (se 0.01375) gap=+0.000e+00
+  rqmc day=45 seed=3007 dated=11.120604 (se 0.01196) numeric=11.120604 (se 0.01196) gap=-1.776e-15
+  rqmc day=45 seed=4007 dated=11.155846 (se 0.01694) numeric=11.155846 (se 0.01694) gap=+0.000e+00
+  rqmc day=45 seed=5007 dated=11.116188 (se 0.01294) numeric=11.116188 (se 0.01294) gap=+0.000e+00
+  rqmc day=45 seed=6007 dated=11.139559 (se 0.01225) numeric=11.139559 (se 0.01225) gap=+0.000e+00
+  rqmc day=45 seed=7007 dated=11.131401 (se 0.01177) numeric=11.131401 (se 0.01177) gap=+0.000e+00
+rqmc day=45: dated mean=11.13695 se=0.00497 | numeric mean=11.13695 se=0.00497 | paired gap mean=+0.000e+00 se=3.357e-16 max|gap|=1.776e-15 | dated-numeric of the means in pooled se: +0.00 bitwise-equal seeds=6/8 [22s]
+  rqmc day=92 seed=7 dated=11.703944 (se 0.01344) numeric=11.671770 (se 0.01225) gap=+3.217e-02
+  rqmc day=92 seed=1007 dated=11.681438 (se 0.01291) numeric=11.674727 (se 0.01115) gap=+6.711e-03
+  rqmc day=92 seed=2007 dated=11.667220 (se 0.01172) numeric=11.675014 (se 0.00843) gap=-7.795e-03
+  rqmc day=92 seed=3007 dated=11.661106 (se 0.01406) numeric=11.671935 (se 0.00796) gap=-1.083e-02
+  rqmc day=92 seed=4007 dated=11.679579 (se 0.01162) numeric=11.686622 (se 0.00925) gap=-7.043e-03
+  rqmc day=92 seed=5007 dated=11.685737 (se 0.01154) numeric=11.674945 (se 0.00908) gap=+1.079e-02
+  rqmc day=92 seed=6007 dated=11.681235 (se 0.01126) numeric=11.700558 (se 0.01157) gap=-1.932e-02
+  rqmc day=92 seed=7007 dated=11.678349 (se 0.01158) numeric=11.676097 (se 0.01035) gap=+2.253e-03
+rqmc day=92: dated mean=11.67983 se=0.00450 | numeric mean=11.67896 se=0.00350 | paired gap mean=+8.676e-04 se=5.664e-03 max|gap|=3.217e-02 | dated-numeric of the means in pooled se: +0.15 bitwise-equal seeds=0/8 [19s]
+  rqmc day=200 seed=7 dated=13.718664 (se 0.00664) numeric=13.718664 (se 0.00664) gap=+0.000e+00
+  rqmc day=200 seed=1007 dated=13.710474 (se 0.00729) numeric=13.710474 (se 0.00729) gap=+0.000e+00
+  rqmc day=200 seed=2007 dated=13.706819 (se 0.01068) numeric=13.706819 (se 0.01068) gap=+0.000e+00
+  rqmc day=200 seed=3007 dated=13.716121 (se 0.00945) numeric=13.716121 (se 0.00945) gap=+0.000e+00
+  rqmc day=200 seed=4007 dated=13.722884 (se 0.00839) numeric=13.722884 (se 0.00839) gap=+0.000e+00
+  rqmc day=200 seed=5007 dated=13.716832 (se 0.00825) numeric=13.716832 (se 0.00825) gap=+0.000e+00
+  rqmc day=200 seed=6007 dated=13.704855 (se 0.01005) numeric=13.704855 (se 0.01005) gap=+0.000e+00
+  rqmc day=200 seed=7007 dated=13.711777 (se 0.00664) numeric=13.711777 (se 0.00664) gap=+0.000e+00
+rqmc day=200: dated mean=13.71355 se=0.00217 | numeric mean=13.71355 se=0.00217 | paired gap mean=+0.000e+00 se=0.000e+00 max|gap|=0.000e+00 | dated-numeric of the means in pooled se: +0.00 bitwise-equal seeds=8/8 [13s]

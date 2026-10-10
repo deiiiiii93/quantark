@@ -1,0 +1,100 @@
+bs_mc     snowball               day= 14 dated=10.649319 numeric=10.661728 gap=-1.241e-02 nodes 254/253 min_dt 1.1e-16/3.0e-04  <-- TWIN GAP
+bs_mc     snowball               day= 41 dated=11.337086 numeric=11.246983 gap=+9.010e-02 nodes 233/234 min_dt 3.4e-04/2.8e-17  <-- TWIN GAP
+bs_mc     snowball               day= 45 dated=11.183166 numeric=11.183166 gap=+0.000e+00 nodes 231/231 min_dt 9.9e-05/9.9e-05
+bs_mc     snowball               day= 53 dated=11.163806 numeric=11.264472 gap=-1.007e-01 nodes 226/225 min_dt 1.1e-16/9.1e-04  <-- TWIN GAP
+bs_mc     snowball               day= 92 dated=11.723997 numeric=11.525881 gap=+1.981e-01 nodes 196/197 min_dt 9.1e-04/1.1e-16  <-- TWIN GAP
+bs_mc     snowball               day=170 dated=13.240136 numeric=13.120275 gap=+1.199e-01 nodes 140/141 min_dt 9.1e-04/5.6e-17  <-- TWIN GAP
+bs_mc     snowball               day=200 dated=13.765525 numeric=13.765525 gap=+1.776e-15 nodes 119/119 min_dt 7.2e-05/7.2e-05
+bs_mc     phoenix                day= 14 dated=3.291736 numeric=3.261586 gap=+3.015e-02 nodes 254/253 min_dt 1.1e-16/3.0e-04  <-- TWIN GAP
+bs_mc     phoenix                day= 41 dated=3.323170 numeric=3.338213 gap=-1.504e-02 nodes 233/234 min_dt 3.4e-04/2.8e-17  <-- TWIN GAP
+bs_mc     phoenix                day= 45 dated=3.420172 numeric=3.420172 gap=+0.000e+00 nodes 231/231 min_dt 9.9e-05/9.9e-05
+bs_mc     phoenix                day= 53 dated=3.708671 numeric=3.604831 gap=+1.038e-01 nodes 226/225 min_dt 1.1e-16/9.1e-04  <-- TWIN GAP
+bs_mc     phoenix                day= 92 dated=3.136692 numeric=3.202865 gap=-6.617e-02 nodes 196/197 min_dt 9.1e-04/1.1e-16  <-- TWIN GAP
+bs_mc     phoenix                day=170 dated=3.474844 numeric=3.560460 gap=-8.562e-02 nodes 140/141 min_dt 9.1e-04/5.6e-17  <-- TWIN GAP
+bs_mc     phoenix                day=200 dated=3.323597 numeric=3.323597 gap=+0.000e+00 nodes 119/119 min_dt 7.2e-05/7.2e-05
+bs_mc     ko_reset_discrete_ki   day= 14 dated=11.085815 numeric=11.085815 gap=+0.000e+00 nodes 12/12 min_dt 4.4e-02/4.4e-02
+bs_mc     ko_reset_discrete_ki   day= 41 dated=10.690690 numeric=10.690690 gap=+0.000e+00 nodes 11/11 min_dt 5.5e-02/5.5e-02
+bs_mc     ko_reset_discrete_ki   day= 45 dated=10.687045 numeric=10.687045 gap=+0.000e+00 nodes 11/11 min_dt 4.4e-02/4.4e-02
+bs_mc     ko_reset_discrete_ki   day= 53 dated=10.653724 numeric=10.653724 gap=+0.000e+00 nodes 11/11 min_dt 2.2e-02/2.2e-02
+bs_mc     ko_reset_discrete_ki   day= 92 dated=10.064536 numeric=10.064536 gap=+0.000e+00 nodes 9/9 min_dt 8.2e-02/8.2e-02
+bs_mc     ko_reset_discrete_ki   day=170 dated=7.090171 numeric=7.090171 gap=+0.000e+00 nodes 7/7 min_dt 3.3e-02/3.3e-02
+bs_mc     ko_reset_discrete_ki   day=200 dated RAISES ValidationError: KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it matured at the end of that sc
+bs_mc     ko_reset_discrete_ki   day=200 numeric RAISES ValidationError: KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it matured at the end of that sc
+bs_mc     ko_reset_continuous_ki day= 14 dated=10.536632 numeric=10.536632 gap=+0.000e+00 nodes 127/127 min_dt 1.9e-04/1.9e-04
+bs_mc     ko_reset_continuous_ki day= 41 dated=10.550502 numeric=10.550502 gap=+0.000e+00 nodes 108/108 min_dt 3.9e-04/3.9e-04
+bs_mc     ko_reset_continuous_ki day= 45 dated=10.627519 numeric=10.627519 gap=+1.776e-15 nodes 105/105 min_dt 3.7e-04/3.7e-04
+bs_mc     ko_reset_continuous_ki day= 53 dated=10.725538 numeric=10.725538 gap=+0.000e+00 nodes 100/100 min_dt 2.7e-04/2.7e-04
+bs_mc     ko_reset_continuous_ki day= 92 dated=10.052792 numeric=10.052792 gap=+0.000e+00 nodes 69/69 min_dt 3.9e-03/3.9e-03
+bs_mc     ko_reset_continuous_ki day=170 dated=7.073098 numeric=7.073098 gap=+0.000e+00 nodes 15/15 min_dt 3.7e-03/3.7e-03
+bs_mc     ko_reset_continuous_ki day=200 dated RAISES ValidationError: KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it matured at the end of that sc
+bs_mc     ko_reset_continuous_ki day=200 numeric RAISES ValidationError: KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it matured at the end of that sc
+lv_mc     snowball               day= 14 dated=9.951943 numeric=9.943327 gap=+8.616e-03 nodes 254/253 min_dt 1.1e-16/3.0e-04  <-- TWIN GAP
+lv_mc     snowball               day= 41 dated=9.930752 numeric=10.103487 gap=-1.727e-01 nodes 233/234 min_dt 3.4e-04/2.8e-17  <-- TWIN GAP
+lv_mc     snowball               day= 45 dated=9.719635 numeric=9.719635 gap=+0.000e+00 nodes 231/231 min_dt 9.9e-05/9.9e-05
+lv_mc     snowball               day= 53 dated=10.486613 numeric=10.524479 gap=-3.787e-02 nodes 226/225 min_dt 1.1e-16/9.1e-04  <-- TWIN GAP
+lv_mc     snowball               day= 92 dated=10.380869 numeric=10.423651 gap=-4.278e-02 nodes 196/197 min_dt 9.1e-04/1.1e-16  <-- TWIN GAP
+lv_mc     snowball               day=170 dated=12.202643 numeric=12.500595 gap=-2.980e-01 nodes 140/141 min_dt 9.1e-04/5.6e-17  <-- TWIN GAP
+lv_mc     snowball               day=200 dated=13.157612 numeric=13.157612 gap=+1.776e-15 nodes 119/119 min_dt 7.2e-05/7.2e-05
+heston_mc snowball               day= 14 dated=9.936007 numeric=10.176231 gap=-2.402e-01 nodes 254/253 min_dt 1.1e-16/3.0e-04  <-- TWIN GAP
+heston_mc snowball               day= 41 dated=10.456080 numeric=10.568245 gap=-1.122e-01 nodes 233/234 min_dt 3.4e-04/2.8e-17  <-- TWIN GAP
+heston_mc snowball               day= 45 dated=10.174573 numeric=10.174573 gap=-1.776e-15 nodes 231/231 min_dt 9.9e-05/9.9e-05
+heston_mc snowball               day= 53 dated=10.567721 numeric=9.559129 gap=+1.009e+00 nodes 226/225 min_dt 1.1e-16/9.1e-04  <-- TWIN GAP
+heston_mc snowball               day= 92 dated=10.966167 numeric=10.319117 gap=+6.470e-01 nodes 196/197 min_dt 9.1e-04/1.1e-16  <-- TWIN GAP
+heston_mc snowball               day=170 dated=12.489345 numeric=13.111760 gap=-6.224e-01 nodes 140/141 min_dt 9.1e-04/5.6e-17  <-- TWIN GAP
+heston_mc snowball               day=200 dated=12.736976 numeric=12.736976 gap=+0.000e+00 nodes 119/119 min_dt 7.2e-05/7.2e-05
+slv_mc    snowball               day= 14 dated=10.695445 numeric=10.738279 gap=-4.283e-02 nodes 254/253 min_dt 1.1e-16/3.0e-04  <-- TWIN GAP
+slv_mc    snowball               day= 41 dated=10.932145 numeric=10.849093 gap=+8.305e-02 nodes 233/234 min_dt 3.4e-04/2.8e-17  <-- TWIN GAP
+slv_mc    snowball               day= 45 dated=10.283591 numeric=10.283591 gap=-3.553e-15 nodes 231/231 min_dt 9.9e-05/9.9e-05
+slv_mc    snowball               day= 53 dated=11.236826 numeric=11.219899 gap=+1.693e-02 nodes 226/225 min_dt 1.1e-16/9.1e-04  <-- TWIN GAP
+slv_mc    snowball               day= 92 dated=10.784614 numeric=10.687498 gap=+9.712e-02 nodes 196/197 min_dt 9.1e-04/1.1e-16  <-- TWIN GAP
+slv_mc    snowball               day=170 dated=12.467702 numeric=11.935210 gap=+5.325e-01 nodes 140/141 min_dt 9.1e-04/5.6e-17  <-- TWIN GAP
+slv_mc    snowball               day=200 dated=12.594556 numeric=12.594556 gap=+1.776e-15 nodes 119/119 min_dt 7.2e-05/7.2e-05
+lv_mc     phoenix                day= 14 dated=3.235042 numeric=3.246701 gap=-1.166e-02 nodes 254/253 min_dt 1.1e-16/3.0e-04  <-- TWIN GAP
+lv_mc     phoenix                day= 41 dated=3.396309 numeric=3.263115 gap=+1.332e-01 nodes 233/234 min_dt 3.4e-04/2.8e-17  <-- TWIN GAP
+lv_mc     phoenix                day= 45 dated=2.991081 numeric=2.991081 gap=-1.776e-15 nodes 231/231 min_dt 9.9e-05/9.9e-05
+lv_mc     phoenix                day= 53 dated=3.528980 numeric=3.431392 gap=+9.759e-02 nodes 226/225 min_dt 1.1e-16/9.1e-04  <-- TWIN GAP
+lv_mc     phoenix                day= 92 dated=2.867511 numeric=2.540874 gap=+3.266e-01 nodes 196/197 min_dt 9.1e-04/1.1e-16  <-- TWIN GAP
+lv_mc     phoenix                day=170 dated=3.652427 numeric=3.774470 gap=-1.220e-01 nodes 140/141 min_dt 9.1e-04/5.6e-17  <-- TWIN GAP
+lv_mc     phoenix                day=200 dated=3.570322 numeric=3.570322 gap=+0.000e+00 nodes 119/119 min_dt 7.2e-05/7.2e-05
+heston_mc phoenix                day= 14 dated=1.884508 numeric=1.954414 gap=-6.991e-02 nodes 254/253 min_dt 1.1e-16/3.0e-04  <-- TWIN GAP
+heston_mc phoenix                day= 41 dated=2.609553 numeric=2.022792 gap=+5.868e-01 nodes 233/234 min_dt 3.4e-04/2.8e-17  <-- TWIN GAP
+heston_mc phoenix                day= 45 dated=1.535584 numeric=1.535584 gap=-3.775e-15 nodes 231/231 min_dt 9.9e-05/9.9e-05
+heston_mc phoenix                day= 53 dated=2.408545 numeric=1.678601 gap=+7.299e-01 nodes 226/225 min_dt 1.1e-16/9.1e-04  <-- TWIN GAP
+heston_mc phoenix                day= 92 dated=1.927874 numeric=2.115087 gap=-1.872e-01 nodes 196/197 min_dt 9.1e-04/1.1e-16  <-- TWIN GAP
+heston_mc phoenix                day=170 dated=2.490313 numeric=2.799707 gap=-3.094e-01 nodes 140/141 min_dt 9.1e-04/5.6e-17  <-- TWIN GAP
+heston_mc phoenix                day=200 dated=2.971698 numeric=2.971698 gap=+0.000e+00 nodes 119/119 min_dt 7.2e-05/7.2e-05
+slv_mc    phoenix                day= 14 dated=2.454733 numeric=2.514304 gap=-5.957e-02 nodes 254/253 min_dt 1.1e-16/3.0e-04  <-- TWIN GAP
+slv_mc    phoenix                day= 41 dated=2.403812 numeric=2.361181 gap=+4.263e-02 nodes 233/234 min_dt 3.4e-04/2.8e-17  <-- TWIN GAP
+slv_mc    phoenix                day= 45 dated=2.172871 numeric=2.172871 gap=+0.000e+00 nodes 231/231 min_dt 9.9e-05/9.9e-05
+slv_mc    phoenix                day= 53 dated=3.060313 numeric=2.931210 gap=+1.291e-01 nodes 226/225 min_dt 1.1e-16/9.1e-04  <-- TWIN GAP
+slv_mc    phoenix                day= 92 dated=2.182410 numeric=2.189992 gap=-7.582e-03 nodes 196/197 min_dt 9.1e-04/1.1e-16  <-- TWIN GAP
+slv_mc    phoenix                day=170 dated=3.071045 numeric=2.705887 gap=+3.652e-01 nodes 140/141 min_dt 9.1e-04/5.6e-17  <-- TWIN GAP
+slv_mc    phoenix                day=200 dated=2.887654 numeric=2.887654 gap=+4.441e-16 nodes 119/119 min_dt 7.2e-05/7.2e-05
+lv_mc     ko_reset_continuous_ki day= 14 dated RAISES PricingError: recorded step variance (256, 127) does not describe these paths (256, 121)
+lv_mc     ko_reset_continuous_ki day= 14 numeric RAISES PricingError: recorded step variance (256, 127) does not describe these paths (256, 121)
+lv_mc     ko_reset_continuous_ki day= 41 dated RAISES PricingError: recorded step variance (256, 108) does not describe these paths (256, 102)
+lv_mc     ko_reset_continuous_ki day= 41 numeric RAISES PricingError: recorded step variance (256, 108) does not describe these paths (256, 102)
+lv_mc     ko_reset_continuous_ki day= 45 dated RAISES PricingError: recorded step variance (256, 105) does not describe these paths (256, 99)
+lv_mc     ko_reset_continuous_ki day= 45 numeric RAISES PricingError: recorded step variance (256, 105) does not describe these paths (256, 99)
+lv_mc     ko_reset_continuous_ki day= 53 dated RAISES PricingError: recorded step variance (256, 100) does not describe these paths (256, 94)
+lv_mc     ko_reset_continuous_ki day= 53 numeric RAISES PricingError: recorded step variance (256, 100) does not describe these paths (256, 94)
+lv_mc     ko_reset_continuous_ki day= 92 dated RAISES PricingError: recorded step variance (256, 69) does not describe these paths (256, 63)
+lv_mc     ko_reset_continuous_ki day= 92 numeric RAISES PricingError: recorded step variance (256, 69) does not describe these paths (256, 63)
+lv_mc     ko_reset_continuous_ki day=170 dated RAISES PricingError: recorded step variance (256, 15) does not describe these paths (256, 9)
+lv_mc     ko_reset_continuous_ki day=170 numeric RAISES PricingError: recorded step variance (256, 15) does not describe these paths (256, 9)
+lv_mc     ko_reset_continuous_ki day=200 dated RAISES ValidationError: KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it matured at the end of that sc
+lv_mc     ko_reset_continuous_ki day=200 numeric RAISES ValidationError: KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it matured at the end of that sc
+heston_mc ko_reset_continuous_ki day= 14 dated RAISES PricingError: recorded step variance (256, 127) does not describe these paths (256, 121)
+heston_mc ko_reset_continuous_ki day= 14 numeric RAISES PricingError: recorded step variance (256, 127) does not describe these paths (256, 121)
+heston_mc ko_reset_continuous_ki day= 41 dated RAISES PricingError: recorded step variance (256, 108) does not describe these paths (256, 102)
+heston_mc ko_reset_continuous_ki day= 41 numeric RAISES PricingError: recorded step variance (256, 108) does not describe these paths (256, 102)
+heston_mc ko_reset_continuous_ki day= 45 dated RAISES PricingError: recorded step variance (256, 105) does not describe these paths (256, 99)
+heston_mc ko_reset_continuous_ki day= 45 numeric RAISES PricingError: recorded step variance (256, 105) does not describe these paths (256, 99)
+heston_mc ko_reset_continuous_ki day= 53 dated RAISES PricingError: recorded step variance (256, 100) does not describe these paths (256, 94)
+heston_mc ko_reset_continuous_ki day= 53 numeric RAISES PricingError: recorded step variance (256, 100) does not describe these paths (256, 94)
+heston_mc ko_reset_continuous_ki day= 92 dated RAISES PricingError: recorded step variance (256, 69) does not describe these paths (256, 63)
+heston_mc ko_reset_continuous_ki day= 92 numeric RAISES PricingError: recorded step variance (256, 69) does not describe these paths (256, 63)
+heston_mc ko_reset_continuous_ki day=170 dated RAISES PricingError: recorded step variance (256, 15) does not describe these paths (256, 9)
+heston_mc ko_reset_continuous_ki day=170 numeric RAISES PricingError: recorded step variance (256, 15) does not describe these paths (256, 9)
+heston_mc ko_reset_continuous_ki day=200 dated RAISES ValidationError: KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it matured at the end of that sc
+heston_mc ko_reset_continuous_ki day=200 numeric RAISES ValidationError: KO-reset snowball: the pre-KI schedule has ended and the contract is not knocked in, so it matured at the end of that sc

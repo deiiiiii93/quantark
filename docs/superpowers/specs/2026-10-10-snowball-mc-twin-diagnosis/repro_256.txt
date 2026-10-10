@@ -1,0 +1,10 @@
+seed=7 day= 10 dated=9.848023 numeric=9.848023 gap=+0.000000
+seed=7 day= 45 dated=10.132097 numeric=10.132097 gap=-0.000000
+seed=7 day= 90 dated=11.199135 numeric=11.199135 gap=-0.000000
+seed=7 day= 92 dated=11.461036 numeric=10.756027 gap=+0.705009
+seed=7 day=200 dated=13.913478 numeric=13.913478 gap=+0.000000
+seed=11 day= 10 dated=10.821369 numeric=10.821369 gap=+0.000000
+seed=11 day= 45 dated=11.281865 numeric=11.281865 gap=+0.000000
+seed=11 day= 90 dated=11.843241 numeric=11.843241 gap=+0.000000
+seed=11 day= 92 dated=12.457200 numeric=11.500637 gap=+0.956563
+seed=11 day=200 dated=14.012749 numeric=14.012749 gap=+0.000000

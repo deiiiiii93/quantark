@@ -1,0 +1,16 @@
+seed= 7 antithetic=False day=45: dated=10.132097 numeric=10.132097 gap=-3.553e-15 | patched dated=10.132097 numeric=10.132097 gap=-3.553e-15
+seed= 7 antithetic=False day=92: dated=11.461036 numeric=10.756027 gap=+7.050e-01 | patched dated=11.461036 numeric=11.461036 gap=+1.776e-15
+seed= 7 antithetic=True  day=45: dated=10.132097 numeric=10.132097 gap=-3.553e-15 | patched dated=10.132097 numeric=10.132097 gap=-3.553e-15
+seed= 7 antithetic=True  day=92: dated=11.461036 numeric=10.756027 gap=+7.050e-01 | patched dated=11.461036 numeric=11.461036 gap=+1.776e-15
+seed=11 antithetic=False day=45: dated=11.281865 numeric=11.281865 gap=+1.776e-15 | patched dated=11.281865 numeric=11.281865 gap=+1.776e-15
+seed=11 antithetic=False day=92: dated=12.457200 numeric=11.500637 gap=+9.566e-01 | patched dated=12.457200 numeric=12.457200 gap=-3.553e-15
+seed=11 antithetic=True  day=45: dated=11.281865 numeric=11.281865 gap=+1.776e-15 | patched dated=11.281865 numeric=11.281865 gap=+1.776e-15
+seed=11 antithetic=True  day=92: dated=12.457200 numeric=11.500637 gap=+9.566e-01 | patched dated=12.457200 numeric=12.457200 gap=-3.553e-15
+seed=42 antithetic=False day=45: dated=9.563335 numeric=9.563335 gap=-1.776e-15 | patched dated=9.563335 numeric=9.563335 gap=-1.776e-15
+seed=42 antithetic=False day=92: dated=11.103678 numeric=10.426716 gap=+6.770e-01 | patched dated=11.103678 numeric=11.103678 gap=+0.000e+00
+seed=42 antithetic=True  day=45: dated=9.563335 numeric=9.563335 gap=-1.776e-15 | patched dated=9.563335 numeric=9.563335 gap=-1.776e-15
+seed=42 antithetic=True  day=92: dated=11.103678 numeric=10.426716 gap=+6.770e-01 | patched dated=11.103678 numeric=11.103678 gap=+0.000e+00
+seeds 0..199 with dated 12.08 / numeric 11.34 on day 92 (256 paths): [(1, 12.08112131182321, 11.342307842516211)]
+  seed=1 dated: 12.081121, engine std_error 0.6426
+  seed=1 numeric: 11.342308, engine std_error 0.6928
+  seed=1 patched: dated=12.081121 numeric=12.081121

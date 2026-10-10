@@ -1,0 +1,12 @@
+snowball day=91 spot=100.0 mc      dated=11.37023587 numeric(drop landing)=11.37023587 gap=+0.000e+00 | numeric(keep_landing)=11.37023587 gap=+0.000e+00
+snowball day=91 spot=100.0 pde     dated=11.64798754 numeric(drop landing)=11.64798754 gap=+0.000e+00 | numeric(keep_landing)=11.64798754 gap=+0.000e+00
+snowball day=91 spot=100.0 quad_v2 dated=11.65346307 numeric(drop landing)=11.65346307 gap=-1.692e-11 | numeric(keep_landing)=11.65346307 gap=-1.776e-15
+snowball day=91 spot=104.0 mc      dated=15.00000000 numeric(drop landing)=13.26989082 gap=+1.730e+00 | numeric(keep_landing)=15.00000000 gap=+0.000e+00
+snowball day=91 spot=104.0 pde     dated=15.00000000 numeric(drop landing)=13.34018036 gap=+1.660e+00 | numeric(keep_landing)=15.00000000 gap=+0.000e+00
+snowball day=91 spot=104.0 quad_v2 dated=15.00000000 numeric(drop landing)=13.34013558 gap=+1.660e+00 | numeric(keep_landing)=15.00000000 gap=+0.000e+00
+phoenix  day=91 spot=100.0 mc      dated=4.06816298 numeric(drop landing)=3.06816298 gap=+1.000e+00 | numeric(keep_landing)=4.06816298 gap=+8.882e-16
+phoenix  day=91 spot=100.0 pde     dated=4.09852649 numeric(drop landing)=3.09852649 gap=+1.000e+00 | numeric(keep_landing)=4.09852649 gap=+0.000e+00
+phoenix  day=91 spot=100.0 quad_v2 dated=4.09781267 numeric(drop landing)=3.09781267 gap=+1.000e+00 | numeric(keep_landing)=4.09781267 gap=+0.000e+00
+phoenix  day=91 spot=104.0 mc      dated=1.00000000 numeric(drop landing)=2.32301646 gap=-1.323e+00 | numeric(keep_landing)=1.00000000 gap=+0.000e+00
+phoenix  day=91 spot=104.0 pde     dated=1.00000000 numeric(drop landing)=2.33065032 gap=-1.331e+00 | numeric(keep_landing)=1.00000000 gap=+0.000e+00
+phoenix  day=91 spot=104.0 quad_v2 dated=1.00000000 numeric(drop landing)=2.33096744 gap=-1.331e+00 | numeric(keep_landing)=1.00000000 gap=+0.000e+00

@@ -1,0 +1,5 @@
+bs_mc     ko_reset_continuous_ki day= 26 dated=10.618901 numeric=10.618901 gap=+0.000e+00 nodes 119/119 min_dt 2.8e-17/2.8e-17
+bs_mc     ko_reset_continuous_ki day= 45 dated=10.627519 numeric=10.627519 gap=+1.776e-15 nodes 105/105 min_dt 3.7e-04/3.7e-04
+bs_mc     ko_reset_continuous_ki day= 65 dated=10.334567 numeric=10.361778 gap=-2.721e-02 nodes 89/90 min_dt 9.1e-04/1.4e-17  <-- TWIN GAP
+bs_mc     ko_reset_continuous_ki day= 78 dated=10.423126 numeric=10.406259 gap=+1.687e-02 nodes 80/81 min_dt 9.1e-04/6.9e-18  <-- TWIN GAP
+bs_mc     ko_reset_continuous_ki day= 82 dated=10.295789 numeric=10.531241 gap=-2.355e-01 nodes 77/79 min_dt 1.2e-03/2.8e-17  <-- TWIN GAP

@@ -1,0 +1,46 @@
+### snowball (days 1..364)
+  dated: 6 spurious steps < 1e-12
+      d14: np.float64(0.7123287671232876)[KO] / np.float64(0.7123287671232877)[KI-linspace]
+      d53: np.float64(0.6054794520547945)[KO] / np.float64(0.6054794520547946)[KI-linspace]
+      d61: np.float64(0.4164383561643835)[KI-linspace] / np.float64(0.41643835616438357)[KO]
+      d105: np.float64(0.46301369863013697)[KO] / np.float64(0.463013698630137)[KI-linspace]
+      d144: np.float64(0.3561643835616438)[KO] / np.float64(0.35616438356164387)[KI-linspace]
+      d209: np.float64(0.1780821917808219)[KO] / np.float64(0.17808219178082194)[KI-linspace]
+  numeric: 8 spurious steps < 1e-12
+      d41: np.float64(0.2219178082191781)[KI-linspace] / np.float64(0.22191780821917811)[KO]
+      d61: np.float64(0.4164383561643835)[KI-linspace] / np.float64(0.4164383561643836)[KO]
+      d92: np.float64(0.49863013698630126)[KI-linspace] / np.float64(0.4986301369863014)[KO]
+      d170: np.float64(0.28493150684931506)[KI-linspace] / np.float64(0.2849315068493151)[KO]
+      d183: np.float64(0.24931506849315063)[KI-linspace] / np.float64(0.24931506849315066)[KO]
+      d209: np.float64(0.17808219178082194)[KI-linspace] / np.float64(0.17808219178082196)[KO]
+      d248: np.float64(0.07123287671232877)[KI-linspace] / np.float64(0.07123287671232881)[KO]
+      d261: np.float64(0.03561643835616439)[KI-linspace] / np.float64(0.03561643835616446)[KO]
+  days where the node counts differ (day, dated n, numeric n): [(14, 254, 253), (41, 233, 234), (53, 226, 225), (92, 196, 197), (105, 188, 187), (144, 160, 159), (170, 140, 141), (183, 130, 131), (248, 83, 84), (261, 74, 75)]
+### phoenix (days 1..364)
+  dated: 6 spurious steps < 1e-12
+      d14: np.float64(0.7123287671232876)[KO] / np.float64(0.7123287671232877)[KI-linspace]
+      d53: np.float64(0.6054794520547945)[KO] / np.float64(0.6054794520547946)[KI-linspace]
+      d61: np.float64(0.4164383561643835)[KI-linspace] / np.float64(0.41643835616438357)[KO]
+      d105: np.float64(0.46301369863013697)[KO] / np.float64(0.463013698630137)[KI-linspace]
+      d144: np.float64(0.3561643835616438)[KO] / np.float64(0.35616438356164387)[KI-linspace]
+      d209: np.float64(0.1780821917808219)[KO] / np.float64(0.17808219178082194)[KI-linspace]
+  numeric: 8 spurious steps < 1e-12
+      d41: np.float64(0.2219178082191781)[KI-linspace] / np.float64(0.22191780821917811)[KO]
+      d61: np.float64(0.4164383561643835)[KI-linspace] / np.float64(0.4164383561643836)[KO]
+      d92: np.float64(0.49863013698630126)[KI-linspace] / np.float64(0.4986301369863014)[KO]
+      d170: np.float64(0.28493150684931506)[KI-linspace] / np.float64(0.2849315068493151)[KO]
+      d183: np.float64(0.24931506849315063)[KI-linspace] / np.float64(0.24931506849315066)[KO]
+      d209: np.float64(0.17808219178082194)[KI-linspace] / np.float64(0.17808219178082196)[KO]
+      d248: np.float64(0.07123287671232877)[KI-linspace] / np.float64(0.07123287671232881)[KO]
+      d261: np.float64(0.03561643835616439)[KI-linspace] / np.float64(0.03561643835616446)[KO]
+  days where the node counts differ (day, dated n, numeric n): [(14, 254, 253), (41, 233, 234), (53, 226, 225), (92, 196, 197), (105, 188, 187), (144, 160, 159), (170, 140, 141), (183, 130, 131), (248, 83, 84), (261, 74, 75)]
+### ko_reset_continuous_ki (days 1..181)
+  dated: 1 spurious steps < 1e-12
+      d26: np.float64(0.1780821917808219)[KO] / np.float64(0.17808219178082194)[KI-linspace]
+  numeric: 5 spurious steps < 1e-12
+      d26: np.float64(0.1780821917808219)[KO] / np.float64(0.17808219178082194)[KI-linspace]
+      d65: np.float64(0.07123287671232877)[KI-linspace] / np.float64(0.07123287671232878)[KO]
+      d78: np.float64(0.035616438356164376)[KO] / np.float64(0.03561643835616438)[KI-linspace]
+      d82: np.float64(0.1095890410958904)[KI-linspace] / np.float64(0.10958904109589043)[KO]
+      d82: np.float64(0.1917808219178082)[KI-linspace] / np.float64(0.19178082191780824)[KO]
+  days where the node counts differ (day, dated n, numeric n): [(65, 89, 90), (78, 80, 81), (82, 77, 79)]
