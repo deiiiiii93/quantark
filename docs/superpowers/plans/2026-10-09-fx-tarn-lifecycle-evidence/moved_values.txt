@@ -55,3 +55,7 @@
 # Ruling 3 - mean_redemption_fraction: a hit by the first of several periods sharing the FINAL fixing time is not an
 #   early redemption: ab37b432 reported 1.0 -> 0.0 (13 periods, the last two on FIX_DATES[-1], hit at period 12, vol
 #   1e-7). Prices do not move. Distinct-time schedules: full engine results byte-identical to e2e07886 (22 results).
+# Task 8c fix round 2 (controller ruling 2026-10-10): an as_of-only booking (R25, count derived from as_of) whose as_of
+#   falls strictly between two fixings on one calendar date (10:00 / 15:00, as_of 12:00) is refused like the explicit
+#   count, same redeemed / terminal exemption. e2e07886 and 4c2b924b accepted the booking (e2e07886 then refused it at
+#   pricing on the equal fixing times). As_of-only bookings on distinct dates: unchanged (same banked counts).

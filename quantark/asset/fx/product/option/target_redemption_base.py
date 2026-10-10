@@ -263,20 +263,27 @@ class TargetRedemptionProduct(BaseFxProduct):
         if st.fixings_banked is not None and st.fixings_banked > len(self.fixing_dates):
             raise ValidationError(
                 f"state.fixings_banked {st.fixings_banked} exceeds the {len(self.fixing_dates)} scheduled fixings")
-        k = st.fixings_banked
-        if (k is not None and 0 < k < len(self.fixing_dates)
-                and self.fixing_dates[k - 1].date() == self.fixing_dates[k].date() and not self.is_terminal):
-            # controller ruling 2026-10-10 (Task 8c fix round 1): periods fixing on one calendar date bank together
-            # (OQ-3 / OQ-4 b); only a target hit stops inside the date - every later fixing is dead (spec section 6)
-            raise ValidationError(
-                f"state.fixings_banked {k} splits the periods fixing on {self.fixing_dates[k].date()}: periods sharing "
-                "a fixing date bank together unless the target was hit first")
+        self._check_banked_count_keeps_dates_whole()
         # cash implies a banked fixing (for a booking stating only as_of: as_of on or after the first fixing date)
         if (st.accumulated > 0.0 or st.pending) and (st.as_of is None or self._banked_count() == 0):
             raise ValidationError(
                 "accumulated or pending cash needs state.as_of and at least one banked fixing")
 
     # -- dated helpers ------------------------------------------------------------------------------------------
+    def _check_banked_count_keeps_dates_whole(self) -> None:
+        """Dated: the banked count - ``state.fixings_banked``, or derived from ``state.as_of`` (R25) - may not stop
+        strictly inside the fixings on one calendar date (controller rulings 2026-10-10, Task 8c fix rounds 1 and 2):
+        periods fixing on one date bank together (OQ-3 / OQ-4 b); only a target hit stops inside the date, and every
+        later fixing is then dead (spec section 6). Friday and Saturday are two dates, not one group."""
+        k = self._banked_count()
+        dates = self.fixing_dates
+        if 0 < k < len(dates) and dates[k - 1].date() == dates[k].date() and not self.is_terminal:
+            source = (f"state.fixings_banked {k}" if self.state.fixings_banked is not None
+                      else f"state.as_of {self.state.as_of} (banks {k})")
+            raise ValidationError(
+                f"{source} splits the periods fixing on {dates[k].date()}: periods sharing a fixing date bank "
+                "together unless the target was hit first")
+
     def _dated_factor(self, index: int, fx_env) -> Optional[float]:
         """TARN hook: the accrual factor of scheduled period ``index``; None for the TARF."""
         return None

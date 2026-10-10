@@ -1506,3 +1506,49 @@ def test_a_tarf_target_hit_by_the_first_of_two_same_date_periods_kills_the_secon
     (fixing,) = [x for x in product.lifecycle_events if x.event_type is FIXING]  # the second period never banks
     assert fixing.amount == 0.03 and fixing.redeemed and product.is_redeemed and product.is_terminal
     assert [p.amount for p in product.state.pending] == [0.03]           # no leg from the second period
+
+
+# --- Task 8c fix round 2 (controller ruling 2026-10-10): an as_of-only booking may not split a calendar date --------
+
+_INTRADAY = _INTRADAY_PAIRS["same_date_10h_15h"]                    # 2026-07-15 10:00 and 15:00
+
+
+def _intraday_dated(kind, target, state):
+    dates = _INTRADAY + FIX_DATES[1:]
+    if kind == "tarf":
+        return dated_tarf(fixing_dates=dates, target=target, state=state)
+    return dated_note(fixing_dates=dates, accrual_factors=SHARED_FACTORS, target=target, state=state)
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_an_as_of_between_two_same_date_fixings_is_refused(kind):
+    """R25 derives the count from as_of: 12:00 banks the 10:00 fixing and not the 15:00 one - a split date."""
+    with pytest.raises(ValidationError, match="splits"):
+        _intraday_dated(kind, 50.0, TargetRedemptionState(0.0, as_of=datetime(2026, 7, 15, 12)))
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+@pytest.mark.parametrize("as_of, banked", [
+    (datetime(2026, 7, 15, 9), 0),                                  # before the group
+    (datetime(2026, 7, 15, 15), 2),                                 # at the second fixing of the group
+    (datetime(2026, 7, 16), 2),                                     # after it
+])
+def test_an_as_of_outside_a_same_date_group_is_accepted(kind, as_of, banked):
+    booked = _intraday_dated(kind, 50.0, TargetRedemptionState(0.0, as_of=as_of))
+    assert booked._banked_count() == banked
+
+
+def test_a_redeemed_as_of_booking_may_stop_inside_a_same_date_group():
+    with pytest.warns(TerminalBookingWarning):
+        booked = _intraday_dated("tarn", 0.9, TargetRedemptionState(0.9, as_of=datetime(2026, 7, 15, 12)))
+    assert booked._banked_count() == 1 and booked.is_redeemed and booked.is_terminal
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_as_of_only_bookings_on_distinct_dates_are_unchanged(kind):
+    for k, as_of in enumerate([VAL] + FIX_DATES[:-1]):
+        booked = _dated(kind, state=TargetRedemptionState(0.0, as_of=as_of))
+        assert booked._banked_count() == k
+    with pytest.warns(TerminalBookingWarning):                          # every fixing banked: a terminal booking
+        booked = _dated(kind, state=TargetRedemptionState(0.0, as_of=FIX_DATES[-1]))
+    assert booked._banked_count() == len(FIX_DATES)
