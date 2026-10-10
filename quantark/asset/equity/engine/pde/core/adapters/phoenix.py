@@ -78,9 +78,8 @@ class PhoenixAdapter(SnowballAdapter):
         return v0, v1
 
     def allocate(self, prepared) -> dict:
-        # grid_v0_list[k] is the V0 surface for k missed coupons. solver._grid_v1 is
-        # NOT set: Phoenix never set it, so under continuous KI the v0 lower
-        # boundary reads None and falls back to 0.0.
+        # grid_v0_list[k] is the V0 surface for k missed coupons; v1[k] is its knocked-in twin.
+        # solver._grid_v1 is exposed per V0 group in boundaries(), not here: there are K + 1 of them.
         layout = prepared.layout
         shape = (len(layout.spatial.x), len(layout.time.t))
         max_k = self._max_k(prepared.product)
@@ -136,6 +135,19 @@ class PhoenixAdapter(SnowballAdapter):
         tau_remaining = prepared.tau - prepared.layout.time.t[j]
         if name.startswith("v1["):
             solver._set_boundary_conditions_v1(grid, x_vec, s_vec, j, tau_remaining, product, env)
+        elif solver._ki_continuous and product.has_ki_barrier:
+            # Continuous KI: the knock-in-side V0 row copies the knocked-in row of the step
+            # (``_boundary_rows_v0``, ``v0_{edge}_copy_ki``). The groups march v0[0..K] before
+            # v1[0..K], so V1's rows of this step are set first, as SnowballAdapter.boundaries
+            # does (the v1 group rewrites the same values), and its grid is exposed as
+            # ``_grid_v1`` for this row only.
+            knocked_in = states["v1" + name[2:]]
+            solver._set_boundary_conditions_v1(knocked_in, x_vec, s_vec, j, tau_remaining, product, env)
+            saved, solver._grid_v1 = solver._grid_v1, knocked_in
+            try:
+                solver._set_boundary_conditions_v0(grid, x_vec, s_vec, j, tau_remaining, product, env)
+            finally:
+                solver._grid_v1 = saved
         else:
             solver._set_boundary_conditions_v0(grid, x_vec, s_vec, j, tau_remaining, product, env)
 

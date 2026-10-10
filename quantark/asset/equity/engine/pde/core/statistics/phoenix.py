@@ -59,8 +59,9 @@ class PhoenixBreach(SnowballBreach):
 
 class PhoenixStatistics(SnowballStatistics):
 
-    #: PhoenixAdapter never sets ``solver._grid_v1``: the value's alive knock-in-side row under continuous KI is 0.0
-    _alive_ki_edge_copies_ki = False
+    #: PhoenixAdapter.boundaries exposes the knocked-in grid to the alive knock-in-side row under continuous KI
+    #: (``solver._grid_v1``), as SnowballAdapter does: the statistics copy the knocked-in row too
+    _alive_ki_edge_copies_ki = True
 
     def __init__(self, prepared, streams):
         super().__init__(prepared, streams)

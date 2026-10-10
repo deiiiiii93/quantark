@@ -164,8 +164,9 @@ def test_rows_do_not_depend_on_the_value_march():
 
 
 def test_phoenix_rows():
-    """Task 13: the alive lower row is the value's 0.0 (Phoenix never exposes the knocked-in grid), the
-    coupon cash rows are 0 (the value's rows carry no coupon), and the knock-out edge triggers the coupon
+    """Task 13: the alive lower row (the knock-in edge, continuous KI) is the knocked-in row, copied whole
+    (W7 Q2: PhoenixAdapter exposes V1's rows of the step to it, as SnowballAdapter does; it used to be 0.0),
+    the coupon cash rows are 0 (the value's rows carry no coupon), and the knock-out edge triggers the coupon
     of the record it pays, in payment units (F8)."""
     solver, e = PhoenixPDESolver(SHORT), env()
     product = make_phoenix(dict(PHOENIX, memory_coupon=True))      # continuous KI
@@ -174,9 +175,12 @@ def test_phoenix_rows():
     t = p.layout.time.t
     seen_trigger = False
     for j, (lower, upper) in enumerate(rows):
-        lo0, up0 = lower[:w], upper[:w]
+        lo0, lo1, up0 = lower[:w], lower[w:], upper[:w]
         cash = L.cash.ravel()
-        assert not lo0[L.ko].any() and lo0[L.maturity[0]] == 0.0 and not lo0[L.trigger_cols].any(), j
+        assert np.array_equal(lo0, lo1) and lo0[L.maturity[0]] != 0.0, j
+        assert not lo0[L.ko].any() and not lo0[L.trigger_cols].any(), j
+        v_lo0, _ = solver._boundary_rows_v0(j, p.tau - t[j], product, e, p.layout.spatial.s)
+        assert v_lo0.branch == "v0_lower_copy_ki" and v_lo0.copy_from_ki, j
         assert not lower[cash].any() and not upper[cash].any() and not upper[w + cash].any(), j
         _, v_up0 = solver._boundary_rows_v0(j, p.tau - t[j], product, e, p.layout.spatial.s)
         (term,) = v_up0.terms

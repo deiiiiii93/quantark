@@ -325,3 +325,48 @@ class TestHeston2DContinuousKICopyRow:
         assert lower.value == knocked_in_lower.value
         assert lower.value != 0.0
 
+
+class TestPhoenix1DContinuousKICopyRow:
+    """The 1D Phoenix (``PhoenixAdapter``) marches each V0 memory state before the knocked-in surfaces and kept no
+    ``_grid_v1``: under continuous KI the V0 knock-in-side row read 0.0 (W7 defect A, 1D Phoenix twin). V1's rows of
+    the step are set first, as ``SnowballAdapter.boundaries`` does, and the V0 row copies the knocked-in row."""
+
+    @staticmethod
+    def _phoenix(reverse, memory, maturity=T, ki=None):
+        ko, ki0 = (97.0, 125.0) if reverse else (103.0, 75.0)
+        ki = ki0 if ki is None else ki
+        n = max(int(round(12 * maturity)), 1)
+        obs = [(i + 1) / n * maturity for i in range(n)]
+        barrier = BarrierConfig(
+            ko_barrier=ko, ko_rate=0.0,
+            ko_observation_schedule=ObservationSchedule(
+                records=[ObservationRecord(observation_time=t, barrier=ko) for t in obs]),
+            ki_barrier=ki, ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True)
+        return PhoenixOption(
+            initial_price=S0, strike=S0, maturity=maturity, contract_multiplier=1.0, is_reverse=reverse,
+            barrier_config=barrier,
+            coupon_config=CouponBarrierConfig(coupon_barrier=ki, coupon_rate=0.01, memory_coupon=memory,
+                                              coupon_pay_type=CouponPayType.INSTANT,
+                                              day_count_convention=DayCountConvention.ACT_365),
+            payoff_config=PayoffConfig(rebate_rate=0.0, include_principal=True))
+
+    @ORIENTATION
+    @pytest.mark.parametrize("memory", [False, True], ids=["plain", "memory"])
+    def test_edge_row_is_the_knocked_in_row(self, reverse, memory):
+        solver = PhoenixPDESolver()
+        solver.price(self._phoenix(reverse, memory), _env())
+        # the valuation step's rows, set last: V0's (every memory state writes the same) and V1's
+        v0_lower, v0_upper = _t0_rows(solver)
+        v1_lower, v1_upper = solver._rows_v1_stash[4], solver._rows_v1_stash[5]
+        ki_edge, knocked_in = (v0_upper, v1_upper) if reverse else (v0_lower, v1_lower)
+        assert ki_edge.branch == ("v0_upper_copy_ki" if reverse else "v0_lower_copy_ki")
+        assert ki_edge.copy_from_ki
+        assert ki_edge.value == knocked_in.value
+        assert ki_edge.value != 0.0
+
+    @pytest.mark.parametrize("reverse,ki", [(False, 60.0), (True, 150.0)], ids=["standard", "reverse"])
+    def test_statistics_reconcile_where_the_edge_row_matters(self, reverse, ki):
+        """Three months, the knock-in edge nearest the knock-in level: the row moves the price (up to 1.7e-5), and
+        the statistics copy the same knocked-in row (``_alive_ki_edge_copies_ki``) or the ledger misses it."""
+        stats = PhoenixPDESolver().calculate_event_stats(self._phoenix(reverse, False, 0.25, ki), _env())
+        assert abs(stats.reconciliation_error) <= 1e-10, stats.reconciliation_error
