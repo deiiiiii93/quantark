@@ -799,15 +799,13 @@ def test_saturday_cash_valued_on_the_sunday_after_a_friday_record(form):
                        initial_date=datetime(2026, 7, 15), target=3.0,
                        state=TargetRedemptionState(c, pending=(PendingPayment(c, pay_date=SATURDAY),), as_of=FRIDAY))
     e_sun = env(val=SUNDAY, **BUS)
-    if form == "dated":
-        product = dated
-    else:
-        product = _numeric_twin(dated, env(val=FRIDAY, **BUS))
-        product.time_shift(calculate_year_fraction(FRIDAY, SUNDAY, DayCountConvention.BUSINESS_DAYS, 252,
-                                                   calendar=TARGET_CAL))
+    twin = _numeric_twin(dated, env(val=FRIDAY, **BUS))
+    twin.time_shift(calculate_year_fraction(FRIDAY, SUNDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                            calendar=TARGET_CAL))
+    product, other = (dated, twin) if form == "dated" else (twin, dated)
     assert product.resolve(e_sun).pending == ((0.0, c),)
     price = _price(product, e=e_sun)
-    assert is_close(price, _price(dated, e=e_sun), rel_tol=1e-12)
+    assert is_close(price, _price(other, e=e_sun), rel_tol=1e-12)          # dated == numeric, each way round
     product.record_passed_fixings(e_sun)
     assert [p.amount for p in product.state.pending] == [c] and product.lifecycle_events == ()
     if form == "dated":
@@ -1123,17 +1121,17 @@ _AGE_START = FIX_DATES[0] - timedelta(days=2)                       # Monday 202
 _AGE_DAYS = [FIX_DATES[0] + timedelta(days=k) for k in range(-1, 6)]  # Tue .. Mon 07-20: fixing Wed, pay Fri (LAG2)
 
 
-def _independent_numeric(kind, e0):
+def _independent_numeric(kind, e0, start=_AGE_START, fix_dates=FIX_DATES, pay_dates=LAG2, initial=VAL):
     """The dated contract's numeric twin written from its terms (times in the environment's day count from the
-    booking date, TARN factors in ACT/365 from initial_date), not from the dated resolve view."""
+    booking date ``start``, TARN factors in ACT/365 from ``initial``), not from the dated resolve view."""
     yf = lambda a, b: calculate_year_fraction(a, b, e0.day_count_convention, e0.bus_days_in_year,  # noqa: E731
                                               calendar=e0.calendar)
-    fix = [yf(_AGE_START, d) for d in FIX_DATES]
-    pays = [yf(_AGE_START, d) for d in LAG2]
+    fix = [yf(start, d) for d in fix_dates]
+    pays = [yf(start, d) for d in pay_dates]
     if kind == "tarf":
         return tarf(fix=fix, pay_times=pays, target=0.20)
-    starts = [VAL] + FIX_DATES[:-1]
-    factors = [calculate_year_fraction(s, d, DayCountConvention.ACT_365, 252) for s, d in zip(starts, FIX_DATES)]
+    starts = [initial] + fix_dates[:-1]
+    factors = [calculate_year_fraction(s, d, DayCountConvention.ACT_365, 252) for s, d in zip(starts, fix_dates)]
     return note(fix=fix, pay_times=pays, accrual_factors=factors, target=3.0)
 
 
@@ -1169,3 +1167,85 @@ def test_independent_daily_twin_across_a_fixing_and_its_pay_day(kind, calendar):
         assert dated.state.as_of <= day
         assert is_close(_price(numeric, e=ek, n=5_000), _price(dated, e=ek, n=5_000), rel_tol=1e-12), day
     assert [e.event_type for e in dated.lifecycle_events] == [FIXING, PAYMENT]
+
+
+_SAT_FIX, _SAT_PAY = [SATURDAY, datetime(2026, 9, 15)], [MONDAY, datetime(2026, 9, 17)]
+_SAT_INITIAL = datetime(2026, 7, 15)
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_independent_daily_twin_across_a_saturday_fixing(kind):
+    """OQ-2 (b) without _numeric_twin: under TARGET BUSINESS_DAYS a fixing on Saturday 08-15 (paid Monday 08-17) is
+    at Friday's instant. Both forms are booked on the Thursday and aged one calendar day at a time to the Tuesday: the
+    fixing banks on the Friday (at Friday's spot, as_of the Friday through the weekend), its cash is due on the Monday
+    and paid on the Tuesday. Events and their times agree exactly every day, and so do prices."""
+    e0 = env(val=THURSDAY, **BUS)
+    if kind == "tarn":
+        dated = dated_note(fixing_dates=_SAT_FIX, pay_dates=_SAT_PAY, initial_date=_SAT_INITIAL, target=3.0)
+    else:
+        dated = dated_tarf(fixing_dates=_SAT_FIX, pay_dates=_SAT_PAY, target=0.20)
+    numeric = _independent_numeric(kind, e0, start=THURSDAY, fix_dates=_SAT_FIX, pay_dates=_SAT_PAY,
+                                   initial=_SAT_INITIAL)
+    prev, as_of = THURSDAY, []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        for day in [THURSDAY + timedelta(days=k) for k in range(6)]:          # Thu .. Tue
+            ek = env(val=day, spot=1.21, **BUS)
+            if day > prev:                                                     # the Thursday is the booking
+                numeric.time_shift(calculate_year_fraction(prev, day, DayCountConvention.BUSINESS_DAYS, 252,
+                                                           calendar=TARGET_CAL))
+            numeric.record_passed_fixings(ek)
+            dated.record_passed_fixings(ek)
+            prev = day
+            assert _event_parts(numeric.lifecycle_events) == _event_parts(dated.lifecycle_events), day
+            assert [e.time for e in numeric.lifecycle_events] == [e.time for e in dated.lifecycle_events], day
+            assert numeric.state.accumulated == dated.state.accumulated
+            assert [p.amount for p in numeric.state.pending] == [p.amount for p in dated.state.pending], day
+            assert is_close(_price(numeric, e=ek, n=5_000), _price(dated, e=ek, n=5_000), rel_tol=1e-12), day
+            as_of.append(dated.state.as_of)
+    assert as_of == [THURSDAY, FRIDAY, FRIDAY, FRIDAY, MONDAY, MONDAY + timedelta(days=1)]
+    assert [e.event_type for e in dated.lifecycle_events] == [FIXING, PAYMENT]
+    assert dated.lifecycle_events[0].fixing == 1.21 and dated.state.fixings_banked == 1
+
+
+# --- fix round 1: an explicit banked count may not claim a fixing ahead of valuation (no check dropped, OQ-3) -------
+
+@pytest.mark.parametrize("call", ["price", "resolve", "record"])
+@pytest.mark.parametrize("case", ["tarn_count_5_on_first_fixing", "tarf_count_3_no_as_of"])
+def test_banked_count_ahead_of_valuation_is_refused(case, call):
+    if case == "tarn_count_5_on_first_fixing":
+        product = dated_note(target=3.0, state=TargetRedemptionState(1.0, as_of=FIX_DATES[0], fixings_banked=5))
+        e = env(val=FIX_DATES[0])
+    else:
+        product = dated_tarf(target=0.20, state=TargetRedemptionState(0.0, fixings_banked=3))
+        e = env()
+    run = {"price": lambda: _price(product, e=e), "resolve": lambda: product.resolve(e),
+           "record": lambda: product.record_passed_fixings(e)}[call]
+    with pytest.raises(ValidationError, match="fixings_banked"):
+        run()
+
+
+def test_banked_count_equal_to_the_passed_fixings_is_accepted():
+    booked = dated_note(target=3.0, state=TargetRedemptionState(1.0, as_of=FIX_DATES[1], fixings_banked=2))
+    e = env(val=FIX_DATES[1])                                     # fixing 1 at t = 0: passed
+    assert booked.resolve(e).fixing_times[0] > 0.0 and len(booked.resolve(e).fixing_times) == 10
+    _price(booked, e=e)
+    booked.record_passed_fixings(e)
+    assert booked.state.fixings_banked == 2 and booked.lifecycle_events == ()
+
+
+def test_a_saturday_fixing_banked_on_the_friday_stays_valid_under_business_days_only():
+    """Decided by TIME (R16): the Saturday fixing banked on the Friday is at zero business time, so the booked count
+    is valid under BUSINESS_DAYS; the same state priced under CALENDAR_DAYS on that Friday claims a fixing a day ahead
+    and is refused (accepted side effect, controller ruling 2026-10-10)."""
+    d = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                   target=50.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        d.record_passed_fixings(env(val=FRIDAY, **BUS))
+    assert (d.state.fixings_banked, d.state.as_of) == (2, FRIDAY)
+    rebooked = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                          target=50.0, state=d.state)
+    _price(rebooked, e=env(val=FRIDAY, **BUS))
+    with pytest.raises(ValidationError, match="fixings_banked"):
+        _price(rebooked, e=env(val=FRIDAY))

@@ -307,11 +307,20 @@ class TargetRedemptionProduct(BaseFxProduct):
         return index >= self._banked_count()
 
     def _check_as_of(self, fx_env) -> None:
+        """Dated: the state may not claim the future. ``as_of`` after the valuation date is refused, and so is a banked
+        count whose last banked fixing lies strictly after the valuation instant, decided by TIME (Ruling R16): a
+        fixing at zero time from valuation (a Saturday under BUSINESS_DAYS, valued on the Friday) may be banked."""
         as_of = self.state.as_of
         if as_of is not None and as_of > fx_env.valuation_date:
             raise ValidationError(
                 f"state.as_of {as_of} is after the valuation date {fx_env.valuation_date}: the state claims "
                 "fixings that have not happened")
+        k = self._banked_count()
+        if k > 0 and not is_passed_time(signed_year_fraction(self.fixing_dates[k - 1], fx_env)):
+            raise ValidationError(
+                f"state.fixings_banked {k} claims fixing {self.fixing_dates[k - 1].date()}, which is after the "
+                f"valuation instant {fx_env.valuation_date} under the environment's "
+                f"{fx_env.day_count_convention.name} day count: the state claims fixings that have not happened")
 
     def get_maturity(self, fx_env=None) -> float:
         """Dated: 0.0 once valuation is past the last fixing date (an aged contract still answers FX consumers)."""
