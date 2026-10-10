@@ -129,9 +129,9 @@ class KnockOutResetSnowballOption(SnowballOption):
             settlement_convention=settlement_convention,
         )
 
-    def validate(self) -> None:
+    def validate(self, *, allow_zero_maturity: bool = False) -> None:
         self._validate_post_ko_mode()
-        super().validate()
+        super().validate(allow_zero_maturity=allow_zero_maturity)
 
     def _validate_barrier_parameters(self) -> None:
         super()._validate_barrier_parameters()

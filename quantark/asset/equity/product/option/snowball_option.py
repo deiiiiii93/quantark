@@ -223,16 +223,20 @@ class SnowballOption(BaseEquityOption):
             settlement_convention=settlement_convention,
         )
 
-    def validate(self) -> None:
+    def validate(self, *, allow_zero_maturity: bool = False) -> None:
         """
         Validate Snowball option parameters.
+
+        Args:
+            allow_zero_maturity: Re-validating a contract aged to exactly its maturity instant
+                (``maturity == 0.0``); see ``BaseEquityOption.validate``. A negative maturity is refused either way.
 
         Raises:
             ValidationError: If parameters are invalid
         """
         self._validate_core_parameters()
-        self._validate_maturity_parameters()
-        super().validate()
+        self._validate_maturity_parameters(allow_zero_maturity=allow_zero_maturity)
+        super().validate(allow_zero_maturity=allow_zero_maturity)
         self._validate_barrier_parameters()
         self._validate_observation_parameters()
         self._validate_payoff_parameters()
@@ -249,11 +253,13 @@ class SnowballOption(BaseEquityOption):
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
 
-    def _validate_maturity_parameters(self) -> None:
+    def _validate_maturity_parameters(self, allow_zero_maturity: bool = False) -> None:
         """Validate maturity, tenor, and date-related parameters."""
         if self.maturity is None and self.exercise_date is None:
             raise ValidationError("Either maturity or exercise_date must be provided")
-        if self.maturity is not None and self.maturity <= 0:
+        if self.maturity is not None and (
+            self.maturity < 0 or (self.maturity == 0.0 and not allow_zero_maturity)
+        ):
             raise ValidationError(f"Maturity must be positive, got {self.maturity}")
         if self.tenor is not None and self.tenor <= 0:
             raise ValidationError(f"Tenor must be positive, got {self.tenor}")

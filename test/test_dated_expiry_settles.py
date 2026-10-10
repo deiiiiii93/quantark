@@ -451,16 +451,20 @@ REFUSING: Dict[Tuple[str, str], str] = {
        for e in ("heston_analytical", "lv_mc", "heston_mc", "heston_pde")},
     **{("barrier_up_out_call", e): "vol-model barrier: the time grid collapses ('t_grid must be strictly increasing')"
        for e in ("lv_mc", "heston_mc", "heston_pde")},
-    **{(f, "quad_v2"): "QUAD V2: validate() refuses the numeric maturity 0.0; the dated twin refuses with it"
-       for f in ("snowball", "phoenix", "phoenix_no_memory")},
-    ("ko_reset_absolute_knocked_in", "quad_v2"): "QUAD V2 refuses a dated KO-reset with past schedule-1 dates at any "
-                                                 "valuation date (pre-existing), and the numeric maturity 0.0",
     ("phoenix", "heston_pde"): "HestonPhoenixPDESolver refuses memory coupons at any maturity (pre-existing)",
 }
 
+#: Routes where the numeric twin settles but the DATED contract is refused at every valuation date for a reason that
+#: is not the exercise date (pre-existing, unchanged): (family, engine) -> why
+DATED_REFUSED_ANY_DATE: Dict[Tuple[str, str], str] = {
+    ("ko_reset_absolute_knocked_in", "quad_v2"): "QUAD V2 refuses a dated KO-reset whose schedule-1 records are in "
+                                                 "the past (settlement resolution of a past record), at any date",
+}
+
 CASES = [(f, name, factory, spot) for f in FAMILIES for name, factory in f.engines for spot in f.spots]
-SETTLING = [c for c in CASES if (c[0].name, c[1]) not in REFUSING]
+SETTLING = [c for c in CASES if (c[0].name, c[1]) not in {**REFUSING, **DATED_REFUSED_ANY_DATE}]
 REFUSED = [c for c in CASES if (c[0].name, c[1]) in REFUSING]
+DATED_REFUSED = [c for c in CASES if (c[0].name, c[1]) in DATED_REFUSED_ANY_DATE]
 
 
 def _ids(cases):
@@ -480,6 +484,40 @@ def test_a_route_without_a_settled_value_refuses_both_forms(family, name, factor
     for form in ("dated", "numeric"):
         with pytest.raises(Exception):
             price(family, name, factory, form, spot)
+
+
+@pytest.mark.parametrize("family,name,factory,spot", DATED_REFUSED, ids=_ids(DATED_REFUSED))
+def test_numeric_twin_settles_where_the_dated_contract_is_refused_at_any_date(family, name, factory, spot):
+    """QUAD V2 prices the numeric KO-reset at maturity 0.0 (ruling Q1, 2026-10-10); the dated contract keeps its
+    pre-existing refusal, which is not caused by the exercise date (it refuses mid-life too)."""
+    assert price(family, name, factory, "numeric", spot) == pytest.approx(family.settled(spot), rel=1e-12, abs=1e-12)
+    with pytest.raises(ValidationError, match="end_date .* must be after start_date"):
+        price(family, name, factory, "dated", spot)
+    with pytest.raises(ValidationError, match="end_date .* must be after start_date"):
+        price(family, name, factory, "dated", spot, valuation=INITIAL + timedelta(days=292))
+
+
+@pytest.mark.parametrize("family,engine", [
+    (SNOWBALL, SnowballQuadEngineV2), (PHOENIX, PhoenixQuadEngineV2), (KO_RESET, KOResetSnowballQuadEngineV2),
+], ids=["snowball", "phoenix", "ko_reset"])
+def test_quad_v2_refuses_a_numeric_contract_aged_past_its_maturity(family, engine):
+    """Maturity 0.0 settles on QUAD V2; a strictly negative maturity is still refused, and pricing does not
+    touch the caller's product."""
+    product = family.build("numeric")
+    product.maturity = -1e-6
+    with pytest.raises(ValidationError, match="Maturity must be positive"):
+        engine().price(product, env(100.0))
+    assert product.maturity == -1e-6
+
+
+@pytest.mark.parametrize("cls_name", ["SnowballOption", "PhoenixOption"])
+def test_constructing_a_contract_with_maturity_zero_is_still_refused(cls_name):
+    """Only re-validating an existing contract aged to its maturity instant accepts 0.0 (QUAD V2's compile)."""
+    product = (SNOWBALL if cls_name == "SnowballOption" else PHOENIX).build("numeric")
+    assert product.maturity == 0.0
+    with pytest.raises(ValidationError, match="Maturity must be positive"):
+        product.validate()
+    product.validate(allow_zero_maturity=True)
 
 
 AFTER = VALUATION + timedelta(days=1)

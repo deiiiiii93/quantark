@@ -150,7 +150,7 @@ class BaseEquityOption(BaseEquityProduct):
     # Validation
     # ==========================================================================
 
-    def validate(self) -> None:
+    def validate(self, *, allow_zero_maturity: bool = False) -> None:
         """
         Validate option parameters.
 
@@ -161,11 +161,16 @@ class BaseEquityOption(BaseEquityProduct):
         - Type enum validation
         - Tenor end configuration validity
 
+        Args:
+            allow_zero_maturity: Re-validating an existing contract aged to exactly its maturity instant
+                (``maturity == 0.0``, the numeric twin of a dated contract valued on its exercise date): a
+                numeric maturity of 0.0 is valid. Construction keeps the default and refuses it.
+
         Raises:
             ValidationError: If any parameter is invalid
         """
         self._validate_strike()
-        self._validate_maturity_dates()
+        self._validate_maturity_dates(allow_zero_maturity=allow_zero_maturity)
         self._validate_date_ordering()
         self._validate_types()
         self._validate_tenor_end()
@@ -195,10 +200,12 @@ class BaseEquityOption(BaseEquityProduct):
                 f"got {type(self.settlement_convention).__name__}"
             )
 
-    def _validate_maturity_dates(self) -> None:
-        """Validate maturity and date parameters are properly specified."""
+    def _validate_maturity_dates(self, allow_zero_maturity: bool = False) -> None:
+        """Validate maturity and date parameters are properly specified (``allow_zero_maturity``: see ``validate``)."""
         has_dates = self.exercise_date is not None
-        has_maturity = self.maturity is not None and self.maturity > 0
+        has_maturity = self.maturity is not None and (
+            self.maturity > 0 or (allow_zero_maturity and self.maturity == 0.0)
+        )
 
         if self.maturity is not None and self.maturity < 0:
             raise ValidationError(f"Maturity must be positive, got {self.maturity}")
