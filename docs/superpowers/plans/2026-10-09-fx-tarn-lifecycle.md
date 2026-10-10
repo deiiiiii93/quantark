@@ -112,8 +112,8 @@ verifies their **content**, not their shas.
 - **R7** A dated fixing strictly after valuation that resolves to `is_zero` time (e.g. a Saturday fixing under a
   `BUSINESS_DAYS` env valued on the Friday) is refused at `resolve` with `ValidationError` — the engines need
   t > 0 and treating it as passed or as future would be invented semantics — cost: such a booking cannot be priced
-  on that day until a rule is chosen. *Re-plan 2026-10-10: conflicts with W6 Ruling 2 inside runs; kept as
-  written pending open question OQ-2.*
+  on that day until a rule is chosen. *Superseded 2026-10-10: the user answered OQ-2 (b); Task 8b makes such a date
+  live, like its numeric twin.*
 - **R8** Dated `get_delivery` mirrors `get_maturity` (0.0 after `delivery_date`) — `BaseFxEngine.calculate_greeks`
   calls `get_delivery`, so Greeks on an aged dated contract past its last pay date would otherwise raise — cost: none.
 - **R9** Q7 changes only `BaseFxEngine._fdm_theta` (spec §12). `localvol_greeks.py:60` and the Heston/SLV PDE thetas
@@ -151,12 +151,12 @@ day's coupon 0.9863 already paid inside `resolve`) and 101.1319 the day after wi
    one generic optional hook (`settle_history` → `with_history_settled(env)`), called at registration after the W5b
    fill and after each clock move's recording. Tests: product-level protocol tests and D2 in
    `test_fx_target_redemption_lifecycle.py`; recorder-level tests (old Task 9 list, remapped) plus new W6-rule tests
-   (R8, Ruling 9, append-only events, index stability) and two status-quo pins (OQ-1, OQ-2) in the new
+   (R8, Ruling 9, append-only events, index stability) and the OQ-1 / OQ-2 tests (flipped to (b), item 6) in the new
    `test_fx_target_redemption_runs.py`; one generic stub test appended to `test/test_run_fixings.py`.
 2. **Task 10 rewritten** — the FX backtest's wiring is W6's; this task adds `booked_cash(product_events)` (in
    `target_redemption_state.py`) and the `paid_cash` / `pending_pv` columns, value = MTM + cumulative paid cash. B1–B6
    kept on flat paths with the same day indices; the weekend test now expects Friday's spot with `gap=True` (W6 D5); new
-   W8 twin test and an OQ-1 value pin.
+   W8 twin test and an OQ-1 value test.
 3. **Task 11 rewritten** — the FX dynamic scenario's wiring is W6's; this task adds the Q8 refusal (before cloning or
    registering), the cash fields and the FIXING snapshots, all read from `RunFixingDay`.
 4. **Task 12 adjusted** — new Step 0 re-captures the B6 baseline and demo stdout on the W6 base (Task 1's captures
@@ -166,6 +166,12 @@ day's coupon 0.9863 already paid inside `resolve`) and 101.1319 the day after wi
 5. **Header** — Architecture sentence, a W6 prerequisites row, a Global Constraints bullet (run semantics are W6's),
    File Structure rows, annotations on Rulings R3 and R7, Review Focus (items 1, 2, 4, 5 retargeted; items 6, 7 new),
    Self-review coverage and type-consistency lines.
+6. **User answers 2026-10-10 (OQ-1 (b), OQ-2 (b))** — new Tasks 8a and 8b re-open the built Tasks 2, 5, 6, 7 (moved
+   values, CHANGELOG, tests in the full task format); Task 9's `_record_dated` block, its terminal-booking / settle /
+   `with_time_elapsed` tests and both pins follow the new rules; Task 10's B3 and W8 expectations move one instant
+   (cash on a path-aligned pay date is booked the next instant), its OQ-1 pin becomes the no-dip test and it gains a
+   business-day twin test; Task 11 gains a business-day twin test; Task 12's sign-off list, Review Focus 5 / 7 and the
+   Self-review follow.
 
 ### Old Tasks 9–11 requirements: where each lives now
 
@@ -183,7 +189,7 @@ day's coupon 0.9863 already paid inside `resolve`) and 101.1319 the day after wi
 | 10 | Numeric `time_shift` by the environment's year fraction since the last date (T9) | Satisfied by W6 R6 (`run_step_dt`) + T9 `with_time_elapsed` (snap) | T9 `test_with_time_elapsed_is_a_snapping_copy_that_banks_nothing`, D2 |
 | 11 | `record_passed_fixings` at the day's spot for every fixing at or before the date (T9) | Changed by W6 D1/D2 + Ruling 4 | Strictly past fixings only, decided at the spot of the first instant they were live; banked by `with_history_settled`: T9 D2, gap, consecutive-fixing tests |
 | 12 | Calendar gaps: banked on the next path day at that day's spot, no warning (T9, T10 weekend test) | Changed by W6 D5 (user) | Previous instant's spot, `gap=True`, no warning: T9 `test_a_calendar_gap_records_at_the_previous_instants_spot_without_a_warning`, T10 `test_business_day_path_records_a_saturday_fixing_at_fridays_spot` |
-| 13 | A payment due between path days is booked, undiscounted, on the first path day on or after it (T9) | Kept | numeric `with_time_elapsed` (via `time_shift`), dated `with_history_settled`: T9 terminal-booking and short tests |
+| 13 | A payment due between path days is booked, undiscounted, on the first path day on or after it (T9) | Kept, amended by OQ-1 (b) (Task 8a): booked on the first path instant at which its pay time is strictly past (a pay date ON a path instant: the next instant) | numeric `with_time_elapsed` (via `time_shift`), dated `with_history_settled`: T9 terminal-booking and short tests |
 | 14 | Day's paid cash = Σ quantity × PAYMENT (T9) | Moved | T10 `booked_cash` (used by T10, T11) |
 | 15 | Pending PV = Σ quantity × `pending_pv` (T9) | Satisfied by W6 (Task 5 hook) | `RunFixingDay.pending_pv` |
 | 16 | Other products untouched (T9) | Satisfied by W6 (`participates`) | T9 `test_other_products_are_untouched` |
@@ -253,8 +259,21 @@ W8); stable indices across numeric banking (T9).
 - **R20** Task 12's B6 and demo references are re-captured from an export of the W6 base (`git archive
   $(merge-base) quantark example`), not taken from Task 1 — Task 1 captured them before the rebase onto W6, and W6
   ages the numeric FX range accruals in the B6 book — cost: B6 then cannot see a W6 defect (W6's own gates cover W6).
+- **R21** (Task 8a, OQ-1 b) One cash rule for both forms: booked once `is_history(pay time)`, otherwise pending at
+  `snap_time(pay time)`; `PendingPayment` refuses only a non-finite or strictly past `pay_time` (an `is_zero` time,
+  either sign, is "today"); a dated pending `pay_date` may equal `as_of` (refused only before it); the dated pay test
+  uses the resolved time (R16) — the user's rule needs a boundary, and `is_history` is the one W6 uses for fixings —
+  cost: none beyond the user-approved moves listed in Task 8a.
+- **R22** (Task 8b, OQ-2 b) `record_passed_fixings` sets a dated `as_of` to `max(valuation_date, last banked fixing
+  date)`, and `_check_as_of` refuses an `as_of` after the valuation date only when its time is strictly ahead — a
+  Saturday fixing banked on the Friday (zero business time) must not be banked again on Monday, and the Friday must
+  still price the state that banked it — cost: a dated state can carry an `as_of` one weekend ahead of its valuation
+  date; nothing else reads `as_of`.
+- **R23** The two follow-ups are numbered **Task 8a / Task 8b** and run before Task 9 (Tasks 9–12 keep their numbers
+  and cross-references): Task 9 replaces `_record_dated` wholesale, so the amended cash and passed-by-time rules must
+  already be in place; its replacement block carries them — cost: none.
 - **Superseded** old R3 (clock origin): now W6 R6, same rule, held by the recorder. Old **R7** (refuse a dated future
-  fixing at zero time): kept as written pending **OQ-2**.
+  fixing or pay date at zero time): **superseded by the user's OQ-2 (b) answer, 2026-10-10 — reversed by Task 8b**.
 
 ### Conflicts between the TARN spec and W6
 
@@ -270,54 +289,58 @@ Resolved by user-approved W6 decisions (no question needed; listed in Task 12's 
 Interface conflicts resolved by rulings above (no value moves): W6 hand-off "`with_fixings_recorded` banks" → R13;
 "records are never dropped" → R14; W6/W8 refusal past maturity vs TARN continuing → R19.
 
-**Open questions for the user (each changes a value; the plan is written for the status quo (a) of both, and pins it
-with a named test that flips if the user picks (b)):**
+### Answered 2026-10-10 by the user (both (b))
 
-- **OQ-1 — cash due on the day of a live fixing (zero pay lag on a path day).** TARN spec §3 / §5.1 (theta-boundary R4):
-  cash whose pay time is at or before valuation is booked and NOT in the value. W6 D1/D2: the fixing dated day d is
-  live on day d and recorded on day d+1. Together: on day d the product's value already excludes the day's cash (the
-  resolve copy pays it), but the run books it only on day d+1 with the recording. Measured: a dated zero-lag TARN on
-  its first fixing day is valued 101.1173 with 0.0 paid; the next day 101.1319 with 0.9863 paid — the run's value dips
-  by one coupon for one day on every zero-lag fixing day that falls on a path instant (the default `pay_dates` of a
-  dated TARN), and a zero-lag fixing ON the run's first day books its cash on day 1 although the baseline excluded it
-  (a spurious +coupon P&L). Numeric k/12 fixings fall between path days and are not affected.
-  (a) Status quo: keep both rules; the dip stands (pinned by T9 `test_oq1_zero_lag_cash_of_a_live_fixing_is_booked_when_the_fixing_is_recorded`
-  and T10 `test_oq1_zero_lag_fixing_day_value_excludes_the_cash_until_it_is_booked`).
-  (b) Cash due today stays in today's value and is booked once strictly past (`is_history` of its pay time), in both
-  forms — the W8 convention (a dated contract on its exercise date prices its settled value) applied to TARN cash, and
-  W6 D1's "today is live" applied to cash. Moves: the price of a TARN / TARF valued on a pay date (+ that day's cash),
-  theta on the day before a pay date (no longer ≈ −cash) and on the pay date (≈ −cash), the terminal value on the last
-  pay date (the cash instead of 0.0); in runs, cash on a path-aligned pay date is booked the next instant (no dip).
-  Scope: a follow-up re-plan of built Task 2 (numeric pending `pay_time` may be exactly 0.0), Task 5 (`time_shift` /
-  dated sweep pay strictly past cash), Task 6 (`resolve` keeps t = 0 cash pending; engines add `amount × DF(0)`) and
-  Task 7, before Task 10.
-  (c) Book a live fixing's same-day cash provisionally in the run and de-duplicate when it is recorded — not
-  recommended: invented reconciliation semantics.
-  **Recommendation: (b)** — it removes the dip and the spurious first-day gain with one rule that matches W8 and W6 D1;
-  (a) leaves a known one-day P&L artefact in every run of a zero-lag dated TARN.
+- **OQ-1 — cash due on the day of a live fixing: (b).** The conflict: TARN spec §3 / §5.1 booked cash whose pay time is
+  at or before valuation (out of the value), while W6 records a fixing dated day d only on day d+1; a zero-lag dated
+  TARN's run value dipped by one coupon on each path-aligned fixing day (measured: 101.1173 with 0.0 paid on the fixing
+  day, 101.1319 + 0.9863 paid the day after), and a zero-lag fixing on the run's first day showed a false +coupon.
+  **Decision:** cash due today stays in today's value and is booked once its pay time is strictly past, as W8 (a dated
+  contract on its date prices its settled value) and W6 D1 (t = 0 is live). **Implemented by Task 8a** (re-opens Tasks
+  2, 5, 6, 7; engines unchanged since DF(0) = 1). Moved values (Task 8a's pins): the price on a pay date gains the cash
+  due that day (TARN zero-lag 101.115629 → 102.101931), theta the day before a pay date gains it (−0.977801 →
+  0.008500), theta on the pay date loses it (0.015260 → −0.971042); full table in Task 8a. Pins flipped: T9
+  `test_zero_lag_cash_of_a_live_fixing_stays_in_the_value_until_recorded`, T10
+  `test_zero_lag_fixing_day_value_keeps_the_coupon_no_dip` (no dip); T9 terminal-booking and settle tests, T10 B3 and
+  W8 now book a path-aligned payment on the instant after its pay date.
+- **OQ-2 — a dated fixing or pay date at zero business time: (b).** The conflict: Ruling R7 (Task 7) refused to price a
+  dated fixing or pay date after the valuation date that resolves to t = 0 (a Saturday under `BUSINESS_DAYS` on the
+  Friday), while W6 Ruling 2 and the numeric twin treat it as live, so business-day runs stopped on the Friday.
+  **Decision:** it is LIVE, like its numeric twin and the FX range accrual; R7 is reversed. **Implemented by Task 8b**
+  (re-opens Task 7: the two `zero year fraction` tests and the CHANGELOG bullet flip; new twin test and a
+  bank-once test). Pins flipped: T9 `test_a_weekend_fixing_on_a_business_day_clock_is_live_on_friday`; new run tests
+  T10 `test_business_day_clock_weekend_fixing_twins_in_a_backtest` and T11
+  `test_business_day_clock_weekend_fixing_twins_in_a_dynamic_scenario`.
 
-- **OQ-2 — a dated future fixing (or pending pay date) that resolves to t = 0 on a business-day clock.** Plan Ruling
-  R7 (Task 7, built, `test_future_fixing_with_zero_year_fraction_is_refused`): `resolve` refuses it with
-  `ValidationError`. W6 Ruling 2 (and the FX range accrual): it is t = 0, i.e. live, priced at the current spot, and
-  recorded at the next instant at the spot of the first instant it was live. Under `BUSINESS_DAYS` a Saturday fixing is
-  t = 0 on the Friday, so a run on a business-day environment holding a dated TARN / TARF with a weekend- or
-  holiday-dated fixing or pay date stops on the business day before (the recorder's `pending_pv` hook prices it; pinned
-  by T9 `test_oq2_a_dated_fixing_at_zero_business_time_is_refused_the_day_before`), while its numeric twin (time 0.0
-  that day) prices — the twin rule is broken there.
-  (a) Status quo: keep R7 (refusal).
-  (b) Treat it as live: priced at the quoted spot like its twin and the FX range accrual, recorded on the next instant;
-  a pay date at t = 0 follows OQ-1's rule. Moves: refusal → a number (Task 7's two `zero year fraction` tests and the
-  CHANGELOG bullet flip). Scope: Task 7's dated banking / view decide passed vs live by resolved time instead of date
-  (and `record_passed_fixings` sets `as_of` to the last banked fixing date, as R15 does), before Task 10.
-  **Recommendation: (b)** — it restores numeric == dated on business-day clocks and matches W6 Ruling 2 and the FX
-  range accrual; dated TARNs on weekend dates are otherwise unusable in business-day runs.
+**Task order now:** 1–8 (done) → **8a** (OQ-1 b) → **8b** (OQ-2 b) → 9 (run-fixings protocol) → 10 (FX backtest
+cash) → 11 (FX dynamic cash, Q8) → 12 (final gate).
 
-**Execution gate.** Task 9 can run now (its two pins state the status quo). Answer OQ-1 and OQ-2 before Task 10: a
-(b) answer needs its follow-up re-plan of Tasks 5–7 code first, and flips the named pins.
+### New open question raised by the answers (plan written for its status quo (a), pinned)
+
+- **OQ-3 — a weekend fixing banked on the Friday together with a zero-lag Friday fixing.** Under OQ-2 (b) a Saturday
+  fixing is passed by time on the Friday, so `record_passed_fixings` (and `resolve`'s copy, and theta landing on the
+  Friday) banks it and sets `as_of` to the Saturday (Ruling R22, needed so it is never banked twice). Under OQ-1 (b)
+  the Friday fixing's own zero-lag coupon is due that day and stays pending with `pay_date` = Friday — before `as_of`.
+  The Task 2 / spec R2 state check ("a dated pending `pay_date` must be on or after `as_of`", relaxed by 8a from
+  "after") then refuses the state: pricing such a contract on that Friday raises `ValidationError`. Only contracts with
+  fixings on BOTH a Friday and the following weekend day, on a `BUSINESS_DAYS` environment, are affected (pinned by
+  Task 8b `test_oq3_friday_cash_with_a_saturday_fixing_banked_on_friday_is_refused`).
+  (a) Status quo: refuse (the plan as written).
+  (b) Drop the state's dated "pending `pay_date` not before `as_of`" check (keep "pending cash needs `as_of`"):
+  a booking's stale pending cash is then handled by the time rule (paid once strictly past), and the Friday prices.
+  Moves: that R2 refusal → accepted (Task 8a's `test_dated_pending_must_not_precede_as_of` and
+  `test_r2_dated_pending_must_not_precede_as_of` would flip; no price of a valid booking moves).
+  (c) Bank a zero-time fixing dated after the valuation date only on `resolve`'s discarded copy, never on the product
+  (`as_of` never passes the valuation date): no validation change, but a direct `record_passed_fixings` on that Friday
+  banks the numeric twin's fixing and not the dated contract's (events differ, prices equal) — breaks the twin rule for
+  that API.
+  **Recommendation: (b)** — it keeps numeric == dated (events included) and moves no value of a valid booking; the
+  refused case is a consistency check that R22 made too strict.
 
 ## Review Focus
 
-Updated by the re-plan 2026-10-10 (items 1, 2, 4, 5 retargeted to W6; 6, 7 new).
+Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by the user's OQ-1 / OQ-2 answers
+(items 5, 7; 8 is the new OQ-3).
 
 1. **A short position (negative quantity)** in a run: the recorder reports events and pending PV with the signed
    quantity, and paid cash scales by it — pinned by Task 9 `test_a_short_position_carries_its_signed_quantity` and
@@ -330,17 +353,24 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4, 5 retargeted to W6; 6, 7 new).
 4. **A dynamic scenario whose `DayPath.start_date` is before the environment's own date**: `ValidationError` from the
    recorder (W6 R9: the clock cannot go back), never a silent re-age — pinned by Task 11
    `test_start_date_before_environment_date_raises`.
-5. **A dated future fixing that resolves to a zero year fraction** under `BUSINESS_DAYS`: refused at pricing (Ruling
-   R7), which inside a run stops the run on the business day before — status quo pending **OQ-2**; pinned by Task 7
-   `test_future_fixing_with_zero_year_fraction_is_refused` and Task 9
-   `test_oq2_a_dated_fixing_at_zero_business_time_is_refused_the_day_before`.
+5. **A dated future fixing or pay date that resolves to zero time** under `BUSINESS_DAYS` (a Saturday, valued on the
+   Friday): live, priced like its numeric twin, banked once (`as_of` covers it), recorded on Monday at Friday's spot
+   (OQ-2 b, Task 8b) — pinned by Task 8b `test_future_fixing_at_zero_business_time_is_live_like_its_twin` and
+   `test_a_weekend_fixing_banked_on_friday_is_not_banked_again`, Task 9
+   `test_a_weekend_fixing_on_a_business_day_clock_is_live_on_friday`, Tasks 10 / 11
+   `test_business_day_clock_weekend_fixing_twins_in_a_backtest` / `..._in_a_dynamic_scenario`.
 6. **A numeric fixing that goes live on the instant an earlier fixing banks** (fixings on consecutive path days): the
    later fixing keeps its own first-live spot and `gap=False` although the numeric contract dropped the earlier one
    (Ruling R14) — pinned by Task 9 `test_consecutive_daily_fixings_keep_their_own_live_spots_across_banking`.
-7. **A zero-lag fixing on a path day** (a dated TARN's default `pay_dates`): its cash is out of the day's value but
-   booked only the next day — status quo pending **OQ-1**; pinned by Task 9
-   `test_oq1_zero_lag_cash_of_a_live_fixing_is_booked_when_the_fixing_is_recorded` and Task 10
-   `test_oq1_zero_lag_fixing_day_value_excludes_the_cash_until_it_is_booked`.
+7. **A pay date on a valuation instant** (a dated TARN's default zero-lag `pay_dates`, or a numeric pay time aged to
+   exactly 0.0): the cash due that day stays in the value and is booked the next instant — no dip, no false first-day
+   gain (OQ-1 b, Task 8a) — pinned by Task 8a `test_moved_values_around_a_pay_date` and
+   `test_numeric_cash_due_today_stays_pending_until_its_pay_time_is_past`, Task 9
+   `test_zero_lag_cash_of_a_live_fixing_stays_in_the_value_until_recorded`, Task 10
+   `test_zero_lag_fixing_day_value_keeps_the_coupon_no_dip`.
+8. **Fixings on a Friday AND the following Saturday (zero lag) under `BUSINESS_DAYS`**, priced or recorded on the
+   Friday: refused by the state check — status quo pending **OQ-3** — pinned by Task 8b
+   `test_oq3_friday_cash_with_a_saturday_fixing_banked_on_friday_is_refused`.
 
 ---
 
@@ -348,8 +378,8 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4, 5 retargeted to W6; 6, 7 new).
 
 | Path | Status | Responsibility |
 |---|---|---|
-| `quantark/asset/fx/product/option/target_redemption_state.py` | Create (T2), extend (T10) | `TARGET_HIT_RTOL`, `target_hit_tol`, `is_target_hit`, `PendingPayment`, `TargetRedemptionState`, `TerminalBookingWarning`, `TargetRedemptionEventType`, `TargetRedemptionEvent`, `ResolvedTargetRedemption`, `pending_present_value`; `booked_cash` (T10) |
-| `quantark/asset/fx/product/option/target_redemption_base.py` | Create (T3), extend (T5, T6, T7, T9) | `TargetRedemptionProduct(BaseFxProduct)`: forms, validation, terminal warning, `time_shift`, `record_passed_fixings`, `resolve`, `pending_pv`, dated `get_maturity`/`get_delivery`; W5 fill protocol; run-fixings protocol (T9: `has_run_fixings`, `open_fixings`, `with_time_elapsed`, `with_history_settled`, `matured_before`, booking-relative indices); helpers `is_passed_time`, `event_label`, `signed_year_fraction` |
+| `quantark/asset/fx/product/option/target_redemption_state.py` | Create (T2), extend (T8a, T10) | `TARGET_HIT_RTOL`, `target_hit_tol`, `is_target_hit`, `PendingPayment`, `TargetRedemptionState`, `TerminalBookingWarning`, `TargetRedemptionEventType`, `TargetRedemptionEvent`, `ResolvedTargetRedemption`, `pending_present_value`; `booked_cash` (T10) |
+| `quantark/asset/fx/product/option/target_redemption_base.py` | Create (T3), extend (T5, T6, T7, T8a, T8b, T9) | `TargetRedemptionProduct(BaseFxProduct)`: forms, validation, terminal warning, `time_shift`, `record_passed_fixings`, `resolve`, `pending_pv`, dated `get_maturity`/`get_delivery`; W5 fill protocol; run-fixings protocol (T9: `has_run_fixings`, `open_fixings`, `with_time_elapsed`, `with_history_settled`, `matured_before`, booking-relative indices); helpers `is_passed_time`, `event_label`, `signed_year_fraction` |
 | `quantark/asset/fx/product/option/fx_target_redemption_note.py` | Modify (T3, T5, T7) | TARN terms, period sources, `coupon_amount`, `_fixing_outcome`, `_dated_factor` |
 | `quantark/asset/fx/product/option/fx_target_redemption_forward.py` | Modify (T4, T5, T7) | TARF terms, `_fixing_outcome` |
 | `quantark/asset/fx/product/option/__init__.py` | Modify (T2) | export the state names |
@@ -358,10 +388,10 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4, 5 retargeted to W6; 6, 7 new).
 | `quantark/util/run_fixings.py` | Modify (T9) | optional hook `with_history_settled(env)` via `settle_history`, at registration and after each clock move's recording (re-plan Ruling R13). (`quantark/asset/fx/lifecycle/` is NOT created: W6 spec §6) |
 | `quantark/backtest/fx/engine.py` | Modify (T10) | paid cash ledger and `paid_cash` / `pending_pv` columns from `RunFixingDay` (register / advance are W6's) |
 | `quantark/dynamicscenario/fx/engine.py`, `quantark/dynamicscenario/results/dynamic_results.py` | Modify (T11) | Q8 refusal, cash fields and FIXING snapshots from `RunFixingDay` (register / advance are W6's) |
-| `test/test_fx_target_redemption_state.py` | Create (T2) | state module |
+| `test/test_fx_target_redemption_state.py` | Create (T2), modify (T8a) | state module; cash due today (T8a) |
 | `test/fx_target_redemption_fixtures.py` | Create (T3), extend (T7, T9) | shared env/product builders, `_numeric_twin`, `book`, `drive` |
-| `test/test_fx_target_redemption_lifecycle.py` | Create (T3), extend (T4–T9) | R1, R2, P1–P5, D1–D5, T1, T2, WARN1–3; run-fixings protocol unit tests (T9) |
-| `test/test_fx_target_redemption_runs.py` | Create (T9), extend (T10, T11) | recorder-level TARN/TARF rules, B1–B6, Q8, W8 twins, OQ-1/OQ-2 pins |
+| `test/test_fx_target_redemption_lifecycle.py` | Create (T3), extend (T4–T9, incl. T8a / T8b flips) | R1, R2, P1–P5, D1–D5, T1, T2, WARN1–3; run-fixings protocol unit tests (T9) |
+| `test/test_fx_target_redemption_runs.py` | Create (T9), extend (T10, T11) | recorder-level TARN/TARF rules, B1–B6, Q8, W8 twins, OQ-1 / OQ-2 (b) run tests |
 | `test/test_run_fixings.py` | Modify (T9) | one appended generic test of the settle hook (W6's file, otherwise untouched) |
 | `test/test_fx_tarn_note_mc.py`, `test/test_fx_tarf_mc.py`, `test/execution/matrix_fixtures.py`, `example/fx_tarn_demo.py` | Modify (T3, T4) | constructor arguments only (C1) |
 | `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/` | Create (T1, T8, T12) | `w4b_baseline.py`, `q7_theta_plugin.py`, `q7_summarize.py`, `moved_values.txt` |
@@ -3179,6 +3209,493 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8a: Cash due today stays in today's value (OQ-1 (b), user decision 2026-10-10)
+
+Follow-up that re-opens built Tasks 2, 5, 6 and 7. User decision OQ-1 (b): cash whose pay time is TODAY (t = 0 after
+`snap_time`) is still pending and priced at `DF(0) = 1`; it is booked (a PAYMENT event, out of the value) only once its
+pay time is strictly past (`is_history`). This is W8's rule (a dated contract on its date prices its settled value)
+and W6 D1's (t = 0 is live) applied to TARN / TARF cash. It amends TARN spec §3 ("pending: pay time after valuation"),
+§5.1 ("pay time at or before valuation is booked") and §6 (`time_shift` / `record_passed_fixings` remove cash at or
+before valuation). Fixings are unchanged: a fixing at t <= 0 is still banked by `record_passed_fixings` / `resolve`
+(spec §6 landing rule); only the CASH it determines now stays in the value on its pay day.
+
+**Files:**
+- Modify: `quantark/asset/fx/product/option/target_redemption_state.py` (`PendingPayment`, `TargetRedemptionState`,
+  docstrings), `quantark/asset/fx/product/option/target_redemption_base.py` (`time_shift`, `_settle_numeric`,
+  `_record_dated` cash sweep, `_settle_dated`, `_dated_view` pending), `CHANGELOG.md`,
+  `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`
+- Test: `test/test_fx_target_redemption_state.py` (two tests flip), `test/test_fx_target_redemption_lifecycle.py` (two
+  tests flip; new tests)
+- Engines unchanged: `FxTargetRedemptionNoteMCEngine` / `FxTarnForwardMCEngine` add `pending_present_value(view.pending)`
+  and `fx_env.get_domestic_df(0.0) == 1.0` (measured on this branch), so a t = 0 entry needs no engine change.
+
+**Interfaces:**
+- Consumes: Tasks 2–8.
+- Produces (one rule, both forms, Ruling R21):
+  - `PendingPayment(amount, pay_time=t)`: refused only when `t` is not finite or `is_history(t)` (strictly past);
+    `t = 0.0` (and an `is_zero` time) is cash due today. Error text names `pay_time`.
+  - `TargetRedemptionState`: a dated pending `pay_date` must be ON OR after `as_of` (`pay_date < as_of` refused,
+    message "... must be on or after as_of ..."): `record_passed_fixings` on a pay date sets `as_of` to that date and
+    keeps the cash due that day pending.
+  - Numeric `time_shift` and `_settle_numeric`: cash with `is_history(pay_time)` → PAYMENT event; otherwise pending at
+    `snap_time(pay_time)`.
+  - Dated `_record_dated` sweep and `_settle_dated`: cash with `is_history(signed_year_fraction(pay_date, fx_env))` →
+    PAYMENT event (decided by TIME, Ruling R16); otherwise pending.
+  - `_dated_view`: pending entries with `is_history(t)` are booked (skipped); the others enter the view at
+    `snap_time(t)` (0.0 on the pay date). The R7 refusal of a pay date AFTER the valuation date that resolves to zero
+    time stays until Task 8b.
+  - `ResolvedTargetRedemption.pending`: `(pay_time, amount)` with `pay_time >= 0`.
+
+- [ ] **Step 1: Flip the tests that pin the old rule and write the new ones**
+
+In `test/test_fx_target_redemption_state.py` replace `test_numeric_pay_time_must_be_after_valuation` and
+`test_dated_pending_must_be_after_as_of` with:
+
+```python
+@pytest.mark.parametrize("t", [-0.1, math.nan, math.inf])
+def test_numeric_pay_time_must_not_be_past(t):
+    with pytest.raises(ValidationError, match="pay_time"):
+        PendingPayment(1.0, pay_time=t)
+
+
+@pytest.mark.parametrize("t", [0.0, 1e-12, -1e-12])
+def test_numeric_pay_time_due_today_is_pending(t):  # OQ-1 (b), user 2026-10-10
+    assert PendingPayment(1.0, pay_time=t).pay_time == t
+
+
+def test_dated_pending_must_not_precede_as_of():
+    with pytest.raises(ValidationError, match="after as_of"):
+        TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=datetime(2026, 7, 1)),), as_of=D1)
+
+
+def test_dated_pending_due_on_as_of_is_allowed():  # OQ-1 (b)
+    s = TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=D1),), as_of=D1)
+    assert s.pending[0].pay_date == D1
+```
+
+In `test/test_fx_target_redemption_lifecycle.py` replace `test_r2_dated_pending_must_follow_as_of` and
+`test_dated_record_banks_through_the_valuation_date_and_sweeps_paid_cash` with:
+
+```python
+def test_r2_dated_pending_must_not_precede_as_of():
+    with pytest.raises(ValidationError, match="after as_of"):
+        dated_note(state=TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=FIX_DATES[0]),),
+                                               as_of=FIX_DATES[1]))
+
+
+def test_dated_record_banks_through_the_valuation_date_and_pays_cash_once_it_is_past():
+    d = dated_note(target=3.0, pay_dates=LAG2)
+    d.record_passed_fixings(env(val=FIX_DATES[0]))
+    coupon = 100.0 * 0.12 * calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.ACT_365, 252)
+    assert d.state == TargetRedemptionState(coupon, pending=(PendingPayment(coupon, pay_date=LAG2[0]),),
+                                            as_of=FIX_DATES[0])
+    d.record_passed_fixings(env(val=LAG2[0]))                    # its pay date: due today, still in the value
+    assert d.state.pending == (PendingPayment(coupon, pay_date=LAG2[0]),) and d.state.as_of == LAG2[0]
+    assert [e.event_type for e in d.lifecycle_events] == [FIXING]
+    d.record_passed_fixings(env(val=LAG2[0] + timedelta(days=1)))
+    assert d.state.pending == () and d.lifecycle_events[-1].event_type is PAYMENT
+    assert d.state.as_of == LAG2[0] + timedelta(days=1)
+```
+
+Append to `test/test_fx_target_redemption_lifecycle.py`:
+
+```python
+# --- OQ-1 (b), user decision 2026-10-10: cash due today stays in today's value --------------------------------------
+
+def test_numeric_cash_due_today_stays_pending_until_its_pay_time_is_past():
+    n = note(fix=[10 / 365] + FIX[1:], pay_times=[12 / 365] + [t + 2 / 365 for t in FIX[1:]], target=3.0)
+    c = n.full_coupon(0)
+    n.time_shift(11 / 365)
+    n.record_passed_fixings(env())
+    assert [p.amount for p in n.state.pending] == [c]
+    n.time_shift(1 / 365)                                        # its pay day: snapped to exactly 0.0, still pending
+    assert n.state.pending == (PendingPayment(c, pay_time=0.0),)
+    assert [e.event_type for e in n.lifecycle_events] == [FIXING]
+    assert n.pending_pv(env()) == c
+    n.time_shift(1 / 365)                                        # strictly past: paid
+    assert n.state.pending == () and [e.event_type for e in n.lifecycle_events] == [FIXING, PAYMENT]
+
+
+def test_a_zero_lag_fixing_banked_today_leaves_its_cash_in_the_value():
+    n = note(fix=[0.0] + FIX[1:], accrual_start=-30 / 365, target=3.0)
+    c = n.full_coupon(0)
+    n.record_passed_fixings(env())
+    assert [e.event_type for e in n.lifecycle_events] == [FIXING]
+    assert n.state.pending == (PendingPayment(c, pay_time=0.0),)
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_value_on_a_pay_date_holds_the_cash_due_that_day(kind):
+    d = dated_note(target=3.0) if kind == "tarn" else dated_tarf(target=0.20)    # pay dates = fixing dates
+    e0 = env(val=FIX_DATES[0])                                                    # live fixing, its cash due today
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)                     # Task 9 makes a t = 0 fill silent
+        view = d.resolve(e0)
+        banked = copy.deepcopy(d)
+        banked.record_passed_fixings(e0)
+        (cash,) = [x.amount for x in banked.lifecycle_events if x.event_type is FIXING]
+        assert view.pending == ((0.0, cash),) and banked.state.pending[0].pay_date == FIX_DATES[0]
+        without = copy.deepcopy(banked)
+        without.state = TargetRedemptionState(banked.state.accumulated, as_of=banked.state.as_of)
+        assert is_close(_price(d, e=e0), _price(without, e=e0) + cash, rel_tol=1e-12)
+        twin = _numeric_twin(d, e0)
+        assert twin.state.pending == (PendingPayment(cash, pay_time=0.0),)
+        assert is_close(_price(twin, e=e0), _price(d, e=e0), rel_tol=1e-12)
+
+
+# Moved values (sign-off): measured on 51186894 (before Task 8a), MC 20_000 paths, seed 7, flat EURUSD 1.20; (price,
+# theta) the day before the pay date and on it. After Task 8a: the day-before price is unchanged; the day-before theta
+# gains the cash (the bump lands on the pay date, where the cash is still in the value); the pay-date price gains the
+# cash; the pay-date theta loses it (the cash leaves the value the next day).
+_PAY_DAY_OLD = {
+    "tarn_zero_lag": ((102.09343055572586, -0.9778012736891526), (101.1156292820367, 0.015259847019819972)),
+    "tarf_zero_lag": ((0.09637222423452786, -0.05217110639974772), (0.04420111783478014, 0.0008503526677482928)),
+    "tarn_lag2_pending": ((102.08935210063005, -0.9702789813483861), (101.11907311928167, 0.01592892165280091)),
+}
+
+
+def _pay_day_case(name):
+    if name == "tarn_zero_lag":
+        return dated_note(target=3.0), FIX_DATES[0]
+    if name == "tarf_zero_lag":
+        return dated_tarf(target=0.20), FIX_DATES[0]
+    lagged = dated_note(target=3.0, pay_dates=LAG2)
+    lagged.record_passed_fixings(env(val=FIX_DATES[0]))
+    return lagged, LAG2[0]
+
+
+@pytest.mark.parametrize("name", sorted(_PAY_DAY_OLD))
+def test_moved_values_around_a_pay_date(name):
+    product, pay = _pay_day_case(name)
+    probe = copy.deepcopy(product)
+    probe.record_passed_fixings(env(val=pay))
+    cash = probe.state.pending[0].amount                         # due on the pay date, still pending
+    (p_before, th_before), (p_on, th_on) = _PAY_DAY_OLD[name]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        g_before = engine_for(product).calculate_greeks(product, env(val=pay - timedelta(days=1)))
+        g_on = engine_for(product).calculate_greeks(product, env(val=pay))
+    # pinned numbers were measured on ARM64; CI runs x86_64 (memory: golden cross-arch), hence 1e-9, not bitwise
+    assert is_close(g_before["price"], p_before, rel_tol=1e-9)
+    assert is_close(g_before["theta"], th_before + cash, rel_tol=0.0, abs_tol=1e-9)
+    assert is_close(g_on["price"], p_on + cash, rel_tol=1e-9)
+    assert is_close(g_on["theta"], th_on - cash, rel_tol=0.0, abs_tol=1e-9)
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py -k "pay_time or as_of or pays_cash_once or due_today or zero_lag_fixing_banked or holds_the_cash or moved_values_around" -n 2 -q`
+Expected: FAIL — `test_numeric_pay_time_due_today_is_pending[0.0]` / `[1e-12]` / `[-1e-12]` (`ValidationError: ... pay_time
+must be after valuation`), `test_dated_pending_due_on_as_of_is_allowed` (`... must be after as_of`), the flipped dated
+record test (PAYMENT on the pay date), the three new behaviour tests (cash paid at t = 0), and
+`test_moved_values_around_a_pay_date` on everything but the day-before price. `test_numeric_pay_time_must_not_be_past`,
+`test_dated_pending_must_not_precede_as_of` and `test_r2_dated_pending_must_not_precede_as_of` already pass.
+
+- [ ] **Step 3: Implement**
+
+`target_redemption_state.py` (import `from quantark.util.fixings import is_history`):
+
+```python
+        if self.pay_time is not None:
+            t = self.pay_time
+            if not math.isfinite(t) or is_history(t):
+                raise ValidationError(
+                    f"a numeric pending pay_time must be at or after valuation (>= 0), got {t}: cash whose pay time is "
+                    "strictly past is booked, not pending (cash due today, t = 0, is still pending)"
+                )
+```
+and in `TargetRedemptionState.__post_init__`:
+```python
+            late = [p.pay_date for p in self.pending if p.pay_date < self.as_of]
+            if late:
+                raise ValidationError(
+                    f"a dated pending pay_date must be on or after as_of {self.as_of}, got {late[0]}")
+```
+Docstrings: module ("``pending`` is determined cash whose pay time is at or after valuation; cash due today is still
+pending"), `ResolvedTargetRedemption` ("pending ``(pay_time, amount)`` with ``pay_time >= 0``").
+
+`target_redemption_base.py` (import `is_history`, `snap_time` from `quantark.util.fixings`):
+
+```python
+    # time_shift: the pending loop
+        for p in self.state.pending:
+            t = p.pay_time - time_bump
+            if is_history(t):  # strictly past: paid within the bump (OQ-1 b: cash due today stays pending)
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount, time=t))
+            else:
+                kept.append(PendingPayment(p.amount, pay_time=snap_time(t)))
+
+    @staticmethod
+    def _settle_numeric(amount: float, pay_time: float, label: str, pending: list, events: list) -> None:
+        """Determined cash: paid now (PAYMENT, the fixing's label) when its pay time is strictly past, else pending
+        (cash due today included, at exactly 0.0)."""
+        if is_zero(amount):
+            return
+        if is_history(pay_time):
+            events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, amount, time=pay_time,
+                                                label=label))
+        else:
+            pending.append(PendingPayment(amount, pay_time=snap_time(pay_time)))
+
+    # _record_dated: the cash sweep at its top
+        for p in st.pending:  # cash whose pay time is strictly past was paid; cash due today stays pending
+            t_pay = signed_year_fraction(p.pay_date, fx_env)
+            if is_history(t_pay):
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount, time=t_pay))
+            else:
+                pending.append(p)
+
+    @staticmethod
+    def _settle_dated(amount: float, pay_date: datetime, label: str, fx_env, pending: list, events: list) -> None:
+        """Dated twin of ``_settle_numeric``: paid now when ``pay_date``'s time is strictly past, else pending."""
+        if is_zero(amount):
+            return
+        t = signed_year_fraction(pay_date, fx_env)
+        if is_history(t):
+            events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, amount, time=t, label=label))
+        else:
+            pending.append(PendingPayment(amount, pay_date=pay_date))
+
+    # _dated_view: the pending loop
+        for p in st.pending:
+            t = signed_year_fraction(p.pay_date, fx_env)
+            if is_history(t):
+                continue  # strictly past: paid, booked, not pending
+            if p.pay_date > val and is_passed_time(t):  # Ruling R7 applied to cash - reversed by Task 8b
+                raise ValidationError(
+                    f"pending pay date {p.pay_date.date()} is after the valuation date {val} but resolves to a zero "
+                    f"year fraction under the environment's {fx_env.day_count_convention.name} day count")
+            pending.append((snap_time(t), p.amount))
+```
+
+Append to the CHANGELOG `### Changed`:
+
+```markdown
+- FX TARN / TARF cash due on the valuation date stays in the value (user decision OQ-1 b, 2026-10-10, as W8 values a
+  dated contract on its date at its settled value): determined cash is booked (a `PAYMENT` event, out of the value)
+  once its pay time is strictly past. A numeric pending `pay_time` of 0.0 and a dated pending `pay_date` equal to
+  `as_of` are accepted. Moves: the price on a pay date gains the cash due that day, theta the day before a pay date
+  gains it and theta on the pay date loses it (values in
+  `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`); inside runs, cash on a
+  path-aligned pay date is booked on the next path instant.
+```
+
+Append to `moved_values.txt`:
+
+```text
+#
+# Task 8a - OQ-1 (b), user decision 2026-10-10: cash due today stays in today's value.
+# Pins: test/test_fx_target_redemption_lifecycle.py::test_moved_values_around_a_pay_date (MC 20_000, seed 7, flat 1.20)
+# case               cash          price d-1 (unchanged)   theta d-1  old -> new         price on pay date  old -> new     theta on pay date old -> new
+# tarn_zero_lag      0.98630137    102.093431              -0.977801 ->  0.008500        101.115629 -> 102.101931         0.015260 -> -0.971042
+# tarf_zero_lag      0.05000000      0.096372              -0.052171 -> -0.002171          0.044201 ->   0.094201         0.000850 -> -0.049150
+# tarn_lag2_pending  0.98630137    102.089352              -0.970279 ->  0.016022        101.119073 -> 102.105374         0.015929 -> -0.970372
+# Rule: every TARN / TARF valued on a pay date: price + cash due that day (x DF(0) = 1); theta the day before a pay
+# date: + cash; theta on the pay date: - cash; the terminal value on the last pay date is that cash, not 0.0.
+# Validation: a numeric pending pay_time of 0.0 (or is_zero) refused -> accepted; a dated pending pay_date equal to
+# as_of refused -> accepted. record_passed_fixings on a pay date: PAYMENT -> still pending (PAYMENT the day after).
+# Flipped tests: test_numeric_pay_time_must_be_after_valuation[0.0, 1e-12] (refused -> accepted),
+# test_dated_pending_must_be_after_as_of[D1], test_r2_dated_pending_must_follow_as_of (refused -> accepted; the
+# replacement tests refuse a pay_date BEFORE as_of), test_dated_record_banks_through_the_valuation_date_and_sweeps_paid_cash
+# (PAYMENT on LAG2[0] -> on LAG2[0] + 1 day).
+```
+
+- [ ] **Step 4: Run to verify they pass, and that nothing else moved**
+
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py test/test_fx_tarn_note_mc.py test/test_fx_tarf_mc.py test/test_fx_base_engine.py -n 2 -q`
+Expected: all pass. No other existing TARN / TARF expectation moves (checked while writing: P1–P5, T1, T2, WARN1–3,
+D1–D5 and the engine suites hold no pay time landing exactly on a valuation instant, except
+`test_t1_theta_steps_over_a_fixing[first=1/365]`, which asserts only that theta is finite). Any other failure: STOP and
+report it as an unlisted mover.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C <WT> add quantark/asset/fx/product/option/target_redemption_state.py quantark/asset/fx/product/option/target_redemption_base.py test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py CHANGELOG.md
+git -C <WT> add -f docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt
+git -C <WT> commit -m "feat(fx-tarn): cash due today stays in today's value; booked once its pay time is past (OQ-1 b)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8b: A dated fixing or pay date at zero business time is live (OQ-2 (b), user decision 2026-10-10)
+
+Follow-up that re-opens built Task 7. User decision OQ-2 (b): a dated fixing or pay date AFTER the valuation date that
+resolves to t = 0 in the environment's day count (a Saturday under `BUSINESS_DAYS`, valued on the Friday) is LIVE, like
+its numeric twin and the FX range accrual (W6 Ruling 2): the fixing is decided at the quoted spot as on its own date,
+and its cash is due today (Task 8a). Plan Ruling R7's refusal is reversed (superseded). Passed vs ahead becomes a
+question of TIME for dated fixings too (Ruling R16).
+
+**Files:**
+- Modify: `quantark/asset/fx/product/option/target_redemption_base.py` (`_has_unbanked_passed`, `_record_dated`
+  fixing loop and `as_of`, `_check_as_of`, `_dated_view`), `CHANGELOG.md`,
+  `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`
+- Test: `test/test_fx_target_redemption_lifecycle.py` (two tests flip; two new tests including a twin test)
+
+**Interfaces:**
+- Consumes: Task 8a.
+- Produces:
+  - dated `_has_unbanked_passed`: an unbanked fixing whose `signed_year_fraction` is `is_passed_time` (t <= 0 or
+    `is_zero`), whatever its date.
+  - dated `_record_dated` banks the leading unbanked fixings with `is_passed_time(t)`; `as_of` becomes
+    `max(valuation_date, last banked fixing date)` (a Saturday fixing banked on the Friday sets `as_of` to the
+    Saturday, so it is never banked twice — Ruling R22).
+  - `_check_as_of` refuses `as_of` after the valuation date only when its time is strictly ahead (not
+    `is_passed_time`): an `as_of` at zero business time is accepted.
+  - `_dated_view`: the two R7 refusals are removed (a passed fixing is banked by `resolve` before the view; a pay date
+    at zero time is pending at 0.0, Task 8a).
+
+- [ ] **Step 1: Flip the R7 tests and write the twin test**
+
+In `test/test_fx_target_redemption_lifecycle.py` replace `test_future_fixing_with_zero_year_fraction_is_refused` and
+`test_pending_pay_date_with_zero_year_fraction_is_refused` with:
+
+```python
+THURSDAY, FRIDAY, SATURDAY, MONDAY = (datetime(2026, 8, 13), datetime(2026, 8, 14), datetime(2026, 8, 15),
+                                      datetime(2026, 8, 17))
+
+
+def _saturday_note():
+    return dated_note(fixing_dates=[SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15), target=3.0)
+
+
+def test_future_fixing_at_zero_business_time_is_live_like_its_twin():  # OQ-2 (b) (was refused, Ruling R7)
+    d = _saturday_note()
+    e_fri = env(val=FRIDAY, **BUS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)          # Task 9 makes a t = 0 fill silent
+        view = d.resolve(e_fri)                                         # banked on a copy at the quoted spot
+        banked = copy.deepcopy(d)
+        banked.record_passed_fixings(e_fri)
+        assert view == banked.resolve(e_fri)
+        c = banked.lifecycle_events[0].amount
+        assert view.pending == ((0.0, c),) and banked.state.as_of == SATURDAY   # its cash is due "today"
+        twin = _numeric_twin(d, env(val=THURSDAY, **BUS))
+        twin.time_shift(calculate_year_fraction(THURSDAY, FRIDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                                calendar=TARGET_CAL))
+        assert is_close(_price(twin, e=e_fri), _price(d, e=e_fri), rel_tol=1e-12)
+
+
+def test_pending_pay_date_at_zero_business_time_is_due_today():  # OQ-2 (b) (was refused, Ruling R7)
+    c = 1.0
+    owed = dated_note(fixing_dates=[THURSDAY, datetime(2026, 9, 15)], pay_dates=[SATURDAY, datetime(2026, 9, 17)],
+                      initial_date=datetime(2026, 7, 15), target=3.0,
+                      state=TargetRedemptionState(c, pending=(PendingPayment(c, pay_date=SATURDAY),), as_of=THURSDAY))
+    assert owed.resolve(env(val=FRIDAY, **BUS)).pending == ((0.0, c),)
+    owed.record_passed_fixings(env(val=FRIDAY, **BUS))
+    assert owed.state.pending == (PendingPayment(c, pay_date=SATURDAY),)            # not paid on the Friday
+    owed.record_passed_fixings(env(val=MONDAY, **BUS))
+    assert owed.state.pending == () and owed.lifecycle_events[-1].event_type is PAYMENT
+
+
+def test_a_weekend_fixing_banked_on_friday_is_not_banked_again():
+    d = _saturday_note()
+    d.record_passed_fixings(env(val=FRIDAY, **BUS))                     # theta's landing rule banks the live fixing
+    assert d.state.as_of == SATURDAY and [e.event_type for e in d.lifecycle_events] == [FIXING]
+    assert _price(d, e=env(val=FRIDAY, **BUS)) > 0.0                    # as_of at zero business time is accepted
+    d.record_passed_fixings(env(val=MONDAY, **BUS))
+    assert [e.event_type for e in d.lifecycle_events] == [FIXING, PAYMENT]      # banked once; its cash paid Monday
+
+
+def test_oq3_friday_cash_with_a_saturday_fixing_banked_on_friday_is_refused():
+    """PINS THE STATUS QUO of open question OQ-3 (re-plan 2026-10-10): zero-lag fixings on a Friday and the Saturday
+    after it, banked together on the Friday under BUSINESS_DAYS: as_of becomes the Saturday (Ruling R22) while the
+    Friday coupon is due that day, and the state refuses pending cash dated before as_of. Flips if OQ-3 (b)."""
+    d = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                   target=50.0)
+    with pytest.raises(ValidationError, match="on or after as_of"):
+        d.record_passed_fixings(env(val=FRIDAY, **BUS))
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_lifecycle.py -k "zero_business_time or banked_on_friday or oq3" -n 2 -q`
+Expected: FAIL — `ValidationError: ... resolves to a zero year fraction` (both flipped tests) and, in the third test,
+`as_of == SATURDAY` (the Friday record leaves the Saturday fixing unbanked: `fd > val` stops the loop), and the OQ-3
+pin (`DID NOT RAISE`: the Friday record banks only the Friday fixing today).
+
+- [ ] **Step 3: Implement** in `target_redemption_base.py`:
+
+```python
+    def _check_as_of(self, fx_env) -> None:
+        as_of = self.state.as_of
+        if as_of is not None and as_of > fx_env.valuation_date and not is_passed_time(
+                signed_year_fraction(as_of, fx_env)):
+            raise ValidationError(
+                f"state.as_of {as_of} is after the valuation date {fx_env.valuation_date}: the state claims "
+                "fixings that have not happened")
+
+    # _has_unbanked_passed, dated branch
+        return any(self._is_unbanked(i) and is_passed_time(signed_year_fraction(d, fx_env))
+                   for i, d in enumerate(self.fixing_dates))
+
+    # _record_dated: the fixing loop and as_of (Task 9 later adds its history_only mode to this loop)
+        acc = st.accumulated
+        last_banked: Optional[datetime] = None
+        if not self.is_terminal:
+            last = len(self.fixing_dates) - 1
+            for i, fd in enumerate(self.fixing_dates):
+                if not self._is_unbanked(i):
+                    continue
+                t = signed_year_fraction(fd, fx_env)
+                if not is_passed_time(t):  # ahead by TIME (OQ-2 b): a Saturday at zero business time is passed
+                    break
+                ... (banking unchanged) ...
+                last_banked = fd
+                if ends:
+                    ...
+                    break
+        # a fixing dated after the valuation date at zero time may have been banked: as_of covers it (Ruling R22)
+        as_of = val if last_banked is None or last_banked <= val else last_banked
+        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)), as_of=as_of)
+```
+
+In `_dated_view` remove the fixing refusal (`if is_passed_time(t): raise ValidationError(... zero year fraction ...)`)
+and the pending refusal added back by Task 8a (`if p.pay_date > val and is_passed_time(t): raise ...`); the pending
+loop becomes `t = signed_year_fraction(p.pay_date, fx_env); if is_history(t): continue; pending.append((snap_time(t),
+p.amount))`.
+
+In the CHANGELOG `### Added` bullet "Dated `FxTargetRedemptionNote` / `FxTargetRedemptionForward`: ...", replace the
+sentence "A fixing or pending pay date after the valuation date that resolves to a zero year fraction in the
+environment's day count (a weekend date under `BUSINESS_DAYS`) is refused with `ValidationError`." with:
+
+```markdown
+A fixing or pay date that resolves to zero time in the environment's day count (a weekend date under `BUSINESS_DAYS`,
+valued on the Friday) is live, as for its numeric twin (user decision OQ-2 b, 2026-10-10): the fixing is decided at
+the quoted spot and its cash is due that day.
+```
+
+Append to `moved_values.txt`:
+
+```text
+#
+# Task 8b - OQ-2 (b), user decision 2026-10-10: a dated fixing / pay date at zero business time is live.
+# test_future_fixing_with_zero_year_fraction_is_refused: ValidationError -> priced (equal to its numeric twin, rel 1e-12).
+# test_pending_pay_date_with_zero_year_fraction_is_refused: ValidationError -> pending at t = 0 (in the value), paid
+# on the next business day. record_passed_fixings on the Friday banks the Saturday fixing (was: left unbanked) and sets
+# as_of to the Saturday. Ruling R7 superseded.
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_lifecycle.py test/test_fx_target_redemption_state.py test/test_fx_base_engine.py -n 2 -q`
+Expected: all pass (D1/D4 business-day twins, D5, WARN3 dated and `test_r2_as_of_after_valuation_is_refused_at_pricing`
+unchanged: their dates never resolve to zero time after the valuation date).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C <WT> add quantark/asset/fx/product/option/target_redemption_base.py test/test_fx_target_redemption_lifecycle.py CHANGELOG.md
+git -C <WT> add -f docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt
+git -C <WT> commit -m "feat(fx-tarn): a dated fixing or pay date at zero business time is live, like its twin (OQ-2 b)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: TARN / TARF implement the run-fixings product protocol (W6; D2, B5 at recorder level)
 
 Re-planned 2026-10-10 against W6 (see "Re-plan 2026-10-10 against W6"). Spec: TARN §6, §7.2 as amended by run-fixings
@@ -3193,7 +3710,8 @@ Rulings 2, 4, 8, 9, 10, 11. **No `quantark/asset/fx/lifecycle/` is built**: W6's
 - Create: `test/test_fx_target_redemption_runs.py`
 
 **Interfaces:**
-- Consumes: Tasks 2–8; W6 `quantark.util.run_fixings` (`RunFixingRecorder.register(portfolio) -> RunFixingDay`,
+- Consumes: Tasks 2–8, 8a (cash due today stays pending until its pay time is strictly past) and 8b (a dated
+  fixing or pay date at zero business time is passed/due by time); W6 `quantark.util.run_fixings` (`RunFixingRecorder.register(portfolio) -> RunFixingDay`,
   `.advance(portfolio) -> RunFixingDay`, `.days`, `.recorded`; `RunFixingDay(date, fixings, product_events,
   pending_pv)`; `RecordedFixing(position_id, index, label, outcome, spot, gap)`; `participates(product)`); W5b
   `quantark.util.fixings` (`is_history`, `snap_time`, `freeze_missing_fixings`, `MissingFixingWarning`); W1
@@ -3210,8 +3728,8 @@ Rulings 2, 4, 8, 9, 10, 11. **No `quantark/asset/fx/lifecycle/` is built**: W6's
   - `with_history_settled(fx_env) -> TargetRedemptionProduct` (new run hook, Ruling R13): a copy with every strictly
     past (`is_history`) unbanked fixing that HAS a recorded rate banked at that rate, in order, stopping at the first
     one that is live or unrecorded (clip, redemption, dead fixings, FIXING / PAYMENT events through the Task 5
-    arithmetic), and — dated — every pending payment with `pay_date <= valuation_date` paid; dated `as_of` becomes the
-    last banked fixing's date (Ruling R15). Nothing is ever filled at `fx_env`'s spot. `self` when nothing changes.
+    arithmetic), and — dated — every pending payment whose pay time is strictly past (`is_history`, Task 8a) paid;
+    dated `as_of` becomes the last banked fixing's date (Ruling R15). Nothing is ever filled at `fx_env`'s spot. `self` when nothing changes.
   - `matured_before(fx_env) -> bool`: not terminal and the last fixing's time is `is_history` (numeric: listed time;
     dated: `signed_year_fraction`) — Ruling R16.
   - Changed: `missing_fixing_fills` / `with_missing_fixings_filled` list only `is_history` fixings (a t = 0 fixing is
@@ -3336,7 +3854,9 @@ def test_with_time_elapsed_is_a_snapping_copy_that_banks_nothing():
     with pytest.warns(TerminalBookingWarning):
         owed = note(fix=[], accrual_factors=[], target=1.5,
                     state=TargetRedemptionState(1.5, pending=(PendingPayment(100.5, pay_time=10 / 365),)))
-    paid = _days(owed, 10)
+    due = _days(owed, 10)                                                # its pay day: due today (Task 8a)
+    assert due.state.pending == (PendingPayment(100.5, pay_time=0.0),) and due.lifecycle_events == ()
+    paid = _days(owed, 11)
     assert owed.state.pending and paid.state.pending == ()
     assert [(x.event_type, x.amount) for x in paid.lifecycle_events] == [(PAYMENT, 100.5)]
     d = dated_note(target=3.0)
@@ -3376,7 +3896,8 @@ def test_with_history_settled_banks_only_recorded_history(form):
     assert product.state == INCEPTION and product.missing_fixing_fills(e) == {0: 1.20}  # the product is a copy
     if form == "dated":
         assert settled.state.as_of == FIX_DATES[0]                        # Ruling R15: the last banked fixing's date
-        paid = settled.with_history_settled(env(val=LAG2[0]))
+        assert settled.with_history_settled(env(val=LAG2[0])) is settled          # due today: pending (Task 8a)
+        paid = settled.with_history_settled(env(val=LAG2[0] + timedelta(days=1)))
         assert [x.event_type for x in paid.lifecycle_events] == [FIXING, PAYMENT] and paid.state.pending == ()
 
 
@@ -3535,7 +4056,7 @@ def test_matured_before_the_run_is_removed_with_a_warning(make):
     assert (day1.product_events, day1.fixings, day1.pending_pv) == ((), (), 0.0)
 
 
-def test_a_terminal_booking_is_kept_at_its_pending_pv_and_paid_on_its_day():
+def test_a_terminal_booking_is_kept_at_its_pending_pv_and_paid_after_its_day():
     with pytest.warns(TerminalBookingWarning):
         owed = note(fix=[], accrual_factors=[], target=1.5,
                     state=TargetRedemptionState(1.5, pending=(PendingPayment(100.5, pay_time=10 / 365),)))
@@ -3544,9 +4065,10 @@ def test_a_terminal_booking_is_kept_at_its_pending_pv_and_paid_on_its_day():
     day0 = rec.register(pf)
     e = pf.pricing_environments["EURUSD"]
     assert pid in pf.positions and day0.pending_pv == 100.5 * e.get_domestic_df(10 / 365)
-    paid = [[ev.amount for _, _, ev in drive(pf, rec, VAL + timedelta(days=k), 1.20).product_events
-             if ev.event_type is PAYMENT] for k in range(1, 12)]
-    assert paid[9] == [100.5] and sum(1 for p in paid if p) == 1                  # booked on day 10 only
+    days = {k: drive(pf, rec, VAL + timedelta(days=k), 1.20) for k in range(1, 13)}
+    paid = {k: [ev.amount for _, _, ev in d.product_events if ev.event_type is PAYMENT] for k, d in days.items()}
+    assert days[10].pending_pv == 100.5                                           # due today: in the value (8a)
+    assert paid[11] == [100.5] and sum(1 for p in paid.values() if p) == 1       # booked once its pay day is past
 
 
 def test_the_run_clock_cannot_go_back():
@@ -3652,26 +4174,35 @@ def test_lifecycle_events_are_append_only_in_a_run():
     assert [ev.event_type for ev in before] == [FIXING, PAYMENT, FIXING, PAYMENT, PAYMENT]
 
 
-def test_oq1_zero_lag_cash_of_a_live_fixing_is_booked_when_the_fixing_is_recorded():
-    """PINS THE STATUS QUO of open question OQ-1 (re-plan 2026-10-10): the fixing dated day 30 (pay date = fixing
-    date) is live on day 30 (W6 D1) and pricing pays its cash inside the resolve copy (TARN spec 5.1), so day 30
-    books nothing and holds nothing pending; the cash is booked on day 31 with the recording. Flips if OQ-1 (b)."""
+def test_zero_lag_cash_of_a_live_fixing_stays_in_the_value_until_recorded():
+    """OQ-1 (b), user 2026-10-10 (Task 8a): the fixing dated day 30 (pay date = fixing date) is live on day 30 and its
+    cash is due that day, so day 30 holds it as pending PV (in the value, nothing booked); on day 31 the fixing is
+    recorded, the cash is past and leaves the value as a PAYMENT - no dip."""
     pf, _, rec = _registered(dated_note(target=3.0))
     days = {k: drive(pf, rec, VAL + timedelta(days=k), 1.20) for k in range(1, 32)}
-    assert days[30].product_events == () and days[30].pending_pv == 0.0
-    assert [ev.event_type for _, _, ev in days[31].product_events] == [FIXING, PAYMENT]
+    fixing, payment = [ev for _, _, ev in days[31].product_events]
+    assert (fixing.event_type, payment.event_type) == (FIXING, PAYMENT) and payment.amount == fixing.amount
+    assert days[30].product_events == () and days[30].pending_pv == fixing.amount
+    assert days[31].pending_pv == 0.0
 
 
-def test_oq2_a_dated_fixing_at_zero_business_time_is_refused_the_day_before():
-    """PINS THE STATUS QUO of open question OQ-2: under BUSINESS_DAYS a Saturday fixing is t = 0 on the Friday (W6
-    Ruling 2: live), but plan Ruling R7 refuses to price a dated future fixing at zero time; the recorder's pending-PV
-    hook prices it, so the run stops on the Friday. Flips if OQ-2 (b)."""
-    friday, saturday = datetime(2026, 8, 14), datetime(2026, 8, 15)
-    prod = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
-    pf, _, rec = _registered(prod, fx_env=env(**BUS))
+def test_a_weekend_fixing_on_a_business_day_clock_is_live_on_friday():
+    """OQ-2 (b), user 2026-10-10 (Task 8b): under BUSINESS_DAYS a Saturday fixing is t = 0 on the Friday, live in both
+    forms (W6 Ruling 2); the run does not stop; on Monday it is recorded at Friday's spot, gap=False, twins identical."""
+    friday, saturday, monday = datetime(2026, 8, 14), datetime(2026, 8, 15), datetime(2026, 8, 17)
+    dated = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
+    pf, (id_d, id_n), rec = _registered(dated, _numeric_twin(dated, env(**BUS)), fx_env=env(**BUS))
     drive(pf, rec, friday - timedelta(days=1), 1.20)
-    with pytest.raises(ValidationError, match="zero year fraction"):
-        drive(pf, rec, friday, 1.20)
+    fri = drive(pf, rec, friday, 1.21)
+    e = pf.pricing_environments["EURUSD"]
+    assert pf.positions[id_d].product.open_fixings(e)[1][0] == pf.positions[id_n].product.open_fixings(e)[1][0] == 0.0
+    assert fri.pending_pv > 0.0                                   # the live fixing's cash is due "today" (Task 8a)
+    mon = drive(pf, rec, monday, 1.30)
+    assert [r for r in _rows(mon, id_d) if r[0] == 1] == [r for r in _rows(mon, id_n) if r[0] == 1] == [
+        (1, 1.21, 1.21, False)]
+    assert [ev.event_type for p, _, ev in mon.product_events if p == id_d] == [FIXING, PAYMENT]
+
+
 ```
 
 Append to `test/test_run_fixings.py` (after `test_hooks_matured_events_pending_pv`):
@@ -3704,7 +4235,7 @@ def test_settle_hook_runs_at_register_and_on_every_clock_move():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_run_fixings.py -k "run_fixings or open_fixings or booking_index or time_elapsed or t0 or history_settled or matured or d2 or register or origin or terminal_booking or clock or time_of_day or untouched or gap or short or pairs or consecutive or append or oq1 or oq2 or settle_hook" -n 2 -q`
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_run_fixings.py -k "run_fixings or open_fixings or booking_index or time_elapsed or t0 or history_settled or matured or d2 or register or origin or terminal_booking or clock or time_of_day or untouched or gap or short or pairs or consecutive or append or zero_lag or weekend_fixing or settle_hook" -n 2 -q`
 Expected: FAIL — `AttributeError: ... object has no attribute 'has_run_fixings'` / `'open_fixings'` / `'with_time_elapsed'` /
 `'with_history_settled'` / `'matured_before'`; the recorder-level tests fail because `participates()` is False (nothing
 is banked: e.g. `assert 0.0 == ...`, `DID NOT WARN`); `test_a_fixing_at_t0_is_live_silent_and_never_frozen` fails on
@@ -3715,7 +4246,8 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
 
 `quantark/asset/fx/product/option/target_redemption_base.py`:
 
-1. Imports: `from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings`.
+1. Imports: `from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings` (Task 8a
+   already added `is_history` and `snap_time`).
 2. In BOTH `_init_dated` and `_init_numeric`, after `self._recorded_rates: Dict[int, float] = {}`:
    ```python
            #: Booking-relative index of the first listed fixing (numeric: fixings banked and dropped since construction,
@@ -3786,10 +4318,10 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
         val, st = fx_env.valuation_date, self.state
         events: List[TargetRedemptionEvent] = []
         pending: list = []
-        for p in st.pending:  # cash due by the valuation date was paid
-            if p.pay_date <= val:
-                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount,
-                                                    time=signed_year_fraction(p.pay_date, fx_env)))
+        for p in st.pending:  # cash whose pay time is strictly past was paid; cash due today stays (Task 8a)
+            t_pay = signed_year_fraction(p.pay_date, fx_env)
+            if is_history(t_pay):
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount, time=t_pay))
             else:
                 pending.append(p)
         acc = st.accumulated
@@ -3799,9 +4331,9 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
             for i, fd in enumerate(self.fixing_dates):
                 if not self._is_unbanked(i):
                     continue
-                if fd > val:
-                    break
                 t = signed_year_fraction(fd, fx_env)
+                if not is_passed_time(t):  # ahead by TIME (Task 8b)
+                    break
                 if history_only and not (is_history(t) and i in self._recorded_rates):
                     break  # a live (t = 0) or unrecorded fixing stays open: the settle step never fills
                 label = event_label(i, date=fd)
@@ -3817,9 +4349,12 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
                 if ends:
                     self._settle_dated(self._principal_amount(), self.pay_dates[i], label, fx_env, pending, events)
                     break  # every later fixing is dead (or there is none)
-        # record_passed_fixings banks through the valuation date; the settle step only through its last banked fixing
-        # (Ruling R15): a fixing dated on the valuation date is live and must stay unbanked
-        as_of = val if not history_only else (last_banked if last_banked is not None else st.as_of)
+        # record_passed_fixings banks through the valuation date (and a later date at zero time, Task 8b / R22); the
+        # settle step only through its last banked fixing (Ruling R15): a fixing at t = 0 is live and stays unbanked
+        if history_only:
+            as_of = last_banked if last_banked is not None else st.as_of
+        else:
+            as_of = val if last_banked is None or last_banked <= val else last_banked
         self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)), as_of=as_of)
         self.lifecycle_events = self.lifecycle_events + tuple(events)
         # a banked or dead fixing's recorded rate is spent
@@ -3936,9 +4471,9 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
     def with_history_settled(self, fx_env) -> "TargetRedemptionProduct":
         """Run hook (``quantark.util.run_fixings.settle_history``, Ruling R13): a COPY with every strictly past
         unbanked fixing that has a recorded rate banked at that rate, in order, stopping at the first live (t = 0) or
-        unrecorded one (clip, redemption, dead fixings, FIXING / PAYMENT events), and every pending payment dated on or
-        before ``fx_env``'s valuation paid (dated; numeric cash is paid by :meth:`with_time_elapsed`). Nothing is filled
-        at ``fx_env``'s spot. ``self`` when nothing changes."""
+        unrecorded one (clip, redemption, dead fixings, FIXING / PAYMENT events), and every pending payment whose pay
+        time is strictly past paid (dated; numeric cash is paid by :meth:`with_time_elapsed`; cash due today stays,
+        Task 8a). Nothing is filled at ``fx_env``'s spot. ``self`` when nothing changes."""
         settled = deepcopy(self)
         settled._bank_passed(fx_env, history_only=True)
         if len(settled.lifecycle_events) == len(self.lifecycle_events):
@@ -4157,8 +4692,10 @@ def test_b3_quiet_path_books_the_principal_and_negative_tarf_cash():
     pf, _ = book(tarn)
     rows = _backtest(pf, _flat_path(370, 1.05)).rows
     paid = [r["paid_cash"] for r in rows]
-    # the last fixing (t = 1.0, day 365) is live on day 365 and recorded on day 366 at 1.05; principal on day 367
-    assert paid[366] == 0.0 and paid[367] == 100.0 and rows[-1]["portfolio_value"] == 100.0
+    # the last fixing (t = 1.0, day 365) is live on day 365 and recorded on day 366 at 1.05; its principal is due on
+    # day 367 (1 + 2/365 years: still in the value that day, Task 8a) and booked on day 368
+    assert paid[366] == 0.0 and paid[367] == 0.0 and rows[367]["pending_pv"] == 100.0
+    assert paid[368] == 100.0 and rows[-1]["portfolio_value"] == 100.0
     f = tarf(target=0.20, gearing=2.0, pay_times=LAG2D)
     pf, _ = book(f)
     rows = _backtest(pf, _flat_path(370, 1.05)).rows
@@ -4234,7 +4771,8 @@ def test_business_day_path_records_a_saturday_fixing_at_fridays_spot():
 
 def test_w8_twins_on_the_last_fixing_day_and_after_the_end(monkeypatch):
     """W8 (on main): a numeric participant aged to its maturity is exactly 0.0 and equals its dated twin. A TARN stays
-    in the run after its end (Ruling R19): PV(pending) until its last pay date, then exactly 0.0."""
+    in the run after its end (Ruling R19): PV(pending) through its last pay date (the cash due that day included,
+    Task 8a), then exactly 0.0."""
     dn = dated_note(target=3.0, pay_dates=LAG2)
     nn = _numeric_twin(dn, env())
     pf, (id_d, id_n) = book(dn, nn)
@@ -4245,24 +4783,49 @@ def test_w8_twins_on_the_last_fixing_day_and_after_the_end(monkeypatch):
     numeric_on_last, value_n = on[last][id_n]
     assert numeric_on_last.maturity == 0.0 and numeric_on_last.fixing_times == [0.0]
     assert is_close(on[last][id_d][1], value_n, rel_tol=1e-12)
-    after = on[pd.Timestamp(LAG2[-1])]
+    due = on[pd.Timestamp(LAG2[-1])]                                              # last pay date: cash due today
+    assert due[id_d][1] == due[id_n][1] == 100.0
+    after = on[pd.Timestamp(LAG2[-1]) + pd.Timedelta(days=1)]
     assert after[id_d][1] == after[id_n][1] == 0.0
     assert rows[-1]["portfolio_value"] == rows[-1]["paid_cash"] == 0.0 + 1.0 * 100.0 + 1.0 * 100.0
 
 
-def test_oq1_zero_lag_fixing_day_value_excludes_the_cash_until_it_is_booked():
-    """PINS THE STATUS QUO of open question OQ-1: on its fixing day a zero-lag dated TARN is valued with that day's
-    coupon already paid (resolve banks the live fixing on a copy, spec 5.1) while the run books the coupon only on the
-    next day, when the fixing is recorded (W6 D1/D2): day 30's run value is short of the coupon. Flips if OQ-1 (b)."""
+def test_zero_lag_fixing_day_value_keeps_the_coupon_no_dip():
+    """OQ-1 (b), user 2026-10-10 (Task 8a): on its fixing day a zero-lag dated TARN keeps that day's coupon in its
+    value (pending, due today); the run books it the next day, when the fixing is recorded. No dip."""
     dn = dated_note(target=3.0)                                                   # pay dates = fixing dates
     pf, _ = book(dn)
     rows = _backtest(pf, _flat_path(33, 1.20)).rows
     e30 = env(val=FIX_DATES[0])                                                   # day 30
     banked = copy.deepcopy(dn)
     banked.record_passed_fixings(e30)
-    coupon = banked.lifecycle_events[-1].amount
-    assert rows[30]["paid_cash"] == 0.0 and rows[31]["paid_cash"] == coupon
+    coupon = banked.state.pending[0].amount
+    assert rows[30]["paid_cash"] == 0.0 and rows[30]["pending_pv"] == coupon
+    assert rows[31]["paid_cash"] == coupon and rows[31]["pending_pv"] == 0.0
     assert is_close(rows[30]["portfolio_value"], engine_for(banked, n=2_000).price(banked, e30), rel_tol=1e-12)
+    for d in (30, 31):                                     # flat market: carry only, never a coupon-sized step
+        assert abs(rows[d]["portfolio_value"] - rows[d - 1]["portfolio_value"]) < 0.1 * coupon
+
+
+def test_business_day_clock_weekend_fixing_twins_in_a_backtest(monkeypatch):
+    """OQ-2 (b), user 2026-10-10 (Task 8b): on a BUSINESS_DAYS environment and a weekday path the Saturday fixing is
+    live on the Friday in both forms (W6 Ruling 2), the run does not stop, Monday records it at Friday's spot with
+    gap=False, and the twins agree every day."""
+    saturday = datetime(2026, 8, 15)
+    dn = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
+    nn = _numeric_twin(dn, env(**BUS))
+    pf, (id_d, id_n) = book(dn, nn, fx_env=env(**BUS))
+    seen = _spy_advance(monkeypatch)
+    index = pd.bdate_range(VAL, periods=70)
+    spots = [1.20 + 0.001 * k for k in range(len(index))]
+    engine, _ = _run_backtest(pf, _path(index, spots))
+    friday_spot = spots[list(index).index(pd.Timestamp(2026, 8, 14))]
+    monday = pd.Timestamp(following(saturday))
+    got = [(day.date, f.position_id, f.outcome, f.spot, f.gap) for day in engine.run_fixings.days
+           for f in day.fixings if f.index == 1]
+    assert got == [(monday, id_d, friday_spot, friday_spot, False), (monday, id_n, friday_spot, friday_spot, False)]
+    for _day, values in seen:
+        assert is_close(values[id_d][1], values[id_n][1], rel_tol=1e-12)
 
 
 def test_b6_book_without_target_redemption_books_nothing():
@@ -4278,7 +4841,7 @@ def test_b6_book_without_target_redemption_books_nothing():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py -k "booked_cash or b1 or b2 or b3 or b4 or b5 or business_day or w8 or oq1_zero_lag_fixing_day or b6_book" -n 2 -q`
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py -k "booked_cash or b1 or b2 or b3 or b4 or b5 or business_day or w8 or zero_lag or b6_book" -n 2 -q`
 Expected: collection error `ImportError: cannot import name 'booked_cash'`; after adding only the helper, FAIL with
 `KeyError: 'paid_cash'`.
 
@@ -4461,6 +5024,21 @@ def test_b4_twins_in_one_dynamic_scenario():
         for s in d.lifecycle_events:
             by.setdefault(s.position_id, []).append((s.payoff, s.cashflow, s.terminates_position, s.spot))
         assert by.get(id_dn) == by.get(id_nn) and by.get(id_dt) == by.get(id_nt)
+
+
+def test_business_day_clock_weekend_fixing_twins_in_a_dynamic_scenario():
+    """OQ-2 (b), user 2026-10-10 (Task 8b) on a daily dated DayPath (weekend rows carry Friday's spot, user ruling)
+    under BUSINESS_DAYS: the Saturday fixing is live Friday to Sunday and recorded on Monday in both forms; snapshots
+    identical, and the run does not stop on the Friday."""
+    saturday = datetime(2026, 8, 15)
+    dn = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
+    nn = _numeric_twin(dn, env(**BUS))
+    pf, (id_d, id_n) = book(dn, nn, fx_env=env(**BUS))
+    days = _scenario(pf, _held_path(70, 1.20)).day_results
+    snaps = {pid: [(d.date, s.payoff, s.cashflow, s.spot, s.terminates_position) for d in days
+                   for s in d.lifecycle_events if s.position_id == pid] for pid in (id_d, id_n)}
+    assert snaps[id_d] == snaps[id_n]
+    assert [x[0] for x in snaps[id_d]] == [datetime(2026, 7, 16), datetime(2026, 8, 17)]
 
 
 def test_b6_dynamic_book_without_target_redemption_books_nothing():
@@ -4677,8 +5255,15 @@ Append to `moved_values.txt`:
 #   informational only.
 # B6 / demo references re-captured on the W6 base (Task 12 Step 0): <N> rows of baseline.json -> baseline_w6.json
 # differ, all numeric FX range accruals in the dated runs (W6's own moved values).
-# Open questions OQ-1 / OQ-2 (plan section "Re-plan 2026-10-10 against W6"): <the user's answers, and any value the
-# chosen option moved>.
+# User answers 2026-10-10 (plan section "Re-plan 2026-10-10 against W6"): OQ-1 (b) - cash due today stays in today's
+# value (Task 8a block above: pay-date prices + cash, theta the day before + cash, theta on the pay date - cash, the
+# terminal value on the last pay date = that cash, validation of pay_time 0.0 / pay_date == as_of); OQ-2 (b) - a dated
+# fixing or pay date at zero business time is live (Task 8b block above: ValidationError -> priced like the twin;
+# Ruling R7 superseded). In runs: a payment on a path-aligned pay date is booked on the next instant (B3 principal
+# day 367 -> 368 against the pre-8a plan text; nothing on main asserted it), and a zero-lag fixing day keeps its
+# coupon in the run value (no dip, no false first-day gain).
+# OQ-3 (Friday + Saturday fixings banked together on the Friday): <the user's answer; under (b) Task 8a's two
+# "must not precede as_of" refusals flip to accepted>.
 ```
 Verify the CHANGELOG block has `### Added`, `### Changed`, `### Fixed` with the bullets from Tasks 2–11 and no empty
 heading.
@@ -4702,7 +5287,8 @@ the rebase); only then ff-merge.
 ## Self-review (done while writing)
 
 - **Spec coverage:** §3 → T2/T3; §4.1 → T3/T4; §4.2/§4.3 → T7; §5.1/§5.2 → T6/T7; §5.3 → T3/T4/T6/T7; §5.4 → T3/T6/T7;
-  §6 → T5/T7/T8; §7.2 → T9 (on W6's recorder, as amended by run-fixings spec §6); §7.3 → T10/T11; §8 → T3/T4/T12; §10 P1–P5 → T6; D1/D3/D4/D5 → T7, D2 → T9, D4 business → T8;
+  §6 → T5/T7/T8 (cash rule amended by T8a); §7.2 → T9 (on W6's recorder, as amended by run-fixings spec §6); §7.3 →
+  T10/T11; user OQ-1 (b) → T8a, OQ-2 (b) → T8b; §8 → T3/T4/T12; §10 P1–P5 → T6; D1/D3/D4/D5 → T7, D2 → T9, D4 business → T8;
   B1–B5 → T9/T10/T11, B6 → T1/T10/T11/T12; WARN1 → T3/T4/T6/T7, WARN2 → T6 (P3) and T10 (B2), WARN3 → T6/T7; R1/R2 →
   T3/T4/T7; T1/T2 → T6; C1 → T3/T4/T12; §12 Q7 → T8, Q8 → T11.
 - **Type consistency:** `resolve(fx_env, *, warn_missing_fixings=True)`, `pending_pv(fx_env)`, `matured_before(fx_env)`,
@@ -4711,6 +5297,10 @@ the rebase); only then ff-merge.
   `RunFixingDay(date, fixings, product_events, pending_pv)` and `RecordedFixing(position_id, index, label, outcome,
   spot, gap)` are used with the same names in every task. (Re-plan 2026-10-10: `FxLifecycleDay` / `FxLifecycleEntry`
   no longer exist.)
+- **User answers (2026-10-10):** OQ-1 (b) → Task 8a (spec §3 / §5.1 / §6 cash rule amended; pins in 8a, 9, 10);
+  OQ-2 (b) → Task 8b (Ruling R7 superseded; flips in 8b, twin pins in 9, 10, 11). Task 9's `_record_dated`
+  replacement carries the 8a cash sweep and the 8b passed-by-time loop / `as_of`; no task still pins the old (a)
+  behaviour.
 - **Re-plan self-check (2026-10-10):** every old Task 9–11 requirement is in the mapping table of "Re-plan 2026-10-10
   against W6"; W6 hand-off notes 1–5 map to Task 9 (protocol, hooks, append-only events, R4/R7/R8/R9/Ruling 9, W8),
   Task 10 (W8 twins) and Task 11 (R7 + Q8); W6 Ruling 2's time-based gap flag drives R16 and OQ-2; the user's weekend
