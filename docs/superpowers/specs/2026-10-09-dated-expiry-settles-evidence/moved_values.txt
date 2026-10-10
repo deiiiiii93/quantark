@@ -1,4 +1,6 @@
-Moved values -- branch w8-dated-expiry-settles (from main e4271b6d), user ruling 2026-10-09 option (a)
+Moved values -- branch w8-dated-expiry-settles, user ruling 2026-10-09 option (a) + Q1 ruling 2026-10-10
+Rebased onto main 6f9c6e74 (W6 run fixings); every value below moves vs main 6f9c6e74 (items 1-6 were first
+measured vs e4271b6d and re-checked after the rebase: test_dated_expiry_settles passes unchanged on the rebased tree).
 =========================================================================================================
 
 Certificate anchors, replay goldens (test/replay_golden, test/test_replay_goldens.py), pde_bitwise captures:
@@ -36,9 +38,7 @@ Behaviour changes with no existing test anchored to them
                                  -> "Valuation date (v) must be on or before exercise date (e)"
      OneTouchOption / DoubleOneTouchOption.get_maturity  "end_date (e) must be after start_date (v)"  -> the same new text
    Many routes resolve the terminal settlement timing first and keep raising its own message (unchanged).
-5. QUAD V2 on a dated snowball / Phoenix / KO-reset ON its exercise date: refused before by get_maturity, refused now
-   by compile_contract with "QUAD V2 does not price a contract at its maturity instant ..." (TODO(dated-expiry));
-   its numeric twin keeps its refusal ("Maturity must be positive, got 0.0" from validate()).
+5. QUAD V2 at the maturity instant -- superseded by ruling Q1 (2026-10-10), see "Rebase + Q1 + W6 items" below.
 6. Replay (ProductReplay.recorded maturity) and ensemble (EnsembleBacktestEngine._pricing_q) dividend-pillar readout on
    a DATED product's maturity day: get_maturity now returns 0.0 there, so both map it to the same 1e-8 pillar they used
    when it raised -- readout unchanged (a carry-implied yield refuses T <= 0).
@@ -49,3 +49,52 @@ Checked and NOT moved
   (greeks_on_exercise_date.txt).
 - Accumulator theta on the day before its last observation: 0 in both trees (numerical_theta returns 0.0 when
   current_maturity <= time_bump; the expiry shortcut is not reached) -- accumulator_theta.txt.
+
+Rebase + Q1 + W6 items (2026-10-10), old (main 6f9c6e74) -> new
+---------------------------------------------------------------
+Q1. QUAD V2 settles on the exercise date (compile_contract re-validates with validate(allow_zero_maturity=True); W8's
+    dated T = 0 refusal dropped). Pinned by test_dated_expiry_settles.py
+    ::test_dated_contract_on_its_exercise_date_prices_its_numeric_twins_settled_value[<family>-quad_v2-<spot>]:
+      snowball (KO 103, continuous KI 75)       spot 104 / 90 / 70:      dated raised*, numeric raised** -> 15 / 15 / -30
+      phoenix, memory                           spot 104 / 90 / 75 / 60: dated raised*, numeric raised** -> 1 / 1 / 0 / -40
+      phoenix, no memory                        spot 104 / 90 / 75 / 60: dated raised*, numeric raised** -> 1 / 1 / 0 / -40
+      (dated == numeric == the hand settled value to rel/abs 1e-12 on all 11 cells)
+    KO-reset ABSOLUTE knocked in, QUAD V2 (test_numeric_twin_settles_where_the_dated_contract_is_refused_at_any_date):
+      numeric  spot 104 / 90: raised** -> 3 / -10 (the settled value)
+      dated    raised* -> still raised, now by its pre-existing date-independent refusal ("KnockOutResetSnowballOption
+               cashflow=observation id=observation[0] ...: end_date (2025-02-04) must be after start_date (2026-01-05)",
+               the same refusal it gives mid-life, e.g. 292 days in). NOT changed: not the exercise-date code path.
+      *  "Valuation date (2026-01-05 00:00:00) must be before exercise date (2026-01-05 00:00:00)"
+      ** "Maturity must be positive, got 0.0" (product validate())
+    Unchanged: constructing SnowballOption / PhoenixOption with maturity 0.0 still raises "Maturity must be positive"
+    (test_snowball_helpers, test_phoenix_option, test_constructing_a_contract_with_maturity_zero_is_still_refused); a
+    negative maturity still raises on V2 (test_quad_v2_refuses_a_numeric_contract_aged_past_its_maturity).
+    API: validate() of BaseEquityOption / SnowballOption / PhoenixOption / KnockOutResetSnowballOption takes a
+    keyword-only allow_zero_maturity=False.
+
+W6 a. Replay tracker (AutocallableLifecycleTracker.product_for_pricing) no longer floors a numeric run participant at 1e-8.
+    Short numeric record Asian (fixings day 4 / 8 at 105 / 109, K 100, maturity 10/365), pricing copy on T = day 10
+    (test_run_fixings_runs.py::test_replay_numeric_participant_on_its_maturity_is_zero_and_equals_the_dated_twin):
+      maturity 1e-08 -> 0.0;  price 6.9999999965 -> 7.0 (= the dated twin's settled value; the dated copy raised*)
+    Replay dividend-pillar readout (ProductReplay recorded maturity): 0.0 / negative -> the same 1e-8 pillar
+    (unchanged readout). Replay goldens: none moved.
+W6 b. PnL explain check_contract_roll: a participant's expected maturity is with_time_elapsed's (snapped, never floored).
+    Backtest explain of the short twins, step day 9 -> day 10 = T
+    (test_run_fixings_runs.py::test_equity_backtest_explain_a_numeric_participant_reaching_its_maturity):
+      numeric range accrual: raised "alive product maturity 0.0 is not 0.0027397260273972646 rolled by 1 days
+                             (expected 1e-08 ...)" -> explains; T-step total 0.00136976919175 (all time), = dated
+      numeric record Asian:  raised (same)                                        -> T-step total 0.000958838434224, = dated
+      the dated twins: raised* on main -> the same rows
+    Error text for a participant whose maturity does not roll: "... floored at 1e-08)" -> "... snapped to 0.0 at its
+    maturity)".
+W6 c. test_run_fixings.py::test_ageing_to_maturity_snaps_and_prices_as_settled asserts the dated twin again (range
+    accrual, exercise day 10): dated raised* -> 10.0 = the numeric twin = 100 x 10%.
+W6 d. Backtest twins through T and T + 1
+    (test_run_fixings_runs.py::test_equity_backtest_twins_settle_on_the_exercise_date_and_refuse_the_day_after):
+      day 10 (T): range accrual dated raised* -> 10.0 (numeric 10.0 unchanged); Asian dated raised* -> 7.0 (numeric 7.0)
+      day 11 (T + 1): both twins raise ValidationError (unchanged; dated: terminal settlement timing of a past date,
+      numeric: terminal determination time -0.00274), so test_equity_backtest_twins_refuse_a_run_past_the_maturity
+      is kept as is.
+    NOT changed (pre-existing on main, both forms): a replay whose path reaches a range accrual / Asian's maturity day
+    fails in AutocallableLifecycleTracker.settle_maturity_if_due ("AsianOption.get_payoff() got an unexpected keyword argument
+    'knocked_in'"): cash for range accruals or Asians at expiry inside runs is out of scope (run-fixings spec §10).

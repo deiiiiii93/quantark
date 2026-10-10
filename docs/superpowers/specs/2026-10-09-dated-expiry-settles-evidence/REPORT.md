@@ -90,7 +90,7 @@ See `moved_values.txt`. No certificate anchor, replay golden or pde_bitwise capt
 
 - Heston analytical / MC / PDE and local-vol MC European: "maturity must be positive".
 - Local-vol, Heston and SLV barrier MC; Heston and SLV barrier PDE: "t_grid must be strictly increasing".
-- QUAD V2 snowball / Phoenix / KO-reset.
+- QUAD V2 snowball / Phoenix / KO-reset. (Settles since ruling Q1, 2026-10-10: §7.)
 - Unchanged, not expiry-caused: Heston Phoenix PDE with memory coupons; QUAD V2 on a dated KO-reset whose
   schedule-1 records are in the past.
 
@@ -98,6 +98,7 @@ See `moved_values.txt`. No certificate anchor, replay golden or pde_bitwise capt
 
 - **Q1 QUAD V2:** let V2 accept an aged copy with maturity == 0.0 and drop the dated refusal. A runtime patch
   (`proposal_quad_v2.py`) priced the settled value exactly in both forms on all 11 cells. Recommend yes.
+  **Ruled yes 2026-10-10; implemented, §7.**
 - **Q2 vol-model routes:** exact settlement at T = 0 (payoff at the spot × settlement discount factor) for the eight
   refusing routes, as the BSM engines have. Recommend yes, as a follow-up.
 - **Q3 DCN on its final observation date:** both engines refuse ("DCN grid has no steps", "tau must be positive");
@@ -107,3 +108,39 @@ See `moved_values.txt`. No certificate anchor, replay golden or pde_bitwise capt
 
 Note: numerical theta returns 0.0 whenever maturity ≤ the time bump, so last-day theta is 0 in both forms on both
 trees (`accumulator_theta.txt`), unchanged by this branch.
+
+## 7. Rebase + Q1 + W6 items (2026-10-10)
+
+**Rebase** onto main 6f9c6e74 (W6 run fixings; `pre-rebase-w8` tags the old head). One conflict, the
+`product_replay.py` imports (W8's `is_zero` + W6's `run_fixings`); CHANGELOG merged cleanly (W6 and W8 entries both
+kept). After the rebase `test_dated_expiry_settles`, `test_run_fixings`, `test_run_fixings_runs`: 330 passed.
+
+**Q1 (user ruling 2026-10-10): QUAD V2 settles on the exercise date.** `compile_contract` re-validates its copy with
+`validate(allow_zero_maturity=True)` (new keyword on `BaseEquityOption` / `SnowballOption` / `PhoenixOption` /
+`KnockOutResetSnowballOption`; default False, so construction still refuses maturity 0.0, and a negative maturity is
+refused either way); W8's dated T = 0 refusal is removed. Unlike the runtime patch (`proposal_quad_v2.py`, which
+validated as maturity 1.0 and rebuilt the contract terminal at 2.0), the copy keeps its own terminal period
+(`accrued_offset + 0.0`). All 11 snowball / Phoenix V2 cells: dated == numeric == settled to 1e-12. The knocked-in
+KO-reset: the numeric twin now settles on V2 (3, -10); the dated one keeps its refusal, which is NOT the exercise-date
+path -- a schedule-1 record in the past fails settlement resolution ("end_date ... must be after start_date") at any
+valuation date (measured mid-life, 292 days in; there the numeric twin prices 2.95303 on V2, 2.95289 on V1). Left as is.
+
+**W6 items.**
+- a. The replay tracker ages a participant with `with_time_elapsed` and no 1e-8 floor (plan Ruling 12 superseded):
+  0.0 on its maturity day, equal to the dated twin (numeric Asian copy on T 6.9999999965 -> 7.0); negative past it,
+  refused as the dated twin is. The replay dividend-pillar readout maps 0.0 / negative to the same 1e-8 pillar.
+- b. `check_contract_roll` expects a participant's `with_time_elapsed` maturity; an explain step ending on the
+  maturity explains (it raised) with the dated twin's rows.
+- c. `test_ageing_to_maturity_snaps_and_prices_as_settled` asserts the dated twin again.
+- d. Backtest twins (range accrual, Asian) through T: both settle (10.0, 7.0) on T; a run to T + 1 refuses both
+  (`ValidationError`), so `test_equity_backtest_twins_refuse_a_run_past_the_maturity` is kept. The replay cannot reach
+  T with an Asian in either form, on main too: `AutocallableLifecycleTracker.settle_maturity_if_due` calls
+  `get_payoff(spot, env, knocked_in=...)` (TypeError). Cash for range accruals / Asians at expiry inside runs is
+  out of scope (run-fixings spec §10); the replay test therefore checks the pricing copy on T, not the settlement.
+
+No certificate anchor, replay golden or pde_bitwise capture moved. Moved values: `moved_values.txt`, last section.
+
+Runs (`-n 2`): QUAD (all `test_*quad*`) + snowball / Phoenix / KO-reset product and lifecycle: 637 passed; replay
+golden + replay + pnlexplain + run fixings + this test file: 681 passed, 4 skipped (golden frames recorded empty);
+backtest, lifecycle, trackers, missing fixings, simulation, FX backtest / dynamic: 794 passed; intraday + accrual
+time + theta boundary: 754 passed.

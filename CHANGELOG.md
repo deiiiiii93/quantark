@@ -168,8 +168,26 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   10.0, a snowball knocked out at 104 15.0. A valuation strictly AFTER the exercise date still raises (now "must be
   on or before exercise date"). Routes with no T = 0 value in either form keep refusing, with `TODO(dated-expiry)`:
   the Heston analytical / MC / PDE and local-vol MC European engines ("maturity must be positive"), the local-vol,
-  Heston and SLV barrier MC and Heston / SLV barrier PDE (`t_grid must be strictly increasing`), and QUAD V2 (it refuses the numeric twin in `validate()`, so it refuses the dated contract on
-  its exercise date too). The replay / ensemble dividend-pillar readout on a dated maturity day is unchanged (1e-8).
+  Heston and SLV barrier MC and Heston / SLV barrier PDE (`t_grid must be strictly increasing`). The replay /
+  ensemble dividend-pillar readout on a dated maturity day is unchanged (1e-8).
+- QUAD V2 settles on the exercise date (user ruling Q1, 2026-10-10): its compile re-validates its copy with the new
+  `validate(allow_zero_maturity=True)` (`BaseEquityOption`, `SnowballOption`, `PhoenixOption`,
+  `KnockOutResetSnowballOption`), so a numeric snowball / Phoenix / KO-reset aged to exactly `maturity == 0.0` prices
+  its settled value (was `Maturity must be positive, got 0.0`), and so does the dated twin on its exercise date (it
+  raised). Snowball KO 103 / continuous KI 75: 15, 15, -30 at spots 104, 90, 70; Phoenix (memory and not): 1, 1, 0,
+  -40 at 104, 90, 75, 60. Constructing a contract with maturity 0.0 is still refused, and a negative maturity is
+  refused everywhere. The knocked-in KO-reset's numeric twin now settles on V2 (3 at 104, -10 at 90) while the dated
+  KO-reset keeps its pre-existing refusal on V2 (a schedule-1 record in the past fails settlement resolution, at any
+  valuation date).
+- A numeric run-fixings participant (range accrual, record Asian) is no longer floored at a 1e-8 maturity in the
+  replay (run-fixings plan Ruling 12, superseded now the dated twin settles on its exercise date): on its maturity
+  day it is exactly 0.0 and prices its dated twin's settled value (numeric Asian pricing copy on T: 6.9999999965 ->
+  7.0, = the dated twin); past it the maturity is negative and pricing refuses, as the dated twin past its date
+  does. The replay dividend-pillar readout maps 0.0 / negative to the same 1e-8 pillar (unchanged). PnL explain's
+  `check_contract_roll` expects a participant's `with_time_elapsed` maturity (snapped, not floored), so an explain
+  step ending on its maturity explains, equal to the dated twin (it raised `alive product maturity 0.0 is not ...
+  rolled ...`). A backtest of the twins through T values both at the settled value on T; a run to T + 1 is refused
+  for both, as before.
 - Asian MC at maturity 0.0 averages the recorded fixings and the live one at the spot (as the analytical engine
   does) instead of the spot alone: 11 fixings 101..111 recorded, spot 110, strike 100: 10.0 -> 6.3333.
 - Accumulator analytical and MC at maturity 0.0 settle the observation at the maturity instant on the spot (as at
