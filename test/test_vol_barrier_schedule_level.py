@@ -115,27 +115,32 @@ _PAYOFF_IDS = [f"{r}-{k}-{f}" for r, k, f in PAYOFF_CASES]
 @pytest.mark.parametrize("route,kind,form", PAYOFF_CASES, ids=_PAYOFF_IDS)
 def test_a_common_record_payoff_and_level_are_the_terms_priced(route, kind, form):
     """Every record at level L paying 4.5, ``product.barrier`` B and ``product.rebate`` 3. A knock-out pays the hit
-    record's payoff: the contract booked at barrier L with rebate 4.5. A knock-in's rebate is paid when no
-    observation hits: ``product.rebate``, as the Black-Scholes MC pays it -- the contract booked at barrier L with
-    rebate 3."""
+    record's payoff: the contract booked at barrier L with rebate 4.5. A knock-in has one rebate, paid when no
+    observation hits: a record paying anything else is refused on every route (W18b, user ruling 2026-10-10 (a);
+    ``test_knock_in_record_payoff_refused``)."""
     _, _, barrier, level = KINDS[kind]
+    if kind in _KI:
+        with pytest.raises(ValidationError, match=r"a knock-in has one rebate \(3\.0\); a schedule record pays 4\.5"):
+            _price(route, _product(kind, form, barrier, level, payoff=4.5), 10)
+        return
     priced = _price(route, _product(kind, form, barrier, level, payoff=4.5), 10)
-    expected_rebate = 4.5 if kind in _KO else REBATE
-    booked = _price(route, _product(kind, form, level, level, rebate=expected_rebate), 10)
+    booked = _price(route, _product(kind, form, level, level, rebate=4.5), 10)
     assert priced == booked               # bitwise
 
 
 @pytest.mark.parametrize("kind", list(KINDS))
 def test_the_black_scholes_mc_reads_the_record_terms_the_same_way(kind):
     """The reference reading, measured on the Black-Scholes barrier MC (numeric form, day 10): the record level and
-    a knock-out's record payoff are priced; a knock-in's no-hit rebate is ``product.rebate``."""
+    a knock-out's record payoff are priced; a knock-in record paying other than its rebate is refused (W18b)."""
     _, _, barrier, level = KINDS[kind]
     engine = lambda: BarrierOptionMCEngine(params=MCParams(seed=11, num_paths=512, time_steps=73))  # noqa: E731
     e = env(100.0, _on(10))
+    if kind in _KI:
+        with pytest.raises(ValidationError, match=r"a knock-in has one rebate \(3\.0\); a schedule record pays 4\.5"):
+            _quiet(lambda: engine().price(_aged(_product(kind, "numeric", barrier, level, payoff=4.5), 10), e))
+        return
     priced = _quiet(lambda: engine().price(_aged(_product(kind, "numeric", barrier, level, payoff=4.5), 10), e))
-    expected_rebate = 4.5 if kind in _KO else REBATE
-    booked = _quiet(lambda: engine().price(
-        _aged(_product(kind, "numeric", level, level, rebate=expected_rebate), 10), e))
+    booked = _quiet(lambda: engine().price(_aged(_product(kind, "numeric", level, level, rebate=4.5), 10), e))
     assert priced == pytest.approx(booked, **TOL)
 
 

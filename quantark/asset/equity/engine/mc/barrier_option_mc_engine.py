@@ -7,6 +7,7 @@ from typing import Optional, Union, Tuple
 
 import numpy as np
 
+from quantark.asset.equity.engine.barrier_schedule_rules import refuse_knock_in_record_payoff
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -176,6 +177,7 @@ class BarrierOptionMCEngine(BaseEngine):
                 f"BarrierOptionMCEngine only supports BarrierOption, "
                 f"got {type(product).__name__}"
             )
+        refuse_knock_in_record_payoff(product)
         validate_settlement_capability(self, product, lifecycle_state)
         fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
         if fixed_pv is not None:

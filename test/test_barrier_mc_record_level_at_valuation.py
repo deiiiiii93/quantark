@@ -26,6 +26,7 @@ from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.asset.equity.product.option import BarrierOption
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
 from quantark.util.enum import BarrierType, ObservationType, OptionType
+from quantark.util.exceptions import ValidationError
 
 #: (barrier type, option type, product.barrier, the records' level, (spot between the two, beyond both, inside both))
 KINDS = {
@@ -140,12 +141,17 @@ def test_the_exercise_date_value_equals_the_black_scholes_pde(route, kind, form)
 @pytest.mark.parametrize("kind", list(KINDS))
 @pytest.mark.parametrize("form", ["dated", "numeric"])
 def test_the_exercise_date_knock_out_pays_the_record_payoff(route, kind, form):
-    """Records paying 4.5 (``product.rebate`` 5): a knock-out hit on the exercise date pays 4.5; a knock-in's no-hit
-    rebate stays ``product.rebate`` (no record fired)."""
+    """Records paying 4.5 (``product.rebate`` 5): a knock-out hit on the exercise date pays 4.5. A knock-in has one
+    rebate: a record paying anything else is refused (user ruling 2026-10-10 (a),
+    ``test_knock_in_record_payoff_refused``)."""
     _, _, barrier, level, spots = KINDS[kind]
     factory, grid = MC_ROUTES[route]
     for spot in spots:
         e = env(spot, EXERCISE, grid=grid)
+        if "_in_" in kind:
+            with pytest.raises(ValidationError, match=r"a knock-in has one rebate \(5\.0\); a schedule record pays 4\.5"):
+                _quiet(lambda: factory().price(_settled(kind, form, barrier, level, "single", payoff=4.5), e))
+            continue
         priced = _quiet(lambda: factory().price(_settled(kind, form, barrier, level, "single", payoff=4.5), e))
         assert priced == pytest.approx(_hand(kind, spot, level, ko_cash=4.5), **TOL), spot
 

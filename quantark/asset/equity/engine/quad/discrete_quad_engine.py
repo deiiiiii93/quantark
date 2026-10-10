@@ -9,6 +9,7 @@ from typing import Optional
 
 import numpy as np
 
+from quantark.asset.equity.engine.barrier_schedule_rules import refuse_knock_in_record_payoff
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.quad.european_quad_engine import EuropeanQuadEngine
@@ -17,6 +18,7 @@ from quantark.asset.equity.engine.quad.term_inputs import build_quad_term_params
 from quantark.asset.equity.engine.quad.quad_core import QuadratureCore
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option import BarrierOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
@@ -56,6 +58,8 @@ class DiscreteQuadEngine(BaseEngine):
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
         adapter = resolve_quad_adapter(product)
+        if isinstance(product, BarrierOption):
+            refuse_knock_in_record_payoff(product)      # one rebate per knock-in, as on every route (W18b)
         if knock_in_carried(product) and product.get_maturity(pricing_env) > 0.0:
             # a knock-in carried as triggered (spec 2026-10-07 R4): the adapter's own triggered value, its vanilla
             # (vanilla + rebate x DF - the knock-out core, which pays the rebate once knocked in)

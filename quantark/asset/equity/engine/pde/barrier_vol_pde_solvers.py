@@ -15,6 +15,7 @@ from typing import Optional
 
 import numpy as np
 
+from quantark.asset.equity.engine.barrier_schedule_rules import refuse_knock_in_record_payoff
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver, barrier_expiry_outcome
@@ -55,6 +56,7 @@ def _check(name, product):
         if len(barriers) > 1 or len({r.payoff for r in recs}) > 1:
             raise ValidationError("per-observation ObservationSchedule (varying barriers/payoffs) is out of scope for v1")
     refuse_non_first_hit(name, product)
+    refuse_knock_in_record_payoff(product)
 
 
 def _bkw(product):

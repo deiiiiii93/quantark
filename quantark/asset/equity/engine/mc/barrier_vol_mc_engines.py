@@ -13,6 +13,7 @@ from typing import Optional
 
 import numpy as np
 
+from quantark.asset.equity.engine.barrier_schedule_rules import refuse_knock_in_record_payoff
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
@@ -67,6 +68,7 @@ def _check_barrier(engine_name: str, product) -> None:
         raise PricingError(f"{engine_name} supports BarrierOption only")
     _reject_nonuniform_schedule(product)
     refuse_non_first_hit(engine_name, product)
+    refuse_knock_in_record_payoff(product)
 
 
 def _refuse_ended(engine_name: str, product, lifecycle_state=None) -> None:

@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from quantark.asset.equity.engine.barrier_schedule_rules import refuse_knock_in_record_payoff
 from quantark.asset.equity.engine.pde.grid.events import DiscreteEvent, EventOp, EventRecord, fold_decision
 from quantark.util.enum import ObservationAggregation, ObservationType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_close
 
 from ..prepare import CompositeProblem, Operation, TerminalOutcome, prepare
 from .base import FamilyAdapter
@@ -235,11 +235,7 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
             raise ValidationError(
                 "a knock-in is priced as participation x vanilla + rebate - knock-out, which holds only under "
                 f"first-hit monitoring; aggregation {schedule.aggregation_mode.value} is refused (spec 3C decision 8)")
-        for rec in schedule.records:
-            if rec.payoff is not None and not is_close(rec.payoff, product.rebate):
-                raise ValidationError(
-                    f"a knock-in has one rebate ({product.rebate}); a schedule record pays {rec.payoff} "
-                    "(spec 3C §5.2 (a))")
+        refuse_knock_in_record_payoff(product)      # one rule for every route (W18b)
 
     def composite(self, product, env, request, lifecycle_state):
         op = request.operation
