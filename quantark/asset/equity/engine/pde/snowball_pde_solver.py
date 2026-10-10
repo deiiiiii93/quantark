@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 import numpy as np
 import scipy.sparse as sp
 
-from scipy.special import ndtr
+from scipy.special import log_ndtr, ndtr
 
 _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
@@ -146,9 +146,8 @@ class _ContinuousKIFirstPassage:
                 ab = a[band]
                 m = mu_e * dt - ab
                 t = m / s_step
-                bracket = m * ndtr(t) + s_step * np.exp(-0.5 * t * t) / _SQRT_2PI
                 G = np.zeros(len(s_vec), dtype=float)
-                G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
+                G[band] = self._reflection_profile(mu_e, dt, ab, m, t, s_step, sig2)
                 live = np.flatnonzero(a > 0.0)
                 # lambda is a SLOPE, and the grid has to resolve it. The nodal
                 # mask has just set d to zero on the breached side, so on the
@@ -158,14 +157,47 @@ class _ContinuousKIFirstPassage:
                 # barrier. Sample no closer than half a cell -- a resolution
                 # floor, not a tuned constant. Barrier-aligned grids (every 1-D
                 # layout) already clear it, so their sample is unchanged.
+                # The cell is the one AT the barrier: the two live nodes nearest it.
+                # On a down barrier those are live[0], live[1]; on an up (reverse)
+                # barrier the live side lies below it, so the lowest-index nodes are
+                # the far edge's and their "cell" was negative -- the floor never
+                # acted, and a node a few thousandths of a cell below the barrier
+                # sent lambda, and V0 with it, off by ~x8 per step (W7b).
                 if live.size > 1:
-                    resolved = live[a[live] >= 0.5 * (a[live[1]] - a[live[0]])]
+                    near = live[np.argsort(a[live], kind="stable")]
+                    resolved = live[a[live] >= 0.5 * (a[near[1]] - a[near[0]])]
                     if resolved.size:
                         live = resolved
                 k_star = int(live[np.argmin(np.abs(a[live] - s_step))])
                 result = (G, k_star, float(a[k_star]))
         self._cache[key] = result
         return result
+
+    @staticmethod
+    def _reflection_profile(mu_e, dt, ab, m, t, s_step, sig2):
+        """``exp(-2 mu_e a / sig2) * [m Phi(m/s) + s phi(m/s)]`` on the band nodes.
+
+        The product is bounded -- completing the square, exp(-2 mu_e a / sig2)
+        phi(m/s) = phi((mu_e dt + a) / s) -- but on an up barrier mu_e < 0 and a
+        near-zero-variance column (the 2-D v = 0 column floors sig2 at 1e-10)
+        overflows the factor to inf while the bracket underflows to 0: inf x 0 =
+        NaN. Where the exponent exceeds ``Tolerance.EXP_MAX`` the same closed form
+        is evaluated in one exponent (W7b); everywhere else the arithmetic is the
+        plain product's, bit for bit.
+        """
+        expo = -2.0 * mu_e * ab / sig2
+        out = np.empty_like(ab)
+        plain = expo <= Tolerance.EXP_MAX
+        if plain.any():
+            tp = t[plain]
+            bracket = m[plain] * ndtr(tp) + s_step * np.exp(-0.5 * tp * tp) / _SQRT_2PI
+            out[plain] = np.exp(expo[plain]) * bracket
+        big = ~plain
+        if big.any():
+            u = (mu_e * dt + ab[big]) / s_step
+            out[big] = (m[big] * np.exp(expo[big] + log_ndtr(t[big]))
+                        + s_step * np.exp(-0.5 * u * u) / _SQRT_2PI)
+        return out
 
     def step_correction(
         self, t_idx: int, s_vec: np.ndarray, barrier: float, d: np.ndarray
