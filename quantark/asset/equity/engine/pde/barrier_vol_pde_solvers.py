@@ -3,10 +3,10 @@
 ``LocalVolBarrierPDESolver`` marches on the shared 1D core (spec 3C §5.3). The Heston and SLV
 solvers are thin wrappers over the ``quantark.volmodels`` 2D ADI barrier kernels, pricing the
 existing ``BarrierOption``: continuous monitoring by per-step injection, discrete monitoring at the
-observation nodes; ``participation_rate`` is applied once; a per-observation
-``observation_schedule`` is rejected (v1). Below the kernels' vol-of-vol floor the variance is deterministic and both
-solvers march the 1D local-vol limit sigma_loc(S, t) = L(S, t) sqrt(v(t)) on the core instead. Deterministic — no MC
-inside PDE.
+observation nodes (a dated schedule resolved against the environment, W12); ``participation_rate`` is
+applied once; a per-observation varying ``observation_schedule`` is rejected (v1). Below the kernels'
+vol-of-vol floor the variance is deterministic and both solvers march the 1D local-vol limit
+sigma_loc(S, t) = L(S, t) sqrt(v(t)) on the core instead. Deterministic — no MC inside PDE.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver, barrier_expiry_outcome
 from quantark.asset.equity.engine.pde.core.adapters.local_vol import LocalVolBarrierAdapter
 from quantark.asset.equity.engine.pde.local_vol_surface import LocalVolSurfaceMixin
+from quantark.asset.equity.engine.vol_barrier_schedule import discrete_observation_times
 from quantark.asset.equity.engine.settlement_support import (
     at_exercise_instant,
     resolve_terminal_timing,
@@ -56,20 +57,15 @@ def _bkw(product):
                 pay_at_hit=bool(product.pay_at_hit))
 
 
-def _obs_dates(product, T):
+def _obs_dates(product, T, env):
     """(continuous, dates): CONTINUOUS -> (True, None); EXPIRY -> (False, []) (terminal only);
-    DISCRETE -> (False, observation_dates)."""
+    DISCRETE -> (False, the observation times: a numeric schedule's ``observation_dates``, a dated
+    schedule's times resolved against ``env`` (W12))."""
     if product.observation_type == ObservationType.CONTINUOUS:
         return True, None
     if product.observation_type == ObservationType.EXPIRY:
         return False, [float(T)]  # single observation AT maturity (the terminal knock-out)
-    dates = product.observation_dates or []
-    if not dates:
-        raise ValidationError("discrete monitoring requires observation_dates")
-    for d in dates:
-        if d > T + 1e-12:
-            raise ValidationError(f"observation date {d} exceeds maturity {T}")
-    return False, list(dates)
+    return False, discrete_observation_times(product, env, T)
 
 
 def _apply_participation(product, price_of_rebate):
@@ -189,8 +185,8 @@ class _Heston2DBarrierBase(BaseEngine):
                 return barrier_expiry_outcome(product, pricing_env, greeks=True)
         return super().calculate_greeks(product, pricing_env, lifecycle_state=lifecycle_state)
 
-    def _observe_taus(self, product, T):
-        continuous, dates = _obs_dates(product, T)
+    def _observe_taus(self, product, T, env):
+        continuous, dates = _obs_dates(product, T, env)
         return continuous, (None if continuous else [T - d for d in dates])
 
     def _deterministic_limit(self, product, env, leverage=None) -> float:
@@ -223,7 +219,7 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
         market = TermMarketContext.from_env(
             env, t_grid, ref_strike=None
         )
-        continuous, observe_taus = self._observe_taus(product, T)
+        continuous, observe_taus = self._observe_taus(product, T, env)
         is_call = product.option_type == OptionType.CALL
 
         def price_of_rebate(reb):
@@ -269,7 +265,7 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
         market = TermMarketContext.from_env(
             env, t_grid, ref_strike=None
         )
-        continuous, observe_taus = self._observe_taus(product, T)
+        continuous, observe_taus = self._observe_taus(product, T, env)
         is_call = product.option_type == OptionType.CALL
 
         def price_of_rebate(reb):

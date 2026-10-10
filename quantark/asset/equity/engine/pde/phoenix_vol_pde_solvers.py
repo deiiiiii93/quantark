@@ -184,6 +184,9 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         from quantark.asset.equity.engine.pde.grid import resolve_bound_layout
 
         market = self.market_snapshot(product, env)
+        # the environment grid_request resolves date schedules against, as the
+        # 1D adapter's solve state stashes it (W12)
+        self._stash_grid_request_env(env)
         request = self.grid_request(product, market, float(T))
         layout = resolve_bound_layout(
             self._layer_binder(), self._frozen_x_layout, request, market
@@ -210,6 +213,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
             return clone
         tau = product.get_maturity(pricing_env)
         market = clone.market_snapshot(product, pricing_env)
+        clone._stash_grid_request_env(pricing_env)
         request = clone.grid_request(product, market, tau)
         clone._frozen_x_layout = clone._layer_binder().bind(request, market)
         return clone

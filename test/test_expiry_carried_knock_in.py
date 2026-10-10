@@ -195,10 +195,10 @@ DOUBLE_PRODUCT = ("double_knock_in_call", _double_knock_in,
                   _knock_in_value(_CALL, lambda s: s <= 80.0 or s >= 130.0), (110.0, 90.0, 135.0))
 
 #: (route, product) cells whose DAY-BEFORE price is refused for a reason that is not the exercise date (pre-existing,
-#: T > 0): the Heston and SLV barrier kernels read a discrete schedule from ``observation_dates`` only ("discrete
-#: monitoring requires observation_dates"). (The BS barrier MC's one-day deep in-the-money put, once refused by the
-#: European MC engine's hard lower-bound check, prices since that check became statistical: W13.)
-_BEFORE_REFUSED = {(route, "up_in_call_discrete") for route in ("heston_mc", "heston_pde", "slv_mc", "slv_pde")}
+#: T > 0). None left: the BS barrier MC's one-day deep in-the-money put prices since the European MC engine's
+#: lower-bound check became statistical (W13), and the Heston and SLV barrier MC / PDE cells on the dated discrete
+#: schedule price since they resolve it against the environment (W12).
+_BEFORE_REFUSED = set()
 
 BARRIER_CASES = ([(route, factory, state_ok, *product) for route, factory, state_ok in BARRIER_ROUTES
                   for product in BARRIER_PRODUCTS]
@@ -369,10 +369,8 @@ AUTOCALL_REFUSED = {
     ("phoenix", "slv_pde"): ("dated", "numeric"),
 }
 #: (kind, route) -> forms whose DAY-BEFORE price is refused for a reason that is not the exercise date (pre-existing,
-#: T > 0): the 2D autocallable PDE kernels cannot resolve a dated knock-out schedule
+#: T > 0). (The 2D Heston / SLV snowball and Phoenix PDE cells left in W12: they resolve a dated knock-out schedule.)
 AUTOCALL_BEFORE_REFUSED = {
-    ("snowball", "heston_pde"): ("dated",), ("snowball", "slv_pde"): ("dated",),
-    ("phoenix_plain", "heston_pde"): ("dated",), ("phoenix_plain", "slv_pde"): ("dated",),
     # (a dated KO-reset with schedule-1 records in the past prices on the PDE and QUAD V2 since W11:
     # test_ko_reset_past_records.py)
 }

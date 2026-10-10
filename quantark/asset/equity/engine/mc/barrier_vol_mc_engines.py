@@ -2,9 +2,9 @@
 
 Thin wrappers over the ``quantark.volmodels`` barrier MC kernels: they resolve the per-step
 forward rate/carry from the curves, resolve continuous vs discrete monitoring, price the
-``BarrierOption``, and apply ``participation_rate`` once. Per-observation ``observation_schedule``
-is out of scope for v1 and rejected. Mirrors the European ``LocalVolMCEngine`` / ``HestonMCEngine``
-/ ``HestonSLVMCEngine`` wrappers.
+``BarrierOption``, and apply ``participation_rate`` once. A dated schedule is resolved against the
+environment (W12); per-observation varying barriers/payoffs are out of scope for v1 and rejected.
+Mirrors the European ``LocalVolMCEngine`` / ``HestonMCEngine`` / ``HestonSLVMCEngine`` wrappers.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
 from quantark.asset.equity.engine.mc.barrier_option_mc_engine import barrier_expiry_value
+from quantark.asset.equity.engine.vol_barrier_schedule import discrete_observation_times
 from quantark.asset.equity.engine.settlement_support import (
     at_exercise_instant,
     pending_receivable_pv,
@@ -72,24 +73,21 @@ def _refuse_ended(engine_name: str, product, lifecycle_state=None) -> None:
             "engine of the same model")
 
 
-def _monitoring(product: BarrierOption, t_grid: np.ndarray):
+def _monitoring(product: BarrierOption, t_grid: np.ndarray, env: PricingEnvironment):
     """Return (continuous: bool, observe_idx: Optional[np.ndarray]) snapping discrete dates to grid.
 
     ObservationType.EXPIRY (barrier checked only at maturity) is discrete monitoring at the
-    single terminal node; CONTINUOUS uses the Brownian bridge; DISCRETE snaps observation_dates.
+    single terminal node; CONTINUOUS uses the Brownian bridge; DISCRETE snaps the observation
+    times -- a numeric schedule's ``observation_dates``, a dated schedule's times resolved
+    against ``env`` (W12) -- to the grid.
     """
     if product.observation_type == ObservationType.CONTINUOUS:
         return True, None
     if product.observation_type == ObservationType.EXPIRY:
         return False, np.asarray([t_grid.size - 1], dtype=int)  # terminal node only
-    dates = product.observation_dates or []
-    if not dates:
-        raise ValidationError("discrete monitoring requires observation_dates")
+    dates = discrete_observation_times(product, env, float(t_grid[-1]))
     idx = []
-    T = float(t_grid[-1])
     for d in dates:
-        if d > T + 1e-12:
-            raise ValidationError(f"observation date {d} exceeds maturity {T}")
         idx.append(int(np.argmin(np.abs(t_grid - d))))
     return False, np.unique(np.asarray(idx, dtype=int))
 
@@ -238,7 +236,7 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
             participation = float(product.participation_rate)
             return _finish_price(self, participation * unit, participation * se, product, env, lifecycle_state,
                                  settlement_scale)
-        continuous, observe_idx = _monitoring(product, t_grid)
+        continuous, observe_idx = _monitoring(product, t_grid, env)
         unit, se = price_barrier_lv_mc(float(env.spot), float(product.strike),
                                        product.option_type == OptionType.CALL, lv,
                                        np.diff(t_grid), r_fwd, carry_fwd, float(env.get_discount_factor(T)),
@@ -284,7 +282,7 @@ class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
-        continuous, observe_idx = _monitoring(product, t_grid)
+        continuous, observe_idx = _monitoring(product, t_grid, env)
         unit, se = price_barrier_heston_mc(float(env.spot), float(product.strike),
                                            product.option_type == OptionType.CALL, self.model_params,
                                            np.diff(t_grid), r_fwd, carry_fwd, float(env.get_discount_factor(T)),
@@ -336,7 +334,7 @@ class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
-        continuous, observe_idx = _monitoring(product, t_grid)
+        continuous, observe_idx = _monitoring(product, t_grid, env)
         unit, se = price_barrier_slv_mc(float(env.spot), float(product.strike),
                                         product.option_type == OptionType.CALL, self.model_params,
                                         self.leverage_surface, np.diff(t_grid), r_fwd, carry_fwd,
