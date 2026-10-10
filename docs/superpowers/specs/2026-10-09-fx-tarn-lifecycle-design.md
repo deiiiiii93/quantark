@@ -3,7 +3,22 @@
 Status: **rev 2**, 2026-10-09, workstream W4b, branch `w4b-tarn-spec` from main `dcea77b6`. Rev 1 (`189df24a`)
 applied decision **A1** and asked Q1–Q6. Rev 2 folds in the user's answers (§1.2), adds the dated TARN/TARF (§4) and
 the ageing of both products in the FX backtest and FX dynamic scenario (§7), and replaces rev 1's open questions with
-the new ones this investigation raised (§12). No library code is changed by this spec.
+the new ones this investigation raised (§12). No library code is changed by this spec. **Amended 2026-10-10** for the
+user's rulings OQ-1 to OQ-4, R24 and R26 (b) (see "Amendments 2026-10-10" below).
+
+## Amendments 2026-10-10
+
+User rulings made after rev 2, applied in place. Plan rulings R21 to R28 and Tasks 8a to 8d carry the build; the
+CHANGELOG `[Unreleased]` TARN bullets list the moved values. Every rule not named here is unchanged.
+
+| Ruling | Rule | Sections changed |
+|---|---|---|
+| **OQ-1 (b)** | Cash due today stays in today's value (priced at `DF(0) = 1`). It is booked (a `PAYMENT` event, out of the value) once its pay time is strictly past. A numeric `pay_time` of 0.0 and a dated `pay_date` equal to `as_of` are valid pending cash. Reverses "pay time is after valuation". | §3 (pending, validation, `PAYMENT` time), §4.3, §5.1, §6, §7.2, §10 (B2, R2) |
+| **OQ-2 (b)** | A dated fixing or pay date after the valuation date that resolves to zero business time (a Saturday under `BUSINESS_DAYS`, valued on the Friday) is LIVE, as its numeric twin is: the fixing is decided at the quoted spot, its cash is due today. R7's refusal is reversed. Passed vs ahead is decided by resolved time. | §4.2, §5.1, §5.4 |
+| **OQ-3** | Dated fixings are banked per fixing, by count (`state.fixings_banked`; fixing `i` is banked iff `i < fixings_banked`). `as_of` is the date the state was brought up to date and never moves past the valuation date. A banked count may not claim a fixing strictly after the valuation instant. A booking that states only `as_of` banks the fixings dated on or before it (R25). | §3 (state, validation, form check), §4.2, §5.3, §5.4, §6, §7.2, §10 (D3, R2, WARN1, WARN3) |
+| **R24** | Under `BUSINESS_DAYS`, a valuation on a non-business day writes `as_of` as the preceding business day (the first date of the zero-time stretch); on a calendar clock it is the valuation date. | §3, §6, §7.2 |
+| **OQ-4 (b)** | Periods may share a fixing date or time. The MC engines simulate each distinct time once; periods run in schedule order; a later same-date period after a hit is dead (§6). A banked count (explicit, or derived from `as_of`) that splits a group of periods fixing on one calendar date is refused unless the state is redeemed or terminal. The default accrual derivation refuses any non-positive derived factor ("zero length"). Schedules are ascending, i.e. non-decreasing, not "ascending, unique". | §4.1, §4.2, §4.3, §5.4, §6 |
+| **R26 (b)** | A dated TARN may state `accrual_end_dates` (R27, R28): one end per fixing; ends strictly increasing; `fixing_dates[i] <= end <= pay_dates[i]`; requires `initial_date`; exclusive with `accrual_factors`; dated TARN only (the TARF has no accrual term). Default (`None`): each end is its fixing date, bitwise today's derivation. An end outside fixing..pay (OQ-5) stays refused; explicit start dates (OQ-6) are not added. | §1.2 (Q2), §4.2, §4.3, §5.4, §10 (D5, R2) |
 
 Evidence, all run on `dcea77b6` in this worktree (`env PYTHONPATH=<wt>:<wt>/test <main venv>/bin/python <script>`):
 
@@ -31,7 +46,7 @@ Origin: findings `2026-10-08-accrual-scope-followups-findings.md` §10.
 | # | Decision | Where |
 |---|---|---|
 | Q1 | `state: TargetRedemptionState` is **mandatory** on TARN and TARF, both forms. Inception code writes `TargetRedemptionState(0.0)`. | §3, §4 |
-| Q2 | (a) A **numeric** TARN must give `accrual_start` or explicit `accrual_factors`. A **dated** TARN derives its period starts from its dates (`initial_date`, then each previous fixing date). | §4.2, §5.1 |
+| Q2 | (a) A **numeric** TARN must give `accrual_start` or explicit `accrual_factors`. A **dated** TARN derives its period starts from its dates (`initial_date`, then each previous period end: the fixing date by default, or its stated `accrual_end_dates`, R26 b). | §4.2, §5.1 |
 | Q3 | (a) A fixing stepped over by theta or ageing is fixed at the **quoted** `fx_env.spot`, as the range accrual's `record_passed_fixings` and the W5 missing-fixing fill do, not at `effective_spot()`. | §6 |
 | Q4 | Scope expanded: (1) build the **dated** TARN and TARF; a numeric contract must show no difference from its dated twin (same events, same cash timing, same PV to float noise). (2) Option (b): the FX backtest and FX dynamic scenario **age** numeric TARN/TARF each simulated day with `time_shift` + `record_passed_fixings` at that day's spot. Other numeric FX products also frozen by M5 are only listed (§9), not designed for. | §4, §7, §9 |
 | Q5 | (a) No knocked-out flag. `is_redeemed` is derived: `accumulated >= target - hit_tol(target)`, with the engines' hit tolerance moved to the product. | §3.1 |
@@ -126,7 +141,10 @@ class PendingPayment:
 class TargetRedemptionState:
     accumulated: float                             # undiscounted amount banked towards the target
     pending: Tuple[PendingPayment, ...] = ()       # determined, unpaid cash, ascending pay time / date
-    as_of: Optional[datetime] = None               # dated form only: every fixing dated on/before it is banked
+    as_of: Optional[datetime] = None               # dated form only: the date the state was brought up to date
+                                                   # (never after the valuation date, R24); NOT a banking cut-off
+    fixings_banked: Optional[int] = None           # dated form only: fixing i is banked iff i < fixings_banked;
+                                                   # None = "the fixings dated on or before as_of" (R25)
 
 class TerminalBookingWarning(UserWarning): ...     # §5.3 (Q6)
 
@@ -139,22 +157,25 @@ class TargetRedemptionEvent:
     event_type: TargetRedemptionEventType
     amount: float           # FIXING: cash it determined (coupon / net cashflow, principal excluded); PAYMENT: cash paid
     fixing: Optional[float] = None    # FIXING: the rate used
-    time: float = 0.0       # FIXING: the fixing's signed time at banking (<= 0); PAYMENT: the pay time (<= 0)
+    time: float = 0.0       # FIXING: the fixing's signed time at banking (<= 0); PAYMENT: the pay time (< 0)
     redeemed: bool = False  # FIXING: this fixing ended the contract (target hit, or the last fixing)
     label: str = ""         # W5 ``fixing_label`` style, informational only
 ```
 
 - `accumulated`: the TARN's realized coupons or the TARF's realized favourable amounts, including those fixed but not
   yet paid.
-- `pending`: cash a banked fixing has determined whose pay time is after valuation — a coupon or TARF net cashflow
-  with a pay lag, or the principal of a TARN that redeemed or matured. Cash whose pay time is at or before valuation
-  is booked and is not part of the value (theta-boundary R4).
+- `pending`: cash a banked fixing has determined whose pay time is not strictly past — a coupon or TARF net cashflow
+  with a pay lag, or the principal of a TARN that redeemed or matured. Cash due today (pay time 0) stays in the value
+  at `DF(0) = 1` (OQ-1 b); cash whose pay time is strictly past (`is_history`) is booked and is not part of the
+  value (theta-boundary R4).
 - **Validation in the state** (`ValidationError`): `accumulated` finite and ≥ 0; each `amount` finite; each
   `PendingPayment` has exactly one of `pay_time` / `pay_date`; all pending entries use the same form; sorted
-  ascending; a numeric `pay_time` is finite, > 0 and not `is_zero`; a dated `pay_date` is after `as_of`, and
-  pending cash with `as_of=None` is refused (cash implies a banked fixing).
-- **Form check in the product**: a numeric product refuses `as_of` or any `pay_date`; a dated product refuses any
-  `pay_time`.
+  ascending; a numeric `pay_time` is finite and not strictly past (an `is_zero` time of either sign is "today");
+  `fixings_banked` is `None` or an `int` (not `bool`) >= 0; a dated `pay_date` is on or after `as_of` (OQ-1 b), and
+  pending cash or `accumulated > 0` with no banked fixing (`as_of=None`, or a banked count of 0) is refused (cash
+  implies a banked fixing, stated by count, OQ-3).
+- **Form check in the product**: a numeric product refuses `as_of`, `fixings_banked` or any `pay_date`; a dated
+  product refuses any `pay_time`.
 - The state is immutable; ageing replaces it, never mutates it.
 - **No knocked-out flag (Q5).** The products derive `is_redeemed = accumulated >= target - hit_tol(target)` with
   `hit_tol(target) = 0` for an unbounded target, else `|target| × TARGET_HIT_RTOL`. Both engines import the same
@@ -178,7 +199,7 @@ schedule argument; `state` is keyword-only and has no default (Q1).
 
 | Field | Product | Rule |
 |---|---|---|
-| `fixing_times` | both | Years from valuation, ascending, unique, finite. Lists **only the fixings not yet banked**. A time ≤ 0 or `is_zero` is an unbanked past fixing: accepted, and filled at pricing with a `MissingFixingWarning` (§5.4). May be empty: the contract is terminal (§5.3); a terminal TARN then states `accrual_factors=[]`. |
+| `fixing_times` | both | Years from valuation, ascending (non-decreasing: periods may share a fixing time, OQ-4), finite. Lists **only the fixings not yet banked**. A time ≤ 0 or `is_zero` is an unbanked past fixing: accepted, and filled at pricing with a `MissingFixingWarning` (§5.4). May be empty: the contract is terminal (§5.3); a terminal TARN then states `accrual_factors=[]`. |
 | `pay_times` | both | As today (default = fixing times; each ≥ its fixing; non-decreasing). |
 | `accrual_start: Optional[float]` | TARN | Time the first LISTED period began (< 0 if before valuation). **Exactly one** of `accrual_start` / `accrual_factors` (Q2): neither → refused (A1.2), both → refused. `accrual_start < fixing_times[0]`. Factors `t_i − t_{i−1}` with `t_{−1} = accrual_start` are computed once at construction and are contract terms from then on. |
 | `accrual_factors` | TARN | Explicit per-listed-period factors (as today). |
@@ -194,18 +215,26 @@ is empty; `delivery` = `max(pay_times)` or the same terminal value.
 
 | Field | Product | Rule |
 |---|---|---|
-| `fixing_dates: List[datetime]` | both | The **whole contractual schedule**, past and future, ascending, unique, non-empty. Dates are taken as stated (already business-day adjusted); no rolling. |
+| `fixing_dates: List[datetime]` | both | The **whole contractual schedule**, past and future, ascending (non-decreasing: periods may share a fixing date, OQ-4), non-empty. Dates are taken as stated (already business-day adjusted); no rolling. |
 | `pay_dates: Optional[List[datetime]]` | both | Default = fixing dates; 1:1, each ≥ its fixing date, non-decreasing. |
-| `initial_date: Optional[datetime]` | TARN | Start of the first period, `< fixing_dates[0]`. **Exactly one** of `initial_date` / `accrual_factors` (Q2: the dated form derives every period start from its dates). |
-| `accrual_factors` | TARN | Explicit factors, 1:1 with the whole schedule. |
+| `initial_date: Optional[datetime]` | TARN | Start of the first period, `< fixing_dates[0]`. **Exactly one period source** (Q2, R26 b): `accrual_factors`, or `initial_date` (with or without `accrual_end_dates`). |
+| `accrual_end_dates: Optional[List[datetime]]` | TARN | R26 (b): one accrual END date per period, 1:1 with `fixing_dates`. Period `i` runs from the previous end (`initial_date` for `i = 0`) to `accrual_end_dates[i]`. Strictly increasing; `fixing_dates[i] <= end <= pay_dates[i]`; **requires** `initial_date`; **excluded** with `accrual_factors`; refused on the numeric form. `None` (default): each end is its fixing date, bitwise the derivation without the field. An end outside fixing..pay (OQ-5) and explicit start dates (OQ-6) are refused / not provided. |
+| `accrual_factors` | TARN | Explicit factors, 1:1 with the whole schedule. Excludes `initial_date`, `accrual_end_dates`, `day_count_convention`. |
 | `day_count_convention: Optional[DayCountConvention]` | TARN | The coupon accrual day count, a contract term; `None` means `ACT_365` (the `FxRangeAccrualConfig` default). Refused on the numeric form and with explicit `accrual_factors`. |
-| `state` | both | Dated `PendingPayment.pay_date` only; `as_of` = the date through which fixings are banked (`None` = nothing banked). |
+| `state` | both | Dated `PendingPayment.pay_date` only; `fixings_banked` = the number of leading fixings banked; `as_of` = the date the state was brought up to date, never after the valuation date (`None` = nothing banked). A state that states only `as_of` banks the fixings dated on or before it (R25). |
 
 - **Mixing forms is refused**: exactly one of `fixing_times` / `fixing_dates`; `pay_times`, `accrual_start` only with
-  times; `pay_dates`, `initial_date`, `day_count_convention` only with dates.
-- **Banked vs unbanked**: fixing `i` is banked iff `as_of is not None and fixing_dates[i] <= as_of`. The rest are
-  unbanked; an unbanked fixing dated on or before the valuation date is a missing past fixing (§5.4).
-- **Accrual factors**: period `i` runs from `initial_date` (i = 0) or `fixing_dates[i-1]` to `fixing_dates[i]`;
+  times; `pay_dates`, `initial_date`, `accrual_end_dates`, `day_count_convention` only with dates.
+- **Banked vs unbanked (OQ-3, R25)**: fixing `i` is banked iff `i < fixings_banked`; a booking stating only `as_of`
+  has `fixings_banked` = the number of fixing dates on or before `as_of`; neither stated: 0. Banking is per fixing, so
+  a fixing is never banked twice whatever the dates. The rest are unbanked; an unbanked fixing that is passed by
+  resolved time (R16) is a missing past fixing (§5.4).
+- **Live at zero time (OQ-2 b)**: a fixing or pay date after the valuation date that resolves to zero time (a
+  Saturday under `BUSINESS_DAYS`, valued on the Friday) is live: not refused; the fixing is decided at the quoted
+  spot and its cash is due today (stays in the value, OQ-1 b).
+- **Accrual factors**: period `i` runs from `initial_date` (i = 0) or the previous period's end `E_{i-1}` to
+  `E_i`, where `E_i = accrual_end_dates[i]`, or `fixing_dates[i]` when `accrual_end_dates is None` (the default,
+  bitwise the derivation without the field);
   factor = `calculate_year_fraction(start, end, day_count_convention, fx_env.bus_days_in_year,
   calendar=fx_env.calendar)`, evaluated at resolve time because a `BUSINESS_DAYS` count needs the environment's
   calendar (the range accrual's `get_year_fraction` precedent). They depend on dates only, so ageing never changes
@@ -213,15 +242,19 @@ is empty; `delivery` = `max(pay_times)` or the same terminal value.
 - **Times**: each fixing and pay date resolves to a signed year fraction from `fx_env.valuation_date` in the
   **environment's** convention (`day_count_convention`, `bus_days_in_year`, `calendar`), exactly as
   `FxRangeAccrualObservationRecord.resolve_time` does: 0.0 on the valuation date, negative before it.
-- **Consistency rules**: `accumulated <= target + hit_tol`; `accumulated > 0` or non-empty `pending` needs
-  `as_of >= fixing_dates[0]`; `is_redeemed` needs the same; TARN pending amounts > 0. At resolve time
-  `as_of > fx_env.valuation_date` is refused (the state claims fixings that have not happened). Fixings after `as_of`
-  on a redeemed contract are dead, not refused: the dated form lists the whole term sheet.
+- **Consistency rules**: `accumulated <= target + hit_tol`; `accumulated > 0` or non-empty `pending` needs at least
+  one banked fixing; `is_redeemed` needs the same; TARN pending amounts > 0; `fixings_banked <= len(fixing_dates)`.
+  At resolve time `as_of > fx_env.valuation_date` is refused, and so is a banked count that claims a fixing strictly
+  after the valuation instant (signed time > 0 beyond zero tolerance: a fixing at zero business time may be banked,
+  OQ-2). A banked count, explicit or derived from `as_of`, that splits a group of periods whose fixing dates share one
+  calendar date is refused unless the state is redeemed or terminal (OQ-4: banking on a shared date banks all its
+  periods together; a hit legitimately stops mid-group). Fixings after the banked ones on a redeemed contract are
+  dead, not refused: the dated form lists the whole term sheet.
 - **Maturity / delivery**: `expiry_date = fixing_dates[-1]`, `delivery_date = max(pay_dates)`, `maturity = None`
   (so `_fdm_theta` takes its dated branch). `get_maturity(fx_env)` returns the base-class value while the valuation
   date is on or before `expiry_date` and `0.0` after it, instead of raising, so an aged dated contract still answers
   FX consumers such as SIMM's `option_tenor`.
-- **Terminal**: `is_redeemed`, or `as_of >= fixing_dates[-1]`.
+- **Terminal**: `is_redeemed`, or the banked count covers every fixing.
 
 ### 4.3 The numeric twin
 
@@ -229,10 +262,12 @@ The twin of a dated contract `D` at valuation date `V` (environment `E`) is the 
 
 - the unbanked fixings of `D` (dead fixings dropped when redeemed): `fixing_times = [t_E(V, F_i)]`,
   `pay_times = [t_E(V, P_i)]`;
-- TARN: `accrual_factors` = `D`'s resolved factors for those periods (explicit, not `accrual_start`, so the coupons
-  are bitwise equal whatever the two day counts are);
-- `state = TargetRedemptionState(D.accumulated, pending=[PendingPayment(a, pay_time=t_E(V, d)) for (a, d) in
-  D.pending if d > V])`, `as_of=None`;
+- TARN: `accrual_factors` = `D`'s resolved factors for those periods, whichever period source `D` states (default
+  ends, `accrual_end_dates` or explicit factors); explicit, not `accrual_start`, so the coupons are bitwise equal
+  whatever the two day counts are;
+- `state = TargetRedemptionState(D.accumulated, pending=[PendingPayment(a, pay_time=snap_time(t_E(V, d))) for (a, d) in
+  D.pending if not is_history(t_E(V, d))])`, `as_of=None`, `fixings_banked=None` (cash due today is kept, OQ-1 b; the
+  numeric state lists only unbanked fixings and carries no count);
 - every economic term (coupon, notional, target, condition, principal flag, strike, gearing, side, pair) unchanged.
 
 It is a test helper (`_numeric_twin(dated, env)` in the new test module), not public API: the mapping is the parity
@@ -250,13 +285,14 @@ Both products expose `resolve(fx_env, *, warn_missing_fixings=True) -> ResolvedT
 | `fixing_times`, `pay_times` | the unbanked fixings still ahead, all > 0 and not `is_zero` |
 | `accrual_factors` | TARN: their factors; TARF: `None` |
 | `accumulated` | after banking any missing past fixing |
-| `pending` | `(pay_time, amount)` with `pay_time > 0`, not `is_zero` |
+| `pending` | `(pay_time, amount)` with `pay_time >= 0` (cash due today at 0.0, OQ-1 b) |
 | `redeemed`, `terminal` | derived as in §3 / §4 |
 
 `resolve` never changes the product. If it finds unbanked fixings at or before valuation (numeric `t <= 0` or
-`is_zero(t)`; dated date ≤ valuation date), it banks them on a **copy** through `record_passed_fixings(fx_env)` at
+`is_zero(t)`; dated: unbanked by count and passed by resolved time, R16, so a later-dated fixing at zero business
+time is live and banked here, OQ-2), it banks them on a **copy** through `record_passed_fixings(fx_env)` at
 the quoted spot (Q3) and emits one `MissingFixingWarning` naming them (W5's `warn_filled_fixings`). Pending cash
-whose pay time is at or before valuation is excluded (booked). A numeric contract with no passed fixing skips the copy
+whose pay time is strictly past is excluded (booked); cash due today stays (OQ-1 b). A numeric contract with no passed fixing skips the copy
 and returns its own lists, so its inception arithmetic is unchanged.
 
 The engines read only this view; the products' other attributes are not engine inputs. Numeric and dated contracts
@@ -284,7 +320,7 @@ vol and rate bumps leave `state` alone, and `_fdm_theta` already calls the hook.
 ### 5.3 Terminal bookings (Q6)
 
 - A booking whose state is terminal is **allowed**: numeric with empty `fixing_times`, or a redeemed state; dated with
-  `as_of >= fixing_dates[-1]`, or a redeemed state. Value = PV(`pending`), or 0 if nothing is pending.
+  every fixing banked (`fixings_banked` or the `as_of`-derived count equals the schedule length), or a redeemed state. Value = PV(`pending`), or 0 if nothing is pending.
 - It emits `TerminalBookingWarning` (a `UserWarning` subclass) **once, from the constructor** — the booking. Pricing
   does not re-warn: a terminal product is priced on every Greek bump and every simulated day, and a warning per
   call would only repeat the booking's.
@@ -295,7 +331,11 @@ vol and rate bumps leave `state` alone, and `_fdm_theta` already calls the hook.
 
 Refused (`ValidationError`): an omitted `state`; an omitted period start on a TARN (numeric: neither `accrual_start`
 nor `accrual_factors`; dated: neither `initial_date` nor `accrual_factors`) — M1's exact failure; both period
-sources; mixed forms; an inconsistent state (§3, §4); a dated `as_of` after the valuation date.
+sources; mixed forms; an inconsistent state (§3, §4); a dated `as_of` after the valuation date; a dated banked count that claims a fixing strictly after the valuation
+instant; a banked count that splits a group of periods fixing on one calendar date (unless redeemed or terminal); the
+default accrual derivation with any non-positive derived factor ("zero length": two fixings on one day, or a
+zero-business-day period); `accrual_end_dates` that break the rules in §4.2 (not 1:1, not strictly increasing, outside
+fixing..pay, without `initial_date`, with `accrual_factors`, on the numeric form, or giving a non-positive factor).
 
 Filled with a `MissingFixingWarning`, never refused: an unbanked fixing at or before valuation, in either form, at
 pricing time. This replaces rev 1's refusal of a numeric fixing ≤ 0, which the W5 rule forbids.
@@ -310,27 +350,33 @@ Both hooks are product methods (the base-class contract; they return `None` and 
 **`time_shift(dt)`** — numeric form only (the dated form ages by its environment's date; the base class already
 leaves `maturity is None` products alone):
 - shifts fixing, pay and pending pay times and `maturity`/`delivery`;
-- removes the pending payments whose pay time is now ≤ 0 or `is_zero` (paid within the bump), appending a `PAYMENT`
-  event for each;
+- removes the pending payments whose pay time is now strictly past (`is_history`; paid within the bump), appending a
+  `PAYMENT` event for each; cash that lands exactly on the bump (time 0) stays pending (OQ-1 b);
 - keeps passed fixings unbanked.
 
 **`record_passed_fixings(fx_env)`** — both forms. For each unbanked fixing at or before valuation, in order, stopping
 once the contract is terminal, at `S = fx_env.spot` (Q3):
 - **TARN**: `c = full_coupon(i)` if `coupon_condition(S)` else 0, clipped to `target − accumulated`;
-  `accumulated += c`. A non-zero `c` paid at `pay_i`: pending if `pay_i` is after valuation, else a `PAYMENT` event.
+  `accumulated += c`. A non-zero `c` paid at `pay_i`: pending if `pay_i` is not strictly past (on the valuation date
+  it is pending, OQ-1 b), else a `PAYMENT` event.
   On a hit (`is_redeemed`), the principal (with `include_principal`) at `pay_i` is handled the same way and every later
   fixing is dead. If the last fixing banks without a hit, the final principal at its pay time is handled the same way.
 - **TARF**: `fav = notional × max(sign × (S − K), 0)` clipped to the remaining target, `cf = fav_eff − gearing × unf`
   (either sign), `accumulated += fav_eff`; non-zero `cf` pending/paid and the hit rule as for the TARN. On a final hit
   the geared unfavourable leg is still paid, as in the engine.
 - One `FIXING` event per banked fixing (`time` = its signed time ≤ 0, `redeemed` when it ends the contract).
-- Numeric: banked fixings, their pay times and factors are removed. Dated: `as_of := fx_env.valuation_date`, and
-  pending entries with `pay_date <= valuation_date` are removed with a `PAYMENT` event each.
+- Periods sharing a fixing date or time (OQ-4) are processed in schedule order at the one spot; the first period to
+  hit the target ends the contract, and every later period, on the same date or later, is dead.
+- Numeric: banked fixings, their pay times and factors are removed. Dated (OQ-3, R24): `fixings_banked :=` index of the
+  last banked fixing + 1 (banking is per fixing, by count), `as_of :=` the valuation date, or on a `BUSINESS_DAYS`
+  non-business valuation date the preceding business day (never after the valuation date); pending entries whose pay
+  time is strictly past are removed with a `PAYMENT` event each.
 - Then `validate()` runs again.
 
 **Theta, then (unchanged from rev 1 except the dated branch):**
-- A fixing inside the bump, or landing exactly on it, fixes at the held spot. Cash paid by the bumped date leaves the
-  value (theta ≈ −payment); cash paid later stays as a receivable.
+- A fixing inside the bump, or landing exactly on it, fixes at the held spot. Cash whose pay time is strictly before
+  the bumped date leaves the value (theta ≈ −payment); cash due exactly on the bumped date, and later cash, stays as a
+  receivable (OQ-1 b).
 - A step past the last fixing prices the terminal contract (§5.2 step 2): theta is pure carry on `pending`.
 - Dated: `_fdm_theta` moves the env date by `days` and calls `record_passed_fixings(env_future)`; same banking.
 - The landing fixing is banked at the held spot rather than left at t = 0 for the engine (equity theta-boundary R1);
@@ -385,7 +431,8 @@ is left exactly as today (§9).
      convention because that is how the dated twin's times are resolved; daily steps telescope to the direct year
      fraction to ≤ 5e-16 (M10).
   3. `record_passed_fixings(env)`: every fixing at or before `date` is banked at **that day's spot** (the run's
-     realized fixing), and dated `as_of` becomes `date`.
+     realized fixing), and a dated state's `fixings_banked` and `as_of` are brought up to date (`as_of` = `date`, or on a
+     `BUSINESS_DAYS` non-business `date` the preceding business day, R24; never after `date`).
   4. The events appended in steps 2–3 are the day's: `paid_today += quantity × Σ PAYMENT.amount`.
   5. `prev := date`.
 
@@ -396,8 +443,8 @@ is left exactly as today (§9).
   first path day on or after its pay date. Numeric fixing times rarely fall on day boundaries (k/12 years is
   30.42 days), so a warning here would fire on ordinary trades; both forms get the identical rule, keeping parity.
   The FX backtest has no cash-interest account (its hedge P&L has none either), so booked cash earns nothing.
-- **Pending cash** stays inside the product's value as PV(pending) until its pay date; on that day it leaves the
-  value and enters paid cash. Run value = Σ position MTM (which includes pending PV) + cumulative paid cash — the
+- **Pending cash** stays inside the product's value as PV(pending) through its pay date (OQ-1 b: cash due today is
+  in today's value); on the first instant after it, it leaves the value and enters paid cash. Run value = Σ position MTM (which includes pending PV) + cumulative paid cash — the
   equity convention (`dynamicscenario/lifecycle_manager.py:11-13`), so P&L does not jump on a payment.
 
 ### 7.3 Changes at the call sites
@@ -509,7 +556,13 @@ fixing, redeemed)`:
   fixing inside the bump. (Under `BUSINESS_DAYS` they differ today, M9: pending Q7.)
 - **D5 dated accrual**: `initial_date` + monthly dates give `ACT_365` factors; a `BUSINESS_DAYS` contract day count
   reads the environment's calendar; `initial_date` together with `accrual_factors` is refused, and neither is
-  refused (R2).
+  refused (R2). R26 (b): `accrual_end_dates` give each period its own factor (the numeric twin carries them), periods
+  sharing a fixing date price without `accrual_factors`, the default derivation is bitwise unchanged, and each rule of
+  §4.2 is refused when broken.
+- **D6 amendments 2026-10-10**: cash due today is in the price and booked the next instant (OQ-1 b); a Saturday
+  fixing valued on the Friday under `BUSINESS_DAYS` is live and banked once, `as_of` the Friday (OQ-2 b, OQ-3, R24);
+  a banked count claiming a later fixing, or splitting a same-date group, is refused (OQ-3, OQ-4); periods sharing a
+  fixing date or time price with each distinct time simulated once and a later period after a hit dead (OQ-4 b).
 
 **Backtest and dynamic-scenario ageing (Q4.2)**
 - **B1** A numeric TARN in an `FXBacktestEngine` run over a flat market: its value on day 0 and day 91 **differ**, and
@@ -517,7 +570,8 @@ fixing, redeemed)`:
 - **B2 redeeming path**: spot path above the strike from day 0, target 1.5 coupons, pay lag 2 days. The first coupon
   is booked as paid cash on its pay day, the clipped second coupon and the principal on the second pay day; the
   product is terminal from the second fixing day; from then its value is exactly Σ DF × pending (no simulation), and
-  on each pay day it drops by that payment while paid cash rises by it; after the last payment the value is 0.0; no
+  on the first instant after each pay day it drops by that payment while paid cash rises by it (OQ-1 b: the pay day's
+  value still holds the cash); after the last payment the value is 0.0; no
   `TerminalBookingWarning` is raised (warnings-as-errors).
 - **B3 quiet path**: no coupon; principal booked on the final pay day; TARF with gearing: negative cash booked.
 - **B4 twins in one run**: the numeric and the dated TARN (and TARF) in the same backtest and the same dated dynamic
@@ -530,23 +584,24 @@ fixing, redeemed)`:
   in both engines; the existing FX backtest and dynamic-scenario tests pass unmodified.
 
 **Warnings (Q6, W5)**
-- **WARN1** Each terminal booking form (numeric empty `fixing_times`; numeric redeemed state; dated `as_of` ≥ last
-  fixing; dated redeemed) warns `TerminalBookingWarning` once at construction; value = PV(pending), or exactly 0.0
+- **WARN1** Each terminal booking form (numeric empty `fixing_times`; numeric redeemed state; dated banked count
+  covering every fixing; dated redeemed) warns `TerminalBookingWarning` once at construction; value = PV(pending), or exactly 0.0
   with nothing pending; pricing and Greeks do not warn again.
 - **WARN2** An aged copy that redeems (P3, B2) does not warn.
 - **WARN3** Pricing a contract with an unbanked passed fixing (numeric after a bare `time_shift`; dated with a fixing
-  date before valuation and `as_of` before it) → exactly one `MissingFixingWarning` naming the fixings; the price
+  date before valuation that is not banked) → exactly one `MissingFixingWarning` naming the fixings; the price
   equals the product after `record_passed_fixings` at the same quoted spot; the product is unchanged afterwards.
 
 **Regression and refusals**
 - **R1** (findings §10): rebuilding with neither period source raises; with `accrual_start = 1/12 − 0.125` the first
   factor is 1/12 and the coupon 1.00, not 0.50.
 - **R2** each raises `ValidationError`: both period sources; missing `state`; `accumulated` < 0, NaN, or > target +
-  tol; `accrual_start ≥ fixing_times[0]`; `accrual_start > 0` with `accumulated > 0`; numeric pending `pay_time` ≤ 0;
+  tol; `accrual_start ≥ fixing_times[0]`; `accrual_start > 0` with `accumulated > 0`; numeric pending `pay_time` strictly past (< 0);
   TARN pending amount ≤ 0; redeemed numeric state with listed fixings; a dated TARN with neither or both of
   `initial_date` / `accrual_factors`; `day_count_convention` on the numeric form; mixed forms (each pair); dated pending
-  `pay_date <= as_of`; dated `accumulated > 0` with `as_of` None or before the first fixing; dated `as_of` after the
-  valuation date (at pricing).
+  `pay_date < as_of`; dated `accumulated > 0` or pending cash with no banked fixing; dated `as_of` after the
+  valuation date (at pricing); a banked count claiming a fixing strictly after valuation; a banked count splitting a
+  same-date group of an unredeemed, unterminated state; a default-derivation TARN with a zero-length period.
 - **T1 theta**: the M3 cases (0.5/365, 1/365) give finite theta; in the small-vol limit the landing-fixing theta
   equals the deterministic forward-path reference (`_det_pv`, `test_fx_tarn_note_mc.py:68`, extended with a start
   `acc`); the 2/365 case equals main's theta to the bit (TARN 0.016861…, TARF 0.003077… at full precision).
