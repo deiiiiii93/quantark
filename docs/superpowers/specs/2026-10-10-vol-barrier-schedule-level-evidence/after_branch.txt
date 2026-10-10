@@ -1,0 +1,447 @@
+# quantark from /Users/fuxinyao/quant-ark/.claude/worktrees/agent-acc853421d5ce109d/quantark/__init__.py
+plain:lv_mc-up_out_call-d10 | dated | price | 2.5460128720856594
+level:lv_mc-up_out_call-d10 | dated | price | 2.078777615280778
+nolevel:lv_mc-up_out_call-d10 | dated | price | 2.5460128720856594
+terms:lv_mc-up_out_call-d10 | dated | price | 2.6051839978806397
+payoff:lv_mc-up_out_call-d10 | dated | price | 2.9273018194823157
+plain:lv_mc-up_out_call-d92 | dated | price | 2.819653711196308
+level:lv_mc-up_out_call-d92 | dated | price | 2.1286503445635336
+plain:lv_mc-up_out_call-d10 | numeric | price | 2.5460128720856594
+level:lv_mc-up_out_call-d10 | numeric | price | 2.078777615280778
+nolevel:lv_mc-up_out_call-d10 | numeric | price | 2.5460128720856594
+terms:lv_mc-up_out_call-d10 | numeric | price | 2.6051839978806397
+payoff:lv_mc-up_out_call-d10 | numeric | price | 2.9273018194823157
+plain:lv_mc-up_out_call-d92 | numeric | price | 2.819653711196308
+level:lv_mc-up_out_call-d92 | numeric | price | 2.1286503445635336
+plain:lv_mc-up_in_call-d10 | dated | price | 9.098340480548416
+level:lv_mc-up_in_call-d10 | dated | price | 9.565575737353297
+nolevel:lv_mc-up_in_call-d10 | dated | price | 9.098340480548416
+terms:lv_mc-up_in_call-d10 | dated | price | 9.565575737353297
+payoff:lv_mc-up_in_call-d10 | dated | price | 9.098340480548416
+plain:lv_mc-up_in_call-d92 | dated | price | 7.6903422201529965
+level:lv_mc-up_in_call-d92 | dated | price | 8.381345586785772
+plain:lv_mc-up_in_call-d10 | numeric | price | 9.098340480548416
+level:lv_mc-up_in_call-d10 | numeric | price | 9.565575737353297
+nolevel:lv_mc-up_in_call-d10 | numeric | price | 9.098340480548416
+terms:lv_mc-up_in_call-d10 | numeric | price | 9.565575737353297
+payoff:lv_mc-up_in_call-d10 | numeric | price | 9.098340480548416
+plain:lv_mc-up_in_call-d92 | numeric | price | 7.690342220152996
+level:lv_mc-up_in_call-d92 | numeric | price | 8.38134558678577
+plain:lv_mc-down_out_put-d10 | dated | price | 2.2926001714742323
+level:lv_mc-down_out_put-d10 | dated | price | 1.8911044598339377
+nolevel:lv_mc-down_out_put-d10 | dated | price | 2.2926001714742323
+terms:lv_mc-down_out_put-d10 | dated | price | 2.6081553161321276
+payoff:lv_mc-down_out_put-d10 | dated | price | 2.7564068761432994
+plain:lv_mc-down_out_put-d92 | dated | price | 2.339842682125452
+level:lv_mc-down_out_put-d92 | dated | price | 1.867099135459461
+plain:lv_mc-down_out_put-d10 | numeric | price | 2.2926001714742323
+level:lv_mc-down_out_put-d10 | numeric | price | 1.8911044598339377
+nolevel:lv_mc-down_out_put-d10 | numeric | price | 2.2926001714742323
+terms:lv_mc-down_out_put-d10 | numeric | price | 2.6081553161321276
+payoff:lv_mc-down_out_put-d10 | numeric | price | 2.7564068761432994
+plain:lv_mc-down_out_put-d92 | numeric | price | 2.339842682125451
+level:lv_mc-down_out_put-d92 | numeric | price | 1.8670991354594606
+plain:lv_mc-down_in_put-d10 | dated | price | 7.427892873999371
+level:lv_mc-down_in_put-d10 | dated | price | 7.829388585639665
+nolevel:lv_mc-down_in_put-d10 | dated | price | 7.427892873999371
+terms:lv_mc-down_in_put-d10 | dated | price | 7.829388585639665
+payoff:lv_mc-down_in_put-d10 | dated | price | 7.427892873999371
+plain:lv_mc-down_in_put-d92 | dated | price | 6.685772872264958
+level:lv_mc-down_in_put-d92 | dated | price | 7.158516418930949
+plain:lv_mc-down_in_put-d10 | numeric | price | 7.427892873999371
+level:lv_mc-down_in_put-d10 | numeric | price | 7.829388585639665
+nolevel:lv_mc-down_in_put-d10 | numeric | price | 7.427892873999371
+terms:lv_mc-down_in_put-d10 | numeric | price | 7.829388585639665
+payoff:lv_mc-down_in_put-d10 | numeric | price | 7.427892873999371
+plain:lv_mc-down_in_put-d92 | numeric | price | 6.685772872264958
+level:lv_mc-down_in_put-d92 | numeric | price | 7.158516418930949
+plain:lv_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.555337590944306
+level:lv_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.094223568840558
+nolevel:lv_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.555337590944306
+terms:lv_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.62835292822031
+payoff:lv_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.941288897770286
+plain:lv_mc-up_out_call_pay_at_hit-d92 | dated | price | 2.8246899096295435
+level:lv_mc-up_out_call_pay_at_hit-d92 | dated | price | 2.137678460176624
+plain:lv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.555337590944306
+level:lv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.094223568840558
+nolevel:lv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.555337590944306
+terms:lv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.62835292822031
+payoff:lv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.941288897770286
+plain:lv_mc-up_out_call_pay_at_hit-d92 | numeric | price | 2.8246899096295435
+level:lv_mc-up_out_call_pay_at_hit-d92 | numeric | price | 2.137678460176624
+plain:heston_mc-up_out_call-d10 | dated | price | 2.9469081038438665
+level:heston_mc-up_out_call-d10 | dated | price | 2.2991629852434476
+nolevel:heston_mc-up_out_call-d10 | dated | price | 2.9469081038438665
+terms:heston_mc-up_out_call-d10 | dated | price | 2.7857332091600764
+payoff:heston_mc-up_out_call-d10 | dated | price | 3.316815291616743
+plain:heston_mc-up_out_call-d92 | dated | price | 3.371706363829428
+level:heston_mc-up_out_call-d92 | dated | price | 2.3336652052700875
+plain:heston_mc-up_out_call-d10 | numeric | price | 2.9469081038438665
+level:heston_mc-up_out_call-d10 | numeric | price | 2.2991629852434476
+nolevel:heston_mc-up_out_call-d10 | numeric | price | 2.9469081038438665
+terms:heston_mc-up_out_call-d10 | numeric | price | 2.7857332091600764
+payoff:heston_mc-up_out_call-d10 | numeric | price | 3.316815291616743
+plain:heston_mc-up_out_call-d92 | numeric | price | 3.3717063638294276
+level:heston_mc-up_out_call-d92 | numeric | price | 2.333665205270087
+plain:heston_mc-up_in_call-d10 | dated | price | 7.843235529564025
+level:heston_mc-up_in_call-d10 | dated | price | 8.490980648164443
+nolevel:heston_mc-up_in_call-d10 | dated | price | 7.843235529564025
+terms:heston_mc-up_in_call-d10 | dated | price | 8.490980648164443
+payoff:heston_mc-up_in_call-d10 | dated | price | 7.843235529564025
+plain:heston_mc-up_in_call-d92 | dated | price | 6.430916795985628
+level:heston_mc-up_in_call-d92 | dated | price | 7.468957954544969
+plain:heston_mc-up_in_call-d10 | numeric | price | 7.843235529564025
+level:heston_mc-up_in_call-d10 | numeric | price | 8.490980648164443
+nolevel:heston_mc-up_in_call-d10 | numeric | price | 7.843235529564025
+terms:heston_mc-up_in_call-d10 | numeric | price | 8.490980648164443
+payoff:heston_mc-up_in_call-d10 | numeric | price | 7.843235529564025
+plain:heston_mc-up_in_call-d92 | numeric | price | 6.430916795985629
+level:heston_mc-up_in_call-d92 | numeric | price | 7.468957954544969
+plain:heston_mc-down_out_put-d10 | dated | price | 1.9980151970439577
+level:heston_mc-down_out_put-d10 | dated | price | 1.6865140302499664
+nolevel:heston_mc-down_out_put-d10 | dated | price | 1.9980151970439577
+terms:heston_mc-down_out_put-d10 | dated | price | 2.352346968241143
+payoff:heston_mc-down_out_put-d10 | dated | price | 2.4589764618070795
+plain:heston_mc-down_out_put-d92 | dated | price | 2.0898751277445466
+level:heston_mc-down_out_put-d92 | dated | price | 1.733767139486985
+plain:heston_mc-down_out_put-d10 | numeric | price | 1.9980151970439577
+level:heston_mc-down_out_put-d10 | numeric | price | 1.6865140302499664
+nolevel:heston_mc-down_out_put-d10 | numeric | price | 1.9980151970439577
+terms:heston_mc-down_out_put-d10 | numeric | price | 2.352346968241143
+payoff:heston_mc-down_out_put-d10 | numeric | price | 2.4589764618070795
+plain:heston_mc-down_out_put-d92 | numeric | price | 2.0898751277445458
+level:heston_mc-down_out_put-d92 | numeric | price | 1.7337671394869842
+plain:heston_mc-down_in_put-d10 | dated | price | 7.8458771394769755
+level:heston_mc-down_in_put-d10 | dated | price | 8.157378306270967
+nolevel:heston_mc-down_in_put-d10 | dated | price | 7.8458771394769755
+terms:heston_mc-down_in_put-d10 | dated | price | 8.157378306270967
+payoff:heston_mc-down_in_put-d10 | dated | price | 7.8458771394769755
+plain:heston_mc-down_in_put-d92 | dated | price | 7.040680149768962
+level:heston_mc-down_in_put-d92 | dated | price | 7.396788138026523
+plain:heston_mc-down_in_put-d10 | numeric | price | 7.8458771394769755
+level:heston_mc-down_in_put-d10 | numeric | price | 8.157378306270967
+nolevel:heston_mc-down_in_put-d10 | numeric | price | 7.8458771394769755
+terms:heston_mc-down_in_put-d10 | numeric | price | 8.157378306270967
+payoff:heston_mc-down_in_put-d10 | numeric | price | 7.8458771394769755
+plain:heston_mc-down_in_put-d92 | numeric | price | 7.04068014976896
+level:heston_mc-down_in_put-d92 | numeric | price | 7.396788138026522
+plain:heston_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.9553154655185754
+level:heston_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.3128320568534377
+nolevel:heston_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.9553154655185754
+terms:heston_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.806236816575062
+payoff:heston_mc-up_out_call_pay_at_hit-d10 | dated | price | 3.3294263341288057
+plain:heston_mc-up_out_call_pay_at_hit-d92 | dated | price | 3.3758135444532638
+level:heston_mc-up_out_call_pay_at_hit-d92 | dated | price | 2.3415536588151187
+plain:heston_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.9553154655185754
+level:heston_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.3128320568534377
+nolevel:heston_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.9553154655185754
+terms:heston_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.806236816575062
+payoff:heston_mc-up_out_call_pay_at_hit-d10 | numeric | price | 3.3294263341288057
+plain:heston_mc-up_out_call_pay_at_hit-d92 | numeric | price | 3.3758135444532638
+level:heston_mc-up_out_call_pay_at_hit-d92 | numeric | price | 2.3415536588151187
+plain:slv_mc-up_out_call-d10 | dated | price | 3.0108372431085577
+level:slv_mc-up_out_call-d10 | dated | price | 2.3500435611355988
+nolevel:slv_mc-up_out_call-d10 | dated | price | 3.0108372431085577
+terms:slv_mc-up_out_call-d10 | dated | price | 2.8280774653343923
+payoff:slv_mc-up_out_call-d10 | dated | price | 3.375053551069543
+plain:slv_mc-up_out_call-d92 | dated | price | 3.37169272389815
+level:slv_mc-up_out_call-d92 | dated | price | 2.3834361885363373
+plain:slv_mc-up_out_call-d10 | numeric | price | 3.0108372431085577
+level:slv_mc-up_out_call-d10 | numeric | price | 2.3500435611355988
+nolevel:slv_mc-up_out_call-d10 | numeric | price | 3.0108372431085577
+terms:slv_mc-up_out_call-d10 | numeric | price | 2.8280774653343923
+payoff:slv_mc-up_out_call-d10 | numeric | price | 3.375053551069543
+plain:slv_mc-up_out_call-d92 | numeric | price | 3.3716927238981507
+level:slv_mc-up_out_call-d92 | numeric | price | 2.3834361885363364
+plain:slv_mc-up_in_call-d10 | dated | price | 7.762549011906231
+level:slv_mc-up_in_call-d10 | dated | price | 8.423342693879189
+nolevel:slv_mc-up_in_call-d10 | dated | price | 7.762549011906231
+terms:slv_mc-up_in_call-d10 | dated | price | 8.423342693879189
+payoff:slv_mc-up_in_call-d10 | dated | price | 7.762549011906231
+plain:slv_mc-up_in_call-d92 | dated | price | 6.422987862047696
+level:slv_mc-up_in_call-d92 | dated | price | 7.411244397409511
+plain:slv_mc-up_in_call-d10 | numeric | price | 7.762549011906231
+level:slv_mc-up_in_call-d10 | numeric | price | 8.423342693879189
+nolevel:slv_mc-up_in_call-d10 | numeric | price | 7.762549011906231
+terms:slv_mc-up_in_call-d10 | numeric | price | 8.423342693879189
+payoff:slv_mc-up_in_call-d10 | numeric | price | 7.762549011906231
+plain:slv_mc-up_in_call-d92 | numeric | price | 6.422987862047697
+level:slv_mc-up_in_call-d92 | numeric | price | 7.4112443974095115
+plain:slv_mc-down_out_put-d10 | dated | price | 2.0414664840122354
+level:slv_mc-down_out_put-d10 | dated | price | 1.6649739594012343
+nolevel:slv_mc-down_out_put-d10 | dated | price | 2.0414664840122354
+terms:slv_mc-down_out_put-d10 | dated | price | 2.342188657016192
+payoff:slv_mc-down_out_put-d10 | dated | price | 2.499582308869413
+plain:slv_mc-down_out_put-d92 | dated | price | 2.0787353324093503
+level:slv_mc-down_out_put-d92 | dated | price | 1.7225215390360256
+plain:slv_mc-down_out_put-d10 | numeric | price | 2.0414664840122354
+level:slv_mc-down_out_put-d10 | numeric | price | 1.6649739594012343
+nolevel:slv_mc-down_out_put-d10 | numeric | price | 2.0414664840122354
+terms:slv_mc-down_out_put-d10 | numeric | price | 2.342188657016192
+payoff:slv_mc-down_out_put-d10 | numeric | price | 2.499582308869413
+plain:slv_mc-down_out_put-d92 | numeric | price | 2.078735332409349
+level:slv_mc-down_out_put-d92 | numeric | price | 1.722521539036025
+plain:slv_mc-down_in_put-d10 | dated | price | 7.837653275947294
+level:slv_mc-down_in_put-d10 | dated | price | 8.214145800558294
+nolevel:slv_mc-down_in_put-d10 | dated | price | 7.837653275947294
+terms:slv_mc-down_in_put-d10 | dated | price | 8.214145800558294
+payoff:slv_mc-down_in_put-d10 | dated | price | 7.837653275947294
+plain:slv_mc-down_in_put-d92 | dated | price | 7.076191638549066
+level:slv_mc-down_in_put-d92 | dated | price | 7.4324054319223904
+plain:slv_mc-down_in_put-d10 | numeric | price | 7.837653275947294
+level:slv_mc-down_in_put-d10 | numeric | price | 8.214145800558294
+nolevel:slv_mc-down_in_put-d10 | numeric | price | 7.837653275947294
+terms:slv_mc-down_in_put-d10 | numeric | price | 8.214145800558294
+payoff:slv_mc-down_in_put-d10 | numeric | price | 7.837653275947294
+plain:slv_mc-down_in_put-d92 | numeric | price | 7.076191638549064
+level:slv_mc-down_in_put-d92 | numeric | price | 7.432405431922388
+plain:slv_mc-up_out_call_pay_at_hit-d10 | dated | price | 3.0192306268442786
+level:slv_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.363580204587784
+nolevel:slv_mc-up_out_call_pay_at_hit-d10 | dated | price | 3.0192306268442786
+terms:slv_mc-up_out_call_pay_at_hit-d10 | dated | price | 2.84838243051267
+payoff:slv_mc-up_out_call_pay_at_hit-d10 | dated | price | 3.3876436266731247
+plain:slv_mc-up_out_call_pay_at_hit-d92 | dated | price | 3.375844065664453
+level:slv_mc-up_out_call_pay_at_hit-d92 | dated | price | 2.391237840390418
+plain:slv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 3.0192306268442786
+level:slv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.363580204587784
+nolevel:slv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 3.0192306268442786
+terms:slv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.84838243051267
+payoff:slv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 3.3876436266731247
+plain:slv_mc-up_out_call_pay_at_hit-d92 | numeric | price | 3.3758440656644533
+level:slv_mc-up_out_call_pay_at_hit-d92 | numeric | price | 2.3912378403904175
+plain:heston_pde-up_out_call-d10 | dated | price | 2.8220952069048875
+level:heston_pde-up_out_call-d10 | dated | price | 2.174434397169507
+nolevel:heston_pde-up_out_call-d10 | dated | price | 2.8220952069048875
+terms:heston_pde-up_out_call-d10 | dated | price | 2.7394485846437
+payoff:heston_pde-up_out_call-d10 | dated | price | 3.2391137276106714
+plain:heston_pde-up_out_call-d92 | dated | price | 3.077746667621889
+level:heston_pde-up_out_call-d92 | dated | price | 2.303149420047309
+plain:heston_pde-up_out_call-d10 | numeric | price | 2.8220952069048875
+level:heston_pde-up_out_call-d10 | numeric | price | 2.174434397169507
+nolevel:heston_pde-up_out_call-d10 | numeric | price | 2.8220952069048875
+terms:heston_pde-up_out_call-d10 | numeric | price | 2.7394485846437
+payoff:heston_pde-up_out_call-d10 | numeric | price | 3.2391137276106714
+plain:heston_pde-up_out_call-d92 | numeric | price | 3.077746667621893
+level:heston_pde-up_out_call-d92 | numeric | price | 2.3031494200473106
+plain:heston_pde-up_in_call-d10 | dated | price | 10.175846966805189
+level:heston_pde-up_in_call-d10 | dated | price | 10.823512117660993
+nolevel:heston_pde-up_in_call-d10 | dated | price | 10.175846966805189
+terms:heston_pde-up_in_call-d10 | dated | price | 10.823512117660993
+payoff:heston_pde-up_in_call-d10 | dated | price | 10.175846966805189
+plain:heston_pde-up_in_call-d92 | dated | price | 8.542972771121299
+level:heston_pde-up_in_call-d92 | dated | price | 9.317573893331291
+plain:heston_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+level:heston_pde-up_in_call-d10 | numeric | price | 10.823512117660993
+nolevel:heston_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+terms:heston_pde-up_in_call-d10 | numeric | price | 10.823512117660993
+payoff:heston_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+plain:heston_pde-up_in_call-d92 | numeric | price | 8.54297277112127
+level:heston_pde-up_in_call-d92 | numeric | price | 9.317573893331264
+plain:heston_pde-down_out_put-d10 | dated | price | 2.1213044826221585
+level:heston_pde-down_out_put-d10 | dated | price | 1.78838872150134
+nolevel:heston_pde-down_out_put-d10 | dated | price | 2.1213044826221585
+terms:heston_pde-down_out_put-d10 | dated | price | 2.4742513765509337
+payoff:heston_pde-down_out_put-d10 | dated | price | 2.607797865856531
+plain:heston_pde-down_out_put-d92 | dated | price | 2.2415962543130514
+level:heston_pde-down_out_put-d92 | dated | price | 1.7763261242350903
+plain:heston_pde-down_out_put-d10 | numeric | price | 2.1213044826221585
+level:heston_pde-down_out_put-d10 | numeric | price | 1.78838872150134
+nolevel:heston_pde-down_out_put-d10 | numeric | price | 2.1213044826221585
+terms:heston_pde-down_out_put-d10 | numeric | price | 2.4742513765509337
+payoff:heston_pde-down_out_put-d10 | numeric | price | 2.607797865856531
+plain:heston_pde-down_out_put-d92 | numeric | price | 2.2415962543130568
+level:heston_pde-down_out_put-d92 | numeric | price | 1.7763261242350905
+plain:heston_pde-down_in_put-d10 | dated | price | 8.913081886773865
+level:heston_pde-down_in_put-d10 | dated | price | 9.245997731627615
+nolevel:heston_pde-down_in_put-d10 | dated | price | 8.913081886773865
+terms:heston_pde-down_in_put-d10 | dated | price | 9.245997731627615
+payoff:heston_pde-down_in_put-d10 | dated | price | 8.913081886773865
+plain:heston_pde-down_in_put-d92 | dated | price | 7.862557560503914
+level:heston_pde-down_in_put-d92 | dated | price | 8.327828042763059
+plain:heston_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+level:heston_pde-down_in_put-d10 | numeric | price | 9.245997731627615
+nolevel:heston_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+terms:heston_pde-down_in_put-d10 | numeric | price | 9.245997731627615
+payoff:heston_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+plain:heston_pde-down_in_put-d92 | numeric | price | 7.86255756050391
+level:heston_pde-down_in_put-d92 | numeric | price | 8.327828042763054
+plain:heston_pde-up_out_call_pay_at_hit-d10 | dated | price | 2.831772319806173
+level:heston_pde-up_out_call_pay_at_hit-d10 | dated | price | 2.1898462972141512
+nolevel:heston_pde-up_out_call_pay_at_hit-d10 | dated | price | 2.831772319806173
+terms:heston_pde-up_out_call_pay_at_hit-d10 | dated | price | 2.762566434710667
+payoff:heston_pde-up_out_call_pay_at_hit-d10 | dated | price | 3.2536293969626007
+plain:heston_pde-up_out_call_pay_at_hit-d92 | dated | price | 3.0829872212921674
+level:heston_pde-up_out_call_pay_at_hit-d92 | dated | price | 2.3123728387943343
+plain:heston_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.831772319806173
+level:heston_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.1898462972141512
+nolevel:heston_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.831772319806173
+terms:heston_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.762566434710667
+payoff:heston_pde-up_out_call_pay_at_hit-d10 | numeric | price | 3.2536293969626007
+plain:heston_pde-up_out_call_pay_at_hit-d92 | numeric | price | 3.08298722129217
+level:heston_pde-up_out_call_pay_at_hit-d92 | numeric | price | 2.3123728387943374
+plain:slv_pde-up_out_call-d10 | dated | price | 2.8220952069048875
+level:slv_pde-up_out_call-d10 | dated | price | 2.174434397169507
+nolevel:slv_pde-up_out_call-d10 | dated | price | 2.8220952069048875
+terms:slv_pde-up_out_call-d10 | dated | price | 2.7394485846437
+payoff:slv_pde-up_out_call-d10 | dated | price | 3.2391137276106714
+plain:slv_pde-up_out_call-d92 | dated | price | 3.077746667621889
+level:slv_pde-up_out_call-d92 | dated | price | 2.303149420047309
+plain:slv_pde-up_out_call-d10 | numeric | price | 2.8220952069048875
+level:slv_pde-up_out_call-d10 | numeric | price | 2.174434397169507
+nolevel:slv_pde-up_out_call-d10 | numeric | price | 2.8220952069048875
+terms:slv_pde-up_out_call-d10 | numeric | price | 2.7394485846437
+payoff:slv_pde-up_out_call-d10 | numeric | price | 3.2391137276106714
+plain:slv_pde-up_out_call-d92 | numeric | price | 3.077746667621893
+level:slv_pde-up_out_call-d92 | numeric | price | 2.3031494200473106
+plain:slv_pde-up_in_call-d10 | dated | price | 10.175846966805189
+level:slv_pde-up_in_call-d10 | dated | price | 10.823512117660993
+nolevel:slv_pde-up_in_call-d10 | dated | price | 10.175846966805189
+terms:slv_pde-up_in_call-d10 | dated | price | 10.823512117660993
+payoff:slv_pde-up_in_call-d10 | dated | price | 10.175846966805189
+plain:slv_pde-up_in_call-d92 | dated | price | 8.542972771121299
+level:slv_pde-up_in_call-d92 | dated | price | 9.317573893331291
+plain:slv_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+level:slv_pde-up_in_call-d10 | numeric | price | 10.823512117660993
+nolevel:slv_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+terms:slv_pde-up_in_call-d10 | numeric | price | 10.823512117660993
+payoff:slv_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+plain:slv_pde-up_in_call-d92 | numeric | price | 8.54297277112127
+level:slv_pde-up_in_call-d92 | numeric | price | 9.317573893331264
+plain:slv_pde-down_out_put-d10 | dated | price | 2.1213044826221585
+level:slv_pde-down_out_put-d10 | dated | price | 1.78838872150134
+nolevel:slv_pde-down_out_put-d10 | dated | price | 2.1213044826221585
+terms:slv_pde-down_out_put-d10 | dated | price | 2.4742513765509337
+payoff:slv_pde-down_out_put-d10 | dated | price | 2.607797865856531
+plain:slv_pde-down_out_put-d92 | dated | price | 2.2415962543130514
+level:slv_pde-down_out_put-d92 | dated | price | 1.7763261242350903
+plain:slv_pde-down_out_put-d10 | numeric | price | 2.1213044826221585
+level:slv_pde-down_out_put-d10 | numeric | price | 1.78838872150134
+nolevel:slv_pde-down_out_put-d10 | numeric | price | 2.1213044826221585
+terms:slv_pde-down_out_put-d10 | numeric | price | 2.4742513765509337
+payoff:slv_pde-down_out_put-d10 | numeric | price | 2.607797865856531
+plain:slv_pde-down_out_put-d92 | numeric | price | 2.2415962543130568
+level:slv_pde-down_out_put-d92 | numeric | price | 1.7763261242350905
+plain:slv_pde-down_in_put-d10 | dated | price | 8.913081886773865
+level:slv_pde-down_in_put-d10 | dated | price | 9.245997731627615
+nolevel:slv_pde-down_in_put-d10 | dated | price | 8.913081886773865
+terms:slv_pde-down_in_put-d10 | dated | price | 9.245997731627615
+payoff:slv_pde-down_in_put-d10 | dated | price | 8.913081886773865
+plain:slv_pde-down_in_put-d92 | dated | price | 7.862557560503914
+level:slv_pde-down_in_put-d92 | dated | price | 8.327828042763059
+plain:slv_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+level:slv_pde-down_in_put-d10 | numeric | price | 9.245997731627615
+nolevel:slv_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+terms:slv_pde-down_in_put-d10 | numeric | price | 9.245997731627615
+payoff:slv_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+plain:slv_pde-down_in_put-d92 | numeric | price | 7.86255756050391
+level:slv_pde-down_in_put-d92 | numeric | price | 8.327828042763054
+plain:slv_pde-up_out_call_pay_at_hit-d10 | dated | price | 2.831772319806173
+level:slv_pde-up_out_call_pay_at_hit-d10 | dated | price | 2.1898462972141512
+nolevel:slv_pde-up_out_call_pay_at_hit-d10 | dated | price | 2.831772319806173
+terms:slv_pde-up_out_call_pay_at_hit-d10 | dated | price | 2.762566434710667
+payoff:slv_pde-up_out_call_pay_at_hit-d10 | dated | price | 3.2536293969626007
+plain:slv_pde-up_out_call_pay_at_hit-d92 | dated | price | 3.0829872212921674
+level:slv_pde-up_out_call_pay_at_hit-d92 | dated | price | 2.3123728387943343
+plain:slv_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.831772319806173
+level:slv_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.1898462972141512
+nolevel:slv_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.831772319806173
+terms:slv_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.762566434710667
+payoff:slv_pde-up_out_call_pay_at_hit-d10 | numeric | price | 3.2536293969626007
+plain:slv_pde-up_out_call_pay_at_hit-d92 | numeric | price | 3.08298722129217
+level:slv_pde-up_out_call_pay_at_hit-d92 | numeric | price | 2.3123728387943374
+greeks:lv_mc-up_out_call-d90 | dated | greeks_price | 2.1158704385523204
+greeks:lv_mc-up_out_call-d90 | dated | greeks_delta | 0.1198163389021425
+greeks:lv_mc-up_out_call-d90 | dated | greeks_gamma | -0.0339267536062593
+greeks:lv_mc-up_out_call-d90 | numeric | greeks_price | 2.1158704385523204
+greeks:lv_mc-up_out_call-d90 | numeric | greeks_delta | 0.1198163389021425
+greeks:lv_mc-up_out_call-d90 | numeric | greeks_gamma | -0.0339267536062593
+greeks:heston_mc-up_out_call-d90 | dated | greeks_price | 2.2941127626081395
+greeks:heston_mc-up_out_call-d90 | dated | greeks_delta | 0.07720217180125677
+greeks:heston_mc-up_out_call-d90 | dated | greeks_gamma | 0.212025921899492
+greeks:heston_mc-up_out_call-d90 | numeric | greeks_price | 2.2941127626081395
+greeks:heston_mc-up_out_call-d90 | numeric | greeks_delta | 0.07720217180125677
+greeks:heston_mc-up_out_call-d90 | numeric | greeks_gamma | 0.212025921899492
+greeks:slv_mc-up_out_call-d90 | dated | greeks_price | 2.3406203647733923
+greeks:slv_mc-up_out_call-d90 | dated | greeks_delta | 0.10721404864941109
+greeks:slv_mc-up_out_call-d90 | dated | greeks_gamma | 0.09465183859044313
+greeks:slv_mc-up_out_call-d90 | numeric | greeks_price | 2.3406203647733923
+greeks:slv_mc-up_out_call-d90 | numeric | greeks_delta | 0.10721404864941109
+greeks:slv_mc-up_out_call-d90 | numeric | greeks_gamma | 0.09465183859044313
+greeks:heston_pde-up_out_call-d90 | dated | greeks_price | 2.30033315770854
+greeks:heston_pde-up_out_call-d90 | dated | greeks_delta | 0.07386652064589505
+greeks:heston_pde-up_out_call-d90 | dated | greeks_gamma | -0.001723448507389591
+greeks:heston_pde-up_out_call-d90 | numeric | greeks_price | 2.30033315770854
+greeks:heston_pde-up_out_call-d90 | numeric | greeks_delta | 0.07386652064589505
+greeks:heston_pde-up_out_call-d90 | numeric | greeks_gamma | -0.001723448507389591
+greeks:slv_pde-up_out_call-d90 | dated | greeks_price | 2.30033315770854
+greeks:slv_pde-up_out_call-d90 | dated | greeks_delta | 0.07386652064589505
+greeks:slv_pde-up_out_call-d90 | dated | greeks_gamma | -0.001723448507389591
+greeks:slv_pde-up_out_call-d90 | numeric | greeks_price | 2.30033315770854
+greeks:slv_pde-up_out_call-d90 | numeric | greeks_delta | 0.07386652064589505
+greeks:slv_pde-up_out_call-d90 | numeric | greeks_gamma | -0.001723448507389591
+agg:lv_mc-up_out_call-accumulate-d10 | dated | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-up_out_call-best-d10 | dated | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-up_out_call-worst-d10 | dated | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-up_out_call-accumulate-d10 | numeric | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-up_out_call-best-d10 | numeric | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-up_out_call-worst-d10 | numeric | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-down_in_put-accumulate-d10 | dated | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-down_in_put-best-d10 | dated | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-down_in_put-worst-d10 | dated | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-down_in_put-accumulate-d10 | numeric | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-down_in_put-best-d10 | numeric | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:lv_mc-down_in_put-worst-d10 | numeric | price | RAISES ValidationError: LocalVolBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) 
+agg:heston_mc-up_out_call-accumulate-d10 | dated | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-up_out_call-best-d10 | dated | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-up_out_call-worst-d10 | dated | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-up_out_call-accumulate-d10 | numeric | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-up_out_call-best-d10 | numeric | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-up_out_call-worst-d10 | numeric | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-down_in_put-accumulate-d10 | dated | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-down_in_put-best-d10 | dated | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-down_in_put-worst-d10 | dated | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-down_in_put-accumulate-d10 | numeric | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-down_in_put-best-d10 | numeric | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:heston_mc-down_in_put-worst-d10 | numeric | price | RAISES ValidationError: HestonBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) on
+agg:slv_mc-up_out_call-accumulate-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-up_out_call-best-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-up_out_call-worst-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-up_out_call-accumulate-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-up_out_call-best-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-up_out_call-worst-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-down_in_put-accumulate-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-down_in_put-best-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-down_in_put-worst-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-down_in_put-accumulate-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-down_in_put-best-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:slv_mc-down_in_put-worst-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierMCEngine: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit)
+agg:heston_pde-up_out_call-accumulate-d10 | dated | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-up_out_call-best-d10 | dated | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-up_out_call-worst-d10 | dated | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-up_out_call-accumulate-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-up_out_call-best-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-up_out_call-worst-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-down_in_put-accumulate-d10 | dated | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-down_in_put-best-d10 | dated | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-down_in_put-worst-d10 | dated | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-down_in_put-accumulate-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-down_in_put-best-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:heston_pde-down_in_put-worst-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agg:slv_pde-up_out_call-accumulate-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-up_out_call-best-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-up_out_call-worst-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-up_out_call-accumulate-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-up_out_call-best-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-up_out_call-worst-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-down_in_put-accumulate-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-down_in_put-best-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-down_in_put-worst-d10 | dated | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-down_in_put-accumulate-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-down_in_put-best-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agg:slv_pde-down_in_put-worst-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agglimit:heston_pde_limit-up_out_call-accumulate-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agglimit:heston_pde_limit-up_out_call-best-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agglimit:heston_pde_limit-up_out_call-worst-d10 | numeric | price | RAISES ValidationError: HestonBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit) o
+agglimit:slv_pde_limit-up_out_call-accumulate-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agglimit:slv_pde_limit-up_out_call-best-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit
+agglimit:slv_pde_limit-up_out_call-worst-d10 | numeric | price | RAISES ValidationError: HestonSLVBarrierPDESolver: the vol-model barrier kernels monitor a discrete schedule first-hit (stop-first-hit

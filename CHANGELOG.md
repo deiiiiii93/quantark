@@ -321,6 +321,22 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   last ulp of the resolved times). New `test/test_vol_dated_schedules.py`; the W9 / carried-KI pins on these
   refusals are removed (`_BEFORE_REFUSED`, `AUTOCALL_BEFORE_REFUSED` in `test/test_expiry_carried_knock_in.py`).
   Evidence: `docs/superpowers/specs/2026-10-10-vol-dated-schedules-evidence/`.
+- The vol-model barrier routes price a discrete schedule at its records' own terms, first-hit only (W18, user rulings
+  2026-10-10). The local-vol, Heston and SLV barrier MC and the Heston and SLV barrier PDE accept a discrete schedule
+  whose records all share one level and payoff, but handed the kernels `product.barrier` and `product.rebate`: a
+  schedule whose common level differs from `product.barrier` was priced at the wrong level, silently, numeric and
+  dated alike; so was a knock-out's common record payoff. The kernels now receive the records' common level (a
+  record without a level takes `product.barrier`, the product's own normalisation) and, on a knock-out, the
+  records' common payoff, exactly as the Black-Scholes barrier MC reads them (`_build_discrete_grid`); a knock-in's
+  no-hit rebate stays `product.rebate`, as the Black-Scholes MC pays it. New
+  `engine/vol_barrier_schedule.schedule_barrier_terms`. The vol kernels monitor first-hit only: a schedule with
+  `aggregation_mode` ACCUMULATE, BEST or WORST, which they silently priced as STOP_FIRST_HIT, is now refused
+  (`ValidationError`, "aggregation ... is refused"; new `refuse_non_first_hit`, `# TODO(vol-aggregation)`), on both
+  forms and including the Heston / SLV PDE deterministic-variance limit. CONTINUOUS / EXPIRY monitoring is
+  unaffected. Moved values: level / payoff-differing schedules value -> value (each equal, bitwise, to the contract
+  booked at the records' terms), non-first-hit aggregation value -> refused; every schedule at `product.barrier`
+  with STOP_FIRST_HIT is unmoved (PDE byte book and the modelvalidation anchors bit-identical). New
+  `test/test_vol_barrier_schedule_level.py`. Evidence: `docs/superpowers/specs/2026-10-10-vol-barrier-schedule-level-evidence/`.
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
