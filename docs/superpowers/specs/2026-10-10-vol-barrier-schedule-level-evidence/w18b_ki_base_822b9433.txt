@@ -1,0 +1,177 @@
+# quantark from /private/tmp/claude-501/-Users-fuxinyao-quant-ark/cca3f369-302d-41df-82ec-52a6d89c5a89/scratchpad/w18/base_822b9433/quantark/__init__.py
+kipay:bs_mc-up_in_call-d10 | dated | price | 10.12187847577865
+kireb:bs_mc-up_in_call-d10 | dated | price | 10.12187847577865
+kinone:bs_mc-up_in_call-d10 | dated | price | 10.12187847577865
+kipay:bs_mc-down_in_put-d10 | dated | price | 7.52202015607155
+kireb:bs_mc-down_in_put-d10 | dated | price | 7.52202015607155
+kinone:bs_mc-down_in_put-d10 | dated | price | 7.52202015607155
+kopay:bs_mc-up_out_call-d10 | dated | price | 3.001810259549487
+kopay:bs_mc-down_out_put-d10 | dated | price | 2.4022078716337862
+kipay:bs_mc-up_in_call-d10 | numeric | price | 10.12187847577865
+kireb:bs_mc-up_in_call-d10 | numeric | price | 10.12187847577865
+kinone:bs_mc-up_in_call-d10 | numeric | price | 10.12187847577865
+kipay:bs_mc-down_in_put-d10 | numeric | price | 7.52202015607155
+kireb:bs_mc-down_in_put-d10 | numeric | price | 7.52202015607155
+kinone:bs_mc-down_in_put-d10 | numeric | price | 7.52202015607155
+kopay:bs_mc-up_out_call-d10 | numeric | price | 3.001810259549487
+kopay:bs_mc-down_out_put-d10 | numeric | price | 2.4022078716337862
+kipay:bs_pde-up_in_call-d10 | dated | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:bs_pde-up_in_call-d10 | dated | price | 8.995171205955295
+kinone:bs_pde-up_in_call-d10 | dated | price | 8.995171205955295
+kipay:bs_pde-down_in_put-d10 | dated | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:bs_pde-down_in_put-d10 | dated | price | 7.52622330066732
+kinone:bs_pde-down_in_put-d10 | dated | price | 7.52622330066732
+kopay:bs_pde-up_out_call-d10 | dated | price | 3.0211965263420746
+kopay:bs_pde-down_out_put-d10 | dated | price | 2.6498899633344455
+kipay:bs_pde-up_in_call-d10 | numeric | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:bs_pde-up_in_call-d10 | numeric | price | 8.9951649468618
+kinone:bs_pde-up_in_call-d10 | numeric | price | 8.9951649468618
+kipay:bs_pde-down_in_put-d10 | numeric | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:bs_pde-down_in_put-d10 | numeric | price | 7.52622417983568
+kinone:bs_pde-down_in_put-d10 | numeric | price | 7.52622417983568
+kopay:bs_pde-up_out_call-d10 | numeric | price | 3.021191474347458
+kopay:bs_pde-down_out_put-d10 | numeric | price | 2.649876091368839
+kipay:quad-up_in_call-d10 | dated | price | 8.588627887454663
+kireb:quad-up_in_call-d10 | dated | price | 8.994709909498013
+kinone:quad-up_in_call-d10 | dated | price | 8.994709909498013
+kipay:quad-down_in_put-d10 | dated | price | 7.052191032890105
+kireb:quad-down_in_put-d10 | dated | price | 7.525896247672824
+kinone:quad-down_in_put-d10 | dated | price | 7.525896247672824
+kopay:quad-up_out_call-d10 | dated | price | 3.021377034169252
+kopay:quad-down_out_put-d10 | dated | price | 2.6500509343884033
+kipay:quad-up_in_call-d10 | numeric | price | 8.588627887454663
+kireb:quad-up_in_call-d10 | numeric | price | 8.994709909498013
+kinone:quad-up_in_call-d10 | numeric | price | 8.994709909498013
+kipay:quad-down_in_put-d10 | numeric | price | 7.052191032890105
+kireb:quad-down_in_put-d10 | numeric | price | 7.525896247672824
+kinone:quad-down_in_put-d10 | numeric | price | 7.525896247672824
+kopay:quad-up_out_call-d10 | numeric | price | 3.021377034169252
+kopay:quad-down_out_put-d10 | numeric | price | 2.6500509343884033
+kipay:lv_pde-up_in_call-d10 | dated | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:lv_pde-up_in_call-d10 | dated | price | 8.995171205956176
+kinone:lv_pde-up_in_call-d10 | dated | price | 8.995171205956176
+kipay:lv_pde-down_in_put-d10 | dated | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:lv_pde-down_in_put-d10 | dated | price | 7.526223300668004
+kinone:lv_pde-down_in_put-d10 | dated | price | 7.526223300668004
+kopay:lv_pde-up_out_call-d10 | dated | price | 3.0211965263420897
+kopay:lv_pde-down_out_put-d10 | dated | price | 2.649889963334521
+kipay:lv_pde-up_in_call-d10 | numeric | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:lv_pde-up_in_call-d10 | numeric | price | 8.995164946862698
+kinone:lv_pde-up_in_call-d10 | numeric | price | 8.995164946862698
+kipay:lv_pde-down_in_put-d10 | numeric | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:lv_pde-down_in_put-d10 | numeric | price | 7.5262241798364045
+kinone:lv_pde-down_in_put-d10 | numeric | price | 7.5262241798364045
+kopay:lv_pde-up_out_call-d10 | numeric | price | 3.021191474347461
+kopay:lv_pde-down_out_put-d10 | numeric | price | 2.649876091368856
+kipay:lv_mc-up_in_call-d10 | dated | price | 9.098340480548416
+kireb:lv_mc-up_in_call-d10 | dated | price | 9.098340480548416
+kinone:lv_mc-up_in_call-d10 | dated | price | 9.098340480548416
+kipay:lv_mc-down_in_put-d10 | dated | price | 7.427892873999371
+kireb:lv_mc-down_in_put-d10 | dated | price | 7.427892873999371
+kinone:lv_mc-down_in_put-d10 | dated | price | 7.427892873999371
+kopay:lv_mc-up_out_call-d10 | dated | price | 2.9273018194823157
+kopay:lv_mc-down_out_put-d10 | dated | price | 2.7564068761432994
+kipay:lv_mc-up_in_call-d10 | numeric | price | 9.098340480548416
+kireb:lv_mc-up_in_call-d10 | numeric | price | 9.098340480548416
+kinone:lv_mc-up_in_call-d10 | numeric | price | 9.098340480548416
+kipay:lv_mc-down_in_put-d10 | numeric | price | 7.427892873999371
+kireb:lv_mc-down_in_put-d10 | numeric | price | 7.427892873999371
+kinone:lv_mc-down_in_put-d10 | numeric | price | 7.427892873999371
+kopay:lv_mc-up_out_call-d10 | numeric | price | 2.9273018194823157
+kopay:lv_mc-down_out_put-d10 | numeric | price | 2.7564068761432994
+kipay:heston_mc-up_in_call-d10 | dated | price | 7.843235529564025
+kireb:heston_mc-up_in_call-d10 | dated | price | 7.843235529564025
+kinone:heston_mc-up_in_call-d10 | dated | price | 7.843235529564025
+kipay:heston_mc-down_in_put-d10 | dated | price | 7.8458771394769755
+kireb:heston_mc-down_in_put-d10 | dated | price | 7.8458771394769755
+kinone:heston_mc-down_in_put-d10 | dated | price | 7.8458771394769755
+kopay:heston_mc-up_out_call-d10 | dated | price | 3.316815291616743
+kopay:heston_mc-down_out_put-d10 | dated | price | 2.4589764618070795
+kipay:heston_mc-up_in_call-d10 | numeric | price | 7.843235529564025
+kireb:heston_mc-up_in_call-d10 | numeric | price | 7.843235529564025
+kinone:heston_mc-up_in_call-d10 | numeric | price | 7.843235529564025
+kipay:heston_mc-down_in_put-d10 | numeric | price | 7.8458771394769755
+kireb:heston_mc-down_in_put-d10 | numeric | price | 7.8458771394769755
+kinone:heston_mc-down_in_put-d10 | numeric | price | 7.8458771394769755
+kopay:heston_mc-up_out_call-d10 | numeric | price | 3.316815291616743
+kopay:heston_mc-down_out_put-d10 | numeric | price | 2.4589764618070795
+kipay:slv_mc-up_in_call-d10 | dated | price | 7.762549011906231
+kireb:slv_mc-up_in_call-d10 | dated | price | 7.762549011906231
+kinone:slv_mc-up_in_call-d10 | dated | price | 7.762549011906231
+kipay:slv_mc-down_in_put-d10 | dated | price | 7.837653275947294
+kireb:slv_mc-down_in_put-d10 | dated | price | 7.837653275947294
+kinone:slv_mc-down_in_put-d10 | dated | price | 7.837653275947294
+kopay:slv_mc-up_out_call-d10 | dated | price | 3.375053551069543
+kopay:slv_mc-down_out_put-d10 | dated | price | 2.499582308869413
+kipay:slv_mc-up_in_call-d10 | numeric | price | 7.762549011906231
+kireb:slv_mc-up_in_call-d10 | numeric | price | 7.762549011906231
+kinone:slv_mc-up_in_call-d10 | numeric | price | 7.762549011906231
+kipay:slv_mc-down_in_put-d10 | numeric | price | 7.837653275947294
+kireb:slv_mc-down_in_put-d10 | numeric | price | 7.837653275947294
+kinone:slv_mc-down_in_put-d10 | numeric | price | 7.837653275947294
+kopay:slv_mc-up_out_call-d10 | numeric | price | 3.375053551069543
+kopay:slv_mc-down_out_put-d10 | numeric | price | 2.499582308869413
+kipay:heston_pde-up_in_call-d10 | dated | price | 10.175846966805189
+kireb:heston_pde-up_in_call-d10 | dated | price | 10.175846966805189
+kinone:heston_pde-up_in_call-d10 | dated | price | 10.175846966805189
+kipay:heston_pde-down_in_put-d10 | dated | price | 8.913081886773865
+kireb:heston_pde-down_in_put-d10 | dated | price | 8.913081886773865
+kinone:heston_pde-down_in_put-d10 | dated | price | 8.913081886773865
+kopay:heston_pde-up_out_call-d10 | dated | price | 3.2391137276106714
+kopay:heston_pde-down_out_put-d10 | dated | price | 2.607797865856531
+kipay:heston_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+kireb:heston_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+kinone:heston_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+kipay:heston_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+kireb:heston_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+kinone:heston_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+kopay:heston_pde-up_out_call-d10 | numeric | price | 3.2391137276106714
+kopay:heston_pde-down_out_put-d10 | numeric | price | 2.607797865856531
+kipay:slv_pde-up_in_call-d10 | dated | price | 10.175846966805189
+kireb:slv_pde-up_in_call-d10 | dated | price | 10.175846966805189
+kinone:slv_pde-up_in_call-d10 | dated | price | 10.175846966805189
+kipay:slv_pde-down_in_put-d10 | dated | price | 8.913081886773865
+kireb:slv_pde-down_in_put-d10 | dated | price | 8.913081886773865
+kinone:slv_pde-down_in_put-d10 | dated | price | 8.913081886773865
+kopay:slv_pde-up_out_call-d10 | dated | price | 3.2391137276106714
+kopay:slv_pde-down_out_put-d10 | dated | price | 2.607797865856531
+kipay:slv_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+kireb:slv_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+kinone:slv_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+kipay:slv_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+kireb:slv_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+kinone:slv_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+kopay:slv_pde-up_out_call-d10 | numeric | price | 3.2391137276106714
+kopay:slv_pde-down_out_put-d10 | numeric | price | 2.607797865856531
+kipay:heston_pde_limit-up_in_call-d10 | dated | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:heston_pde_limit-up_in_call-d10 | dated | price | 8.995171205956236
+kinone:heston_pde_limit-up_in_call-d10 | dated | price | 8.995171205956236
+kipay:heston_pde_limit-down_in_put-d10 | dated | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:heston_pde_limit-down_in_put-d10 | dated | price | 7.52622330066799
+kinone:heston_pde_limit-down_in_put-d10 | dated | price | 7.52622330066799
+kopay:heston_pde_limit-up_out_call-d10 | dated | price | 3.0211965263421083
+kopay:heston_pde_limit-down_out_put-d10 | dated | price | 2.649889963334539
+kipay:heston_pde_limit-up_in_call-d10 | numeric | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:heston_pde_limit-up_in_call-d10 | numeric | price | 8.995164946862754
+kinone:heston_pde_limit-up_in_call-d10 | numeric | price | 8.995164946862754
+kipay:heston_pde_limit-down_in_put-d10 | numeric | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:heston_pde_limit-down_in_put-d10 | numeric | price | 7.526224179836392
+kinone:heston_pde_limit-down_in_put-d10 | numeric | price | 7.526224179836392
+kopay:heston_pde_limit-up_out_call-d10 | numeric | price | 3.021191474347487
+kopay:heston_pde_limit-down_out_put-d10 | numeric | price | 2.649876091368874
+kipay:slv_pde_limit-up_in_call-d10 | dated | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:slv_pde_limit-up_in_call-d10 | dated | price | 8.995171205956236
+kinone:slv_pde_limit-up_in_call-d10 | dated | price | 8.995171205956236
+kipay:slv_pde_limit-down_in_put-d10 | dated | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:slv_pde_limit-down_in_put-d10 | dated | price | 7.52622330066799
+kinone:slv_pde_limit-down_in_put-d10 | dated | price | 7.52622330066799
+kopay:slv_pde_limit-up_out_call-d10 | dated | price | 3.0211965263421083
+kopay:slv_pde_limit-down_out_put-d10 | dated | price | 2.649889963334539
+kipay:slv_pde_limit-up_in_call-d10 | numeric | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:slv_pde_limit-up_in_call-d10 | numeric | price | 8.995164946862754
+kinone:slv_pde_limit-up_in_call-d10 | numeric | price | 8.995164946862754
+kipay:slv_pde_limit-down_in_put-d10 | numeric | price | RAISES ValidationError: a knock-in has one rebate (3.0); a schedule record pays 4.5 (spec 3C §5.2 (a))
+kireb:slv_pde_limit-down_in_put-d10 | numeric | price | 7.526224179836392
+kinone:slv_pde_limit-down_in_put-d10 | numeric | price | 7.526224179836392
+kopay:slv_pde_limit-up_out_call-d10 | numeric | price | 3.021191474347487
+kopay:slv_pde_limit-down_out_put-d10 | numeric | price | 2.649876091368874

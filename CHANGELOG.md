@@ -337,6 +337,29 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   booked at the records' terms), non-first-hit aggregation value -> refused; every schedule at `product.barrier`
   with STOP_FIRST_HIT is unmoved (PDE byte book and the modelvalidation anchors bit-identical). New
   `test/test_vol_barrier_schedule_level.py`. Evidence: `docs/superpowers/specs/2026-10-10-vol-barrier-schedule-level-evidence/`.
+- The Black-Scholes barrier MC decides at the valuation instant on the schedule record's own level (W18b, user
+  approval 2026-10-10). Two decisions of `BarrierOptionMCEngine` read `product.barrier` / `product.rebate` while
+  its discrete path reads each resolved record: (a) the exercise-date value `barrier_expiry_value` (also the
+  local-vol / Heston / SLV barrier MC routes' value at T = 0 since W9) and (b) the "hit at valuation" decision
+  before simulating. For a DISCRETE schedule both now read the first record at or after the valuation instant (the
+  record on the valuation date, else the next observation, the barrier PDE's `_next_observation` rule): its level,
+  and on a knock-out its payoff (new `valuation_barrier_terms`; `barrier_expiry_value` now takes the pricing
+  environment). A record without a level takes `product.barrier`; CONTINUOUS / EXPIRY monitoring and a knock-in's
+  no-hit rebate are unchanged. Example: up-and-out call, `barrier` 120, record at 115 on the exercise date, spot 117:
+  17.0 -> 5.0 on the BS MC and the three vol MC routes, equal to the BS PDE, the vol PDE routes and the contract
+  booked at 115. A record on a mid-life valuation date whose level the spot has crossed now knocks out / in at once,
+  as the PDE does (the MC previously simulated and failed on the zero-length step). Moved values: only contracts
+  whose record level differs from `product.barrier` (or a knock-out record paying other than the rebate), spot
+  between the levels; plain contracts bit-identical. New `test/test_barrier_mc_record_level_at_valuation.py`.
+- A knock-in whose discrete schedule records pay other than `product.rebate` is refused on every route (W18b, user
+  ruling 2026-10-10, option (a)). A knock-in's rebate is paid when no observation hits, so no record's payoff can
+  apply. The 1D PDE core already refused it (spec 3C §5.2 (a): the Black-Scholes and local-vol barrier PDE, and the
+  Heston / SLV PDE deterministic limit); the Black-Scholes MC, the QUAD barrier, the local-vol / Heston / SLV MC and
+  the Heston / SLV 2D PDE priced it. The core's rule and message ("a knock-in has one rebate (R); a schedule record
+  pays P (spec 3C §5.2 (a))") move to the neutral `engine/barrier_schedule_rules.refuse_knock_in_record_payoff`,
+  which every route now calls, in both forms. Unaffected: knock-ins whose records pay the rebate or nothing, and all
+  knock-outs. Moved values: those knock-in cells price -> refused only. New
+  `test/test_knock_in_record_payoff_refused.py`.
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
