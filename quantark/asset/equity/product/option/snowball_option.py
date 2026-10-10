@@ -32,6 +32,7 @@ from quantark.util.exceptions import ValidationError
 from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor, leg_annualized
 from .accrual_build import build_contract_accrual
 from .observation_schedule import (
+    active_record_indices,
     at_valuation_instant,
     ObservationsAtValuation,
     knock_in_decided_at_valuation,
@@ -1077,9 +1078,19 @@ class SnowballOption(BaseEquityOption):
             )
         return ko_records
 
+    def active_ki_source_indices(self, pricing_env) -> List[int]:
+        """The original schedule position of each knock-in record ``resolve_ki_observations`` keeps: not before
+        the valuation date, not at a negative time (``active_record_indices``)."""
+        return active_record_indices(self.barrier_config.ki_observation_schedule, pricing_env)
+
     def resolve_ki_observations(self, pricing_env) -> List[ResolvedObservationRecord]:
         """
         Resolve KI observation schedule to times and barrier levels (no immediate payoff).
+
+        Only the records still ahead are resolved (``active_ki_source_indices``), as the knock-out resolver
+        does: a passed knock-in record is history, its outcome the carried knock-in state. A dated contract
+        keeps its passed records in its schedule; resolving one forward measured a year fraction back to its
+        date and refused the contract mid-life (W11, 2026-10-10), while the aged numeric twin had dropped it.
         """
         if self.barrier_config.ki_barrier is None:
             raise ValidationError("KI barrier configuration is missing.")
@@ -1096,7 +1107,8 @@ class SnowballOption(BaseEquityOption):
             raise ValidationError(
                 "KI observation schedule is required to resolve KI observations."
             )
-        if not schedule.records:
+        active_indices = self.active_ki_source_indices(pricing_env)
+        if not active_indices:
             # Every knock-in observation has passed -- the state an aged
             # contract reaches once its last KI date is behind it.  The KO
             # resolver already returns an empty list when no record is
@@ -1108,7 +1120,11 @@ class SnowballOption(BaseEquityOption):
             if isinstance(self.barrier_config.ki_barrier, list)
             else self.barrier_config.ki_barrier
         )
-        resolved_schedule = schedule.resolve(
+        resolved_schedule = ObservationSchedule(
+            records=[schedule.records[index] for index in active_indices],
+            aggregation_mode=schedule.aggregation_mode,
+            frequency=schedule.frequency,
+        ).resolve(
             pricing_env=pricing_env,
             default_barrier=default_barrier,
             default_payoff=0.0,

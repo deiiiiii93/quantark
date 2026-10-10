@@ -1173,9 +1173,11 @@ class SnowballMCEngine(BaseEngine):
             ]
             ki_times = [ki_profile["observation_times"][index] for index in in_horizon]
             ki_barriers = [ki_profile["barriers"][index] for index in in_horizon]
+            # the profile holds the records still ahead; a dated contract keeps its passed ones in its schedule
             ki_schedule_records = product.barrier_config.ki_observation_schedule.records
-            ki_records = [ki_schedule_records[index] for index in in_horizon]
-            ki_record_indices = list(in_horizon)
+            ki_source_indices = product.active_ki_source_indices(pricing_env)
+            ki_record_indices = [ki_source_indices[index] for index in in_horizon]
+            ki_records = [ki_schedule_records[index] for index in ki_record_indices]
 
         all_times_set = set(pre_times) | set(ki_times) | {T}
 

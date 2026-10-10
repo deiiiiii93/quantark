@@ -275,6 +275,31 @@ class ObservationsAtValuation:
     ko_index: Optional[int] = None
 
 
+def active_record_indices(schedule: Optional["ObservationSchedule"], pricing_env) -> List[int]:
+    """The schedule positions of the records still ahead of the valuation: not at a negative time and not dated
+    before the valuation date (a record AT the valuation instant is pending). The autocallables' knock-out
+    resolvers keep exactly these (spec 3B decision 13); their knock-in resolvers keep them too (W11, 2026-10-10).
+
+    A passed record is history: its outcome is the carried lifecycle state, and it is never resolved forward (a
+    dated one would need a year fraction from the valuation date back to its date). It is what ``time_shift``
+    drops from the numeric twin.
+    """
+    if schedule is None:
+        return []
+    return [
+        index
+        for index, record in enumerate(schedule.records)
+        if not (
+            (record.observation_time is not None and float(record.observation_time) < 0.0)
+            or (
+                record.observation_date is not None
+                and pricing_env is not None
+                and record.observation_date < pricing_env.valuation_date
+            )
+        )
+    ]
+
+
 def knock_in_decided_at_valuation(product, spot: float, pricing_env) -> bool:
     """Whether a knock-in observation AT the valuation instant is breached by the known spot.
 

@@ -369,16 +369,14 @@ AUTOCALLABLES = (
 AUTOCALL_REFUSED = {
     ("phoenix", "heston_pde"): ("dated", "numeric"),     # the 2D Phoenix PDE refuses memory coupons
     ("phoenix", "slv_pde"): ("dated", "numeric"),
-    ("ko_reset_absolute", "quad_v2"): ("dated",),        # a dated KO-reset with past schedule-1 records
 }
 #: (kind, route) -> forms whose DAY-BEFORE price is refused for a reason that is not the exercise date (pre-existing,
 #: T > 0): the 2D autocallable PDE kernels cannot resolve a dated knock-out schedule
 AUTOCALL_BEFORE_REFUSED = {
     ("snowball", "heston_pde"): ("dated",), ("snowball", "slv_pde"): ("dated",),
     ("phoenix_plain", "heston_pde"): ("dated",), ("phoenix_plain", "slv_pde"): ("dated",),
-    # a dated KO-reset with schedule-1 records in the past: settlement resolution of a past record (as QUAD V2's
-    # refusal at any date, DATED_REFUSED_ANY_DATE in test_dated_expiry_settles); the exercise instant itself prices
-    ("ko_reset_absolute", "pde"): ("dated",),
+    # (a dated KO-reset with schedule-1 records in the past prices on the PDE and QUAD V2 since W11:
+    # test_ko_reset_past_records.py)
 }
 
 

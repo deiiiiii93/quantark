@@ -277,7 +277,10 @@ def _ko_reset_events(product, cal, env, origin, fixing_time):
             continuous = float(product.barrier_config.ki_barrier)
         else:
             ki_src = list(product.barrier_config.ki_observation_schedule.records)
-            for i, rec in enumerate(product.resolve_ki_observations(env)):
+            ki_res = product.resolve_ki_observations(env)
+            if len(ki_res) != len(ki_src):      # a passed record is not resolved (W11): positions would shift
+                raise ValidationError("schedule env must keep every KI record active (anchor at initial_date)")
+            for i, rec in enumerate(ki_res):
                 ts, date_only = _instant(cal, timestamp=ki_src[i].observation_timestamp, dt=rec.observation_date,
                                          tau=rec.observation_time, origin=origin, fixing_time=fixing_time, what=f"ki[{i}]")
                 events.append(ContractEvent.make(EventKind.KI, i, ts, ts, rec.barrier, None, date_only))
@@ -329,7 +332,10 @@ def _autocallable_events(product, cal, env, origin, fixing_time, with_coupons: b
         else:
             ki_sched = product.barrier_config.ki_observation_schedule
             ki_src = list(ki_sched.records) if ki_sched is not None else None
-            for i, rec in enumerate(product.resolve_ki_observations(env)):
+            ki_res = product.resolve_ki_observations(env)
+            if ki_src is not None and len(ki_res) != len(ki_src):   # a passed record is not resolved (W11)
+                raise ValidationError("schedule env must keep every KI record active (anchor at initial_date)")
+            for i, rec in enumerate(ki_res):
                 src = ki_src[i] if ki_src is not None else None
                 ts, date_only = _instant(cal, timestamp=getattr(src, "observation_timestamp", None),
                                          dt=rec.observation_date, tau=rec.observation_time, origin=origin,

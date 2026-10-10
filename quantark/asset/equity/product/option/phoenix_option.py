@@ -33,6 +33,7 @@ from quantark.util.exceptions import ValidationError
 from .accrual import contract_tenor as _contract_tenor, coupon_period_fraction, ko_accrual_factor, leg_annualized
 from .accrual_build import build_contract_accrual
 from .observation_schedule import (
+    active_record_indices,
     at_valuation_instant,
     ObservationAggregation,
     ObservationsAtValuation,
@@ -683,9 +684,17 @@ class PhoenixOption(BaseEquityOption):
             )
         return ko_records
 
+    def active_ki_source_indices(self, pricing_env) -> List[int]:
+        """The original schedule position of each knock-in record ``resolve_ki_observations`` keeps: not before
+        the valuation date, not at a negative time (``active_record_indices``)."""
+        return active_record_indices(self.barrier_config.ki_observation_schedule, pricing_env)
+
     def resolve_ki_observations(self, pricing_env) -> List[ResolvedObservationRecord]:
         """
         Resolve KI observation schedule to times and barrier levels.
+
+        Only the records still ahead are resolved (``active_ki_source_indices``), as
+        ``SnowballOption.resolve_ki_observations``: a passed knock-in record is history (W11, 2026-10-10).
         """
         if self.barrier_config.ki_barrier is None:
             raise ValidationError("KI barrier configuration is missing.")
@@ -702,10 +711,12 @@ class PhoenixOption(BaseEquityOption):
             raise ValidationError(
                 "KI observation schedule is required to resolve KI observations."
             )
-        if not schedule.records:
-            # Every knock-in observation has passed: an aged contract, or the intraday twin, drops them. A missing
-            # schedule is still an error (above); an emptied one tests no knock-in, and the redemption and last
-            # coupon remain to be valued, as SnowballOption.resolve_ki_observations answers.
+        active_indices = self.active_ki_source_indices(pricing_env)
+        if not active_indices:
+            # Every knock-in observation has passed: an aged contract, or the intraday twin, drops them (a dated
+            # contract keeps them behind its valuation date). A missing schedule is still an error (above); an
+            # emptied one tests no knock-in, and the redemption and last coupon remain to be valued, as
+            # SnowballOption.resolve_ki_observations answers.
             return []
 
         default_barrier = (
@@ -713,7 +724,11 @@ class PhoenixOption(BaseEquityOption):
             if isinstance(self.barrier_config.ki_barrier, list)
             else self.barrier_config.ki_barrier
         )
-        resolved_schedule = schedule.resolve(
+        resolved_schedule = ObservationSchedule(
+            records=[schedule.records[index] for index in active_indices],
+            aggregation_mode=schedule.aggregation_mode,
+            frequency=schedule.frequency,
+        ).resolve(
             pricing_env=pricing_env,
             default_barrier=default_barrier,
             default_payoff=0.0,
