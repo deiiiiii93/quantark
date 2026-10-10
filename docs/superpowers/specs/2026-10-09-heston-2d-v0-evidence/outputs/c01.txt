@@ -1,0 +1,5 @@
+max |KO cash x DF - cf| over the 24 dates = 18.8353
+rev KO= 10.0 sub=10 paths=20000000  true-cf = +1.3128e-04 (SE 1.1e-05)  P(KO)=7.75e-06
+rev KO=  5.0 sub=10 paths=20000000  true-cf = +7.0076e-06 (SE 2.5e-06)  P(KO)=4.00e-07
+rev KO=  2.0 sub=10 paths=100000000  true-cf = +0.0000e+00 (SE 0.0e+00)  P(KO)=0.00e+00  95% bound with no knock-out 5.65e-07  BELOW tol 1e-06
+rev KO=  2.0 sub=40 paths=100000000  true-cf = +0.0000e+00 (SE 0.0e+00)  P(KO)=0.00e+00  95% bound with no knock-out 5.65e-07  BELOW tol 1e-06

@@ -46,6 +46,11 @@ CALL_STRIKE, CALL_PARTICIPATION = 100.0, 0.2
 # misprices the same Black-Scholes call by 1.7e-4 on its default grid)
 CLOSED_FORM_ABS = 1e-5
 CALL_CLOSED_FORM_ABS = 2e-5
+# The 2D Heston reverse control knocks out at 2 (S down 98%), not 20: under W3's Heston (v0 = theta = 0.04, kappa 1.5,
+# sigma 0.3, rho -0.5) the knock-out at 20 carries a real premium, +4.90e-3 +- 2.0e-4 by independent MC (b05), so the
+# closed form is not its price. At 2 the same MC sees no knock-out on 1e8 paths (sub 10 and 40): |premium| <= 18.84 x 3
+# / 1e8 = 5.7e-7 at 95% (c01), below the control's 1e-6. The 1D BSM controls keep 20 (premium ~1e-8).
+HESTON_REVERSE_CONTROL_KO = 2.0
 
 
 def _env(grid_vol: bool = False) -> PricingEnvironment:
@@ -69,9 +74,11 @@ def _barrier(ko: float, ki: float, continuous: bool) -> BarrierConfig:
 
 
 def _certain_v0(rebate_rate: float, annualized: bool, reverse: bool = False, call: bool = False,
-                continuous: bool = False) -> SnowballOption:
-    """Knock-out 5x beyond the spot and knock-in 100x beyond it, each on its own side: neither is reachable."""
-    ko, ki = (20.0, 10000.0) if reverse else (500.0, 1.0)
+                continuous: bool = False, ko: float = None) -> SnowballOption:
+    """Knock-out 5x beyond the spot and knock-in 100x beyond it, each on its own side: neither is reachable.
+    ``ko`` overrides the knock-out level (the 2D Heston reverse control: ``HESTON_REVERSE_CONTROL_KO``)."""
+    ko_default, ki = (20.0, 10000.0) if reverse else (500.0, 1.0)
+    ko = ko_default if ko is None else ko
     extra = (dict(call_rebate_enabled=True, call_strike=CALL_STRIKE, call_participation_rate=CALL_PARTICIPATION)
              if call else {})
     return SnowballOption(
@@ -226,13 +233,15 @@ class TestHeston2DRows:
     @ANNUALIZED
     def test_reverse_rows_mirror_the_standard(self, annualized):
         env = _env()
-        product = _certain_v0(0.10, annualized, reverse=True)
+        product = _certain_v0(0.10, annualized, reverse=True, ko=HESTON_REVERSE_CONTROL_KO)
         solver = HestonSnowballPDESolver(model_params=self.HP, n_x=96, n_v=24, n_t=48)
         solver.price(product, env)
         lower, upper = _t0_rows(solver)
+        closed_form = _closed_form(product, env, 0.10, annualized, False)
         assert upper.branch == "v0_upper_principal_rebate"
-        assert upper.value == pytest.approx(_closed_form(product, env, 0.10, annualized, False), rel=1e-14)
-        assert lower.branch in ("v0_lower_ko", "v0_lower_principal_rebate")
+        assert upper.value == pytest.approx(closed_form, rel=1e-14)
+        # the 2D grid reaches down past the knock-out at 2 (S_min 1.97): the lower edge is the knock-out edge
+        assert lower.branch == "v0_lower_ko"
 
     @ANNUALIZED
     def test_call_rebate_lower_row(self, annualized):
@@ -245,25 +254,29 @@ class TestHeston2DRows:
 
 
 class TestHeston2DCertainV0Control:
-    """The standard certain-V0 control (KO 500 / discrete KI 1) under Heston at (96, 24, 48) is its closed form.
+    """The certain-V0 controls under Heston at (96, 24, 48) price at their closed form: standard KO 500 / discrete KI
+    1, reverse KO 2 / discrete KI 10000 (``HESTON_REVERSE_CONTROL_KO``; the reverse KO 20 control is not certain under
+    Heston, W7 Q5).
 
     The ADI core's explicit S-operator ``A1`` must carry the degenerate v = 0 column: the implicit S-solve carries the
     S-drift and the -rU reaction on every variance column, so a predictor that leaves that column at 0 evolves it
-    under theta x A1 -- consistent only on a fully implicit step (W7 defect B). Unpatched the gap is +2.48e-3.
+    under theta x A1 -- consistent only on a fully implicit step (W7 defect B). Unpatched the gap is +2.48e-3 in
+    both orientations.
 
     Every damping step is switched off (event AND terminal): a theta = 1 step discounts the constant by 1 / (1 + r dt)
     instead of exp(-r dt), a second-order-in-dt term by design (the Rannacher start alone is +4.0e-5 here). With
-    both off the residual is the Crank-Nicolson / Craig-Sneyd step's own, -9.3e-7 at n_t = 48.
+    both off the residual is the Crank-Nicolson / Craig-Sneyd step's own: -9.3e-7 standard, -7.3e-7 reverse.
     """
 
     HP = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.3, rho=-0.5)
 
-    def test_standard_control_is_the_closed_form_without_damping(self):
+    @ORIENTATION
+    def test_control_is_the_closed_form_without_damping(self, reverse):
         from quantark.asset.equity.engine.pde.core.components import CrankNicolson
         from quantark.asset.equity.param.engine_params import PDEParams
 
         env = _env()
-        product = _certain_v0(0.10, False)
+        product = _certain_v0(0.10, False, reverse=reverse, ko=HESTON_REVERSE_CONTROL_KO if reverse else None)
         undamped = PDEParams(stepper=CrankNicolson(event_damping_steps=0, terminal_damping_steps=0))
         solver = HestonSnowballPDESolver(model_params=self.HP, n_x=96, n_v=24, n_t=48, params=undamped)
         price = solver.price(product, env)
