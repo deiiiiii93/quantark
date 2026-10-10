@@ -118,9 +118,17 @@ def test_ageing_to_maturity_snaps_and_prices_as_settled():
     short = [d / 365.0 for d in (4, 10)]
     numeric = _aged(F.ra_numeric({0: True, 1: True}, times=short, maturity=10 / 365.0), 10)
     assert numeric.maturity == 0.0 and numeric.observation_records[-1].observation_time == 0.0
-    # A dated contract cannot be priced ON its exercise date (the engine refuses), so the numeric contract aged to
-    # its maturity is checked against the settled value: both fixings in range for the whole contract length.
-    assert is_close(F.quiet_price(F.ENGINES["ra"](), numeric, F.eq_env(10)), 100.0 * 0.10, rel_tol=1e-12)
+    # The settled value: both fixings in range for the whole contract length; the dated twin ON its exercise date
+    # prices the same (W8, user ruling 2026-10-09 option (a): a dated option on its exercise date settles).
+    dated = RangeAccrualOption(
+        initial_price=100.0, range_config=RangeAccrualConfig(upper_barrier=110.0, lower_barrier=90.0, accrual_rate=0.10),
+        exercise_date=F.START + timedelta(days=10), initial_date=F.START,
+        observation_records=[RangeAccrualObservationRecord(observation_date=F.START + timedelta(days=d),
+                                                           observed_in_range=True) for d in (4, 10)])
+    engine = F.ENGINES["ra"]()
+    settled = F.quiet_price(engine, numeric, F.eq_env(10))
+    assert is_close(settled, 100.0 * 0.10, rel_tol=1e-12)
+    assert is_close(F.quiet_price(engine, dated, F.eq_env(10)), settled, rel_tol=1e-12)
 
 
 # ---------------------------------------------------------------- X4: only history warns

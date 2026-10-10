@@ -487,3 +487,79 @@ def test_x3i_replay_explain():
 
     _, res, mtm = _replay(F.asian_dated(), n=12, explain=PnLExplainConfig(methods=(ExplainMethod.WATERFALL,)))
     _refill_and_chain(res.explain_df(), res.explain_reconciliation_df(), mtm)   # book results: methods
+
+
+# ================================================================ W6 x W8: a run reaching the exercise date
+# A dated contract valued ON its exercise date prices its settled value (W8, user ruling 2026-10-09 option (a)), so
+# a numeric participant aged to its maturity is no longer floored at 1e-8: it is exactly 0.0 and equals its twin.
+_SHORT_SETTLED = {"ra": 100.0 * 0.10, "asian": (F.spot_on(4) + F.spot_on(8)) / 2.0 - 100.0}   # fixings 105, 109
+
+
+def _backtest_explained(product, kind, n, tmp_path):
+    from quantark.pnlexplain import ExplainMethod, PnLExplainConfig
+
+    from quantark.backtest import BacktestConfig, BacktestEngine, ZeroCostModel
+    from quantark.backtest.strategy import DeltaNeutralStrategy
+    from quantark.portfolio import Position
+
+    adapter = F.DailyAdapter(n)
+    cfg = BacktestConfig(
+        strategy=DeltaNeutralStrategy(delta_threshold=1e12), start_date=F.START,
+        end_date=adapter.dates[-1].to_pydatetime(), underlying=F.UNDERLYING,
+        initial_positions=[Position(product=product, quantity=1.0, entry_price=0.0, underlying=F.UNDERLYING,
+                                    engine=F.ENGINES[kind](), entry_timestamp=F.START)],
+        market_data_adapter=adapter, transaction_cost_model=ZeroCostModel(), handle_lifecycle_events=False,
+        results_path=str(tmp_path), pnl_explain=PnLExplainConfig(methods=(ExplainMethod.WATERFALL,)),
+    )
+    return BacktestEngine(cfg).run()
+
+
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_equity_backtest_twins_settle_on_the_exercise_date_and_refuse_the_day_after(kind, tmp_path):
+    """Days 0..10 (T = day 10): both twins value their settled value on T, equal to each other. A run to T + 1 is
+    refused for both (the dated contract has expired; the numeric one is past its maturity)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _, res_d = _backtest(_short(kind, "dated"), kind, F.DailyAdapter(11), tmp_path)
+        _, res_n = _backtest(_short(kind, "numeric"), kind, F.DailyAdapter(11), tmp_path)
+        values_d, values_n = res_d.get_value_series().tolist(), res_n.get_value_series().tolist()
+        assert is_close(values_d[-1], _SHORT_SETTLED[kind], rel_tol=1e-12)
+        assert is_close(values_n[-1], values_d[-1], rel_tol=1e-12)
+        for form in ("dated", "numeric"):
+            with pytest.raises(ValidationError):
+                _backtest(_short(kind, form), kind, F.DailyAdapter(12), tmp_path)
+
+
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_equity_backtest_explain_a_numeric_participant_reaching_its_maturity(kind, tmp_path):
+    """The explain step ending ON the maturity: the numeric participant aged to exactly 0.0 is a time step (it was
+    refused against the trackers' 1e-8 floor) and explains as its dated twin does."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res_d = _backtest_explained(_short(kind, "dated"), kind, 11, tmp_path)
+        res_n = _backtest_explained(_short(kind, "numeric"), kind, 11, tmp_path)
+    for res in (res_d, res_n):
+        assert res.explain_reconciliation_df["ok"].all()
+    key = ["date", "factor"]
+    rows_d = res_d.explain_df.sort_values(key).reset_index(drop=True)
+    rows_n = res_n.explain_df.sort_values(key).reset_index(drop=True)
+    assert rows_d[key].equals(rows_n[key])
+    for a, b in zip(rows_d["pnl"], rows_n["pnl"]):
+        assert is_close(a, b, rel_tol=1e-9, abs_tol=1e-12), (a, b)
+
+
+def test_replay_numeric_participant_on_its_maturity_is_zero_and_equals_the_dated_twin():
+    """The replay's pricing copy on T: the numeric Asian aged to exactly 0.0 (no longer floored at 1e-8) prices the
+    dated twin's settled value. (The replay's own maturity settlement of an Asian is out of scope -- run-fixings spec
+    §10, cash for range accruals or Asians at expiry inside runs -- so the path stops the day before T.)"""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        copies = {}
+        for form in ("dated", "numeric"):
+            eng, _, _ = _replay(_short("asian", form), n=10)                      # days 0..9, fixings 4 and 8 recorded
+            copies[form] = eng._replays[0].product_for_date(pd.Timestamp(F.START + timedelta(days=10)), F.eq_env(10))
+        assert copies["numeric"].maturity == 0.0
+        engine = F.ENGINES["asian"]()
+        dated = F.quiet_price(engine, copies["dated"], F.eq_env(10))
+        assert is_close(dated, _SHORT_SETTLED["asian"], rel_tol=1e-12)
+        assert is_close(F.quiet_price(engine, copies["numeric"], F.eq_env(10)), dated, rel_tol=1e-12)

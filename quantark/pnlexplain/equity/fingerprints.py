@@ -376,7 +376,10 @@ def check_contract_roll(
     A float maturity must equal ``max(MATURITY_FLOOR, m0 - decrement)`` within
     ROLL_TOL, where the decrement defaults to ``calendar_days/365``: the
     trackers' floor is only reached when the roll would cross it, so a floored
-    maturity is validated, not waved through. ``calendar_days == 0`` declares an
+    maturity is validated, not waved through. A run-fixings product is not
+    floored: its maturity is ``with_time_elapsed``'s (snapped to exactly 0.0 on
+    the maturity instant, where it prices its settled value like its dated twin
+    on the exercise date -- W8, user ruling 2026-10-09 option (a)). ``calendar_days == 0`` declares an
     unrolled contract (same maturity, same schedules); otherwise a schedule may
     have lost the observations that passed inside the step (its records are a
     suffix of the t0 records).
@@ -395,11 +398,12 @@ def check_contract_roll(
     ``pricing_env_t1`` is the t1 environment that says which records are strictly past there; without it no
     outcome may change. A changed t0-recorded outcome is still refused.
     """
+    run_fixings_expected = None
     if participates(product_t0):
         days0 = int(calendar_days) == 0
         decrement = 0.0 if days0 else (calendar_days / 365.0 if expected_decrement is None
                                        else float(expected_decrement))
-        expected = product_t0.with_time_elapsed(decrement)
+        expected = run_fixings_expected = product_t0.with_time_elapsed(decrement)
         allowed = (frozenset(expected.missing_fixing_fills(pricing_env_t1)) if pricing_env_t1 is not None
                    else frozenset())
         same = _run_fixings_roll_equal(expected, product_alive_t1, allowed)
@@ -428,14 +432,20 @@ def check_contract_roll(
     decrement = days / 365.0 if expected_decrement is None else float(expected_decrement)
     if decrement < 0.0:
         raise ValidationError(f"expected_decrement must be non-negative, got {decrement}")
-    expected = m0 if days == 0 else max(MATURITY_FLOOR, m0 - decrement)
+    if days == 0:
+        expected = m0
+    elif run_fixings_expected is not None:
+        expected = _float_maturity(run_fixings_expected.maturity, "rolled t0")   # snapped, never floored
+    else:
+        expected = max(MATURITY_FLOOR, m0 - decrement)
     if not is_close(m1, expected, rel_tol=0.0, abs_tol=ROLL_TOL):
         basis = ("calendar_days/365" if expected_decrement is None
                  else f"the environment's own clock ({decrement:.10g} of a year)")
         raise ValidationError(
             f"alive product maturity {m1} is not {m0} rolled by {days} days (expected {expected}; "
             f"a float-maturity contract must be supplied rolled by {basis}, "
-            f"floored at {MATURITY_FLOOR})"
+            + ("snapped to 0.0 at its maturity)" if run_fixings_expected is not None
+               else f"floored at {MATURITY_FLOOR})")
         )
 
 

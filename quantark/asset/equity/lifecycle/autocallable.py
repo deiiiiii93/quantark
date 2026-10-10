@@ -246,10 +246,12 @@ class AutocallableLifecycleTracker:
             and origin is not None
         ):
             if participates(product):
-                # a run-fixings product's records move with its maturity (spec 2026-10-09 run fixings §3.5); the
-                # trackers' floor is kept (Ruling 12)
+                # a run-fixings product's records move with its maturity (spec 2026-10-09 run fixings §3.5). No
+                # floor: on its maturity day the maturity is exactly 0.0 and the contract prices its settled value,
+                # equal to its dated twin on the exercise date (W8, user ruling 2026-10-09 option (a); this
+                # replaces the run-fixings plan's Ruling 12, which kept the trackers' 1e-8 floor). Past it the
+                # maturity is negative and pricing refuses, as the dated twin past its exercise date does.
                 product = product.with_time_elapsed(elapsed)
-                product.maturity = max(float(product.maturity), 1e-8)
             else:
                 product.maturity = max(float(product.maturity) - elapsed, 1e-8)
         barrier_config = getattr(product, "barrier_config", None)

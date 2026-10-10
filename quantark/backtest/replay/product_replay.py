@@ -527,9 +527,11 @@ class ProductReplay:
             # Valuation date on/after a date-based final maturity: sample the
             # shortest pillar (the product settles today; its price is unused).
             return 1e-8
-        if is_zero(remaining) and getattr(product, "exercise_date", None) is not None:
+        if is_zero(remaining) or remaining < 0.0:
             # ON a date-based final maturity get_maturity is 0.0 (2026-10-09; it
-            # used to raise): the same pillar, so the readout is unchanged.
+            # used to raise), and a numeric run-fixings product is no longer
+            # floored at 1e-8 (0.0 on its maturity day, negative past it): the
+            # same pillar, so the readout is unchanged.
             return 1e-8
         return remaining
 
