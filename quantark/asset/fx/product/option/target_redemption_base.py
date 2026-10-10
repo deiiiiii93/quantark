@@ -24,7 +24,7 @@ from typing import Dict, List, Mapping, Optional, Tuple
 
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import fixing_label, warn_filled_fixings
+from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
 from ..base_fx_product import BaseFxProduct
@@ -293,8 +293,9 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     # -- ageing (spec section 6) --------------------------------------------------------------------------------
     def time_shift(self, time_bump: float) -> None:
-        """Numeric form: move every fixing, pay and pending time by ``time_bump``. Pending cash now at or before
-        valuation was paid within the bump and leaves as a PAYMENT event; fixings stepped over stay unbanked until
+        """Numeric form: move every fixing, pay and pending time by ``time_bump``. Pending cash whose pay time is now
+        strictly past was paid within the bump and leaves as a PAYMENT event; cash due today (snapped to exactly 0.0)
+        stays pending, in the value (user decision OQ-1 b, 2026-10-10). Fixings stepped over stay unbanked until
         :meth:`record_passed_fixings`. The dated form ages by its environment's date, so this is a no-op for it."""
         if not self.is_numeric:
             return
@@ -303,10 +304,10 @@ class TargetRedemptionProduct(BaseFxProduct):
         kept, events = [], []
         for p in self.state.pending:
             t = p.pay_time - time_bump
-            if is_passed_time(t):
+            if is_history(t):  # strictly past: paid within the bump (OQ-1 b: cash due today stays pending)
                 events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount, time=t))
             else:
-                kept.append(PendingPayment(p.amount, pay_time=t))
+                kept.append(PendingPayment(p.amount, pay_time=snap_time(t)))
         self.state = TargetRedemptionState(self.state.accumulated, pending=tuple(kept))
         self.lifecycle_events = self.lifecycle_events + tuple(events)
         self._refresh_numeric_horizon()
@@ -315,8 +316,8 @@ class TargetRedemptionProduct(BaseFxProduct):
     def record_passed_fixings(self, fx_env) -> None:
         """Bank every unbanked fixing at or before valuation, in order, at its recorded rate (``with_fixings_recorded``)
         or else the QUOTED ``fx_env.spot`` (spec Q3), stopping once the contract is terminal; append the events;
-        re-validate. Dated: ``state.as_of`` becomes the valuation date and pending cash dated on or before it leaves
-        as a PAYMENT event."""
+        re-validate. Dated: ``state.as_of`` becomes the valuation date and pending cash whose pay time is strictly past
+        leaves as a PAYMENT event; cash due on the valuation date stays pending (OQ-1 b)."""
         self._bank_passed(fx_env)
         self.validate()
 
@@ -373,14 +374,15 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     @staticmethod
     def _settle_numeric(amount: float, pay_time: float, label: str, pending: list, events: list) -> None:
-        """Determined cash: paid now (PAYMENT, the fixing's label) when its pay time has passed, else pending."""
+        """Determined cash: paid now (PAYMENT, the fixing's label) when its pay time is strictly past, else pending
+        (cash due today included, at exactly 0.0)."""
         if is_zero(amount):
             return
-        if is_passed_time(pay_time):
+        if is_history(pay_time):
             events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, amount, time=pay_time,
                                                 label=label))
         else:
-            pending.append(PendingPayment(amount, pay_time=pay_time))
+            pending.append(PendingPayment(amount, pay_time=snap_time(pay_time)))
 
     def _record_dated(self, fx_env) -> List[Tuple[int, str]]:
         self._check_as_of(fx_env)
@@ -388,10 +390,10 @@ class TargetRedemptionProduct(BaseFxProduct):
         val, st = fx_env.valuation_date, self.state
         events: List[TargetRedemptionEvent] = []
         pending: list = []
-        for p in st.pending:  # cash due by the valuation date was paid
-            if p.pay_date <= val:
-                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount,
-                                                    time=signed_year_fraction(p.pay_date, fx_env)))
+        for p in st.pending:  # cash whose pay time is strictly past was paid; cash due today stays pending
+            t_pay = signed_year_fraction(p.pay_date, fx_env)
+            if is_history(t_pay):
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount, time=t_pay))
             else:
                 pending.append(p)
         acc = st.accumulated
@@ -424,12 +426,12 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     @staticmethod
     def _settle_dated(amount: float, pay_date: datetime, label: str, fx_env, pending: list, events: list) -> None:
-        """Dated twin of ``_settle_numeric``: paid now when ``pay_date`` is on or before valuation, else pending."""
+        """Dated twin of ``_settle_numeric``: paid now when ``pay_date``'s time is strictly past, else pending."""
         if is_zero(amount):
             return
-        if pay_date <= fx_env.valuation_date:
-            events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, amount,
-                                                time=signed_year_fraction(pay_date, fx_env), label=label))
+        t = signed_year_fraction(pay_date, fx_env)
+        if is_history(t):
+            events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, amount, time=t, label=label))
         else:
             pending.append(PendingPayment(amount, pay_date=pay_date))
 
@@ -526,8 +528,8 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     def _dated_view(self, fx_env) -> ResolvedTargetRedemption:
         """Unbanked fixings (all after valuation once ``resolve`` has banked the passed ones), their pay times and
-        factors resolved against ``fx_env``; pending cash dated after valuation. Dead fixings of a redeemed
-        contract are dropped."""
+        factors resolved against ``fx_env``; pending cash whose pay time is not strictly past (at exactly 0.0 when
+        due today, OQ-1 b). Dead fixings of a redeemed contract are dropped."""
         val, st = fx_env.valuation_date, self.state
         fix_t: List[float] = []
         pay_t: List[float] = []
@@ -547,14 +549,14 @@ class TargetRedemptionProduct(BaseFxProduct):
                     factors.append(self._dated_factor(i, fx_env))
         pending: List[Tuple[float, float]] = []
         for p in st.pending:
-            if p.pay_date <= val:
-                continue  # paid: booked, not pending
             t = signed_year_fraction(p.pay_date, fx_env)
-            if is_passed_time(t):  # Ruling R7 applied to cash: unpaid by date, paid by the numeric rule
+            if is_history(t):
+                continue  # strictly past: paid, booked, not pending
+            if p.pay_date > val and is_passed_time(t):  # Ruling R7 applied to cash - reversed by Task 8b
                 raise ValidationError(
                     f"pending pay date {p.pay_date.date()} is after the valuation date {val} but resolves to a zero "
                     f"year fraction under the environment's {fx_env.day_count_convention.name} day count")
-            pending.append((t, p.amount))
+            pending.append((snap_time(t), p.amount))
         return ResolvedTargetRedemption(
             fixing_times=tuple(fix_t),
             pay_times=tuple(pay_t),
@@ -566,5 +568,6 @@ class TargetRedemptionProduct(BaseFxProduct):
         )
 
     def pending_pv(self, fx_env) -> float:
-        """PV of the pending cash still due after valuation (no warning: callers have banked the passed fixings)."""
+        """PV of the pending cash still due at or after valuation, cash due today at ``DF(0) = 1`` (no warning:
+        callers have banked the passed fixings)."""
         return pending_present_value(self.resolve(fx_env, warn_missing_fixings=False).pending, fx_env)

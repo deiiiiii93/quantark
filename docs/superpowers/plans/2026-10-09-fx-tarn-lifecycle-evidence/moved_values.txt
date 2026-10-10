@@ -1,0 +1,15 @@
+#
+# Task 8a - OQ-1 (b), user decision 2026-10-10: cash due today stays in today's value.
+# Pins: test/test_fx_target_redemption_lifecycle.py::test_moved_values_around_a_pay_date (MC 20_000, seed 7, flat 1.20)
+# case               cash          price d-1 (unchanged)   theta d-1  old -> new         price on pay date  old -> new     theta on pay date old -> new
+# tarn_zero_lag      0.98630137    102.093431              -0.977801 ->  0.008500        101.115629 -> 102.101931         0.015260 -> -0.971042
+# tarf_zero_lag      0.05000000      0.096372              -0.052171 -> -0.002171          0.044201 ->   0.094201         0.000850 -> -0.049150
+# tarn_lag2_pending  0.98630137    102.089352              -0.970279 ->  0.016022        101.119073 -> 102.105374         0.015929 -> -0.970372
+# Rule: every TARN / TARF valued on a pay date: price + cash due that day (x DF(0) = 1); theta the day before a pay
+# date: + cash; theta on the pay date: - cash; the terminal value on the last pay date is that cash, not 0.0.
+# Validation: a numeric pending pay_time of 0.0 (or is_zero) refused -> accepted; a dated pending pay_date equal to
+# as_of refused -> accepted. record_passed_fixings on a pay date: PAYMENT -> still pending (PAYMENT the day after).
+# Flipped tests: test_numeric_pay_time_must_be_after_valuation[0.0, 1e-12] (refused -> accepted),
+# test_dated_pending_must_be_after_as_of[D1], test_r2_dated_pending_must_follow_as_of (refused -> accepted; the
+# replacement tests refuse a pay_date BEFORE as_of), test_dated_record_banks_through_the_valuation_date_and_sweeps_paid_cash
+# (PAYMENT on LAG2[0] -> on LAG2[0] + 1 day).

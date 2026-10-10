@@ -2,7 +2,8 @@
 
 Spec: docs/superpowers/specs/2026-10-09-fx-tarn-lifecycle-design.md, section 3. ``accumulated`` is the undiscounted
 amount banked towards the target (TARN coupons, TARF favourable amounts, including those fixed but not yet paid).
-``pending`` is determined cash whose pay time is after valuation. The state is immutable: ageing replaces it.
+``pending`` is determined cash whose pay time is at or after valuation; cash due today is still pending (user decision
+OQ-1 b, 2026-10-10). The state is immutable: ageing replaces it.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from enum import Enum
 from typing import Final, Optional, Sequence, Tuple
 
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_zero
+from quantark.util.fixings import is_history
 
 #: Relative target-hit tolerance, moved from the two MC engines' ``_HIT_RTOL`` with its value unchanged (spec section
 #: 3: ``Tolerance.RELATIVE`` would move redemption decisions and inception prices).
@@ -47,10 +48,10 @@ class PendingPayment:
             )
         if self.pay_time is not None:
             t = self.pay_time
-            if not math.isfinite(t) or t <= 0.0 or is_zero(t):
+            if not math.isfinite(t) or is_history(t):
                 raise ValidationError(
-                    f"a numeric pending pay_time must be after valuation (> 0), got {t}: cash paid at or before "
-                    "valuation is booked, not pending"
+                    f"a numeric pending pay_time must be at or after valuation (>= 0), got {t}: cash whose pay time is "
+                    "strictly past is booked, not pending (cash due today, t = 0, is still pending)"
                 )
 
 
@@ -83,9 +84,10 @@ class TargetRedemptionState:
                 raise ValidationError(
                     "dated pending cash with as_of=None is refused: cash implies a banked fixing"
                 )
-            late = [p.pay_date for p in self.pending if p.pay_date <= self.as_of]
+            late = [p.pay_date for p in self.pending if p.pay_date < self.as_of]
             if late:
-                raise ValidationError(f"a dated pending pay_date must be after as_of {self.as_of}, got {late[0]}")
+                raise ValidationError(
+                    f"a dated pending pay_date must be on or after as_of {self.as_of}, got {late[0]}")
 
 
 class TerminalBookingWarning(UserWarning):
@@ -119,7 +121,8 @@ class TargetRedemptionEvent:
 @dataclass(frozen=True)
 class ResolvedTargetRedemption:
     """The one engine input (spec section 5.1): unbanked fixings still ahead (all > 0), their factors (TARN), the
-    banked amount, pending ``(pay_time, amount)`` after valuation, and the derived flags."""
+    banked amount, pending ``(pay_time, amount)`` with ``pay_time >= 0`` (cash due today included), and the derived
+    flags."""
 
     fixing_times: Tuple[float, ...]
     pay_times: Tuple[float, ...]

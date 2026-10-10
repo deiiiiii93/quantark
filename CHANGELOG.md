@@ -45,6 +45,13 @@ backtest and FX dynamic scenario.
   under `CALENDAR_DAYS` / `ACT_365`; under `BUSINESS_DAYS` a Friday or holiday theta is 0.0 and `ACT_360` steps 1/360,
   matching the dated product. Values that move are listed in
   `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`.
+- FX TARN / TARF cash due on the valuation date stays in the value (user decision OQ-1 b, 2026-10-10, as W8 values a
+  dated contract on its date at its settled value): determined cash is booked (a `PAYMENT` event, out of the value)
+  once its pay time is strictly past. A numeric pending `pay_time` of 0.0 and a dated pending `pay_date` equal to
+  `as_of` are accepted. Moves: the price on a pay date gains the cash due that day, theta the day before a pay date
+  gains it and theta on the pay date loses it (values in
+  `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`); inside runs, cash on a
+  path-aligned pay date is booked on the next path instant.
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be

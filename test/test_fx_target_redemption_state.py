@@ -64,10 +64,15 @@ def test_pending_needs_exactly_one_of_time_or_date(kw):
         PendingPayment(1.0, **kw)
 
 
-@pytest.mark.parametrize("t", [0.0, -0.1, 1e-12, math.nan, math.inf])
-def test_numeric_pay_time_must_be_after_valuation(t):
+@pytest.mark.parametrize("t", [-0.1, math.nan, math.inf])
+def test_numeric_pay_time_must_not_be_past(t):
     with pytest.raises(ValidationError, match="pay_time"):
         PendingPayment(1.0, pay_time=t)
+
+
+@pytest.mark.parametrize("t", [0.0, 1e-12, -1e-12])
+def test_numeric_pay_time_due_today_is_pending(t):  # OQ-1 (b), user 2026-10-10
+    assert PendingPayment(1.0, pay_time=t).pay_time == t
 
 
 @pytest.mark.parametrize("amount", [math.nan, math.inf])
@@ -96,10 +101,14 @@ def test_dated_pending_needs_as_of():
         TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=D2),))
 
 
-@pytest.mark.parametrize("pay", [D1, datetime(2026, 7, 1)])
-def test_dated_pending_must_be_after_as_of(pay):
+def test_dated_pending_must_not_precede_as_of():
     with pytest.raises(ValidationError, match="after as_of"):
-        TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=pay),), as_of=D1)
+        TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=datetime(2026, 7, 1)),), as_of=D1)
+
+
+def test_dated_pending_due_on_as_of_is_allowed():  # OQ-1 (b)
+    s = TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=D1),), as_of=D1)
+    assert s.pending[0].pay_date == D1
 
 
 def test_terminal_booking_warning_is_a_user_warning():

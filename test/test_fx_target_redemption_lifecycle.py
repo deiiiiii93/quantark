@@ -648,10 +648,10 @@ def test_r2_neither_schedule_refused():
         FxTargetRedemptionForward(strike=1.15, state=INCEPTION)
 
 
-def test_r2_dated_pending_must_follow_as_of():
+def test_r2_dated_pending_must_not_precede_as_of():
     with pytest.raises(ValidationError, match="after as_of"):
         dated_note(state=TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=FIX_DATES[0]),),
-                                               as_of=FIX_DATES[0]))
+                                               as_of=FIX_DATES[1]))
 
 
 def test_r2_as_of_after_valuation_is_refused_at_pricing():
@@ -681,15 +681,18 @@ def test_pending_pay_date_with_zero_year_fraction_is_refused():
 
 # --- dated record semantics, maturity ------------------------------------------------------------------------------
 
-def test_dated_record_banks_through_the_valuation_date_and_sweeps_paid_cash():
+def test_dated_record_banks_through_the_valuation_date_and_pays_cash_once_it_is_past():
     d = dated_note(target=3.0, pay_dates=LAG2)
     d.record_passed_fixings(env(val=FIX_DATES[0]))
     coupon = 100.0 * 0.12 * calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.ACT_365, 252)
     assert d.state == TargetRedemptionState(coupon, pending=(PendingPayment(coupon, pay_date=LAG2[0]),),
                                             as_of=FIX_DATES[0])
-    d.record_passed_fixings(env(val=LAG2[0]))
+    d.record_passed_fixings(env(val=LAG2[0]))                    # its pay date: due today, still in the value
+    assert d.state.pending == (PendingPayment(coupon, pay_date=LAG2[0]),) and d.state.as_of == LAG2[0]
+    assert [e.event_type for e in d.lifecycle_events] == [FIXING]
+    d.record_passed_fixings(env(val=LAG2[0] + timedelta(days=1)))
     assert d.state.pending == () and d.lifecycle_events[-1].event_type is PAYMENT
-    assert d.state.as_of == LAG2[0]
+    assert d.state.as_of == LAG2[0] + timedelta(days=1)
 
 
 def test_dated_time_shift_is_a_noop():
@@ -894,3 +897,85 @@ def test_a_rate_recorded_for_a_future_fixing_is_refused(form):
 def test_a_recorded_rate_must_be_positive_and_finite(rate):
     with pytest.raises(ValidationError, match="rate"):
         _numeric_unbanked("tarn").with_fixings_recorded({0: rate})
+
+
+# --- OQ-1 (b), user decision 2026-10-10: cash due today stays in today's value --------------------------------------
+
+def test_numeric_cash_due_today_stays_pending_until_its_pay_time_is_past():
+    n = note(fix=[10 / 365] + FIX[1:], pay_times=[12 / 365] + [t + 2 / 365 for t in FIX[1:]], target=3.0)
+    c = n.full_coupon(0)
+    n.time_shift(11 / 365)
+    n.record_passed_fixings(env())
+    assert [p.amount for p in n.state.pending] == [c]
+    n.time_shift(1 / 365)                                        # its pay day: snapped to exactly 0.0, still pending
+    assert n.state.pending == (PendingPayment(c, pay_time=0.0),)
+    assert [e.event_type for e in n.lifecycle_events] == [FIXING]
+    assert n.pending_pv(env()) == c
+    n.time_shift(1 / 365)                                        # strictly past: paid
+    assert n.state.pending == () and [e.event_type for e in n.lifecycle_events] == [FIXING, PAYMENT]
+
+
+def test_a_zero_lag_fixing_banked_today_leaves_its_cash_in_the_value():
+    n = note(fix=[0.0] + FIX[1:], accrual_start=-30 / 365, target=3.0)
+    c = n.full_coupon(0)
+    n.record_passed_fixings(env())
+    assert [e.event_type for e in n.lifecycle_events] == [FIXING]
+    assert n.state.pending == (PendingPayment(c, pay_time=0.0),)
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_value_on_a_pay_date_holds_the_cash_due_that_day(kind):
+    d = dated_note(target=3.0) if kind == "tarn" else dated_tarf(target=0.20)    # pay dates = fixing dates
+    e0 = env(val=FIX_DATES[0])                                                    # live fixing, its cash due today
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)                     # Task 9 makes a t = 0 fill silent
+        view = d.resolve(e0)
+        banked = copy.deepcopy(d)
+        banked.record_passed_fixings(e0)
+        (cash,) = [x.amount for x in banked.lifecycle_events if x.event_type is FIXING]
+        assert view.pending == ((0.0, cash),) and banked.state.pending[0].pay_date == FIX_DATES[0]
+        without = copy.deepcopy(banked)
+        without.state = TargetRedemptionState(banked.state.accumulated, as_of=banked.state.as_of)
+        assert is_close(_price(d, e=e0), _price(without, e=e0) + cash, rel_tol=1e-12)
+        twin = _numeric_twin(d, e0)
+        assert twin.state.pending == (PendingPayment(cash, pay_time=0.0),)
+        assert is_close(_price(twin, e=e0), _price(d, e=e0), rel_tol=1e-12)
+
+
+# Moved values (sign-off): measured on 51186894 (before Task 8a), MC 20_000 paths, seed 7, flat EURUSD 1.20; (price,
+# theta) the day before the pay date and on it. After Task 8a: the day-before price is unchanged; the day-before theta
+# gains the cash (the bump lands on the pay date, where the cash is still in the value); the pay-date price gains the
+# cash; the pay-date theta loses it (the cash leaves the value the next day).
+_PAY_DAY_OLD = {
+    "tarn_zero_lag": ((102.09343055572586, -0.9778012736891526), (101.1156292820367, 0.015259847019819972)),
+    "tarf_zero_lag": ((0.09637222423452786, -0.05217110639974772), (0.04420111783478014, 0.0008503526677482928)),
+    "tarn_lag2_pending": ((102.08935210063005, -0.9702789813483861), (101.11907311928167, 0.01592892165280091)),
+}
+
+
+def _pay_day_case(name):
+    if name == "tarn_zero_lag":
+        return dated_note(target=3.0), FIX_DATES[0]
+    if name == "tarf_zero_lag":
+        return dated_tarf(target=0.20), FIX_DATES[0]
+    lagged = dated_note(target=3.0, pay_dates=LAG2)
+    lagged.record_passed_fixings(env(val=FIX_DATES[0]))
+    return lagged, LAG2[0]
+
+
+@pytest.mark.parametrize("name", sorted(_PAY_DAY_OLD))
+def test_moved_values_around_a_pay_date(name):
+    product, pay = _pay_day_case(name)
+    probe = copy.deepcopy(product)
+    probe.record_passed_fixings(env(val=pay))
+    cash = probe.state.pending[0].amount                         # due on the pay date, still pending
+    (p_before, th_before), (p_on, th_on) = _PAY_DAY_OLD[name]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        g_before = engine_for(product).calculate_greeks(product, env(val=pay - timedelta(days=1)))
+        g_on = engine_for(product).calculate_greeks(product, env(val=pay))
+    # pinned numbers were measured on ARM64; CI runs x86_64 (memory: golden cross-arch), hence 1e-9, not bitwise
+    assert is_close(g_before["price"], p_before, rel_tol=1e-9)
+    assert is_close(g_before["theta"], th_before + cash, rel_tol=0.0, abs_tol=1e-9)
+    assert is_close(g_on["price"], p_on + cash, rel_tol=1e-9)
+    assert is_close(g_on["theta"], th_on - cash, rel_tol=0.0, abs_tol=1e-9)
