@@ -1,7 +1,7 @@
 W7 moved values: branch w7-heston-2d-rows vs main 0d1e4133 (2026-10-10). Generated from the banked anchors and the
 c09 / c10 outputs in this folder; every 'old' value is main's, every 'new' value the branch's, same machine (arm64,
-python 3.11.8, numpy 2.4.6). Prices per 100 notional unless stated. Q1 = HestonSLVADICore._A1 v = 0 column (bccd5cfc);
-Q2 = 1D Phoenix continuous-KI copy row (4bb994e0); defect A = 2D continuous-KI copy row (c4684b41); Q5 is tests only.
+python 3.11.8, numpy 2.4.6). Prices per 100 notional unless stated. Q1 = HestonSLVADICore._A1 v = 0 column (1cbdb41b);
+Q2 = 1D Phoenix continuous-KI copy row (f72aa83e); defect A = 2D continuous-KI copy row (fb5f933d); Q5 is tests only.
 
 == Certificate anchors: adi2d-snowball-greeks  2026-10-06 -> 2026-10-10  (amendment, Q1; projected_sha256 d8bf666d9446510b..., parent 8b8474ef44601961...)
    28 of 28 anchors moved; decisions {'equity.snowball.heston_pde': 'ADMITTED', 'equity.snowball.heston_slv_pde': 'ADMITTED'}

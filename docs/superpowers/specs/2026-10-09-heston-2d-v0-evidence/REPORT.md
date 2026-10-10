@@ -139,13 +139,13 @@ x-grid, reverse orientation. Not diagnosed further.
 ## Follow-up 2026-10-10: user rulings Q1–Q5
 
 Branch rebased onto main 0d1e4133 (tag `pre-rebase-w7` = a4b26aa5, the pre-rebase head; no conflicts; W7 tests
-re-run: 37 passed). Commits: bccd5cfc (Q1), 4bb994e0 (Q2), 8772c1fc (Q5), then the certificates, CHANGELOG and this
+re-run: 37 passed). Commits: 1cbdb41b (Q1), f72aa83e (Q2), 6e29aea7 (Q5), then the certificates, CHANGELOG and this
 evidence. Every moved value vs main 0d1e4133 is in `moved_values.txt` (generated from the banked anchors and `c09` /
 `c10`, main measured on a `git archive` export of 0d1e4133, the branch on the worktree, same machine).
 
 ### Q1 — `HestonSLVADICore._A1` on the degenerate v = 0 column: APPLIED, `adi2d-snowball-greeks` amended
 
-- `adi_core_v0_column.patch` applied as is (bccd5cfc).
+- `adi_core_v0_column.patch` applied as is (1cbdb41b).
 - TDD regression (`TestHeston2DCertainV0Control`): the standard control KO 500 / discrete KI 1 at (96, 24, 48) within
   1e−6 of its closed form, failed first at +2.478e−3, passes at −9.31e−7. **Deviation from the ruling's wording**: with
   event damping off alone the patched value is +3.95e−5 — the Rannacher start's own θ = 1 term (`b07` predicts
@@ -177,7 +177,7 @@ evidence. Every moved value vs main 0d1e4133 is in `moved_values.txt` (generated
 
 ### Q2 — the 1D Phoenix continuous-KI copy row: FIXED, `phoenix-flat-bsm` amended
 
-- `PhoenixAdapter.boundaries` (4bb994e0): under continuous KI a `v0[k]` group first sets V1's rows of the step on
+- `PhoenixAdapter.boundaries` (f72aa83e): under continuous KI a `v0[k]` group first sets V1's rows of the step on
   `v1[k]` (the `v1[k]` group rewrites the same values), then exposes `v1[k]` as `_grid_v1` for the V0 call only, as
   `SnowballAdapter.boundaries` does; discrete KI takes the unchanged path. `PhoenixStatistics._alive_ki_edge_copies_ki`
   = True. It is bit-identical to `a05`'s helper patch on all 24 `a05` cases, so `a05`'s moves stand (T = 2 bit-
@@ -275,6 +275,10 @@ KI 114.45 production PV finite, and the standard-orientation / 1D bit-identity.
 ---
 
 ## W7b — the Q3 fix, applied (ruling 2026-10-10)
+
+Commit hashes in this report are the post-rebase ones (main c02296cb). The 2026-10-10 certificates record the
+pre-rebase `quantark_git_sha` they were run at (8772c1fc for adi2d, 4bb994e0 for Phoenix; reachable through tag
+`pre-rebase2-w7`); on the rebased branch every one of their anchors reproduces bit for bit (the guard run above).
 
 Branch rebased onto main c02296cb (tag `pre-rebase2-w7` = ffb5db88; no conflicts). The two amended certificates'
 guards and the W7 tests pass on the rebased branch (670 passed, 11 skipped): main's commits since 0d1e4133 move no
