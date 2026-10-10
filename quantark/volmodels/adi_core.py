@@ -670,6 +670,16 @@ class HestonSLVADICore:
         out[1:-1, 1:-1] = (0.5 * L2v * U_xx
                            + ((r_step - q_step) - 0.5 * L2v) * U_x
                            - r_step * U[1:-1, 1:-1])
+        if self._degenerate_v0:
+            # The degenerate v = 0 row is a PDE row too: U_tau = (r - q) U_x + kappa theta U_v - r U (both
+            # diffusions vanish at v = 0). The implicit S-solve (_tri_S) carries the S-drift and the -rU reaction on
+            # EVERY variance column, so the predictor must carry them on this one as well -- otherwise the row
+            # evolves under theta * A1, consistent only on a fully implicit (theta = 1) step.
+            if self._uniform:
+                U0_x = (U[2:, 0] - U[:-2, 0]) / (2.0 * self.dx)
+            else:
+                U0_x = U[:-2, 0] * wm1 + U[1:-1, 0] * w01 + U[2:, 0] * wp1
+            out[1:-1, 0] = (r_step - q_step) * U0_x - r_step * U[1:-1, 0]
         return out
 
     def _build_v_generator_coefficients(self):

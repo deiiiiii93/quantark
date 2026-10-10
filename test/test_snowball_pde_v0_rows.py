@@ -244,6 +244,32 @@ class TestHeston2DRows:
         assert lower.value == pytest.approx(S0 * math.exp(-R * T), rel=1e-14)
 
 
+class TestHeston2DCertainV0Control:
+    """The standard certain-V0 control (KO 500 / discrete KI 1) under Heston at (96, 24, 48) is its closed form.
+
+    The ADI core's explicit S-operator ``A1`` must carry the degenerate v = 0 column: the implicit S-solve carries the
+    S-drift and the -rU reaction on every variance column, so a predictor that leaves that column at 0 evolves it
+    under theta x A1 -- consistent only on a fully implicit step (W7 defect B). Unpatched the gap is +2.48e-3.
+
+    Every damping step is switched off (event AND terminal): a theta = 1 step discounts the constant by 1 / (1 + r dt)
+    instead of exp(-r dt), a second-order-in-dt term by design (the Rannacher start alone is +4.0e-5 here). With
+    both off the residual is the Crank-Nicolson / Craig-Sneyd step's own, -9.3e-7 at n_t = 48.
+    """
+
+    HP = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.3, rho=-0.5)
+
+    def test_standard_control_is_the_closed_form_without_damping(self):
+        from quantark.asset.equity.engine.pde.core.components import CrankNicolson
+        from quantark.asset.equity.param.engine_params import PDEParams
+
+        env = _env()
+        product = _certain_v0(0.10, False)
+        undamped = PDEParams(stepper=CrankNicolson(event_damping_steps=0, terminal_damping_steps=0))
+        solver = HestonSnowballPDESolver(model_params=self.HP, n_x=96, n_v=24, n_t=48, params=undamped)
+        price = solver.price(product, env)
+        assert price == pytest.approx(_closed_form(product, env, 0.10, False, False), abs=1e-6)
+
+
 class TestHeston2DContinuousKICopyRow:
     """Under continuous KI the V0 knock-in-side edge copies the knocked-in row (``v0_{edge}_copy_ki``).
 
@@ -298,3 +324,4 @@ class TestHeston2DContinuousKICopyRow:
         knocked_in_lower, _ = solver._boundary_rows_v1(0, T, product, env, core.S_grid)
         assert lower.value == knocked_in_lower.value
         assert lower.value != 0.0
+
