@@ -1,0 +1,114 @@
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+E         comparison failed
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[snowball-d14]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[snowball-d41]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[snowball-d53]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[snowball-d61]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[snowball-d92]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_snowball-d53]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[snowball-d170]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[snowball-d209]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_snowball-d92]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[phoenix-d14]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[phoenix-d41]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[phoenix-d53]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[phoenix-d61]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_snowball-d170]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[phoenix-d92]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[phoenix-d170]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[phoenix-d209]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[ko_reset-d26]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[ko_reset-d65]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[ko_reset-d78]
+FAILED test/test_mc_time_node_merge.py::test_collision_day_grids_hold_no_sub_tolerance_step_and_match_across_forms[ko_reset-d82]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_snowball-d14]
+FAILED test/test_mc_time_node_merge.py::test_grids_without_a_collision_are_bit_identical_to_the_set_construction[snowball-364]
+FAILED test/test_mc_time_node_merge.py::test_grids_without_a_collision_are_bit_identical_to_the_set_construction[phoenix-364]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_snowball-d41]
+FAILED test/test_mc_time_node_merge.py::test_grids_without_a_collision_are_bit_identical_to_the_set_construction[ko_reset-181]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_snowball-d53]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_snowball-d61]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_snowball-d92]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_snowball-d170]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_snowball-d14]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_snowball-d41]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_snowball-d14]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_snowball-d53]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_snowball-d61]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_snowball-d41]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_snowball-d92]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_snowball-d170]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_snowball-d53]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_phoenix-d14]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_phoenix-d41]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_phoenix-d53]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_snowball-d92]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_phoenix-d61]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_phoenix-d92]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_snowball-d170]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[bs_phoenix-d170]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_snowball-d14]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_phoenix-d14]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_snowball-d41]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_phoenix-d41]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_phoenix-d53]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_phoenix-d92]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_phoenix-d14]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[lv_phoenix-d170]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_phoenix-d41]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_phoenix-d14]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_phoenix-d53]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_phoenix-d41]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_phoenix-d92]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_phoenix-d53]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[slv_phoenix-d170]
+FAILED test/test_mc_time_node_merge.py::test_ko_reset_continuous_ki_twin_on_collision_days[65]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_phoenix-d92]
+FAILED test/test_mc_time_node_merge.py::test_ko_reset_continuous_ki_twin_on_collision_days[78]
+FAILED test/test_mc_time_node_merge.py::test_ko_reset_continuous_ki_twin_on_collision_days[82]
+FAILED test/test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days[heston_phoenix-d170]
+67 failed, 20 passed in 2.72s

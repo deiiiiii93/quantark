@@ -1,0 +1,4 @@
+grid nodes 48, steps < 1e-10: 0
+disable_ko_after_ki = False
+unpatched: pde=96.624024 mc=96.621477 stderr=nan |pde-mc|=0.00255 gate=0.20000 PASS
+patched  : pde=96.624024 mc=96.621477 stderr=nan |pde-mc|=0.00255 gate=0.20000 PASS

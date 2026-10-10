@@ -107,3 +107,41 @@ step; 2 REBASED KO-reset grids did (step 2.8e-17): `test_ko_reset_event_stats_sh
 5. Twins valued on an observation day must age with `keep_landing=True` (W11 does; W12 never values there).
 6. Same set-union in `range_accrual_mc_engine.py:325` and `asian_option_mc_engine.py:337`: not measured; use the helper
    if a twin test shows a collision.
+
+## W17a: the fix (approved 2026-10-10)
+
+**Pre-fix probe** (`w17_grid_probe.py` + `probe_site/sitecustomize.py`, so pipeline-spawned children are probed too;
+`run_probe_cert.sh`). `test/modelvalidation` (577 passed, 62 skipped) and `test/mo_volmodels` (587 passed, 50 skipped):
+no grid with a sub-tolerance step. `test/pde_grid` (218 passed): one, `test_anchor_certification.py::
+test_snowball_pde_vs_mc[False]` (KO dates `i/12` against KI dates `round(i/48, 10)`, eight 3.3e-11 steps). Ruled a
+LIVE gate by the controller (nothing stored): MC 96.645369 -> 96.621477, |PDE - MC| 0.02134 -> 0.00255, gate 0.2
+(`pde_grid_anchor_cell.txt`, branch value confirmed in `w17a_pde_grid_cell_branch.txt`).
+
+**Fix.** `quantark/util/numerical/time_nodes.py` (no simulation import): `merge_time_nodes(times, tol=Tolerance.ZERO,
+*, pin=None)` sorts the union and collapses every run of nodes closer than `tol` into its LAST member; a node within
+`tol` of `pin` (maturity) becomes `pin` exactly. `node_index(nodes, t, tol)` = the first merged node strictly after
+`t - tol` (controller ruling: a gap of exactly `tol` is two instants). Used in `SnowballMCEngine._build_time_grid`,
+`_build_time_grid_ko_reset` (all of its nodes incl. daily and REBASED `t_ki + offset`; `ki_horizon_idx` reads the
+last node at or before `pre_maturity + tol`) and `PhoenixMCEngine._build_time_grid`. The vol-model snowball / Phoenix
+MC inherit them. A grid without such a run is the sorted set of its times, bit for bit.
+
+**Range accrual / Asian MC** (`twin_ra_asian.py`, every valuation day, two schedules each; probe over their 12 test
+files, 722 passed): no sub-tolerance step in either form (their only possible pair, an observation against `T`, is
+spelled alike in both forms); twins agree within 8.9e-16. Left unchanged.
+
+**Tests** (`test/test_mc_time_node_merge.py`, written first: 67 failed / 20 passed before the engines used the helper,
+`w17a_tdd_red.txt`; 87 passed after). Helper (tolerance, keep-last, chained runs, maturity pin both sides, strict
+mapping at an exact-`tol` gap, identity); collision-day grids (no sub-tolerance step, forms equal to 1e-15);
+bit-identity with the c02296cb set construction on every day without a collision (snowball / Phoenix 1..364, KO-reset
+1..181, both forms, nodes and indices); dated == numeric at rel 1e-10 on days 14 / 41 / 53 / 61 / 92 / 170 / 209 for
+the BS, LV, Heston and SLV snowball and Phoenix MC, and on 26 / 65 / 78 / 82 for the BS continuous-KI KO-reset (the
+LV / Heston continuous-KI KO-reset variance-shape refusal stays out, separate ticket). Run set (`run_w17a_tests.sh`:
+the 70 autocallable-MC test files incl. carried-KI, dated-expiry, `test_ko_reset_past_records`; theta_boundary; the
+replay golden; `test/pde_grid`; modelvalidation `test_anchors` + `test_banked_certificates`): 2941 passed,
+79 skipped (`w17a_tests.txt`). `test_vol_dated_schedules.py` skipped by ruling (W12 unmerged).
+
+**Moved values** (`moved_values.txt`; `measure_w17a.py` on a c02296cb export vs the branch, `summarize_w17a.py`):
+112 of 1940 rows moved, 0 unexpected -- every one on a day whose c02296cb grid held the step, each a fresh draw of
+the same law; 1828 unchanged to the bit. Twin gap over every day: c02296cb up to 0.980 (snowball) / 0.800 (Phoenix) /
+0.610 (KO-reset), branch <= 8.9e-15. Outside the twins: the pde_grid live gate above, and
+`test_ko_reset_event_stats_shape[Rebased]` (shape-only) pv 98.1788 -> 97.5565. No golden or certificate anchor moved.

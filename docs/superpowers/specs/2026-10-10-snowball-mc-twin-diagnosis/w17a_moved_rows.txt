@@ -1,0 +1,140 @@
+rows 1940
+twin:bs_snowball-d14 | dated | 10.292357486365281 -> 10.045893297413091 | delta -0.246464 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_snowball-d41 | numeric | 9.289641689658513 -> 10.269532335942845 | delta +0.979891 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_snowball-d53 | dated | 10.722147956093721 -> 9.789604385768921 | delta -0.932544 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_snowball-d61 | dated | 11.38995133679754 -> 9.517116587840931 | delta -1.872835 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_snowball-d61 | numeric | 11.389951334859337 -> 9.51711658784093 | delta -1.872835 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_snowball-d92 | numeric | 10.756026545900086 -> 11.461035645205406 | delta +0.705009 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_snowball-d170 | numeric | 12.888795024162219 -> 12.278622005053412 | delta -0.610173 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_snowball-d209 | dated | 13.940549134567885 -> 13.768544480570716 | delta -0.172005 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_snowball-d209 | numeric | 13.940549134743556 -> 13.768544480570716 | delta -0.172005 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d14 | dated | 2.8908455682748233 -> 2.9979583191200416 | delta +0.107113 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d41 | numeric | 2.5866540963010856 -> 3.1061096996643354 | delta +0.519456 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d53 | dated | 2.9108826311589295 -> 2.6158959701114295 | delta -0.294987 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d61 | dated | 4.073535962936563 -> 2.9184757326505366 | delta -1.155060 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d61 | numeric | 4.0735359624620395 -> 2.9184757326505357 | delta -1.155060 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d92 | numeric | 2.3163148319516207 -> 3.1163943918660015 | delta +0.800080 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d170 | numeric | 3.61674298779468 -> 3.2846817961993593 | delta -0.332061 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d209 | dated | 3.756917400263723 -> 3.585909588211703 | delta -0.171008 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_phoenix-d209 | numeric | 3.756917400371867 -> 3.585909588211703 | delta -0.171008 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d14 | dated | 9.951942858676336 -> 9.943327157737086 | delta -0.008616 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d41 | numeric | 10.103487138531284 -> 9.930751546187654 | delta -0.172736 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d53 | dated | 10.486612910362126 -> 10.524478887241665 | delta +0.037866 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d61 | dated | 9.965988406376209 -> 9.963764916485546 | delta -0.002223 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d61 | numeric | 9.965988405485518 -> 9.963764916485546 | delta -0.002223 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d92 | numeric | 10.42365065170036 -> 10.380868620371471 | delta -0.042782 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d170 | numeric | 12.500594909861473 -> 12.202642707102086 | delta -0.297952 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d209 | dated | 13.379056804256136 -> 13.792066854896383 | delta +0.413010 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_snowball-d209 | numeric | 13.379056804256136 -> 13.792066854896383 | delta +0.413010 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d14 | dated | 9.936006510158894 -> 10.176230804233894 | delta +0.240224 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d41 | numeric | 10.56824531131829 -> 10.456079997431623 | delta -0.112165 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d53 | dated | 10.567721187424803 -> 9.55912932887486 | delta -1.008592 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d61 | dated | 10.646798395881635 -> 9.043518234999608 | delta -1.603280 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d61 | numeric | 10.646798397154202 -> 9.043518234999608 | delta -1.603280 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d92 | numeric | 10.319117113462337 -> 10.966166636744418 | delta +0.647050 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d170 | numeric | 13.111760161271118 -> 12.489345115704591 | delta -0.622415 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d209 | dated | 13.258699622297918 -> 11.914848213524346 | delta -1.343851 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_snowball-d209 | numeric | 13.258699622297915 -> 11.914848213524342 | delta -1.343851 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d14 | dated | 10.695444506204808 -> 10.738278882922671 | delta +0.042834 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d41 | numeric | 10.849092812732202 -> 10.93214474014346 | delta +0.083052 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d53 | dated | 11.236826445381787 -> 11.219898887320742 | delta -0.016928 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d61 | dated | 10.774982348600822 -> 10.793731082073926 | delta +0.018749 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d61 | numeric | 10.774982347768272 -> 10.793731082073926 | delta +0.018749 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d92 | numeric | 10.687498147941408 -> 10.784614261970212 | delta +0.097116 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d170 | numeric | 11.935210351821521 -> 12.467702134387963 | delta +0.532492 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d209 | dated | 13.069589986483049 -> 13.37846012806343 | delta +0.308870 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_snowball-d209 | numeric | 13.069589986483045 -> 13.37846012806343 | delta +0.308870 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d14 | dated | 3.2350420720308923 -> 3.2467011800879764 | delta +0.011659 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d41 | numeric | 3.263115161683708 -> 3.396309061923895 | delta +0.133194 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d53 | dated | 3.5289800552166177 -> 3.431392066631261 | delta -0.097588 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d61 | dated | 3.7540265761332874 -> 3.541935441865312 | delta -0.212091 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d61 | numeric | 3.7540265764687906 -> 3.541935441865312 | delta -0.212091 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d92 | numeric | 2.540874345448678 -> 2.867510764741099 | delta +0.326636 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d170 | numeric | 3.7744698021643517 -> 3.6524265710950985 | delta -0.122043 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d209 | dated | 3.7148313044615975 -> 3.925194017212731 | delta +0.210363 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:lv_phoenix-d209 | numeric | 3.7148313044615975 -> 3.925194017212731 | delta +0.210363 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d14 | dated | 1.8845084231228248 -> 1.9544144546378295 | delta +0.069906 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d41 | numeric | 2.0227915179135216 -> 2.6095533252237413 | delta +0.586762 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d53 | dated | 2.4085447345555213 -> 1.6786013347835225 | delta -0.729943 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d61 | dated | 3.4478535910538826 -> 2.4809841496017766 | delta -0.966869 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d61 | numeric | 3.447853591183958 -> 2.4809841496017793 | delta -0.966869 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d92 | numeric | 2.115086656640994 -> 1.9278738808846112 | delta -0.187213 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d170 | numeric | 2.799706795739099 -> 2.4903126190517684 | delta -0.309394 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d209 | dated | 3.0104730669463056 -> 3.0583140198369625 | delta +0.047841 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:heston_phoenix-d209 | numeric | 3.010473066946305 -> 3.0583140198369625 | delta +0.047841 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d14 | dated | 2.454733487323853 -> 2.5143039330500017 | delta +0.059570 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d41 | numeric | 2.361181492966851 -> 2.4038120280252078 | delta +0.042631 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d53 | dated | 3.06031280508736 -> 2.93120970512374 | delta -0.129103 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d61 | dated | 3.1355233041815502 -> 3.1490583728214574 | delta +0.013535 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d61 | numeric | 3.1355233042329793 -> 3.1490583728214587 | delta +0.013535 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d92 | numeric | 2.1899920768967203 -> 2.1824100005818177 | delta -0.007582 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d170 | numeric | 2.7058868264896563 -> 3.0710452790746476 | delta +0.365158 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d209 | dated | 3.3731126623770704 -> 3.5624291117238442 | delta +0.189316 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:slv_phoenix-d209 | numeric | 3.373112662377069 -> 3.5624291117238442 | delta +0.189316 | expected (collision grid) | test_mc_time_node_merge.py::test_dated_twin_equals_numeric_on_collision_days
+twin:bs_ko_reset_continuous_ki-d26 | dated | 10.701393596992304 -> 10.115283360993136 | delta -0.586110 | expected (collision grid) | test_mc_time_node_merge.py::test_ko_reset_continuous_ki_twin_on_collision_days
+twin:bs_ko_reset_continuous_ki-d26 | numeric | 10.701393596992304 -> 10.115283360993134 | delta -0.586110 | expected (collision grid) | test_mc_time_node_merge.py::test_ko_reset_continuous_ki_twin_on_collision_days
+twin:bs_ko_reset_continuous_ki-d65 | numeric | 10.188823761155597 -> 10.055183438689458 | delta -0.133640 | expected (collision grid) | test_mc_time_node_merge.py::test_ko_reset_continuous_ki_twin_on_collision_days
+twin:bs_ko_reset_continuous_ki-d78 | numeric | 9.779144187646963 -> 10.38920972504689 | delta +0.610066 | expected (collision grid) | test_mc_time_node_merge.py::test_ko_reset_continuous_ki_twin_on_collision_days
+twin:bs_ko_reset_continuous_ki-d82 | numeric | 10.109062595742557 -> 10.493779803835594 | delta +0.384717 | expected (collision grid) | test_mc_time_node_merge.py::test_ko_reset_continuous_ki_twin_on_collision_days
+allday:bs_snowball-d14 | dated | 10.292357486365281 -> 10.045893297413091 | delta -0.246464 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d41 | numeric | 9.289641689658513 -> 10.269532335942845 | delta +0.979891 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d53 | dated | 10.722147956093721 -> 9.789604385768921 | delta -0.932544 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d61 | dated | 11.38995133679754 -> 9.517116587840931 | delta -1.872835 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d61 | numeric | 11.389951334859337 -> 9.51711658784093 | delta -1.872835 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d92 | numeric | 10.756026545900086 -> 11.461035645205406 | delta +0.705009 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d105 | dated | 11.611265254175404 -> 11.571010641167629 | delta -0.040255 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d144 | dated | 12.363513667939227 -> 12.072991017152596 | delta -0.290523 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d170 | numeric | 12.888795024162219 -> 12.278622005053412 | delta -0.610173 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d183 | numeric | 12.85214598477147 -> 13.451190455647861 | delta +0.599044 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d209 | dated | 13.940549134567885 -> 13.768544480570716 | delta -0.172005 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d209 | numeric | 13.940549134743556 -> 13.768544480570716 | delta -0.172005 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d248 | numeric | 14.430439651873137 -> 14.602090777561804 | delta +0.171651 | expected (collision grid) | none (measured only)
+allday:bs_snowball-d261 | numeric | 14.61460295503305 -> 14.617371575511742 | delta +0.002769 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d14 | dated | 2.8908455682748233 -> 2.9979583191200416 | delta +0.107113 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d41 | numeric | 2.5866540963010856 -> 3.1061096996643354 | delta +0.519456 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d53 | dated | 2.9108826311589295 -> 2.6158959701114295 | delta -0.294987 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d61 | dated | 4.073535962936563 -> 2.9184757326505366 | delta -1.155060 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d61 | numeric | 4.0735359624620395 -> 2.9184757326505357 | delta -1.155060 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d92 | numeric | 2.3163148319516207 -> 3.1163943918660015 | delta +0.800080 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d105 | dated | 3.249441379282307 -> 2.882161434892044 | delta -0.367280 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d144 | dated | 3.710228619773488 -> 3.6360067047528504 | delta -0.074222 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d170 | numeric | 3.61674298779468 -> 3.2846817961993593 | delta -0.332061 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d183 | numeric | 2.91956348148756 -> 3.0728296458138216 | delta +0.153266 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d209 | dated | 3.756917400263723 -> 3.585909588211703 | delta -0.171008 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d209 | numeric | 3.756917400371867 -> 3.585909588211703 | delta -0.171008 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d248 | numeric | 2.6817902091001695 -> 2.7516041219914733 | delta +0.069814 | expected (collision grid) | none (measured only)
+allday:bs_phoenix-d261 | numeric | 2.8011382435688925 -> 2.7857343519868363 | delta -0.015404 | expected (collision grid) | none (measured only)
+allday:bs_ko_reset_continuous_ki-d26 | dated | 10.701393596992304 -> 10.115283360993136 | delta -0.586110 | expected (collision grid) | none (measured only)
+allday:bs_ko_reset_continuous_ki-d26 | numeric | 10.701393596992304 -> 10.115283360993134 | delta -0.586110 | expected (collision grid) | none (measured only)
+allday:bs_ko_reset_continuous_ki-d65 | numeric | 10.188823761155597 -> 10.055183438689458 | delta -0.133640 | expected (collision grid) | none (measured only)
+allday:bs_ko_reset_continuous_ki-d78 | numeric | 9.779144187646963 -> 10.38920972504689 | delta +0.610066 | expected (collision grid) | none (measured only)
+allday:bs_ko_reset_continuous_ki-d82 | numeric | 10.109062595742557 -> 10.493779803835594 | delta +0.384717 | expected (collision grid) | none (measured only)
+event_stats:ko_reset_rebased(test_ko_reset_event_stats_shape[Rebased]) | pv | 98.17880092147409 -> 97.5565430810779 | delta -0.622258 | expected (collision grid) | test_ko_reset_snowball_mc_engine.py::test_ko_reset_event_stats_shape[Rebased] (shape only)
+event_stats:ko_reset_rebased(test_ko_reset_event_stats_shape[Rebased]) | sum_post_ko_probability | 0.07 -> 0.089 | delta +0.019000 | expected (collision grid) | test_ko_reset_snowball_mc_engine.py::test_ko_reset_event_stats_shape[Rebased] (shape only)
+moved 112 of 1940; unexpected 0
+twin gaps on c02296cb:
+   allday:bs_ko_reset_continuous_ki         worst |dated - numeric| 6.101e-01 (allday:bs_ko_reset_continuous_ki-d78); pairs beyond rel 1e-10: 3
+   allday:bs_phoenix                        worst |dated - numeric| 8.001e-01 (allday:bs_phoenix-d92); pairs beyond rel 1e-10: 11
+   allday:bs_snowball                       worst |dated - numeric| 9.799e-01 (allday:bs_snowball-d41); pairs beyond rel 1e-10: 11
+   twin:bs_ko_reset_continuous_ki           worst |dated - numeric| 6.101e-01 (twin:bs_ko_reset_continuous_ki-d78); pairs beyond rel 1e-10: 3
+   twin:bs_phoenix                          worst |dated - numeric| 8.001e-01 (twin:bs_phoenix-d92); pairs beyond rel 1e-10: 6
+   twin:bs_snowball                         worst |dated - numeric| 9.799e-01 (twin:bs_snowball-d41); pairs beyond rel 1e-10: 6
+   twin:heston_phoenix                      worst |dated - numeric| 7.299e-01 (twin:heston_phoenix-d53); pairs beyond rel 1e-10: 5
+   twin:heston_snowball                     worst |dated - numeric| 1.009e+00 (twin:heston_snowball-d53); pairs beyond rel 1e-10: 6
+   twin:lv_phoenix                          worst |dated - numeric| 3.266e-01 (twin:lv_phoenix-d92); pairs beyond rel 1e-10: 5
+   twin:lv_snowball                         worst |dated - numeric| 2.980e-01 (twin:lv_snowball-d170); pairs beyond rel 1e-10: 5
+   twin:slv_phoenix                         worst |dated - numeric| 3.652e-01 (twin:slv_phoenix-d170); pairs beyond rel 1e-10: 5
+   twin:slv_snowball                        worst |dated - numeric| 5.325e-01 (twin:slv_snowball-d170); pairs beyond rel 1e-10: 5
+twin gaps on branch:
+   allday:bs_ko_reset_continuous_ki         worst |dated - numeric| 1.776e-15 (allday:bs_ko_reset_continuous_ki-d75); pairs beyond rel 1e-10: 0
+   allday:bs_phoenix                        worst |dated - numeric| 3.553e-15 (allday:bs_phoenix-d103); pairs beyond rel 1e-10: 0
+   allday:bs_snowball                       worst |dated - numeric| 8.882e-15 (allday:bs_snowball-d54); pairs beyond rel 1e-10: 0
+   twin:bs_ko_reset_continuous_ki           worst |dated - numeric| 1.776e-15 (twin:bs_ko_reset_continuous_ki-d26); pairs beyond rel 1e-10: 0
+   twin:bs_phoenix                          worst |dated - numeric| 1.776e-15 (twin:bs_phoenix-d53); pairs beyond rel 1e-10: 0
+   twin:bs_snowball                         worst |dated - numeric| 3.553e-15 (twin:bs_snowball-d41); pairs beyond rel 1e-10: 0
+   twin:heston_phoenix                      worst |dated - numeric| 7.994e-15 (twin:heston_phoenix-d41); pairs beyond rel 1e-10: 0
+   twin:heston_snowball                     worst |dated - numeric| 7.105e-15 (twin:heston_snowball-d41); pairs beyond rel 1e-10: 0
+   twin:lv_phoenix                          worst |dated - numeric| 1.332e-15 (twin:lv_phoenix-d41); pairs beyond rel 1e-10: 0
+   twin:lv_snowball                         worst |dated - numeric| 1.776e-15 (twin:lv_snowball-d53); pairs beyond rel 1e-10: 0
+   twin:slv_phoenix                         worst |dated - numeric| 3.997e-15 (twin:slv_phoenix-d92); pairs beyond rel 1e-10: 0
+   twin:slv_snowball                        worst |dated - numeric| 1.776e-15 (twin:slv_snowball-d53); pairs beyond rel 1e-10: 0

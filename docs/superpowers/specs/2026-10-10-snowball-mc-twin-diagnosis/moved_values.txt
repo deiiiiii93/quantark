@@ -1,0 +1,109 @@
+W17a moved values vs c02296cb (branch w17-snowball-mc-twin)
+==========================================================
+
+Every value below moved because its c02296cb MC time grid held a step below Tolerance.ZERO (1e-10 y): two spellings
+of one instant kept as two nodes. The merge makes them one node; the move is a fresh draw of the same law (the
+empty step re-dealt every random draw after it), not a change of the priced contract. Every grid without such a
+step is bit-identical (test_mc_time_node_merge.py::test_grids_without_a_collision_are_bit_identical_to_the_set_
+construction, every valuation day, both forms; and 1828 of the 1940 measured rows are unchanged to the bit).
+
+Sources: measure_w17a.py on a c02296cb `git archive` export (w17a_base_c02296cb.txt) and on the branch
+(w17a_after_branch.txt); summarize_w17a.py -> w17a_moved_rows.txt (all 112 moved rows, old -> new, with the
+pinning test; 0 unexpected = every moved row is on a day whose c02296cb grid held the step, W17 grid_scan.txt).
+MC configuration: MCParams(seed=7, num_paths=256) (the test configuration); flat 20% vol, r 3%, q 1%, spot 100.
+
+1. Pinned by the new twin tests (test_mc_time_node_merge.py), old -> new (only the form(s) whose grid collided move;
+   after the fix dated == numeric within 8.0e-15 on every route and day)
+
+route              day  form     c02296cb               branch
+bs_snowball         14  dated    10.292357486365281  -> 10.045893297413091
+bs_snowball         41  numeric   9.289641689658513  -> 10.269532335942845
+bs_snowball         53  dated    10.722147956093721  ->  9.789604385768921
+bs_snowball         61  both     11.38995133679754   ->  9.517116587840931
+bs_snowball         92  numeric  10.756026545900086  -> 11.461035645205406
+bs_snowball        170  numeric  12.888795024162219  -> 12.278622005053412
+bs_snowball        209  both     13.940549134567885  -> 13.768544480570716
+bs_phoenix          14  dated     2.8908455682748233 ->  2.9979583191200416
+bs_phoenix          41  numeric   2.5866540963010856 ->  3.1061096996643354
+bs_phoenix          53  dated     2.9108826311589295 ->  2.6158959701114295
+bs_phoenix          61  both      4.073535962936563  ->  2.9184757326505366
+bs_phoenix          92  numeric   2.3163148319516207 ->  3.1163943918660015
+bs_phoenix         170  numeric   3.61674298779468   ->  3.2846817961993593
+bs_phoenix         209  both      3.756917400263723  ->  3.585909588211703
+lv_snowball         14  dated     9.951942858676336  ->  9.943327157737086
+lv_snowball         41  numeric  10.103487138531284  ->  9.930751546187654
+lv_snowball         53  dated    10.486612910362126  -> 10.524478887241665
+lv_snowball         61  both      9.965988406376209  ->  9.963764916485546
+lv_snowball         92  numeric  10.42365065170036   -> 10.380868620371471
+lv_snowball        170  numeric  12.500594909861473  -> 12.202642707102086
+lv_snowball        209  both     13.379056804256136  -> 13.792066854896383
+heston_snowball     14  dated     9.936006510158894  -> 10.176230804233894
+heston_snowball     41  numeric  10.56824531131829   -> 10.456079997431623
+heston_snowball     53  dated    10.567721187424803  ->  9.55912932887486
+heston_snowball     61  both     10.646798395881635  ->  9.043518234999608
+heston_snowball     92  numeric  10.319117113462337  -> 10.966166636744418
+heston_snowball    170  numeric  13.111760161271118  -> 12.489345115704591
+heston_snowball    209  both     13.258699622297918  -> 11.914848213524346
+slv_snowball        14  dated    10.695444506204808  -> 10.738278882922671
+slv_snowball        41  numeric  10.849092812732202  -> 10.93214474014346
+slv_snowball        53  dated    11.236826445381787  -> 11.219898887320742
+slv_snowball        61  both     10.774982348600822  -> 10.793731082073926
+slv_snowball        92  numeric  10.687498147941408  -> 10.784614261970212
+slv_snowball       170  numeric  11.935210351821521  -> 12.467702134387963
+slv_snowball       209  both     13.069589986483049  -> 13.37846012806343
+lv_phoenix          14  dated     3.2350420720308923 ->  3.2467011800879764
+lv_phoenix          41  numeric   3.263115161683708  ->  3.396309061923895
+lv_phoenix          53  dated     3.5289800552166177 ->  3.431392066631261
+lv_phoenix          61  both      3.7540265761332874 ->  3.541935441865312
+lv_phoenix          92  numeric   2.540874345448678  ->  2.867510764741099
+lv_phoenix         170  numeric   3.7744698021643517 ->  3.6524265710950985
+lv_phoenix         209  both      3.7148313044615975 ->  3.925194017212731
+heston_phoenix      14  dated     1.8845084231228248 ->  1.9544144546378295
+heston_phoenix      41  numeric   2.0227915179135216 ->  2.6095533252237413
+heston_phoenix      53  dated     2.4085447345555213 ->  1.6786013347835225
+heston_phoenix      61  both      3.4478535910538826 ->  2.4809841496017766
+heston_phoenix      92  numeric   2.115086656640994  ->  1.9278738808846112
+heston_phoenix     170  numeric   2.799706795739099  ->  2.4903126190517684
+heston_phoenix     209  both      3.0104730669463056 ->  3.0583140198369625
+slv_phoenix         14  dated     2.454733487323853  ->  2.5143039330500017
+slv_phoenix         41  numeric   2.361181492966851  ->  2.4038120280252078
+slv_phoenix         53  dated     3.06031280508736   ->  2.93120970512374
+slv_phoenix         61  both      3.1355233041815502 ->  3.1490583728214574
+slv_phoenix         92  numeric   2.1899920768967203 ->  2.1824100005818177
+slv_phoenix        170  numeric   2.7058868264896563 ->  3.0710452790746476
+slv_phoenix        209  both      3.3731126623770704 ->  3.5624291117238442
+bs_ko_reset_cki     26  both     10.701393596992304  -> 10.115283360993136
+bs_ko_reset_cki     65  numeric  10.188823761155597  -> 10.055183438689458
+bs_ko_reset_cki     78  numeric   9.779144187646963  -> 10.38920972504689
+bs_ko_reset_cki     82  numeric  10.109062595742557  -> 10.493779803835594
+("both": the two forms moved by the same amount to within 2e-9; the c02296cb dated value is shown.)
+
+2. Measured only, every valuation day (BS MC, 256 x seed 7): the moves beyond section 1 (same rule, other days)
+
+bs_snowball        105  dated    11.611265254175404  -> 11.571010641167629
+bs_snowball        144  dated    12.363513667939227  -> 12.072991017152596
+bs_snowball        183  numeric  12.85214598477147   -> 13.451190455647861
+bs_snowball        248  numeric  14.430439651873137  -> 14.602090777561804
+bs_snowball        261  numeric  14.61460295503305   -> 14.617371575511742
+bs_phoenix         105  dated     3.249441379282307  ->  2.882161434892044
+bs_phoenix         144  dated     3.710228619773488  ->  3.6360067047528504
+bs_phoenix         183  numeric   2.91956348148756   ->  3.0728296458138216
+bs_phoenix         248  numeric   2.6817902091001695 ->  2.7516041219914733
+bs_phoenix         261  numeric   2.8011382435688925 ->  2.7857343519868363
+Every other day of 1..364 (snowball, Phoenix) and 1..181 (continuous-KI KO-reset), both forms: unchanged to the bit.
+Twin gap |dated - numeric| over all days: c02296cb up to 0.980 (snowball) / 0.800 (Phoenix) / 0.610 (KO-reset);
+branch <= 8.9e-15 / 3.6e-15 / 1.8e-15, no pair beyond rel 1e-10.
+
+3. Existing tests whose values move (pre-fix probe, w17_grid_probe.py over 70 autocallable-MC test files and
+   test/modelvalidation, test/mo_volmodels, test/pde_grid; no golden or certificate anchor among them)
+
+test/pde_grid/test_anchor_certification.py::test_snowball_pde_vs_mc[False]  LIVE GATE (controller ruling
+   2026-10-10: not a certificate anchor; nothing stored): KO dates i/12 against discrete KI dates round(i/48, 10),
+   eight 3.3e-11 steps. MC 96.645369 -> 96.621477 (sample move -0.023892); PDE 96.624024; |PDE - MC|
+   0.02134 -> 0.00255 against the gate 0.2: passes before and after. (pde_grid_anchor_cell.txt: the c02296cb
+   value and the merge as a runtime patch; the branch value is confirmed in w17a_pde_grid_cell_branch.txt.)
+test/test_ko_reset_snowball_mc_engine.py::test_ko_reset_event_stats_shape[Rebased]  (shape-only assertions; REBASED
+   t_ki + offset nodes against the KO schedule, 2.8e-17 step): pv 98.17880092147409 -> 97.5565430810779,
+   sum(post_ko_probability) 0.07 -> 0.089 (1000 paths).
+test/test_cashleg/test_ko_reset_distribution.py::test_mc_rebased_is_refused  builds the same REBASED grid and asserts
+   a refusal: no value, unchanged.
