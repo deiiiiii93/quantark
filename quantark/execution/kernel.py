@@ -156,7 +156,17 @@ class ExecutionKernel:
                         f"adaptive:trace_fingerprint={try_fingerprint(trace)}"
                     )
                     executed = True
-            if not executed and batch_capable:
+            # A batch-capable adapter may answer a prepared request without a
+            # plan (e.g. a DCN on its final observation date, settled by its
+            # helper: nothing to simulate); it then executes natively.
+            answers_natively = getattr(adapter, "answers_natively", None)
+            native_now = (
+                not executed
+                and batch_capable
+                and answers_natively is not None
+                and bool(answers_natively(prepared))
+            )
+            if not executed and batch_capable and not native_now:
                 plan = adapter.plan_batches(engine, request, prepared, context)
                 plan_fingerprint = try_fingerprint(plan)
                 batch_count = plan.num_batches

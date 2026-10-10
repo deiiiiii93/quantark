@@ -11,7 +11,7 @@ from quantark.util.enum.engine_enums import EventProjectionMode
 from quantark.util.exceptions import PricingError
 
 from ..groups import VALUE, Backend, ColumnGroup
-from ..prepare import Operation
+from ..prepare import Operation, TerminalOutcome
 from .base import FamilyAdapter
 
 __all__ = ["DCNAdapter", "DCNEvents"]
@@ -104,7 +104,20 @@ class DCNAdapter(FamilyAdapter):
         validate_settlement_capability(self.solver, product, lifecycle_state)
 
     def terminal_outcome(self, product, env, request, lifecycle_state):
-        return None          # the contract's grid context sets the horizon; today's engine had no expiry branch
+        """The final observation date (W10): the settled final row from ``dcn_valuation``, pointwise at the spot
+        (Q2); greeks = its slope, gamma 0 (Q6). Any other date marches."""
+        from quantark.asset.equity.engine.dcn_valuation import (
+            at_final_observation, settle_final_observation, settled_row_delta)
+        if not at_final_observation(product):
+            return None
+        row = settle_final_observation(product, env)
+        price = row.pv
+        if request.operation is Operation.GREEKS:
+            return TerminalOutcome("expired", {"price": price, "delta": settled_row_delta(product, env, row),
+                                               "gamma": 0.0})
+        if request.operation is Operation.SESSION_OUTPUTS:
+            return TerminalOutcome("expired", self._session_outputs(price, None))
+        return TerminalOutcome("expired", price)
 
     def market_checks(self, product, env, tau) -> None:
         """Today's DCN engine read the term vol at the initial price and never guarded the collapse."""

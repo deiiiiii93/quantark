@@ -1,0 +1,497 @@
+# W10 (0d1e4133 -> W10): 492 moved of 816 measured
+## section control: 0 moved, 108 unchanged
+## section final: 468 moved, 0 unchanged
+DCN_A carried=False spot=4000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=False spot=4000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=False spot=4000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-433164.3069464694, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_A carried=False spot=4000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-433164.3069464694
+DCN_A carried=False spot=4000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -433164.3069464694
+DCN_A carried=False spot=4000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=False spot=4000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -433164.3069464694
+DCN_A carried=False spot=4000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=False spot=4000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-433164.3069464694
+DCN_A carried=False spot=4000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -433164.3069464694
+DCN_A carried=False spot=4000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=False spot=4000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=False spot=4000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -433164.3069464694
+DCN_A carried=False spot=4500 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=False spot=4500 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=False spot=4500 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-349863.47868753294, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_A carried=False spot=4500 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=-349863.47868753294
+DCN_A carried=False spot=4500 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -349863.47868753294
+DCN_A carried=False spot=4500 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=False spot=4500 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -349863.47868753294
+DCN_A carried=False spot=4500 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=False spot=4500 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=-349863.47868753294
+DCN_A carried=False spot=4500 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -349863.47868753294
+DCN_A carried=False spot=4500 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=False spot=4500 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=False spot=4500 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -349863.47868753294
+DCN_A carried=False spot=4650 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_A carried=False spot=4650 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_A carried=False spot=4650 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (0.0, 0.0, 0.0, 0.0, (0.0,), 0.0)
+DCN_A carried=False spot=4650 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=0.0
+DCN_A carried=False spot=4650 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 0.0
+DCN_A carried=False spot=4650 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_A carried=False spot=4650 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 0.0
+DCN_A carried=False spot=4650 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_A carried=False spot=4650 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=0.0
+DCN_A carried=False spot=4650 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 0.0
+DCN_A carried=False spot=4650 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_A carried=False spot=4650 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_A carried=False spot=4650 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 0.0
+DCN_A carried=False spot=4800 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=4800 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=4800 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 0.0, 0.0, (1.0,), 0.0)
+DCN_A carried=False spot=4800 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=4800 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=4800 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=4800 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=False spot=4800 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=4800 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=4800 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=4800 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=4800 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=4800 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=5500 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5500 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5500 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 0.0, 0.0, (1.0,), 0.0)
+DCN_A carried=False spot=5500 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=5500 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=5500 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5500 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=False spot=5500 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5500 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=5500 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=5500 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5500 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5500 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=5999 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5999 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5999 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 0.0, 0.0, (1.0,), 0.0)
+DCN_A carried=False spot=5999 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=5999 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=5999 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5999 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=False spot=5999 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5999 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=5999 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=5999 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5999 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=5999 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=6000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 0.0, 1.0, (0.0,), 0.0)
+DCN_A carried=False spot=6000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=6000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=6000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=False spot=6000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=6000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=6000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=6300 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6300 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6300 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 0.0, 1.0, (0.0,), 0.0)
+DCN_A carried=False spot=6300 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=6300 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=6300 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6300 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=False spot=6300 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6300 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=6300 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=6300 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6300 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=6300 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=7000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=7000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=7000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 0.0, 1.0, (0.0,), 0.0)
+DCN_A carried=False spot=7000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=7000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=7000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=7000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=False spot=7000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=7000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=False spot=7000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=False spot=7000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=7000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=False spot=7000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=4000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=True spot=4000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=True spot=4000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-433164.3069464694, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_A carried=True spot=4000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-433164.3069464694
+DCN_A carried=True spot=4000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -433164.3069464694
+DCN_A carried=True spot=4000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=True spot=4000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -433164.3069464694
+DCN_A carried=True spot=4000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=True spot=4000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-433164.3069464694
+DCN_A carried=True spot=4000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -433164.3069464694
+DCN_A carried=True spot=4000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=True spot=4000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -433164.3069464694
+DCN_A carried=True spot=4000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -433164.3069464694
+DCN_A carried=True spot=4500 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=True spot=4500 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=True spot=4500 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-349863.47868753294, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_A carried=True spot=4500 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-349863.47868753294
+DCN_A carried=True spot=4500 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -349863.47868753294
+DCN_A carried=True spot=4500 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=True spot=4500 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -349863.47868753294
+DCN_A carried=True spot=4500 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=True spot=4500 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-349863.47868753294
+DCN_A carried=True spot=4500 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -349863.47868753294
+DCN_A carried=True spot=4500 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=True spot=4500 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349863.47868753294
+DCN_A carried=True spot=4500 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -349863.47868753294
+DCN_A carried=True spot=4650 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -324873.23020985204
+DCN_A carried=True spot=4650 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -324873.23020985204
+DCN_A carried=True spot=4650 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-324873.23020985204, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_A carried=True spot=4650 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-324873.23020985204
+DCN_A carried=True spot=4650 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -324873.23020985204
+DCN_A carried=True spot=4650 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -324873.23020985204
+DCN_A carried=True spot=4650 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -324873.23020985204
+DCN_A carried=True spot=4650 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -324873.23020985204
+DCN_A carried=True spot=4650 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-324873.23020985204
+DCN_A carried=True spot=4650 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -324873.23020985204
+DCN_A carried=True spot=4650 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -324873.23020985204
+DCN_A carried=True spot=4650 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -324873.23020985204
+DCN_A carried=True spot=4650 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -324873.23020985204
+DCN_A carried=True spot=4800 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -299882.98173217115
+DCN_A carried=True spot=4800 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -299882.98173217115
+DCN_A carried=True spot=4800 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-299882.98173217115, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_A carried=True spot=4800 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-299882.98173217115
+DCN_A carried=True spot=4800 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -299882.98173217115
+DCN_A carried=True spot=4800 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -299882.98173217115
+DCN_A carried=True spot=4800 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -299882.98173217115
+DCN_A carried=True spot=4800 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -299882.98173217115
+DCN_A carried=True spot=4800 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-299882.98173217115
+DCN_A carried=True spot=4800 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -299882.98173217115
+DCN_A carried=True spot=4800 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -299882.98173217115
+DCN_A carried=True spot=4800 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -299882.98173217115
+DCN_A carried=True spot=4800 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -299882.98173217115
+DCN_A carried=True spot=5500 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -183261.8221696602
+DCN_A carried=True spot=5500 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -183261.8221696602
+DCN_A carried=True spot=5500 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-183261.8221696602, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_A carried=True spot=5500 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-183261.8221696602
+DCN_A carried=True spot=5500 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -183261.8221696602
+DCN_A carried=True spot=5500 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -183261.8221696602
+DCN_A carried=True spot=5500 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -183261.8221696602
+DCN_A carried=True spot=5500 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -183261.8221696602
+DCN_A carried=True spot=5500 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-183261.8221696602
+DCN_A carried=True spot=5500 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -183261.8221696602
+DCN_A carried=True spot=5500 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -183261.8221696602
+DCN_A carried=True spot=5500 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -183261.8221696602
+DCN_A carried=True spot=5500 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -183261.8221696602
+DCN_A carried=True spot=5999 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -100127.59556724169
+DCN_A carried=True spot=5999 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -100127.59556724169
+DCN_A carried=True spot=5999 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-100127.59556724169, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_A carried=True spot=5999 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-100127.59556724169
+DCN_A carried=True spot=5999 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -100127.59556724169
+DCN_A carried=True spot=5999 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -100127.59556724169
+DCN_A carried=True spot=5999 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -100127.59556724169
+DCN_A carried=True spot=5999 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -100127.59556724169
+DCN_A carried=True spot=5999 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.60165651787278 gamma=0.0 price=-100127.59556724169
+DCN_A carried=True spot=5999 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -100127.59556724169
+DCN_A carried=True spot=5999 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -100127.59556724169
+DCN_A carried=True spot=5999 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -100127.59556724169
+DCN_A carried=True spot=5999 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -100127.59556724169
+DCN_A carried=True spot=6000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 1.0, 1.0, (0.0,), 0.0)
+DCN_A carried=True spot=6000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=True spot=6000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=6000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=True spot=6000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=True spot=6000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=6000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=6300 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6300 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6300 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 1.0, 1.0, (0.0,), 0.0)
+DCN_A carried=True spot=6300 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=True spot=6300 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=6300 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6300 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=True spot=6300 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6300 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=True spot=6300 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=6300 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6300 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=6300 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=7000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=7000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=7000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9996.099391072365, 0.0, 1.0, 1.0, (0.0,), 0.0)
+DCN_A carried=True spot=7000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=True spot=7000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=7000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=7000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9996.099391072365
+DCN_A carried=True spot=7000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=7000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9996.099391072365
+DCN_A carried=True spot=7000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_A carried=True spot=7000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=7000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9996.099391072365
+DCN_A carried=True spot=7000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9996.099391072365
+DCN_B carried=False spot=4000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=False spot=4000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=False spot=4000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-483239.05942354404, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_B carried=False spot=4000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-483239.05942354404
+DCN_B carried=False spot=4000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -483239.05942354404
+DCN_B carried=False spot=4000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=False spot=4000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -483239.05942354404
+DCN_B carried=False spot=4000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=False spot=4000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-483239.05942354404
+DCN_B carried=False spot=4000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -483239.05942354404
+DCN_B carried=False spot=4000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=False spot=4000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=False spot=4000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -483239.05942354404
+DCN_B carried=False spot=4500 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=False spot=4500 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=False spot=4500 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-399921.98021258815, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_B carried=False spot=4500 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=-399921.98021258815
+DCN_B carried=False spot=4500 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -399921.98021258815
+DCN_B carried=False spot=4500 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=False spot=4500 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -399921.98021258815
+DCN_B carried=False spot=4500 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=False spot=4500 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=-399921.98021258815
+DCN_B carried=False spot=4500 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -399921.98021258815
+DCN_B carried=False spot=4500 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=False spot=4500 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=False spot=4500 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -399921.98021258815
+DCN_B carried=False spot=4650 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_B carried=False spot=4650 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_B carried=False spot=4650 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (0.0, 0.0, 0.0, 0.0, (0.0,), 0.0)
+DCN_B carried=False spot=4650 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=0.0
+DCN_B carried=False spot=4650 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 0.0
+DCN_B carried=False spot=4650 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_B carried=False spot=4650 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 0.0
+DCN_B carried=False spot=4650 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_B carried=False spot=4650 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=0.0
+DCN_B carried=False spot=4650 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 0.0
+DCN_B carried=False spot=4650 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_B carried=False spot=4650 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.0
+DCN_B carried=False spot=4650 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 0.0
+DCN_B carried=False spot=4800 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=4800 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=4800 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 0.0, 0.0, (1.0,), 0.0)
+DCN_B carried=False spot=4800 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=4800 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=4800 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=4800 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=False spot=4800 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=4800 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=4800 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=4800 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=4800 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=4800 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=5500 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5500 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5500 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 0.0, 0.0, (1.0,), 0.0)
+DCN_B carried=False spot=5500 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=5500 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=5500 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5500 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=False spot=5500 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5500 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=5500 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=5500 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5500 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5500 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=5999 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5999 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5999 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 0.0, 0.0, (1.0,), 0.0)
+DCN_B carried=False spot=5999 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=5999 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=5999 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5999 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=False spot=5999 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5999 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=5999 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=5999 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5999 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=5999 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=6000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 0.0, 1.0, (0.0,), 0.0)
+DCN_B carried=False spot=6000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=6000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=6000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=False spot=6000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=6000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=6000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=6300 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6300 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6300 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 0.0, 1.0, (0.0,), 0.0)
+DCN_B carried=False spot=6300 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=6300 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=6300 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6300 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=False spot=6300 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6300 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=6300 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=6300 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6300 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=6300 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=7000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=7000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=7000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 0.0, 1.0, (0.0,), 0.0)
+DCN_B carried=False spot=7000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=7000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=7000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=7000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=False spot=7000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=7000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=False spot=7000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=False spot=7000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=7000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=False spot=7000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=4000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=True spot=4000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=True spot=4000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-483239.05942354404, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_B carried=True spot=4000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-483239.05942354404
+DCN_B carried=True spot=4000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -483239.05942354404
+DCN_B carried=True spot=4000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=True spot=4000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -483239.05942354404
+DCN_B carried=True spot=4000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=True spot=4000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-483239.05942354404
+DCN_B carried=True spot=4000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -483239.05942354404
+DCN_B carried=True spot=4000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=True spot=4000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -483239.05942354404
+DCN_B carried=True spot=4000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -483239.05942354404
+DCN_B carried=True spot=4500 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=True spot=4500 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=True spot=4500 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-399921.98021258815, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_B carried=True spot=4500 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-399921.98021258815
+DCN_B carried=True spot=4500 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -399921.98021258815
+DCN_B carried=True spot=4500 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=True spot=4500 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -399921.98021258815
+DCN_B carried=True spot=4500 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=True spot=4500 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-399921.98021258815
+DCN_B carried=True spot=4500 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -399921.98021258815
+DCN_B carried=True spot=4500 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=True spot=4500 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -399921.98021258815
+DCN_B carried=True spot=4500 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -399921.98021258815
+DCN_B carried=True spot=4650 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -374926.85644930135
+DCN_B carried=True spot=4650 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -374926.85644930135
+DCN_B carried=True spot=4650 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-374926.85644930135, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_B carried=True spot=4650 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-374926.85644930135
+DCN_B carried=True spot=4650 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -374926.85644930135
+DCN_B carried=True spot=4650 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -374926.85644930135
+DCN_B carried=True spot=4650 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -374926.85644930135
+DCN_B carried=True spot=4650 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -374926.85644930135
+DCN_B carried=True spot=4650 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-374926.85644930135
+DCN_B carried=True spot=4650 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -374926.85644930135
+DCN_B carried=True spot=4650 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -374926.85644930135
+DCN_B carried=True spot=4650 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -374926.85644930135
+DCN_B carried=True spot=4650 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -374926.85644930135
+DCN_B carried=True spot=4800 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349931.7326860146
+DCN_B carried=True spot=4800 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349931.7326860146
+DCN_B carried=True spot=4800 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-349931.7326860146, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_B carried=True spot=4800 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-349931.7326860146
+DCN_B carried=True spot=4800 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -349931.7326860146
+DCN_B carried=True spot=4800 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349931.7326860146
+DCN_B carried=True spot=4800 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -349931.7326860146
+DCN_B carried=True spot=4800 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349931.7326860146
+DCN_B carried=True spot=4800 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-349931.7326860146
+DCN_B carried=True spot=4800 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -349931.7326860146
+DCN_B carried=True spot=4800 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349931.7326860146
+DCN_B carried=True spot=4800 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -349931.7326860146
+DCN_B carried=True spot=4800 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -349931.7326860146
+DCN_B carried=True spot=5500 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -233287.82179067636
+DCN_B carried=True spot=5500 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -233287.82179067636
+DCN_B carried=True spot=5500 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-233287.82179067636, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_B carried=True spot=5500 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-233287.82179067636
+DCN_B carried=True spot=5500 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -233287.82179067636
+DCN_B carried=True spot=5500 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -233287.82179067636
+DCN_B carried=True spot=5500 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -233287.82179067636
+DCN_B carried=True spot=5500 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -233287.82179067636
+DCN_B carried=True spot=5500 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-233287.82179067636
+DCN_B carried=True spot=5500 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -233287.82179067636
+DCN_B carried=True spot=5500 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -233287.82179067636
+DCN_B carried=True spot=5500 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -233287.82179067636
+DCN_B carried=True spot=5500 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -233287.82179067636
+DCN_B carried=True spot=5999 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -150137.37673814237
+DCN_B carried=True spot=5999 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -150137.37673814237
+DCN_B carried=True spot=5999 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (-150137.37673814237, 0.0, 1.0, 0.0, (0.0,), 0.0)
+DCN_B carried=True spot=5999 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-150137.37673814237
+DCN_B carried=True spot=5999 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -150137.37673814237
+DCN_B carried=True spot=5999 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -150137.37673814237
+DCN_B carried=True spot=5999 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> -150137.37673814237
+DCN_B carried=True spot=5999 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -150137.37673814237
+DCN_B carried=True spot=5999 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=166.6341584219118 gamma=0.0 price=-150137.37673814237
+DCN_B carried=True spot=5999 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> -150137.37673814237
+DCN_B carried=True spot=5999 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -150137.37673814237
+DCN_B carried=True spot=5999 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> -150137.37673814237
+DCN_B carried=True spot=5999 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> -150137.37673814237
+DCN_B carried=True spot=6000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 1.0, 1.0, (0.0,), 0.0)
+DCN_B carried=True spot=6000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=True spot=6000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=6000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=True spot=6000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=True spot=6000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=6000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=6300 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6300 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6300 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 1.0, 1.0, (0.0,), 0.0)
+DCN_B carried=True spot=6300 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=True spot=6300 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=6300 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6300 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=True spot=6300 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6300 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=True spot=6300 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=6300 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6300 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=6300 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=7000 CoupledCoarseHestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=7000 DCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=7000 DCNMCEngine.price_detailed | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> (9999.999999999998, 0.0, 1.0, 1.0, (0.0,), 0.0)
+DCN_B carried=True spot=7000 DCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=True spot=7000 DCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=7000 HestonDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=7000 HestonDCNPDESolver.price | RAISES ValidationError: t_grid must be a 1D array with at least 2 points -> 9999.999999999998
+DCN_B carried=True spot=7000 LocalVolDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=7000 LocalVolDCNPDEEngine.greeks | RAISES ValidationError: tau must be positive, got 0.0 -> delta=0.0 gamma=0.0 price=9999.999999999998
+DCN_B carried=True spot=7000 LocalVolDCNPDEEngine.price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+DCN_B carried=True spot=7000 QEDCNMCEngine.price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=7000 session[DCNMCEngine].price | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 9999.999999999998
+DCN_B carried=True spot=7000 session[DCNPDEEngine].price | RAISES ValidationError: tau must be positive, got 0.0 -> 9999.999999999998
+## section obsdate: 0 moved, 216 unchanged
+## section theta: 24 moved, 0 unchanged
+DCN_A carried=False spot=4000 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 149.34186704747844
+DCN_A carried=False spot=4000 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 149.2921350466204
+DCN_A carried=False spot=5500 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.9749144782526855
+DCN_A carried=False spot=5500 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 0.9749129925439775
+DCN_A carried=False spot=6300 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.9749144782526855
+DCN_A carried=False spot=6300 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 0.9749129930514755
+DCN_A carried=True spot=4000 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 149.34186704747844
+DCN_A carried=True spot=4000 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 149.2921350466204
+DCN_A carried=True spot=5500 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 245.56028941841214
+DCN_A carried=True spot=5500 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 245.61067267981707
+DCN_A carried=True spot=6300 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 0.9749144782526855
+DCN_A carried=True spot=6300 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 1.4182549667038984
+DCN_B carried=False spot=4000 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 721.8330659715575
+DCN_B carried=False spot=4000 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 721.8342266959953
+DCN_B carried=False spot=5500 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 4.87552340588627
+DCN_B carried=False spot=5500 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 4.875560558481084
+DCN_B carried=False spot=6300 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 4.875523405888089
+DCN_B carried=False spot=6300 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 4.875618595315245
+DCN_B carried=True spot=4000 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 721.8330659715575
+DCN_B carried=True spot=4000 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 721.8342266959953
+DCN_B carried=True spot=5500 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 1202.7364020840905
+DCN_B carried=True spot=5500 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 1199.3157270351949
+DCN_B carried=True spot=6300 penultimate DCNMCEngine.theta_1d | RAISES ValidationError: DCN grid has no steps (valuation at maturity?) -> 2415.3863885301816
+DCN_B carried=True spot=6300 penultimate DCNPDEEngine.theta_1d | RAISES ValidationError: tau must be positive, got 0.0 -> 2411.0149245517932

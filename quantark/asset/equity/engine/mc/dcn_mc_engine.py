@@ -26,7 +26,11 @@ from quantark.asset.equity.engine.event_stats import (
     DCNEventStats,
     payment_aware_cashflow_fields,
 )
-from quantark.asset.equity.engine.mc.dcn_payoff import compute_dcn_cashflows
+from quantark.asset.equity.engine.dcn_valuation import settle_final_observation
+from quantark.asset.equity.engine.mc.dcn_payoff import (
+    DCNPathCashflows,
+    compute_dcn_cashflows,
+)
 from quantark.asset.equity.engine.mc.qmc_draws import qmc_normals
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
@@ -244,6 +248,28 @@ def _finalize_dcn_result(
     )
 
 
+def settled_dcn_result(product, pricing_env, ctx, seed, t0) -> "DCNMCResult":
+    """The DCN on its final observation date (W10, ruling Q6): the settled
+    final row from ``dcn_valuation`` as a one-path result, so pv, legs and
+    event statistics are the row's 0/1 decisions; ``std_error`` is 0.0 and
+    ``expected_life_years`` 0.0."""
+    row = settle_final_observation(product, pricing_env, ctx)
+    cf = DCNPathCashflows(
+        fixed_coupon_pv=np.array([row.coupon_pv]),
+        fixed_coupon_pv_by_period=np.array([[row.coupon_pv]]),
+        ko_pv=np.array([row.ko_pv]),
+        loss_pv=np.array([row.loss_pv]),
+        ko_obs_row=np.array([0 if row.knocked_out else -1], dtype=int),
+        knocked_in=np.array([row.knocked_in]),
+        coupon_paid=np.array([[row.coupon_paid]]),
+    )
+    acc = _LegAccumulator(n_obs=1)
+    acc.add(cf, ctx.times[ctx.obs_cols])
+    return _finalize_dcn_result(
+        acc, product, seed, 0.0, t0, pricing_env=pricing_env, ctx=ctx,
+    )
+
+
 class DCNMCEngine(BaseEngine):
     """GBM MC engine for DCNOption; flat markets are just flat curves.
 
@@ -308,6 +334,12 @@ class DCNMCEngine(BaseEngine):
             )
         t0 = time.perf_counter()
         ctx = build_dcn_grid_context(product)
+        if ctx.times.size == 1:
+            # the final observation date (W10): the settled final row, no
+            # simulation and no model preparation
+            result = settled_dcn_result(product, pricing_env, ctx, self.seed, t0)
+            self._last_result = result
+            return result
         dt_array = np.diff(ctx.times)
         if dt_array.size == 0:
             raise ValidationError("DCN grid has no steps (valuation at maturity?)")

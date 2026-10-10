@@ -31,6 +31,7 @@ from typing import Optional
 
 import numpy as np
 
+from quantark.asset.equity.engine.dcn_valuation import at_final_observation
 from quantark.asset.equity.engine.mc.dcn_mc_engine import (
     _finalize_dcn_result,
     _LegAccumulator,
@@ -224,10 +225,31 @@ class _PinnedDrawProvider:
             handle.close()
 
 
+class _DCNFinalObservation:
+    """Prepared payload of a DCN valued on its final observation date (W10,
+    ruling Q8): nothing to simulate; the kernel executes natively and the
+    engine settles the final row from ``dcn_valuation``."""
+
+
+def _final_observation_state(request):
+    if not at_final_observation(request.product):
+        return None
+    return PreparedState(
+        payload=_DCNFinalObservation(), descriptors=(), fingerprint=None,
+        byte_estimate=None, handles=(),
+    )
+
+
 class _DCNBatchMixin:
     """Batch capability shared by the GBM and Local-Vol DCN MC adapters."""
 
     _SCHEME = "gbm-term/v1"
+
+    def answers_natively(self, prepared) -> bool:
+        """The final observation date is answered without a batch plan."""
+        return prepared is not None and isinstance(
+            prepared.payload, _DCNFinalObservation
+        )
 
     def capabilities(self) -> EngineCapabilities:
         return EngineCapabilities(
@@ -514,6 +536,12 @@ class _DCNBatchMixin:
                        prepared=None):
         # Non-batch fallback (kernel prefers plan_batches when present):
         # run the prepared clone through the legacy call path.
+        if prepared is not None and isinstance(
+            prepared.payload, _DCNFinalObservation
+        ):
+            return LegacyPriceAdapter.execute_native(
+                self, engine, request, normalized, context
+            )
         if prepared is not None and isinstance(prepared.payload, _DCNSimContext):
             return LegacyPriceAdapter.execute_native(
                 self, prepared.payload.engine, request, normalized, context
@@ -555,6 +583,9 @@ class DCNBatchMCAdapter(_DCNBatchMixin, LegacyPriceAdapter):
         super().__init__(call_shape="product_env")
 
     def prepare(self, engine, request, context) -> PreparedState:
+        settled = _final_observation_state(request)
+        if settled is not None:
+            return settled
         clone = type(engine)(
             num_paths=engine.num_paths, seed=engine.seed,
             use_sobol=engine.use_sobol, use_antithetic=engine.use_antithetic,
@@ -631,6 +662,9 @@ class DCNLocalVolMCAdapter(_DCNBatchMixin, _DCNLocalVolAdapterBase):
     _SCHEME = "lv-euler/v1"
 
     def prepare(self, engine, request, context) -> PreparedState:
+        settled = _final_observation_state(request)
+        if settled is not None:
+            return settled
         surface_state = self._prepare_surface(engine, request, context)
         clone = self._clone_with_surface(engine, surface_state.payload)
         provider = self._attach_draw_provider(clone, context)
@@ -717,6 +751,9 @@ class _HestonBatchBase(_DCNBatchMixin, LegacyPriceAdapter):
         return provider
 
     def prepare(self, engine, request, context) -> PreparedState:
+        settled = _final_observation_state(request)
+        if settled is not None:
+            return settled
         clone = self._clone_engine(engine)
         provider = self._attach_draw_provider(clone, context)
         sim = self._sim_context(clone, request, context,

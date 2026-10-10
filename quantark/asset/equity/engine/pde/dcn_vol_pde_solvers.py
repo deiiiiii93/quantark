@@ -26,6 +26,10 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.dcn_valuation import (
+    at_final_observation,
+    settle_final_observation,
+)
 from quantark.asset.equity.engine.pde.core.adapters.local_vol import LocalVolDCNAdapter
 from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     DCNPDEEngine,
@@ -168,6 +172,14 @@ class HestonDCNPDESolver(BaseEngine):
         if not isinstance(product, DCNOption):
             raise PricingError("HestonDCNPDESolver only supports DCNOption")
         ctx = build_dcn_grid_context(product)
+        if at_final_observation(product):
+            # the final observation date (W10): the settled final row
+            return DCNPDEResult(
+                pv=settle_final_observation(product, pricing_env, ctx).pv,
+                direction_sign=product.direction_sign,
+                num_space_nodes=0,
+                num_time_steps=0,
+            )
         times = np.asarray(ctx.times, dtype=float)
         t_fine, day_col = self._fine_grid(times)
         T = float(times[-1])

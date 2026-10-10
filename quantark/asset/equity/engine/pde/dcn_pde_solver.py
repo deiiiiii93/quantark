@@ -131,6 +131,8 @@ class DCNPDEEngine(BasePDESolver):
         problem = prepare(self, product, pricing_env, OutputRequest(Operation.PRICE),
                           frozen=self._frozen_base_layout, session=self._session_artefacts)
         pv = float(run(problem))
+        if problem.terminal is not None:     # the final observation date (W10): settled, no grid
+            return DCNPDEResult(pv=pv, direction_sign=product.direction_sign, num_space_nodes=0, num_time_steps=0)
         return DCNPDEResult(pv=pv, direction_sign=product.direction_sign,
                             num_space_nodes=len(problem.layout.spatial.x),
                             num_time_steps=int(problem.layout.time.actual_steps))

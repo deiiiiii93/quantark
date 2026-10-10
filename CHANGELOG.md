@@ -210,6 +210,23 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
 - Accumulator analytical and MC at maturity 0.0 settle the observation at the maturity instant on the spot (as at
   every other instant, `settle_valuation_instant`) instead of dropping it: spot 100, strike 95, one share: 0 -> 5;
   `test_accumulator_mc_engine` expiry cases 5.0 -> 10.0 and -5.0 -> -15.0.
+- The DCN settles on its final observation date (W10, user rulings 2026-10-10 on
+  `docs/superpowers/specs/2026-10-10-dcn-final-observation-proposal.md`): every DCN route (GBM, local-vol, Heston,
+  QE and coupled-coarse MC, the execution-session MC adapters, the GBM, local-vol and Heston PDE) prices the settled
+  final row from the new neutral `quantark.asset.equity.engine.dcn_valuation` (`settle_final_observation`) instead of
+  raising `DCN grid has no steps`, `tau must be positive` or `t_grid must be a 1D array`. The row is decided on
+  today's spot, pointwise at barrier ties on every route: knock-in = carried OR spot <= KI; knock-out (spot >= KO,
+  either state) pays the KO coupon; the fixed coupon pays when not knocked out, not knocked in and spot >= the
+  coupon barrier; the loss leg pays when knocked in and not knocked out; each flow at its own payment-date DF (1 when
+  paid that day). DCN_A (N 1e6, S0 6000, lags 2 SSE days): 9996.099391 for a coupon or knock-out, -433164.306946
+  knocked in at 4000; the MC result's legs / event statistics are the 0/1 decisions with `std_error` and
+  `expected_life_years` 0.0; PDE greeks are the settled row's slope (0 at a tie), gamma 0. Sessions answer the
+  final date natively (the kernel's new optional adapter hook `answers_natively(prepared)`: no batch plan). The
+  cash-Greeks report's date-rolled `theta_1d` on the penultimate day now prices (settled - today) where it raised.
+  The row equals the MC path kernel's one-column row bit for bit and is the limit of both engines as the last step
+  shrinks (evidence: `docs/superpowers/specs/2026-10-10-dcn-final-observation-evidence/`). Not changed: decided but
+  unpaid coupons are not carried (W14), a knocked-out DCN is assumed alive (W14), `settlement_convention` is ignored
+  (W15), a valuation after the final date still raises.
 
 ### Fixed
 - A dated autocallable whose discrete knock-in records lie in the past prices like its numeric twin (W11). The
