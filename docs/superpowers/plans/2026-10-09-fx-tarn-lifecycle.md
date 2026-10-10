@@ -172,6 +172,10 @@ day's coupon 0.9863 already paid inside `resolve`) and 101.1319 the day after wi
    (cash on a path-aligned pay date is booked the next instant), its OQ-1 pin becomes the no-dip test and it gains a
    business-day twin test; Task 11 gains a business-day twin test; Task 12's sign-off list, Review Focus 5 / 7 and the
    Self-review follow.
+7. **User OQ-3 ruling 2026-10-10 (per-fixing banking)** — Task 8b rewritten (state `fixings_banked`, identity-based
+   banked set, `as_of` never past the valuation date via `_state_date`, Friday + Saturday test, OQ-4 pin); Task 9's
+   `_record_dated` block, settle test, `fixings_banked` property, D2 parity and a run-level Friday + Saturday test; R15
+   and R22 superseded, R24 and R25 added; new open question OQ-4.
 
 ### Old Tasks 9–11 requirements: where each lives now
 
@@ -239,10 +243,9 @@ W8); stable indices across numeric banking (T9).
   fixings (spec §6), so with listed positions a fixing that goes live on the instant an earlier one banks would inherit
   the wrong first-live spot (pinned by `test_consecutive_daily_fixings_keep_their_own_live_spots_across_banking`) —
   cost: numeric event labels after a banking read `#<booking index>`; informational only; inception twins share indices.
-- **R15** `with_history_settled` sets a dated `as_of` to the last banked fixing's date, not the valuation date — a
-  fixing dated on the valuation date (or at t = 0 on a business-day clock) is live and must stay unbanked, which
-  `as_of = valuation_date` would deny — cost: a dated contract inside a run carries an earlier `as_of` than
-  `record_passed_fixings` would give it; amounts, events and prices are identical.
+- **R15** *(SUPERSEDED 2026-10-10 by the user's OQ-3 ruling: banked fixings are tracked per fixing, `as_of` never
+  passes the valuation date; see Task 8b and R24.)* ~~`with_history_settled` sets a dated `as_of` to the last banked
+  fixing's date, used as a high-water mark of the banked set.~~
 - **R16** `matured_before` and every live/history decision use the resolved TIME (`is_history`), not the date — W6
   Ruling 2 (time-based gap flag) and the twin rule (a numeric twin only has times) — cost: only a weekend/holiday
   last fixing on a `BUSINESS_DAYS` environment is affected (live on the run start instead of matured).
@@ -264,14 +267,25 @@ W8); stable indices across numeric banking (T9).
   either sign, is "today"); a dated pending `pay_date` may equal `as_of` (refused only before it); the dated pay test
   uses the resolved time (R16) — the user's rule needs a boundary, and `is_history` is the one W6 uses for fixings —
   cost: none beyond the user-approved moves listed in Task 8a.
-- **R22** (Task 8b, OQ-2 b) `record_passed_fixings` sets a dated `as_of` to `max(valuation_date, last banked fixing
-  date)`, and `_check_as_of` refuses an `as_of` after the valuation date only when its time is strictly ahead — a
-  Saturday fixing banked on the Friday (zero business time) must not be banked again on Monday, and the Friday must
-  still price the state that banked it — cost: a dated state can carry an `as_of` one weekend ahead of its valuation
-  date; nothing else reads `as_of`.
+- **R22** *(SUPERSEDED 2026-10-10 by the user's OQ-3 ruling: double-banking is prevented by fixing identity, not by
+  date; `as_of` never passes the valuation date; `_check_as_of` stays as built.)* ~~`as_of` = max(valuation date, last
+  banked fixing date) and a time-based `_check_as_of`.~~
 - **R23** The two follow-ups are numbered **Task 8a / Task 8b** and run before Task 9 (Tasks 9–12 keep their numbers
   and cross-references): Task 9 replaces `_record_dated` wholesale, so the amended cash and passed-by-time rules must
   already be in place; its replacement block carries them — cost: none.
+- **R24** (Task 8b, OQ-3 ruling) The `as_of` that banking writes is `_state_date(fx_env)`: the valuation date, moved
+  back over the days at zero time from it — valued on a Saturday under `BUSINESS_DAYS` (a weekend row, W6 Ruling 4)
+  it is the Friday, the same instant; under `CALENDAR_DAYS` / ACT conventions it is the valuation date itself. Why:
+  the ruling keeps the "a pending `pay_date` must not precede `as_of`" check, and on a Saturday row a zero-lag Friday
+  fixing is still live with its Friday coupon due at that instant (Task 8a); `as_of` = Saturday would make that state
+  invalid and stop every business-day run with weekend rows, while the Friday is the instant the state describes and
+  is never after the valuation date — cost: on a non-business valuation date a dated state reads an `as_of` up to a
+  weekend or holiday earlier; no price, event or banked set depends on it (banked is by identity). Pinned by Task 8b
+  `test_as_of_on_a_weekend_valuation_is_the_friday`.
+- **R25** (Task 8b) A dated booking that states only `as_of` (no `fixings_banked`) banks the fixings dated on or before
+  it — that is what such a booking meant under spec §4.2, so every existing booking and test keeps its banked set — and
+  the "cash needs a banked fixing" rule is stated by count (`as_of is None or banked count == 0` refused), which equals
+  the old "`as_of` before the first fixing" refusal for every such booking — cost: none.
 - **Superseded** old R3 (clock origin): now W6 R6, same rule, held by the recorder. Old **R7** (refuse a dated future
   fixing or pay date at zero time): **superseded by the user's OQ-2 (b) answer, 2026-10-10 — reversed by Task 8b**.
 
@@ -315,32 +329,49 @@ Interface conflicts resolved by rulings above (no value moves): W6 hand-off "`wi
 **Task order now:** 1–8 (done) → **8a** (OQ-1 b) → **8b** (OQ-2 b) → 9 (run-fixings protocol) → 10 (FX backtest
 cash) → 11 (FX dynamic cash, Q8) → 12 (final gate).
 
-### New open question raised by the answers (plan written for its status quo (a), pinned)
+### OQ-3 answered by a user ruling (2026-10-10, replacing the options offered)
 
-- **OQ-3 — a weekend fixing banked on the Friday together with a zero-lag Friday fixing.** Under OQ-2 (b) a Saturday
-  fixing is passed by time on the Friday, so `record_passed_fixings` (and `resolve`'s copy, and theta landing on the
-  Friday) banks it and sets `as_of` to the Saturday (Ruling R22, needed so it is never banked twice). Under OQ-1 (b)
-  the Friday fixing's own zero-lag coupon is due that day and stays pending with `pay_date` = Friday — before `as_of`.
-  The Task 2 / spec R2 state check ("a dated pending `pay_date` must be on or after `as_of`", relaxed by 8a from
-  "after") then refuses the state: pricing such a contract on that Friday raises `ValidationError`. Only contracts with
-  fixings on BOTH a Friday and the following weekend day, on a `BUSINESS_DAYS` environment, are affected (pinned by
-  Task 8b `test_oq3_friday_cash_with_a_saturday_fixing_banked_on_friday_is_refused`).
-  (a) Status quo: refuse (the plan as written).
-  (b) Drop the state's dated "pending `pay_date` not before `as_of`" check (keep "pending cash needs `as_of`"):
-  a booking's stale pending cash is then handled by the time rule (paid once strictly past), and the Friday prices.
-  Moves: that R2 refusal → accepted (Task 8a's `test_dated_pending_must_not_precede_as_of` and
-  `test_r2_dated_pending_must_not_precede_as_of` would flip; no price of a valid booking moves).
-  (c) Bank a zero-time fixing dated after the valuation date only on `resolve`'s discarded copy, never on the product
-  (`as_of` never passes the valuation date): no validation change, but a direct `record_passed_fixings` on that Friday
-  banks the numeric twin's fixing and not the dated contract's (events differ, prices equal) — breaks the twin rule for
-  that API.
-  **Recommendation: (b)** — it keeps numeric == dated (events included) and moves no value of a valid booking; the
-  refused case is a consistency check that R22 made too strict.
+- **Ruling:** the TARN records banked fixings PER FIXING (by schedule index), as the FX range accrual does through W6's
+  recorder (each fixing recorded once, at its first live instant's spot, W6 Ruling 4). A weekend fixing inherits
+  Friday's spot (live on the Friday on a `BUSINESS_DAYS` clock; weekend rows carry Friday's spot on a calendar clock).
+  `as_of` never moves past the valuation date (R15, R22 superseded). Double-banking is prevented by fixing identity.
+  No validation check is dropped (the "pending `pay_date` must not precede `as_of`" check stays). A Monday / following
+  convention is NOT adopted (separate future decision).
+- **Implemented by Task 8b (rewritten):** `TargetRedemptionState.fixings_banked` (Task 2), `_banked_count` /
+  `_is_unbanked` by identity / `is_terminal` by count / `_record_dated` writing the count and `as_of =
+  _state_date(fx_env)` (Task 7); numeric form unchanged — its banked fixings are the dropped ones, counted by Task 9's
+  `_index_offset` (R14), and Task 9's `fixings_banked` property reports both forms alike (asserted in D2). Tests: the
+  Friday + Saturday case prices on the Friday in both forms (dated == numeric, state and payments; the numeric twin is
+  booked on the Friday — see OQ-4) and Monday does not bank the Saturday fixing again (Task 8b
+  `test_oq3_friday_and_saturday_fixings_price_on_friday_and_bank_once`; in a run, Task 9
+  `test_oq3_friday_and_saturday_fixings_in_a_run_are_recorded_once_at_fridays_spot`). Moved values: none beyond Tasks
+  8a / 8b's (a dated state now states its count — not a value).
+
+**Task order now:** 1–8 (done) → **8a** (OQ-1 b) → **8b** (OQ-2 b + OQ-3 ruling) → 9 → 10 → 11 → 12.
+
+### New open question raised by the OQ-3 case (plan written for its status quo (a), pinned)
+
+- **OQ-4 — two scheduled fixings that resolve to the same time** (the OQ-3 Friday + Saturday pair under
+  `BUSINESS_DAYS`, valued on any earlier day). Both forms fail BEFORE the Friday: the dated view lists both fixings at
+  one time and the engines' path generator (`FxGKPathGenerator`) refuses times that are not strictly increasing; the
+  numeric form (Task 3 validation) refuses equal fixing times, so the twin cannot even be booked. From the Friday on
+  everything works (Task 8b). Pinned by Task 8b `test_oq4_two_fixings_at_one_business_time_cannot_be_priced_before_it`.
+  Inside a run the recorder itself works (it never calls an engine), but the run's valuation of the position on the
+  Thursday raises.
+  (a) Status quo: such a contract cannot be priced until the shared instant (a `ValidationError` naming the times).
+  (b) Allow equal resolved fixing times: the numeric form accepts non-decreasing `fixing_times`; the two MC engines
+  simulate the distinct times and apply each fixing at its time's simulated spot (two fixings at one instant see the
+  same spot, as on the Friday itself). Moves: refusal → a number for such contracts only; every other price is
+  unchanged (distinct times take the same path). Scope: Task 3 validation, Task 6 engines (`_simulate` / the walks),
+  a twin test before the Friday.
+  (c) Adopt a following / Monday convention for weekend fixings — excluded by the ruling (a separate future decision).
+  **Recommendation: (b)** — it makes the OQ-3 contract priceable on every day in both forms with no other value moving;
+  (a) leaves a contract the ruling explicitly supports unpriceable for the days before its weekend.
 
 ## Review Focus
 
 Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by the user's OQ-1 / OQ-2 answers
-(items 5, 7; 8 is the new OQ-3).
+(items 5, 7), the OQ-3 ruling (item 8) and the new OQ-4 (item 9).
 
 1. **A short position (negative quantity)** in a run: the recorder reports events and pending PV with the signed
    quantity, and paid cash scales by it — pinned by Task 9 `test_a_short_position_carries_its_signed_quantity` and
@@ -354,7 +385,7 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by
    recorder (W6 R9: the clock cannot go back), never a silent re-age — pinned by Task 11
    `test_start_date_before_environment_date_raises`.
 5. **A dated future fixing or pay date that resolves to zero time** under `BUSINESS_DAYS` (a Saturday, valued on the
-   Friday): live, priced like its numeric twin, banked once (`as_of` covers it), recorded on Monday at Friday's spot
+   Friday): live, priced like its numeric twin, banked once (by fixing identity), recorded on Monday at Friday's spot
    (OQ-2 b, Task 8b) — pinned by Task 8b `test_future_fixing_at_zero_business_time_is_live_like_its_twin` and
    `test_a_weekend_fixing_banked_on_friday_is_not_banked_again`, Task 9
    `test_a_weekend_fixing_on_a_business_day_clock_is_live_on_friday`, Tasks 10 / 11
@@ -368,17 +399,21 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by
    `test_numeric_cash_due_today_stays_pending_until_its_pay_time_is_past`, Task 9
    `test_zero_lag_cash_of_a_live_fixing_stays_in_the_value_until_recorded`, Task 10
    `test_zero_lag_fixing_day_value_keeps_the_coupon_no_dip`.
-8. **Fixings on a Friday AND the following Saturday (zero lag) under `BUSINESS_DAYS`**, priced or recorded on the
-   Friday: refused by the state check — status quo pending **OQ-3** — pinned by Task 8b
-   `test_oq3_friday_cash_with_a_saturday_fixing_banked_on_friday_is_refused`.
-
+8. **Fixings on a Friday AND the following Saturday (zero lag) under `BUSINESS_DAYS`** (OQ-3 ruling): on the Friday
+   both price and bank in both forms with `as_of` = Friday, on Monday nothing is banked again; valued on a Saturday
+   row, `as_of` is the Friday (R24) — pinned by Task 8b `test_oq3_friday_and_saturday_fixings_price_on_friday_and_bank_once`,
+   `test_as_of_on_a_weekend_valuation_is_the_friday`, Task 9
+   `test_oq3_friday_and_saturday_fixings_in_a_run_are_recorded_once_at_fridays_spot`.
+9. **The same pair valued BEFORE the Friday**: two fixings at one business time — refused by the engines and the
+   numeric form, status quo pending **OQ-4** — pinned by Task 8b
+   `test_oq4_two_fixings_at_one_business_time_cannot_be_priced_before_it`.
 ---
 
 ## File Structure
 
 | Path | Status | Responsibility |
 |---|---|---|
-| `quantark/asset/fx/product/option/target_redemption_state.py` | Create (T2), extend (T8a, T10) | `TARGET_HIT_RTOL`, `target_hit_tol`, `is_target_hit`, `PendingPayment`, `TargetRedemptionState`, `TerminalBookingWarning`, `TargetRedemptionEventType`, `TargetRedemptionEvent`, `ResolvedTargetRedemption`, `pending_present_value`; `booked_cash` (T10) |
+| `quantark/asset/fx/product/option/target_redemption_state.py` | Create (T2), extend (T8a, T8b `fixings_banked`, T10) | `TARGET_HIT_RTOL`, `target_hit_tol`, `is_target_hit`, `PendingPayment`, `TargetRedemptionState`, `TerminalBookingWarning`, `TargetRedemptionEventType`, `TargetRedemptionEvent`, `ResolvedTargetRedemption`, `pending_present_value`; `booked_cash` (T10) |
 | `quantark/asset/fx/product/option/target_redemption_base.py` | Create (T3), extend (T5, T6, T7, T8a, T8b, T9) | `TargetRedemptionProduct(BaseFxProduct)`: forms, validation, terminal warning, `time_shift`, `record_passed_fixings`, `resolve`, `pending_pv`, dated `get_maturity`/`get_delivery`; W5 fill protocol; run-fixings protocol (T9: `has_run_fixings`, `open_fixings`, `with_time_elapsed`, `with_history_settled`, `matured_before`, booking-relative indices); helpers `is_passed_time`, `event_label`, `signed_year_fraction` |
 | `quantark/asset/fx/product/option/fx_target_redemption_note.py` | Modify (T3, T5, T7) | TARN terms, period sources, `coupon_amount`, `_fixing_outcome`, `_dated_factor` |
 | `quantark/asset/fx/product/option/fx_target_redemption_forward.py` | Modify (T4, T5, T7) | TARF terms, `_fixing_outcome` |
@@ -388,7 +423,7 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by
 | `quantark/util/run_fixings.py` | Modify (T9) | optional hook `with_history_settled(env)` via `settle_history`, at registration and after each clock move's recording (re-plan Ruling R13). (`quantark/asset/fx/lifecycle/` is NOT created: W6 spec §6) |
 | `quantark/backtest/fx/engine.py` | Modify (T10) | paid cash ledger and `paid_cash` / `pending_pv` columns from `RunFixingDay` (register / advance are W6's) |
 | `quantark/dynamicscenario/fx/engine.py`, `quantark/dynamicscenario/results/dynamic_results.py` | Modify (T11) | Q8 refusal, cash fields and FIXING snapshots from `RunFixingDay` (register / advance are W6's) |
-| `test/test_fx_target_redemption_state.py` | Create (T2), modify (T8a) | state module; cash due today (T8a) |
+| `test/test_fx_target_redemption_state.py` | Create (T2), modify (T8a, T8b) | state module; cash due today (T8a); `fixings_banked` (T8b) |
 | `test/fx_target_redemption_fixtures.py` | Create (T3), extend (T7, T9) | shared env/product builders, `_numeric_twin`, `book`, `drive` |
 | `test/test_fx_target_redemption_lifecycle.py` | Create (T3), extend (T4–T9, incl. T8a / T8b flips) | R1, R2, P1–P5, D1–D5, T1, T2, WARN1–3; run-fixings protocol unit tests (T9) |
 | `test/test_fx_target_redemption_runs.py` | Create (T9), extend (T10, T11) | recorder-level TARN/TARF rules, B1–B6, Q8, W8 twins, OQ-1 / OQ-2 (b) run tests |
@@ -3520,49 +3555,143 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8b: A dated fixing or pay date at zero business time is live (OQ-2 (b), user decision 2026-10-10)
+### Task 8b: Dated fixings banked per fixing; a fixing or pay date at zero business time is live (OQ-2 (b), OQ-3 ruling, 2026-10-10)
 
-Follow-up that re-opens built Task 7. User decision OQ-2 (b): a dated fixing or pay date AFTER the valuation date that
-resolves to t = 0 in the environment's day count (a Saturday under `BUSINESS_DAYS`, valued on the Friday) is LIVE, like
-its numeric twin and the FX range accrual (W6 Ruling 2): the fixing is decided at the quoted spot as on its own date,
-and its cash is due today (Task 8a). Plan Ruling R7's refusal is reversed (superseded). Passed vs ahead becomes a
-question of TIME for dated fixings too (Ruling R16).
+Follow-up that re-opens built Tasks 2 and 7. Two user decisions of 2026-10-10:
+- **OQ-2 (b):** a dated fixing or pay date AFTER the valuation date that resolves to t = 0 in the environment's day
+  count (a Saturday under `BUSINESS_DAYS`, valued on the Friday) is LIVE, like its numeric twin and the FX range accrual
+  (W6 Ruling 2): the fixing is decided at the quoted spot as on its own date, its cash is due today (Task 8a). Plan
+  Ruling R7's refusal is reversed. Passed vs ahead is decided by TIME (Ruling R16).
+- **OQ-3 ruling (replaces the options the re-plan offered):** a dated TARN / TARF records banked fixings PER FIXING
+  (by schedule index), as the FX range accrual does through W6's recorder; double-banking is prevented by fixing
+  identity, not by date; `as_of` NEVER moves past the valuation date; no validation check is dropped; a Monday /
+  following convention is NOT adopted (separate future decision). A weekend fixing inherits Friday's spot: on a
+  `BUSINESS_DAYS` clock it is live on the Friday (W6 Ruling 4), on a calendar clock the weekend rows carry Friday's
+  spot (user weekend ruling).
+
+**What changes in the built code (exactly):**
+- Task 2, `TargetRedemptionState`: new field `fixings_banked: Optional[int] = None` (after `as_of`). Dated form: the
+  number of leading scheduled fixings that are banked — fixing `i` is banked iff `i < fixings_banked` (fixings bank in
+  schedule order, so a count is the index set `{0, …, n − 1}`). State validation: `None` or an `int` (not `bool`)
+  `>= 0`. `as_of` keeps its own checks (pending needs `as_of`; a pending `pay_date` must not precede `as_of`, Task 8a);
+  its meaning becomes "the date the state was brought up to date", never after the valuation date.
+- Task 7, `TargetRedemptionProduct` (dated form):
+  - `_banked_count()`: `state.fixings_banked` when stated; else, for a booking that states only `as_of`, the number of
+    fixing dates on or before `as_of` (exactly the spec §4.2 reading of such a booking, so every existing booking
+    keeps its meaning); else 0.
+  - `_is_unbanked(i)`: `i >= _banked_count()` (was: `fixing_dates[i] > as_of`).
+  - `is_terminal`: redeemed, or `_banked_count() >= len(fixing_dates)` (was: `as_of >= fixing_dates[-1]`).
+  - `_record_dated`: banks the leading unbanked fixings whose resolved time is passed (`is_passed_time`, OQ-2 b),
+    writes `fixings_banked` = index of the last banked fixing + 1, and sets `as_of = _state_date(fx_env)`: the
+    valuation date, or — valued on a day at zero time from the previous one (a Saturday under `BUSINESS_DAYS`) — the
+    first date of that zero-time stretch (Ruling R24). Never after the valuation date.
+  - `_has_unbanked_passed`: unbanked by count and passed by time.
+  - `_dated_view`: the two R7 refusals are removed (a passed fixing is banked by `resolve` first; a pay date at zero
+    time is pending at 0.0, Task 8a).
+  - `_validate_state` (dated): `fixings_banked <= len(fixing_dates)`; the "cash needs a banked fixing" rule is kept and
+    stated by count: accumulated > 0 or pending cash with `as_of is None` or `_banked_count() == 0` is refused (for a
+    booking stating only `as_of` this is exactly the old "`as_of` before the first fixing" refusal; the date form could
+    not hold once a Saturday first fixing banks on the Friday with `as_of` = Friday). Numeric: `fixings_banked` must be
+    `None` (form check, like `as_of`).
+  - `_check_as_of` is unchanged (an `as_of` after the valuation date is refused): `as_of` never passes it now.
+- **Numeric mapping:** the numeric state carries no count (`fixings_banked` is `None`; it lists only unbanked
+  fixings). Its banked fixings are the ones dropped from the listed schedule; Task 9 counts them in `_index_offset`
+  (Ruling R14, booking-relative indices) and exposes both forms through one product property `fixings_banked`
+  (dated: `_banked_count()`; numeric: `_index_offset`), so a numeric twin booked with its dated contract reports the
+  same count at every step (asserted in Task 9's D2 test).
 
 **Files:**
-- Modify: `quantark/asset/fx/product/option/target_redemption_base.py` (`_has_unbanked_passed`, `_record_dated`
-  fixing loop and `as_of`, `_check_as_of`, `_dated_view`), `CHANGELOG.md`,
+- Modify: `quantark/asset/fx/product/option/target_redemption_state.py` (`fixings_banked`),
+  `quantark/asset/fx/product/option/target_redemption_base.py` (`_banked_count`, `_is_unbanked`, `is_terminal`,
+  `_record_dated`, `_has_unbanked_passed`, `_dated_view`, `_validate_state`), `CHANGELOG.md`,
   `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`
-- Test: `test/test_fx_target_redemption_lifecycle.py` (two tests flip; two new tests including a twin test)
+- Test: `test/test_fx_target_redemption_state.py` (new field tests), `test/test_fx_target_redemption_lifecycle.py`
+  (two R7 tests flip; Task 8a's dated record test states the count; new tests incl. the OQ-3 Friday + Saturday case)
 
 **Interfaces:**
 - Consumes: Task 8a.
-- Produces:
-  - dated `_has_unbanked_passed`: an unbanked fixing whose `signed_year_fraction` is `is_passed_time` (t <= 0 or
-    `is_zero`), whatever its date.
-  - dated `_record_dated` banks the leading unbanked fixings with `is_passed_time(t)`; `as_of` becomes
-    `max(valuation_date, last banked fixing date)` (a Saturday fixing banked on the Friday sets `as_of` to the
-    Saturday, so it is never banked twice — Ruling R22).
-  - `_check_as_of` refuses `as_of` after the valuation date only when its time is strictly ahead (not
-    `is_passed_time`): an `as_of` at zero business time is accepted.
-  - `_dated_view`: the two R7 refusals are removed (a passed fixing is banked by `resolve` before the view; a pay date
-    at zero time is pending at 0.0, Task 8a).
+- Produces: `TargetRedemptionState(accumulated, pending=(), as_of=None, fixings_banked=None)`; dated
+  `_banked_count() -> int`; the rules above. Every booking written before this task constructs and prices unchanged.
 
-- [ ] **Step 1: Flip the R7 tests and write the twin test**
+- [ ] **Step 1: Write the failing tests**
 
-In `test/test_fx_target_redemption_lifecycle.py` replace `test_future_fixing_with_zero_year_fraction_is_refused` and
-`test_pending_pay_date_with_zero_year_fraction_is_refused` with:
+Append to `test/test_fx_target_redemption_state.py`:
+
+```python
+@pytest.mark.parametrize("n", [-1, 1.5, True])
+def test_fixings_banked_must_be_a_non_negative_int(n):
+    with pytest.raises(ValidationError, match="fixings_banked"):
+        TargetRedemptionState(1.0, as_of=D1, fixings_banked=n)
+
+
+def test_fixings_banked_defaults_to_none():
+    assert TargetRedemptionState(0.0).fixings_banked is None
+    assert TargetRedemptionState(1.0, as_of=D1, fixings_banked=1).fixings_banked == 1
+```
+
+In `test/test_fx_target_redemption_lifecycle.py`, in Task 8a's
+`test_dated_record_banks_through_the_valuation_date_and_pays_cash_once_it_is_past`, the first state assertion states
+the count:
+
+```python
+    assert d.state == TargetRedemptionState(coupon, pending=(PendingPayment(coupon, pay_date=LAG2[0]),),
+                                            as_of=FIX_DATES[0], fixings_banked=1)
+```
+
+Replace `test_future_fixing_with_zero_year_fraction_is_refused` and
+`test_pending_pay_date_with_zero_year_fraction_is_refused` with (and append the rest):
 
 ```python
 THURSDAY, FRIDAY, SATURDAY, MONDAY = (datetime(2026, 8, 13), datetime(2026, 8, 14), datetime(2026, 8, 15),
                                       datetime(2026, 8, 17))
 
 
-def _saturday_note():
-    return dated_note(fixing_dates=[SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15), target=3.0)
+def _business_twin_on_friday(dated):
+    """The numeric twin booked on the Thursday and aged to the Friday by the business-day step (both forms are then
+    valued at the Friday with the same history)."""
+    twin = _numeric_twin(dated, env(val=THURSDAY, **BUS))
+    twin.time_shift(calculate_year_fraction(THURSDAY, FRIDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                            calendar=TARGET_CAL))
+    return twin
+
+
+def _kinds_only(events):
+    return [(e.event_type, e.amount, e.fixing, e.redeemed) for e in events]
+
+
+def test_bookings_that_state_only_as_of_keep_their_meaning():
+    """OQ-3 ruling: banked is tracked per fixing; a booking stating only as_of banks the fixings dated on or before it."""
+    d = dated_note(target=3.0, state=TargetRedemptionState(1.0, as_of=FIX_DATES[0] + timedelta(days=1)))
+    assert d._banked_count() == 1 and not d._is_unbanked(0) and d._is_unbanked(1)
+    assert dated_note(target=3.0)._banked_count() == 0
+    with pytest.warns(TerminalBookingWarning):
+        done = dated_note(target=3.0, state=TargetRedemptionState(1.0, as_of=FIX_DATES[-1]))
+    assert done._banked_count() == 12 and done.is_terminal
+
+
+def test_record_counts_banked_fixings_and_as_of_is_the_valuation_date():  # CALENDAR_DAYS: R24 is the date itself
+    d = dated_note(target=3.0, pay_dates=LAG2)
+    e = env(val=FIX_DATES[1] + timedelta(days=1))
+    d.record_passed_fixings(e)
+    assert (d.state.fixings_banked, d.state.as_of) == (2, e.valuation_date)
+
+
+@pytest.mark.parametrize("kw, match", [
+    (dict(state=TargetRedemptionState(1.0, as_of=FIX_DATES[0], fixings_banked=13)), "fixings_banked"),
+    (dict(state=TargetRedemptionState(1.0, as_of=FIX_DATES[0], fixings_banked=0)), "as_of"),  # cash, nothing banked
+])
+def test_r2_dated_banked_count_refusals(kw, match):
+    with pytest.raises(ValidationError, match=match):
+        dated_note(target=3.0, **kw)
+
+
+def test_r2_numeric_state_refuses_a_banked_count():
+    with pytest.raises(ValidationError, match="fixings_banked"):
+        note(state=TargetRedemptionState(0.0, fixings_banked=0))
 
 
 def test_future_fixing_at_zero_business_time_is_live_like_its_twin():  # OQ-2 (b) (was refused, Ruling R7)
-    d = _saturday_note()
+    d = dated_note(fixing_dates=[SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15), target=3.0)
     e_fri = env(val=FRIDAY, **BUS)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", MissingFixingWarning)          # Task 9 makes a t = 0 fill silent
@@ -3571,11 +3700,9 @@ def test_future_fixing_at_zero_business_time_is_live_like_its_twin():  # OQ-2 (b
         banked.record_passed_fixings(e_fri)
         assert view == banked.resolve(e_fri)
         c = banked.lifecycle_events[0].amount
-        assert view.pending == ((0.0, c),) and banked.state.as_of == SATURDAY   # its cash is due "today"
-        twin = _numeric_twin(d, env(val=THURSDAY, **BUS))
-        twin.time_shift(calculate_year_fraction(THURSDAY, FRIDAY, DayCountConvention.BUSINESS_DAYS, 252,
-                                                calendar=TARGET_CAL))
-        assert is_close(_price(twin, e=e_fri), _price(d, e=e_fri), rel_tol=1e-12)
+        assert view.pending == ((0.0, c),)                              # its cash is due "today"
+        assert (banked.state.fixings_banked, banked.state.as_of) == (1, FRIDAY)   # never past the valuation date
+        assert is_close(_price(_business_twin_on_friday(d), e=e_fri), _price(d, e=e_fri), rel_tol=1e-12)
 
 
 def test_pending_pay_date_at_zero_business_time_is_due_today():  # OQ-2 (b) (was refused, Ruling R7)
@@ -3590,106 +3717,254 @@ def test_pending_pay_date_at_zero_business_time_is_due_today():  # OQ-2 (b) (was
     assert owed.state.pending == () and owed.lifecycle_events[-1].event_type is PAYMENT
 
 
-def test_a_weekend_fixing_banked_on_friday_is_not_banked_again():
-    d = _saturday_note()
-    d.record_passed_fixings(env(val=FRIDAY, **BUS))                     # theta's landing rule banks the live fixing
-    assert d.state.as_of == SATURDAY and [e.event_type for e in d.lifecycle_events] == [FIXING]
-    assert _price(d, e=env(val=FRIDAY, **BUS)) > 0.0                    # as_of at zero business time is accepted
-    d.record_passed_fixings(env(val=MONDAY, **BUS))
-    assert [e.event_type for e in d.lifecycle_events] == [FIXING, PAYMENT]      # banked once; its cash paid Monday
+def test_oq3_friday_and_saturday_fixings_price_on_friday_and_bank_once():
+    """OQ-3 ruling: zero-lag fixings on a Friday and the Saturday after it, under BUSINESS_DAYS. On the Friday both are
+    passed by time (the Saturday one live like the Friday one, at Friday's spot): the dated contract prices, equal to
+    its numeric twin, and banks them once; as_of stays the Friday, so the Friday coupon due that day does not precede
+    it. On Monday nothing is banked again (fixing identity) and both coupons are paid, as in the twin. The twin is
+    booked on the Friday from the dated view: before the Friday both fixings sit at one business time, which the
+    numeric form cannot list (open question OQ-4), so FIXING events are compared from the Friday on."""
+    dated = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                       target=50.0)
+    e_fri, e_mon = env(val=FRIDAY, **BUS), env(val=MONDAY, **BUS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        twin = _numeric_twin(dated, e_fri)
+        assert is_close(_price(twin, e=e_fri), _price(dated, e=e_fri), rel_tol=1e-12)
+        dated.record_passed_fixings(e_fri)
+    assert [e.event_type for e in dated.lifecycle_events] == [FIXING, FIXING]
+    assert (dated.state.fixings_banked, dated.state.as_of) == (2, FRIDAY)
+    assert [p.pay_date for p in dated.state.pending] == [FRIDAY, SATURDAY]            # both due today, in the value
+    assert dated.state.accumulated == twin.state.accumulated
+    assert [p.amount for p in dated.state.pending] == [p.amount for p in twin.state.pending]
+    twin.time_shift(calculate_year_fraction(FRIDAY, MONDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                            calendar=TARGET_CAL))
+    twin.record_passed_fixings(e_mon)
+    dated.record_passed_fixings(e_mon)
+    assert [e.event_type for e in dated.lifecycle_events] == [FIXING, FIXING, PAYMENT, PAYMENT]   # banked once
+    assert _kinds_only(dated.lifecycle_events[2:]) == _kinds_only(twin.lifecycle_events)          # same payments
+    assert (dated.state.fixings_banked, dated.state.as_of) == (2, MONDAY)
 
 
-def test_oq3_friday_cash_with_a_saturday_fixing_banked_on_friday_is_refused():
-    """PINS THE STATUS QUO of open question OQ-3 (re-plan 2026-10-10): zero-lag fixings on a Friday and the Saturday
-    after it, banked together on the Friday under BUSINESS_DAYS: as_of becomes the Saturday (Ruling R22) while the
-    Friday coupon is due that day, and the state refuses pending cash dated before as_of. Flips if OQ-3 (b)."""
-    d = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
-                   target=50.0)
-    with pytest.raises(ValidationError, match="on or after as_of"):
-        d.record_passed_fixings(env(val=FRIDAY, **BUS))
+def test_as_of_on_a_weekend_valuation_is_the_friday():
+    """Ruling R24: valued on the Saturday under BUSINESS_DAYS (a weekend row), a zero-lag Friday fixing is still live
+    (t = 0, W6 Ruling 4) and its Friday coupon is due at that instant; banking writes as_of = the Friday, the first date
+    of the valuation's zero-time stretch (never after the valuation date), so the kept check "a pending pay_date must
+    not precede as_of" holds and the contract prices like its numeric twin."""
+    d = dated_note(fixing_dates=[FRIDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15), target=50.0)
+    e_sat = env(val=SATURDAY, **BUS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        banked = copy.deepcopy(d)
+        banked.record_passed_fixings(e_sat)
+        assert (banked.state.as_of, banked.state.fixings_banked) == (FRIDAY, 1)
+        assert banked.state.pending[0].pay_date == FRIDAY
+        twin = _numeric_twin(d, env(val=THURSDAY, **BUS))
+        twin.time_shift(calculate_year_fraction(THURSDAY, SATURDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                                calendar=TARGET_CAL))
+        assert is_close(_price(twin, e=e_sat), _price(d, e=e_sat), rel_tol=1e-12)
+
+
+def test_oq4_two_fixings_at_one_business_time_cannot_be_priced_before_it():
+    """PINS THE STATUS QUO of open question OQ-4 (re-plan 2026-10-10): on the Thursday the Friday and Saturday
+    fixings resolve to the same business time; the engines' path generator needs strictly increasing times and the
+    numeric form refuses equal fixing times, so neither form prices before the Friday. Flips if OQ-4 (b)."""
+    dated = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                       target=50.0)
+    e_thu = env(val=THURSDAY, **BUS)
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        _price(dated, e=e_thu)
+    with pytest.raises(ValidationError, match="unique"):
+        _numeric_twin(dated, e_thu)
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_lifecycle.py -k "zero_business_time or banked_on_friday or oq3" -n 2 -q`
-Expected: FAIL — `ValidationError: ... resolves to a zero year fraction` (both flipped tests) and, in the third test,
-`as_of == SATURDAY` (the Friday record leaves the Saturday fixing unbanked: `fd > val` stops the loop), and the OQ-3
-pin (`DID NOT RAISE`: the Friday record banks only the Friday fixing today).
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py -k "fixings_banked or banked_count or only_as_of or counts_banked or zero_business_time or oq3 or oq4 or weekend_valuation or pays_cash_once" -n 2 -q`
+Expected: FAIL — `TypeError: ... unexpected keyword argument 'fixings_banked'` (state tests, the count refusals and the
+8a record test), `AttributeError: ... '_banked_count'`, `ValidationError: ... resolves to a zero year fraction` (both
+flipped R7 tests, the OQ-3 test and the weekend-valuation test). The OQ-4 pin already passes (it pins today's
+refusals).
 
-- [ ] **Step 3: Implement** in `target_redemption_base.py`:
+- [ ] **Step 3: Implement**
+
+`target_redemption_state.py` — the field and its check:
 
 ```python
-    def _check_as_of(self, fx_env) -> None:
-        as_of = self.state.as_of
-        if as_of is not None and as_of > fx_env.valuation_date and not is_passed_time(
-                signed_year_fraction(as_of, fx_env)):
+@dataclass(frozen=True)
+class TargetRedemptionState:
+    """... ``as_of`` (dated form only): the date the state was brought up to date, never after the valuation date.
+    ``fixings_banked`` (dated form only): how many leading scheduled fixings are banked (fixing ``i`` is banked iff
+    ``i < fixings_banked``); ``None`` on a booking means "the fixings dated on or before ``as_of``"."""
+
+    accumulated: float
+    pending: Tuple[PendingPayment, ...] = ()
+    as_of: Optional[datetime] = None
+    fixings_banked: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        ...  # existing checks unchanged
+        n = self.fixings_banked
+        if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 0):
+            raise ValidationError(f"state.fixings_banked must be None or an int >= 0, got {n!r}")
+```
+
+`target_redemption_base.py` (add `timedelta` to the `datetime` import):
+
+```python
+    def _banked_count(self) -> int:
+        """Dated: how many leading scheduled fixings are banked (OQ-3 ruling, per fixing): ``state.fixings_banked``,
+        else - a booking that states only ``as_of`` - the fixings dated on or before ``as_of``, else 0."""
+        st = self.state
+        if st.fixings_banked is not None:
+            return st.fixings_banked
+        if st.as_of is None:
+            return 0
+        return sum(1 for d in self.fixing_dates if d <= st.as_of)
+
+    @staticmethod
+    def _state_date(fx_env) -> datetime:
+        """The ``as_of`` banking writes (Ruling R24): the valuation date, moved back over the days at zero time from it
+        (valued on a Saturday under BUSINESS_DAYS, the Friday: the same instant), so it never passes the valuation date
+        and cash due at that instant never precedes it. Under CALENDAR_DAYS / ACT conventions: the valuation date."""
+        val = fx_env.valuation_date
+        d = val
+        for _ in range(31):  # bounded: no zero-time stretch (weekend + holidays) is a month long
+            prev = d - timedelta(days=1)
+            if not is_zero(calculate_year_fraction(prev, val, fx_env.day_count_convention, fx_env.bus_days_in_year,
+                                                   calendar=fx_env.calendar)):
+                break
+            d = prev
+        return d
+
+    def _is_unbanked(self, index: int) -> bool:
+        """Dated: fixing ``index`` is banked iff it is one of the first ``_banked_count()`` (identity, not date)."""
+        return index >= self._banked_count()
+
+    @property
+    def is_terminal(self) -> bool:
+        """Redeemed, or no fixing left: numeric - an empty list; dated - every scheduled fixing banked."""
+        if self.is_numeric:
+            return not self.fixing_times or self.is_redeemed
+        return self.is_redeemed or self._banked_count() >= len(self.fixing_dates)
+
+    # _validate_state: numeric branch, next to the as_of form check
+            if st.fixings_banked is not None:
+                raise ValidationError(
+                    "state.fixings_banked belongs to the dated form: a numeric state lists only unbanked fixings")
+    # _validate_state: dated branch (replaces the as_of-before-the-first-fixing rule; same refusal for every
+    # as_of-only booking)
+        if st.fixings_banked is not None and st.fixings_banked > len(self.fixing_dates):
             raise ValidationError(
-                f"state.as_of {as_of} is after the valuation date {fx_env.valuation_date}: the state claims "
-                "fixings that have not happened")
+                f"state.fixings_banked {st.fixings_banked} exceeds the {len(self.fixing_dates)} scheduled fixings")
+        if (st.accumulated > 0.0 or st.pending) and (st.as_of is None or self._banked_count() == 0):
+            raise ValidationError(
+                "accumulated or pending cash needs state.as_of and at least one banked fixing")
 
-    # _has_unbanked_passed, dated branch
-        return any(self._is_unbanked(i) and is_passed_time(signed_year_fraction(d, fx_env))
-                   for i, d in enumerate(self.fixing_dates))
+    def _has_unbanked_passed(self, fx_env) -> bool:
+        if self.is_numeric:
+            return bool(self.fixing_times) and is_passed_time(self.fixing_times[0])
+        self._check_as_of(fx_env)
+        if self.is_terminal:
+            return False
+        first = self._banked_count()
+        return first < len(self.fixing_dates) and is_passed_time(
+            signed_year_fraction(self.fixing_dates[first], fx_env))
 
-    # _record_dated: the fixing loop and as_of (Task 9 later adds its history_only mode to this loop)
+    def _record_dated(self, fx_env) -> List[Tuple[int, str]]:
+        self._check_as_of(fx_env)
+        filled: List[Tuple[int, str]] = []
+        val, st = fx_env.valuation_date, self.state
+        events: List[TargetRedemptionEvent] = []
+        pending: list = []
+        for p in st.pending:  # cash whose pay time is strictly past was paid; cash due today stays (Task 8a)
+            t_pay = signed_year_fraction(p.pay_date, fx_env)
+            if is_history(t_pay):
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount, time=t_pay))
+            else:
+                pending.append(p)
         acc = st.accumulated
-        last_banked: Optional[datetime] = None
+        banked = self._banked_count()
         if not self.is_terminal:
             last = len(self.fixing_dates) - 1
-            for i, fd in enumerate(self.fixing_dates):
-                if not self._is_unbanked(i):
-                    continue
+            for i in range(banked, len(self.fixing_dates)):
+                fd = self.fixing_dates[i]
                 t = signed_year_fraction(fd, fx_env)
                 if not is_passed_time(t):  # ahead by TIME (OQ-2 b): a Saturday at zero business time is passed
                     break
-                ... (banking unchanged) ...
-                last_banked = fd
+                label = event_label(i, date=fd)
+                spot = self._rate(i, fx_env, filled, label)
+                added, cash = self._fixing_outcome(self._dated_factor(i, fx_env), spot, acc)
+                acc = acc + added
+                hit = is_target_hit(acc, self.target)
+                ends = hit or i == last
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.FIXING, cash, fixing=spot, time=t,
+                                                    redeemed=ends, label=label))
+                self._settle_dated(cash, self.pay_dates[i], label, fx_env, pending, events)
+                banked = i + 1  # identity: fixings 0 .. i are banked, whatever their dates (OQ-3 ruling)
                 if ends:
-                    ...
-                    break
-        # a fixing dated after the valuation date at zero time may have been banked: as_of covers it (Ruling R22)
-        as_of = val if last_banked is None or last_banked <= val else last_banked
-        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)), as_of=as_of)
+                    self._settle_dated(self._principal_amount(), self.pay_dates[i], label, fx_env, pending, events)
+                    break  # every later fixing is dead (or there is none)
+        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)),
+                                           as_of=self._state_date(fx_env), fixings_banked=banked)
+        self.lifecycle_events = self.lifecycle_events + tuple(events)
+        # a banked or dead fixing's recorded rate is spent
+        self._recorded_rates = {i: r for i, r in self._recorded_rates.items()
+                                if not self.is_terminal and self._is_unbanked(i)}
+        return filled
 ```
 
-In `_dated_view` remove the fixing refusal (`if is_passed_time(t): raise ValidationError(... zero year fraction ...)`)
-and the pending refusal added back by Task 8a (`if p.pay_date > val and is_passed_time(t): raise ...`); the pending
-loop becomes `t = signed_year_fraction(p.pay_date, fx_env); if is_history(t): continue; pending.append((snap_time(t),
-p.amount))`.
+In `_dated_view`: iterate `for i in range(self._banked_count(), len(self.fixing_dates))` (when not terminal), remove the
+fixing refusal (`if is_passed_time(t): raise ValidationError(... zero year fraction ...)`) and the pending refusal Task
+8a kept (`if p.pay_date > val and is_passed_time(t): raise ...`); the pending loop becomes
+`t = signed_year_fraction(p.pay_date, fx_env); if is_history(t): continue; pending.append((snap_time(t), p.amount))`.
+Any other reader of the banked set already goes through `_is_unbanked` / `is_terminal` (`_is_listed_unbanked`,
+`with_fixings_recorded`, the recorded-rate cleanup).
 
-In the CHANGELOG `### Added` bullet "Dated `FxTargetRedemptionNote` / `FxTargetRedemptionForward`: ...", replace the
-sentence "A fixing or pending pay date after the valuation date that resolves to a zero year fraction in the
-environment's day count (a weekend date under `BUSINESS_DAYS`) is refused with `ValidationError`." with:
+CHANGELOG — in the `### Added` bullet "Dated `FxTargetRedemptionNote` / `FxTargetRedemptionForward`: ...", replace "the
+TARN derives its periods" sentence's neighbour "A fixing or pending pay date after the valuation date that resolves to
+a zero year fraction in the environment's day count (a weekend date under `BUSINESS_DAYS`) is refused with
+`ValidationError`." with:
 
 ```markdown
 A fixing or pay date that resolves to zero time in the environment's day count (a weekend date under `BUSINESS_DAYS`,
 valued on the Friday) is live, as for its numeric twin (user decision OQ-2 b, 2026-10-10): the fixing is decided at
-the quoted spot and its cash is due that day.
+the quoted spot and its cash is due that day. A dated state counts its banked fixings
+(`TargetRedemptionState.fixings_banked`, fixing identity in schedule order; a booking stating only `as_of` banks the
+fixings dated on or before it); `as_of` never passes the valuation date (user ruling OQ-3, 2026-10-10).
 ```
 
 Append to `moved_values.txt`:
 
 ```text
 #
-# Task 8b - OQ-2 (b), user decision 2026-10-10: a dated fixing / pay date at zero business time is live.
+# Task 8b - OQ-2 (b) and the OQ-3 ruling, user 2026-10-10: a dated fixing / pay date at zero business time is live;
+# banked fixings are tracked per fixing (TargetRedemptionState.fixings_banked), as_of never passes the valuation date.
 # test_future_fixing_with_zero_year_fraction_is_refused: ValidationError -> priced (equal to its numeric twin, rel 1e-12).
 # test_pending_pay_date_with_zero_year_fraction_is_refused: ValidationError -> pending at t = 0 (in the value), paid
-# on the next business day. record_passed_fixings on the Friday banks the Saturday fixing (was: left unbanked) and sets
-# as_of to the Saturday. Ruling R7 superseded.
+# on the next business day. A Friday + Saturday fixing pair on BUSINESS_DAYS prices on the Friday (twins equal, events
+# equal) and is banked once. Ruling R7 superseded.
+# Not a value: a dated state after ageing now states fixings_banked (Task 8a's dated record test expects
+# fixings_banked=1; no price, Greek or event moves). Every booking stating only as_of keeps its banked set.
+# Not a value: banking on a non-business valuation date under BUSINESS_DAYS writes as_of = the first date of its
+# zero-time stretch (Ruling R24: a Saturday row writes the Friday); under CALENDAR_DAYS / ACT as_of is the valuation
+# date as before.
 ```
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_lifecycle.py test/test_fx_target_redemption_state.py test/test_fx_base_engine.py -n 2 -q`
-Expected: all pass (D1/D4 business-day twins, D5, WARN3 dated and `test_r2_as_of_after_valuation_is_refused_at_pricing`
-unchanged: their dates never resolve to zero time after the valuation date).
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py test/test_fx_tarn_note_mc.py test/test_fx_tarf_mc.py test/test_fx_base_engine.py -n 2 -q`
+Expected: all pass, and no other existing expectation moves (D1–D5, WARN1 dated, WARN3 dated, P-tests,
+`test_r2_as_of_after_valuation_is_refused_at_pricing` and the R2 "accumulated with as_of before the first fixing"
+refusal keep their outcomes: every booking there states only `as_of`, so its banked set is unchanged). Any other
+failure: STOP and report it as an unlisted mover.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git -C <WT> add quantark/asset/fx/product/option/target_redemption_base.py test/test_fx_target_redemption_lifecycle.py CHANGELOG.md
+git -C <WT> add quantark/asset/fx/product/option/target_redemption_state.py quantark/asset/fx/product/option/target_redemption_base.py test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py CHANGELOG.md
 git -C <WT> add -f docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt
-git -C <WT> commit -m "feat(fx-tarn): a dated fixing or pay date at zero business time is live, like its twin (OQ-2 b)
+git -C <WT> commit -m "feat(fx-tarn): dated fixings banked per fixing; a fixing or pay date at zero business time is live (OQ-2 b, OQ-3)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -3710,8 +3985,9 @@ Rulings 2, 4, 8, 9, 10, 11. **No `quantark/asset/fx/lifecycle/` is built**: W6's
 - Create: `test/test_fx_target_redemption_runs.py`
 
 **Interfaces:**
-- Consumes: Tasks 2–8, 8a (cash due today stays pending until its pay time is strictly past) and 8b (a dated
-  fixing or pay date at zero business time is passed/due by time); W6 `quantark.util.run_fixings` (`RunFixingRecorder.register(portfolio) -> RunFixingDay`,
+- Consumes: Tasks 2–8, 8a (cash due today stays pending until its pay time is strictly past) and 8b (dated fixings
+  banked per fixing — `fixings_banked`, `_banked_count`, `_is_unbanked` by identity, `as_of` = `_state_date`; a fixing
+  or pay date at zero business time is passed/due by time); W6 `quantark.util.run_fixings` (`RunFixingRecorder.register(portfolio) -> RunFixingDay`,
   `.advance(portfolio) -> RunFixingDay`, `.days`, `.recorded`; `RunFixingDay(date, fixings, product_events,
   pending_pv)`; `RecordedFixing(position_id, index, label, outcome, spot, gap)`; `participates(product)`); W5b
   `quantark.util.fixings` (`is_history`, `snap_time`, `freeze_missing_fixings`, `MissingFixingWarning`); W1
@@ -3729,7 +4005,12 @@ Rulings 2, 4, 8, 9, 10, 11. **No `quantark/asset/fx/lifecycle/` is built**: W6's
     past (`is_history`) unbanked fixing that HAS a recorded rate banked at that rate, in order, stopping at the first
     one that is live or unrecorded (clip, redemption, dead fixings, FIXING / PAYMENT events through the Task 5
     arithmetic), and — dated — every pending payment whose pay time is strictly past (`is_history`, Task 8a) paid;
-    dated `as_of` becomes the last banked fixing's date (Ruling R15). Nothing is ever filled at `fx_env`'s spot. `self` when nothing changes.
+    dated `fixings_banked` counts what it banked and `as_of` becomes `_state_date(fx_env)` (Task 8b; never after the
+    valuation date — R15 superseded by the OQ-3 ruling). Nothing is ever filled at `fx_env`'s spot. `self` when
+    nothing changes.
+  - `fixings_banked` (property) -> `int`: fixings banked since booking, by fixing identity — dated: `_banked_count()`
+    (Task 8b, schedule positions `0 .. n − 1`); numeric: `_index_offset` (R14, the fixings dropped from the listed
+    schedule). A numeric twin booked with its dated contract reports the same count at every step (D2 test).
   - `matured_before(fx_env) -> bool`: not terminal and the last fixing's time is `is_history` (numeric: listed time;
     dated: `signed_year_fraction`) — Ruling R16.
   - Changed: `missing_fixing_fills` / `with_missing_fixings_filled` list only `is_history` fixings (a t = 0 fixing is
@@ -3895,7 +4176,7 @@ def test_with_history_settled_banks_only_recorded_history(form):
     assert settled.state.accumulated > 0.0 and len(settled.state.pending) == 1   # paid two days after the fixing
     assert product.state == INCEPTION and product.missing_fixing_fills(e) == {0: 1.20}  # the product is a copy
     if form == "dated":
-        assert settled.state.as_of == FIX_DATES[0]                        # Ruling R15: the last banked fixing's date
+        assert (settled.state.fixings_banked, settled.state.as_of) == (1, e.valuation_date)   # per fixing (Task 8b)
         assert settled.with_history_settled(env(val=LAG2[0])) is settled          # due today: pending (Task 8a)
         paid = settled.with_history_settled(env(val=LAG2[0] + timedelta(days=1)))
         assert [x.event_type for x in paid.lifecycle_events] == [FIXING, PAYMENT] and paid.state.pending == ()
@@ -3947,6 +4228,7 @@ def test_d2_twins_age_identically(kind, path):
             e = pf.pricing_environments["EURUSD"]
             a, b = pf.positions[pid_d], pf.positions[pid_n]
             assert a.product.state.accumulated == b.product.state.accumulated
+            assert a.product.fixings_banked == b.product.fixings_banked          # same fixing identity (OQ-3)
             assert [p.amount for p in a.product.state.pending] == [p.amount for p in b.product.state.pending]
             assert is_close(a.get_market_value(e), b.get_market_value(e), rel_tol=1e-12)
             if day == FIX_DATES[1]:                                    # live on its own day, in both forms (W6 D1)
@@ -4203,6 +4485,25 @@ def test_a_weekend_fixing_on_a_business_day_clock_is_live_on_friday():
     assert [ev.event_type for p, _, ev in mon.product_events if p == id_d] == [FIXING, PAYMENT]
 
 
+
+
+def test_oq3_friday_and_saturday_fixings_in_a_run_are_recorded_once_at_fridays_spot():
+    """OQ-3 ruling in a run (BUSINESS_DAYS, weekday instants): the Friday fixing and the Saturday fixing are both live
+    on the Friday (W6 Ruling 4); on Monday both are recorded at Friday's spot, gap=False, banked by identity with
+    their cash; nothing is banked again later. (Recorder level: pricing either form before the Friday is OQ-4.)"""
+    friday, saturday, monday = datetime(2026, 8, 14), datetime(2026, 8, 15), datetime(2026, 8, 17)
+    dated = dated_note(fixing_dates=[datetime(2026, 7, 15), friday, saturday, datetime(2026, 9, 15)], target=50.0)
+    pf, (pid,), rec = _registered(dated, fx_env=env(**BUS))
+    drive(pf, rec, friday - timedelta(days=1), 1.20)
+    fri = drive(pf, rec, friday, 1.21)
+    assert fri.product_events == () and fri.pending_pv > 0.0                     # both live; their cash due today
+    mon = drive(pf, rec, monday, 1.30)
+    assert [r for r in _rows(mon) if r[0] in (1, 2)] == [(1, 1.21, 1.21, False), (2, 1.21, 1.21, False)]
+    assert [ev.event_type for _, _, ev in mon.product_events] == [FIXING, PAYMENT, FIXING, PAYMENT]
+    held = pf.positions[pid].product
+    assert (held.fixings_banked, held.state.as_of) == (3, monday)
+    tue = drive(pf, rec, monday + timedelta(days=1), 1.30)
+    assert tue.product_events == () and pf.positions[pid].product.fixings_banked == 3
 ```
 
 Append to `test/test_run_fixings.py` (after `test_hooks_matured_events_pending_pv`):
@@ -4235,7 +4536,7 @@ def test_settle_hook_runs_at_register_and_on_every_clock_move():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_run_fixings.py -k "run_fixings or open_fixings or booking_index or time_elapsed or t0 or history_settled or matured or d2 or register or origin or terminal_booking or clock or time_of_day or untouched or gap or short or pairs or consecutive or append or zero_lag or weekend_fixing or settle_hook" -n 2 -q`
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_run_fixings.py -k "run_fixings or open_fixings or booking_index or time_elapsed or t0 or history_settled or matured or d2 or register or origin or terminal_booking or clock or time_of_day or untouched or gap or short or pairs or consecutive or append or zero_lag or weekend_fixing or oq3 or settle_hook" -n 2 -q`
 Expected: FAIL — `AttributeError: ... object has no attribute 'has_run_fixings'` / `'open_fixings'` / `'with_time_elapsed'` /
 `'with_history_settled'` / `'matured_before'`; the recorder-level tests fail because `participates()` is False (nothing
 is banked: e.g. `assert 0.0 == ...`, `DID NOT WARN`); `test_a_fixing_at_t0_is_live_silent_and_never_frozen` fails on
@@ -4255,7 +4556,8 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
            self._index_offset = 0
    ```
 3. Replace `_bank_passed`, `_record_numeric` and `_record_dated` (the arithmetic of each banked fixing is unchanged;
-   only the loop's stop rule in `history_only` mode, the numeric label/offset and the dated `as_of` change):
+   only the loop's stop rule in `history_only` mode and the numeric label/offset change; the dated block is Task 8b's
+   per-fixing version with the `history_only` stop added):
 
 ```python
     def _bank_passed(self, fx_env, *, history_only: bool = False) -> List[Tuple[int, str]]:
@@ -4315,7 +4617,7 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
     def _record_dated(self, fx_env, *, history_only: bool = False) -> List[Tuple[int, str]]:
         self._check_as_of(fx_env)
         filled: List[Tuple[int, str]] = []
-        val, st = fx_env.valuation_date, self.state
+        st = self.state
         events: List[TargetRedemptionEvent] = []
         pending: list = []
         for p in st.pending:  # cash whose pay time is strictly past was paid; cash due today stays (Task 8a)
@@ -4325,12 +4627,11 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
             else:
                 pending.append(p)
         acc = st.accumulated
-        last_banked: Optional[datetime] = None
+        banked = self._banked_count()
         if not self.is_terminal:
             last = len(self.fixing_dates) - 1
-            for i, fd in enumerate(self.fixing_dates):
-                if not self._is_unbanked(i):
-                    continue
+            for i in range(banked, len(self.fixing_dates)):
+                fd = self.fixing_dates[i]
                 t = signed_year_fraction(fd, fx_env)
                 if not is_passed_time(t):  # ahead by TIME (Task 8b)
                     break
@@ -4345,17 +4646,13 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
                 events.append(TargetRedemptionEvent(TargetRedemptionEventType.FIXING, cash, fixing=spot, time=t,
                                                     redeemed=ends, label=label))
                 self._settle_dated(cash, self.pay_dates[i], label, fx_env, pending, events)
-                last_banked = fd
+                banked = i + 1  # identity: fixings 0 .. i are banked (OQ-3 ruling), never re-banked by date
                 if ends:
                     self._settle_dated(self._principal_amount(), self.pay_dates[i], label, fx_env, pending, events)
                     break  # every later fixing is dead (or there is none)
-        # record_passed_fixings banks through the valuation date (and a later date at zero time, Task 8b / R22); the
-        # settle step only through its last banked fixing (Ruling R15): a fixing at t = 0 is live and stays unbanked
-        if history_only:
-            as_of = last_banked if last_banked is not None else st.as_of
-        else:
-            as_of = val if last_banked is None or last_banked <= val else last_banked
-        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)), as_of=as_of)
+        # both modes: banked set by count, as_of never after the valuation date (Task 8b, R24; R15 superseded)
+        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)),
+                                           as_of=self._state_date(fx_env), fixings_banked=banked)
         self.lifecycle_events = self.lifecycle_events + tuple(events)
         # a banked or dead fixing's recorded rate is spent
         self._recorded_rates = {i: r for i, r in self._recorded_rates.items()
@@ -4439,6 +4736,12 @@ fails (the recorder never calls the hook). The other W6 tests in `test/test_run_
     def has_run_fixings(self) -> bool:
         """Takes part in run fixings (``quantark.util.run_fixings``), both forms."""
         return True
+
+    @property
+    def fixings_banked(self) -> int:
+        """Fixings banked since booking, by fixing identity (OQ-3 ruling): dated - ``_banked_count()`` (schedule
+        positions ``0 .. n - 1``); numeric - ``_index_offset`` (the fixings dropped from the listed schedule, R14)."""
+        return self._index_offset if self.is_numeric else self._banked_count()
 
     def open_fixings(self, fx_env) -> Dict[int, Tuple[float, str]]:
         """``{index: (time, label)}`` of every fixing not banked and without a recorded rate: numeric times as listed,
@@ -5262,8 +5565,11 @@ Append to `moved_values.txt`:
 # Ruling R7 superseded). In runs: a payment on a path-aligned pay date is booked on the next instant (B3 principal
 # day 367 -> 368 against the pre-8a plan text; nothing on main asserted it), and a zero-lag fixing day keeps its
 # coupon in the run value (no dip, no false first-day gain).
-# OQ-3 (Friday + Saturday fixings banked together on the Friday): <the user's answer; under (b) Task 8a's two
-# "must not precede as_of" refusals flip to accepted>.
+# OQ-3 (user ruling 2026-10-10): banked fixings tracked per fixing (TargetRedemptionState.fixings_banked), as_of never
+# after the valuation date (R24: on a weekend row, the Friday), no check dropped. Moved values: none beyond Tasks 8a /
+# 8b; not a value: aged dated states state their count, and a dated state's as_of on a non-business valuation date
+# reads the preceding business date.
+# OQ-4 (equal resolved fixing times before the shared instant): <the user's answer; under (b) the OQ-4 pin flips>.
 ```
 Verify the CHANGELOG block has `### Added`, `### Changed`, `### Fixed` with the bullets from Tasks 2–11 and no empty
 heading.
@@ -5298,9 +5604,11 @@ the rebase); only then ff-merge.
   spot, gap)` are used with the same names in every task. (Re-plan 2026-10-10: `FxLifecycleDay` / `FxLifecycleEntry`
   no longer exist.)
 - **User answers (2026-10-10):** OQ-1 (b) → Task 8a (spec §3 / §5.1 / §6 cash rule amended; pins in 8a, 9, 10);
-  OQ-2 (b) → Task 8b (Ruling R7 superseded; flips in 8b, twin pins in 9, 10, 11). Task 9's `_record_dated`
-  replacement carries the 8a cash sweep and the 8b passed-by-time loop / `as_of`; no task still pins the old (a)
-  behaviour.
+  OQ-2 (b) → Task 8b (Ruling R7 superseded; flips in 8b, twin pins in 9, 10, 11). OQ-3 ruling → Task 8b rewritten
+  (per-fixing banked count; R15, R22 superseded; R24, R25 added) with the Friday + Saturday case in 8b and Task 9.
+  Task 9's `_record_dated` replacement carries the 8a cash sweep and 8b's per-fixing loop, count and `_state_date`; no
+  task relies on `as_of` as a banked high-water mark, and no task still pins an answered question's old behaviour.
+  Open: OQ-4 (pinned in 8b).
 - **Re-plan self-check (2026-10-10):** every old Task 9–11 requirement is in the mapping table of "Re-plan 2026-10-10
   against W6"; W6 hand-off notes 1–5 map to Task 9 (protocol, hooks, append-only events, R4/R7/R8/R9/Ruling 9, W8),
   Task 10 (W8 twins) and Task 11 (R7 + Q8); W6 Ruling 2's time-based gap flag drives R16 and OQ-2; the user's weekend
