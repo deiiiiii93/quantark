@@ -1,0 +1,3 @@
+valuation 2024-12-03: schedule rows (months, observed, coupon paid) = [((23,), '2024-12-03', '2025-01-08'), ((24,), '2025-01-03', '2025-02-17')]
+valuation 2024-12-04: schedule rows (months, observed, coupon paid) = [((24,), '2025-01-03', '2025-02-17')]
+valuation 2025-01-03: schedule rows (months, observed, coupon paid) = [((24,), '2025-01-03', '2025-02-17')]

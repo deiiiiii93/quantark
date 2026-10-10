@@ -1,0 +1,205 @@
+=== DCN_A: final obs 2025-01-03, day before 2025-01-02, loss settlement 2025-01-07; KI 4500 coupon 4800 KO 6000 K_loss 6600
+final row: months (24,) coupon_obs=True ko_obs=True coupon_pay 2025-01-07 ko_pay 2025-01-07; grid times [0.0] get_maturity 0.0
+
+-- A. final row: HAND | MCROW | PDEROW(interp; nearest node) | TODAY mc | TODAY pde
+carried=False spot=   7000 | HAND    9996.099391 {ko=9996.099391, coupon=0.000000, loss=0.000000} | MCROW    9996.099391 | PDEROW    9996.099391 (node 7001.824: 9996.099391) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   6300 | HAND    9996.099391 {ko=9996.099391, coupon=0.000000, loss=0.000000} | MCROW    9996.099391 | PDEROW    9996.099391 (node 6299.408: 9996.099391) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   6000 | HAND    9996.099391 {ko=9996.099391, coupon=0.000000, loss=0.000000} | MCROW    9996.099391 | PDEROW    9996.099391 (node 5998.567: 9996.099391) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   5999 | HAND    9996.099391 {ko=0.000000, coupon=9996.099391, loss=0.000000} | MCROW    9996.099391 | PDEROW    9996.099391 (node 5998.066: 9996.099391) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   5500 | HAND    9996.099391 {ko=0.000000, coupon=9996.099391, loss=0.000000} | MCROW    9996.099391 | PDEROW    9996.099391 (node 5500.803: 9996.099391) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   4800 | HAND    9996.099391 {ko=0.000000, coupon=9996.099391, loss=0.000000} | MCROW    9996.099391 | PDEROW    5368.808060 (node 4800.451: 5904.446500) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   4650 | HAND       0.000000 {ko=0.000000, coupon=0.000000, loss=0.000000} | MCROW       0.000000 | PDEROW       0.000000 (node 4648.133: 0.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   4500 | HAND -349863.478688 {ko=0.000000, coupon=0.000000, loss=-349863.478688} | MCROW -349863.478688 | PDEROW -349863.478688 (node 4502.656: -349420.977868) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   4000 | HAND -433164.306946 {ko=0.000000, coupon=0.000000, loss=-433164.306946} | MCROW -433164.306946 | PDEROW -433164.306946 (node 4001.210: -432962.670586) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   7000 | HAND    9996.099391 {ko=9996.099391, coupon=0.000000, loss=0.000000} | MCROW    9996.099391 | PDEROW    9996.099391 (node 7001.824: 9996.099391) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   6300 | HAND    9996.099391 {ko=9996.099391, coupon=0.000000, loss=0.000000} | MCROW    9996.099391 | PDEROW    9996.099391 (node 6299.408: 9996.099391) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   6000 | HAND    9996.099391 {ko=9996.099391, coupon=0.000000, loss=0.000000} | MCROW    9996.099391 | PDEROW  -45108.403422 (node 5998.567: -100199.744850) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   5999 | HAND -100127.595567 {ko=0.000000, coupon=0.000000, loss=-100127.595567} | MCROW -100127.595567 | PDEROW  -70613.676777 (node 5998.066: -100283.237977) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   5500 | HAND -183261.822170 {ko=0.000000, coupon=0.000000, loss=-183261.822170} | MCROW -183261.822170 | PDEROW -183261.822170 (node 5500.803: -183127.964690) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   4800 | HAND -299882.981732 {ko=0.000000, coupon=0.000000, loss=-299882.981732} | MCROW -299882.981732 | PDEROW -299882.981732 (node 4800.451: -299807.783352) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   4650 | HAND -324873.230210 {ko=0.000000, coupon=0.000000, loss=-324873.230210} | MCROW -324873.230210 | PDEROW -324873.230210 (node 4648.133: -325184.192323) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   4500 | HAND -349863.478688 {ko=0.000000, coupon=0.000000, loss=-349863.478688} | MCROW -349863.478688 | PDEROW -349863.478688 (node 4502.656: -349420.977868) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   4000 | HAND -433164.306946 {ko=0.000000, coupon=0.000000, loss=-433164.306946} | MCROW -433164.306946 | PDEROW -433164.306946 (node 4001.210: -432962.670586) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+SELLER carried=False spot=5500 | HAND -9996.099391 | MCROW -9996.099391 | PDEROW -9996.099391
+SELLER carried=True spot=4000 | HAND 433164.306946 | MCROW 433164.306946 | PDEROW 433164.306946
+
+-- B. day before: MC | PDE | HAND(final) | MC-HAND | PDE-HAND | one-day spot sd
+carried=False spot=   7000 | MC    9995.124477 | PDE    9995.124478 | HAND    9996.099391 | MC-HAND    -0.974914 | PDE-HAND    -0.974913 | sd 67.42
+carried=False spot=   6300 | MC    9995.124477 | PDE    9995.124478 | HAND    9996.099391 | MC-HAND    -0.974914 | PDE-HAND    -0.974913 | sd 60.68
+carried=False spot=   6000 | MC    9995.124477 | PDE    9995.124478 | HAND    9996.099391 | MC-HAND    -0.974914 | PDE-HAND    -0.974913 | sd 57.79
+carried=False spot=   5999 | MC    9995.124477 | PDE    9995.124478 | HAND    9996.099391 | MC-HAND    -0.974914 | PDE-HAND    -0.974913 | sd 57.78
+carried=False spot=   5500 | MC    9995.124477 | PDE    9995.124478 | HAND    9996.099391 | MC-HAND    -0.974914 | PDE-HAND    -0.974913 | sd 52.97
+carried=False spot=   4800 | MC    4859.232497 | PDE    4858.764883 | HAND    9996.099391 | MC-HAND -5136.866894 | PDE-HAND -5137.334508 | sd 46.23
+carried=False spot=   4650 | MC    -129.707586 | PDE    -222.574258 | HAND       0.000000 | MC-HAND  -129.707586 | PDE-HAND  -222.574258 | sd 44.78
+carried=False spot=   4500 | MC -350044.945045 | PDE -350044.837800 | HAND -349863.478688 | MC-HAND  -181.466357 | PDE-HAND  -181.359112 | sd 43.34
+carried=False spot=   4000 | MC -433313.694754 | PDE -433313.599082 | HAND -433164.306946 | MC-HAND  -149.387807 | PDE-HAND  -149.292135 | sd 38.52
+carried=True  spot=   7000 | MC    9995.124477 | PDE    9995.124478 | HAND    9996.099391 | MC-HAND    -0.974914 | PDE-HAND    -0.974913 | sd 67.42
+carried=True  spot=   6300 | MC    9995.124477 | PDE    9994.681136 | HAND    9996.099391 | MC-HAND    -0.974914 | PDE-HAND    -1.418255 | sd 60.68
+carried=True  spot=   6000 | MC  -50484.891817 | PDE  -50478.210814 | HAND    9996.099391 | MC-HAND -60480.991208 | PDE-HAND -60474.310205 | sd 57.79
+carried=True  spot=   5999 | MC  -51327.019014 | PDE  -51277.489309 | HAND -100127.595567 | MC-HAND 48800.576554 | PDE-HAND 48850.106259 | sd 57.78
+carried=True  spot=   5500 | MC -183507.445627 | PDE -183507.432842 | HAND -183261.822170 | MC-HAND  -245.623457 | PDE-HAND  -245.610673 | sd 52.97
+carried=True  spot=   4800 | MC -300083.695219 | PDE -300083.688923 | HAND -299882.981732 | MC-HAND  -200.713487 | PDE-HAND  -200.707191 | sd 46.23
+carried=True  spot=   4650 | MC -325064.320132 | PDE -325064.237192 | HAND -324873.230210 | MC-HAND  -191.089922 | PDE-HAND  -191.006982 | sd 44.78
+carried=True  spot=   4500 | MC -350044.945045 | PDE -350044.837800 | HAND -349863.478688 | MC-HAND  -181.466357 | PDE-HAND  -181.359112 | sd 43.34
+carried=True  spot=   4000 | MC -433313.694754 | PDE -433313.599082 | HAND -433164.306946 | MC-HAND  -149.387807 | PDE-HAND  -149.292135 | sd 38.52
+
+-- C. shrinking final step h (day-before contract, payment gaps after T held): MC | PDE | HAND
+h=1d     carried=False spot=   7000 | MC      9995.124477 | PDE      9995.124478 | HAND    9996.099391
+h=1d     carried=False spot=   6300 | MC      9995.124477 | PDE      9995.124478 | HAND    9996.099391
+h=1d     carried=False spot=   5500 | MC      9995.124477 | PDE      9995.124478 | HAND    9996.099391
+h=1d     carried=False spot=   4650 | MC      -129.707586 | PDE      -222.574258 | HAND       0.000000
+h=1d     carried=False spot=   4000 | MC   -433313.694754 | PDE   -433313.599082 | HAND -433164.306946
+h=1d     carried=True  spot=   7000 | MC      9995.124477 | PDE      9995.124478 | HAND    9996.099391
+h=1d     carried=True  spot=   6300 | MC      9995.124477 | PDE      9994.681136 | HAND    9996.099391
+h=1d     carried=True  spot=   5500 | MC   -183507.445627 | PDE   -183507.432842 | HAND -183261.822170
+h=1d     carried=True  spot=   4650 | MC   -325064.320132 | PDE   -325064.237192 | HAND -324873.230210
+h=1d     carried=True  spot=   4000 | MC   -433313.694754 | PDE   -433313.599082 | HAND -433164.306946
+h=1h     carried=False spot=   7000 | MC      9996.058768 | PDE      9996.058768 | HAND    9996.099391
+h=1h     carried=False spot=   6300 | MC      9996.058768 | PDE      9996.058768 | HAND    9996.099391
+h=1h     carried=False spot=   5500 | MC      9996.058768 | PDE      9996.058768 | HAND    9996.099391
+h=1h     carried=False spot=   4650 | MC         0.000000 | PDE        -0.000000 | HAND       0.000000
+h=1h     carried=False spot=   4000 | MC   -433170.528966 | PDE   -433170.414212 | HAND -433164.306946
+h=1h     carried=True  spot=   7000 | MC      9996.058768 | PDE      9996.058768 | HAND    9996.099391
+h=1h     carried=True  spot=   6300 | MC      9996.058768 | PDE      9996.058768 | HAND    9996.099391
+h=1h     carried=True  spot=   5500 | MC   -183272.053159 | PDE   -183272.014312 | HAND -183261.822170
+h=1h     carried=True  spot=   4650 | MC   -324881.189449 | PDE   -324881.084402 | HAND -324873.230210
+h=1h     carried=True  spot=   4000 | MC   -433170.528966 | PDE   -433170.414212 | HAND -433164.306946
+h=1min   carried=False spot=   7000 | MC      9996.098714 | PDE      9996.098714 | HAND    9996.099391
+h=1min   carried=False spot=   6300 | MC      9996.098714 | PDE      9996.098714 | HAND    9996.099391
+h=1min   carried=False spot=   5500 | MC      9996.098714 | PDE      9996.098714 | HAND    9996.099391
+h=1min   carried=False spot=   4650 | MC         0.000000 | PDE         0.000000 | HAND       0.000000
+h=1min   carried=False spot=   4000 | MC   -433164.410049 | PDE   -433164.290673 | HAND -433164.306946
+h=1min   carried=True  spot=   7000 | MC      9996.098714 | PDE      9996.098714 | HAND    9996.099391
+h=1min   carried=True  spot=   6300 | MC      9996.098714 | PDE      9996.098714 | HAND    9996.099391
+h=1min   carried=True  spot=   5500 | MC   -183261.991865 | PDE   -183261.946668 | HAND -183261.822170
+h=1min   carried=True  spot=   4650 | MC   -324873.362169 | PDE   -324873.251751 | HAND -324873.230210
+h=1min   carried=True  spot=   4000 | MC   -433164.410049 | PDE   -433164.290673 | HAND -433164.306946
+h=1s     carried=False spot=   7000 | MC      9996.099380 | PDE      9996.099380 | HAND    9996.099391
+h=1s     carried=False spot=   6300 | MC      9996.099380 | PDE      9996.099380 | HAND    9996.099391
+h=1s     carried=False spot=   5500 | MC      9996.099380 | PDE      9996.099380 | HAND    9996.099391
+h=1s     carried=False spot=   4650 | MC         0.000000 | PDE         0.000000 | HAND       0.000000
+h=1s     carried=False spot=   4000 | MC   -433164.308588 | PDE   -433164.188613 | HAND -433164.306946
+h=1s     carried=True  spot=   7000 | MC      9996.099380 | PDE      9996.099380 | HAND    9996.099391
+h=1s     carried=True  spot=   6300 | MC      9996.099380 | PDE      9996.099380 | HAND    9996.099391
+h=1s     carried=True  spot=   5500 | MC   -183261.824892 | PDE   -183261.778872 | HAND -183261.822170
+h=1s     carried=True  spot=   4650 | MC   -324873.232319 | PDE   -324873.121205 | HAND -324873.230210
+h=1s     carried=True  spot=   4000 | MC   -433164.308588 | PDE   -433164.188613 | HAND -433164.306946
+h=1e-9y  carried=False spot=   7000 | MC      9996.099391 | PDE      9996.099391 | HAND    9996.099391
+h=1e-9y  carried=False spot=   6300 | MC      9996.099391 | PDE      9996.099391 | HAND    9996.099391
+h=1e-9y  carried=False spot=   5500 | MC      9996.099391 | PDE      9996.099391 | HAND    9996.099391
+h=1e-9y  carried=False spot=   4650 | MC         0.000000 | PDE         0.000000 | HAND       0.000000
+h=1e-9y  carried=False spot=   4000 | MC   -433164.306985 | PDE   -433164.186938 | HAND -433164.306946
+h=1e-9y  carried=True  spot=   7000 | MC      9996.099391 | PDE      9996.099391 | HAND    9996.099391
+h=1e-9y  carried=True  spot=   6300 | MC      9996.099391 | PDE      9996.099391 | HAND    9996.099391
+h=1e-9y  carried=True  spot=   5500 | MC   -183261.822238 | PDE   -183261.776117 | HAND -183261.822170
+h=1e-9y  carried=True  spot=   4650 | MC   -324873.230261 | PDE   -324873.119062 | HAND -324873.230210
+h=1e-9y  carried=True  spot=   4000 | MC   -433164.306985 | PDE   -433164.186938 | HAND -433164.306946
+
+=== DCN_B: final obs 2026-01-05, day before 2025-12-31, loss settlement 2026-01-07; KI 4500 coupon 4800 KO 6000 K_loss 6900
+final row: months (36,) coupon_obs=True ko_obs=True coupon_pay 2026-01-05 ko_pay 2026-01-05; grid times [0.0] get_maturity 0.0
+
+-- A. final row: HAND | MCROW | PDEROW(interp; nearest node) | TODAY mc | TODAY pde
+carried=False spot=   7000 | HAND   10000.000000 {ko=10000.000000, coupon=0.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW   10000.000000 (node 7001.824: 10000.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   6300 | HAND   10000.000000 {ko=10000.000000, coupon=0.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW   10000.000000 (node 6299.408: 10000.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   6000 | HAND   10000.000000 {ko=10000.000000, coupon=0.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW   10000.000000 (node 5998.567: 10000.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   5999 | HAND   10000.000000 {ko=0.000000, coupon=10000.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW   10000.000000 (node 5998.066: 10000.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   5500 | HAND   10000.000000 {ko=0.000000, coupon=10000.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW   10000.000000 (node 5500.803: 10000.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   4800 | HAND   10000.000000 {ko=0.000000, coupon=10000.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW    5370.903039 (node 4800.451: 5906.750492) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   4650 | HAND       0.000000 {ko=0.000000, coupon=0.000000, loss=0.000000} | MCROW       0.000000 | PDEROW       0.000000 (node 4648.133: 0.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   4500 | HAND -399921.980213 {ko=0.000000, coupon=0.000000, loss=-399921.980213} | MCROW -399921.980213 | PDEROW -399921.980213 (node 4502.656: -399479.393067) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=False spot=   4000 | HAND -483239.059424 {ko=0.000000, coupon=0.000000, loss=-483239.059424} | MCROW -483239.059424 | PDEROW -483239.059424 (node 4001.210: -483037.383726) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   7000 | HAND   10000.000000 {ko=10000.000000, coupon=0.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW   10000.000000 (node 7001.824: 10000.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   6300 | HAND   10000.000000 {ko=10000.000000, coupon=0.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW   10000.000000 (node 6299.408: 10000.000000) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   6000 | HAND   10000.000000 {ko=10000.000000, coupon=0.000000, loss=0.000000} | MCROW   10000.000000 | PDEROW  -70114.337467 (node 5998.567: -150209.540097) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   5999 | HAND -150137.376738 {ko=0.000000, coupon=0.000000, loss=-150137.376738} | MCROW -150137.376738 | PDEROW -107175.015845 (node 5998.066: -150293.049512) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   5500 | HAND -233287.821791 {ko=0.000000, coupon=0.000000, loss=-233287.821791} | MCROW -233287.821791 | PDEROW -233287.821791 (node 5500.803: -233153.938197) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   4800 | HAND -349931.732686 {ko=0.000000, coupon=0.000000, loss=-349931.732686} | MCROW -349931.732686 | PDEROW -349931.732686 (node 4800.451: -349856.519636) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   4650 | HAND -374926.856449 {ko=0.000000, coupon=0.000000, loss=-374926.856449} | MCROW -374926.856449 | PDEROW -374926.856449 (node 4648.133: -375237.879228) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   4500 | HAND -399921.980213 {ko=0.000000, coupon=0.000000, loss=-399921.980213} | MCROW -399921.980213 | PDEROW -399921.980213 (node 4502.656: -399479.393067) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+carried=True  spot=   4000 | HAND -483239.059424 {ko=0.000000, coupon=0.000000, loss=-483239.059424} | MCROW -483239.059424 | PDEROW -483239.059424 (node 4001.210: -483037.383726) | TODAY mc RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | pde RAISES ValidationError: tau must be positive, got 0.0
+SELLER carried=False spot=5500 | HAND -10000.000000 | MCROW -10000.000000 | PDEROW -10000.000000
+SELLER carried=True spot=4000 | HAND 483239.059424 | MCROW 483239.059424 | PDEROW 483239.059424
+
+-- B. day before: MC | PDE | HAND(final) | MC-HAND | PDE-HAND | one-day spot sd
+carried=False spot=   7000 | MC    9995.124477 | PDE    9995.124480 | HAND   10000.000000 | MC-HAND    -4.875523 | PDE-HAND    -4.875520 | sd 150.75
+carried=False spot=   6300 | MC    9995.124477 | PDE    9995.124381 | HAND   10000.000000 | MC-HAND    -4.875523 | PDE-HAND    -4.875619 | sd 135.67
+carried=False spot=   6000 | MC    9995.124477 | PDE    9990.589908 | HAND   10000.000000 | MC-HAND    -4.875523 | PDE-HAND    -9.410092 | sd 129.21
+carried=False spot=   5999 | MC    9995.124477 | PDE    9990.587728 | HAND   10000.000000 | MC-HAND    -4.875523 | PDE-HAND    -9.412272 | sd 129.19
+carried=False spot=   5500 | MC    9995.124477 | PDE    9995.124439 | HAND   10000.000000 | MC-HAND    -4.875523 | PDE-HAND    -4.875561 | sd 118.45
+carried=False spot=   4800 | MC    3979.056381 | PDE    3957.980115 | HAND   10000.000000 | MC-HAND -6020.943619 | PDE-HAND -6042.019885 | sd 103.37
+carried=False spot=   4650 | MC  -29595.023139 | PDE  -29605.019262 | HAND       0.000000 | MC-HAND -29595.023139 | PDE-HAND -29605.019262 | sd 100.14
+carried=False spot=   4500 | MC -400804.190003 | PDE -400804.115935 | HAND -399921.980213 | MC-HAND  -882.209790 | PDE-HAND  -882.135723 | sd 96.91
+carried=False spot=   4000 | MC -483960.959700 | PDE -483960.893650 | HAND -483239.059424 | MC-HAND  -721.900277 | PDE-HAND  -721.834227 | sd 86.14
+carried=True  spot=   7000 | MC    9995.124477 | PDE    9995.124477 | HAND   10000.000000 | MC-HAND    -4.875523 | PDE-HAND    -4.875523 | sd 150.75
+carried=True  spot=   6300 | MC    7593.733901 | PDE    7588.985075 | HAND   10000.000000 | MC-HAND -2406.266099 | PDE-HAND -2411.014925 | sd 135.67
+carried=True  spot=   6000 | MC  -84210.717078 | PDE  -84208.355945 | HAND   10000.000000 | MC-HAND -94210.717078 | PDE-HAND -94208.355945 | sd 129.21
+carried=True  spot=   5999 | MC  -84788.238951 | PDE  -84779.247101 | HAND -150137.376738 | MC-HAND 65349.137787 | PDE-HAND 65358.129637 | sd 129.19
+carried=True  spot=   5500 | MC -234485.875715 | PDE -234487.137518 | HAND -233287.821791 | MC-HAND -1198.053924 | PDE-HAND -1199.315727 | sd 118.45
+carried=True  spot=   4800 | MC -350910.128184 | PDE -350910.157060 | HAND -349931.732686 | MC-HAND  -978.395498 | PDE-HAND  -978.424374 | sd 103.37
+carried=True  spot=   4650 | MC -375857.159093 | PDE -375857.110363 | HAND -374926.856449 | MC-HAND  -930.302644 | PDE-HAND  -930.253914 | sd 100.14
+carried=True  spot=   4500 | MC -400804.190003 | PDE -400804.115935 | HAND -399921.980213 | MC-HAND  -882.209790 | PDE-HAND  -882.135723 | sd 96.91
+carried=True  spot=   4000 | MC -483960.959700 | PDE -483960.893650 | HAND -483239.059424 | MC-HAND  -721.900277 | PDE-HAND  -721.834227 | sd 86.14
+
+-- C. shrinking final step h (day-before contract, payment gaps after T held): MC | PDE | HAND
+h=1d     carried=False spot=   7000 | MC      9999.024705 | PDE      9999.024707 | HAND   10000.000000
+h=1d     carried=False spot=   6300 | MC      9999.024705 | PDE      9999.024707 | HAND   10000.000000
+h=1d     carried=False spot=   5500 | MC      9999.024705 | PDE      9999.024707 | HAND   10000.000000
+h=1d     carried=False spot=   4650 | MC      -148.799934 | PDE      -255.171673 | HAND       0.000000
+h=1d     carried=False spot=   4000 | MC   -483383.600851 | PDE   -483383.505168 | HAND -483239.059424
+h=1d     carried=True  spot=   7000 | MC      9999.024705 | PDE      9999.024707 | HAND   10000.000000
+h=1d     carried=True  spot=   6300 | MC      9999.024705 | PDE      9998.384997 | HAND   10000.000000
+h=1d     carried=True  spot=   5500 | MC   -233528.617642 | PDE   -233528.604863 | HAND -233287.821791
+h=1d     carried=True  spot=   4650 | MC   -375113.108127 | PDE   -375113.025179 | HAND -374926.856449
+h=1d     carried=True  spot=   4000 | MC   -483383.600851 | PDE   -483383.505168 | HAND -483239.059424
+h=1h     carried=False spot=   7000 | MC      9999.959361 | PDE      9999.959361 | HAND   10000.000000
+h=1h     carried=False spot=   6300 | MC      9999.959361 | PDE      9999.959361 | HAND   10000.000000
+h=1h     carried=False spot=   5500 | MC      9999.959361 | PDE      9999.959361 | HAND   10000.000000
+h=1h     carried=False spot=   4650 | MC         0.000000 | PDE        -0.000000 | HAND       0.000000
+h=1h     carried=False spot=   4000 | MC   -483245.079500 | PDE   -483244.964724 | HAND -483239.059424
+h=1h     carried=True  spot=   7000 | MC      9999.959361 | PDE      9999.959361 | HAND   10000.000000
+h=1h     carried=True  spot=   6300 | MC      9999.959361 | PDE      9999.959361 | HAND   10000.000000
+h=1h     carried=True  spot=   5500 | MC   -233297.851619 | PDE   -233297.812765 | HAND -233287.821791
+h=1h     carried=True  spot=   4650 | MC   -374934.614085 | PDE   -374934.509017 | HAND -374926.856449
+h=1h     carried=True  spot=   4000 | MC   -483245.079500 | PDE   -483244.964724 | HAND -483239.059424
+h=1min   carried=False spot=   7000 | MC      9999.999323 | PDE      9999.999323 | HAND   10000.000000
+h=1min   carried=False spot=   6300 | MC      9999.999323 | PDE      9999.999323 | HAND   10000.000000
+h=1min   carried=False spot=   5500 | MC      9999.999323 | PDE      9999.999323 | HAND   10000.000000
+h=1min   carried=False spot=   4650 | MC         0.000000 | PDE         0.000000 | HAND       0.000000
+h=1min   carried=False spot=   4000 | MC   -483239.159161 | PDE   -483239.039761 | HAND -483239.059424
+h=1min   carried=True  spot=   7000 | MC      9999.999323 | PDE      9999.999323 | HAND   10000.000000
+h=1min   carried=True  spot=   6300 | MC      9999.999323 | PDE      9999.999323 | HAND   10000.000000
+h=1min   carried=True  spot=   5500 | MC   -233287.988133 | PDE   -233287.942927 | HAND -233287.821791
+h=1min   carried=True  spot=   4650 | MC   -374926.985049 | PDE   -374926.874608 | HAND -374926.856449
+h=1min   carried=True  spot=   4000 | MC   -483239.159161 | PDE   -483239.039761 | HAND -483239.059424
+h=1s     carried=False spot=   7000 | MC      9999.999989 | PDE      9999.999989 | HAND   10000.000000
+h=1s     carried=False spot=   6300 | MC      9999.999989 | PDE      9999.999989 | HAND   10000.000000
+h=1s     carried=False spot=   5500 | MC      9999.999989 | PDE      9999.999989 | HAND   10000.000000
+h=1s     carried=False spot=   4650 | MC         0.000000 | PDE         0.000000 | HAND       0.000000
+h=1s     carried=False spot=   4000 | MC   -483239.061009 | PDE   -483238.941011 | HAND -483239.059424
+h=1s     carried=True  spot=   7000 | MC      9999.999989 | PDE      9999.999989 | HAND   10000.000000
+h=1s     carried=True  spot=   6300 | MC      9999.999989 | PDE      9999.999989 | HAND   10000.000000
+h=1s     carried=True  spot=   5500 | MC   -233287.824457 | PDE   -233287.778428 | HAND -233287.821791
+h=1s     carried=True  spot=   4650 | MC   -374926.858503 | PDE   -374926.747367 | HAND -374926.856449
+h=1s     carried=True  spot=   4000 | MC   -483239.061009 | PDE   -483238.941011 | HAND -483239.059424
+h=1e-9y  carried=False spot=   7000 | MC     10000.000000 | PDE     10000.000000 | HAND   10000.000000
+h=1e-9y  carried=False spot=   6300 | MC     10000.000000 | PDE     10000.000000 | HAND   10000.000000
+h=1e-9y  carried=False spot=   5500 | MC     10000.000000 | PDE     10000.000000 | HAND   10000.000000
+h=1e-9y  carried=False spot=   4650 | MC         0.000000 | PDE         0.000000 | HAND       0.000000
+h=1e-9y  carried=False spot=   4000 | MC   -483239.059461 | PDE   -483238.939390 | HAND -483239.059424
+h=1e-9y  carried=True  spot=   7000 | MC     10000.000000 | PDE     10000.000000 | HAND   10000.000000
+h=1e-9y  carried=True  spot=   6300 | MC     10000.000000 | PDE     10000.000000 | HAND   10000.000000
+h=1e-9y  carried=True  spot=   5500 | MC   -233287.821857 | PDE   -233287.775728 | HAND -233287.821791
+h=1e-9y  carried=True  spot=   4650 | MC   -374926.856499 | PDE   -374926.745278 | HAND -374926.856449
+h=1e-9y  carried=True  spot=   4000 | MC   -483239.059461 | PDE   -483238.939390 | HAND -483239.059424
+
+=== D. valuation ON a non-final monthly observation (DCN_A, 2024-12-03, month 23): MC | PDE | MC-PDE
+carried=False spot=   6300 | MC    9998.049505 | PDE    9965.915047 | MC-PDE    32.134459
+carried=False spot=   5500 | MC   19801.744119 | PDE    9779.744644 | MC-PDE 10021.999475
+carried=False spot=   4650 | MC -186328.293902 | PDE -186252.271775 | MC-PDE   -76.022127
+carried=False spot=   4000 | MC -437755.262529 | PDE -437755.032829 | MC-PDE    -0.229700
+carried=True  spot=   6300 | MC    9998.049505 | PDE  -23211.996112 | MC-PDE 33210.045617
+carried=True  spot=   5500 | MC -187875.752378 | PDE -187762.846535 | MC-PDE  -112.905843
+carried=True  spot=   4650 | MC -330749.650987 | PDE -330749.222184 | MC-PDE    -0.428803
+carried=True  spot=   4000 | MC -437755.262529 | PDE -437755.032829 | MC-PDE    -0.229700
+day before (2024-12-02) carried=False spot=6300 | MC 9997.074401 | PDE 9997.119425
+day before (2024-12-02) carried=False spot=5500 | MC 19746.644457 | PDE 19739.926698

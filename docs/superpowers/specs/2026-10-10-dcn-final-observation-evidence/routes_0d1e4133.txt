@@ -1,0 +1,57 @@
+=== DCN_A routes: final 2025-01-03 | day before 2025-01-02
+DCNMCEngine            carried=False spot=  6300 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+DCNMCEngine            carried=False spot=  5500 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+DCNMCEngine            carried=False spot=  4000 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -433313.751382
+DCNMCEngine            carried=True  spot=  6300 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+DCNMCEngine            carried=True  spot=  5500 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -183507.523490
+DCNMCEngine            carried=True  spot=  4000 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -433313.751382
+DCNPDEEngine           carried=False spot=  6300 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: 9995.124478
+DCNPDEEngine           carried=False spot=  5500 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: 9995.124478
+DCNPDEEngine           carried=False spot=  4000 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: -433313.599082
+DCNPDEEngine           carried=True  spot=  6300 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: 9994.681136
+DCNPDEEngine           carried=True  spot=  5500 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: -183507.432842
+DCNPDEEngine           carried=True  spot=  4000 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: -433313.599082
+LocalVolDCNMCEngine    carried=False spot=  6300 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+LocalVolDCNMCEngine    carried=False spot=  5500 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+LocalVolDCNMCEngine    carried=False spot=  4000 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -433313.751382
+LocalVolDCNMCEngine    carried=True  spot=  6300 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+LocalVolDCNMCEngine    carried=True  spot=  5500 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -183507.523490
+LocalVolDCNMCEngine    carried=True  spot=  4000 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -433313.751382
+LocalVolDCNPDEEngine   carried=False spot=  6300 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: 9995.124478
+LocalVolDCNPDEEngine   carried=False spot=  5500 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: 9995.124478
+LocalVolDCNPDEEngine   carried=False spot=  4000 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: -433313.599082
+LocalVolDCNPDEEngine   carried=True  spot=  6300 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: 9994.681136
+LocalVolDCNPDEEngine   carried=True  spot=  5500 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: -183507.432842
+LocalVolDCNPDEEngine   carried=True  spot=  4000 | final: RAISES ValidationError: tau must be positive, got 0.0 | day before: -433313.599082
+HestonDCNMCEngine      carried=False spot=  6300 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+HestonDCNMCEngine      carried=False spot=  5500 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+HestonDCNMCEngine      carried=False spot=  4000 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -433313.887750
+HestonDCNMCEngine      carried=True  spot=  6300 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+HestonDCNMCEngine      carried=True  spot=  5500 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -183507.710997
+HestonDCNMCEngine      carried=True  spot=  4000 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -433313.887750
+QEDCNMCEngine          carried=False spot=  6300 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+QEDCNMCEngine          carried=False spot=  5500 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+QEDCNMCEngine          carried=False spot=  4000 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -433313.776640
+QEDCNMCEngine          carried=True  spot=  6300 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: 9995.124477
+QEDCNMCEngine          carried=True  spot=  5500 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -183507.558221
+QEDCNMCEngine          carried=True  spot=  4000 | final: RAISES ValidationError: DCN grid has no steps (valuation at maturity?) | day before: -433313.776640
+HestonDCNPDESolver     carried=False spot=  6300 | final: RAISES ValidationError: t_grid must be a 1D array with at least 2 points | day before: 9994.574750
+HestonDCNPDESolver     carried=False spot=  5500 | final: RAISES ValidationError: t_grid must be a 1D array with at least 2 points | day before: 9994.574770
+HestonDCNPDESolver     carried=False spot=  4000 | final: RAISES ValidationError: t_grid must be a 1D array with at least 2 points | day before: -433313.834489
+HestonDCNPDESolver     carried=True  spot=  6300 | final: RAISES ValidationError: t_grid must be a 1D array with at least 2 points | day before: 9975.130534
+HestonDCNPDESolver     carried=True  spot=  5500 | final: RAISES ValidationError: t_grid must be a 1D array with at least 2 points | day before: -183507.685304
+HestonDCNPDESolver     carried=True  spot=  4000 | final: RAISES ValidationError: t_grid must be a 1D array with at least 2 points | day before: -433313.834489
+
+=== vol-model PDE routes on a non-final monthly observation (2024-12-03) vs their MC twin
+LocalVolDCNPDEEngine   spot=  6300 | PDE 9965.915047 | LocalVolDCNMCEngine 9998.049505
+LocalVolDCNPDEEngine   spot=  5500 | PDE 9779.744644 | LocalVolDCNMCEngine 19761.611665
+HestonDCNPDESolver     spot=  6300 | PDE 9964.081718 | HestonDCNMCEngine 9998.049505
+HestonDCNPDESolver     spot=  5500 | PDE 9151.616425 | HestonDCNMCEngine 19128.987823
+
+=== cash-Greeks report date-rolled theta (rolls the schedule one SSE day; day before -> final)
+DCNMCEngine            carried=False spot=5500 | theta_1d RAISES ValidationError: DCN grid has no steps (valuation at maturity?)
+DCNPDEEngine           carried=False spot=5500 | theta_1d RAISES ValidationError: tau must be positive, got 0.0
+DCNMCEngine (2 days before) carried=False spot=5500 | theta_1d 1.949544
+DCNMCEngine            carried=True  spot=5500 | theta_1d RAISES ValidationError: DCN grid has no steps (valuation at maturity?)
+DCNPDEEngine           carried=True  spot=5500 | theta_1d RAISES ValidationError: tau must be positive, got 0.0
+DCNMCEngine (2 days before) carried=True  spot=5500 | theta_1d 491.155170
