@@ -12,7 +12,7 @@ from quantark.asset.fx.product.option.target_redemption_state import PendingPaym
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.portfolio.fx import FXPortfolio
 from quantark.priceenv import FxPricingEnvironment
-from quantark.util.calendar import DayCountConvention
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.calendar.business_calendar import CalendarType, create_calendar
 
 PAIR = CurrencyPair("EUR", "USD")
@@ -101,6 +101,33 @@ def _numeric_twin(dated, fx_env):
                                       accrual_factors=list(view.accrual_factors), **common)
     return FxTargetRedemptionForward(strike=dated.strike, notional=dated.notional, gearing=dated.gearing,
                                      is_buy_base=dated.is_buy_base, **common)
+
+
+def signed_yf(date, e):
+    """Signed year fraction from ``e``'s valuation instant to ``date`` in ``e``'s day count, written test-side from
+    ``calculate_year_fraction``."""
+    yf = lambda a, b: calculate_year_fraction(a, b, e.day_count_convention, e.bus_days_in_year,  # noqa: E731
+                                              calendar=e.calendar)
+    v = e.valuation_date
+    if date == v:
+        return 0.0
+    return yf(v, date) if date > v else -yf(date, v)
+
+
+def twin_from_terms(dated, e):
+    """The dated contract's numeric twin written at ``e``'s valuation instant from its TERMS and its state (times by
+    ``signed_yf``, TARN factors ACT/365 from ``initial_date`` VAL), not from the dated resolve view."""
+    k = dated.state.fixings_banked or 0
+    fix = [signed_yf(d, e) + 0.0 for d in dated.fixing_dates[k:]]
+    pays = [signed_yf(d, e) + 0.0 for d in dated.pay_dates[k:]]
+    pending = tuple(PendingPayment(p.amount, pay_time=signed_yf(p.pay_date, e) + 0.0) for p in dated.state.pending)
+    state = TargetRedemptionState(dated.state.accumulated, pending=pending)
+    if isinstance(dated, FxTargetRedemptionForward):
+        return tarf(fix=fix, pay_times=pays, target=dated.target, state=state)
+    starts = [VAL] + dated.fixing_dates[:-1]
+    factors = [calculate_year_fraction(s, d, DayCountConvention.ACT_365, 252)
+               for s, d in zip(starts, dated.fixing_dates)][k:]
+    return note(fix=fix, pay_times=pays, accrual_factors=factors, target=dated.target, state=state)
 
 
 # --- run fixings (W6 recorder; TARN plan re-plan 2026-10-10, Task 9) ------------------------------------------------

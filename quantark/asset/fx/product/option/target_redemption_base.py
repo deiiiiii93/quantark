@@ -50,10 +50,10 @@ def is_passed_time(t: float) -> bool:
     return t <= 0.0 or is_zero(t)
 
 
-def signed_year_fraction(date: datetime, fx_env) -> float:
-    """Signed year fraction from ``fx_env.valuation_date`` to ``date`` in the ENVIRONMENT's convention: 0.0 on the
-    valuation date, negative before it (``FxRangeAccrualObservationRecord.resolve_time``'s rule)."""
-    val = fx_env.valuation_date
+def signed_year_fraction(date: datetime, fx_env, origin: Optional[datetime] = None) -> float:
+    """Signed year fraction from ``fx_env.valuation_date`` (or ``origin`` when given) to ``date`` in the ENVIRONMENT's
+    convention: 0.0 on that instant, negative before it (``FxRangeAccrualObservationRecord.resolve_time``'s rule)."""
+    val = fx_env.valuation_date if origin is None else origin
     if date == val:
         return 0.0
     if date > val:
@@ -311,7 +311,10 @@ class TargetRedemptionProduct(BaseFxProduct):
     def _state_date(fx_env) -> datetime:
         """The ``as_of`` banking writes (Ruling R24): the valuation date, moved back over the days at zero time from it
         (valued on a Saturday under BUSINESS_DAYS, the Friday: the same instant), so it never passes the valuation date
-        and cash due at that instant never precedes it. Under CALENDAR_DAYS / ACT conventions: the valuation date."""
+        and cash due at that instant never precedes it. Under CALENDAR_DAYS / ACT conventions: the valuation date.
+        The ``as_of`` written can therefore be EARLIER than the one a booking stated (a state booked as of a Saturday
+        becomes the Friday at its first banking under BUSINESS_DAYS); no value depends on it - banking is by count,
+        and passed / due is decided by time."""
         val = fx_env.valuation_date
         d = val
         for _ in range(31):  # bounded: no zero-time stretch (weekend + holidays) is a month long
@@ -329,7 +332,11 @@ class TargetRedemptionProduct(BaseFxProduct):
     def _check_as_of(self, fx_env) -> None:
         """Dated: the state may not claim the future. ``as_of`` after the valuation date is refused, and so is a banked
         count whose last banked fixing lies strictly after the valuation instant, decided by TIME (Ruling R16): a
-        fixing at zero time from valuation (a Saturday under BUSINESS_DAYS, valued on the Friday) may be banked."""
+        fixing at zero time from valuation (a Saturday under BUSINESS_DAYS, valued on the Friday) may be banked. Nor
+        may it hold pending cash strictly past at ``as_of``, decided by TIME in ``fx_env``'s day count (cash due at
+        00:00 is still due at a 15:00 ``as_of`` under a whole-day count; the state's constructor cannot know the day
+        count, final-review Critical 1 ruling). Every path that resolves the contract against an environment runs
+        this."""
         as_of = self.state.as_of
         if as_of is not None and as_of > fx_env.valuation_date:
             raise ValidationError(
@@ -341,6 +348,14 @@ class TargetRedemptionProduct(BaseFxProduct):
                 f"state.fixings_banked {k} claims fixing {self.fixing_dates[k - 1].date()}, which is after the "
                 f"valuation instant {fx_env.valuation_date} under the environment's "
                 f"{fx_env.day_count_convention.name} day count: the state claims fixings that have not happened")
+        # pending cash is not strictly past at as_of, by RESOLVED time (OQ-1 b and R16 restated by time; final-review
+        # Critical 1 ruling 2026-10-10): under a whole-day count, cash due at 00:00 is still due at a 15:00 as_of
+        for p in self.state.pending:  # dated pending implies as_of (the state's structural check)
+            if is_history(signed_year_fraction(p.pay_date, fx_env, origin=as_of)):
+                raise ValidationError(
+                    f"a dated pending pay_date {p.pay_date} is strictly before state.as_of {as_of} under the "
+                    f"environment's {fx_env.day_count_convention.name} day count: cash whose pay time is strictly "
+                    "past is booked, not pending (cash due at as_of stays pending)")
 
     def get_maturity(self, fx_env=None) -> float:
         """Dated: 0.0 once valuation is past the last fixing date (an aged contract still answers FX consumers)."""
@@ -381,9 +396,10 @@ class TargetRedemptionProduct(BaseFxProduct):
         or else the QUOTED ``fx_env.spot`` (spec Q3), stopping once the contract is terminal; append the events;
         re-validate. Dated: passed is decided by TIME (a fixing at zero time from valuation is banked, OQ-2 b);
         ``state.fixings_banked`` counts the banked fixings and ``state.as_of`` becomes the valuation date, or the first
-        date of its zero-time stretch (Ruling R24: a Saturday under BUSINESS_DAYS writes the Friday); pending cash
-        whose pay time is strictly past leaves as a PAYMENT event; cash due at the valuation instant stays pending
-        (OQ-1 b)."""
+        date of its zero-time stretch (Ruling R24: a Saturday under BUSINESS_DAYS writes the Friday, so the ``as_of``
+        written can move back to the preceding business day - a state booked as of a Saturday becomes the Friday at its
+        first banking; no value depends on it); pending cash whose pay time is strictly past leaves as a PAYMENT event;
+        cash due at the valuation instant stays pending (OQ-1 b)."""
         self._bank_passed(fx_env)
         self.validate()
 

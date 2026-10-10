@@ -20,6 +20,7 @@ CHANGELOG `[Unreleased]` TARN bullets list the moved values. Every rule not name
 | **OQ-4 (b)** | Periods may share a fixing date or time. The MC engines simulate each distinct time once; periods run in schedule order; a later same-date period after a hit is dead (§6). A banked count (explicit, or derived from `as_of`) that splits a group of periods fixing on one calendar date is refused unless the state is redeemed or terminal. The default accrual derivation refuses any non-positive derived factor ("zero length"). Schedules are ascending, i.e. non-decreasing, not "ascending, unique". | §4.1, §4.2, §4.3, §5.4, §6 |
 | **R26 (b)** | A dated TARN may state `accrual_end_dates` (R27, R28): one end per fixing; ends strictly increasing; `fixing_dates[i] <= end <= pay_dates[i]`; requires `initial_date`; exclusive with `accrual_factors`; dated TARN only (the TARF has no accrual term). Default (`None`): each end is its fixing date, bitwise today's derivation. An end outside fixing..pay (OQ-5) stays refused; explicit start dates (OQ-6) are not added. | §1.2 (Q2), §4.2, §4.3, §5.4, §10 (D5, R2) |
 | **W6 §6** (run-fixings spec, user-approved; built in Tasks 9–11) | The general run-fixings recorder subsumes rev 2's TARN-only hook (`FxTargetRedemptionLifecycle`, not built): TARN / TARF implement its product protocol plus the optional `with_history_settled` hook; the FX runs read cash (`booked_cash`) and pending PV from `RunFixingDay`; FIXING snapshots and the Q8 refusal are kept. Run-day rules are W6's (t = 0 live; first-live spot; gaps at the previous instant's spot). | §7.2, §7.3 |
+| **Final review, Critical 1** (controller ruling 2026-10-10) | "Strictly past" for dated pending cash is decided by RESOLVED time in the environment's day count, also when a date carries a time of day (under a whole-day count, cash due at 00:00 is still due at 15:00 that day; 10:00 cash at the next midnight). `TargetRedemptionState` no longer compares `pay_date` with `as_of` (it cannot know the day count); the product refuses pending cash whose resolved time from `as_of` is strictly negative whenever an environment prices, resolves, records or settles it (`_check_as_of`). OQ-1 (b) and R16 restated by time; no check is dropped. Known limit: from a time-of-day valuation a whole-day count is not additive, so a pay date less than a day ahead can be at t = 0 both at V and at V + 1 day; the dated theta then keeps the cash while the numeric twin's Q7 step pays it (open, reported). | §3, §10 (R2) |
 
 Evidence, all run on `dcea77b6` in this worktree (`env PYTHONPATH=<wt>:<wt>/test <main venv>/bin/python <script>`):
 
@@ -172,9 +173,14 @@ class TargetRedemptionEvent:
 - **Validation in the state** (`ValidationError`): `accumulated` finite and ≥ 0; each `amount` finite; each
   `PendingPayment` has exactly one of `pay_time` / `pay_date`; all pending entries use the same form; sorted
   ascending; a numeric `pay_time` is finite and not strictly past (an `is_zero` time of either sign is "today");
-  `fixings_banked` is `None` or an `int` (not `bool`) >= 0; a dated `pay_date` is on or after `as_of` (OQ-1 b), and
+  `fixings_banked` is `None` or an `int` (not `bool`) >= 0, and
   pending cash or `accumulated > 0` with no banked fixing (`as_of=None`, or a banked count of 0) is refused (cash
   implies a banked fixing, stated by count, OQ-3).
+- **Validation in the product, by resolved time** (final review, Critical 1): a dated pending `pay_date` may not be
+  strictly past at `as_of` in the pricing environment's day count (`is_history` of its signed year fraction from
+  `as_of`; cash due at `as_of` is pending, OQ-1 b). The state cannot decide it without the day count (under a
+  whole-day count a 00:00 pay date is not past at a 15:00 `as_of`), so every path that resolves the contract
+  against an environment checks it (`_check_as_of`).
 - **Form check in the product**: a numeric product refuses `as_of`, `fixings_banked` or any `pay_date`; a dated
   product refuses any `pay_time`.
 - The state is immutable; ageing replaces it, never mutates it.
@@ -317,8 +323,10 @@ Only two engines exist, `FxTargetRedemptionNoteMCEngine` and `FxTarnForwardMCEng
 4. Rev 1's "refuse pricing an unsettled product" guard is **dropped**: under the W5 rule a passed, unbanked fixing is
    filled with a warning (step 1), never refused.
 
-The `PricingError` on a negative TARN price stays (TARN pending cash is > 0). `BaseFxEngine` is unchanged: its spot,
-vol and rate bumps leave `state` alone, and `_fdm_theta` already calls the hook.
+The `PricingError` on a negative TARN price stays (TARN pending cash is > 0). `BaseFxEngine`'s spot, vol and rate
+bumps leave `state` alone, and `_fdm_theta` already calls the hook; its theta step for a numeric product changed
+(§12 Q7: the environment's year fraction of the bump instead of `days/365`), and `calculate_greeks` records missing
+fixings once at the base spot before the bumps (the W5 fill protocol).
 
 ### 5.3 Terminal bookings (Q6)
 
@@ -633,7 +641,7 @@ fixing, redeemed)`:
   tol; `accrual_start ≥ fixing_times[0]`; `accrual_start > 0` with `accumulated > 0`; numeric pending `pay_time` strictly past (< 0);
   TARN pending amount ≤ 0; redeemed numeric state with listed fixings; a dated TARN with neither or both of
   `initial_date` / `accrual_factors`; `day_count_convention` on the numeric form; mixed forms (each pair); dated pending
-  `pay_date < as_of`; dated `accumulated > 0` or pending cash with no banked fixing; dated `as_of` after the
+  `pay_date` strictly before `as_of` by resolved time (at pricing); dated `accumulated > 0` or pending cash with no banked fixing; dated `as_of` after the
   valuation date (at pricing); a banked count claiming a fixing strictly after valuation; a banked count splitting a
   same-date group of an unredeemed, unterminated state; a default-derivation TARN with a zero-length period.
 - **T1 theta**: the M3 cases (0.5/365, 1/365) give finite theta; in the small-vol limit the landing-fixing theta

@@ -271,4 +271,54 @@ Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock 
 # Refused, pending OQ-5 / OQ-6 (non-blocking): an accrual end before its fixing or after its pay date; gapped or
 # overlapping periods by dates (accrual_factors books both).
 #
+# Final-review fix pass (branch w4b-tarn-final-fix from 583b292d) - Critical 1, controller ruling 2026-10-10: a dated
+# pending pay date is decided "strictly past" by RESOLVED time in the environment's day count, in the product
+# (_check_as_of: pending cash may not be strictly past at state.as_of); TargetRedemptionState no longer compares
+# pay_date < as_of by datetime. Only time-of-day datetimes move (raised -> priced). MC 20_000 paths, seed 7, fixture
+# env (EURUSD 1.20, r_d 5%, r_f 3%, vol 10%); TARN target 3.0 (dated_note, initial_date VAL), TARF target 0.20;
+# CALENDAR_DAYS and ACT_365 identical, BUSINESS_DAYS with the TARGET calendar. Dated == numeric twin written from the
+# terms at that instant (price bitwise; every Greek within 1e-12 x price except the one theta noted below).
+# probe                                   kind  day count   price (was)                     theta (was)
+# zero-lag 00:00, valued 07-15 15:00      TARN  CAL/ACT     ValidationError -> 102.11719049891953   ValidationError -> -0.9704097285934097
+#                                         TARN  BUS         ValidationError -> 102.09606867751705   ValidationError -> -0.963230577272256
+#                                         TARF  CAL/ACT     ValidationError -> 0.09505147050252849  ValidationError -> -0.049110153058909214
+#                                         TARF  BUS         ValidationError -> 0.0928809342569654   ValidationError -> -0.04882506241605278
+# lag 2, valued 07-16 15:00 (day before   TARN  CAL/ACT     102.10537448914465 (unchanged)   ValidationError -> 0.01592892165281512
+#   pay date 07-17; theta lands on        TARN  BUS         102.07957894674068 (unchanged)   ValidationError -> 0.023569474031901905
+#   07-17 15:00)                          TARF  CAL/ACT     0.09592873250534888 (unchanged)  ValidationError -> 0.0009013196576036359
+#                                         TARF  BUS         0.09405361473365927 (unchanged)  ValidationError -> 0.0012274917853323242
+# fixing and pay 10:00, zero lag, valued  TARN  CAL/ACT     ValidationError -> 102.11719049891953   ValidationError -> -0.9704097285934097
+#   07-16 00:00                           TARN  BUS         ValidationError -> 102.0973037929289    ValidationError -> -0.9640171110694098
+#                                         TARF  CAL/ACT     ValidationError -> 0.09505147050252849  ValidationError -> -0.049110153058909214
+#                                         TARF  BUS         ValidationError -> 0.09310316454949212  ValidationError -> -0.04872439757860916
+# OPEN (lag-2 theta): the pay date (07-17 00:00) is 9 hours ahead of the 07-16 15:00 valuation and resolves to t = 0
+#   both from there and from the theta instant 07-17 15:00 (a whole-day count is not additive from a time-of-day
+#   valuation), so the dated contract keeps the cash in the value one day on (theta above, = the twin written at
+#   07-17 15:00 minus the twin at 07-16 15:00), while the numeric twin's Q7 step of one day pays it: twin theta
+#   -0.9703724482101848 (CAL/ACT TARN), -0.962731895831098 (BUS TARN), -0.04909868034239642 (CAL/ACT TARF),
+#   -0.04877250821466771 (BUS TARF). Prices and every other Greek agree. Not decided here (no semantics invented).
+# FX backtest (daily midnight rows, flat 1.20, fixing and pay at 10:00): zero lag raised ValidationError at the
+#   midnight after the fixing -> every row prices; the cash is pending (in the value at DF(t_pay)) while the pay date
+#   resolves to t >= 0 and is booked on the first row where it is strictly past (zero lag: fixing 07-15 10:00 live on
+#   the 07-15 and 07-16 rows, recorded and its cash booked on 07-17; lag 2: pending 07-15 .. 07-18, booked 07-19).
+#   Greeks on == off on value / paid_cash / pending_pv.
+# Refusal moved, not dropped: a dated pending pay_date strictly before as_of was refused by TargetRedemptionState's
+#   constructor ("must be on or after as_of"); the state is now accepted and the product refuses it when an environment
+#   prices, resolves, records or settles it, if its resolved time from as_of is strictly negative ("strictly before
+#   state.as_of"). Tests changed: test_fx_target_redemption_state.py::test_dated_pending_must_not_precede_as_of ->
+#   test_dated_pending_before_as_of_is_decided_by_the_product_not_the_state; lifecycle
+#   test_r2_dated_pending_must_not_precede_as_of now refuses at price / resolve / record / settle.
+# Unchanged (pinned on 583b292d at GOLDEN_REL_TOL): intraday valuations on non-pay days (lag 2 on the fixing day at
+#   15:00; zero lag paid, valued day 5 at 15:00), TARN and TARF: test_an_intraday_valuation_on_a_non_pay_day_is_unchanged.
+# Bitwise evidence (583b292d vs fix): final_fix_byte_probe.py - dated TARN / TARN without principal / TARF, lag 0 / 2,
+#   CALENDAR_DAYS / ACT_365 / BUSINESS_DAYS (TARGET), date-only schedules aged daily through 12 valuations (states,
+#   events, resolve views, prices, Greeks at 4 of them, twins, rebooked contracts), FX backtests (4 dated + 4 numeric
+#   contracts, calendar and business-day paths) and FX dynamic scenarios: 4924 lines (position uuids masked),
+#   byte-identical, sha1 1d0acce204c9ca5f4ef7d16c8681b76eba7b3d2f.
+# Pinning tests: test_fx_target_redemption_lifecycle.py::test_intraday_probe_prices_and_greeks_like_the_twin_with_the_cash_due_in_value,
+#   test_intraday_cash_is_booked_once_its_pay_time_is_strictly_past,
+#   test_a_booked_state_with_ten_oclock_cash_at_the_next_midnight_is_due_today,
+#   test_an_intraday_valuation_on_a_non_pay_day_is_unchanged; test_fx_target_redemption_runs.py::
+#   test_ten_oclock_dates_in_a_backtest_price_like_the_twin_and_book_cash_once_strictly_past.
+#
 FULL SUITE (controller): <pending>

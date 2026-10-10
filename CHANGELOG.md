@@ -65,13 +65,19 @@ backtest and FX dynamic scenario.
   under `CALENDAR_DAYS` / `ACT_365`; under `BUSINESS_DAYS` a Friday or holiday theta is 0.0 and `ACT_360` steps 1/360,
   matching the dated product. Values that move are listed in
   `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`.
+  **Breaking:** `calculate_greeks` on any numeric FX product under a `BUSINESS_DAYS` environment with no calendar now
+  raises `ValidationError` in theta (it used to step `theta_days / 365`); a business-day count needs the calendar.
 - FX TARN / TARF cash due on the valuation date stays in the value (user decision OQ-1 b, 2026-10-10, as W8 values a
   dated contract on its date at its settled value): determined cash is booked (a `PAYMENT` event, out of the value)
   once its pay time is strictly past. A numeric pending `pay_time` of 0.0 and a dated pending `pay_date` equal to
   `as_of` are accepted. Moves: the price on a pay date gains the cash due that day, theta the day before a pay date
   gains it and theta on the pay date loses it (values in
   `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`); inside runs, cash is booked
-  once its pay date is past (on the next path instant).
+  once its pay date is past (on the next path instant). "Due" is decided by resolved TIME in the environment's day
+  count, also when a date carries a time of day: under a whole-day count, cash due at 00:00 is still due at 15:00
+  that day, and 10:00 cash at the next midnight. `TargetRedemptionState` no longer compares a dated `pay_date` with
+  `as_of` (it cannot know the day count); the product refuses pending cash strictly past at `as_of` by resolved time
+  when an environment prices, records or settles it (`ValidationError`, the same refusal moved from construction).
 - FX TARN / TARF periods may share a fixing date or time (user decision OQ-4 b, 2026-10-10): `fixing_dates` /
   `fixing_times` must be non-decreasing instead of strictly increasing. Both MC engines simulate each distinct fixing
   time once and every period sharing it fixes at that spot; periods are accumulated in schedule order (a period after

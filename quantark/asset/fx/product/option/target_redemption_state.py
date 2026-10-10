@@ -59,7 +59,9 @@ class PendingPayment:
 class TargetRedemptionState:
     """What a target-redemption contract has banked (``accumulated``) and still has to pay (``pending``).
 
-    ``as_of`` (dated form only): the date the state was brought up to date, never after the valuation date.
+    ``as_of`` (dated form only): the date the state was brought up to date, never after the valuation date. Dated
+    pending cash may not be strictly past at ``as_of`` by resolved time; the product checks that against the
+    environment that prices it (a datetime comparison here would refuse cash due earlier the same day).
     ``fixings_banked`` (dated form only): how many leading scheduled fixings are banked (fixing ``i`` is banked iff
     ``i < fixings_banked``; banking is tracked per fixing, user ruling OQ-3, 2026-10-10); ``None`` on a booking means
     "the fixings dated on or before ``as_of``".
@@ -83,15 +85,14 @@ class TargetRedemptionState:
         keys = [p.pay_time if p.pay_time is not None else p.pay_date for p in self.pending]
         if keys != sorted(keys):
             raise ValidationError("state.pending must be sorted by ascending pay time / date")
-        if self.pending and not any(numeric):
-            if self.as_of is None:
-                raise ValidationError(
-                    "dated pending cash with as_of=None is refused: cash implies a banked fixing"
-                )
-            late = [p.pay_date for p in self.pending if p.pay_date < self.as_of]
-            if late:
-                raise ValidationError(
-                    f"a dated pending pay_date must be on or after as_of {self.as_of}, got {late[0]}")
+        if self.pending and not any(numeric) and self.as_of is None:
+            raise ValidationError(
+                "dated pending cash with as_of=None is refused: cash implies a banked fixing"
+            )
+        # Whether dated cash is strictly past at as_of is decided by RESOLVED time in the environment's day count (a
+        # 00:00 pay date is still due at 15:00 that day under a whole-day count), which this state cannot know: the
+        # product checks it when an environment prices it (``TargetRedemptionProduct._check_as_of``, final-review
+        # Critical 1 ruling, 2026-10-10).
         n = self.fixings_banked
         if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 0):
             raise ValidationError(f"state.fixings_banked must be None or an int >= 0, got {n!r}")

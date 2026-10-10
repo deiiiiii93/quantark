@@ -28,7 +28,9 @@ from fx_target_redemption_fixtures import (
     following,
     mc,
     note,
+    signed_yf,
     tarf,
+    twin_from_terms,
 )
 from quantark.asset.fx.engine.mc import FxTargetRedemptionNoteMCEngine, FxTarnForwardMCEngine, FxTarnMCResult
 from quantark.asset.fx.product.option import FxTargetRedemptionForward, FxTargetRedemptionNote
@@ -653,10 +655,17 @@ def test_r2_neither_schedule_refused():
         FxTargetRedemptionForward(strike=1.15, state=INCEPTION)
 
 
-def test_r2_dated_pending_must_not_precede_as_of():
-    with pytest.raises(ValidationError, match="after as_of"):
-        dated_note(state=TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=FIX_DATES[0]),),
-                                               as_of=FIX_DATES[1]))
+@pytest.mark.parametrize("call", ["price", "resolve", "record", "settle"])
+def test_r2_dated_pending_must_not_precede_as_of(call):
+    """Decided by RESOLVED TIME where the environment is known (final-review Critical 1 ruling): cash strictly past at
+    the state's as_of is booked, not pending; the refusal moved from the state's constructor to the product."""
+    booked = dated_note(state=TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=FIX_DATES[0]),),
+                                                    as_of=FIX_DATES[1]))
+    e = env(val=FIX_DATES[1])
+    run = {"price": lambda: _price(booked, e=e), "resolve": lambda: booked.resolve(e),
+           "record": lambda: booked.record_passed_fixings(e), "settle": lambda: booked.with_history_settled(e)}[call]
+    with pytest.raises(ValidationError, match="strictly before state.as_of"):
+        run()
 
 
 def test_r2_as_of_after_valuation_is_refused_at_pricing():
@@ -1823,3 +1832,167 @@ def test_with_history_settled_copies_nothing_when_nothing_is_recorded_or_past_du
         assert product.state.pending
     monkeypatch.setattr(base, "deepcopy", lambda obj: pytest.fail("with_history_settled deep-copied"))
     assert product.with_history_settled(e) is product
+
+
+# --- final-review Critical 1 (controller ruling): time-of-day datetimes decide "due" by RESOLVED time ---------------
+# A dated pay date strictly before the state's as_of was refused by datetime in the state's constructor; under a
+# whole-day count, cash due at 00:00 is still due at 15:00 that day (and 10:00 cash at the next midnight), so a record
+# at that instant wrote an as_of the constructor refused. The check is now the product's, by resolved time.
+
+_DAY_COUNTS = {"calendar": {}, "act_365": dict(dc=DayCountConvention.ACT_365), "business": BUS}
+_D0 = FIX_DATES[0]                                                  # Wednesday 2026-07-15
+_AT10 = [d + timedelta(hours=10) for d in FIX_DATES]
+
+
+def _dated_terms(dated):
+    common = dict(fixing_dates=dated.fixing_dates, pay_dates=dated.pay_dates, strike=dated.strike,
+                  notional=dated.notional, currency_pair=dated.currency_pair, target=dated.target)
+    if isinstance(dated, FxTargetRedemptionForward):
+        return common
+    return dict(common, coupon_rate=dated.coupon_rate, include_principal=dated.include_principal, initial_date=VAL)
+
+
+def _intraday_case(probe, kind):
+    """``(dated contract, instants it is aged through, the probe's valuation instant)`` for the three review probes:
+    ``zero_lag_15h`` - zero-lag fixing/pay at 00:00, valued 15:00 that day; ``lag2_15h_day_before_pay`` - pay two days
+    after the fixing, valued 15:00 the day before the pay date (its theta lands on the pay day at 15:00);
+    ``fix_10h_next_midnight`` - fixing and pay at 10:00, zero lag, valued at midnight the day after."""
+    if kind == "tarn":
+        make = lambda **kw: dated_note(target=3.0, **kw)  # noqa: E731
+    else:
+        make = lambda **kw: dated_tarf(target=0.20, **kw)  # noqa: E731
+    day = timedelta(days=1)
+    if probe == "zero_lag_15h":
+        at = _D0 + timedelta(hours=15)
+        return make(), [_D0, at, _D0 + day, at + day], at
+    if probe == "lag2_15h_day_before_pay":
+        pay = LAG2[0]                                               # Friday 07-17; Monday is pay + 3 days
+        at = pay - day + timedelta(hours=15)
+        return make(pay_dates=LAG2), [_D0, at, pay, at + day, pay + day, pay + 3 * day], at
+    at = _D0 + day
+    return make(fixing_dates=_AT10), [_D0, at, at + timedelta(hours=15), at + day], at
+
+
+_PROBES = ["zero_lag_15h", "lag2_15h_day_before_pay", "fix_10h_next_midnight"]
+_GREEK_KEYS = ("price", "delta", "gamma", "vega", "theta", "rho_dom", "rho_for")
+
+
+def _greeks_agree(gd, gn):
+    scale = abs(gd["price"])
+    return all(is_close(gd[k], gn[k], rel_tol=1e-12, abs_tol=1e-12 * scale) for k in _GREEK_KEYS)
+
+
+@pytest.mark.parametrize("dc", sorted(_DAY_COUNTS))
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+@pytest.mark.parametrize("probe", _PROBES)
+def test_intraday_probe_prices_and_greeks_like_the_twin_with_the_cash_due_in_value(probe, kind, dc):
+    """Each review probe (both kinds; CALENDAR_DAYS, ACT_365, BUSINESS_DAYS): the dated contract, aged by
+    ``record_passed_fixings`` to the probe instant, prices and gives Greeks (theta included) like its numeric twin
+    written from its terms; the banked fixing's cash is not booked and stays in the value at its resolved pay time
+    (OQ-1 b)."""
+    dated, instants, at = _intraday_case(probe, kind)
+    kw = _DAY_COUNTS[dc]
+    for instant in instants:
+        if instant < at:
+            dated.record_passed_fixings(env(val=instant, **kw))
+    e = env(val=at, **kw)
+    banked = copy.deepcopy(dated)
+    banked.record_passed_fixings(e)
+    assert [x.event_type for x in banked.lifecycle_events] == [FIXING]      # banked, not booked
+    (cash,) = [p.amount for p in banked.state.pending]
+    t_pay = signed_yf(banked.pay_dates[0], e) + 0.0
+    assert dated.resolve(e).pending == ((t_pay, cash),) and t_pay >= 0.0
+    assert banked.state.as_of <= at
+    twin = twin_from_terms(dated, e)
+    assert is_close(_price(dated, e=e, n=5_000), _price(twin, e=e, n=5_000), rel_tol=1e-12)
+    gd = engine_for(dated, n=4_000).calculate_greeks(dated, e)
+    gn = engine_for(twin, n=4_000).calculate_greeks(twin, e)
+    # theta: the dated contract one day on equals its twin written there (twins agree at every instant)
+    e1 = env(val=at + timedelta(days=1), **kw)
+    aged = copy.deepcopy(banked)
+    aged.record_passed_fixings(e1)
+    twin1 = twin_from_terms(aged, e1)
+    step = engine_for(twin1, n=4_000).price(twin1, e1) - engine_for(twin, n=4_000).price(twin, e)
+    assert is_close(gd["theta"], step, rel_tol=1e-12, abs_tol=1e-12 * abs(gd["price"]))
+    if probe == "lag2_15h_day_before_pay":
+        # OPEN (reported to the controller): the pay date is 9 hours ahead, at resolved time 0 from 15:00 the day
+        # before AND from 15:00 on the pay day (a whole-day count is not additive from a time-of-day valuation), so
+        # the dated contract keeps the cash one day on, while the numeric twin's Q7 step (one day) pays it. Every
+        # Greek but theta agrees; theta agrees with the twin written one day on (above).
+        gn = dict(gn, theta=gd["theta"])
+    assert _greeks_agree(gd, gn), (gd, gn)
+    without = copy.deepcopy(banked)                                         # the cash is in the value
+    without.state = TargetRedemptionState(banked.state.accumulated, as_of=banked.state.as_of,
+                                          fixings_banked=banked.state.fixings_banked)
+    assert is_close(_price(banked, e=e, n=5_000),
+                    _price(without, e=e, n=5_000) + cash * e.get_domestic_df(t_pay), rel_tol=1e-12)
+
+
+@pytest.mark.parametrize("dc", sorted(_DAY_COUNTS))
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+@pytest.mark.parametrize("probe", _PROBES)
+def test_intraday_cash_is_booked_once_its_pay_time_is_strictly_past(probe, kind, dc):
+    """Aged instant by instant: the PAYMENT event appears exactly at the first instant where the pay date's resolved
+    time is strictly negative, never earlier; every instant prices like the twin written there; a contract rebooked
+    from the recorded state prices the same (a pay date before as_of by datetime is accepted when its time is 0)."""
+    dated, instants, _at = _intraday_case(probe, kind)
+    kw = _DAY_COUNTS[dc]
+    pay = dated.pay_dates[0]
+    expected = min(i for i in instants if signed_yf(pay, env(val=i, **kw)) < 0.0)
+    for instant in instants:
+        e = env(val=instant, **kw)
+        dated.record_passed_fixings(e)
+        payments = [x for x in dated.lifecycle_events if x.event_type is PAYMENT]
+        assert len(payments) == (1 if instant >= expected else 0), instant
+        assert len(dated.state.pending) == (0 if instant >= expected else 1), instant
+        assert is_close(_price(dated, e=e, n=5_000), _price(twin_from_terms(dated, e), e=e, n=5_000),
+                        rel_tol=1e-12), instant
+        rebooked = type(dated)(**_dated_terms(dated), state=dated.state)
+        assert is_close(_price(rebooked, e=e, n=5_000), _price(dated, e=e, n=5_000), rel_tol=1e-12), instant
+    assert payments[0].time < 0.0
+
+
+def test_a_booked_state_with_ten_oclock_cash_at_the_next_midnight_is_due_today():
+    """The state accepts a pay date before as_of by datetime; the product refuses it only when its resolved time from
+    as_of is strictly negative (here 0 under a whole-day count: still due; one day later: refused)."""
+    nxt = _D0 + timedelta(days=1)
+
+    def booked(as_of):
+        return dated_note(fixing_dates=_AT10, target=300.0,
+                          state=TargetRedemptionState(5.0, pending=(PendingPayment(1.0, pay_date=_AT10[0]),),
+                                                      as_of=as_of))
+
+    assert booked(nxt).resolve(env(val=nxt)).pending == ((0.0, 1.0),)
+    with pytest.raises(ValidationError, match="strictly before state.as_of"):
+        _price(booked(nxt + timedelta(days=1)), e=env(val=nxt + timedelta(days=1)))
+
+
+# Pinned on 583b292d (before the Critical 1 fix), MC 4_000 paths, seed 7: (price, delta, theta) of intraday valuations
+# that were never refused; the fix must not move them.
+_INTRADAY_NON_PAY_DAY = {
+    "tarn_lag2_fixing_day_15h": (102.09040904890882, 2.139892746437037, 0.015445214140356711),
+    "tarf_lag2_fixing_day_15h": (0.09615520809719763, 2.9585200696565126, 0.0009610009779291578),
+    "tarn_paid_day5_15h": (101.20847334161026, 1.3092477031821186, 0.015231191182181192),
+    "tarf_paid_day5_15h": (0.051179061982023, 2.964737073705562, 0.0009385578889724785),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_INTRADAY_NON_PAY_DAY))
+def test_an_intraday_valuation_on_a_non_pay_day_is_unchanged(name):
+    tarn_kind = name.startswith("tarn")
+    if name.endswith("lag2_fixing_day_15h"):                  # fixing day 15:00, its cash due two days later
+        d = dated_note(target=3.0, pay_dates=LAG2) if tarn_kind else dated_tarf(target=0.20, pay_dates=LAG2)
+        e = env(val=_D0 + timedelta(hours=15))
+    else:                                                      # zero lag, recorded and paid, valued day 5 at 15:00
+        d = dated_note(target=3.0) if tarn_kind else dated_tarf(target=0.20)
+        for k in (0, 1):
+            d.record_passed_fixings(env(val=_D0 + timedelta(days=k)))
+        e = env(val=_D0 + timedelta(days=5, hours=15))
+    g = engine_for(d, n=4_000).calculate_greeks(d, e)
+    price, delta, theta = _INTRADAY_NON_PAY_DAY[name]
+    # measured on ARM64; CI runs x86_64 (memory: golden cross-arch), hence GOLDEN_REL_TOL, not bitwise
+    assert is_close(g["price"], price, rel_tol=GOLDEN_REL_TOL)
+    assert is_close(g["delta"], delta, rel_tol=GOLDEN_REL_TOL)
+    assert is_close(g["theta"], theta, rel_tol=GOLDEN_REL_TOL)
+    twin = twin_from_terms(d, e)
+    assert _greeks_agree(g, engine_for(twin, n=4_000).calculate_greeks(twin, e))

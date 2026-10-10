@@ -101,9 +101,12 @@ def test_dated_pending_needs_as_of():
         TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=D2),))
 
 
-def test_dated_pending_must_not_precede_as_of():
-    with pytest.raises(ValidationError, match="after as_of"):
-        TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=datetime(2026, 7, 1)),), as_of=D1)
+def test_dated_pending_before_as_of_is_decided_by_the_product_not_the_state():
+    """Final-review Critical 1 (controller ruling): whether dated cash is strictly past at ``as_of`` depends on the
+    environment's day count (10:00 cash at a next-midnight as_of is due today under whole-day counts), which the state
+    cannot know. The product decides it by resolved time when an environment prices it."""
+    s = TargetRedemptionState(1.0, pending=(PendingPayment(1.0, pay_date=datetime(2026, 7, 1)),), as_of=D1)
+    assert s.pending[0].pay_date < s.as_of
 
 
 def test_dated_pending_due_on_as_of_is_allowed():  # OQ-1 (b)

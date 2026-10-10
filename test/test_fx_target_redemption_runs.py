@@ -10,7 +10,7 @@ import pytest
 
 from fx_target_redemption_fixtures import (
     FIX, FIX_DATES, INCEPTION, LAG2, PAIR, TARGET_CAL, VAL, _numeric_twin, book, dated_note, dated_tarf, drive,
-    engine_for, env, following, mc, note, tarf,
+    engine_for, env, following, mc, note, signed_yf, tarf, twin_from_terms,
 )
 from quantark.asset.equity.lifecycle.autocallable import MaturedBeforeRunWarning
 from quantark.asset.fx.engine.analytical import GarmanKohlhagenEngine
@@ -848,3 +848,70 @@ def test_a_non_target_redemption_backtest_value_is_pinned():
     assert all(r["paid_cash"] == 0.0 and r["pending_pv"] == 0.0 for r in res.rows)
     for key, golden in _NON_TARN_BACKTEST.items():
         assert is_close(live[key], float.fromhex(golden), rel_tol=GOLDEN_REL_TOL), (key, live[key].hex())
+
+
+# ================================================================ final-review Critical 1: time-of-day dates in a run
+
+_AT10 = [d + timedelta(hours=10) for d in FIX_DATES]
+
+
+def _ten_oclock(kind, lag):
+    pays = [d + timedelta(days=lag) for d in _AT10]
+    if kind == "tarn":
+        return dated_note(fixing_dates=_AT10, pay_dates=pays, target=3.0)
+    return dated_tarf(fixing_dates=_AT10, pay_dates=pays, target=0.20)
+
+
+def _ten_oclock_run(product, greeks, days=36):
+    pf, (pid,) = book(product)
+    engine = FXBacktestEngine(FXBacktestConfig(
+        portfolio=pf, market_path=_flat_path(days, 1.20),
+        strategy=FXDeltaNeutralStrategy(delta_threshold=1e12, rebalance_frequency="on_threshold"),
+        transaction_cost_model=ZeroCostModel(), calculate_greeks=greeks))
+    return pid, engine.run().rows
+
+
+@pytest.mark.parametrize("lag", [0, 2])
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_ten_oclock_dates_in_a_backtest_price_like_the_twin_and_book_cash_once_strictly_past(kind, lag, monkeypatch):
+    """Final-review Critical 1, probe 3 in a run: fixing and pay datetimes at 10:00 on daily midnight rows (zero lag
+    raised at the midnight after the fixing). Every row prices, with Greeks on or off (same rows); each row's value
+    equals the numeric twin written from the terms and the held state at that row; the cash is in the value while its
+    pay time resolves to >= 0 and is booked on the first row where it is strictly past."""
+    seen = []
+    original = RunFixingRecorder.advance
+
+    def spy(self, portfolio):
+        day = original(self, portfolio)
+        e = portfolio.pricing_environments["EURUSD"]
+        seen.append((e, {pid: (p.product, p.get_market_value(e)) for pid, p in portfolio.positions.items()}))
+        return day
+
+    monkeypatch.setattr(RunFixingRecorder, "advance", spy)
+    pid, rows = _ten_oclock_run(_ten_oclock(kind, lag), greeks=False)
+    assert len(seen) == len(rows)
+    fixing, pay = _AT10[0], _AT10[0] + timedelta(days=lag)
+    final = seen[-1][1][pid][0]
+    (cash,) = [x.amount for x in final.lifecycle_events if x.event_type is FIXING]
+    pending_rows = booked_rows = 0
+    for (e, held), row in zip(seen, rows):
+        product, value = held[pid]
+        twin = twin_from_terms(product, e)
+        assert is_close(value, engine_for(twin, n=2_000).price(twin, e), rel_tol=1e-12), e.valuation_date
+        assert is_close(row["portfolio_value"] - row["paid_cash"], value, rel_tol=1e-12, abs_tol=1e-12)
+        t_fix, t_pay = signed_yf(fixing, e), signed_yf(pay, e)
+        if t_pay < 0.0:                                                  # strictly past: booked, once
+            assert (row["paid_cash"], row["pending_pv"]) == (cash, 0.0), e.valuation_date
+            booked_rows += 1
+        elif t_fix <= 0.0:                                               # fixed (or live), its cash due: in value
+            assert row["paid_cash"] == 0.0, e.valuation_date
+            assert is_close(row["pending_pv"], cash * e.get_domestic_df(t_pay), rel_tol=1e-12), e.valuation_date
+            pending_rows += 1
+        else:
+            assert (row["paid_cash"], row["pending_pv"]) == (0.0, 0.0), e.valuation_date
+    assert pending_rows >= 2 and booked_rows >= 1                        # the midnight after the fixing is pending
+    payments = [x for x in final.lifecycle_events if x.event_type is PAYMENT]
+    assert [x.amount for x in payments] == [cash]
+    _, with_greeks = _ten_oclock_run(_ten_oclock(kind, lag), greeks=True)
+    fields = ("portfolio_value", "paid_cash", "pending_pv")
+    assert [[r[f] for f in fields] for r in with_greeks] == [[r[f] for f in fields] for r in rows]
