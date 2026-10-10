@@ -20,8 +20,11 @@ backtest and FX dynamic scenario.
 - Dated `FxTargetRedemptionNote` / `FxTargetRedemptionForward`: `fixing_dates` (the whole contractual schedule),
   `pay_dates`, `state.as_of`; the TARN derives its periods from `initial_date` (or explicit `accrual_factors`) in its
   `day_count_convention` (default ACT/365). Times resolve in the environment's convention; a numeric contract and its
-  dated twin price identically. A fixing or pending pay date after the valuation date that resolves to a zero year
-  fraction in the environment's day count (a weekend date under `BUSINESS_DAYS`) is refused with `ValidationError`.
+  dated twin price identically. A fixing or pay date that resolves to zero time in the environment's day count (a
+  weekend date under `BUSINESS_DAYS`, valued on the Friday) is live, as for its numeric twin (user decision OQ-2 b,
+  2026-10-10): the fixing is decided at the quoted spot and its cash is due that day. A dated state counts its banked
+  fixings (`TargetRedemptionState.fixings_banked`, fixing identity in schedule order; a booking stating only `as_of`
+  banks the fixings dated on or before it); `as_of` never passes the valuation date (user ruling OQ-3, 2026-10-10).
 - `resolve(fx_env)` (the engines' one input), `lifecycle_events`, `is_redeemed`, `is_terminal`, `hit_tol`,
   `pending_pv(fx_env)` on both products.
 - TARN / TARF take part in the missing-fixing fill protocol (`missing_fixing_fills`, `with_fixings_recorded`,

@@ -53,8 +53,9 @@ class FxTargetRedemptionForward(TargetRedemptionProduct):
         state: Mandatory realized state (``TargetRedemptionState(0.0)`` for a
             contract booked at inception).
         fixing_dates, pay_dates: Dated form (exclusive with ``fixing_times`` /
-            ``pay_times``): the whole contractual schedule; ``state.as_of`` is
-            the date through which fixings are banked.
+            ``pay_times``): the whole contractual schedule;
+            ``state.fixings_banked`` counts the banked fixings (a booking
+            stating only ``state.as_of`` banks those dated on or before it).
     """
 
     def __init__(

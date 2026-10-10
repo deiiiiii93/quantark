@@ -13,3 +13,15 @@
 # test_dated_pending_must_be_after_as_of[D1], test_r2_dated_pending_must_follow_as_of (refused -> accepted; the
 # replacement tests refuse a pay_date BEFORE as_of), test_dated_record_banks_through_the_valuation_date_and_sweeps_paid_cash
 # (PAYMENT on LAG2[0] -> on LAG2[0] + 1 day).
+#
+# Task 8b - OQ-2 (b) and the OQ-3 ruling, user 2026-10-10: a dated fixing / pay date at zero business time is live;
+# banked fixings are tracked per fixing (TargetRedemptionState.fixings_banked), as_of never passes the valuation date.
+# test_future_fixing_with_zero_year_fraction_is_refused: ValidationError -> priced (equal to its numeric twin, rel 1e-12).
+# test_pending_pay_date_with_zero_year_fraction_is_refused: ValidationError -> pending at t = 0 (in the value), paid
+# on the next business day. A Friday + Saturday fixing pair on BUSINESS_DAYS prices on the Friday (twins equal, events
+# equal) and is banked once. Ruling R7 superseded.
+# Not a value: a dated state after ageing now states fixings_banked (Task 8a's dated record test expects
+# fixings_banked=1; no price, Greek or event moves). Every booking stating only as_of keeps its banked set.
+# Not a value: banking on a non-business valuation date under BUSINESS_DAYS writes as_of = the first date of its
+# zero-time stretch (Ruling R24: a Saturday row writes the Friday); under CALENDAR_DAYS / ACT as_of is the valuation
+# date as before.

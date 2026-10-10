@@ -660,23 +660,159 @@ def test_r2_as_of_after_valuation_is_refused_at_pricing():
         _price(booked, e=env())
 
 
-def test_future_fixing_with_zero_year_fraction_is_refused():
-    friday = datetime(2026, 8, 14)
-    saturday_fixing = dated_note(fixing_dates=[datetime(2026, 8, 15), datetime(2026, 9, 15)],
-                                 initial_date=datetime(2026, 7, 15))
-    with pytest.raises(ValidationError, match="zero year fraction"):
-        saturday_fixing.resolve(env(val=friday, **BUS))
+THURSDAY, FRIDAY, SATURDAY, MONDAY = (datetime(2026, 8, 13), datetime(2026, 8, 14), datetime(2026, 8, 15),
+                                      datetime(2026, 8, 17))
 
 
-def test_pending_pay_date_with_zero_year_fraction_is_refused():
-    friday, saturday = datetime(2026, 8, 14), datetime(2026, 8, 15)
+def _business_twin_on_friday(dated):
+    """The numeric twin booked on the Thursday and aged to the Friday by the business-day step (both forms are then
+    valued at the Friday with the same history)."""
+    twin = _numeric_twin(dated, env(val=THURSDAY, **BUS))
+    twin.time_shift(calculate_year_fraction(THURSDAY, FRIDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                            calendar=TARGET_CAL))
+    return twin
+
+
+def _kinds_only(events):
+    return [(e.event_type, e.amount, e.fixing, e.redeemed) for e in events]
+
+
+def test_bookings_that_state_only_as_of_keep_their_meaning():
+    """OQ-3 ruling: banked is tracked per fixing; a booking stating only as_of banks the fixings dated on or before
+    it."""
+    d = dated_note(target=3.0, state=TargetRedemptionState(1.0, as_of=FIX_DATES[0] + timedelta(days=1)))
+    assert d._banked_count() == 1 and not d._is_unbanked(0) and d._is_unbanked(1)
+    assert dated_note(target=3.0)._banked_count() == 0
+    with pytest.warns(TerminalBookingWarning):
+        done = dated_note(target=3.0, state=TargetRedemptionState(1.0, as_of=FIX_DATES[-1]))
+    assert done._banked_count() == 12 and done.is_terminal
+
+
+def test_record_counts_banked_fixings_and_as_of_is_the_valuation_date():  # CALENDAR_DAYS: R24 is the date itself
+    d = dated_note(target=3.0, pay_dates=LAG2)
+    e = env(val=FIX_DATES[1] + timedelta(days=1))
+    d.record_passed_fixings(e)
+    assert (d.state.fixings_banked, d.state.as_of) == (2, e.valuation_date)
+
+
+@pytest.mark.parametrize("kw, match", [
+    (dict(state=TargetRedemptionState(1.0, as_of=FIX_DATES[0], fixings_banked=13)), "fixings_banked"),
+    (dict(state=TargetRedemptionState(1.0, as_of=FIX_DATES[0], fixings_banked=0)), "as_of"),  # cash, nothing banked
+])
+def test_r2_dated_banked_count_refusals(kw, match):
+    with pytest.raises(ValidationError, match=match):
+        dated_note(target=3.0, **kw)
+
+
+def test_r2_numeric_state_refuses_a_banked_count():
+    with pytest.raises(ValidationError, match="fixings_banked"):
+        note(state=TargetRedemptionState(0.0, fixings_banked=0))
+
+
+def test_future_fixing_at_zero_business_time_is_live_like_its_twin():  # OQ-2 (b) (was refused, Ruling R7)
+    d = dated_note(fixing_dates=[SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15), target=3.0)
+    e_fri = env(val=FRIDAY, **BUS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)          # Task 9 makes a t = 0 fill silent
+        view = d.resolve(e_fri)                                         # banked on a copy at the quoted spot
+        banked = copy.deepcopy(d)
+        banked.record_passed_fixings(e_fri)
+        assert view == banked.resolve(e_fri)
+        c = banked.lifecycle_events[0].amount
+        assert view.pending == ((0.0, c),)                              # its cash is due "today"
+        assert (banked.state.fixings_banked, banked.state.as_of) == (1, FRIDAY)   # never past the valuation date
+        assert is_close(_price(_business_twin_on_friday(d), e=e_fri), _price(d, e=e_fri), rel_tol=1e-12)
+
+
+def test_pending_pay_date_at_zero_business_time_is_due_today():  # OQ-2 (b) (was refused, Ruling R7)
     c = 1.0
-    owed = dated_note(fixing_dates=[datetime(2026, 8, 13), datetime(2026, 9, 15)],
-                      pay_dates=[saturday, datetime(2026, 9, 17)], initial_date=datetime(2026, 7, 15), target=3.0,
-                      state=TargetRedemptionState(c, pending=(PendingPayment(c, pay_date=saturday),),
-                                                  as_of=datetime(2026, 8, 13)))
-    with pytest.raises(ValidationError, match="zero year fraction"):
-        owed.resolve(env(val=friday, **BUS))
+    owed = dated_note(fixing_dates=[THURSDAY, datetime(2026, 9, 15)], pay_dates=[SATURDAY, datetime(2026, 9, 17)],
+                      initial_date=datetime(2026, 7, 15), target=3.0,
+                      state=TargetRedemptionState(c, pending=(PendingPayment(c, pay_date=SATURDAY),), as_of=THURSDAY))
+    assert owed.resolve(env(val=FRIDAY, **BUS)).pending == ((0.0, c),)
+    owed.record_passed_fixings(env(val=FRIDAY, **BUS))
+    assert owed.state.pending == (PendingPayment(c, pay_date=SATURDAY),)            # not paid on the Friday
+    owed.record_passed_fixings(env(val=MONDAY, **BUS))
+    assert owed.state.pending == () and owed.lifecycle_events[-1].event_type is PAYMENT
+
+
+def test_oq3_friday_and_saturday_fixings_price_on_friday_and_bank_once():
+    """OQ-3 ruling: zero-lag fixings on a Friday and the Saturday after it, under BUSINESS_DAYS. On the Friday both are
+    passed by time (the Saturday one live like the Friday one, at Friday's spot): the dated contract prices, equal to
+    its numeric twin, and banks them once; as_of stays the Friday, so the Friday coupon due that day does not precede
+    it. On Monday nothing is banked again (fixing identity) and both coupons are paid, as in the twin. The twin is
+    booked on the Friday from the dated view, so FIXING events are compared from the Friday on (Task 8c adds the
+    Thursday valuation, both fixings at one business time, and twin event parity for shared fixing dates)."""
+    dated = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                       target=50.0)
+    e_fri, e_mon = env(val=FRIDAY, **BUS), env(val=MONDAY, **BUS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        twin = _numeric_twin(dated, e_fri)
+        assert is_close(_price(twin, e=e_fri), _price(dated, e=e_fri), rel_tol=1e-12)
+        dated.record_passed_fixings(e_fri)
+    assert [e.event_type for e in dated.lifecycle_events] == [FIXING, FIXING]
+    assert (dated.state.fixings_banked, dated.state.as_of) == (2, FRIDAY)
+    assert [p.pay_date for p in dated.state.pending] == [FRIDAY, SATURDAY]            # both due today, in the value
+    assert dated.state.accumulated == twin.state.accumulated
+    assert [p.amount for p in dated.state.pending] == [p.amount for p in twin.state.pending]
+    twin.time_shift(calculate_year_fraction(FRIDAY, MONDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                            calendar=TARGET_CAL))
+    twin.record_passed_fixings(e_mon)
+    dated.record_passed_fixings(e_mon)
+    assert [e.event_type for e in dated.lifecycle_events] == [FIXING, FIXING, PAYMENT, PAYMENT]   # banked once
+    assert _kinds_only(dated.lifecycle_events[2:]) == _kinds_only(twin.lifecycle_events)          # same payments
+    assert (dated.state.fixings_banked, dated.state.as_of) == (2, MONDAY)
+
+
+def test_as_of_on_a_weekend_valuation_is_the_friday():
+    """Ruling R24: valued on the Saturday under BUSINESS_DAYS (a weekend row), a zero-lag Friday fixing is still live
+    (t = 0, W6 Ruling 4) and its Friday coupon is due at that instant; banking writes as_of = the Friday, the first date
+    of the valuation's zero-time stretch (never after the valuation date), so the kept check "a pending pay_date must
+    not precede as_of" holds and the contract prices like its numeric twin."""
+    d = dated_note(fixing_dates=[FRIDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15), target=50.0)
+    e_sat = env(val=SATURDAY, **BUS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MissingFixingWarning)
+        banked = copy.deepcopy(d)
+        banked.record_passed_fixings(e_sat)
+        assert (banked.state.as_of, banked.state.fixings_banked) == (FRIDAY, 1)
+        assert banked.state.pending[0].pay_date == FRIDAY
+        twin = _numeric_twin(d, env(val=THURSDAY, **BUS))
+        twin.time_shift(calculate_year_fraction(THURSDAY, SATURDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                                calendar=TARGET_CAL))
+        assert is_close(_price(twin, e=e_sat), _price(d, e=e_sat), rel_tol=1e-12)
+
+
+SUNDAY = datetime(2026, 8, 16)
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_saturday_cash_valued_on_the_sunday_after_a_friday_record(form):
+    """Task 8a's interim corner, closed by Ruling R24: as_of Friday, cash dated Saturday, valued on the Sunday under
+    BUSINESS_DAYS. The Saturday is at the Sunday's instant, so the cash is due today: resolve / price hold it at t = 0
+    and record_passed_fixings keeps it pending (as_of = the Friday, not the Sunday, so the kept check "a pending
+    pay_date must not precede as_of" holds). Dated == numeric: the numeric twin booked on the Friday and aged to the
+    Sunday by the business-day step holds the same cash at t = 0 and the same price."""
+    c = 1.0
+    dated = dated_note(fixing_dates=[THURSDAY, datetime(2026, 9, 15)], pay_dates=[SATURDAY, datetime(2026, 9, 17)],
+                       initial_date=datetime(2026, 7, 15), target=3.0,
+                       state=TargetRedemptionState(c, pending=(PendingPayment(c, pay_date=SATURDAY),), as_of=FRIDAY))
+    e_sun = env(val=SUNDAY, **BUS)
+    if form == "dated":
+        product = dated
+    else:
+        product = _numeric_twin(dated, env(val=FRIDAY, **BUS))
+        product.time_shift(calculate_year_fraction(FRIDAY, SUNDAY, DayCountConvention.BUSINESS_DAYS, 252,
+                                                   calendar=TARGET_CAL))
+    assert product.resolve(e_sun).pending == ((0.0, c),)
+    price = _price(product, e=e_sun)
+    assert is_close(price, _price(dated, e=e_sun), rel_tol=1e-12)
+    product.record_passed_fixings(e_sun)
+    assert [p.amount for p in product.state.pending] == [c] and product.lifecycle_events == ()
+    if form == "dated":
+        assert (product.state.as_of, product.state.fixings_banked) == (FRIDAY, 1)
+    assert is_close(_price(product, e=e_sun), price, rel_tol=1e-12)
 
 
 # --- dated record semantics, maturity ------------------------------------------------------------------------------
@@ -686,7 +822,7 @@ def test_dated_record_banks_through_the_valuation_date_and_pays_cash_once_it_is_
     d.record_passed_fixings(env(val=FIX_DATES[0]))
     coupon = 100.0 * 0.12 * calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.ACT_365, 252)
     assert d.state == TargetRedemptionState(coupon, pending=(PendingPayment(coupon, pay_date=LAG2[0]),),
-                                            as_of=FIX_DATES[0])
+                                            as_of=FIX_DATES[0], fixings_banked=1)
     d.record_passed_fixings(env(val=LAG2[0]))                    # its pay date: due today, still in the value
     assert d.state.pending == (PendingPayment(coupon, pay_date=LAG2[0]),) and d.state.as_of == LAG2[0]
     assert [e.event_type for e in d.lifecycle_events] == [FIXING]
@@ -979,3 +1115,57 @@ def test_moved_values_around_a_pay_date(name):
     assert is_close(g_before["theta"], th_before + cash, rel_tol=0.0, abs_tol=1e-9)
     assert is_close(g_on["price"], p_on + cash, rel_tol=1e-9)
     assert is_close(g_on["theta"], th_on - cash, rel_tol=0.0, abs_tol=1e-9)
+
+
+# --- numeric == dated, aged independently day by day (no _numeric_twin): a fixing day, its pay day, the days after --
+
+_AGE_START = FIX_DATES[0] - timedelta(days=2)                       # Monday 2026-07-13
+_AGE_DAYS = [FIX_DATES[0] + timedelta(days=k) for k in range(-1, 6)]  # Tue .. Mon 07-20: fixing Wed, pay Fri (LAG2)
+
+
+def _independent_numeric(kind, e0):
+    """The dated contract's numeric twin written from its terms (times in the environment's day count from the
+    booking date, TARN factors in ACT/365 from initial_date), not from the dated resolve view."""
+    yf = lambda a, b: calculate_year_fraction(a, b, e0.day_count_convention, e0.bus_days_in_year,  # noqa: E731
+                                              calendar=e0.calendar)
+    fix = [yf(_AGE_START, d) for d in FIX_DATES]
+    pays = [yf(_AGE_START, d) for d in LAG2]
+    if kind == "tarf":
+        return tarf(fix=fix, pay_times=pays, target=0.20)
+    starts = [VAL] + FIX_DATES[:-1]
+    factors = [calculate_year_fraction(s, d, DayCountConvention.ACT_365, 252) for s, d in zip(starts, FIX_DATES)]
+    return note(fix=fix, pay_times=pays, accrual_factors=factors, target=3.0)
+
+
+def _event_parts(events):
+    return [(e.event_type, e.amount, e.fixing, e.redeemed) for e in events]
+
+
+@pytest.mark.parametrize("calendar", ["calendar", "business"])
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_independent_daily_twin_across_a_fixing_and_its_pay_day(kind, calendar):
+    """Task 8a's pay-day twin builds its numeric contract from the dated resolve view; this one does not. Both forms
+    are booked at inception on the Monday before the first fixing and aged one calendar day at a time through the
+    fixing (Wednesday), its pay day (Friday, LAG2) and the days after (under BUSINESS_DAYS the Saturday and Sunday are
+    at Friday's instant: the cash is still due, paid on the Monday). Events agree exactly (type, amount, rate,
+    redeemed; times to ULPs) and so do prices."""
+    kw = {} if calendar == "calendar" else BUS
+    e0 = env(val=_AGE_START, **kw)
+    dated = dated_note(target=3.0, pay_dates=LAG2) if kind == "tarn" else dated_tarf(target=0.20, pay_dates=LAG2)
+    numeric = _independent_numeric(kind, e0)
+    prev = _AGE_START
+    for day in _AGE_DAYS:
+        ek = env(val=day, spot=1.21, **kw)
+        numeric.time_shift(calculate_year_fraction(prev, day, ek.day_count_convention, ek.bus_days_in_year,
+                                                   calendar=ek.calendar))
+        numeric.record_passed_fixings(ek)
+        dated.record_passed_fixings(ek)
+        prev = day
+        assert _event_parts(numeric.lifecycle_events) == _event_parts(dated.lifecycle_events), day
+        assert all(is_close(a.time, b.time, rel_tol=0.0, abs_tol=1e-12)
+                   for a, b in zip(numeric.lifecycle_events, dated.lifecycle_events)), day
+        assert numeric.state.accumulated == dated.state.accumulated
+        assert [p.amount for p in numeric.state.pending] == [p.amount for p in dated.state.pending], day
+        assert dated.state.as_of <= day
+        assert is_close(_price(numeric, e=ek, n=5_000), _price(dated, e=ek, n=5_000), rel_tol=1e-12), day
+    assert [e.event_type for e in dated.lifecycle_events] == [FIXING, PAYMENT]

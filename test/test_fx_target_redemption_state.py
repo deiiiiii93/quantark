@@ -134,3 +134,14 @@ def test_pending_present_value_sums_in_order():
     expected = 0.0 + 0.5 * e.get_domestic_df(0.1) + 100.0 * e.get_domestic_df(0.1)
     assert pending_present_value(((0.1, 0.5), (0.1, 100.0)), e) == expected
     assert pending_present_value((), e) == 0.0
+
+
+@pytest.mark.parametrize("n", [-1, 1.5, True])
+def test_fixings_banked_must_be_a_non_negative_int(n):
+    with pytest.raises(ValidationError, match="fixings_banked"):
+        TargetRedemptionState(1.0, as_of=D1, fixings_banked=n)
+
+
+def test_fixings_banked_defaults_to_none():
+    assert TargetRedemptionState(0.0).fixings_banked is None
+    assert TargetRedemptionState(1.0, as_of=D1, fixings_banked=1).fixings_banked == 1

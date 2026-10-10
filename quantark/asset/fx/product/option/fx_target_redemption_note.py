@@ -52,8 +52,9 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
 
     Numeric form: ``fixing_times`` / ``pay_times`` are years from valuation and list only the fixings not yet
     banked (a non-positive time is an unbanked past fixing; an empty list is a terminal booking).
-    Dated form: ``fixing_dates`` / ``pay_dates`` list the whole contractual schedule; ``state.as_of`` is the date
-    through which fixings are banked; times and factors resolve against the pricing environment.
+    Dated form: ``fixing_dates`` / ``pay_dates`` list the whole contractual schedule; ``state.fixings_banked`` counts
+    the banked fixings (a booking stating only ``state.as_of`` banks those dated on or before it); times and factors
+    resolve against the pricing environment.
 
     Attributes:
         fixing_times: Ascending, unique, finite year-fraction fixing times.

@@ -59,12 +59,16 @@ class PendingPayment:
 class TargetRedemptionState:
     """What a target-redemption contract has banked (``accumulated``) and still has to pay (``pending``).
 
-    ``as_of`` is used by the dated form only: every fixing dated on or before it is banked.
+    ``as_of`` (dated form only): the date the state was brought up to date, never after the valuation date.
+    ``fixings_banked`` (dated form only): how many leading scheduled fixings are banked (fixing ``i`` is banked iff
+    ``i < fixings_banked``; banking is tracked per fixing, user ruling OQ-3, 2026-10-10); ``None`` on a booking means
+    "the fixings dated on or before ``as_of``".
     """
 
     accumulated: float
     pending: Tuple[PendingPayment, ...] = ()
     as_of: Optional[datetime] = None
+    fixings_banked: Optional[int] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "pending", tuple(self.pending))
@@ -88,6 +92,9 @@ class TargetRedemptionState:
             if late:
                 raise ValidationError(
                     f"a dated pending pay_date must be on or after as_of {self.as_of}, got {late[0]}")
+        n = self.fixings_banked
+        if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 0):
+            raise ValidationError(f"state.fixings_banked must be None or an int >= 0, got {n!r}")
 
 
 class TerminalBookingWarning(UserWarning):
@@ -105,7 +112,8 @@ class TargetRedemptionEvent:
     """One lifecycle event, appended to a product's ``lifecycle_events`` by ``time_shift`` / ``record_passed_fixings``.
 
     ``amount``: FIXING - the cash it determined (coupon / net cashflow, principal excluded); PAYMENT - the cash paid.
-    ``time``: FIXING - the fixing's signed time at banking (<= 0); PAYMENT - the pay time (<= 0).
+    ``time``: FIXING - the fixing's signed time at banking (<= 0); PAYMENT - the pay time (strictly < 0: cash due
+    today stays pending, OQ-1 b).
     ``redeemed``: FIXING - this fixing ended the contract (target hit, or the last fixing).
     ``label``: W5 ``fixing_label`` text; an immediate PAYMENT carries its FIXING's label (informational).
     """
