@@ -321,4 +321,4 @@ Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock 
 #   test_an_intraday_valuation_on_a_non_pay_day_is_unchanged; test_fx_target_redemption_runs.py::
 #   test_ten_oclock_dates_in_a_backtest_price_like_the_twin_and_book_cash_once_strictly_past.
 #
-FULL SUITE (controller): <pending>
+FULL SUITE (controller, 2026-10-10, final tree 2d25ef86 on main c02296cb, -n 4): 13721 passed, 188 skipped, 0 failed. Q7 full-suite measurement (pre-fix tree 583b292d, -p q7_theta_plugin, 13672 passed / 188 skipped / 0 failed): 44 numeric FX theta moves (38 test_run_fixings_runs FX range accrual BUSINESS_DAYS, 4 TARN lifecycle, 2 base engine) - same 44 as the Task 12 partial measurement; no other file moves.
