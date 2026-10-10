@@ -8,6 +8,8 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.localvol_greeks import local_vol_model_greeks
 from quantark.asset.equity.engine.settlement_support import (
+    at_exercise_instant,
+    expiry_terminal_value,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -77,8 +79,9 @@ class HestonAnalyticalEngine(BaseEngine):
             return fixed_pv
         timing = resolve_terminal_timing(product, pricing_env)
         T = float(product.get_maturity(pricing_env))
-        # TODO(dated-expiry): no T = 0 settled value on this route (the numeric twin at maturity 0.0 is refused
-        # too); kept refusing -- docs/superpowers/specs/2026-10-09-dated-expiry-settles-evidence/REPORT.md
+        if at_exercise_instant(T):
+            # settled before the model runs: the Black-Scholes engine's expiry value (W9, ruling 2026-10-10)
+            return expiry_terminal_value(product, pricing_env, timing, lifecycle_state)
         if T <= 0:
             raise ValidationError("maturity must be positive")
         s0 = float(pricing_env.spot)
@@ -107,6 +110,9 @@ class HestonAnalyticalEngine(BaseEngine):
         fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
         if fixed_pv is not None:
             return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
+        if at_exercise_instant(float(product.get_maturity(pricing_env))):
+            # the Black-Scholes engine's greeks of the settled value (bump-and-reprice: price, delta, gamma)
+            return BaseEngine.calculate_greeks(self, product, pricing_env, lifecycle_state=lifecycle_state)
         bump = self.params.get_effective_bump_config()
         return local_vol_model_greeks(
             lambda p, e, _surface: self.price(

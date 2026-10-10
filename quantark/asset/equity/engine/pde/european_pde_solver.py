@@ -196,3 +196,13 @@ class EuropeanPDESolver(BasePDESolver):
     
     def __repr__(self):
         return "EuropeanPDESolver()"
+
+
+def european_expiry_outcome(product, pricing_env, lifecycle_state=None, greeks: bool = False):
+    """This route on a European at its exercise instant: its expiry outcome (the payoff at the spot x the terminal
+    delay discount, plus any pending receivable; delta the intrinsic slope, gamma 0), decided before any grid or vol
+    is read. The vol-model European PDE routes settle on it before their model runs (W9, ruling 2026-10-10)."""
+    solver = EuropeanPDESolver(PDEParams())
+    if greeks:
+        return solver.calculate_greeks(product, pricing_env, lifecycle_state=lifecycle_state)
+    return solver.price(product, pricing_env, lifecycle_state=lifecycle_state)

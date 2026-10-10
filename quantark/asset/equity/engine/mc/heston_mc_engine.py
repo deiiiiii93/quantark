@@ -10,6 +10,8 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.localvol_greeks import local_vol_model_greeks
 from quantark.asset.equity.engine.settlement_support import (
+    at_exercise_instant,
+    expiry_terminal_value,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -62,8 +64,6 @@ class HestonMCEngine(BaseEngine):
         if not isinstance(product, EuropeanVanillaOption):
             raise PricingError("HestonMCEngine supports EuropeanVanillaOption only")
         T = float(product.get_maturity(env))
-        # TODO(dated-expiry): no T = 0 settled value on this route (the numeric twin at maturity 0.0 is refused
-        # too); kept refusing -- docs/superpowers/specs/2026-10-09-dated-expiry-settles-evidence/REPORT.md
         if T <= 0:
             raise ValidationError("maturity must be positive")
         n = int(self.params.time_steps)
@@ -97,6 +97,10 @@ class HestonMCEngine(BaseEngine):
         if fixed_pv is not None:
             return fixed_pv
         timing = resolve_terminal_timing(product, pricing_env)
+        if (isinstance(product, _supported_products())
+                and at_exercise_instant(float(product.get_maturity(pricing_env)))):
+            # settled before the model runs: the Black-Scholes MC engine's expiry value (W9, ruling 2026-10-10)
+            return expiry_terminal_value(product, pricing_env, timing, lifecycle_state)
         return (
             self._price(product, pricing_env, payment_df=timing.payment_df)
             + pending_receivable_pv(lifecycle_state, pricing_env)
@@ -113,6 +117,9 @@ class HestonMCEngine(BaseEngine):
         fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
         if fixed_pv is not None:
             return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
+        if at_exercise_instant(float(product.get_maturity(pricing_env))):
+            # the Black-Scholes MC engine's greeks of the settled value (bump-and-reprice: price, delta, gamma)
+            return BaseEngine.calculate_greeks(self, product, pricing_env, lifecycle_state=lifecycle_state)
         bump = self.params.get_effective_bump_config()
         return local_vol_model_greeks(
             lambda p, e, _s: self.price(
@@ -125,3 +132,8 @@ class HestonMCEngine(BaseEngine):
             None,
             spot_bump=bump.spot_bump, rate_bump=bump.rate_bump, theta_days=bump.time_bump_days,
         )
+
+
+def _supported_products():
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+    return (EuropeanVanillaOption,)

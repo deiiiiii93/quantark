@@ -7,7 +7,9 @@ from typing import Dict, Optional, Union
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.pde.european_pde_solver import european_expiry_outcome
 from quantark.asset.equity.engine.settlement_support import (
+    at_exercise_instant,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -87,6 +89,10 @@ class HestonSLVPDESolver(BaseEngine):
         if fixed_pv is not None:
             return fixed_pv
         timing = resolve_terminal_timing(product, pricing_env)
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        if (isinstance(product, EuropeanVanillaOption)
+                and at_exercise_instant(float(product.get_maturity(pricing_env)))):
+            return european_expiry_outcome(product, pricing_env, lifecycle_state)    # settled before the model runs
         return (
             self._price(product, pricing_env) * timing.delay_df
             + pending_receivable_pv(lifecycle_state, pricing_env)
@@ -106,6 +112,8 @@ class HestonSLVPDESolver(BaseEngine):
             return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
         timing = resolve_terminal_timing(product, pricing_env)
         T = float(product.get_maturity(pricing_env))
+        if at_exercise_instant(T):
+            return european_expiry_outcome(product, pricing_env, lifecycle_state, greeks=True)
         if T <= 0:
             raise ValidationError("maturity must be positive")
         bump = self.params.get_effective_bump_config()

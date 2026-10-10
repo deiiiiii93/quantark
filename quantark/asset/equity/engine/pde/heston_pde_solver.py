@@ -8,7 +8,9 @@ from copy import deepcopy
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.pde.european_pde_solver import european_expiry_outcome
 from quantark.asset.equity.engine.settlement_support import (
+    at_exercise_instant,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -60,8 +62,6 @@ class HestonPDESolver(BaseEngine):
         if not isinstance(product, EuropeanVanillaOption):
             raise PricingError("HestonPDESolver supports EuropeanVanillaOption only")
         T = float(product.get_maturity(env))
-        # TODO(dated-expiry): no T = 0 settled value on this route (the numeric twin at maturity 0.0 is refused
-        # too); kept refusing -- docs/superpowers/specs/2026-10-09-dated-expiry-settles-evidence/REPORT.md
         if T <= 0:
             raise ValidationError("maturity must be positive")
         unit = price_european_heston_pde(
@@ -89,6 +89,10 @@ class HestonPDESolver(BaseEngine):
         if fixed_pv is not None:
             return fixed_pv
         timing = resolve_terminal_timing(product, pricing_env)
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        if (isinstance(product, EuropeanVanillaOption)
+                and at_exercise_instant(float(product.get_maturity(pricing_env)))):
+            return european_expiry_outcome(product, pricing_env, lifecycle_state)    # settled before the model runs
         return (
             self._price(product, pricing_env) * timing.delay_df
             + pending_receivable_pv(lifecycle_state, pricing_env)
@@ -110,6 +114,8 @@ class HestonPDESolver(BaseEngine):
             return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
         timing = resolve_terminal_timing(product, pricing_env)
         T = float(product.get_maturity(pricing_env))
+        if at_exercise_instant(T):
+            return european_expiry_outcome(product, pricing_env, lifecycle_state, greeks=True)
         if T <= 0:
             raise ValidationError("maturity must be positive")
         bump = self.params.get_effective_bump_config()

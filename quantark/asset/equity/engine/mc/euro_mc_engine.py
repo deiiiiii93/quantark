@@ -9,6 +9,7 @@ import numpy as np
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
+    expiry_terminal_value,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -178,10 +179,7 @@ class EuropeanMCEngine(BaseEngine):
         self._validate_inputs(S, K, T, r, q, sigma)
 
         if T < 1e-10:
-            return (
-                product.get_payoff(S) * timing.delay_df
-                + pending_receivable_pv(lifecycle_state, pricing_env)
-            )
+            return expiry_terminal_value(product, pricing_env, timing, lifecycle_state)
 
         term = build_mc_term_inputs(
             pricing_env, ref_strike=K, maturity=T,

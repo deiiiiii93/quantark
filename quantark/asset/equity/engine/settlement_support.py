@@ -23,7 +23,7 @@ from quantark.util.calendar import (
     calculate_year_fraction,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import is_close, is_zero
 
 from .capabilities import SettlementSupport
 
@@ -477,6 +477,28 @@ def terminal_lifecycle_pv(
             "realized cashflow"
         )
     return pending_receivable_pv(lifecycle_state, pricing_env)
+
+
+def at_exercise_instant(maturity: float) -> bool:
+    """Whether a ``get_maturity`` reading is the exercise instant itself: 0.0 (within ``Tolerance.ZERO``), not past
+    it. A dated contract valued after its exercise raises in ``get_maturity`` before this is asked."""
+    return maturity >= 0.0 and is_zero(maturity)
+
+
+def expiry_terminal_value(
+    product,
+    pricing_env: "PricingEnvironment",
+    timing: ResolvedPaymentTiming,
+    lifecycle_state: Optional["EquityOptionLifecycleState"] = None,
+) -> float:
+    """A terminal-payoff contract at its exercise instant (T = 0): ``product.get_payoff`` at today's spot x the
+    terminal payment's delay discount, plus any pending receivable. The Black-Scholes analytical and MC European
+    engines' expiry value; the vol-model European routes settle on it before their model runs (W9, ruling
+    2026-10-10)."""
+    return (
+        product.get_payoff(pricing_env.spot) * timing.delay_df
+        + pending_receivable_pv(lifecycle_state, pricing_env)
+    )
 
 
 # a flat curve reproduces exp(-r L) bitwise; the tolerance only absorbs curve interpolation

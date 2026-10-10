@@ -15,7 +15,9 @@ import numpy as np
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
+from quantark.asset.equity.engine.mc.barrier_option_mc_engine import barrier_expiry_value
 from quantark.asset.equity.engine.settlement_support import (
+    at_exercise_instant,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -156,6 +158,16 @@ def _finish_price(
     )
 
 
+def _settled_at_exercise(engine, product, env, lifecycle_state) -> float:
+    """At the exercise instant the model has no effect: the Black-Scholes barrier MC engine's expiry value (decided at
+    the spot, times the terminal payment discount), plus any pending receivable (W9, ruling 2026-10-10)."""
+    engine._last_std_error = 0.0
+    return (
+        barrier_expiry_value(product, env.spot, resolve_terminal_timing(product, env).payment_df)
+        + pending_receivable_pv(lifecycle_state, env)
+    )
+
+
 class _StdErrMixin:
     """Records the MC standard error of the last pricing run.
 
@@ -201,9 +213,9 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
             self._last_std_error = 0.0
             return (remaining_replication(product).price(env)
                     + pending_receivable_pv(lifecycle_state, env))
-        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
-        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
+        if at_exercise_instant(T):
+            return _settled_at_exercise(self, product, env, lifecycle_state)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
@@ -264,9 +276,9 @@ class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
         if fixed_pv is not None:
             self._last_std_error = 0.0
             return fixed_pv
-        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
-        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
+        if at_exercise_instant(T):
+            return _settled_at_exercise(self, product, env, lifecycle_state)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
@@ -316,9 +328,9 @@ class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
         if fixed_pv is not None:
             self._last_std_error = 0.0
             return fixed_pv
-        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
-        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
+        if at_exercise_instant(T):
+            return _settled_at_exercise(self, product, env, lifecycle_state)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)

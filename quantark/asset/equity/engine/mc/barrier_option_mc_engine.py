@@ -450,13 +450,7 @@ class BarrierOptionMCEngine(BaseEngine):
     def _price_expiry_payoff(
         self, product: BarrierOption, spot: float, r: float, T: float
     ) -> float:
-        hit = product.is_barrier_hit(spot)
-        payoff = product.get_payoff(spot) * product.participation_rate
-        if product.is_knock_out:
-            value = product.rebate if hit else payoff
-        else:
-            value = payoff if hit else product.rebate
-        return value * self._terminal_df
+        return barrier_expiry_value(product, spot, self._terminal_df)
 
     def _expiry_payoffs(
         self, product: BarrierOption, terminal_prices: np.ndarray
@@ -858,3 +852,17 @@ class BarrierOptionMCEngine(BaseEngine):
             f"BarrierOptionMCEngine(method={self.method.name}, "
             f"brownian_bridge={self.use_brownian_bridge})"
         )
+
+
+def barrier_expiry_value(product: BarrierOption, spot: float, terminal_df: float) -> float:
+    """A barrier option at its exercise instant (T = 0): decided at ``spot`` alone -- a knock-out hit there pays its
+    rebate, else the participating payoff; a knock-in hit there pays the participating payoff, else its rebate --
+    times the terminal payment discount ``terminal_df``. This engine's expiry value; the vol-model barrier MC routes
+    settle on it before their model runs (W9, ruling 2026-10-10)."""
+    hit = product.is_barrier_hit(spot)
+    payoff = product.get_payoff(spot) * product.participation_rate
+    if product.is_knock_out:
+        value = product.rebate if hit else payoff
+    else:
+        value = payoff if hit else product.rebate
+    return value * terminal_df

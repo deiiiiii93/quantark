@@ -41,6 +41,8 @@ from quantark.asset.equity.engine.mc import (
     HestonBarrierMCEngine,
     HestonMCEngine,
     HestonPhoenixMCEngine,
+    HestonSLVBarrierMCEngine,
+    HestonSLVMCEngine,
     HestonSnowballMCEngine,
     LocalVolBarrierMCEngine,
     LocalVolMCEngine,
@@ -61,6 +63,8 @@ from quantark.asset.equity.engine.pde import (
     HestonBarrierPDESolver,
     HestonPDESolver,
     HestonPhoenixPDESolver,
+    HestonSLVBarrierPDESolver,
+    HestonSLVPDESolver,
     HestonSnowballPDESolver,
     LocalVolBarrierPDESolver,
     LocalVolPDESolver,
@@ -105,6 +109,7 @@ from quantark.asset.equity.product.option import (
 )
 from quantark.asset.equity.product.option.asian_option import AsianObservationRecord, AsianOption
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, GridVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import (
@@ -121,6 +126,7 @@ from quantark.util.enum import (
 from quantark.util.enum.option_enums import ObservationAggregation, PostKOScheduleMode
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
+from quantark.volmodels.slv.leverage import LeverageSurface
 
 #: the valuation instant == the exercise date; the contract started a year (365 days) earlier
 VALUATION = datetime(2026, 1, 5)
@@ -147,7 +153,8 @@ def env(spot: float, valuation: datetime = VALUATION, grid: bool = False) -> Pri
 
 
 def env_for(engine_name: str, spot: float, valuation: datetime = VALUATION) -> PricingEnvironment:
-    return env(spot, valuation, grid=engine_name.startswith("lv_"))
+    """The local-vol routes and the SLV MC European (its Dupire leg) read the market IV grid."""
+    return env(spot, valuation, grid=engine_name.startswith(("lv_", "slv_mc")))
 
 
 def _age(product, years: float = 1.0):
@@ -174,6 +181,9 @@ def _mc():
 #: a Heston model for the vol-model routes (the settled value cannot depend on it)
 HESTON = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.3, rho=-0.5)
 _ADI = dict(n_x=64, n_v=16, n_t=16)
+#: a flat (unit) leverage for the SLV routes that consume a calibrated one
+SLV_LEVERAGE = LeverageSurface(time_grid=np.linspace(0.0, 1.0, 6), strike_grid=np.array([40.0, 100.0, 250.0]),
+                               leverage_grid=np.ones((6, 3)))
 
 
 # -- vanillas ------------------------------------------------------------------------------------------------------
@@ -192,7 +202,9 @@ EUROPEAN = Family(
      ("pde", lambda: EuropeanPDESolver(PDEParams())), ("quad", lambda: EuropeanQuadEngine()),
      ("heston_analytical", lambda: HestonAnalyticalEngine(HESTON)), ("lv_mc", lambda: LocalVolMCEngine(params=_mc())),
      ("lv_pde", lambda: LocalVolPDESolver()), ("heston_mc", lambda: HestonMCEngine(HESTON, params=_mc())),
-     ("heston_pde", lambda: HestonPDESolver(HESTON, **_ADI))))
+     ("heston_pde", lambda: HestonPDESolver(HESTON, **_ADI)),
+     ("slv_mc", lambda: HestonSLVMCEngine(HESTON, params=_mc())),
+     ("slv_pde", lambda: HestonSLVPDESolver(HESTON, SLV_LEVERAGE, **_ADI))))
 
 AMERICAN = Family(
     "american_put", _vanilla(AmericanOption, OptionType.PUT), lambda s: max(100.0 - s, 0.0), (90.0, 110.0),
@@ -245,7 +257,9 @@ BARRIER = Family(
      ("pde", lambda: BarrierPDESolver(PDEParams())), ("quad", lambda: BarrierQuadEngine()),
      ("lv_mc", lambda: LocalVolBarrierMCEngine(params=_mc())), ("lv_pde", lambda: LocalVolBarrierPDESolver()),
      ("heston_mc", lambda: HestonBarrierMCEngine(HESTON, params=_mc())),
-     ("heston_pde", lambda: HestonBarrierPDESolver(HESTON, **_ADI))))
+     ("heston_pde", lambda: HestonBarrierPDESolver(HESTON, **_ADI)),
+     ("slv_mc", lambda: HestonSLVBarrierMCEngine(HESTON, SLV_LEVERAGE, params=_mc())),
+     ("slv_pde", lambda: HestonSLVBarrierPDESolver(HESTON, SLV_LEVERAGE, **_ADI))))
 
 
 def _double_barrier(form):
@@ -444,13 +458,9 @@ def price(family: Family, name: str, engine_factory, form: str, spot: float,
         return float(engine_factory().price(family.build(form), env_for(name, spot, valuation)))
 
 
-#: Routes that price NEITHER form at maturity 0.0, kept refusing on both (``TODO(dated-expiry)`` at each site):
-#: (family, engine) -> why
+#: Routes that price NEITHER form at maturity 0.0, kept refusing on both: (family, engine) -> why. The vol-model
+#: European and barrier routes left this table in W9 (user ruling 2026-10-10: they settle at T = 0).
 REFUSING: Dict[Tuple[str, str], str] = {
-    **{("european_call", e): "vol-model European: 'maturity must be positive'"
-       for e in ("heston_analytical", "lv_mc", "heston_mc", "heston_pde")},
-    **{("barrier_up_out_call", e): "vol-model barrier: the time grid collapses ('t_grid must be strictly increasing')"
-       for e in ("lv_mc", "heston_mc", "heston_pde")},
     ("phoenix", "heston_pde"): "HestonPhoenixPDESolver refuses memory coupons at any maturity (pre-existing)",
 }
 
@@ -551,3 +561,127 @@ def test_an_instant_later_on_the_exercise_date_is_after_it():
     with pytest.raises(ValidationError):
         price(EUROPEAN, "analytical_bs", BlackScholesEngine, "dated", 110.0,
               valuation=VALUATION + timedelta(hours=15))
+
+
+# -- W9: the vol-model routes settle on the exercise date (user ruling 2026-10-10) -----------------------------------
+# At T = 0 the vol model has no effect on the price: each vol-model European / barrier route short-circuits, before
+# its model runs, to the expiry code of its Black-Scholes counterpart of the same method (analytical / MC / PDE). Each
+# route is checked against that counterpart in both forms, on the products and spots below: in / at / beyond the
+# money and the barrier, a knock-in fresh and carried as triggered, expiry monitoring and a two-day settlement lag.
+
+_LAG2D = SettlementConvention(lag=2 / 365.0, lag_unit=SettlementLagUnit.YEAR_FRACTION)
+
+
+def _barrier_variant(barrier_type, option_type, barrier, observation=ObservationType.CONTINUOUS, carried=False,
+                     **extra):
+    def build(form):
+        kw = dict(strike=100.0, option_type=option_type, barrier=barrier, barrier_type=barrier_type, rebate=5.0,
+                  observation_type=observation, **extra)
+        product = (BarrierOption(exercise_date=VALUATION, initial_date=INITIAL, **kw) if form == "dated"
+                   else _age(BarrierOption(maturity=1.0, **kw)))
+        if carried:     # a knock-in carried into the valuation as triggered (spec 2026-10-07 R4)
+            product._otc_lifecycle_knocked_in = True
+        return product
+    return build
+
+
+VOL_EUROPEAN_PRODUCTS = (
+    ("call", _vanilla(EuropeanVanillaOption, OptionType.CALL), (110.0, 90.0, 100.0)),
+    ("put", _vanilla(EuropeanVanillaOption, OptionType.PUT), (90.0, 110.0)),
+    ("call_lag2d", _vanilla(EuropeanVanillaOption, OptionType.CALL, settlement_convention=_LAG2D), (110.0,)),
+)
+
+VOL_BARRIER_PRODUCTS = (
+    ("up_out_call", _barrier_variant(BarrierType.UP_OUT, OptionType.CALL, 130.0), (110.0, 90.0, 130.0, 135.0)),
+    ("up_in_call", _barrier_variant(BarrierType.UP_IN, OptionType.CALL, 130.0), (110.0, 130.0, 135.0)),
+    ("up_in_call_knocked_in", _barrier_variant(BarrierType.UP_IN, OptionType.CALL, 130.0, carried=True),
+     (110.0, 135.0)),
+    ("down_out_put", _barrier_variant(BarrierType.DOWN_OUT, OptionType.PUT, 80.0), (90.0, 110.0, 80.0, 75.0)),
+    ("up_out_call_expiry", _barrier_variant(BarrierType.UP_OUT, OptionType.CALL, 130.0, ObservationType.EXPIRY),
+     (110.0, 135.0)),
+    ("up_out_call_lag2d", _barrier_variant(BarrierType.UP_OUT, OptionType.CALL, 130.0, settlement_convention=_LAG2D),
+     (110.0, 135.0)),
+)
+
+#: (route, the vol-model engine, its Black-Scholes counterpart, the products it routes)
+VOL_ROUTES = (
+    ("heston_analytical", lambda: HestonAnalyticalEngine(HESTON), BlackScholesEngine, VOL_EUROPEAN_PRODUCTS),
+    ("heston_mc", lambda: HestonMCEngine(HESTON, params=_mc()), lambda: EuropeanMCEngine(params=_mc()),
+     VOL_EUROPEAN_PRODUCTS),
+    ("lv_mc", lambda: LocalVolMCEngine(params=_mc()), lambda: EuropeanMCEngine(params=_mc()), VOL_EUROPEAN_PRODUCTS),
+    ("slv_mc", lambda: HestonSLVMCEngine(HESTON, params=_mc()), lambda: EuropeanMCEngine(params=_mc()),
+     VOL_EUROPEAN_PRODUCTS),
+    ("heston_pde", lambda: HestonPDESolver(HESTON, **_ADI), lambda: EuropeanPDESolver(PDEParams()),
+     VOL_EUROPEAN_PRODUCTS),
+    ("slv_pde", lambda: HestonSLVPDESolver(HESTON, SLV_LEVERAGE, **_ADI), lambda: EuropeanPDESolver(PDEParams()),
+     VOL_EUROPEAN_PRODUCTS),
+    ("lv_barrier_mc", lambda: LocalVolBarrierMCEngine(params=_mc()), lambda: BarrierOptionMCEngine(params=_mc()),
+     VOL_BARRIER_PRODUCTS),
+    ("heston_barrier_mc", lambda: HestonBarrierMCEngine(HESTON, params=_mc()),
+     lambda: BarrierOptionMCEngine(params=_mc()), VOL_BARRIER_PRODUCTS),
+    ("slv_barrier_mc", lambda: HestonSLVBarrierMCEngine(HESTON, SLV_LEVERAGE, params=_mc()),
+     lambda: BarrierOptionMCEngine(params=_mc()), VOL_BARRIER_PRODUCTS),
+    ("heston_barrier_pde", lambda: HestonBarrierPDESolver(HESTON, **_ADI), lambda: BarrierPDESolver(PDEParams()),
+     VOL_BARRIER_PRODUCTS),
+    ("slv_barrier_pde", lambda: HestonSLVBarrierPDESolver(HESTON, SLV_LEVERAGE, **_ADI),
+     lambda: BarrierPDESolver(PDEParams()), VOL_BARRIER_PRODUCTS),
+)
+
+VOL_CASES = [(route, vol, bsm, kind, build, spot) for route, vol, bsm, products in VOL_ROUTES
+             for kind, build, spots in products for spot in spots]
+_VOL_IDS = [f"{route}-{kind}-{spot:g}" for route, _, _, kind, _, spot in VOL_CASES]
+
+
+def _vol_env(spot: float, valuation: datetime = VALUATION) -> PricingEnvironment:
+    """The flat market IV grid for every engine of this section (the local-vol legs read it; nothing else does)."""
+    return env(spot, valuation, grid=True)
+
+
+def _quiet(fn):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return fn()
+
+
+@pytest.mark.parametrize("route,vol,bsm,kind,build,spot", VOL_CASES, ids=_VOL_IDS)
+def test_vol_model_route_on_its_exercise_date_prices_its_black_scholes_counterparts_settled_value(
+        route, vol, bsm, kind, build, spot):
+    """The dated contract on its exercise date == the numeric twin at maturity 0.0 == the Black-Scholes engine of
+    the same method on the same contract (which never reads the vol model at T = 0)."""
+    dated = _quiet(lambda: float(vol().price(build("dated"), _vol_env(spot))))
+    numeric = _quiet(lambda: float(vol().price(build("numeric"), _vol_env(spot))))
+    bsm_dated = _quiet(lambda: float(bsm().price(build("dated"), _vol_env(spot))))
+    bsm_numeric = _quiet(lambda: float(bsm().price(build("numeric"), _vol_env(spot))))
+    assert dated == pytest.approx(numeric, rel=1e-12, abs=1e-12)
+    assert dated == pytest.approx(bsm_dated, rel=1e-12, abs=1e-12)
+    assert numeric == pytest.approx(bsm_numeric, rel=1e-12, abs=1e-12)
+
+
+@pytest.mark.parametrize("route,vol,bsm,kind,build,spot", VOL_CASES, ids=_VOL_IDS)
+def test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts(
+        route, vol, bsm, kind, build, spot):
+    """``calculate_greeks`` on the exercise date: the counterpart's keys (price, delta, gamma) and values, in both
+    forms."""
+    dated = _quiet(lambda: vol().calculate_greeks(build("dated"), _vol_env(spot)))
+    numeric = _quiet(lambda: vol().calculate_greeks(build("numeric"), _vol_env(spot)))
+    reference = _quiet(lambda: bsm().calculate_greeks(build("dated"), _vol_env(spot)))
+    assert set(dated) == set(numeric) == set(reference) == {"price", "delta", "gamma"}
+    for key in reference:
+        assert float(dated[key]) == pytest.approx(float(numeric[key]), rel=1e-12, abs=1e-12), key
+        assert float(dated[key]) == pytest.approx(float(reference[key]), rel=1e-12, abs=1e-12), key
+
+
+_VOL_FIRST = [(route, vol, products[0][1]) for route, vol, _, products in VOL_ROUTES]
+
+
+@pytest.mark.parametrize("route,vol,build", _VOL_FIRST, ids=[r for r, _, _ in _VOL_FIRST])
+def test_vol_model_route_still_refuses_a_valuation_after_the_exercise(route, vol, build):
+    """Strictly after the exercise date, and later on the exercise day than the booked exercise instant (ruling Q4:
+    the same instant), the dated contract is refused; so is a numeric contract aged past its maturity."""
+    for valuation in (AFTER, VALUATION + timedelta(hours=15)):
+        with pytest.raises(ValidationError):
+            _quiet(lambda: vol().price(build("dated"), _vol_env(110.0, valuation)))
+    product = build("numeric")
+    product.maturity = -1e-6
+    with pytest.raises(ValidationError):
+        _quiet(lambda: vol().price(product, _vol_env(110.0)))

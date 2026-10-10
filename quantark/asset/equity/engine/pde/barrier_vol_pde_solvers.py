@@ -16,10 +16,11 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver
+from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver, barrier_expiry_outcome
 from quantark.asset.equity.engine.pde.core.adapters.local_vol import LocalVolBarrierAdapter
 from quantark.asset.equity.engine.pde.local_vol_surface import LocalVolSurfaceMixin
 from quantark.asset.equity.engine.settlement_support import (
+    at_exercise_instant,
     resolve_terminal_timing,
 )
 from quantark.asset.equity.param import PDEParams
@@ -171,6 +172,23 @@ class _Heston2DBarrierBase(BaseEngine):
         super().__init__(PDEParams())
         self.n_x, self.n_v, self.n_t, self.scheme = int(n_x), int(n_v), int(n_t), scheme
 
+    def _admit(self, product, env) -> float:
+        """The route's refusals (product, ended schedule, delayed first-hit cash), then the terminal settlement
+        scale."""
+        name = type(self).__name__
+        _check(name, product)
+        _refuse_ended(name, product)
+        return _settlement_scale(self, product, env)
+
+    def calculate_greeks(self, product, pricing_env, *, lifecycle_state=None):
+        """At the exercise instant, the Black-Scholes barrier PDE route's greeks of the settled value (price, the
+        payoff slope, gamma 0; W9, ruling 2026-10-10); otherwise bump-and-reprice."""
+        if lifecycle_state is None:
+            self._admit(product, pricing_env)
+            if at_exercise_instant(float(product.get_maturity(pricing_env))):
+                return barrier_expiry_outcome(product, pricing_env, greeks=True)
+        return super().calculate_greeks(product, pricing_env, lifecycle_state=lifecycle_state)
+
     def _observe_taus(self, product, T):
         continuous, dates = _obs_dates(product, T)
         return continuous, (None if continuous else [T - d for d in dates])
@@ -195,14 +213,12 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
 
-        _check("HestonBarrierPDESolver", product)
-        _refuse_ended("HestonBarrierPDESolver", product)
-        settlement_scale = _settlement_scale(self, product, env)
+        settlement_scale = self._admit(product, env)
         if self.model_params.sigma < _SIGMA_MIN:
             return self._deterministic_limit(product, env)
-        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
-        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env))
+        if at_exercise_instant(T):
+            return barrier_expiry_outcome(product, env)     # settled before the model runs (W9, ruling 2026-10-10)
         t_grid = np.linspace(0.0, T, self.n_t + 1)
         market = TermMarketContext.from_env(
             env, t_grid, ref_strike=None
@@ -243,14 +259,12 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
 
-        _check("HestonSLVBarrierPDESolver", product)
-        _refuse_ended("HestonSLVBarrierPDESolver", product)
-        settlement_scale = _settlement_scale(self, product, env)
+        settlement_scale = self._admit(product, env)
         if self.model_params.sigma < _SIGMA_MIN:
             return self._deterministic_limit(product, env, self.leverage_surface)
-        # TODO(dated-expiry): no T = 0 settled value on this route -- at maturity 0.0 (dated on its exercise date or
-        # numeric) the time grid collapses and term sampling refuses it ("t_grid must be strictly increasing")
         T = float(product.get_maturity(env))
+        if at_exercise_instant(T):
+            return barrier_expiry_outcome(product, env)     # settled before the model runs (W9, ruling 2026-10-10)
         t_grid = np.linspace(0.0, T, self.n_t + 1)
         market = TermMarketContext.from_env(
             env, t_grid, ref_strike=None

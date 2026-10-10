@@ -404,3 +404,16 @@ class BarrierPDESolver(BasePDESolver):
 
     def __repr__(self):
         return "BarrierPDESolver()"
+
+
+def barrier_expiry_outcome(product, pricing_env, greeks: bool = False):
+    """This route on a barrier option at its exercise instant: its maturity outcome (the payoff at the spot, then the
+    decision there -- knocked out, knocked in or not -- times the terminal payment discount; delta the slope, gamma
+    0), decided before any grid or vol is read. The vol-model 2D barrier PDE routes settle on it before their model
+    runs (W9, ruling 2026-10-10)."""
+    from quantark.asset.equity.param import PDEParams
+
+    solver = BarrierPDESolver(PDEParams())
+    if greeks:
+        return solver.calculate_greeks(product, pricing_env)
+    return solver.price(product, pricing_env)

@@ -8,6 +8,7 @@ from scipy import stats
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
+    expiry_terminal_value,
     pending_receivable_pv,
     resolve_terminal_timing,
     terminal_lifecycle_pv,
@@ -96,10 +97,7 @@ class BlackScholesEngine(BaseEngine):
 
         # Handle edge cases
         if T < 1e-10:  # Option has expired
-            return (
-                product.get_payoff(S) * timing.delay_df
-                + pending_receivable_pv(lifecycle_state, pricing_env)
-            )
+            return expiry_terminal_value(product, pricing_env, timing, lifecycle_state)
 
         # Calculate d1 and d2 with numerical stability checks
         try:
