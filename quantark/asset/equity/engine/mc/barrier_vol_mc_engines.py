@@ -3,7 +3,8 @@
 Thin wrappers over the ``quantark.volmodels`` barrier MC kernels: they resolve the per-step
 forward rate/carry from the curves, resolve continuous vs discrete monitoring, price the
 ``BarrierOption``, and apply ``participation_rate`` once. A dated schedule is resolved against the
-environment (W12); per-observation varying barriers/payoffs are out of scope for v1 and rejected.
+environment (W12); a discrete schedule is priced at its records' common level and (knock-out) payoff, first-hit
+only (W18); per-observation varying barriers/payoffs are out of scope for v1 and rejected.
 Mirrors the European ``LocalVolMCEngine`` / ``HestonMCEngine`` / ``HestonSLVMCEngine`` wrappers.
 """
 from __future__ import annotations
@@ -16,7 +17,11 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
 from quantark.asset.equity.engine.mc.barrier_option_mc_engine import barrier_expiry_value
-from quantark.asset.equity.engine.vol_barrier_schedule import discrete_observation_times
+from quantark.asset.equity.engine.vol_barrier_schedule import (
+    discrete_observation_times,
+    refuse_non_first_hit,
+    schedule_barrier_terms,
+)
 from quantark.asset.equity.engine.settlement_support import (
     at_exercise_instant,
     pending_receivable_pv,
@@ -61,6 +66,7 @@ def _check_barrier(engine_name: str, product) -> None:
     if not isinstance(product, BarrierOption):
         raise PricingError(f"{engine_name} supports BarrierOption only")
     _reject_nonuniform_schedule(product)
+    refuse_non_first_hit(engine_name, product)
 
 
 def _refuse_ended(engine_name: str, product, lifecycle_state=None) -> None:
@@ -93,8 +99,10 @@ def _monitoring(product: BarrierOption, t_grid: np.ndarray, env: PricingEnvironm
 
 
 def _barrier_kwargs(product: BarrierOption, continuous, observe_idx):
-    return dict(barrier=float(product.barrier), is_up=product.is_up_barrier, is_out=product.is_knock_out,
-                rebate=float(product.rebate), pay_at_hit=bool(product.pay_at_hit),
+    """The kernel's barrier terms: a discrete schedule's common level and (knock-out) payoff (W18)."""
+    barrier, rebate = schedule_barrier_terms(product)
+    return dict(barrier=barrier, is_up=product.is_up_barrier, is_out=product.is_knock_out,
+                rebate=rebate, pay_at_hit=bool(product.pay_at_hit),
                 continuous=continuous, observe_idx=observe_idx,
                 participation=float(product.participation_rate))
 

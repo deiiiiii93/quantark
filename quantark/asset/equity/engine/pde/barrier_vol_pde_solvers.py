@@ -3,8 +3,9 @@
 ``LocalVolBarrierPDESolver`` marches on the shared 1D core (spec 3C §5.3). The Heston and SLV
 solvers are thin wrappers over the ``quantark.volmodels`` 2D ADI barrier kernels, pricing the
 existing ``BarrierOption``: continuous monitoring by per-step injection, discrete monitoring at the
-observation nodes (a dated schedule resolved against the environment, W12); ``participation_rate`` is
-applied once; a per-observation varying ``observation_schedule`` is rejected (v1). Below the kernels'
+observation nodes (a dated schedule resolved against the environment, W12; priced at its records' common level and
+knock-out payoff, first-hit only, W18); ``participation_rate`` is applied once; a per-observation varying
+``observation_schedule`` is rejected (v1). Below the kernels'
 vol-of-vol floor the variance is deterministic and both solvers march the 1D local-vol limit
 sigma_loc(S, t) = L(S, t) sqrt(v(t)) on the core instead. Deterministic — no MC inside PDE.
 """
@@ -19,7 +20,11 @@ from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver, barrier_expiry_outcome
 from quantark.asset.equity.engine.pde.core.adapters.local_vol import LocalVolBarrierAdapter
 from quantark.asset.equity.engine.pde.local_vol_surface import LocalVolSurfaceMixin
-from quantark.asset.equity.engine.vol_barrier_schedule import discrete_observation_times
+from quantark.asset.equity.engine.vol_barrier_schedule import (
+    discrete_observation_times,
+    refuse_non_first_hit,
+    schedule_barrier_terms,
+)
 from quantark.asset.equity.engine.settlement_support import (
     at_exercise_instant,
     resolve_terminal_timing,
@@ -49,11 +54,14 @@ def _check(name, product):
         barriers = {(r.barrier, r.upper_barrier, r.lower_barrier) for r in recs}
         if len(barriers) > 1 or len({r.payoff for r in recs}) > 1:
             raise ValidationError("per-observation ObservationSchedule (varying barriers/payoffs) is out of scope for v1")
+    refuse_non_first_hit(name, product)
 
 
 def _bkw(product):
-    """Barrier kwargs shared by both leg pricings (rebate passed separately via the closure)."""
-    return dict(barrier=float(product.barrier), is_up=product.is_up_barrier, is_out=product.is_knock_out,
+    """Barrier kwargs shared by both leg pricings (rebate passed separately via the closure): a discrete schedule's
+    common record level (W18)."""
+    barrier, _ = schedule_barrier_terms(product)
+    return dict(barrier=barrier, is_up=product.is_up_barrier, is_out=product.is_knock_out,
                 pay_at_hit=bool(product.pay_at_hit))
 
 
@@ -71,9 +79,10 @@ def _obs_dates(product, T, env):
 def _apply_participation(product, price_of_rebate):
     """Apply participation to the OPTION leg only (never the rebate leg), by superposition:
     V = V(full rebate) + (participation - 1) * V(rebate=0). Reduces to participation*V when
-    rebate == 0, and to V when participation == 1 -- one PDE solve in the common cases."""
+    rebate == 0, and to V when participation == 1 -- one PDE solve in the common cases. The rebate is a discrete
+    schedule's common (knock-out) record payoff (W18)."""
     p = float(product.participation_rate)
-    reb = float(product.rebate)
+    _, reb = schedule_barrier_terms(product)
     if p == 1.0 or reb == 0.0:
         return p * price_of_rebate(reb)
     return price_of_rebate(reb) + (p - 1.0) * price_of_rebate(0.0)
