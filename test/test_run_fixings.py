@@ -640,3 +640,75 @@ def test_settle_hook_runs_at_register_and_on_every_clock_move():
     assert rec.advance(pf).product_events == ()
     F.move(pf, 1)
     assert rec.advance(pf).product_events == (("keep", 2.0, ("SETTLED", F.START + timedelta(days=1))),)
+
+
+# ---------------------------------------------------------------- guard: W4b's live-first step_fixings (final review)
+def _step_fixings_before_w4b(product, env, *, prev_date, prev_spot, run_fills, live_spots=None):
+    """``step_fixings`` as W6 shipped it (before W4b's Task 9 fix round 1, f7adea43): ONE probe of the whole listing at
+    ``prev_spot``, then each live entry re-decided at its first-live spot."""
+    from quantark.util.run_fixings import at_spot
+    if run_fills:
+        product = product.with_fixings_recorded(dict(run_fills))
+    new_fills = dict(product.missing_fixing_fills(at_spot(env, prev_spot)))
+    by_spot = {}
+    for index in new_fills:
+        if live_spots and index in live_spots:
+            by_spot.setdefault(float(live_spots[index]), []).append(index)
+    for spot, indices in by_spot.items():
+        at_live = product.missing_fixing_fills(at_spot(env, spot))
+        for index in indices:
+            new_fills[index] = at_live[index]
+    return (product.with_fixings_recorded(new_fills) if new_fills else product), new_fills
+
+
+def test_w6_participants_record_what_the_pre_w4b_step_recorded_when_weekend_rows_quote_another_spot(monkeypatch):
+    """Final-review minor 4: W4b moved ``step_fixings`` to record live entries first, then probe the gaps (a TARN's
+    listing depends on earlier outcomes). On a BUSINESS_DAYS clock whose weekend rows quote a spot other than
+    Friday's (the case that motivated it), the equity range accrual, the Asian and the FX domestic / foreign / quanto
+    range accruals, dated and numeric, record exactly what the pre-W4b single probe + re-decide recorded, at every
+    step; the Friday fixings are recorded at Friday's spot on the Monday."""
+    import quantark.util.run_fixings as run_fixings_module
+    from quantark.util.calendar import CalendarType, DayCountConvention, calculate_year_fraction, create_calendar
+
+    cal = create_calendar(CalendarType.NONE, year_range=(2024, 2025))
+    kw = dict(day_count_convention=DayCountConvention.BUSINESS_DAYS, bus_days_in_year=252, calendar=cal)
+    yf = lambda d: calculate_year_fraction(F.START, d, DayCountConvention.BUSINESS_DAYS, 252, calendar=cal)  # noqa: E731
+    times = [yf(d) for d in F.fixing_dates()]
+    expiry = yf(F.START + timedelta(days=365))
+    asian_numeric = AsianOption(
+        strike=100.0, option_type=F.OptionType.CALL, asian_strike_type=F.AsianStrikeType.FIXED,
+        averaging_type=F.AveragingType.ARITHMETIC, maturity=1.0,
+        observation_records=[AsianObservationRecord(observation_time=t) for t in times])
+    books = {
+        "equity": (F.eq_book(F.ra_dated(), F.ra_numeric(times=times), F.asian_dated(), asian_numeric,
+                             env=F.eq_env(0, spot=105.0, **kw)), F.UNDERLYING, 105.0, 120.0),
+        "fx": (F.fx_book(F.fx_ra("domestic", "dated"), F.fx_ra("domestic", "numeric", times=times, maturity=expiry),
+                         F.fx_ra("foreign", "dated"), F.fx_ra("foreign", "numeric", times=times, maturity=expiry),
+                         env=F.fx_env(0, spot=1.25, **kw)), "EURUSD", 1.25, 1.35),
+        "quanto": (F.fx_book(F.fx_ra("quanto", "dated"), F.fx_ra("quanto", "numeric", times=times, maturity=expiry),
+                             env=F.fx_env(0, spot=1.25, quanto=True, **kw)), "EURUSD", 1.25, 1.35),
+    }
+    steps = []
+    real = run_fixings_module.step_fixings
+
+    def both(product, env, **step_kw):
+        got = real(product, env, **step_kw)
+        old = _step_fixings_before_w4b(product, env, **step_kw)
+        assert got[1] == old[1], (env.valuation_date, got[1], old[1])
+        assert got[0].open_fixings(env) == old[0].open_fixings(env)
+        steps.append((step_kw["prev_spot"], dict(step_kw.get("live_spots") or {}), got[1]))
+        return got
+
+    monkeypatch.setattr(run_fixings_module, "step_fixings", both)
+    for name, (pf, underlying, weekday, weekend) in books.items():
+        rec = RunFixingRecorder()
+        rec.register(pf)
+        for k in range(1, 26):
+            weekend_row = (F.START + timedelta(days=k)).weekday() >= 5
+            F.move(pf, k, weekend if weekend_row else weekday, underlying=underlying)
+            rec.advance(pf)
+        for pid, position in pf.positions.items():
+            outcome = weekday if isinstance(position.product, AsianOption) else True   # Friday's spot: in range
+            assert _rows(rec, pid) == [(0, outcome, weekday, False), (1, outcome, weekday, False)], (name, pid)
+    # the guard ran on the case it guards: live fixings decided at Friday's spot after a weekend at another spot
+    assert any(live and new and set(live.values()) != {prev} for prev, live, new in steps)

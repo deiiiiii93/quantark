@@ -164,8 +164,11 @@ class RunFixingRecorder:
     def register(self, portfolio) -> RunFixingDay: ...     # the run's first valuation
     def advance(self, portfolio) -> RunFixingDay: ...      # every later path instant, after the market is applied
 
-def step_fixings(product, env, *, prev_date, prev_spot, run_fills) -> Tuple[Any, Dict[int, Any]]: ...
-    # stateless core used by the recorder and by ProductReplay (§3.6)
+def step_fixings(product, env, *, prev_date, prev_spot, run_fills,
+                 live_spots=None) -> Tuple[Any, Dict[int, Any]]: ...
+    # stateless core used by the recorder and by ProductReplay (§3.6); live_spots: amendment below
+
+def settle_history(product, env) -> Any: ...   # optional product hook, amendment below
 
 @dataclass(frozen=True)
 class RecordedFixing:
@@ -182,6 +185,21 @@ class RunFixingDay:
     fixings: Tuple[RecordedFixing, ...]
     product_events: Tuple[Tuple[str, float, Any], ...] = ()   # (position_id, quantity, event): TARN/TARF cash (§6)
 ```
+
+**Amendment 2026-10-10 (as built in W4b Task 9 fix round 1, controller ruling; W6 participants byte-identical).**
+`step_fixings` takes `live_spots` (`{index: spot of the first instant the record was live}`, kept by the recorder
+with `update_live`). It records the LIVE entries first, in index order, each at its first-live spot (R3 / Ruling 4;
+consecutive indices sharing one spot in one `missing_fixing_fills` probe), and only then probes the recorded copy at
+`prev_spot` for the remaining (gap, R4) records. Before, it probed the whole listing at `prev_spot` and re-decided only
+the live entries, which is the same for W6's range accruals and Asians (their open records do not depend on earlier
+outcomes) but wrong for a TARN / TARF on a business-day clock whose weekend rows quote a spot other than Friday's (a
+redemption at Friday's spot kills later fixings). `settle_history(product, env)` calls the optional product hook
+`with_history_settled(env)` (W4b TARN / TARF: bank the recorded strictly past fixings and pay the cash whose pay time
+is strictly past, on a copy; a product without the hook is returned unchanged). The recorder calls it once at a
+position's registration, after the W5b fill (its events are not reported), and at every clock-moving `advance` right
+after the step's recording (its FIXING / PAYMENT events go to `RunFixingDay.product_events`); a same-date `advance`
+(Ruling 9) does not call it. `ProductReplay` does not settle product-held history and refuses a product with the hook
+(`ValidationError`, `TODO(tarn-replay)`).
 
 ### 3.2 Product protocol (extends W5b)
 
@@ -221,8 +239,8 @@ Implemented by: `RangeAccrualOption`, `AsianOption` (record schedules only; a le
   exactly the records dated `d_P` (live at P) and the records dated strictly between `d_P` and `d_P′` (R4). Records
   dated `d_P′` stay live at P′. **Amendment (user approved 2026-10-09):** a record that was live (t = 0) at more than
   one instant — a Friday fixing on a `BUSINESS_DAYS` clock with weekend path rows is t = 0 on Friday, Saturday and
-  Sunday — is recorded at the spot of the FIRST instant it was live (the last path day on or before its date, Friday),
-  not at `S_P` (Sunday). On calendar-day clocks a record is live at exactly one instant, so this is the rule above.
+  Sunday — is recorded at the spot of the FIRST instant it was live (Friday here; in general the first instant can fall after
+  the record's date, e.g. Thursday then Saturday rows), not at `S_P` (Sunday). On calendar-day clocks a record is live at exactly one instant, so this is the rule above.
 - **R4 Holidays and gaps (D5).** Path instants are whatever the path holds (business days, `W`/`M` equity backtest
   frequencies, sparse `DayPath`s, and every numeric `k/12` fixing on a daily path). A record dated strictly between two
   path instants was never live on the path; R3 records it at the spot of the PREVIOUS path instant, flags `gap=True`,
@@ -285,7 +303,10 @@ keeps the clock origin at the date the run values first, and the input portfolio
 `product = tracker.product_for_pricing(date)`; `step_fixings(product, env, prev_date=_last.date,
 prev_spot=_last.spot, run_fills=_run_fills)` computes `product.missing_fixing_fills(env with spot = prev_spot)` (the
 records that became history in the step), adds them to `_run_fills`, and returns
-`product.with_fixings_recorded(_run_fills)`. The second call on the same date (the replay calls `product_for_date`
+`product.with_fixings_recorded(_run_fills)`. (Amendment 2026-10-10, §3.1: as built, the replay also keeps `_live`
+(`update_live`) and passes it as `live_spots`, so `step_fixings` records the live records first at their first-live
+spot and then probes the gaps at `prev_spot`; it never calls `settle_history` and refuses a product carrying
+`with_history_settled`.) The second call on the same date (the replay calls `product_for_date`
 twice on its first date, `engine.py:409` and `:439`) records nothing new. The replay prices post-close; for the
 autocallables its tracker applies a record due today at today's close — that rule is the tracker's, not changed here;
 range accrual and Asian records follow R2/R3.
