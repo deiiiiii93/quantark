@@ -70,8 +70,8 @@ backtest and FX dynamic scenario.
   once its pay time is strictly past. A numeric pending `pay_time` of 0.0 and a dated pending `pay_date` equal to
   `as_of` are accepted. Moves: the price on a pay date gains the cash due that day, theta the day before a pay date
   gains it and theta on the pay date loses it (values in
-  `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`); inside runs, cash on a
-  path-aligned pay date is booked on the next path instant.
+  `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`); inside runs, cash is booked
+  once its pay date is past (on the next path instant).
 - FX TARN / TARF periods may share a fixing date or time (user decision OQ-4 b, 2026-10-10): `fixing_dates` /
   `fixing_times` must be non-decreasing instead of strictly increasing. Both MC engines simulate each distinct fixing
   time once and every period sharing it fixes at that spot; periods are accumulated in schedule order (a period after
@@ -92,12 +92,13 @@ backtest and FX dynamic scenario.
   Saturday fixings at Friday's spot (was a `KeyError`, a gap at the weekend spot, or a split shared-date refusal).
   W6's range accruals and Asians record exactly as before. `ProductReplay` refuses a TARN / TARF (`ValidationError`):
   it does not settle product-held history.
-- `FXBacktestEngine` books TARN / TARF cash: rows gain `paid_cash` (cumulative, quantity-scaled) and `pending_pv`;
-  `portfolio_value` and `final_value` include paid cash. A book without TARN / TARF is unchanged (cash columns 0.0).
+- `FXBacktestEngine` books TARN / TARF cash once its pay date is past (on the next path instant): rows gain
+  `paid_cash` (cumulative, quantity-scaled) and `pending_pv`; `portfolio_value` and `final_value` include paid cash.
+  A book without TARN / TARF is unchanged (cash columns 0.0).
 - `FXDynamicScenarioEngine` books TARN / TARF cash on a dated `DayPath` (determined cash moves to `paid_cash` /
-  `realized_cash` on its pay date; one `FIXING` lifecycle snapshot per banked fixing; `pending_receivable_pv` filled).
-  An undated `DayPath` with a TARN / TARF in the book raises `ValidationError` (user decision Q8 a). Books without
-  TARN / TARF are unchanged.
+  `realized_cash` once its pay date is past (on the next path instant); one `FIXING` lifecycle snapshot per banked
+  fixing; `pending_receivable_pv` filled). An undated `DayPath` with a TARN / TARF in the book raises
+  `ValidationError` (user decision Q8 a). Books without TARN / TARF are unchanged.
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be

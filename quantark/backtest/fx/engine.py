@@ -6,8 +6,8 @@ reprices each day, and neutralises spot delta with a linear FX spot hedge,
 tracking hedge P&L and transaction costs.
 
 TARN / TARF positions age with the run on the run-fixings recorder (their fixings recorded and banked, determined cash
-booked into ``paid_cash`` on its pay date); ``portfolio_value`` includes cumulative paid cash and each row carries the
-pending cash's PV (``pending_pv``).
+booked into ``paid_cash`` once its pay date is past (on the next path instant)); ``portfolio_value`` includes
+cumulative paid cash and each row carries the pending cash's PV (``pending_pv``).
 """
 from __future__ import annotations
 
@@ -63,7 +63,8 @@ class FXBacktestEngine:
 
         cum_hedge_pnl = 0.0
         cum_costs = 0.0
-        # TARN / TARF cash paid inside the run (spec 2026-10-09 fx-tarn 7.2): quantity-scaled, cumulative
+        # TARN / TARF cash paid inside the run (fx-tarn spec 7.2 / 7.3 as amended 2026-10-10: booked once its pay date
+        # is past, OQ-1 b): quantity-scaled, cumulative
         cum_paid = 0.0
         num_hedges = 0
         rows = []

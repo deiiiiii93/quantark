@@ -19,6 +19,7 @@ CHANGELOG `[Unreleased]` TARN bullets list the moved values. Every rule not name
 | **R24** | Under `BUSINESS_DAYS`, a valuation on a non-business day writes `as_of` as the preceding business day (the first date of the zero-time stretch); on a calendar clock it is the valuation date. | §3, §6, §7.2 |
 | **OQ-4 (b)** | Periods may share a fixing date or time. The MC engines simulate each distinct time once; periods run in schedule order; a later same-date period after a hit is dead (§6). A banked count (explicit, or derived from `as_of`) that splits a group of periods fixing on one calendar date is refused unless the state is redeemed or terminal. The default accrual derivation refuses any non-positive derived factor ("zero length"). Schedules are ascending, i.e. non-decreasing, not "ascending, unique". | §4.1, §4.2, §4.3, §5.4, §6 |
 | **R26 (b)** | A dated TARN may state `accrual_end_dates` (R27, R28): one end per fixing; ends strictly increasing; `fixing_dates[i] <= end <= pay_dates[i]`; requires `initial_date`; exclusive with `accrual_factors`; dated TARN only (the TARF has no accrual term). Default (`None`): each end is its fixing date, bitwise today's derivation. An end outside fixing..pay (OQ-5) stays refused; explicit start dates (OQ-6) are not added. | §1.2 (Q2), §4.2, §4.3, §5.4, §10 (D5, R2) |
+| **W6 §6** (run-fixings spec, user-approved; built in Tasks 9–11) | The general run-fixings recorder subsumes rev 2's TARN-only hook (`FxTargetRedemptionLifecycle`, not built): TARN / TARF implement its product protocol plus the optional `with_history_settled` hook; the FX runs read cash (`booked_cash`) and pending PV from `RunFixingDay`; FIXING snapshots and the Q8 refusal are kept. Run-day rules are W6's (t = 0 live; first-live spot; gaps at the previous instant's spot). | §7.2, §7.3 |
 
 Evidence, all run on `dcea77b6` in this worktree (`env PYTHONPATH=<wt>:<wt>/test <main venv>/bin/python <script>`):
 
@@ -404,80 +405,109 @@ once the contract is terminal, at `S = fx_env.spot` (Q3):
 
 M7 measures the consequence for every numeric FX product; M8 shows an undated path freezes dated products too.
 
-### 7.2 The hook: `FxTargetRedemptionLifecycle`
+### 7.2 Ageing on the run-fixings recorder (as built, Tasks 9–11)
 
-New module `quantark/asset/fx/lifecycle/target_redemption.py` (mirroring `quantark/asset/equity/lifecycle/`). It acts
-only on positions whose product is an `FxTargetRedemptionNote` or `FxTargetRedemptionForward`; every other position
-is left exactly as today (§9).
+*Amended 2026-10-10 (Task 12).* Rev 2 designed a TARN-only hook, `FxTargetRedemptionLifecycle` (a new
+`quantark/asset/fx/lifecycle/` with `register` / `advance` / `FxLifecycleDay`). It was **not built**: the run-fixings
+spec (`2026-10-09-run-fixings-design.md` §6, user-approved) decides that its general recorder subsumes it, and the TARN
+and TARF implement that recorder's product protocol instead. Run-day semantics (which spot a fixing is recorded at,
+gaps, the clock) are the run-fixings spec's §3.3 rules R1–R10; this section describes only what the TARN / TARF add.
 
-- **`register(portfolio)`** — called on the run's working copy before the baseline is valued. Per ageable position:
-  1. **Clock origin** = its pair environment's `valuation_date` at that moment (backtest: the first row's date,
-     after line 44; dynamic scenario: the environment's own date, before line 80). A numeric product's times are read
-     as years from this date — the date the run first values it, as the equity `FloatMaturityRoller` anchors a numeric
-     maturity at first sight (`float_roll.py:51-71`).
-  2. **Matured before the run** (W1 rule; `matured_before`, decided by TIME, R16, and banked by COUNT): the contract
-     is not terminal (not redeemed, and its banked count does not cover every fixing) **and** its last fixing is
-     strictly before the origin by resolved time (`is_history`; numeric: the last listed time; dated: the last fixing
-     date's resolved time, so a weekend last fixing on a `BUSINESS_DAYS` clock is live at the origin, not matured)
-     → one `MaturedBeforeRunWarning`; the position is removed from the working copy (value 0, no cash, no Greeks).
-     A terminal booking (§5.3) is not this case: it is kept and valued at PV(pending).
-  3. **Fixings before the run**: unbanked fixings strictly before the origin are banked at the origin's spot through
-     `record_passed_fixings`, with one `MissingFixingWarning` per position naming them (W5 rule). A fixing on the
-     origin date itself is banked at that spot **without** a warning: on the run's own dates the path's spot is the
-     realized fixing.
-  4. `PAYMENT` events produced by registration are **not** booked: that cash was paid on or before the baseline and
-     is neither in the baseline value nor in the run's P&L.
-- **`advance(portfolio, date) -> FxLifecycleDay`** — called each simulated day after the day's market is applied and
-  the environment carries `date`. Per ageable position, with `prev` its last clock date:
-  1. `date < prev` → `ValidationError` (a run's clock cannot go back).
-  2. Numeric: `dt = calculate_year_fraction(prev, date, env.day_count_convention, env.bus_days_in_year,
-     calendar=env.calendar)` (0.0 when equal); `time_shift(dt)` unless `is_zero(dt)`. The step uses the environment's
-     convention because that is how the dated twin's times are resolved; daily steps telescope to the direct year
-     fraction to ≤ 5e-16 (M10).
-  3. `record_passed_fixings(env)`: every fixing at or before `date` is banked at **that day's spot** (the run's
-     realized fixing), and a dated state's `fixings_banked` and `as_of` are brought up to date (`as_of` = `date`, or on a
-     `BUSINESS_DAYS` non-business `date` the preceding business day, R24; never after `date`).
-  4. The events appended in steps 2–3 are the day's: `paid_today += quantity × Σ PAYMENT.amount`.
-  5. `prev := date`.
+**Recorder (`quantark/util/run_fixings.py`, `RunFixingRecorder`).** A run calls `register(portfolio)` once on its
+working copy at the first valuation, then `advance(portfolio)` after every later path instant's market and
+`valuation_date` are applied. Each call returns a `RunFixingDay(date, fixings, product_events, pending_pv)`: the
+`RecordedFixing(position_id, index, label, outcome, spot, gap)` rows the step recorded, the `(position_id, quantity,
+event)` entries of every event a product appended in the step, and `Σ quantity × pending_pv(env)` over the positions
+exposing `pending_pv`. A position takes part when `participates(product)`: `has_run_fixings` is true and it has
+`missing_fixing_fills`, `with_fixings_recorded`, `with_time_elapsed` and `open_fixings`. Every other position is left
+exactly as it was (§9).
 
-  `FxLifecycleDay` carries `paid_cash` (quantity-scaled, today), `events` (position id, event) and
-  `pending_pv` (Σ quantity × PV of each position's pending at the day's environment).
-- **Calendar gaps.** A fixing whose date (or time) falls between two path days is banked on the first path day on or
-  after it, at that day's spot, without a warning; a payment due between path days is booked, undiscounted, on the
-  first path day on or after its pay date. Numeric fixing times rarely fall on day boundaries (k/12 years is
-  30.42 days), so a warning here would fire on ordinary trades; both forms get the identical rule, keeping parity.
-  The FX backtest has no cash-interest account (its hedge P&L has none either), so booked cash earns nothing.
-- **Pending cash** stays inside the product's value as PV(pending) through its pay date (OQ-1 b: cash due today is
-  in today's value); on the first instant after it, it leaves the value and enters paid cash. Run value = Σ position MTM (which includes pending PV) + cumulative paid cash — the
-  equity convention (`dynamicscenario/lifecycle_manager.py:11-13`), so P&L does not jump on a payment.
+**Product protocol (`TargetRedemptionProduct`, both forms).**
+- `has_run_fixings` is `True`. `open_fixings(fx_env)` lists `{index: (time, label)}` for every fixing not banked and
+  without a recorded rate (numeric: listed times; dated: resolved against `fx_env`); a terminal contract lists none.
+  Indices are booking-relative (Ruling R14: numeric = fixings banked and dropped since construction + listed
+  position; dated = schedule position).
+- `missing_fixing_fills(fx_env)` / `with_missing_fixings_filled(fx_env, warn=...)` list only strictly past
+  (`is_history`) fixings; a fixing at t = 0 is live (run-fixings D1). `with_fixings_recorded(fills)` stores rates on a
+  copy and banks nothing.
+- `with_time_elapsed(dt)` (R6 step): a numeric contract is copied and `time_shift(dt)`-ed (pending cash whose pay
+  time becomes strictly past leaves as a `PAYMENT` event), every fixing and pay time within `is_zero` of valuation
+  snapped to exactly 0.0; nothing is banked. A dated contract, or `dt` of zero, is returned as is.
+- `with_history_settled(fx_env)` — the optional generic hook `settle_history(product, env)` (Ruling R13): a copy with
+  the **leading strictly past unbanked fixings that have a recorded rate** banked at those rates, in order (clip,
+  redemption, dead fixings after a hit, `FIXING` / `PAYMENT` events), stopping at the first live (t = 0) or
+  unrecorded fixing; and, dated, every pending payment whose pay time is strictly past paid (numeric cash is paid by
+  `with_time_elapsed`). Nothing is filled at `fx_env`'s spot. It returns the product itself when nothing would change.
+  A dated state's `fixings_banked` and `as_of` are brought up to date (`as_of` never after the valuation date; on a
+  `BUSINESS_DAYS` non-business date the preceding business day, R24).
+- `matured_before(fx_env)`: not terminal, and the last fixing strictly before valuation by time (numeric: its listed
+  time; dated: its resolved time, R16).
+- `lifecycle_events` is append-only; `pending_pv(fx_env)` is the PV of the pending cash due at or after valuation
+  (cash due today at `DF(0) = 1`, OQ-1 b).
 
-### 7.3 Changes at the call sites
+**`register(portfolio)`** — per participating position, at the pair environment's date and spot (the clock origin,
+held by the recorder per underlying; a numeric product's times are years from it):
+1. **Matured before the run** (`matured_before`): one `MaturedBeforeRunWarning`; the position is removed from the
+   working copy (value 0, no cash, no Greeks). A terminal booking (§5.3) is not this case: it is kept at PV(pending).
+2. **Fixings before the run**: W5b's `freeze_missing_fixings` records every strictly past unbanked fixing at the
+   origin's spot (one `MissingFixingWarning` per position naming them), then `settle_history` banks them, since they
+   are now strictly past with a recorded rate. A fixing **on the origin date** (t = 0) is live: it is not banked at
+   registration; it is recorded on the next clock-moving `advance`, at the origin day's spot (as refreshed by any
+   same-date `advance`, W6 Ruling 9), without a warning.
+3. Registration reports no events (W6 Ruling 10): its banking and payments are before the baseline and are neither in
+   the baseline value nor in the run's P&L.
+
+**`advance(portfolio)`** — per participating position, with `prev` its underlying's last instant:
+1. The instant must be a date (R8: a time of day is refused) and not before `prev` (R9, `ValidationError`). An instant
+   equal to `prev` only refreshes the spot of the fixings live on it (Ruling 9) and settles nothing.
+2. `with_time_elapsed(run_step_dt(prev, env))`, the environment's year fraction (R6).
+3. `step_fixings`: the strictly past open fixings are recorded — a fixing that was live (t = 0) at an earlier instant
+   at the spot of its **first** live instant (Ruling 4; a Friday fixing on a `BUSINESS_DAYS` clock with weekend rows at
+   Friday's spot), first, in index order; any other (a gap: no instant fell on it) at the previous instant's spot,
+   `gap=True`, no warning (D5).
+4. `settle_history`: the recorded fixings are banked and the dated cash whose pay date is strictly past is paid.
+5. The events the product appended in steps 2–4 are reported in `RunFixingDay.product_events` with the position's
+   signed quantity.
+
+**Calendar gaps and cash.** Numeric `k/12` fixings rarely fall on a path day; they are gap records at the previous
+instant's spot, identically for the twin. Cash is booked once its pay time is **strictly past** (OQ-1 b): cash due
+on a path instant stays in that instant's value as PV(pending) and is booked on the next instant; a payment due
+between path instants is booked, undiscounted, on the first instant after it. The FX runs have no cash-interest
+account, so booked cash earns nothing. Run value = Σ position MTM (which includes pending PV) + cumulative paid cash —
+the equity convention (`dynamicscenario/lifecycle_manager.py`), so P&L does not jump on a payment.
+
+### 7.3 Changes at the call sites (as built)
+
+The `register` / `advance` calls were wired by W6 (run-fixings spec §3.5). Tasks 10 and 11 add only what reads the
+result.
 
 **FX backtest (`quantark/backtest/fx/engine.py`):**
-- after line 44: `lifecycle = FxTargetRedemptionLifecycle(); lifecycle.register(portfolio)`; line 45 then values the
-  aged book;
-- after line 58: `day = lifecycle.advance(portfolio, ts)`; `cum_paid += day.paid_cash`. On the first row `ts` is the
-  registration date, so the call is a no-op;
-- line 66: `value = portfolio.get_portfolio_value() + cum_paid`; the row gains `paid_cash` (cumulative) and
-  `pending_pv`; Greeks and hedging run on the aged products;
-- line 117: `final_value = portfolio.get_portfolio_value() + cum_paid`.
-- `FXBacktestResults` gains nothing else; for a book without TARN/TARF `cum_paid` stays 0.0 and every number is
-  unchanged to the bit.
+- `booked_cash(day.product_events)` (`target_redemption_state.py`): the quantity-scaled sum of the step's `PAYMENT`
+  events (any other entry ignored) is added to a cumulative `cum_paid` after each row's `advance`.
+- Each row's `portfolio_value` = `get_portfolio_value() + cum_paid`; the row gains `paid_cash` (cumulative) and
+  `pending_pv` (`RunFixingDay.pending_pv`); Greeks and hedging run on the aged products. `final_value` includes
+  `cum_paid`.
+- For a book without TARN / TARF, `cum_paid` and `pending_pv` stay 0.0 and every other number is unchanged to the bit
+  (B6).
 
 **FX dynamic scenario (`quantark/dynamicscenario/fx/engine.py`):**
-- after line 79: register; line 80 values the baseline;
-- after line 89, when `day_date` is not None: `day = lifecycle.advance(working, day_date)`;
-- line 91: `value = working.get_portfolio_value() + cum_paid`; `DayResult` fills the existing `paid_cash`,
-  `realized_cash`, `pending_receivable_pv` (`dynamic_results.py:224-227`) and `lifecycle_events`: one
-  `LifecycleEventSnapshot` per `FIXING` event, `event_type="FIXING"` (a new value next to `'KO'`, `'COUPON'`, …),
-  `spot` = the fixing, `payoff` = the amount it determined, `cashflow` = the quantity-scaled amount paid on the day,
-  `terminates_position` = `redeemed`;
-- line 112: `final_value` includes `cum_paid`.
-- **Undated path** (`start_date is None`): no date to age by (M8). Decided (§12 Q8 a): before `register`, `run` raises a `ValidationError` naming `DayPath.start_date` when the
-  book holds a TARN/TARF.
+- **Undated path** (`DayPath.start_date is None`) with a TARN / TARF in the book (`isinstance(...,
+  TargetRedemptionProduct)`): `run` raises a `ValidationError` naming `DayPath.start_date`, before cloning or
+  registering (§12 Q8 a). An undated path holding no TARN / TARF runs as before (the recorder never advances it, R7).
+- On a dated path, after each day's changes and date are applied: `advance`; `cum_paid += booked_cash(...)`;
+  `value = get_portfolio_value() + cum_paid`. `DayResult` fills `paid_cash` and `realized_cash` (both cumulative),
+  `pending_receivable_pv` (`RunFixingDay.pending_pv`) and `lifecycle_events`; `final_value` includes `cum_paid`.
+- **FIXING snapshots**: one `LifecycleEventSnapshot` per `FIXING` event in the step, `event_type="FIXING"`, `spot` =
+  the recorded fixing rate, `payoff` = the amount it determined, `cashflow` = quantity × the `PAYMENT` events of that
+  fixing (same label) paid in the same step (plan Ruling R6), `terminates_position` = `redeemed` (the position stays in
+  the book at PV(pending)). With a pay lag the cash is booked on a later step without a snapshot, so the summed
+  snapshot `cashflow` is not the realized cash; `paid_cash` is.
 
-**Dated TARN/TARF** need no clock of their own: the environment's date is the clock. The same `advance` call records
-their passed fixings at the day's spot into the state (step 3), so numeric and dated run through identical events.
+**`ProductReplay`** (`quantark/backtest/replay/product_replay.py`) does not settle product-held history: it refuses a
+product with `with_history_settled` (`ValidationError`, `TODO(tarn-replay)`).
+
+**Dated TARN/TARF** need no clock of their own: the environment's date is the clock. Numeric and dated twins run
+through identical recorded fixings, events and cash (D2, B4).
 
 ## 8. Compatibility (measured by grep and the gates on dcea77b6)
 

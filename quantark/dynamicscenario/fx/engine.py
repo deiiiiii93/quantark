@@ -39,7 +39,7 @@ from quantark.stresstest.stress.stress_types import StressLevel
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import pnl_pct_of_abs_baseline
 from quantark.var.fx.revaluation import bump_env
-from quantark.util.run_fixings import RunFixingRecorder
+from quantark.util.run_fixings import RunFixingDay, RunFixingRecorder
 
 _CORE_GREEKS = ("delta", "gamma", "vega", "theta", "rho_dom", "rho_for")
 
@@ -205,7 +205,8 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
             raise ValidationError(f"Unsupported FX dynamic parameter '{param}'")
 
     @staticmethod
-    def _fixing_snapshots(portfolio: FXPortfolio, day: Any, day_date: datetime) -> List[LifecycleEventSnapshot]:
+    def _fixing_snapshots(portfolio: FXPortfolio, day: RunFixingDay,
+                          day_date: datetime) -> List[LifecycleEventSnapshot]:
         """One FIXING snapshot per TARN / TARF fixing banked in the step (``RunFixingDay.product_events``);
         ``cashflow`` = quantity x that fixing's cash paid in the same step (an immediate PAYMENT carries its FIXING's
         label - Ruling R6 of the W4b plan)."""

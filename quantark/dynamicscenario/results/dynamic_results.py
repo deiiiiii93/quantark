@@ -103,7 +103,9 @@ class LifecycleEventSnapshot:
         spot: Underlying close used for the observation
         barrier: Barrier level checked, if any
         payoff: Per-position-unit settlement amount
-        cashflow: Quantity-scaled amount booked to the cash ledger
+        cashflow: Quantity-scaled amount booked to the cash ledger (FIXING: only the cash paid in the same step;
+            with a pay lag the cash is booked later without a snapshot (W4b plan Ruling R6), so the summed snapshot
+            cashflow is not realized cash)
         terminates_position: Whether the position was removed by this event
     """
 

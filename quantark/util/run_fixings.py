@@ -7,12 +7,13 @@ Spec: docs/superpowers/specs/2026-10-09-run-fixings-design.md (W6). Asset-neutra
 A product takes part when ``has_run_fixings`` is true and it has the protocol methods ``missing_fixing_fills``,
 ``with_fixings_recorded`` (W5b), ``with_time_elapsed`` and ``open_fixings``. Rules (spec §3.3): R1 the run's quoted
 spot; R2 t = 0 is live, t < 0 is history; R3 when the clock moves from path instant P to P', every record strictly
-past at P' without an outcome is recorded at the spot of the FIRST instant it was live (t = 0) — P's spot on a
-calendar-day clock, where a record is live at one instant only (R3 amendment / Ruling 4: a Friday fixing on a
-``BUSINESS_DAYS`` clock with weekend rows is recorded at Friday's spot); R4 a record no instant fell on (never live)
-takes the previous instant's spot, ``gap=True``; R5 the first valuation is W5b's freeze; R6 a numeric contract
-ages by the environment's year fraction; R7 an undated run never advances; R8 time-of-day instants are refused; R9
-the clock never goes back; R10 the run's working positions get copies, the booked product is never mutated.
+past at P' without an outcome is recorded at the spot of the FIRST instant it was live (t = 0; that instant can
+fall after its date, e.g. Thu then Sat rows) — P's spot on a calendar-day clock, where a record is live at one
+instant only (R3 amendment / Ruling 4: a Friday fixing on a ``BUSINESS_DAYS`` clock with weekend rows is recorded
+at Friday's spot); R4 a record no instant fell on (never live) takes the previous instant's spot, ``gap=True``; R5
+the first valuation is W5b's freeze; R6 a numeric contract ages by the environment's year fraction; R7 an undated
+run never advances; R8 time-of-day instants are refused; R9 the clock never goes back; R10 the run's working
+positions get copies, the booked product is never mutated.
 
 Optional product hooks for product-held run state (W4b TARN / TARF): ``matured_before(env)``, ``lifecycle_events``
 (append-only), ``pending_pv(env)`` and ``with_history_settled(env)`` (the recorded history banked and the cash due
@@ -108,8 +109,8 @@ def step_fixings(product: Any, env: Any, *, prev_date: Any, prev_spot: float,
     ``product`` is already aged to ``env``'s date. Returns ``(recorded, new_fills)``: ``recorded`` carries
     ``run_fills`` (decisions of earlier steps) and ``new_fills``, the records strictly past at ``env`` and still open.
     A record in ``live_spots`` was live at an earlier instant and is decided at the spot of the first instant it was
-    live (Ruling 4: the last path day on or before its date); any other (a gap) at ``prev_spot``. ``run_fills`` is
-    not mutated.
+    live (Ruling 4: its first live instant, which can fall after its date, e.g. Thu then Sat rows); any other (a gap)
+    at ``prev_spot``. ``run_fills`` is not mutated.
 
     The live records are decided and recorded FIRST, in index order (a run of consecutive indices sharing one spot in
     one probe); only then is the recorded copy probed at ``prev_spot`` for the remaining (gap) records. A product

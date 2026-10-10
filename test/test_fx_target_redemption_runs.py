@@ -648,17 +648,24 @@ def test_dynamic_snapshot_cashflow_when_paid_in_the_recording_step():
 
 
 def test_b4_twins_in_one_dynamic_scenario():
+    """B4 on two books (Task 11 review): the dated book and its numeric-twin book give the same snapshots, value, paid
+    cash and pending PV every day (one book could not separate the forms' cash)."""
     dn = dated_note(target=1.5, pay_dates=LAG2)
     dt = dated_tarf(target=0.075, gearing=2.0, pay_dates=LAG2)
     nn, nt = _numeric_twin(dn, env()), _numeric_twin(dt, env())
-    pf, (id_dn, id_nn, id_dt, id_nt) = book(dn, nn, dt, nt)
-    days = _scenario(pf, _held_path(100, 1.20)).day_results
-    assert any(d.lifecycle_events for d in days)
-    for d in days:
-        by = {}
-        for s in d.lifecycle_events:
-            by.setdefault(s.position_id, []).append((s.payoff, s.cashflow, s.terminates_position, s.spot))
-        assert by.get(id_dn) == by.get(id_nn) and by.get(id_dt) == by.get(id_nt)
+    pf_d, ids_d = book(dn, dt)
+    pf_n, ids_n = book(nn, nt)
+    days_d = _scenario(pf_d, _held_path(100, 1.20)).day_results
+    days_n = _scenario(pf_n, _held_path(100, 1.20)).day_results
+    assert any(d.lifecycle_events for d in days_d) and any(d.paid_cash != 0.0 for d in days_d)
+    for d, n in zip(days_d, days_n):
+        snaps = []
+        for day, ids in ((d, ids_d), (n, ids_n)):
+            snaps.append([(ids.index(s.position_id), s.payoff, s.cashflow, s.terminates_position, s.spot)
+                          for s in day.lifecycle_events])
+        assert snaps[0] == snaps[1]
+        for field in ("portfolio_value", "paid_cash", "realized_cash", "pending_receivable_pv"):
+            assert is_close(getattr(d, field), getattr(n, field), rel_tol=1e-12, abs_tol=1e-12), (d.day_index, field)
 
 
 def test_business_day_clock_weekend_fixing_twins_in_a_dynamic_scenario():
@@ -686,3 +693,158 @@ def test_b6_dynamic_book_without_target_redemption_books_nothing():
         days = _scenario(pf, _held_path(10, 1.20, start=start)).day_results
         assert all(d.paid_cash == 0.0 and d.pending_receivable_pv == 0.0 and d.lifecycle_events == []
                    for d in days)
+
+
+# ======================================================== Task 12: regressions from the Task 10 / 11 review probes
+
+_GBP = CurrencyPair("GBP", "USD")
+
+
+def _two_pair_run(eur_qty, gbp_qty):
+    """A dated EURUSD TARN and a dated GBPUSD TARF (each held only when its quantity is given) on two different spot
+    paths: the FX backtest's rows."""
+    from quantark.portfolio.fx import FXPortfolio
+    pf = FXPortfolio(portfolio_name="two_pairs", pricing_environments={"EURUSD": env(), "GBPUSD": env(spot=1.30)})
+    for qty, pair, prod in ((eur_qty, "EURUSD", dated_note(target=3.0, pay_dates=LAG2)),
+                            (gbp_qty, "GBPUSD", dated_tarf(currency_pair=_GBP, strike=1.29, gearing=2.0,
+                                                           target=0.5, pay_dates=LAG2))):
+        if qty is not None:
+            pf.add_position(product=prod, quantity=qty, entry_price=0.0, underlying=pair,
+                            engine=engine_for(prod, n=2_000))
+    index = pd.date_range(VAL, periods=100, freq="D")
+    path = pd.DataFrame({
+        "EURUSD_spot": [1.18 + 0.0007 * k for k in range(100)],
+        "GBPUSD_spot": [1.31 - 0.0005 * k + (0.02 if k % 7 == 3 else 0.0) for k in range(100)],
+        "EURUSD_vol": 0.10, "EURUSD_dom_rate": 0.05, "EURUSD_for_rate": 0.03,
+        "GBPUSD_vol": 0.10, "GBPUSD_dom_rate": 0.05, "GBPUSD_for_rate": 0.03,
+    }, index=index)
+    return _backtest(pf, path).rows
+
+
+def test_short_tarn_and_long_tarf_on_two_pairs_are_the_quantity_weighted_sum_of_single_runs():
+    """Task 10 review probe P1: a short EURUSD TARN (-2.5) and a long GBPUSD TARF (+3.0) on their own paths; every
+    row's paid cash, value and pending PV equal -2.5 x the EUR-only run + 3.0 x the GBP-only run."""
+    both = _two_pair_run(-2.5, 3.0)
+    eur = _two_pair_run(1.0, None)
+    gbp = _two_pair_run(None, 1.0)
+    assert any(r["paid_cash"] > 0.0 for r in eur) and any(r["paid_cash"] < 0.0 for r in gbp)
+    for b, e, g in zip(both, eur, gbp):
+        for field in ("paid_cash", "portfolio_value", "pending_pv"):
+            expected = -2.5 * e[field] + 3.0 * g[field]
+            assert is_close(b[field], expected, rel_tol=1e-12, abs_tol=1e-12), (b["timestamp"], field)
+
+
+def _weekend_carry_path(days=75):
+    """Daily rows from VAL; weekday spots climb, Saturday and Sunday rows carry Friday's spot (user weekend ruling)."""
+    index = pd.date_range(VAL, periods=days, freq="D")
+    spots, last = [], None
+    for k, ts in enumerate(index):
+        if ts.weekday() < 5 or last is None:
+            last = 1.20 + 0.001 * k
+        spots.append(last)
+    return _path(index, spots)
+
+
+def test_business_day_backtest_weekend_rows_carry_friday_twins_and_saturday_cash_books_monday():
+    """Task 10 review probe P2 on a BUSINESS_DAYS / TARGET environment: a TARN and a TARF fixing on Thursday
+    2026-08-13 and paying on Saturday 08-15. The dated book equals its numeric-twin book on every row; each weekend
+    row equals its Friday row; the Saturday cash stays in the value (due, zero business time) through Sunday and is
+    booked on Monday."""
+    thursday, saturday = datetime(2026, 8, 13), datetime(2026, 8, 15)
+    fix = [datetime(2026, 7, 15), thursday, datetime(2026, 9, 15)]
+    pay = [datetime(2026, 7, 17), saturday, datetime(2026, 9, 17)]
+    dn = dated_note(fixing_dates=fix, pay_dates=pay, target=50.0)
+    dt = dated_tarf(fixing_dates=fix, pay_dates=pay, target=50.0)
+    e0 = env(**BUS)
+    rows_d = _backtest(book(dn, dt, fx_env=e0)[0], _weekend_carry_path()).rows
+    rows_n = _backtest(book(_numeric_twin(dn, e0), _numeric_twin(dt, e0), fx_env=e0)[0], _weekend_carry_path()).rows
+    fields = ("portfolio_value", "paid_cash", "pending_pv")
+    for d, n in zip(rows_d, rows_n):
+        for field in fields:
+            assert is_close(d[field], n[field], rel_tol=1e-12, abs_tol=1e-12), (d["timestamp"], field)
+    for rows in (rows_d, rows_n):
+        by_date = {r["timestamp"]: r for r in rows}
+        weekends = [ts for ts in by_date if ts.weekday() >= 5 and ts - pd.Timedelta(days=ts.weekday() - 4) in by_date]
+        assert weekends
+        for ts in weekends:
+            friday = by_date[ts - pd.Timedelta(days=ts.weekday() - 4)]
+            assert all(by_date[ts][f] == friday[f] for f in fields), ts
+        fri, sat, sun, mon = (by_date[pd.Timestamp(2026, 8, d)] for d in (14, 15, 16, 17))
+        assert fri["paid_cash"] == sat["paid_cash"] == sun["paid_cash"] < mon["paid_cash"]
+        assert sun["pending_pv"] > 0.0
+        assert is_close(mon["paid_cash"] - sun["paid_cash"], sun["pending_pv"], rel_tol=1e-12)   # cash due: DF = 1
+
+
+def _greeks_scenario(pf, greeks):
+    return FXDynamicScenarioEngine(FXDynamicScenarioConfig(calculate_greeks=greeks)).run(pf, _held_path(40, 1.20))
+
+
+def test_dynamic_scenario_with_greeks_equals_without_and_leaves_the_input_book_untouched():
+    """Task 11 review probe P1: Greeks (bumped repricings of the aged products) change no value, cash, pending PV or
+    snapshot, and the input book is never touched."""
+    dn = dated_note(target=3.0, pay_dates=LAG2)
+    nt = tarf(target=0.2, gearing=2.0, pay_times=LAG2D)
+    pf, ids = book(dn, nt)
+    before = {pid: (pos.product, copy.deepcopy(pos.product.state), pos.product.lifecycle_events)
+              for pid, pos in pf.positions.items()}
+    on = _greeks_scenario(pf, True).day_results
+    off = _greeks_scenario(pf, False).day_results
+    assert on[-1].greeks and not off[-1].greeks
+    assert any(d.lifecycle_events for d in on) and any(d.paid_cash != 0.0 for d in on)
+    for a, b in zip(on, off):
+        assert (a.portfolio_value, a.paid_cash, a.realized_cash, a.pending_receivable_pv) == (
+            b.portfolio_value, b.paid_cash, b.realized_cash, b.pending_receivable_pv)
+        assert [dataclasses.astuple(s) for s in a.lifecycle_events] == [dataclasses.astuple(s) for s in
+                                                                         b.lifecycle_events]
+    for pid, (product, state, events) in before.items():
+        held = pf.positions[pid].product
+        assert held is product and held.state == state and held.lifecycle_events == events == ()
+    assert pf.pricing_environments["EURUSD"].valuation_date == VAL
+
+
+def test_dynamic_scenario_equals_the_backtest_bitwise_on_cash_and_pending_pv():
+    """Task 11 review probe P3: the same book on the same dated path (the backtest fed the scenario's own spots) books
+    the same paid cash and pending PV, bit for bit."""
+    dn = dated_note(target=1.5, pay_dates=LAG2)
+    nt = tarf(target=0.2, gearing=2.0, pay_times=LAG2D)
+    spots = [1.20] + [1.20 + 0.002 * ((k % 9) - 4) for k in range(1, 70)]
+    steps = [DayStep(day_index=i, changes=[ParameterChange("spot", StressType.VALUE, s)]) for i, s in enumerate(spots)]
+    pf, _ = book(dn, nt, quantities=[2.0, -1.5])
+    days = _scenario(pf, DayPath(name="moving", steps=steps, start_date=VAL)).day_results
+    realized = [d.market_state.spot["EURUSD"] for d in days]
+    rows = _backtest(book(dn, nt, quantities=[2.0, -1.5])[0],
+                     _path(pd.date_range(VAL, periods=len(days), freq="D"), realized)).rows
+    assert any(d.paid_cash > 0.0 for d in days) and any(d.pending_receivable_pv != 0.0 for d in days)
+    assert [d.paid_cash for d in days] == [r["paid_cash"] for r in rows]
+    assert [d.pending_receivable_pv for d in days] == [r["pending_pv"] for r in rows]
+
+
+# A non-TARN FX backtest (GK vanilla, 30 hedges), frozen on the ARM64 dev machine: byte-identical on this branch and on
+# its base main c02296cb (Task 12). Compared at GOLDEN_REL_TOL: a frozen literal crosses architectures
+# (test/golden_compare.py); the same-machine byte gate is the evidence script w4b_baseline.py (B6).
+_NON_TARN_BACKTEST = {
+    "final_value": "0x1.3d44b9ded6c7bp-1",
+    "total_hedge_pnl": "-0x1.c3c234176532ap-5",
+    "last_net_pnl": "0x1.dd61d56818418p-7",
+}
+
+
+def test_a_non_target_redemption_backtest_value_is_pinned():
+    from golden_compare import GOLDEN_REL_TOL
+    from quantark.portfolio.fx import FXPortfolio
+    pf = FXPortfolio(portfolio_name="pin", pricing_environments={"EURUSD": env()})
+    pf.add_position(product=FxVanillaOption(strike=1.2, option_type=OptionType.CALL, maturity=1.0,
+                                            notional_foreign=1.0, currency_pair=PAIR),
+                    quantity=10.0, entry_price=0.0, underlying="EURUSD", engine=GarmanKohlhagenEngine())
+    index = pd.date_range(VAL, periods=30, freq="D")
+    engine = FXBacktestEngine(FXBacktestConfig(
+        portfolio=pf, market_path=_path(index, [1.20 + 0.003 * ((k % 5) - 2) for k in range(30)]),
+        strategy=FXDeltaNeutralStrategy(delta_threshold=0.05, rebalance_frequency="on_threshold"),
+        transaction_cost_model=ZeroCostModel(), calculate_greeks=True))
+    res = engine.run()
+    live = {"final_value": res.final_value, "total_hedge_pnl": res.total_hedge_pnl,
+            "last_net_pnl": res.rows[-1]["net_pnl"]}
+    assert res.num_hedges > 0
+    assert all(r["paid_cash"] == 0.0 and r["pending_pv"] == 0.0 for r in res.rows)
+    for key, golden in _NON_TARN_BACKTEST.items():
+        assert is_close(live[key], float.fromhex(golden), rel_tol=GOLDEN_REL_TOL), (key, live[key].hex())
