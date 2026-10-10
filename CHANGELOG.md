@@ -212,6 +212,32 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   `test_accumulator_mc_engine` expiry cases 5.0 -> 10.0 and -5.0 -> -15.0.
 
 ### Fixed
+- A dated autocallable whose discrete knock-in records lie in the past prices like its numeric twin (W11). The
+  knock-in resolvers (`SnowballOption.resolve_ki_observations`, inherited by `KnockOutResetSnowballOption`, and
+  `PhoenixOption.resolve_ki_observations`) resolved EVERY record, so a dated record before the valuation date asked
+  the settlement resolver for a year fraction from the valuation date back to it (`calculate_year_fraction`,
+  `day_counter.py:86`: "end_date (2025-02-04) must be after start_date (...)"), while the knock-out resolvers already
+  kept only the records not before the valuation date and the numeric twin's `time_shift` had dropped them. Every
+  engine reads that resolver (QUAD V2's compile, the PDE's valuation decision and knock-in rows, QUAD V1's valuation
+  decision, the MC time grid), so a dated KO-reset with schedule-1 records in the past was refused mid-life on all of
+  them (QUAD V2 and the PDE also when knocked in, QUAD V2 also on the exercise date), and so was a dated snowball or
+  Phoenix with a DISCRETE knock-in schedule (the continuous-KI fixtures never met it). The knock-in resolvers now keep
+  the same records as the knock-out ones (`observation_schedule.active_record_indices`; new
+  `active_ki_source_indices` on both products): a passed record is history, its outcome the carried knock-in state,
+  never resolved forward. The KO-reset MC grid maps each kept record to its source position in the contract's
+  schedule (the knock-in anchor's `source_index`). The KO-reset contract rules are unchanged (a past schedule 1 not
+  knocked in still refuses, `require_alive`, on both forms). Moved: 363 dated values raised -> price / delta / gamma
+  (KO-reset ABSOLUTE at days 100-365 alive and knocked in on MC / PDE / QUAD V1 / V2 / local-vol / Heston / SLV MC,
+  e.g. QUAD V2 292 days in knocked in at spot 100: raised -> 2.43400 = the numeric twin; QUAD V2 on the exercise date
+  3.0 at 104, -10.0 at 90; discrete-KI snowball and Phoenix on MC / PDE / QUAD V1 / V2 / local-vol MC and PDE /
+  Heston / QE / SLV MC); no numeric value and no golden / certificate anchor moved. Dated == numeric twin (price,
+  delta, gamma) within 7e-13. Intraday event building (`quantark/intraday/events.py`) now refuses a schedule env that
+  drops a knock-in record, as it already refused one that drops a knock-out record (it indexes the source records by
+  position). Not changed: the 2D Heston / SLV snowball and Phoenix PDE still refuse a dated knock-out schedule before
+  maturity (pre-existing, a different step). New `test/test_ko_reset_past_records.py`; the pinned
+  splits are gone (`test_dated_expiry_settles` `DATED_REFUSED_ANY_DATE`, `test_expiry_carried_knock_in` KO-reset
+  entries in `AUTOCALL_REFUSED` / `AUTOCALL_BEFORE_REFUSED`). Evidence:
+  `docs/superpowers/specs/2026-10-10-ko-reset-past-records-evidence/`.
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
