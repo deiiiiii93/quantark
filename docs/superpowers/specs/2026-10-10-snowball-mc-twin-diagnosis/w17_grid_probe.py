@@ -16,19 +16,26 @@ TOL = 1e-10
 
 def _log(kind, all_times):
     at = np.asarray(all_times, float)
-    if at.size < 2:
+    if at.size < 1:
         return
-    steps = np.diff(at)
+    steps = np.diff(np.concatenate([[0.0], at]))
     if steps.min() >= TOL:
         return
     path = os.environ.get("W17_PROBE_LOG", "w17_probe.log")
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    worker = f"{os.environ.get('PYTEST_XDIST_WORKER', 'main')}.{os.getpid()}"
     with open(f"{path}.{worker}", "a") as fh:
         fh.write(f"{os.environ.get('PYTEST_CURRENT_TEST', '?')}\t{kind}\tnodes={at.size}\t"
-                 f"min_step={steps.min():.3e}\n")
+                 f"min_step={steps.min():.3e}\targmin={int(np.argmin(steps))}\n")
+
+
+_INSTALLED = False
 
 
 def pytest_configure(config):
+    global _INSTALLED
+    if _INSTALLED:          # probe_site/sitecustomize.py may have installed it already in this interpreter
+        return
+    _INSTALLED = True
     from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
     from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 
@@ -57,3 +64,16 @@ def pytest_configure(config):
     SnowballMCEngine._build_time_grid = snow_w
     SnowballMCEngine._build_time_grid_ko_reset = ko_reset_w
     PhoenixMCEngine._build_time_grid = phx_w
+
+    # W17a: the range-accrual and Asian MC grids use the same set-union pattern (observation times | {T})
+    from quantark.asset.equity.engine.mc.asian_option_mc_engine import AsianOptionMCEngine
+    from quantark.asset.equity.engine.mc.range_accrual_mc_engine import RangeAccrualMCEngine
+
+    for cls, label in ((RangeAccrualMCEngine, "range_accrual"), (AsianOptionMCEngine, "asian")):
+        orig = cls._build_observation_grid
+
+        def wrapped(self, *args, _orig=orig, _label=label, **kwargs):
+            out = _orig(self, *args, **kwargs)
+            _log(f"{_label}:{type(self).__name__}", out[0])
+            return out
+        cls._build_observation_grid = wrapped

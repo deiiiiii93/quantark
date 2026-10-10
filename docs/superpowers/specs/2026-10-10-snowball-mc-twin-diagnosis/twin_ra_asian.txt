@@ -1,0 +1,16 @@
+### range_accrual / monthly_to_expiry: sub-1e-10 steps []; node counts differ []; errors 0 []
+   day  45: dated=6.1115396764 numeric=6.1115396764 gap=+0.000e+00
+   day  92: dated=6.9229818921 numeric=6.9229818921 gap=+0.000e+00
+   day 200: dated=8.5189361809 numeric=8.5189361809 gap=+0.000e+00
+### range_accrual / last_record_day_364: sub-1e-10 steps []; node counts differ []; errors 0 []
+   day  45: dated=6.2135968402 numeric=6.2135968402 gap=+0.000e+00
+   day  92: dated=6.8800116597 numeric=6.8800116597 gap=+0.000e+00
+   day 200: dated=8.5454299038 numeric=8.5454299038 gap=+0.000e+00
+### asian / monthly_to_expiry: sub-1e-10 steps []; node counts differ []; errors 0 []
+   day  45: dated=4.4520091582 numeric=4.4520091582 gap=-8.882e-16
+   day  92: dated=3.4669694182 numeric=3.4669694182 gap=+0.000e+00
+   day 200: dated=1.7255574969 numeric=1.7255574969 gap=-4.441e-16
+### asian / last_record_day_364: sub-1e-10 steps []; node counts differ []; errors 0 []
+   day  45: dated=4.3374425463 numeric=4.3374425463 gap=+0.000e+00
+   day  92: dated=3.6378199959 numeric=3.6378199959 gap=+0.000e+00
+   day 200: dated=1.7249657845 numeric=1.7249657845 gap=-4.441e-16

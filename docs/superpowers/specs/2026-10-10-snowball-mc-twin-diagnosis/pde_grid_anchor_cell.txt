@@ -1,0 +1,12 @@
+grid nodes 56, steps < 1e-10: 8
+   np.float64(0.0833333333) / np.float64(0.08333333333333333)  step 3.333e-11
+   np.float64(0.16666666666666666) / np.float64(0.1666666667)  step 3.333e-11
+   np.float64(0.3333333333) / np.float64(0.3333333333333333)  step 3.333e-11
+   np.float64(0.4166666666666667) / np.float64(0.4166666667)  step 3.333e-11
+   np.float64(0.5833333333) / np.float64(0.5833333333333334)  step 3.333e-11
+   np.float64(0.6666666666666666) / np.float64(0.6666666667)  step 3.333e-11
+   np.float64(0.8333333333) / np.float64(0.8333333333333334)  step 3.333e-11
+   np.float64(0.9166666666666666) / np.float64(0.9166666667)  step 3.333e-11
+disable_ko_after_ki = False
+unpatched: pde=96.624024 mc=96.645369 stderr=nan |pde-mc|=0.02134 gate=0.20000 PASS
+patched  : pde=96.624024 mc=96.621477 stderr=nan |pde-mc|=0.00255 gate=0.20000 PASS

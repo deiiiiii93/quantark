@@ -1,0 +1,1 @@
+test/pde_grid/test_anchor_certification.py::test_snowball_pde_vs_mc[False] (call)	snowball:SnowballMCEngine	nodes=56	min_step=3.333e-11	argmin=4

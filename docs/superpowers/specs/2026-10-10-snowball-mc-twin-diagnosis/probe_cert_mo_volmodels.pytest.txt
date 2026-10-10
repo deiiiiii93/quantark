@@ -1,0 +1,22 @@
+bringing up nodes...
+bringing up nodes...
+
+........sssssssssssss................................................... [ 11%]
+.s...ss................................................................. [ 22%]
+..............................s.................................sssss... [ 33%]
+.......s..ssss.ss.........s.ss.............................sssss......s. [ 45%]
+........................s............................................... [ 56%]
+..............................s..........................s.............. [ 67%]
+........................................................................ [ 79%]
+........................................................................ [ 90%]
+..................sssssss..............ss....................            [100%]
+=============================== warnings summary ===============================
+../../../.venv/lib/python3.11/site-packages/_pytest/config/__init__.py:837
+../../../.venv/lib/python3.11/site-packages/_pytest/config/__init__.py:837
+../../../.venv/lib/python3.11/site-packages/_pytest/config/__init__.py:837
+  /Users/fuxinyao/quant-ark/.venv/lib/python3.11/site-packages/_pytest/config/__init__.py:837: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; w17_grid_probe
+    self.import_plugin(arg, consider_entry_points=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+587 passed, 50 skipped, 3 warnings in 318.31s (0:05:18)
+exit 0
