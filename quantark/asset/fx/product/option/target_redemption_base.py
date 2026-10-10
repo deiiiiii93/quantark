@@ -600,9 +600,12 @@ class TargetRedemptionProduct(BaseFxProduct):
 
     @property
     def fixings_banked(self) -> int:
-        """Fixings banked since booking, by fixing identity (OQ-3 ruling): dated - ``_banked_count()`` (schedule
-        positions ``0 .. n - 1``); numeric - the fixings banked and dropped from the listed schedule since construction
-        (``_index_offset`` less the fixings a target hit made dead: a dead fixing is not banked, in either form)."""
+        """Fixings banked, by fixing identity (OQ-3 ruling): dated - counted from the SCHEDULE START,
+        ``_banked_count()`` (schedule positions ``0 .. n - 1``); numeric - counted from the BOOKING, the fixings banked
+        and dropped from the listed schedule since construction (``_index_offset`` less the fixings a target hit made
+        dead: a dead fixing is not banked, in either form). A numeric state cannot carry a pre-booking count, so the
+        two forms report the same count and protocol indices only for twins booked at inception (the D2 test); their
+        outcomes, events and PV always match."""
         return self._numeric_banked if self.is_numeric else self._banked_count()
 
     def open_fixings(self, fx_env) -> Dict[int, Tuple[float, str]]:
@@ -638,13 +641,31 @@ class TargetRedemptionProduct(BaseFxProduct):
         unbanked fixing that has a recorded rate banked at that rate, in order, stopping at the first live (t = 0) or
         unrecorded one (clip, redemption, dead fixings, FIXING / PAYMENT events), and every pending payment whose pay
         time is strictly past paid (dated; numeric cash is paid by :meth:`with_time_elapsed`; cash due today stays,
-        Task 8a). Nothing is filled at ``fx_env``'s spot. ``self`` when nothing changes."""
+        Task 8a). Nothing is filled at ``fx_env``'s spot. ``self`` when nothing changes (without a copy when there is
+        no recorded history rate to bank and no strictly past pending cash)."""
+        if self._settles_nothing(fx_env):
+            return self
         settled = deepcopy(self)
         settled._bank_passed(fx_env, history_only=True)
         if len(settled.lifecycle_events) == len(self.lifecycle_events):
             return self
         settled.validate()
         return settled
+
+    def _settles_nothing(self, fx_env) -> bool:
+        """``with_history_settled`` would produce no event: the first open fixing is not strictly past with a recorded
+        rate (the settle step's first stop rule), and - dated - no pending cash is strictly past. Same checks and
+        refusals as the settle step (``_check_as_of``, the times it resolves)."""
+        if self.is_numeric:
+            return not (self.fixing_times and is_history(self.fixing_times[0]) and 0 in self._recorded_rates)
+        self._check_as_of(fx_env)
+        if any(is_history(signed_year_fraction(p.pay_date, fx_env)) for p in self.state.pending):
+            return False
+        if self.is_terminal:
+            return True
+        first = self._banked_count()
+        t = signed_year_fraction(self.fixing_dates[first], fx_env)
+        return not (is_history(t) and first in self._recorded_rates)
 
     def matured_before(self, fx_env) -> bool:
         """W1 rule at a run's registration (run-fixings recorder hook): not terminal, and the last fixing is strictly

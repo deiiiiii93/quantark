@@ -243,8 +243,6 @@ def test_a_weekend_fixing_on_a_business_day_clock_is_live_on_friday():
     assert [ev.event_type for p, _, ev in mon.product_events if p == id_d] == [FIXING, PAYMENT]
 
 
-
-
 def test_oq3_friday_and_saturday_fixings_in_a_run_are_recorded_once_at_fridays_spot():
     """OQ-3 ruling in a run (BUSINESS_DAYS, weekday instants): the Friday fixing and the Saturday fixing are both live
     on the Friday (W6 Ruling 4); on Monday both are recorded at Friday's spot, gap=False, banked by identity with
@@ -279,3 +277,68 @@ def test_periods_sharing_a_fixing_date_are_recorded_and_banked_once_in_a_run():
     assert pf.positions[pid].product.fixings_banked == 2
     assert days[32].product_events == ()                                         # nothing banked again
     assert [ev.event_type for _, _, ev in days[33].product_events] == [PAYMENT]  # the second period's own pay date
+
+
+# ================================================================ Task 9 fix round 1: live entries are recorded first
+
+_THU, _FRI, _SAT, _SUN, _MON, _TUE = (datetime(2026, 8, d) for d in (13, 14, 15, 16, 17, 18))
+
+
+def _weekend_rows_run(fri_spot, weekend_spot, **kw):
+    """BUSINESS_DAYS clock (TARGET) with weekend path rows; fixings Jul 15, Fri Aug 14, Sat Aug 15 (both live on the
+    Friday, W6 Ruling 2), Sep 15; target 1.5. Booked in both forms (dated and its numeric twin)."""
+    kw.setdefault("fixing_dates", [datetime(2026, 7, 15), _FRI, _SAT, datetime(2026, 9, 15)])
+    dated = dated_note(target=1.5, **kw)
+    pf, (id_d, id_n), rec = _registered(dated, _numeric_twin(dated, env(**BUS)), fx_env=env(**BUS))
+    rows = [(datetime(2026, 7, 16), 1.20), (_THU, 1.20), (_FRI, fri_spot), (_SAT, weekend_spot),
+            (_SUN, weekend_spot), (_MON, weekend_spot), (_TUE, weekend_spot)]
+    days = {d: drive(pf, rec, d, s) for d, s in rows}
+    return pf, (id_d, id_n), days
+
+
+def _events(day, pid):
+    return [(ev.event_type, ev.amount, ev.fixing, ev.redeemed) for p, _, ev in day.product_events if p == pid]
+
+
+@pytest.mark.parametrize("fri, weekend, monday_rows, redeemed", [
+    (1.05, 1.20, [(1, 1.05, 1.05, False), (2, 1.05, 1.05, False)], False),   # probe at 1.20 hit at #1: #2 was lost
+    (1.20, 1.05, [(1, 1.20, 1.20, False)], True),                            # was KeyError: 2 (#2 dead at 1.20)
+    (1.05, 1.05, [(1, 1.05, 1.05, False), (2, 1.05, 1.05, False)], False),   # control: weekend rows carry Friday's
+    (1.20, 1.20, [(1, 1.20, 1.20, False)], True),                            # control
+])
+def test_weekend_rows_quoting_another_spot_record_the_live_fixings_at_their_first_live_spot(fri, weekend, monday_rows,
+                                                                                             redeemed):
+    """Review Task 9 (W6 R3 / Ruling 4): the Friday and Saturday fixings are recorded on Monday at FRIDAY's spot, in
+    both forms, whatever the weekend rows quote; a target hit at the Friday fixing at Friday's spot kills Saturday's."""
+    pf, (id_d, id_n), days = _weekend_rows_run(fri, weekend)
+    assert _rows(days[_MON], id_d) == _rows(days[_MON], id_n) == monday_rows
+    assert _rows(days[_TUE]) == []                                               # nothing is recorded again
+    assert _events(days[_MON], id_d) == _events(days[_MON], id_n)
+    for pid in (id_d, id_n):
+        held = pf.positions[pid].product
+        assert held.is_redeemed is redeemed and held.fixings_banked == (2 if redeemed else 3)
+    if not redeemed:                                                              # below the strike: no coupon
+        assert [x[1] for x in _events(days[_MON], id_d)] == [0.0, 0.0]
+
+
+@pytest.mark.parametrize("weekend", [1.20, 1.05])                               # 1.05: control (Friday's spot)
+def test_periods_sharing_a_friday_fixing_are_recorded_together_whatever_the_weekend_rows_quote(weekend):
+    """Review Task 9: two periods on Friday Aug 14 (stated accrual) are both recorded on Monday at Friday's 1.05; a
+    weekend row at 1.20 (a hit if the Friday fixing were probed there) must not record only the first (was
+    ``ValidationError ... splits the periods fixing on 2026-08-14``)."""
+    pf, (id_d, id_n), days = _weekend_rows_run(
+        1.05, weekend, fixing_dates=[datetime(2026, 7, 15), _FRI, _FRI, datetime(2026, 9, 15)],
+        accrual_factors=[1 / 12, 1 / 12, 1 / 24, 1 / 12])
+    assert _rows(days[_MON], id_d) == _rows(days[_MON], id_n) == [(1, 1.05, 1.05, False), (2, 1.05, 1.05, False)]
+    assert pf.positions[id_d].product.fixings_banked == pf.positions[id_n].product.fixings_banked == 3
+
+
+@pytest.mark.parametrize("make", [lambda: note(target=3.0), lambda: dated_note(target=3.0)])
+def test_product_replay_refuses_a_target_redemption_product(make):
+    """Review Task 9 item 5: ``ProductReplay`` steps run fixings but never settles product-held history
+    (``settle_history``): a TARN / TARF is refused there, not replayed wrongly."""
+    from quantark.backtest.replay.product_replay import ProductReplay
+    with pytest.raises(ValidationError, match="ProductReplay"):
+        ProductReplay(product=make(), product_quantity=1.0, has_lifecycle=True, lifecycle=None, surface_engine=None,
+                      event_stats_engine=None, engine_config=None, market_data=None, start_date=None,
+                      underlying="EURUSD", actions_sink=[], event_prob_sink=[], daily_event_sink=[], surfaces_sink=[])

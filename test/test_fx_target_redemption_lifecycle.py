@@ -1806,3 +1806,20 @@ def test_d2_twins_age_identically(kind, path):
                 assert a.product.open_fixings(e)[1][0] == b.product.open_fixings(e)[1][0] == 0.0
     assert events[pid_d] and events[pid_d] == events[pid_n]
     assert recorded[pid_d] and recorded[pid_d] == recorded[pid_n]
+
+
+@pytest.mark.parametrize("form", ["numeric", "dated", "dated_due_today"])
+def test_with_history_settled_copies_nothing_when_nothing_is_recorded_or_past_due(form, monkeypatch):
+    """Task 9 review minor 3: no recorded history rate and no strictly past pending cash -> ``self``, no deep copy."""
+    import quantark.asset.fx.product.option.target_redemption_base as base
+    if form == "numeric":
+        product, e = _days(note(target=3.0), 31), env()                     # #0 is history, without a rate
+    elif form == "dated":
+        product, e = dated_note(target=3.0, pay_dates=LAG2), env(val=FIX_DATES[0] + timedelta(days=1))
+    else:                                                                    # banked, its cash due today (Task 8a)
+        product = dated_note(target=3.0, pay_dates=LAG2).with_fixings_recorded({0: 1.25}).with_history_settled(
+            env(val=FIX_DATES[0] + timedelta(days=1)))
+        e = env(val=LAG2[0])
+        assert product.state.pending
+    monkeypatch.setattr(base, "deepcopy", lambda obj: pytest.fail("with_history_settled deep-copied"))
+    assert product.with_history_settled(e) is product

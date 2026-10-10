@@ -84,6 +84,12 @@ backtest and FX dynamic scenario.
   today's fixing to move with the bumped spot, and pricing decides it at the quoted spot without a
   `MissingFixingWarning`. Numeric protocol indices and event labels count from the booking (fixings banked since
   construction + listed position).
+- Run fixings (`quantark.util.run_fixings.step_fixings`): a record that was live is recorded first, at its first live
+  instant's spot, in index order; only then are the remaining (gap) records probed at the previous instant's spot. A
+  TARN / TARF on a business-day clock whose weekend rows quote a spot other than Friday's now records its Friday and
+  Saturday fixings at Friday's spot (was a `KeyError`, a gap at the weekend spot, or a split shared-date refusal).
+  W6's range accruals and Asians record exactly as before. `ProductReplay` refuses a TARN / TARF (`ValidationError`):
+  it does not settle product-held history.
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be

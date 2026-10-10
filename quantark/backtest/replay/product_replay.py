@@ -140,6 +140,13 @@ class ProductReplay:
         surface_config: Any = None,
         position_id: Optional[Any] = None,
     ) -> None:
+        if callable(getattr(product, "with_history_settled", None)):
+            # TODO(tarn-replay): replay a product holding run state - call run_fixings.settle_history after
+            # step_fixings and book its FIXING / PAYMENT cash - before admitting FX TARN / TARF here
+            raise ValidationError(
+                f"ProductReplay cannot replay {type(product).__name__}: it holds run state (FX TARN / TARF) that "
+                "run_fixings.settle_history banks and pays, which ProductReplay does not call; run it in the FX "
+                "backtest or FX dynamic scenario")
         self.product = product
         self.product_quantity = product_quantity
         self.has_lifecycle = has_lifecycle

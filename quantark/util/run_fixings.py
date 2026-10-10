@@ -110,6 +110,11 @@ def step_fixings(product: Any, env: Any, *, prev_date: Any, prev_spot: float,
     A record in ``live_spots`` was live at an earlier instant and is decided at the spot of the first instant it was
     live (Ruling 4: the last path day on or before its date); any other (a gap) at ``prev_spot``. ``run_fills`` is
     not mutated.
+
+    The live records are decided and recorded FIRST, in index order (a run of consecutive indices sharing one spot in
+    one probe); only then is the recorded copy probed at ``prev_spot`` for the remaining (gap) records. A product
+    whose open records depend on earlier outcomes (a TARN redeemed by an earlier fixing) is thus listed under the
+    outcomes it actually records, never under ``prev_spot``'s (Task 9 review: weekend rows quoting another spot).
     """
     require_date_instant(prev_date)
     require_date_instant(env.valuation_date)
@@ -117,16 +122,24 @@ def step_fixings(product: Any, env: Any, *, prev_date: Any, prev_spot: float,
         raise ValidationError(f"the run clock cannot go back: from {prev_date} to {env.valuation_date} (R9)")
     if run_fills:
         product = product.with_fixings_recorded(dict(run_fills))
-    new_fills = dict(product.missing_fixing_fills(at_spot(env, prev_spot)))
-    by_spot: Dict[float, List[int]] = {}
-    for index in new_fills:
-        if live_spots and index in live_spots:
-            by_spot.setdefault(float(live_spots[index]), []).append(index)
-    for spot, indices in by_spot.items():          # grouped by the stored value: one decision per distinct spot
+    new_fills: Dict[int, Any] = {}
+    live = sorted((int(i), float(s)) for i, s in (live_spots or {}).items())
+    k = 0
+    while k < len(live):                           # live records first, at their first live instant's spot (R3)
+        spot, run = live[k][1], []
+        while k < len(live) and live[k][1] == spot:
+            run.append(live[k][0])
+            k += 1
         at_live = product.missing_fixing_fills(at_spot(env, spot))
-        for index in indices:
-            new_fills[index] = at_live[index]
-    return (product.with_fixings_recorded(new_fills) if new_fills else product), new_fills
+        decided = {i: at_live[i] for i in run if i in at_live}   # a record still live (t = 0) or dead is not listed
+        if decided:
+            product = product.with_fixings_recorded(decided)
+            new_fills.update(decided)
+    gaps = product.missing_fixing_fills(at_spot(env, prev_spot))   # the rest were never live: R4
+    if gaps:
+        product = product.with_fixings_recorded(dict(gaps))
+        new_fills.update(gaps)
+    return product, dict(sorted(new_fills.items()))
 
 
 def update_live(open_fixings: Mapping[int, Tuple[float, str]], date: Any, spot: float,
