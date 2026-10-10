@@ -37,6 +37,7 @@ from quantark.util.exceptions import ValidationError, PricingError
 from quantark.util.numerical import (
     is_zero,
     is_close,
+    is_greater_than_or_close,
     validate_positive,
     validate_non_negative,
     safe_log,
@@ -209,14 +210,18 @@ class BarrierOptionMCEngine(BaseEngine):
             )
 
         # Hit at valuation, or a knock-in carried as triggered (spec 2026-10-07 R4): the engine's own triggered path
+        # A DISCRETE schedule decides on its first record at or after now: that record's level and knock-out cash
+        # (W18b); continuous monitoring on product.barrier / product.rebate.
+        level, knock_out_cash = valuation_barrier_terms(product, pricing_env)
         if product.observation_type != ObservationType.EXPIRY and (
-            product.is_barrier_hit(S) or knock_in_carried(product, lifecycle_state)
+            _beyond(product, S, level) or knock_in_carried(product, lifecycle_state)
         ):
             if product.is_knock_out:
                 return (
                     self._price_immediate_knock_out(
                         product,
                         pricing_env,
+                        knock_out_cash,
                     )
                     + pending_receivable_pv(lifecycle_state, pricing_env)
                 )
@@ -273,7 +278,9 @@ class BarrierOptionMCEngine(BaseEngine):
         self,
         product: BarrierOption,
         pricing_env: PricingEnvironment,
+        cash: float,
     ) -> float:
+        """A knock-out decided at the valuation instant pays ``cash`` (the deciding record's payoff, W18b)."""
         if product.pay_at_hit:
             timing = SettlementResolver.resolve_contingent(
                 product,
@@ -285,8 +292,8 @@ class BarrierOptionMCEngine(BaseEngine):
                 ),
                 pricing_env,
             )
-            return product.rebate * timing.payment_df
-        return product.rebate * self._terminal_df
+            return cash * timing.payment_df
+        return cash * self._terminal_df
 
     def _price_vanilla_mc(
         self, product: BarrierOption, pricing_env: PricingEnvironment
@@ -451,7 +458,7 @@ class BarrierOptionMCEngine(BaseEngine):
     def _price_expiry_payoff(
         self, product: BarrierOption, spot: float, r: float, T: float, knocked_in: bool = False
     ) -> float:
-        return barrier_expiry_value(product, spot, self._terminal_df, knocked_in=knocked_in)
+        return barrier_expiry_value(product, spot, self._terminal_df, self._pricing_env, knocked_in=knocked_in)
 
     def _expiry_payoffs(
         self, product: BarrierOption, terminal_prices: np.ndarray
@@ -855,16 +862,63 @@ class BarrierOptionMCEngine(BaseEngine):
         )
 
 
-def barrier_expiry_value(product: BarrierOption, spot: float, terminal_df: float, knocked_in: bool = False) -> float:
+def _beyond(product: BarrierOption, spot: float, level: float) -> bool:
+    """``product.is_barrier_hit`` at ``level``: up >= level, down <= level."""
+    return spot >= level if product.is_up_barrier else spot <= level
+
+
+def _record_time(record, pricing_env) -> Optional[float]:
+    """A record's time from the valuation instant, or ``None`` when it lies behind it. A dated record on the
+    valuation instant is at 0.0 (the settlement resolver's rule); one before it is past and never resolved (the year
+    fraction refuses a date behind the valuation date)."""
+    if record.observation_date is not None and record.observation_time is None:
+        if record.observation_date < pricing_env.valuation_date:
+            return None
+        if record.observation_date == pricing_env.valuation_date:
+            return 0.0
+    t = float(record.resolve_time(pricing_env))
+    return t if is_greater_than_or_close(t, 0.0) else None
+
+
+def valuation_barrier_terms(product: BarrierOption, pricing_env) -> Tuple[float, float]:
+    """(level, knock-out cash) deciding a DISCRETE barrier at the valuation instant (W18b, user approval 2026-10-10).
+
+    The first record at or after the valuation instant decides -- the record on the valuation date when there is
+    one, the next observation otherwise (the barrier PDE's ``_next_observation`` rule): its own level (a record
+    without one takes ``product.barrier``, the product's normalisation) and its payoff (unset: ``product.rebate``),
+    as this engine's discrete path reads each resolved record (``_build_discrete_grid``, ``payoffs[first_idx]``).
+    CONTINUOUS / EXPIRY monitoring, or no record left: ``product.barrier`` and ``product.rebate``.
+    """
+    default = (float(product.barrier), float(product.rebate))
+    schedule = getattr(product, "observation_schedule", None)
+    if product.observation_type != ObservationType.DISCRETE or schedule is None or not schedule.records:
+        return default
+    first = None
+    for record in schedule.records:
+        t = _record_time(record, pricing_env)
+        if t is not None and (first is None or t < first[0]):
+            first = (t, record)
+    if first is None:
+        return default
+    record = first[1]
+    level = record.barrier if record.barrier is not None else product.barrier
+    cash = record.payoff if record.payoff is not None else product.rebate
+    return float(level), float(cash)
+
+
+def barrier_expiry_value(product: BarrierOption, spot: float, terminal_df: float, pricing_env,
+                         knocked_in: bool = False) -> float:
     """A barrier option at its exercise instant (T = 0): a knock-out hit at ``spot`` pays its rebate, else the
     participating payoff; a knock-in carried as triggered (``knocked_in``: ``knock_in_carried``, ruling 2026-10-10)
     or hit at ``spot`` pays the participating payoff, else (never knocked in) its rebate -- times the terminal payment
-    discount ``terminal_df``. This engine's expiry value; the vol-model barrier MC routes settle on it before their
-    model runs (W9, ruling 2026-10-10)."""
-    hit = product.is_barrier_hit(spot)
+    discount ``terminal_df``. A DISCRETE schedule decides on its record at the exercise instant: that record's level,
+    and a knock-out its payoff (``valuation_barrier_terms``, W18b). This engine's expiry value; the vol-model barrier
+    MC routes settle on it before their model runs (W9, ruling 2026-10-10)."""
+    level, knock_out_cash = valuation_barrier_terms(product, pricing_env)
+    hit = _beyond(product, spot, level)
     payoff = product.get_payoff(spot) * product.participation_rate
     if product.is_knock_out:
-        value = product.rebate if hit else payoff
+        value = knock_out_cash if hit else payoff
     else:
         value = payoff if (knocked_in or hit) else product.rebate
     return value * terminal_df

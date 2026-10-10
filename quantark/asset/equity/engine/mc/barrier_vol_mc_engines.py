@@ -170,7 +170,7 @@ def _settled_at_exercise(engine, product, env, lifecycle_state) -> float:
     2026-10-10)."""
     engine._last_std_error = 0.0
     return (
-        barrier_expiry_value(product, env.spot, resolve_terminal_timing(product, env).payment_df,
+        barrier_expiry_value(product, env.spot, resolve_terminal_timing(product, env).payment_df, env,
                              knocked_in=knock_in_carried(product, lifecycle_state))
         + pending_receivable_pv(lifecycle_state, env)
     )
