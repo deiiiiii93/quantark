@@ -671,6 +671,21 @@ def test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_count
         assert float(dated[key]) == pytest.approx(float(reference[key]), rel=1e-12, abs=1e-12), key
 
 
+#: The hand settled value of the knock-in carried as triggered (user ruling 2026-10-10, "check knock in state first"):
+#: knocked in, it pays the call payoff, never the rebate 5 -- W9 pinned these cells only as "equal to the BSM
+#: counterpart", which returned the rebate at 110 (test/test_expiry_carried_knock_in.py covers every route)
+_CARRIED = [c for c in VOL_CASES if c[3] == "up_in_call_knocked_in"]
+
+
+@pytest.mark.parametrize("route,vol,bsm,kind,build,spot", _CARRIED,
+                         ids=[f"{c[0]}-{c[3]}-{c[5]:g}" for c in _CARRIED])
+def test_vol_model_route_settles_a_carried_knock_in_at_its_payoff(route, vol, bsm, kind, build, spot):
+    for form in ("dated", "numeric"):
+        for engine in (vol, bsm):
+            value = _quiet(lambda: float(engine().price(build(form), _vol_env(spot))))
+            assert value == pytest.approx(max(spot - 100.0, 0.0), rel=1e-12, abs=1e-12), (form, engine)
+
+
 _VOL_FIRST = [(route, vol, products[0][1]) for route, vol, _, products in VOL_ROUTES]
 
 

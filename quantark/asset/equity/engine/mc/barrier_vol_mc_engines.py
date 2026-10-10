@@ -159,11 +159,13 @@ def _finish_price(
 
 
 def _settled_at_exercise(engine, product, env, lifecycle_state) -> float:
-    """At the exercise instant the model has no effect: the Black-Scholes barrier MC engine's expiry value (decided at
-    the spot, times the terminal payment discount), plus any pending receivable (W9, ruling 2026-10-10)."""
+    """At the exercise instant the model has no effect: the Black-Scholes barrier MC engine's expiry value (a carried
+    knock-in first, then the spot; times the terminal payment discount), plus any pending receivable (W9, ruling
+    2026-10-10)."""
     engine._last_std_error = 0.0
     return (
-        barrier_expiry_value(product, env.spot, resolve_terminal_timing(product, env).payment_df)
+        barrier_expiry_value(product, env.spot, resolve_terminal_timing(product, env).payment_df,
+                             knocked_in=knock_in_carried(product, lifecycle_state))
         + pending_receivable_pv(lifecycle_state, env)
     )
 

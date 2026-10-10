@@ -604,7 +604,9 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         if product.is_knock_out:
             value = product.rebate if hit else vanilla
         else:
-            value = vanilla if hit else product.rebate
+            # a knock-in carried as triggered first (ruling 2026-10-10), as ``price`` reads it before maturity
+            from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
+            value = vanilla if (knock_in_carried(product) or hit) else product.rebate
         if df is not None:
             return value * df
         if maturity <= 0.0:
@@ -1104,7 +1106,9 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         if product.is_knock_out:
             value = product.rebate if hit else intrinsic
         else:
-            value = intrinsic if hit else product.rebate
+            # a knock-in carried as triggered first (ruling 2026-10-10), as ``price`` reads it before maturity
+            from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
+            value = intrinsic if (knock_in_carried(product) or hit) else product.rebate
         if df is not None:
             return value * df
         if maturity <= 0.0:

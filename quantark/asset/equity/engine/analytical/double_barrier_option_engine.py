@@ -113,12 +113,13 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
                     + pending_receivable_pv(lifecycle_state, pricing_env))
         timing = resolve_terminal_timing(product, pricing_env)
         return (
-            self._price_immediate(product, pricing_env) * timing.delay_df
+            self._price_immediate(product, pricing_env, knocked_in=knock_in_carried(product, lifecycle_state))
+            * timing.delay_df
             + pending_receivable_pv(lifecycle_state, pricing_env)
         )
 
     def _price_immediate(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, knocked_in: bool = False
     ) -> float:
         """
         Price a double-barrier option.
@@ -126,6 +127,8 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         Args:
             product: DoubleBarrierOption to price.
             pricing_env: Pricing environment with market data.
+            knocked_in: A knock-in carried as triggered (read at zero maturity; before it the remaining-contract
+                replication in ``price`` prices the carried state).
 
         Returns:
             Option price.
@@ -155,7 +158,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
 
         # Edge case: zero maturity
         if is_zero(T):
-            return self._price_zero_maturity(product, pricing_env, S, multiplier)
+            return self._price_zero_maturity(product, pricing_env, S, multiplier, knocked_in=knocked_in)
 
         # Edge case: zero volatility
         if is_zero(sigma):
@@ -217,9 +220,11 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         pricing_env: PricingEnvironment,
         spot: float,
         multiplier: float,
+        knocked_in: bool = False,
     ) -> float:
-        """Return price at maturity: a discrete schedule is breached only by its records at the valuation
-        instant, each at its own levels; continuous and expiry monitoring observe the spot."""
+        """Return price at maturity: a knock-in carried as triggered (``knocked_in``, ruling 2026-10-10) pays the
+        payoff; otherwise a discrete schedule is breached only by its records at the valuation instant, each at its
+        own levels, and continuous and expiry monitoring observe the spot."""
         if product.observation_type == ObservationType.DISCRETE:
             hit = self._breached_at_valuation(product, pricing_env, spot)
         else:
@@ -228,8 +233,8 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             if hit:
                 return product.rebate * multiplier
             return product.get_payoff(spot)
-        # Knock-in
-        if hit:
+        # Knock-in: carried as triggered, or hit now
+        if knocked_in or hit:
             return product.get_payoff(spot)
         return product.rebate * multiplier
 

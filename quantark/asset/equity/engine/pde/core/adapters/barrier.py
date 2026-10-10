@@ -149,9 +149,10 @@ class _BarrierFamilyAdapter(FamilyAdapter):
             return None
         return solver._terminal_event(product, env)
 
-    def maturity_value(self, product, env, spot):
+    def maturity_value(self, product, env, spot, knocked_in: bool = False):
         """(price, delta, gamma) at maturity: the solver's terminal payoff at ``spot`` (the continuation), then the
-        decision there (spec 3C decision 30). Gamma is zero."""
+        decision there (spec 3C decision 30). Gamma is zero. ``knocked_in`` (a knock-in carried as triggered) is read
+        by the knock-in families only."""
         value, slope = self.solver._terminal_payoff(product, env, np.array([float(spot)]))
         price, delta, gamma, _ = fold_decision(self._maturity_event(product, env), spot, float(value[0]),
                                                float(slope[0]), 0.0)
@@ -168,7 +169,11 @@ class _BarrierFamilyAdapter(FamilyAdapter):
     def terminal_outcome(self, product, env, request, lifecycle_state):
         op = request.operation
         if op in _MATURITY_OPS and product.get_maturity(env) <= 0:
-            return TerminalOutcome("expired", self._outputs(op, *self.maturity_value(product, env, env.spot)))
+            from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
+            # the carried knock-in state first (ruling 2026-10-10), as the composite before maturity reads it
+            knocked_in = knock_in_carried(product, lifecycle_state)
+            return TerminalOutcome("expired", self._outputs(op, *self.maturity_value(product, env, env.spot,
+                                                                                      knocked_in=knocked_in)))
         if op in _FACADE and not getattr(product, "is_knock_in", False):
             price, delta, gamma, fired = self.decision_at(product, env, env.spot)
             if fired:                                             # a SET record fires at the spot: nothing is marched
@@ -276,11 +281,11 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         return solver._cashflow_value_at_time(env, product.rebate, 0.0,
                                               solver._terminal_payment_time(product, env)) * solver._multiplier(product)
 
-    def maturity_value(self, product, env, spot):
-        """Repair (a)'s identity on terminal values (spec 3C decision 30 table): knocked in, participation x the
-        payoff x the terminal payment discount (delta likewise); otherwise the rebate x that discount, delta 0. No
-        part product is constructed (a product cannot be built with zero maturity, §4.11). A knock-out takes the
-        family's rule."""
+    def maturity_value(self, product, env, spot, knocked_in: bool = False):
+        """Repair (a)'s identity on terminal values (spec 3C decision 30 table): knocked in -- carried as triggered
+        (``knocked_in``, ruling 2026-10-10) or by the decision at maturity -- participation x the payoff x the terminal
+        payment discount (delta likewise); otherwise the rebate x that discount, delta 0. No part product is
+        constructed (a product cannot be built with zero maturity, §4.11). A knock-out takes the family's rule."""
         if not product.is_knock_in:
             return super().maturity_value(product, env, spot)
         value, slope = self.solver._vanilla_solver()._terminal_payoff(product, env, np.array([float(spot)]))
@@ -288,7 +293,7 @@ class _KnockInAdapter(_BarrierFamilyAdapter):
         van, dvan = float(value[0]), float(slope[0])
         if pr is not None:
             van, dvan = pr * van, pr * dvan
-        if fold_decision(self._maturity_event(product, env), spot, 0.0)[3]:
+        if knocked_in or fold_decision(self._maturity_event(product, env), spot, 0.0)[3]:
             return van, dvan, 0.0
         return self._rebate_constant(product, env), 0.0, 0.0
 

@@ -60,8 +60,9 @@ class BarrierAnalyticalEngine(BaseEngine):
           beyond the barrier with no observation due is valued through the next
           observation (``first_observation``); only an observation at the valuation
           instant knocks the option out or in on the spot.
-        - At maturity only what is observed now decides: a discrete schedule's
-          records at the valuation instant, each at its own level and cash.
+        - At maturity a knock-in carried as triggered pays the payoff; otherwise
+          only what is observed now decides: a discrete schedule's records at the
+          valuation instant, each at its own level and cash.
         - Rebates for continuous/discrete monitoring are valued via OneTouchAnalyticalEngine.
     """
 
@@ -129,7 +130,8 @@ class BarrierAnalyticalEngine(BaseEngine):
         # Immediate handling for zero maturity
         if maturity < self.MIN_MATURITY:
             return (
-                self._price_at_maturity(product, pricing_env, spot, terminal_timing)
+                self._price_at_maturity(product, pricing_env, spot, terminal_timing,
+                                        knocked_in=knock_in_carried(product, lifecycle_state))
                 + pending_pv
             )
 
@@ -252,13 +254,16 @@ class BarrierAnalyticalEngine(BaseEngine):
         pricing_env: PricingEnvironment,
         spot: float,
         terminal_timing,
+        knocked_in: bool = False,
     ) -> float:
-        """The value at maturity: what is observed now decides, and nothing else.
+        """The value at maturity: the carried knock-in state first, then what is observed now.
 
-        Continuous and expiry monitoring observe the spot at the product's barrier; a discrete schedule observes
-        only its records at the valuation instant, each at its own level and paying its own cash (none observed:
-        no hit). A knock-out hit pays its cash, an untouched knock-in its rebate, at the terminal payment time
-        (hit-paid knock-out cash at the record's own payment time).
+        ``knocked_in``: a knock-in carried as triggered (``knock_in_carried``, the state the T > 0 path prices as the
+        knocked-in vanilla; ruling 2026-10-10) pays the payoff whatever is observed now. Otherwise continuous and
+        expiry monitoring observe the spot at the product's barrier; a discrete schedule observes only its records at
+        the valuation instant, each at its own level and paying its own cash (none observed: no hit). A knock-out hit
+        pays its cash, a knock-in never knocked in its rebate, at the terminal payment time (hit-paid knock-out cash at
+        the record's own payment time).
         """
         multiplier = product.contract_multiplier
         payoff = product.get_payoff(spot) * product.participation_rate * terminal_timing.payment_df
@@ -270,7 +275,8 @@ class BarrierAnalyticalEngine(BaseEngine):
             ]
             hit = hits[0] if hits else None
             if product.is_knock_in:
-                return payoff if hit is not None else product.rebate * terminal_timing.payment_df * multiplier
+                return (payoff if (knocked_in or hit is not None)
+                        else product.rebate * terminal_timing.payment_df * multiplier)
             if hit is None:
                 return payoff
             cash_df = (
@@ -282,7 +288,7 @@ class BarrierAnalyticalEngine(BaseEngine):
 
         hit = product.is_barrier_hit(spot)
         if product.is_knock_in:
-            return payoff if hit else product.rebate * terminal_timing.payment_df * multiplier
+            return payoff if (knocked_in or hit) else product.rebate * terminal_timing.payment_df * multiplier
         if not hit:
             return payoff
         if product.pay_at_hit:

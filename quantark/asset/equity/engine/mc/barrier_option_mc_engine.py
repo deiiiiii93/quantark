@@ -203,7 +203,8 @@ class BarrierOptionMCEngine(BaseEngine):
 
         if is_zero(T):
             return (
-                self._price_expiry_payoff(product, S, r, T)
+                self._price_expiry_payoff(product, S, r, T,
+                                          knocked_in=knock_in_carried(product, lifecycle_state))
                 + pending_receivable_pv(lifecycle_state, pricing_env)
             )
 
@@ -448,9 +449,9 @@ class BarrierOptionMCEngine(BaseEngine):
         return payoffs * product.participation_rate
 
     def _price_expiry_payoff(
-        self, product: BarrierOption, spot: float, r: float, T: float
+        self, product: BarrierOption, spot: float, r: float, T: float, knocked_in: bool = False
     ) -> float:
-        return barrier_expiry_value(product, spot, self._terminal_df)
+        return barrier_expiry_value(product, spot, self._terminal_df, knocked_in=knocked_in)
 
     def _expiry_payoffs(
         self, product: BarrierOption, terminal_prices: np.ndarray
@@ -854,15 +855,16 @@ class BarrierOptionMCEngine(BaseEngine):
         )
 
 
-def barrier_expiry_value(product: BarrierOption, spot: float, terminal_df: float) -> float:
-    """A barrier option at its exercise instant (T = 0): decided at ``spot`` alone -- a knock-out hit there pays its
-    rebate, else the participating payoff; a knock-in hit there pays the participating payoff, else its rebate --
-    times the terminal payment discount ``terminal_df``. This engine's expiry value; the vol-model barrier MC routes
-    settle on it before their model runs (W9, ruling 2026-10-10)."""
+def barrier_expiry_value(product: BarrierOption, spot: float, terminal_df: float, knocked_in: bool = False) -> float:
+    """A barrier option at its exercise instant (T = 0): a knock-out hit at ``spot`` pays its rebate, else the
+    participating payoff; a knock-in carried as triggered (``knocked_in``: ``knock_in_carried``, ruling 2026-10-10)
+    or hit at ``spot`` pays the participating payoff, else (never knocked in) its rebate -- times the terminal payment
+    discount ``terminal_df``. This engine's expiry value; the vol-model barrier MC routes settle on it before their
+    model runs (W9, ruling 2026-10-10)."""
     hit = product.is_barrier_hit(spot)
     payoff = product.get_payoff(spot) * product.participation_rate
     if product.is_knock_out:
         value = product.rebate if hit else payoff
     else:
-        value = payoff if hit else product.rebate
+        value = payoff if (knocked_in or hit) else product.rebate
     return value * terminal_df
