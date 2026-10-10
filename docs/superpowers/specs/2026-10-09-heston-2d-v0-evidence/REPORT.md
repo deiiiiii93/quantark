@@ -271,3 +271,94 @@ KI 114.45 production PV finite, and the standard-orientation / 1D bit-identity.
 4. Q1's regression test switches the terminal damping off as well as the event damping (above); confirm.
 5. Q1 moves the Feller-violating 2D Heston DCN by about 1% of its PV on a coarse (151, 41) grid, toward the refined
    values; a sharper DCN reference would be needed to rank main and branch on the fine grid.
+
+---
+
+## W7b — the Q3 fix, applied (ruling 2026-10-10)
+
+Branch rebased onto main c02296cb (tag `pre-rebase2-w7` = ffb5db88; no conflicts). The two amended certificates'
+guards and the W7 tests pass on the rebased branch (670 passed, 11 skipped): main's commits since 0d1e4133 move no
+amended anchor.
+
+**Change** (1ab76106, `_ContinuousKIFirstPassage._geometry`, exactly `c02` / `c08`): the half-cell floor takes the two
+live nodes nearest the barrier (`near = live[np.argsort(a[live], kind="stable")]`); the reflection profile is
+`_reflection_profile`, the plain product where `-2 mu_e a / sig2 <= Tolerance.EXP_MAX` and the one-exponent form of the
+same closed form above it.
+
+**Tests** (`test/test_vol_pde_reverse_continuous_ki.py`; every one below failed first except the inertness set):
+the floor and the reflection profile directly; KI 125 at n_x 312 / 317 / 384 finite, within 5e−3 of the nearest
+well-aligned grid and within 4 s.e. + 0.02 of the library MC; production Greeks at KI 139.80 and production PV at KI
+114.45 finite and within the same MC band; bit-identity against the pre-W7b `_geometry` in one process (standard
+continuous, reverse discrete, BSM limit, reverse n_x 313, 1D standard / reverse / reverse KI 115). Slow (the
+production Greek policy path, ruling 2026-10-10): reverse and standard orientation × Heston and SLV (unit leverage) ×
+KI 114.45 / 125 / 139.80 (standard: mirrored through the spot, 87.37 / 80 / 71.53), PV and Greeks finite, the Greek
+grid resolved to (300, 135, 3200), reverse within the MC band; PV n_x sweep 192 … 208 and reverse Greek n_x sweep 300 …
+310, finite and within 0.02. MC references (`d01`, HestonSnowballMCEngine QE, continuous-KI bridge, 4 substeps,
+200,000 antithetic × 8 batches): KI 125 95.4157 ± 0.0458, KI 139.80 98.2961 ± 0.0436, KI 114.45 94.6825 ± 0.0458.
+
+**Results.** Fast set 14 passed; slow set 30 passed (21.6 min at -n 2); continuous-KI regression (168 files and
+directories referencing continuous KI, plus anchors, banked certificates, replay goldens, pde_statistics / core /
+bitwise / grid / routes, execution, mo_volmodels ADI certifications; `-m "not slow"`): 5196 passed, 138 skipped — every
+certificate anchor and golden bit for bit. `d02` (the moved values, `moved_values.txt` "W7b"): 54 of 112 rows moved, 51
+of the 97-grid scan (the 3 divergent ones, 48 finite by 9.2e−6 … 6.59e−4), the KI 139.80 Greeks (PricingError →
+98.313775 / −0.599596 / −0.072751), the KI 114.45 PV (NaN → 94.678183) and the KI 114.45 production Greeks (+1.86e−4).
+Run before the fix, `d02` moved 0 of 112 rows (the legacy copy in the test is faithful).
+
+**Production matrix after the fix** (`d03`; SLV with unit leverage reproduces Heston to the last digit, as it must):
+
+| orientation | KI | PV (200, 60, 800) | Greeks (300, 135, 3200): price / delta / gamma | PV n_x sweep spread | vs MC (s.e.) |
+|---|---|---|---|---|---|
+| reverse | 114.45 | 94.678183 | 94.675349 / −0.955185 / −0.047586 | 6.3e−4 | −0.09 / −0.16 |
+| reverse | 125 | 95.426394 | 95.424085 / −0.901871 / −0.057579 | 2.6e−3 | +0.23 / +0.18 |
+| reverse | 139.80 | 98.327205 | 98.313775 / −0.599596 / −0.072751 | 4.1e−3 | +0.71 / +0.41 |
+| standard | 87.37 | 98.940533 | 98.939392 / +0.324837 / −0.038548 | 4.0e−4 | — |
+| standard | 80 | 99.144314 | 99.143763 / +0.293119 / −0.035817 | 5.5e−4 | — |
+| standard | 71.53 | 99.978517 | 99.977754 / +0.168865 / −0.026720 | 8.2e−4 | — |
+
+No production continuous-KI configuration tested still misbehaves. Not covered: an SLV leverage surface that is not
+flat (the matrix's SLV arm is the Heston dynamics through the SLV solver).
+
+## DCN refinement ladder (ruling 2026-10-10, "(a) first")
+
+`d04_dcn_refinement_ladder.py`, one process, no MC: DCN_A, Feller-violating Heston (ratio 0.36), HestonDCNPDESolver
+from its default grid (n_x 301, n_v 101, 1 substep per daily interval); each axis doubled alone, then all together,
+4 levels; patched core (W7 Q1) and the runtime-unpatched core (the v = 0 column of `A1` zeroed again — checked: it
+reproduces main's (151, 41) −89,176.7328541755 bit for bit). Per 1,000,000 notional; d = successive difference, p =
+observed order log2(|d_prev| / |d|).
+
+| ladder | level | patched | d | p | unpatched | d | p |
+|---|---|---|---|---|---|---|---|
+| n_x | 301 | −97,286.01 | | | −96,889.48 | | |
+| | 601 | −93,698.04 | +3,587.98 | | −93,312.21 | +3,577.27 | |
+| | 1201 | −93,695.62 | +2.42 | 10.5 | −93,314.02 | −1.81 | 11.0 |
+| | 2401 | −93,281.83 | +413.79 | −7.4 | −92,902.07 | +411.95 | −7.8 |
+| n_v | 101 | −97,286.01 | | | −96,889.48 | | |
+| | 201 | −97,286.14 | −0.13 | | −97,072.67 | −183.19 | |
+| | 401 | −97,286.17 | −0.03 | 2.2 | −97,171.07 | −98.40 | 0.90 |
+| | 801 | −97,286.19 | −0.02 | 0.8 | −97,224.11 | −53.04 | 0.89 |
+| time (substeps) | 1 | −97,286.01 | | | −96,889.48 | | |
+| | 2 | −97,081.43 | +204.58 | | −96,669.05 | +220.42 | |
+| | 4 | −97,141.50 | −60.07 | 1.8 | −96,709.00 | −39.95 | 2.5 |
+| | 8 | −97,148.25 | −6.75 | 3.2 | −96,705.71 | +3.29 | 3.6 |
+| together | (301, 101, 1) | −97,286.01 | | | −96,889.48 | | |
+| | (601, 201, 2) | −93,491.66 | +3,794.35 | | −93,275.82 | +3,613.66 | |
+| | (1201, 401, 4) | −93,385.69 | +105.97 | 5.2 | −93,265.03 | +10.79 | 8.4 |
+| | (2401, 801, 8) | −93,043.52 | +342.17 | −1.7 | −92,977.26 | +287.78 | −4.7 |
+
+What it shows:
+- **The variance axis is what the patch changes.** Patched, the price is converged in n_v already at 101 (the next
+  three doublings move it 0.13, 0.03, 0.02). Unpatched it converges at first order (p ≈ 0.9: −183, −98, −53) toward the
+  patched value (its differences shrink by 0.54 per doubling, so the geometric tail adds ≈ −62: −97,224 − 62 ≈ −97,286, the patched value); the patched−unpatched gap at n_v 101 (−397) is that
+  O(h_v) error, and it shrinks with n_v along the "together" ladder (−216, −121, −66). On n_v the patch makes the
+  ladder flat; it is the first-order v = 0 inconsistency of W7 defect B.
+- **The spot axis is not converged, in either arm, and the patch does not change that.** n_x 301 → 601 moves the price
+  +3,588; 601 → 1201 by 2; 1201 → 2401 by +414 again: non-monotone in n_x with the same steps in both arms (the "together"
+  ladder inherits it: p = 5.2 then −1.7 patched, 8.4 then −4.7 unpatched). Neither arm is in its asymptotic range on the
+  spot axis by n_x 2401, so neither ladder supports an extrapolated value; the spread of the last three spot levels is
+  ~400 (0.04% of notional), larger than the patch's own move at the finer grids.
+- **Time** is regular in both arms (p 1.8–3.6), the damped start's signature.
+- The (151, 41) grid the W7 c09 row used (−90,111 patched, −89,177 unpatched) is far outside all of this; its −935 move
+  is mostly the n_v = 41 first-order error the patch removes.
+
+Not diagnosed (no library change asked): why the DCN's spot axis is non-monotone in n_x (a barrier / event-node
+alignment effect on the concentrated grid would fit the step pattern). No sharper MC reference was run (ruling).

@@ -423,6 +423,16 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   continuous-KI Phoenixes whose edge sits near the knock-in level (three months, reverse KI 150: +1.737e-5);
   `phoenix-flat-bsm` re-certified by amendment (2026-10-10; near_expiry pv -2.8e-16, delta +6.9e-17, the other 124
   anchors bit for bit).
+- Snowball / Phoenix PDE continuous knock-in on an up (reverse) barrier, FIRST_PASSAGE crossing correction
+  (`_ContinuousKIFirstPassage._geometry`, W7b, ruling 2026-10-10). The half-cell floor on the slope sample measured
+  the cell at the grid's far edge on an up barrier (a negative "cell": the floor never acted), so a node a few
+  thousandths of a cell below the barrier sent the 2D Heston / SLV price off by ~x8 per step; and the reflection
+  factor overflowed to inf x 0 = NaN on the 2D v = 0 column. The floor now measures the cell at the barrier, and the
+  factor is evaluated in one exponent where it would overflow (`Tolerance.EXP_MAX`). Fixed: reverse KO 97 / KI 125 at
+  n_x 312 / 317 / 384 (diverged to -1e30 ... -1e173), the production Greek grid at KI 139.80 (raised `PricingError`),
+  the production PV grid at KI 114.45 (NaN); other reverse 2D continuous-KI grids whose nearest node lies within half
+  a cell of the barrier move by <= 6.6e-4. Down barriers, discrete knock-in and every 1D layout are bit for bit, and
+  so is every certificate anchor and golden (`docs/superpowers/specs/2026-10-09-heston-2d-v0-evidence/moved_values.txt`).
 - Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract
   aged).
 - Phoenix `get_ko_payoff` keeps `accrued_offset`.

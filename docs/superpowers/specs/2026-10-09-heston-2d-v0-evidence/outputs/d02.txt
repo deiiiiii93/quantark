@@ -1,0 +1,127 @@
+KI 125 (288, 48, 192)                                      MOVED  95.4371440373018 -> 95.43719430793203  (diff +5.027e-05)
+KI 125 (289, 48, 192)                                      MOVED  95.43750195443262 -> 95.43759956645683  (diff +9.761e-05)
+KI 125 (290, 48, 192)                                      bit-identical  ['95.43639609055215']
+KI 125 (291, 48, 192)                                      MOVED  95.43736466050403 -> 95.43748857342003  (diff +1.239e-04)
+KI 125 (292, 48, 192)                                      bit-identical  ['95.434693961988']
+KI 125 (293, 48, 192)                                      MOVED  95.436948380947 -> 95.43698905981304  (diff +4.068e-05)
+KI 125 (294, 48, 192)                                      MOVED  95.43793278918749 -> 95.4379879063026  (diff +5.512e-05)
+KI 125 (295, 48, 192)                                      bit-identical  ['95.43588263146809']
+KI 125 (296, 48, 192)                                      MOVED  95.43756753428134 -> 95.43766919691454  (diff +1.017e-04)
+KI 125 (297, 48, 192)                                      bit-identical  ['95.43423933038275']
+KI 125 (298, 48, 192)                                      bit-identical  ['95.43730809587376']
+KI 125 (299, 48, 192)                                      MOVED  95.43785952708762 -> 95.43789770566134  (diff +3.818e-05)
+KI 125 (300, 48, 192)                                      bit-identical  ['95.43568785428042']
+KI 125 (301, 48, 192)                                      MOVED  95.43719906546016 -> 95.43728470341416  (diff +8.564e-05)
+KI 125 (302, 48, 192)                                      bit-identical  ['95.43386450232278']
+KI 125 (303, 48, 192)                                      bit-identical  ['95.43677891744836']
+KI 125 (304, 48, 192)                                      MOVED  95.43748046752327 -> 95.43750977153  (diff +2.930e-05)
+KI 125 (305, 48, 192)                                      bit-identical  ['95.4356414128888']
+KI 125 (306, 48, 192)                                      MOVED  95.43706131599028 -> 95.43713606716038  (diff +7.475e-05)
+KI 125 (307, 48, 192)                                      bit-identical  ['95.43394243873936']
+KI 125 (308, 48, 192)                                      bit-identical  ['95.43654481672047']
+KI 125 (309, 48, 192)                                      MOVED  95.43790404884321 -> 95.43792810994708  (diff +2.406e-05)
+KI 125 (310, 48, 192)                                      bit-identical  ['95.43533422616397']
+KI 125 (311, 48, 192)                                      MOVED  95.43733934915963 -> 95.43740652492835  (diff +6.718e-05)
+KI 125 (312, 48, 192)                                      MOVED  -1.3414101274562126e+173 -> 95.43707560798374  (diff +1.341e+173)
+KI 125 (313, 48, 192)                                      bit-identical  ['95.43649088008081']
+KI 125 (314, 48, 192)                                      MOVED  95.43779998309842 -> 95.43782085980214  (diff +2.088e-05)
+KI 125 (315, 48, 192)                                      bit-identical  ['95.43488340682359']
+KI 125 (316, 48, 192)                                      MOVED  95.43720666819398 -> 95.43726880055965  (diff +6.213e-05)
+KI 125 (317, 48, 192)                                      MOVED  -1.1487014503952795e+30 -> 95.43700242011666  (diff +1.149e+30)
+KI 125 (318, 48, 192)                                      bit-identical  ['95.43649736542432']
+KI 125 (319, 48, 192)                                      MOVED  95.43766826522976 -> 95.43768728853084  (diff +1.902e-05)
+KI 125 (320, 48, 192)                                      bit-identical  ['95.43507544969442']
+KI 125 (321, 48, 192)                                      MOVED  95.43703295987872 -> 95.43709214510702  (diff +5.919e-05)
+KI 125 (322, 48, 192)                                      MOVED  95.4366375434376 -> 95.43729649562684  (diff +6.590e-04)
+KI 125 (323, 48, 192)                                      bit-identical  ['95.43629421370281']
+KI 125 (324, 48, 192)                                      MOVED  95.43788375603367 -> 95.43790190263215  (diff +1.815e-05)
+KI 125 (325, 48, 192)                                      bit-identical  ['95.43508594049113']
+KI 125 (326, 48, 192)                                      MOVED  95.43697649139688 -> 95.43703456692903  (diff +5.808e-05)
+KI 125 (327, 48, 192)                                      MOVED  95.43673508073816 -> 95.43710329433833  (diff +3.682e-04)
+KI 125 (328, 48, 192)                                      MOVED  95.43696036815754 -> 95.43701111649595  (diff +5.075e-05)
+KI 125 (329, 48, 192)                                      MOVED  95.4371054641024 -> 95.4372775037712  (diff +1.720e-04)
+KI 125 (330, 48, 192)                                      bit-identical  ['95.43633257884585']
+KI 125 (331, 48, 192)                                      MOVED  95.4377241992182 -> 95.43774425503416  (diff +2.006e-05)
+KI 125 (332, 48, 192)                                      bit-identical  ['95.43484907235687']
+KI 125 (333, 48, 192)                                      MOVED  95.43718956184823 -> 95.4372609974809  (diff +7.144e-05)
+KI 125 (334, 48, 192)                                      bit-identical  ['95.43344856276617']
+KI 125 (335, 48, 192)                                      bit-identical  ['95.43671801116277']
+KI 125 (336, 48, 192)                                      MOVED  95.43720503209612 -> 95.43724144082542  (diff +3.641e-05)
+KI 125 (337, 48, 192)                                      bit-identical  ['95.43611479510325']
+KI 125 (338, 48, 192)                                      MOVED  95.43718587805971 -> 95.43728974964075  (diff +1.039e-04)
+KI 125 (339, 48, 192)                                      bit-identical  ['95.43453038547024']
+KI 125 (340, 48, 192)                                      MOVED  95.43667653700115 -> 95.43671984227956  (diff +4.331e-05)
+KI 125 (341, 48, 192)                                      MOVED  95.43733562894444 -> 95.4373726370055  (diff +3.701e-05)
+KI 125 (342, 48, 192)                                      bit-identical  ['95.43616518986282']
+KI 125 (343, 48, 192)                                      MOVED  95.43706640088989 -> 95.43707555495897  (diff +9.154e-06)
+KI 125 (344, 48, 192)                                      bit-identical  ['95.43482266332126']
+KI 125 (345, 48, 192)                                      MOVED  95.43725264660507 -> 95.43731756709413  (diff +6.492e-05)
+KI 125 (346, 48, 192)                                      bit-identical  ['95.43329835859274']
+KI 125 (347, 48, 192)                                      bit-identical  ['95.4365512874249']
+KI 125 (348, 48, 192)                                      MOVED  95.43751301754388 -> 95.43752469199163  (diff +1.167e-05)
+KI 125 (349, 48, 192)                                      bit-identical  ['95.43559366351889']
+KI 125 (350, 48, 192)                                      MOVED  95.43661302151224 -> 95.43666072215642  (diff +4.770e-05)
+KI 125 (351, 48, 192)                                      bit-identical  ['95.43398292925434']
+KI 125 (352, 48, 192)                                      MOVED  95.43693775396585 -> 95.43698070890709  (diff +4.295e-05)
+KI 125 (353, 48, 192)                                      MOVED  95.43779868680025 -> 95.43781424983769  (diff +1.556e-05)
+KI 125 (354, 48, 192)                                      bit-identical  ['95.43645454230222']
+KI 125 (355, 48, 192)                                      MOVED  95.43664473683131 -> 95.43670383960628  (diff +5.910e-05)
+KI 125 (356, 48, 192)                                      bit-identical  ['95.43517523587202']
+KI 125 (357, 48, 192)                                      MOVED  95.43671922933166 -> 95.4367879258047  (diff +6.870e-05)
+KI 125 (358, 48, 192)                                      bit-identical  ['95.43393994815666']
+KI 125 (359, 48, 192)                                      bit-identical  ['95.4364923037326']
+KI 125 (360, 48, 192)                                      MOVED  95.43693329943227 -> 95.43700843874184  (diff +7.514e-05)
+KI 125 (361, 48, 192)                                      bit-identical  ['95.43583714543499']
+KI 125 (362, 48, 192)                                      MOVED  95.43757463925336 -> 95.43768836789428  (diff +1.137e-04)
+KI 125 (363, 48, 192)                                      bit-identical  ['95.43439757196859']
+KI 125 (364, 48, 192)                                      MOVED  95.43692543219548 -> 95.43697536629978  (diff +4.993e-05)
+KI 125 (365, 48, 192)                                      MOVED  95.43680636584185 -> 95.43701221196773  (diff +2.058e-04)
+KI 125 (366, 48, 192)                                      bit-identical  ['95.4363472094471']
+KI 125 (367, 48, 192)                                      MOVED  95.43750615357068 -> 95.43752957413967  (diff +2.342e-05)
+KI 125 (368, 48, 192)                                      bit-identical  ['95.43548221025607']
+KI 125 (369, 48, 192)                                      MOVED  95.43689515763691 -> 95.43698040379154  (diff +8.525e-05)
+KI 125 (370, 48, 192)                                      bit-identical  ['95.43380606247617']
+KI 125 (371, 48, 192)                                      bit-identical  ['95.4368005184896']
+KI 125 (372, 48, 192)                                      MOVED  95.4370410764588 -> 95.43711022413427  (diff +6.915e-05)
+KI 125 (373, 48, 192)                                      bit-identical  ['95.43628848216672']
+KI 125 (374, 48, 192)                                      MOVED  95.43733767659143 -> 95.43735394999953  (diff +1.627e-05)
+KI 125 (375, 48, 192)                                      bit-identical  ['95.4352705110554']
+KI 125 (376, 48, 192)                                      MOVED  95.43649675876516 -> 95.4365650225608  (diff +6.826e-05)
+KI 125 (377, 48, 192)                                      bit-identical  ['95.43384109953854']
+KI 125 (378, 48, 192)                                      bit-identical  ['95.43627973549829']
+KI 125 (379, 48, 192)                                      MOVED  95.43779884453424 -> 95.43784256026547  (diff +4.372e-05)
+KI 125 (380, 48, 192)                                      bit-identical  ['95.43567621518207']
+KI 125 (381, 48, 192)                                      MOVED  95.4379871367906 -> 95.43811348228641  (diff +1.263e-04)
+KI 125 (382, 48, 192)                                      bit-identical  ['95.43435556379967']
+KI 125 (383, 48, 192)                                      MOVED  95.43719650783308 -> 95.43725438826436  (diff +5.788e-05)
+KI 125 (384, 48, 192)                                      MOVED  -1.6515398826610555e+158 -> 95.4369246602919  (diff +1.652e+158)
+KI 125 (600, 48, 192)                                      bit-identical  ['95.43651869831758']
+KI 125 (600, 60, 800)                                      bit-identical  ['95.42472258396305']
+KI 125.00 production PV (200, 60, 800)                     bit-identical  ['95.42639365557969']
+KI 125.00 production Greeks (price, delta, gamma)          bit-identical  ['95.42408473565776', '-0.9018710303620949', '-0.05757868995139859']
+KI 139.80 production PV (200, 60, 800)                     bit-identical  ['98.32720478545934']
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:664: RuntimeWarning: overflow encountered in multiply
+  U_xx = (U[:-2, 1:-1] * wm2[:, None] + U[1:-1, 1:-1] * w02[:, None]
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:665: RuntimeWarning: overflow encountered in multiply
+  + U[2:, 1:-1] * wp2[:, None])
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:982: RuntimeWarning: overflow encountered in multiply
+  U_xv = Ux[:, :-2] * wvm + Ux[:, 1:-1] * wv0 + Ux[:, 2:] * wvp
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:982: RuntimeWarning: invalid value encountered in add
+  U_xv = Ux[:, :-2] * wvm + Ux[:, 1:-1] * wv0 + Ux[:, 2:] * wvp
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:1154: RuntimeWarning: invalid value encountered in subtract
+  rhs = source - theta_loc * dt_step * A1U                    # (N_S, N_V), fresh array
+KI 139.80 production Greeks (price, delta, gamma)          MOVED  PricingError -> 98.31377534064602 / -0.5995962695946915 / -0.07275086648355966  (diff n/a)
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/test/test_vol_pde_reverse_continuous_ki.py:112: RuntimeWarning: overflow encountered in exp
+  G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/test/test_vol_pde_reverse_continuous_ki.py:112: RuntimeWarning: invalid value encountered in multiply
+  G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
+KI 114.45 production PV (200, 60, 800)                     MOVED  nan -> 94.67818262683816  (diff +nan)
+KI 114.45 production Greeks (price, delta, gamma)          MOVED  94.67516280203942 / -0.9551884807944475 / -0.04758132295225437 -> 94.6753486294809 / -0.9551846301971878 / -0.04758567688089954  (diff +1.858e-04 / +3.851e-06 / -4.354e-06)
+inert: 2D standard continuous                              bit-identical  ['99.55753989636924']
+inert: 2D reverse discrete                                 bit-identical  ['95.81313708993714']
+inert: 2D reverse BSM limit                                bit-identical  ['95.35715846165232']
+inert: 2D reverse, node beyond half a cell                 bit-identical  ['95.43649088008081']
+inert: 1D standard continuous                              bit-identical  ['99.41621551577873']
+inert: 1D reverse continuous                               bit-identical  ['95.35537486568889']
+inert: 1D reverse continuous KI 115                        bit-identical  ['95.19649181432759']
+moved: 54 rows; of the 97-grid scan: 51

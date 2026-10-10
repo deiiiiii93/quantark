@@ -1,0 +1,42 @@
+unpatched arm at (151, 41): -89176.7328541755 vs main -89176.7328541755: bit-identical
+patched (151, 41): -90111.4177797157
+  n_x ladder, patched core (63 s)
+    (n_x  301, n_v 101, substeps 1)     -97286.0115    
+    (n_x  601, n_v 101, substeps 1)     -93698.0363  d  +3587.9753  
+    (n_x 1201, n_v 101, substeps 1)     -93695.6189  d     +2.4174  p 10.54
+    (n_x 2401, n_v 101, substeps 1)     -93281.8252  d   +413.7936  p -7.42
+  n_x ladder, unpatched core (71 s)
+    (n_x  301, n_v 101, substeps 1)     -96889.4785    
+    (n_x  601, n_v 101, substeps 1)     -93312.2084  d  +3577.2701  
+    (n_x 1201, n_v 101, substeps 1)     -93314.0179  d     -1.8095  p 10.95
+    (n_x 2401, n_v 101, substeps 1)     -92902.0679  d   +411.9500  p -7.83
+  n_v ladder, patched core (69 s)
+    (n_x  301, n_v 101, substeps 1)     -97286.0115    
+    (n_x  301, n_v 201, substeps 1)     -97286.1431  d     -0.1316  
+    (n_x  301, n_v 401, substeps 1)     -97286.1727  d     -0.0296  p  2.15
+    (n_x  301, n_v 801, substeps 1)     -97286.1891  d     -0.0165  p  0.84
+  n_v ladder, unpatched core (73 s)
+    (n_x  301, n_v 101, substeps 1)     -96889.4785    
+    (n_x  301, n_v 201, substeps 1)     -97072.6665  d   -183.1881  
+    (n_x  301, n_v 401, substeps 1)     -97171.0687  d    -98.4021  p  0.90
+    (n_x  301, n_v 801, substeps 1)     -97224.1082  d    -53.0395  p  0.89
+  time ladder, patched core (76 s)
+    (n_x  301, n_v 101, substeps 1)     -97286.0115    
+    (n_x  301, n_v 101, substeps 2)     -97081.4288  d   +204.5828  
+    (n_x  301, n_v 101, substeps 4)     -97141.5030  d    -60.0743  p  1.77
+    (n_x  301, n_v 101, substeps 8)     -97148.2504  d     -6.7473  p  3.15
+  time ladder, unpatched core (70 s)
+    (n_x  301, n_v 101, substeps 1)     -96889.4785    
+    (n_x  301, n_v 101, substeps 2)     -96669.0539  d   +220.4246  
+    (n_x  301, n_v 101, substeps 4)     -96709.0047  d    -39.9508  p  2.46
+    (n_x  301, n_v 101, substeps 8)     -96705.7124  d     +3.2923  p  3.60
+  together ladder, patched core (2676 s)
+    (n_x  301, n_v 101, substeps 1)     -97286.0115    
+    (n_x  601, n_v 201, substeps 2)     -93491.6606  d  +3794.3509  
+    (n_x 1201, n_v 401, substeps 4)     -93385.6920  d   +105.9686  p  5.16
+    (n_x 2401, n_v 801, substeps 8)     -93043.5200  d   +342.1720  p -1.69
+  together ladder, unpatched core (2050 s)
+    (n_x  301, n_v 101, substeps 1)     -96889.4785    
+    (n_x  601, n_v 201, substeps 2)     -93275.8205  d  +3613.6580  
+    (n_x 1201, n_v 401, substeps 4)     -93265.0321  d    +10.7884  p  8.39
+    (n_x 2401, n_v 801, substeps 8)     -92977.2556  d   +287.7766  p -4.74

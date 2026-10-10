@@ -1,0 +1,3 @@
+reverse continuous KI 125.00: MC 95.41574689509987 +- 4.575e-02 (s.e.)
+reverse continuous KI 139.80: MC 98.2960595799618 +- 4.356e-02 (s.e.)
+reverse continuous KI 114.45: MC 94.68248138957318 +- 4.575e-02 (s.e.)

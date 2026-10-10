@@ -1,0 +1,12 @@
+reverse  heston KI  114.45  PV 94.678183  Greeks price 94.675349 delta -0.955185 gamma -0.047586  n_x sweep spread 6.26e-04  finite  PV - MC -0.09 s.e., Greek price - MC -0.16 s.e.
+reverse  heston KI  125.00  PV 95.426394  Greeks price 95.424085 delta -0.901871 gamma -0.057579  n_x sweep spread 2.60e-03  finite  PV - MC +0.23 s.e., Greek price - MC +0.18 s.e.
+reverse  heston KI  139.80  PV 98.327205  Greeks price 98.313775 delta -0.599596 gamma -0.072751  n_x sweep spread 4.08e-03  finite  PV - MC +0.71 s.e., Greek price - MC +0.41 s.e.
+reverse  slv    KI  114.45  PV 94.678183  Greeks price 94.675349 delta -0.955185 gamma -0.047586  n_x sweep spread 6.26e-04  finite  PV - MC -0.09 s.e., Greek price - MC -0.16 s.e.
+reverse  slv    KI  125.00  PV 95.426394  Greeks price 95.424085 delta -0.901871 gamma -0.057579  n_x sweep spread 2.60e-03  finite  PV - MC +0.23 s.e., Greek price - MC +0.18 s.e.
+reverse  slv    KI  139.80  PV 98.327205  Greeks price 98.313775 delta -0.599596 gamma -0.072751  n_x sweep spread 4.08e-03  finite  PV - MC +0.71 s.e., Greek price - MC +0.41 s.e.
+standard heston KI   87.37  PV 98.940533  Greeks price 98.939392 delta +0.324837 gamma -0.038548  n_x sweep spread 3.97e-04  finite
+standard heston KI   80.00  PV 99.144314  Greeks price 99.143763 delta +0.293119 gamma -0.035817  n_x sweep spread 5.54e-04  finite
+standard heston KI   71.53  PV 99.978517  Greeks price 99.977754 delta +0.168865 gamma -0.026720  n_x sweep spread 8.21e-04  finite
+standard slv    KI   87.37  PV 98.940533  Greeks price 98.939392 delta +0.324837 gamma -0.038548  n_x sweep spread 3.97e-04  finite
+standard slv    KI   80.00  PV 99.144314  Greeks price 99.143763 delta +0.293119 gamma -0.035817  n_x sweep spread 5.54e-04  finite
+standard slv    KI   71.53  PV 99.978517  Greeks price 99.977754 delta +0.168865 gamma -0.026720  n_x sweep spread 8.21e-04  finite
