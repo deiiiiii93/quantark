@@ -217,6 +217,13 @@ class BranchSolution(NamedTuple):
     s_vec: np.ndarray
     ki_barrier: float
     knocked_in: bool
+    # A DCN monthly observation on the valuation date (W10b), decided pointwise at each level: a knock-out
+    # (level >= t0_ko_barrier) settles at t0_ko_cash with zero greeks; a coupon (alive branch, level >=
+    # t0_coupon_barrier) adds t0_coupon_cash. Signed cash; None = no such event today.
+    t0_ko_cash: Optional[float] = None
+    t0_ko_barrier: float = 0.0
+    t0_coupon_cash: Optional[float] = None
+    t0_coupon_barrier: float = 0.0
 
     def rows(self, spot_levels=None):
         levels = [float(s) for s in (self.s_vec if spot_levels is None else spot_levels)]
@@ -225,8 +232,14 @@ class BranchSolution(NamedTuple):
                     (("alive", self.alive), ("ki", self.ki))}
         out = []
         for spot in levels:
+            if self.t0_ko_cash is not None and spot >= self.t0_ko_barrier:
+                out.append({"spot": spot, "price": self.t0_ko_cash, "delta": 0.0, "gamma": 0.0,
+                            "calculation_mode": "engine_grid"})
+                continue
             branch = "ki" if (self.knocked_in or spot <= self.ki_barrier) else "alive"
             price, delta, gamma = _project_rows(surfaces[branch], [spot])[0]
+            if self.t0_coupon_cash is not None and branch == "alive" and spot >= self.t0_coupon_barrier:
+                price = price + self.t0_coupon_cash
             out.append({"spot": spot, "price": price, "delta": delta, "gamma": gamma, "calculation_mode": "engine_grid"})
         return out
 

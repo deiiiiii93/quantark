@@ -104,20 +104,21 @@ class DCNAdapter(FamilyAdapter):
         validate_settlement_capability(self.solver, product, lifecycle_state)
 
     def terminal_outcome(self, product, env, request, lifecycle_state):
-        """The final observation date (W10): the settled final row from ``dcn_valuation``, pointwise at the spot
-        (Q2); greeks = its slope, gamma 0 (Q6). Any other date marches."""
-        from quantark.asset.equity.engine.dcn_valuation import (
-            at_final_observation, settle_final_observation, settled_row_delta)
-        if not at_final_observation(product):
+        """The valuation-date row when it ends the contract (``dcn_valuation``, pointwise at the spot, Q2): the final
+        observation date (W10: the settled final row; greeks = its slope, gamma 0, Q6) or a knock-out today (W10b:
+        the knock-out coupon; greeks 0). Any other date marches."""
+        from quantark.asset.equity.engine.dcn_valuation import observe_valuation_row, settled_row_delta
+        row = observe_valuation_row(product, env)
+        if row is None or not row.ends_contract:
             return None
-        row = settle_final_observation(product, env)
+        reason = "expired" if row.is_final else "knocked_out"
         price = row.pv
         if request.operation is Operation.GREEKS:
-            return TerminalOutcome("expired", {"price": price, "delta": settled_row_delta(product, env, row),
-                                               "gamma": 0.0})
+            delta = settled_row_delta(product, env, row) if row.is_final else 0.0
+            return TerminalOutcome(reason, {"price": price, "delta": delta, "gamma": 0.0})
         if request.operation is Operation.SESSION_OUTPUTS:
-            return TerminalOutcome("expired", self._session_outputs(price, None))
-        return TerminalOutcome("expired", price)
+            return TerminalOutcome(reason, self._session_outputs(price, None))
+        return TerminalOutcome(reason, price)
 
     def market_checks(self, product, env, tau) -> None:
         """Today's DCN engine read the term vol at the initial price and never guarded the collapse."""
@@ -170,6 +171,14 @@ class DCNAdapter(FamilyAdapter):
         column = ki if (flagged or spot <= product.ki_barrier) else alive
         price = sign * readout.price(column, spot, layout)
         validate_readout(price, readout)
+        # W10b: a monthly observation on the valuation date, decided pointwise at the spot. The march's t = 0 column
+        # is the smooth continuation (step_events never applies t = 0); a knock-out today never marches
+        # (terminal_outcome); a coupon today is added here.
+        from quantark.asset.equity.engine.dcn_valuation import observe_valuation_row
+        ev = prepared.events
+        row = observe_valuation_row(product, env, ev.ctx, ev.df)
+        if row is not None and row.coupon_paid:
+            price = price + sign * row.coupon_pv
         op = prepared.request.operation
         if op is Operation.GREEKS:
             delta, gamma = readout.delta_gamma(column, spot, layout)
@@ -177,8 +186,15 @@ class DCNAdapter(FamilyAdapter):
         if op is Operation.SESSION_OUTPUTS:
             solution = None
             if prepared.request.grid:
+                today = {}
+                if row is not None:          # W10b: the valuation-date row, decided per spot level
+                    cpn, ko = ev.amounts(0, 0.0)
+                    today = dict(t0_coupon_cash=None if cpn is None else sign * cpn,
+                                 t0_coupon_barrier=float(product.coupon_barrier),
+                                 t0_ko_cash=None if ko is None else sign * ko,
+                                 t0_ko_barrier=float(product.ko_barrier))
                 solution = BranchSolution(alive=sign * alive, ki=sign * ki, x_vec=layout.spatial.x,
                                           s_vec=layout.spatial.s, ki_barrier=float(product.ki_barrier),
-                                          knocked_in=flagged)
+                                          knocked_in=flagged, **today)
             return self._session_outputs(price, solution)
         return price

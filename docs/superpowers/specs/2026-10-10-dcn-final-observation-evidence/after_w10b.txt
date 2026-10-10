@@ -1,0 +1,816 @@
+final | DCN_A carried=False spot=7000 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=7000 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=7000 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=7000 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=7000 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=7000 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=7000 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=7000 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=False spot=7000 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 0.0, 1.0, (0.0,), 0.0)
+final | DCN_A carried=False spot=7000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=7000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=7000 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=False spot=7000 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=False spot=7000 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_A carried=False spot=7000 day-before DCNPDEEngine.price | 9995.12447807971
+final | DCN_A carried=False spot=6300 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6300 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6300 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6300 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6300 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6300 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6300 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6300 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=False spot=6300 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 0.0, 1.0, (0.0,), 0.0)
+final | DCN_A carried=False spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=6300 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=False spot=6300 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=False spot=6300 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_A carried=False spot=6300 day-before DCNPDEEngine.price | 9995.124478079313
+final | DCN_A carried=False spot=6000 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6000 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6000 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6000 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6000 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6000 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6000 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=6000 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=False spot=6000 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 0.0, 1.0, (0.0,), 0.0)
+final | DCN_A carried=False spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=6000 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=False spot=6000 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=False spot=6000 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_A carried=False spot=6000 day-before DCNPDEEngine.price | 9995.124477975789
+final | DCN_A carried=False spot=5999 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5999 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5999 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5999 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5999 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5999 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5999 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5999 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=False spot=5999 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 0.0, 0.0, (1.0,), 0.0)
+final | DCN_A carried=False spot=5999 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=5999 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=5999 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=False spot=5999 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=False spot=5999 day-before DCNMCEngine.price | 9995.12447659411
+control | DCN_A carried=False spot=5999 day-before DCNPDEEngine.price | 9995.124477975483
+final | DCN_A carried=False spot=5500 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5500 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5500 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5500 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5500 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5500 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5500 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=5500 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=False spot=5500 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 0.0, 0.0, (1.0,), 0.0)
+final | DCN_A carried=False spot=5500 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=5500 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=5500 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=False spot=5500 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=False spot=5500 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_A carried=False spot=5500 day-before DCNPDEEngine.price | 9995.12447807982
+final | DCN_A carried=False spot=4800 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=4800 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=4800 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=4800 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=4800 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=4800 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=4800 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=False spot=4800 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=False spot=4800 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 0.0, 0.0, (1.0,), 0.0)
+final | DCN_A carried=False spot=4800 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=4800 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=False spot=4800 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=False spot=4800 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=False spot=4800 day-before DCNMCEngine.price | 4860.91014584362
+control | DCN_A carried=False spot=4800 day-before DCNPDEEngine.price | 4858.7648833001485
+final | DCN_A carried=False spot=4650 DCNMCEngine.price | 0.0
+final | DCN_A carried=False spot=4650 LocalVolDCNMCEngine.price | 0.0
+final | DCN_A carried=False spot=4650 HestonDCNMCEngine.price | 0.0
+final | DCN_A carried=False spot=4650 QEDCNMCEngine.price | 0.0
+final | DCN_A carried=False spot=4650 CoupledCoarseHestonDCNMCEngine.price | 0.0
+final | DCN_A carried=False spot=4650 DCNPDEEngine.price | 0.0
+final | DCN_A carried=False spot=4650 LocalVolDCNPDEEngine.price | 0.0
+final | DCN_A carried=False spot=4650 HestonDCNPDESolver.price | 0.0
+final | DCN_A carried=False spot=4650 DCNMCEngine.price_detailed | (0.0, 0.0, 0.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=False spot=4650 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=0.0
+final | DCN_A carried=False spot=4650 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=0.0
+final | DCN_A carried=False spot=4650 session[DCNMCEngine].price | 0.0
+final | DCN_A carried=False spot=4650 session[DCNPDEEngine].price | 0.0
+control | DCN_A carried=False spot=4650 day-before DCNMCEngine.price | -166.3913902262873
+control | DCN_A carried=False spot=4650 day-before DCNPDEEngine.price | -222.5742580066718
+final | DCN_A carried=False spot=4500 DCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=False spot=4500 LocalVolDCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=False spot=4500 HestonDCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=False spot=4500 QEDCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=False spot=4500 CoupledCoarseHestonDCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=False spot=4500 DCNPDEEngine.price | -349863.47868753294
+final | DCN_A carried=False spot=4500 LocalVolDCNPDEEngine.price | -349863.47868753294
+final | DCN_A carried=False spot=4500 HestonDCNPDESolver.price | -349863.47868753294
+final | DCN_A carried=False spot=4500 DCNMCEngine.price_detailed | (-349863.47868753294, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=False spot=4500 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=-349863.47868753294
+final | DCN_A carried=False spot=4500 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=-349863.47868753294
+final | DCN_A carried=False spot=4500 session[DCNMCEngine].price | -349863.47868753294
+final | DCN_A carried=False spot=4500 session[DCNPDEEngine].price | -349863.47868753294
+control | DCN_A carried=False spot=4500 day-before DCNMCEngine.price | -350044.89336203714
+control | DCN_A carried=False spot=4500 day-before DCNPDEEngine.price | -350044.83779958665
+final | DCN_A carried=False spot=4000 DCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=False spot=4000 LocalVolDCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=False spot=4000 HestonDCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=False spot=4000 QEDCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=False spot=4000 CoupledCoarseHestonDCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=False spot=4000 DCNPDEEngine.price | -433164.3069464694
+final | DCN_A carried=False spot=4000 LocalVolDCNPDEEngine.price | -433164.3069464694
+final | DCN_A carried=False spot=4000 HestonDCNPDESolver.price | -433164.3069464694
+final | DCN_A carried=False spot=4000 DCNMCEngine.price_detailed | (-433164.3069464694, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=False spot=4000 DCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-433164.3069464694
+final | DCN_A carried=False spot=4000 LocalVolDCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-433164.3069464694
+final | DCN_A carried=False spot=4000 session[DCNMCEngine].price | -433164.3069464694
+final | DCN_A carried=False spot=4000 session[DCNPDEEngine].price | -433164.3069464694
+control | DCN_A carried=False spot=4000 day-before DCNMCEngine.price | -433313.6488135169
+control | DCN_A carried=False spot=4000 day-before DCNPDEEngine.price | -433313.59908151603
+theta | DCN_A carried=False spot=6300 penultimate DCNMCEngine.theta_1d | 0.9749144782526855
+theta | DCN_A carried=False spot=6300 penultimate DCNPDEEngine.theta_1d | 0.9749129930514755
+theta | DCN_A carried=False spot=5500 penultimate DCNMCEngine.theta_1d | 0.9749144782526855
+theta | DCN_A carried=False spot=5500 penultimate DCNPDEEngine.theta_1d | 0.9749129925439775
+theta | DCN_A carried=False spot=4000 penultimate DCNMCEngine.theta_1d | 149.34186704747844
+theta | DCN_A carried=False spot=4000 penultimate DCNPDEEngine.theta_1d | 149.2921350466204
+final | DCN_A carried=True spot=7000 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=7000 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=7000 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=7000 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=7000 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=7000 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=7000 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=7000 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=True spot=7000 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 1.0, 1.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=7000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=True spot=7000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=True spot=7000 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=True spot=7000 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=True spot=7000 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_A carried=True spot=7000 day-before DCNPDEEngine.price | 9995.12447807971
+final | DCN_A carried=True spot=6300 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6300 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6300 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6300 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6300 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6300 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6300 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6300 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=True spot=6300 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 1.0, 1.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=True spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=True spot=6300 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=True spot=6300 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=True spot=6300 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_A carried=True spot=6300 day-before DCNPDEEngine.price | 9994.68113610566
+final | DCN_A carried=True spot=6000 DCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6000 LocalVolDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6000 HestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6000 QEDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6000 CoupledCoarseHestonDCNMCEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6000 DCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6000 LocalVolDCNPDEEngine.price | 9996.099391072365
+final | DCN_A carried=True spot=6000 HestonDCNPDESolver.price | 9996.099391072365
+final | DCN_A carried=True spot=6000 DCNMCEngine.price_detailed | (9996.099391072365, 0.0, 1.0, 1.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=True spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9996.099391072365
+final | DCN_A carried=True spot=6000 session[DCNMCEngine].price | 9996.099391072365
+final | DCN_A carried=True spot=6000 session[DCNPDEEngine].price | 9996.099391072365
+control | DCN_A carried=True spot=6000 day-before DCNMCEngine.price | -50466.152511711975
+control | DCN_A carried=True spot=6000 day-before DCNPDEEngine.price | -50478.21081391001
+final | DCN_A carried=True spot=5999 DCNMCEngine.price | -100127.59556724169
+final | DCN_A carried=True spot=5999 LocalVolDCNMCEngine.price | -100127.59556724169
+final | DCN_A carried=True spot=5999 HestonDCNMCEngine.price | -100127.59556724169
+final | DCN_A carried=True spot=5999 QEDCNMCEngine.price | -100127.59556724169
+final | DCN_A carried=True spot=5999 CoupledCoarseHestonDCNMCEngine.price | -100127.59556724169
+final | DCN_A carried=True spot=5999 DCNPDEEngine.price | -100127.59556724169
+final | DCN_A carried=True spot=5999 LocalVolDCNPDEEngine.price | -100127.59556724169
+final | DCN_A carried=True spot=5999 HestonDCNPDESolver.price | -100127.59556724169
+final | DCN_A carried=True spot=5999 DCNMCEngine.price_detailed | (-100127.59556724169, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=5999 DCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-100127.59556724169
+final | DCN_A carried=True spot=5999 LocalVolDCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-100127.59556724169
+final | DCN_A carried=True spot=5999 session[DCNMCEngine].price | -100127.59556724169
+final | DCN_A carried=True spot=5999 session[DCNPDEEngine].price | -100127.59556724169
+control | DCN_A carried=True spot=5999 day-before DCNMCEngine.price | -51330.089108249485
+control | DCN_A carried=True spot=5999 day-before DCNPDEEngine.price | -51277.4893087078
+final | DCN_A carried=True spot=5500 DCNMCEngine.price | -183261.8221696602
+final | DCN_A carried=True spot=5500 LocalVolDCNMCEngine.price | -183261.8221696602
+final | DCN_A carried=True spot=5500 HestonDCNMCEngine.price | -183261.8221696602
+final | DCN_A carried=True spot=5500 QEDCNMCEngine.price | -183261.8221696602
+final | DCN_A carried=True spot=5500 CoupledCoarseHestonDCNMCEngine.price | -183261.8221696602
+final | DCN_A carried=True spot=5500 DCNPDEEngine.price | -183261.8221696602
+final | DCN_A carried=True spot=5500 LocalVolDCNPDEEngine.price | -183261.8221696602
+final | DCN_A carried=True spot=5500 HestonDCNPDESolver.price | -183261.8221696602
+final | DCN_A carried=True spot=5500 DCNMCEngine.price_detailed | (-183261.8221696602, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=5500 DCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-183261.8221696602
+final | DCN_A carried=True spot=5500 LocalVolDCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-183261.8221696602
+final | DCN_A carried=True spot=5500 session[DCNMCEngine].price | -183261.8221696602
+final | DCN_A carried=True spot=5500 session[DCNPDEEngine].price | -183261.8221696602
+control | DCN_A carried=True spot=5500 day-before DCNMCEngine.price | -183507.38245907862
+control | DCN_A carried=True spot=5500 day-before DCNPDEEngine.price | -183507.43284234003
+final | DCN_A carried=True spot=4800 DCNMCEngine.price | -299882.98173217115
+final | DCN_A carried=True spot=4800 LocalVolDCNMCEngine.price | -299882.98173217115
+final | DCN_A carried=True spot=4800 HestonDCNMCEngine.price | -299882.98173217115
+final | DCN_A carried=True spot=4800 QEDCNMCEngine.price | -299882.98173217115
+final | DCN_A carried=True spot=4800 CoupledCoarseHestonDCNMCEngine.price | -299882.98173217115
+final | DCN_A carried=True spot=4800 DCNPDEEngine.price | -299882.98173217115
+final | DCN_A carried=True spot=4800 LocalVolDCNPDEEngine.price | -299882.98173217115
+final | DCN_A carried=True spot=4800 HestonDCNPDESolver.price | -299882.98173217115
+final | DCN_A carried=True spot=4800 DCNMCEngine.price_detailed | (-299882.98173217115, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=4800 DCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-299882.98173217115
+final | DCN_A carried=True spot=4800 LocalVolDCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-299882.98173217115
+final | DCN_A carried=True spot=4800 session[DCNMCEngine].price | -299882.98173217115
+final | DCN_A carried=True spot=4800 session[DCNPDEEngine].price | -299882.98173217115
+control | DCN_A carried=True spot=4800 day-before DCNMCEngine.price | -300083.64009114954
+control | DCN_A carried=True spot=4800 day-before DCNPDEEngine.price | -300083.68892291846
+final | DCN_A carried=True spot=4650 DCNMCEngine.price | -324873.23020985204
+final | DCN_A carried=True spot=4650 LocalVolDCNMCEngine.price | -324873.23020985204
+final | DCN_A carried=True spot=4650 HestonDCNMCEngine.price | -324873.23020985204
+final | DCN_A carried=True spot=4650 QEDCNMCEngine.price | -324873.23020985204
+final | DCN_A carried=True spot=4650 CoupledCoarseHestonDCNMCEngine.price | -324873.23020985204
+final | DCN_A carried=True spot=4650 DCNPDEEngine.price | -324873.23020985204
+final | DCN_A carried=True spot=4650 LocalVolDCNPDEEngine.price | -324873.23020985204
+final | DCN_A carried=True spot=4650 HestonDCNPDESolver.price | -324873.23020985204
+final | DCN_A carried=True spot=4650 DCNMCEngine.price_detailed | (-324873.23020985204, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=4650 DCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-324873.23020985204
+final | DCN_A carried=True spot=4650 LocalVolDCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-324873.23020985204
+final | DCN_A carried=True spot=4650 session[DCNMCEngine].price | -324873.23020985204
+final | DCN_A carried=True spot=4650 session[DCNPDEEngine].price | -324873.23020985204
+control | DCN_A carried=True spot=4650 day-before DCNMCEngine.price | -325064.266726593
+control | DCN_A carried=True spot=4650 day-before DCNPDEEngine.price | -325064.2371920684
+final | DCN_A carried=True spot=4500 DCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=True spot=4500 LocalVolDCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=True spot=4500 HestonDCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=True spot=4500 QEDCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=True spot=4500 CoupledCoarseHestonDCNMCEngine.price | -349863.47868753294
+final | DCN_A carried=True spot=4500 DCNPDEEngine.price | -349863.47868753294
+final | DCN_A carried=True spot=4500 LocalVolDCNPDEEngine.price | -349863.47868753294
+final | DCN_A carried=True spot=4500 HestonDCNPDESolver.price | -349863.47868753294
+final | DCN_A carried=True spot=4500 DCNMCEngine.price_detailed | (-349863.47868753294, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=4500 DCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-349863.47868753294
+final | DCN_A carried=True spot=4500 LocalVolDCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-349863.47868753294
+final | DCN_A carried=True spot=4500 session[DCNMCEngine].price | -349863.47868753294
+final | DCN_A carried=True spot=4500 session[DCNPDEEngine].price | -349863.47868753294
+control | DCN_A carried=True spot=4500 day-before DCNMCEngine.price | -350044.89336203714
+control | DCN_A carried=True spot=4500 day-before DCNPDEEngine.price | -350044.83779958665
+final | DCN_A carried=True spot=4000 DCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=True spot=4000 LocalVolDCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=True spot=4000 HestonDCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=True spot=4000 QEDCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=True spot=4000 CoupledCoarseHestonDCNMCEngine.price | -433164.3069464694
+final | DCN_A carried=True spot=4000 DCNPDEEngine.price | -433164.3069464694
+final | DCN_A carried=True spot=4000 LocalVolDCNPDEEngine.price | -433164.3069464694
+final | DCN_A carried=True spot=4000 HestonDCNPDESolver.price | -433164.3069464694
+final | DCN_A carried=True spot=4000 DCNMCEngine.price_detailed | (-433164.3069464694, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_A carried=True spot=4000 DCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-433164.3069464694
+final | DCN_A carried=True spot=4000 LocalVolDCNPDEEngine.greeks | delta=166.60165651787278 gamma=0.0 price=-433164.3069464694
+final | DCN_A carried=True spot=4000 session[DCNMCEngine].price | -433164.3069464694
+final | DCN_A carried=True spot=4000 session[DCNPDEEngine].price | -433164.3069464694
+control | DCN_A carried=True spot=4000 day-before DCNMCEngine.price | -433313.6488135169
+control | DCN_A carried=True spot=4000 day-before DCNPDEEngine.price | -433313.59908151603
+theta | DCN_A carried=True spot=6300 penultimate DCNMCEngine.theta_1d | 0.9749144782526855
+theta | DCN_A carried=True spot=6300 penultimate DCNPDEEngine.theta_1d | 1.4182549667038984
+theta | DCN_A carried=True spot=5500 penultimate DCNMCEngine.theta_1d | 245.56028941841214
+theta | DCN_A carried=True spot=5500 penultimate DCNPDEEngine.theta_1d | 245.61067267981707
+theta | DCN_A carried=True spot=4000 penultimate DCNMCEngine.theta_1d | 149.34186704747844
+theta | DCN_A carried=True spot=4000 penultimate DCNPDEEngine.theta_1d | 149.2921350466204
+final | DCN_B carried=False spot=7000 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=7000 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=7000 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=7000 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=7000 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=7000 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=7000 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=7000 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=False spot=7000 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 0.0, 1.0, (0.0,), 0.0)
+final | DCN_B carried=False spot=7000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=7000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=7000 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=False spot=7000 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=False spot=7000 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_B carried=False spot=7000 day-before DCNPDEEngine.price | 9995.124479625261
+final | DCN_B carried=False spot=6300 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6300 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6300 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6300 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6300 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6300 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6300 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6300 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=False spot=6300 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 0.0, 1.0, (0.0,), 0.0)
+final | DCN_B carried=False spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=6300 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=False spot=6300 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=False spot=6300 day-before DCNMCEngine.price | 9995.12447659411
+control | DCN_B carried=False spot=6300 day-before DCNPDEEngine.price | 9995.124381404683
+final | DCN_B carried=False spot=6000 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6000 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6000 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6000 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6000 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6000 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6000 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=6000 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=False spot=6000 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 0.0, 1.0, (0.0,), 0.0)
+final | DCN_B carried=False spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=6000 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=False spot=6000 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=False spot=6000 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_B carried=False spot=6000 day-before DCNPDEEngine.price | 9990.589908410302
+final | DCN_B carried=False spot=5999 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5999 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5999 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5999 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5999 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5999 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5999 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5999 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=False spot=5999 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 0.0, 0.0, (1.0,), 0.0)
+final | DCN_B carried=False spot=5999 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=5999 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=5999 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=False spot=5999 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=False spot=5999 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_B carried=False spot=5999 day-before DCNPDEEngine.price | 9990.587727683454
+final | DCN_B carried=False spot=5500 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5500 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5500 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5500 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5500 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5500 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5500 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=5500 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=False spot=5500 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 0.0, 0.0, (1.0,), 0.0)
+final | DCN_B carried=False spot=5500 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=5500 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=5500 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=False spot=5500 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=False spot=5500 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_B carried=False spot=5500 day-before DCNPDEEngine.price | 9995.124439441517
+final | DCN_B carried=False spot=4800 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=4800 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=4800 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=4800 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=4800 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=4800 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=4800 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=False spot=4800 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=False spot=4800 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 0.0, 0.0, (1.0,), 0.0)
+final | DCN_B carried=False spot=4800 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=4800 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=False spot=4800 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=False spot=4800 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=False spot=4800 day-before DCNMCEngine.price | 3999.359186135697
+control | DCN_B carried=False spot=4800 day-before DCNPDEEngine.price | 3957.980114862317
+final | DCN_B carried=False spot=4650 DCNMCEngine.price | 0.0
+final | DCN_B carried=False spot=4650 LocalVolDCNMCEngine.price | 0.0
+final | DCN_B carried=False spot=4650 HestonDCNMCEngine.price | 0.0
+final | DCN_B carried=False spot=4650 QEDCNMCEngine.price | 0.0
+final | DCN_B carried=False spot=4650 CoupledCoarseHestonDCNMCEngine.price | 0.0
+final | DCN_B carried=False spot=4650 DCNPDEEngine.price | 0.0
+final | DCN_B carried=False spot=4650 LocalVolDCNPDEEngine.price | 0.0
+final | DCN_B carried=False spot=4650 HestonDCNPDESolver.price | 0.0
+final | DCN_B carried=False spot=4650 DCNMCEngine.price_detailed | (0.0, 0.0, 0.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=False spot=4650 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=0.0
+final | DCN_B carried=False spot=4650 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=0.0
+final | DCN_B carried=False spot=4650 session[DCNMCEngine].price | 0.0
+final | DCN_B carried=False spot=4650 session[DCNPDEEngine].price | 0.0
+control | DCN_B carried=False spot=4650 day-before DCNMCEngine.price | -29595.010153716117
+control | DCN_B carried=False spot=4650 day-before DCNPDEEngine.price | -29605.019262116693
+final | DCN_B carried=False spot=4500 DCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=False spot=4500 LocalVolDCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=False spot=4500 HestonDCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=False spot=4500 QEDCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=False spot=4500 CoupledCoarseHestonDCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=False spot=4500 DCNPDEEngine.price | -399921.98021258815
+final | DCN_B carried=False spot=4500 LocalVolDCNPDEEngine.price | -399921.98021258815
+final | DCN_B carried=False spot=4500 HestonDCNPDESolver.price | -399921.98021258815
+final | DCN_B carried=False spot=4500 DCNMCEngine.price_detailed | (-399921.98021258815, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=False spot=4500 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=-399921.98021258815
+final | DCN_B carried=False spot=4500 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=-399921.98021258815
+final | DCN_B carried=False spot=4500 session[DCNMCEngine].price | -399921.98021258815
+final | DCN_B carried=False spot=4500 session[DCNPDEEngine].price | -399921.98021258815
+control | DCN_B carried=False spot=4500 day-before DCNMCEngine.price | -400804.11439059686
+control | DCN_B carried=False spot=4500 day-before DCNPDEEngine.price | -400804.1159354943
+final | DCN_B carried=False spot=4000 DCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=False spot=4000 LocalVolDCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=False spot=4000 HestonDCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=False spot=4000 QEDCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=False spot=4000 CoupledCoarseHestonDCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=False spot=4000 DCNPDEEngine.price | -483239.05942354404
+final | DCN_B carried=False spot=4000 LocalVolDCNPDEEngine.price | -483239.05942354404
+final | DCN_B carried=False spot=4000 HestonDCNPDESolver.price | -483239.05942354404
+final | DCN_B carried=False spot=4000 DCNMCEngine.price_detailed | (-483239.05942354404, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=False spot=4000 DCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-483239.05942354404
+final | DCN_B carried=False spot=4000 LocalVolDCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-483239.05942354404
+final | DCN_B carried=False spot=4000 session[DCNMCEngine].price | -483239.05942354404
+final | DCN_B carried=False spot=4000 session[DCNPDEEngine].price | -483239.05942354404
+control | DCN_B carried=False spot=4000 day-before DCNMCEngine.price | -483960.8924895156
+control | DCN_B carried=False spot=4000 day-before DCNPDEEngine.price | -483960.89365024003
+theta | DCN_B carried=False spot=6300 penultimate DCNMCEngine.theta_1d | 4.875523405888089
+theta | DCN_B carried=False spot=6300 penultimate DCNPDEEngine.theta_1d | 4.875618595315245
+theta | DCN_B carried=False spot=5500 penultimate DCNMCEngine.theta_1d | 4.87552340588627
+theta | DCN_B carried=False spot=5500 penultimate DCNPDEEngine.theta_1d | 4.875560558481084
+theta | DCN_B carried=False spot=4000 penultimate DCNMCEngine.theta_1d | 721.8330659715575
+theta | DCN_B carried=False spot=4000 penultimate DCNPDEEngine.theta_1d | 721.8342266959953
+final | DCN_B carried=True spot=7000 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=7000 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=7000 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=7000 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=7000 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=7000 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=7000 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=7000 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=True spot=7000 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 1.0, 1.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=7000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=True spot=7000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=True spot=7000 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=True spot=7000 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=True spot=7000 day-before DCNMCEngine.price | 9995.124476594112
+control | DCN_B carried=True spot=7000 day-before DCNPDEEngine.price | 9995.124476732632
+final | DCN_B carried=True spot=6300 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6300 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6300 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6300 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6300 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6300 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6300 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6300 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=True spot=6300 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 1.0, 1.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=True spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=True spot=6300 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=True spot=6300 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=True spot=6300 day-before DCNMCEngine.price | 7584.6136114698165
+control | DCN_B carried=True spot=6300 day-before DCNPDEEngine.price | 7588.985075448205
+final | DCN_B carried=True spot=6000 DCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6000 LocalVolDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6000 HestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6000 QEDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6000 CoupledCoarseHestonDCNMCEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6000 DCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6000 LocalVolDCNPDEEngine.price | 9999.999999999998
+final | DCN_B carried=True spot=6000 HestonDCNPDESolver.price | 9999.999999999998
+final | DCN_B carried=True spot=6000 DCNMCEngine.price_detailed | (9999.999999999998, 0.0, 1.0, 1.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=True spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9999.999999999998
+final | DCN_B carried=True spot=6000 session[DCNMCEngine].price | 9999.999999999998
+final | DCN_B carried=True spot=6000 session[DCNPDEEngine].price | 9999.999999999998
+control | DCN_B carried=True spot=6000 day-before DCNMCEngine.price | -84185.71192917431
+control | DCN_B carried=True spot=6000 day-before DCNPDEEngine.price | -84208.35594527396
+final | DCN_B carried=True spot=5999 DCNMCEngine.price | -150137.37673814237
+final | DCN_B carried=True spot=5999 LocalVolDCNMCEngine.price | -150137.37673814237
+final | DCN_B carried=True spot=5999 HestonDCNMCEngine.price | -150137.37673814237
+final | DCN_B carried=True spot=5999 QEDCNMCEngine.price | -150137.37673814237
+final | DCN_B carried=True spot=5999 CoupledCoarseHestonDCNMCEngine.price | -150137.37673814237
+final | DCN_B carried=True spot=5999 DCNPDEEngine.price | -150137.37673814237
+final | DCN_B carried=True spot=5999 LocalVolDCNPDEEngine.price | -150137.37673814237
+final | DCN_B carried=True spot=5999 HestonDCNPDESolver.price | -150137.37673814237
+final | DCN_B carried=True spot=5999 DCNMCEngine.price_detailed | (-150137.37673814237, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=5999 DCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-150137.37673814237
+final | DCN_B carried=True spot=5999 LocalVolDCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-150137.37673814237
+final | DCN_B carried=True spot=5999 session[DCNMCEngine].price | -150137.37673814237
+final | DCN_B carried=True spot=5999 session[DCNPDEEngine].price | -150137.37673814237
+control | DCN_B carried=True spot=5999 day-before DCNMCEngine.price | -84819.34775272831
+control | DCN_B carried=True spot=5999 day-before DCNPDEEngine.price | -84779.24710091074
+final | DCN_B carried=True spot=5500 DCNMCEngine.price | -233287.82179067636
+final | DCN_B carried=True spot=5500 LocalVolDCNMCEngine.price | -233287.82179067636
+final | DCN_B carried=True spot=5500 HestonDCNMCEngine.price | -233287.82179067636
+final | DCN_B carried=True spot=5500 QEDCNMCEngine.price | -233287.82179067636
+final | DCN_B carried=True spot=5500 CoupledCoarseHestonDCNMCEngine.price | -233287.82179067636
+final | DCN_B carried=True spot=5500 DCNPDEEngine.price | -233287.82179067636
+final | DCN_B carried=True spot=5500 LocalVolDCNPDEEngine.price | -233287.82179067636
+final | DCN_B carried=True spot=5500 HestonDCNPDESolver.price | -233287.82179067636
+final | DCN_B carried=True spot=5500 DCNMCEngine.price_detailed | (-233287.82179067636, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=5500 DCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-233287.82179067636
+final | DCN_B carried=True spot=5500 LocalVolDCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-233287.82179067636
+final | DCN_B carried=True spot=5500 session[DCNMCEngine].price | -233287.82179067636
+final | DCN_B carried=True spot=5500 session[DCNPDEEngine].price | -233287.82179067636
+control | DCN_B carried=True spot=5500 day-before DCNMCEngine.price | -234490.55819276045
+control | DCN_B carried=True spot=5500 day-before DCNPDEEngine.price | -234487.13751771156
+final | DCN_B carried=True spot=4800 DCNMCEngine.price | -349931.7326860146
+final | DCN_B carried=True spot=4800 LocalVolDCNMCEngine.price | -349931.7326860146
+final | DCN_B carried=True spot=4800 HestonDCNMCEngine.price | -349931.7326860146
+final | DCN_B carried=True spot=4800 QEDCNMCEngine.price | -349931.7326860146
+final | DCN_B carried=True spot=4800 CoupledCoarseHestonDCNMCEngine.price | -349931.7326860146
+final | DCN_B carried=True spot=4800 DCNPDEEngine.price | -349931.7326860146
+final | DCN_B carried=True spot=4800 LocalVolDCNPDEEngine.price | -349931.7326860146
+final | DCN_B carried=True spot=4800 HestonDCNPDESolver.price | -349931.7326860146
+final | DCN_B carried=True spot=4800 DCNMCEngine.price_detailed | (-349931.7326860146, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=4800 DCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-349931.7326860146
+final | DCN_B carried=True spot=4800 LocalVolDCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-349931.7326860146
+final | DCN_B carried=True spot=4800 session[DCNMCEngine].price | -349931.7326860146
+final | DCN_B carried=True spot=4800 session[DCNPDEEngine].price | -349931.7326860146
+control | DCN_B carried=True spot=4800 day-before DCNMCEngine.price | -350910.0475312459
+control | DCN_B carried=True spot=4800 day-before DCNPDEEngine.price | -350910.15705994796
+final | DCN_B carried=True spot=4650 DCNMCEngine.price | -374926.85644930135
+final | DCN_B carried=True spot=4650 LocalVolDCNMCEngine.price | -374926.85644930135
+final | DCN_B carried=True spot=4650 HestonDCNMCEngine.price | -374926.85644930135
+final | DCN_B carried=True spot=4650 QEDCNMCEngine.price | -374926.85644930135
+final | DCN_B carried=True spot=4650 CoupledCoarseHestonDCNMCEngine.price | -374926.85644930135
+final | DCN_B carried=True spot=4650 DCNPDEEngine.price | -374926.85644930135
+final | DCN_B carried=True spot=4650 LocalVolDCNPDEEngine.price | -374926.85644930135
+final | DCN_B carried=True spot=4650 HestonDCNPDESolver.price | -374926.85644930135
+final | DCN_B carried=True spot=4650 DCNMCEngine.price_detailed | (-374926.85644930135, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=4650 DCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-374926.85644930135
+final | DCN_B carried=True spot=4650 LocalVolDCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-374926.85644930135
+final | DCN_B carried=True spot=4650 session[DCNMCEngine].price | -374926.85644930135
+final | DCN_B carried=True spot=4650 session[DCNPDEEngine].price | -374926.85644930135
+control | DCN_B carried=True spot=4650 day-before DCNMCEngine.price | -375857.08096092107
+control | DCN_B carried=True spot=4650 day-before DCNPDEEngine.price | -375857.1103631393
+final | DCN_B carried=True spot=4500 DCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=True spot=4500 LocalVolDCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=True spot=4500 HestonDCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=True spot=4500 QEDCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=True spot=4500 CoupledCoarseHestonDCNMCEngine.price | -399921.98021258815
+final | DCN_B carried=True spot=4500 DCNPDEEngine.price | -399921.98021258815
+final | DCN_B carried=True spot=4500 LocalVolDCNPDEEngine.price | -399921.98021258815
+final | DCN_B carried=True spot=4500 HestonDCNPDESolver.price | -399921.98021258815
+final | DCN_B carried=True spot=4500 DCNMCEngine.price_detailed | (-399921.98021258815, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=4500 DCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-399921.98021258815
+final | DCN_B carried=True spot=4500 LocalVolDCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-399921.98021258815
+final | DCN_B carried=True spot=4500 session[DCNMCEngine].price | -399921.98021258815
+final | DCN_B carried=True spot=4500 session[DCNPDEEngine].price | -399921.98021258815
+control | DCN_B carried=True spot=4500 day-before DCNMCEngine.price | -400804.11439059686
+control | DCN_B carried=True spot=4500 day-before DCNPDEEngine.price | -400804.1159354943
+final | DCN_B carried=True spot=4000 DCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=True spot=4000 LocalVolDCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=True spot=4000 HestonDCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=True spot=4000 QEDCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=True spot=4000 CoupledCoarseHestonDCNMCEngine.price | -483239.05942354404
+final | DCN_B carried=True spot=4000 DCNPDEEngine.price | -483239.05942354404
+final | DCN_B carried=True spot=4000 LocalVolDCNPDEEngine.price | -483239.05942354404
+final | DCN_B carried=True spot=4000 HestonDCNPDESolver.price | -483239.05942354404
+final | DCN_B carried=True spot=4000 DCNMCEngine.price_detailed | (-483239.05942354404, 0.0, 1.0, 0.0, (0.0,), 0.0)
+final | DCN_B carried=True spot=4000 DCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-483239.05942354404
+final | DCN_B carried=True spot=4000 LocalVolDCNPDEEngine.greeks | delta=166.6341584219118 gamma=0.0 price=-483239.05942354404
+final | DCN_B carried=True spot=4000 session[DCNMCEngine].price | -483239.05942354404
+final | DCN_B carried=True spot=4000 session[DCNPDEEngine].price | -483239.05942354404
+control | DCN_B carried=True spot=4000 day-before DCNMCEngine.price | -483960.8924895156
+control | DCN_B carried=True spot=4000 day-before DCNPDEEngine.price | -483960.89365024003
+theta | DCN_B carried=True spot=6300 penultimate DCNMCEngine.theta_1d | 2415.3863885301816
+theta | DCN_B carried=True spot=6300 penultimate DCNPDEEngine.theta_1d | 2411.0149245517932
+theta | DCN_B carried=True spot=5500 penultimate DCNMCEngine.theta_1d | 1202.7364020840905
+theta | DCN_B carried=True spot=5500 penultimate DCNPDEEngine.theta_1d | 1199.3157270351949
+theta | DCN_B carried=True spot=4000 penultimate DCNMCEngine.theta_1d | 721.8330659715575
+theta | DCN_B carried=True spot=4000 penultimate DCNPDEEngine.theta_1d | 721.8342266959953
+obsdate | DCN_A 2024-12-03 carried=False spot=6300 DCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=False spot=6300 LocalVolDCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=False spot=6300 HestonDCNPDESolver.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=False spot=6300 DCNMCEngine.price | 9998.049505314704
+obsdate | DCN_A 2024-12-03 carried=False spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=False spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+control | DCN_A 2024-12-02 carried=False spot=6300 day-before-obs DCNPDEEngine.price | 9997.119425037505
+obsdate | DCN_A 2024-12-03 carried=False spot=6000 DCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=False spot=6000 LocalVolDCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=False spot=6000 HestonDCNPDESolver.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=False spot=6000 DCNMCEngine.price | 9998.049505314704
+obsdate | DCN_A 2024-12-03 carried=False spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=False spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+control | DCN_A 2024-12-02 carried=False spot=6000 day-before-obs DCNPDEEngine.price | 15113.892561969553
+obsdate | DCN_A 2024-12-03 carried=False spot=5500 DCNPDEEngine.price | 19777.794149169684
+obsdate | DCN_A 2024-12-03 carried=False spot=5500 LocalVolDCNPDEEngine.price | 19777.794149169073
+obsdate | DCN_A 2024-12-03 carried=False spot=5500 HestonDCNPDESolver.price | 19149.665930443443
+obsdate | DCN_A 2024-12-03 carried=False spot=5500 DCNMCEngine.price | 19767.09269696242
+obsdate | DCN_A 2024-12-03 carried=False spot=5500 DCNPDEEngine.greeks | delta=2.0420992706854886 gamma=-0.02157099479155493 price=19777.794149169684
+obsdate | DCN_A 2024-12-03 carried=False spot=5500 LocalVolDCNPDEEngine.greeks | delta=2.0420992706848997 gamma=-0.02157099479158478 price=19777.794149169073
+control | DCN_A 2024-12-02 carried=False spot=5500 day-before-obs DCNPDEEngine.price | 19739.92669803707
+obsdate | DCN_A 2024-12-03 carried=False spot=4800 DCNPDEEngine.price | -70015.93548143144
+obsdate | DCN_A 2024-12-03 carried=False spot=4800 LocalVolDCNPDEEngine.price | -70015.93548143428
+obsdate | DCN_A 2024-12-03 carried=False spot=4800 HestonDCNPDESolver.price | -71442.0112275146
+obsdate | DCN_A 2024-12-03 carried=False spot=4800 DCNMCEngine.price | -69419.20299431845
+obsdate | DCN_A 2024-12-03 carried=False spot=4800 DCNPDEEngine.greeks | delta=537.6468970777497 gamma=-2.3068184909273284 price=-70015.93548143144
+obsdate | DCN_A 2024-12-03 carried=False spot=4800 LocalVolDCNPDEEngine.greeks | delta=537.6468970777694 gamma=-2.3068184909269656 price=-70015.93548143428
+control | DCN_A 2024-12-02 carried=False spot=4800 day-before-obs DCNPDEEngine.price | -78291.25448898782
+obsdate | DCN_A 2024-12-03 carried=False spot=4650 DCNPDEEngine.price | -186252.27177484636
+obsdate | DCN_A 2024-12-03 carried=False spot=4650 LocalVolDCNPDEEngine.price | -186252.27177484118
+obsdate | DCN_A 2024-12-03 carried=False spot=4650 HestonDCNPDESolver.price | -182069.0085365918
+obsdate | DCN_A 2024-12-03 carried=False spot=4650 DCNMCEngine.price | -184507.26186562845
+obsdate | DCN_A 2024-12-03 carried=False spot=4650 DCNPDEEngine.greeks | delta=866.5915822925948 gamma=-1.8449997473108326 price=-186252.27177484636
+obsdate | DCN_A 2024-12-03 carried=False spot=4650 LocalVolDCNPDEEngine.greeks | delta=866.5915822925735 gamma=-1.8449997473109756 price=-186252.27177484118
+control | DCN_A 2024-12-02 carried=False spot=4650 day-before-obs DCNPDEEngine.price | -189214.74335112557
+obsdate | DCN_A 2024-12-03 carried=False spot=4000 DCNPDEEngine.price | -437755.03282867285
+obsdate | DCN_A 2024-12-03 carried=False spot=4000 LocalVolDCNPDEEngine.price | -437755.0328286794
+obsdate | DCN_A 2024-12-03 carried=False spot=4000 HestonDCNPDESolver.price | -437754.4760172545
+obsdate | DCN_A 2024-12-03 carried=False spot=4000 DCNMCEngine.price | -437754.81299839355
+obsdate | DCN_A 2024-12-03 carried=False spot=4000 DCNPDEEngine.greeks | delta=164.62404527723402 gamma=2.3442384277586824e-08 price=-437755.03282867285
+obsdate | DCN_A 2024-12-03 carried=False spot=4000 LocalVolDCNPDEEngine.greeks | delta=164.62404527722848 gamma=2.344080172042595e-08 price=-437755.0328286794
+control | DCN_A 2024-12-02 carried=False spot=4000 day-before-obs DCNPDEEngine.price | -437901.5475736378
+obsdate | DCN_A 2024-12-03 carried=True spot=6300 DCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=True spot=6300 LocalVolDCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=True spot=6300 HestonDCNPDESolver.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=True spot=6300 DCNMCEngine.price | 9998.049505314704
+obsdate | DCN_A 2024-12-03 carried=True spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=True spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+control | DCN_A 2024-12-02 carried=True spot=6300 day-before-obs DCNPDEEngine.price | 9996.653074668535
+obsdate | DCN_A 2024-12-03 carried=True spot=6000 DCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=True spot=6000 LocalVolDCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=True spot=6000 HestonDCNPDESolver.price | 9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=True spot=6000 DCNMCEngine.price | 9998.049505314704
+obsdate | DCN_A 2024-12-03 carried=True spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+obsdate | DCN_A 2024-12-03 carried=True spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+control | DCN_A 2024-12-02 carried=True spot=6000 day-before-obs DCNPDEEngine.price | -41264.74109458773
+obsdate | DCN_A 2024-12-03 carried=True spot=5500 DCNPDEEngine.price | -187762.84653494493
+obsdate | DCN_A 2024-12-03 carried=True spot=5500 LocalVolDCNPDEEngine.price | -187762.846534933
+obsdate | DCN_A 2024-12-03 carried=True spot=5500 HestonDCNPDESolver.price | -188931.63048499633
+obsdate | DCN_A 2024-12-03 carried=True spot=5500 DCNMCEngine.price | -187962.9858953003
+obsdate | DCN_A 2024-12-03 carried=True spot=5500 DCNPDEEngine.greeks | delta=186.70214494769968 gamma=0.1232006974427999 price=-187762.84653494493
+obsdate | DCN_A 2024-12-03 carried=True spot=5500 LocalVolDCNPDEEngine.greeks | delta=186.70214494768834 gamma=0.12320069744308336 price=-187762.846534933
+control | DCN_A 2024-12-02 carried=True spot=5500 day-before-obs DCNPDEEngine.price | -187868.9134459931
+obsdate | DCN_A 2024-12-03 carried=True spot=4800 DCNPDEEngine.price | -306054.98402524943
+obsdate | DCN_A 2024-12-03 carried=True spot=4800 LocalVolDCNPDEEngine.price | -306054.9840252616
+obsdate | DCN_A 2024-12-03 carried=True spot=4800 HestonDCNPDESolver.price | -306055.81596458505
+obsdate | DCN_A 2024-12-03 carried=True spot=4800 DCNMCEngine.price | -306055.5088868772
+obsdate | DCN_A 2024-12-03 carried=True spot=4800 DCNPDEEngine.greeks | delta=164.6359698272212 gamma=0.0001968793993610537 price=-306054.98402524943
+obsdate | DCN_A 2024-12-03 carried=True spot=4800 LocalVolDCNPDEEngine.greeks | delta=164.6359698272204 gamma=0.0001968793996605604 price=-306054.9840252616
+control | DCN_A 2024-12-02 carried=True spot=4800 day-before-obs DCNPDEEngine.price | -306252.35456626816
+obsdate | DCN_A 2024-12-03 carried=True spot=4650 DCNPDEEngine.price | -330749.2221839466
+obsdate | DCN_A 2024-12-03 carried=True spot=4650 LocalVolDCNPDEEngine.price | -330749.22218393855
+obsdate | DCN_A 2024-12-03 carried=True spot=4650 HestonDCNPDESolver.price | -330749.3631255431
+obsdate | DCN_A 2024-12-03 carried=True spot=4650 DCNMCEngine.price | -330749.12840778613
+obsdate | DCN_A 2024-12-03 carried=True spot=4650 DCNPDEEngine.greeks | delta=164.62486568493537 gamma=1.5908227296911565e-05 price=-330749.2221839466
+obsdate | DCN_A 2024-12-03 carried=True spot=4650 LocalVolDCNPDEEngine.greeks | delta=164.62486568492747 gamma=1.5908228457500585e-05 price=-330749.22218393855
+control | DCN_A 2024-12-02 carried=True spot=4650 day-before-obs DCNPDEEngine.price | -330937.266736931
+obsdate | DCN_A 2024-12-03 carried=True spot=4000 DCNPDEEngine.price | -437755.03282867285
+obsdate | DCN_A 2024-12-03 carried=True spot=4000 LocalVolDCNPDEEngine.price | -437755.0328286794
+obsdate | DCN_A 2024-12-03 carried=True spot=4000 HestonDCNPDESolver.price | -437754.4760172545
+obsdate | DCN_A 2024-12-03 carried=True spot=4000 DCNMCEngine.price | -437754.81299839355
+obsdate | DCN_A 2024-12-03 carried=True spot=4000 DCNPDEEngine.greeks | delta=164.62404527723402 gamma=2.3442384277586824e-08 price=-437755.03282867285
+obsdate | DCN_A 2024-12-03 carried=True spot=4000 LocalVolDCNPDEEngine.greeks | delta=164.62404527722848 gamma=2.344080172042595e-08 price=-437755.0328286794
+control | DCN_A 2024-12-02 carried=True spot=4000 day-before-obs DCNPDEEngine.price | -437901.5475736378
+obsdate | DCN_A 2024-06-03 carried=False spot=6300 DCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=False spot=6300 LocalVolDCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=False spot=6300 HestonDCNPDESolver.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=False spot=6300 DCNMCEngine.price | 9998.049505314704
+obsdate | DCN_A 2024-06-03 carried=False spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=False spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+control | DCN_A 2024-05-31 carried=False spot=6300 day-before-obs DCNPDEEngine.price | 10000.857667971277
+obsdate | DCN_A 2024-06-03 carried=False spot=6000 DCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=False spot=6000 LocalVolDCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=False spot=6000 HestonDCNPDESolver.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=False spot=6000 DCNMCEngine.price | 9998.049505314704
+obsdate | DCN_A 2024-06-03 carried=False spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=False spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+control | DCN_A 2024-05-31 carried=False spot=6000 day-before-obs DCNPDEEngine.price | 9693.073956910077
+obsdate | DCN_A 2024-06-03 carried=False spot=5500 DCNPDEEngine.price | -40346.30233592825
+obsdate | DCN_A 2024-06-03 carried=False spot=5500 LocalVolDCNPDEEngine.price | -40346.3023359346
+obsdate | DCN_A 2024-06-03 carried=False spot=5500 HestonDCNPDESolver.price | -35908.96767276773
+obsdate | DCN_A 2024-06-03 carried=False spot=5500 DCNMCEngine.price | -43088.38289322579
+obsdate | DCN_A 2024-06-03 carried=False spot=5500 DCNPDEEngine.greeks | delta=191.44296141796016 gamma=-0.3690658396570764 price=-40346.30233592825
+obsdate | DCN_A 2024-06-03 carried=False spot=5500 LocalVolDCNPDEEngine.greeks | delta=191.44296141797676 gamma=-0.3690658396571065 price=-40346.3023359346
+control | DCN_A 2024-05-31 carried=False spot=5500 day-before-obs DCNPDEEngine.price | -42820.74286416272
+obsdate | DCN_A 2024-06-03 carried=False spot=4800 DCNPDEEngine.price | -256616.19694494407
+obsdate | DCN_A 2024-06-03 carried=False spot=4800 LocalVolDCNPDEEngine.price | -256616.19694495059
+obsdate | DCN_A 2024-06-03 carried=False spot=4800 HestonDCNPDESolver.price | -240308.4907818572
+obsdate | DCN_A 2024-06-03 carried=False spot=4800 DCNMCEngine.price | -254967.96953402192
+obsdate | DCN_A 2024-06-03 carried=False spot=4800 DCNPDEEngine.greeks | delta=387.9839439718118 gamma=-0.021883134730286555 price=-256616.19694494407
+obsdate | DCN_A 2024-06-03 carried=False spot=4800 LocalVolDCNPDEEngine.greeks | delta=387.9839439718277 gamma=-0.02188313472962318 price=-256616.19694495059
+control | DCN_A 2024-05-31 carried=False spot=4800 day-before-obs DCNPDEEngine.price | -263432.81085693394
+obsdate | DCN_A 2024-06-03 carried=False spot=4650 DCNPDEEngine.price | -324398.30492171674
+obsdate | DCN_A 2024-06-03 carried=False spot=4650 LocalVolDCNPDEEngine.price | -324398.30492173095
+obsdate | DCN_A 2024-06-03 carried=False spot=4650 HestonDCNPDESolver.price | -314464.2849403532
+obsdate | DCN_A 2024-06-03 carried=False spot=4650 DCNMCEngine.price | -323016.95429264003
+obsdate | DCN_A 2024-06-03 carried=False spot=4650 DCNPDEEngine.greeks | delta=379.18414521404026 gamma=0.09418884426918682 price=-324398.30492171674
+obsdate | DCN_A 2024-06-03 carried=False spot=4650 LocalVolDCNPDEEngine.greeks | delta=379.18414521404463 gamma=0.0941888442692863 price=-324398.30492173095
+control | DCN_A 2024-05-31 carried=False spot=4650 day-before-obs DCNPDEEngine.price | -325289.6658333343
+obsdate | DCN_A 2024-06-03 carried=False spot=4000 DCNPDEEngine.price | -463143.6500373556
+obsdate | DCN_A 2024-06-03 carried=False spot=4000 LocalVolDCNPDEEngine.price | -463143.6500373698
+obsdate | DCN_A 2024-06-03 carried=False spot=4000 HestonDCNPDESolver.price | -463172.9613177894
+obsdate | DCN_A 2024-06-03 carried=False spot=4000 DCNMCEngine.price | -463173.3576278819
+obsdate | DCN_A 2024-06-03 carried=False spot=4000 DCNPDEEngine.greeks | delta=153.6817072728146 gamma=0.0016015751643945841 price=-463143.6500373556
+obsdate | DCN_A 2024-06-03 carried=False spot=4000 LocalVolDCNPDEEngine.greeks | delta=153.6817072728458 gamma=0.0016015751658351 price=-463143.6500373698
+control | DCN_A 2024-05-31 carried=False spot=4000 day-before-obs DCNPDEEngine.price | -463534.69306497835
+obsdate | DCN_A 2024-06-03 carried=True spot=6300 DCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=True spot=6300 LocalVolDCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=True spot=6300 HestonDCNPDESolver.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=True spot=6300 DCNMCEngine.price | 9998.049505314704
+obsdate | DCN_A 2024-06-03 carried=True spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=True spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+control | DCN_A 2024-05-31 carried=True spot=6300 day-before-obs DCNPDEEngine.price | 9759.398780282076
+obsdate | DCN_A 2024-06-03 carried=True spot=6000 DCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=True spot=6000 LocalVolDCNPDEEngine.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=True spot=6000 HestonDCNPDESolver.price | 9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=True spot=6000 DCNMCEngine.price | 9998.049505314704
+obsdate | DCN_A 2024-06-03 carried=True spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+obsdate | DCN_A 2024-06-03 carried=True spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9998.049505314706
+control | DCN_A 2024-05-31 carried=True spot=6000 day-before-obs DCNPDEEngine.price | -47249.835853150194
+obsdate | DCN_A 2024-06-03 carried=True spot=5500 DCNPDEEngine.price | -205399.18884819566
+obsdate | DCN_A 2024-06-03 carried=True spot=5500 LocalVolDCNPDEEngine.price | -205399.18884821463
+obsdate | DCN_A 2024-06-03 carried=True spot=5500 HestonDCNPDESolver.price | -211616.98471000564
+obsdate | DCN_A 2024-06-03 carried=True spot=5500 DCNMCEngine.price | -205588.54224047798
+obsdate | DCN_A 2024-06-03 carried=True spot=5500 DCNPDEEngine.greeks | delta=228.9652202779718 gamma=0.15796081713790894 price=-205399.18884819566
+obsdate | DCN_A 2024-06-03 carried=True spot=5500 LocalVolDCNPDEEngine.greeks | delta=228.96522027799153 gamma=0.15796081713780427 price=-205399.18884821463
+control | DCN_A 2024-05-31 carried=True spot=5500 day-before-obs DCNPDEEngine.price | -205763.46662450966
+obsdate | DCN_A 2024-06-03 carried=True spot=4800 DCNPDEEngine.price | -337782.71514695283
+obsdate | DCN_A 2024-06-03 carried=True spot=4800 LocalVolDCNPDEEngine.price | -337782.715146959
+obsdate | DCN_A 2024-06-03 carried=True spot=4800 HestonDCNPDESolver.price | -339402.1938119279
+obsdate | DCN_A 2024-06-03 carried=True spot=4800 DCNMCEngine.price | -337539.2846199127
+obsdate | DCN_A 2024-06-03 carried=True spot=4800 DCNPDEEngine.greeks | delta=164.26341888526198 gamma=0.03756802056321199 price=-337782.71514695283
+obsdate | DCN_A 2024-06-03 carried=True spot=4800 LocalVolDCNPDEEngine.greeks | delta=164.26341888527006 gamma=0.03756802056318256 price=-337782.715146959
+control | DCN_A 2024-05-31 carried=True spot=4800 day-before-obs DCNPDEEngine.price | -338241.7408143568
+obsdate | DCN_A 2024-06-03 carried=True spot=4650 DCNPDEEngine.price | -362054.0062774792
+obsdate | DCN_A 2024-06-03 carried=True spot=4650 LocalVolDCNPDEEngine.price | -362054.0062774945
+obsdate | DCN_A 2024-06-03 carried=True spot=4650 HestonDCNPDESolver.price | -363051.3604055035
+obsdate | DCN_A 2024-06-03 carried=True spot=4650 DCNMCEngine.price | -361673.71232018445
+obsdate | DCN_A 2024-06-03 carried=True spot=4650 DCNPDEEngine.greeks | delta=159.69255782400373 gamma=0.02413621183237451 price=-362054.0062774792
+obsdate | DCN_A 2024-06-03 carried=True spot=4650 LocalVolDCNPDEEngine.greeks | delta=159.69255782399856 gamma=0.02413621183189375 price=-362054.0062774945
+control | DCN_A 2024-05-31 carried=True spot=4650 day-before-obs DCNPDEEngine.price | -362515.0727200331
+obsdate | DCN_A 2024-06-03 carried=True spot=4000 DCNPDEEngine.price | -463143.6500373556
+obsdate | DCN_A 2024-06-03 carried=True spot=4000 LocalVolDCNPDEEngine.price | -463143.6500373698
+obsdate | DCN_A 2024-06-03 carried=True spot=4000 HestonDCNPDESolver.price | -463172.9613177894
+obsdate | DCN_A 2024-06-03 carried=True spot=4000 DCNMCEngine.price | -463173.3576278819
+obsdate | DCN_A 2024-06-03 carried=True spot=4000 DCNPDEEngine.greeks | delta=153.6817072728146 gamma=0.0016015751643945841 price=-463143.6500373556
+obsdate | DCN_A 2024-06-03 carried=True spot=4000 LocalVolDCNPDEEngine.greeks | delta=153.6817072728458 gamma=0.0016015751658351 price=-463143.6500373698
+control | DCN_A 2024-05-31 carried=True spot=4000 day-before-obs DCNPDEEngine.price | -463534.69306497835
+obsdate | DCN_A 2023-04-03 carried=False spot=6300 DCNPDEEngine.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=False spot=6300 LocalVolDCNPDEEngine.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=False spot=6300 HestonDCNPDESolver.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=False spot=6300 DCNMCEngine.price | 9997.074400642803
+obsdate | DCN_A 2023-04-03 carried=False spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=False spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9997.074400642805
+control | DCN_A 2023-03-31 carried=False spot=6300 day-before-obs DCNPDEEngine.price | 9855.75348861805
+obsdate | DCN_A 2023-04-03 carried=False spot=6000 DCNPDEEngine.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=False spot=6000 LocalVolDCNPDEEngine.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=False spot=6000 HestonDCNPDESolver.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=False spot=6000 DCNMCEngine.price | 9997.074400642803
+obsdate | DCN_A 2023-04-03 carried=False spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=False spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9997.074400642805
+control | DCN_A 2023-03-31 carried=False spot=6000 day-before-obs DCNPDEEngine.price | -26107.571571095938
+obsdate | DCN_A 2023-04-03 carried=False spot=5500 DCNPDEEngine.price | -156948.34309179732
+obsdate | DCN_A 2023-04-03 carried=False spot=5500 LocalVolDCNPDEEngine.price | -156948.34309180093
+obsdate | DCN_A 2023-04-03 carried=False spot=5500 HestonDCNPDESolver.price | -139588.9985180356
+obsdate | DCN_A 2023-04-03 carried=False spot=5500 DCNMCEngine.price | -158966.54393564397
+obsdate | DCN_A 2023-04-03 carried=False spot=5500 DCNPDEEngine.greeks | delta=254.15567839793582 gamma=-0.0630623111444701 price=-156948.34309179732
+obsdate | DCN_A 2023-04-03 carried=False spot=5500 LocalVolDCNPDEEngine.greeks | delta=254.15567839793735 gamma=-0.06306231114455385 price=-156948.34309180093
+control | DCN_A 2023-03-31 carried=False spot=5500 day-before-obs DCNPDEEngine.price | -158383.24334926298
+obsdate | DCN_A 2023-04-03 carried=False spot=4800 DCNPDEEngine.price | -348459.94550313446
+obsdate | DCN_A 2023-04-03 carried=False spot=4800 LocalVolDCNPDEEngine.price | -348459.94550313824
+obsdate | DCN_A 2023-04-03 carried=False spot=4800 HestonDCNPDESolver.price | -341316.173055308
+obsdate | DCN_A 2023-04-03 carried=False spot=4800 DCNMCEngine.price | -349051.3602093772
+obsdate | DCN_A 2023-04-03 carried=False spot=4800 DCNPDEEngine.greeks | delta=279.4819922104512 gamma=0.06753509509743293 price=-348459.94550313446
+obsdate | DCN_A 2023-04-03 carried=False spot=4800 LocalVolDCNPDEEngine.greeks | delta=279.4819922104728 gamma=0.06753509509839355 price=-348459.94550313824
+control | DCN_A 2023-03-31 carried=False spot=4800 day-before-obs DCNPDEEngine.price | -354530.37921087054
+obsdate | DCN_A 2023-04-03 carried=False spot=4650 DCNPDEEngine.price | -399340.4990923631
+obsdate | DCN_A 2023-04-03 carried=False spot=4650 LocalVolDCNPDEEngine.price | -399340.4990923831
+obsdate | DCN_A 2023-04-03 carried=False spot=4650 HestonDCNPDESolver.price | -396940.54749827104
+obsdate | DCN_A 2023-04-03 carried=False spot=4650 DCNMCEngine.price | -399219.6185572367
+obsdate | DCN_A 2023-04-03 carried=False spot=4650 DCNPDEEngine.greeks | delta=263.89970073523654 gamma=0.1376606662515406 price=-399340.4990923631
+obsdate | DCN_A 2023-04-03 carried=False spot=4650 LocalVolDCNPDEEngine.greeks | delta=263.89970073525495 gamma=0.13766066625170328 price=-399340.4990923831
+control | DCN_A 2023-03-31 carried=False spot=4650 day-before-obs DCNPDEEngine.price | -399648.3175339642
+obsdate | DCN_A 2023-04-03 carried=False spot=4000 DCNPDEEngine.price | -510846.6494767168
+obsdate | DCN_A 2023-04-03 carried=False spot=4000 LocalVolDCNPDEEngine.price | -510846.64947672735
+obsdate | DCN_A 2023-04-03 carried=False spot=4000 HestonDCNPDESolver.price | -511976.91873150377
+obsdate | DCN_A 2023-04-03 carried=False spot=4000 DCNMCEngine.price | -510628.2424664699
+obsdate | DCN_A 2023-04-03 carried=False spot=4000 DCNPDEEngine.greeks | delta=135.25273531237747 gamma=0.015193286543750574 price=-510846.6494767168
+obsdate | DCN_A 2023-04-03 carried=False spot=4000 LocalVolDCNPDEEngine.greeks | delta=135.2527353123448 gamma=0.015193286543165246 price=-510846.64947672735
+control | DCN_A 2023-03-31 carried=False spot=4000 day-before-obs DCNPDEEngine.price | -511129.9347746007
+obsdate | DCN_A 2023-04-03 carried=True spot=6300 DCNPDEEngine.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=True spot=6300 LocalVolDCNPDEEngine.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=True spot=6300 HestonDCNPDESolver.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=True spot=6300 DCNMCEngine.price | 9997.074400642803
+obsdate | DCN_A 2023-04-03 carried=True spot=6300 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=True spot=6300 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9997.074400642805
+control | DCN_A 2023-03-31 carried=True spot=6300 day-before-obs DCNPDEEngine.price | 9720.294301369942
+obsdate | DCN_A 2023-04-03 carried=True spot=6000 DCNPDEEngine.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=True spot=6000 LocalVolDCNPDEEngine.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=True spot=6000 HestonDCNPDESolver.price | 9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=True spot=6000 DCNMCEngine.price | 9997.074400642803
+obsdate | DCN_A 2023-04-03 carried=True spot=6000 DCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9997.074400642805
+obsdate | DCN_A 2023-04-03 carried=True spot=6000 LocalVolDCNPDEEngine.greeks | delta=0.0 gamma=0.0 price=9997.074400642805
+control | DCN_A 2023-03-31 carried=True spot=6000 day-before-obs DCNPDEEngine.price | -58870.91317660387
+obsdate | DCN_A 2023-04-03 carried=True spot=5500 DCNPDEEngine.price | -246643.97416554904
+obsdate | DCN_A 2023-04-03 carried=True spot=5500 LocalVolDCNPDEEngine.price | -246643.97416555768
+obsdate | DCN_A 2023-04-03 carried=True spot=5500 HestonDCNPDESolver.price | -262971.7314040418
+obsdate | DCN_A 2023-04-03 carried=True spot=5500 DCNMCEngine.price | -247556.6206255838
+obsdate | DCN_A 2023-04-03 carried=True spot=5500 DCNPDEEngine.greeks | delta=267.08702795025374 gamma=0.209228371793699 price=-246643.97416554904
+obsdate | DCN_A 2023-04-03 carried=True spot=5500 LocalVolDCNPDEEngine.greeks | delta=267.0870279502622 gamma=0.20922837179368167 price=-246643.97416555768
+control | DCN_A 2023-03-31 carried=True spot=5500 day-before-obs DCNPDEEngine.price | -246981.89264179557
+obsdate | DCN_A 2023-04-03 carried=True spot=4800 DCNPDEEngine.price | -393011.04441712506
+obsdate | DCN_A 2023-04-03 carried=True spot=4800 LocalVolDCNPDEEngine.price | -393011.04441713024
+obsdate | DCN_A 2023-04-03 carried=True spot=4800 HestonDCNPDESolver.price | -400933.31983232853
+obsdate | DCN_A 2023-04-03 carried=True spot=4800 DCNMCEngine.price | -392788.2493578001
+obsdate | DCN_A 2023-04-03 carried=True spot=4800 DCNPDEEngine.greeks | delta=167.6482178183446 gamma=0.07864980015666287 price=-393011.04441712506
+obsdate | DCN_A 2023-04-03 carried=True spot=4800 LocalVolDCNPDEEngine.greeks | delta=167.64821781835923 gamma=0.07864980015737229 price=-393011.04441713024
+control | DCN_A 2023-03-31 carried=True spot=4800 day-before-obs DCNPDEEngine.price | -393338.1618736877
+obsdate | DCN_A 2023-04-03 carried=True spot=4650 DCNPDEEngine.price | -417343.9856528138
+obsdate | DCN_A 2023-04-03 carried=True spot=4650 LocalVolDCNPDEEngine.price | -417343.9856528344
+obsdate | DCN_A 2023-04-03 carried=True spot=4650 HestonDCNPDESolver.price | -423501.7103331167
+obsdate | DCN_A 2023-04-03 carried=True spot=4650 DCNMCEngine.price | -416092.8243123769
+obsdate | DCN_A 2023-04-03 carried=True spot=4650 DCNPDEEngine.greeks | delta=157.27493900632123 gamma=0.06035413584627008 price=-417343.9856528138
+obsdate | DCN_A 2023-04-03 carried=True spot=4650 LocalVolDCNPDEEngine.greeks | delta=157.27493900632723 gamma=0.060354135846269 price=-417343.9856528344
+control | DCN_A 2023-03-31 carried=True spot=4650 day-before-obs DCNPDEEngine.price | -417671.03662956244
+obsdate | DCN_A 2023-04-03 carried=True spot=4000 DCNPDEEngine.price | -510846.6494767168
+obsdate | DCN_A 2023-04-03 carried=True spot=4000 LocalVolDCNPDEEngine.price | -510846.64947672735
+obsdate | DCN_A 2023-04-03 carried=True spot=4000 HestonDCNPDESolver.price | -511976.91873150377
+obsdate | DCN_A 2023-04-03 carried=True spot=4000 DCNMCEngine.price | -510628.2424664699
+obsdate | DCN_A 2023-04-03 carried=True spot=4000 DCNPDEEngine.greeks | delta=135.25273531237747 gamma=0.015193286543750574 price=-510846.6494767168
+obsdate | DCN_A 2023-04-03 carried=True spot=4000 LocalVolDCNPDEEngine.greeks | delta=135.2527353123448 gamma=0.015193286543165246 price=-510846.64947672735
+control | DCN_A 2023-03-31 carried=True spot=4000 day-before-obs DCNPDEEngine.price | -511129.9347746007

@@ -26,10 +26,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.dcn_valuation import (
-    at_final_observation,
-    settle_final_observation,
-)
+from quantark.asset.equity.engine.dcn_valuation import observe_valuation_row
 from quantark.asset.equity.engine.pde.core.adapters.local_vol import LocalVolDCNAdapter
 from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     DCNPDEEngine,
@@ -172,10 +169,13 @@ class HestonDCNPDESolver(BaseEngine):
         if not isinstance(product, DCNOption):
             raise PricingError("HestonDCNPDESolver only supports DCNOption")
         ctx = build_dcn_grid_context(product)
-        if at_final_observation(product):
-            # the final observation date (W10): the settled final row
+        df = make_df_fn(pricing_env)
+        # the monthly row observed today, pointwise at the spot: the final
+        # observation date (W10) or a knock-out today (W10b) settle here
+        row = observe_valuation_row(product, pricing_env, ctx, df)
+        if row is not None and row.ends_contract:
             return DCNPDEResult(
-                pv=settle_final_observation(product, pricing_env, ctx).pv,
+                pv=row.pv,
                 direction_sign=product.direction_sign,
                 num_space_nodes=0,
                 num_time_steps=0,
@@ -183,7 +183,6 @@ class HestonDCNPDESolver(BaseEngine):
         times = np.asarray(ctx.times, dtype=float)
         t_fine, day_col = self._fine_grid(times)
         T = float(times[-1])
-        df = make_df_fn(pricing_env)
         market = TermMarketContext.from_env(
             pricing_env, t_fine, ref_strike=product.initial_price
         )
@@ -321,6 +320,10 @@ class HestonDCNPDESolver(BaseEngine):
             float(self.model_params.v0),
         )
         pv = product.direction_sign * pv_unsigned
+        if row is not None and row.coupon_paid:
+            # W10b: a coupon today, added to the smooth continuation (the
+            # march never applies the t = 0 row: k > 0 above)
+            pv = pv + product.direction_sign * row.coupon_pv
         return DCNPDEResult(
             pv=pv,
             direction_sign=product.direction_sign,

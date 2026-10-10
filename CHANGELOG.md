@@ -271,6 +271,15 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   reported std error is the iid formula and overstates the real error (up to about 800x measured), so the check is
   loose there; the std error formula, `EuropeanQuadEngine`'s check and RQMC seeding are unchanged (open questions in
   the diagnosis).
+- The DCN PDE routes pay a monthly observation that falls on the valuation date (W10b, user ruling Q5 2026-10-10).
+  The GBM, local-vol and Heston DCN PDE dropped it (the march never applies t = 0) while every MC route paid it, so
+  the PDE value lost the day's coupon overnight. They now decide the row pointwise at the spot through the W10
+  helper (`dcn_valuation.observe_valuation_row`), at every valuation date: a knock-out today settles at the
+  knock-out coupon (greeks 0, no march), a coupon today is added to the smooth continuation, a knock-in today reads
+  the knocked-in surface (as before). DCN_A on 2024-12-03 (month 23): spot 5500 coupon today 9779.74 -> 19777.79
+  (MC 19767.09; the day before 19739.93); carried knock-in at 6300, knock-out today -23212.00 -> 9998.05 (= MC).
+  The grid spot curve (`calculate_spot_greeks_curve`, `BranchSolution`) folds the same row per level. 90 values
+  move on the measured observation dates; nothing else (evidence `moved_values.txt`).
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
