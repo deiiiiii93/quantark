@@ -206,8 +206,6 @@ class TargetRedemptionProduct(BaseFxProduct):
             raise ValidationError("fixing_dates and pay_dates must be datetimes")
         if dates != sorted(dates):
             raise ValidationError("fixing_dates must be ascending")
-        if len(set(dates)) != len(dates):
-            raise ValidationError("fixing_dates must be unique")
         if len(pays) != len(dates):
             raise ValidationError("pay_dates must align 1:1 with fixing_dates")
         for f, p in zip(dates, pays):
@@ -221,8 +219,6 @@ class TargetRedemptionProduct(BaseFxProduct):
         fixings, pays = self.fixing_times, self.pay_times
         if list(fixings) != sorted(fixings):
             raise ValidationError("fixing_times must be ascending")
-        if len(set(fixings)) != len(fixings):
-            raise ValidationError("fixing_times must be unique")
         if any(not math.isfinite(t) for t in fixings):
             raise ValidationError("fixing_times must be finite")
         if len(pays) != len(fixings):

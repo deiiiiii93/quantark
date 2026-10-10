@@ -25,3 +25,12 @@
 # Not a value: banking on a non-business valuation date under BUSINESS_DAYS writes as_of = the first date of its
 # zero-time stretch (Ruling R24: a Saturday row writes the Friday); under CALENDAR_DAYS / ACT as_of is the valuation
 # date as before.
+#
+# Task 8c - OQ-4 (b), user decision 2026-10-10: periods may share a fixing date / time.
+# Contracts with equal fixing times (numeric) or equal fixing dates (dated, explicit accrual_factors / TARF), and dated
+# contracts whose distinct dates resolve to one time (Friday + Saturday under BUSINESS_DAYS valued before that
+# instant): ValidationError (unique / strictly increasing) -> priced, equal to the twin. Nothing else moves: a schedule
+# of distinct times takes exactly the old engine path (no reindexing).
+# Same refusal, new reason: test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] (initial_date-derived) still raises
+# ValidationError, now the default derivation's zero-length refusal (user ruling 2026-10-10 on R26 (b)) instead of
+# "fixing_dates must be unique".

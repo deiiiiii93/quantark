@@ -107,9 +107,13 @@ class FxTargetRedemptionNoteMCEngine(BaseFxEngine):
     # -- simulation ------------------------------------------------------
 
     def _simulate(self, fx_env, spot, sigma, fixings) -> np.ndarray:
-        gen = self._make_generator(fx_env, spot, sigma, fixings)
+        """Spots at each PERIOD's fixing, (P, M). Each distinct fixing time is simulated once; periods sharing a time
+        share its spot (user decision OQ-4 b). A schedule of distinct times is simulated exactly as before."""
+        times, period_of = np.unique(fixings, return_inverse=True)
+        gen = self._make_generator(fx_env, spot, sigma, times)
         paths, _ = gen.generate_paths()
-        return paths[:, 1:]
+        spots = paths[:, 1:]  # drop S_0 column -> one column per distinct time
+        return spots if times.size == fixings.size else spots[:, period_of]
 
     def _make_generator(self, fx_env, spot, sigma, times) -> FxGKPathGenerator:
         if self.mc.method == MonteCarloMethod.PSEUDO:

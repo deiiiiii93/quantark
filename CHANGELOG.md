@@ -55,6 +55,12 @@ backtest and FX dynamic scenario.
   gains it and theta on the pay date loses it (values in
   `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`); inside runs, cash on a
   path-aligned pay date is booked on the next path instant.
+- FX TARN / TARF periods may share a fixing date or time (user decision OQ-4 b, 2026-10-10): `fixing_dates` /
+  `fixing_times` must be non-decreasing instead of strictly increasing. Both MC engines simulate each distinct fixing
+  time once and every period sharing it fixes at that spot; periods are accumulated in schedule order (a period after
+  the target hit is dead), each with its own pay date and cash. A dated TARN on the default period derivation
+  (`initial_date`, then each previous fixing date) cannot share a fixing date (a zero-length period): it states its own
+  accrual.
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be

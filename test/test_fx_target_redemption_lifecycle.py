@@ -6,8 +6,10 @@ import math
 import warnings
 from datetime import datetime, timedelta
 
+import numpy as np
 import pytest
 
+from golden_compare import GOLDEN_REL_TOL
 from fx_target_redemption_fixtures import (
     FIX,
     FIX_DATES,
@@ -1249,3 +1251,140 @@ def test_a_saturday_fixing_banked_on_the_friday_stays_valid_under_business_days_
     _price(rebooked, e=env(val=FRIDAY, **BUS))
     with pytest.raises(ValidationError, match="fixings_banked"):
         _price(rebooked, e=env(val=FRIDAY))
+
+
+# --- OQ-4 (b), user decision 2026-10-10: periods may share a fixing date / time ------------------------------------
+
+SHARED_FACTORS = [1 / 12, 1 / 24] + [1 / 12] * 11
+
+
+def _shared_dated(kind, target, **kw):
+    """Thirteen periods: the first two share FIX_DATES[0]; the second pays two days later."""
+    dates = [FIX_DATES[0]] + FIX_DATES
+    pays = [FIX_DATES[0], LAG2[0]] + FIX_DATES[1:]
+    if kind == "tarf":
+        return dated_tarf(fixing_dates=dates, pay_dates=pays, target=target, **kw)
+    return dated_note(fixing_dates=dates, pay_dates=pays, accrual_factors=SHARED_FACTORS, target=target, **kw)
+
+
+def test_numeric_form_accepts_equal_fixing_times():
+    n = note(fix=[FIX[0], FIX[0]] + FIX[1:], pay_times=[FIX[0], FIX[0] + 2 / 365] + FIX[1:],
+             accrual_factors=SHARED_FACTORS, target=50.0)
+    assert n.fixing_times[:2] == [FIX[0], FIX[0]]
+    with pytest.raises(ValidationError, match="ascending"):
+        note(fix=[FIX[1], FIX[0]] + FIX[2:], target=50.0)              # decreasing is still refused
+
+
+def test_the_default_derivation_cannot_share_a_fixing_date():
+    """User ruling 2026-10-10 on R26 (b): a zero-length DERIVED period is refused; a stated accrual is not."""
+    with pytest.raises(ValidationError, match="zero length"):
+        dated_note(fixing_dates=[FIX_DATES[0]] + FIX_DATES, target=50.0)  # initial_date=VAL: a zero-length period
+    assert _shared_dated("tarn", target=50.0).fixing_dates[:2] == [FIX_DATES[0]] * 2  # explicit factors: accepted
+
+
+def test_engines_simulate_a_shared_time_once():
+    e = env()
+    eng = engine_for(note(target=50.0), n=1_000)
+    t0, t1 = FIX[0], FIX[1]
+    shared = eng._simulate(e, 1.20, 0.10, np.array([t0, t0, t1]))
+    distinct = eng._simulate(e, 1.20, 0.10, np.array([t0, t1]))
+    assert np.array_equal(shared[:, 0], shared[:, 1]) and np.array_equal(shared[:, [0, 2]], distinct)
+    tarf_eng = engine_for(tarf(target=0.2), n=1_000)
+    assert np.array_equal(tarf_eng._simulate(e, 1.20, 0.10, np.array([t0, t0, t1]))[:, [0, 2]],
+                          tarf_eng._simulate(e, 1.20, 0.10, np.array([t0, t1])))
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_two_periods_on_one_fixing_date_price_like_the_twin_and_each_is_paid(kind):
+    dated = _shared_dated(kind, target=50.0)
+    twin = _numeric_twin(dated, env())
+    assert twin.fixing_times[0] == twin.fixing_times[1]
+    assert is_close(_price(twin), _price(dated), rel_tol=1e-12)
+    e0, e3 = env(val=FIX_DATES[0]), env(val=FIX_DATES[0] + timedelta(days=3))
+    twin.time_shift(calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.CALENDAR_DAYS, 252))
+    for product in (dated, twin):
+        product.record_passed_fixings(e0)                              # the shared date: both periods bank together
+    fixings = [x for x in dated.lifecycle_events if x.event_type is FIXING]
+    assert len(fixings) == 2 and _kinds_only(dated.lifecycle_events) == _kinds_only(twin.lifecycle_events)
+    assert fixings[0].fixing == fixings[1].fixing == 1.20                # one spot for both
+    assert dated.state.fixings_banked == 2
+    assert [p.pay_date for p in dated.state.pending] == [FIX_DATES[0], LAG2[0]]      # each its own pay date
+    assert [p.amount for p in dated.state.pending] == [x.amount for x in fixings]    # each its own cash
+    twin.time_shift(3 / 365)
+    for product, e in ((dated, e3), (twin, e3)):
+        product.record_passed_fixings(e)
+    assert _kinds_only(dated.lifecycle_events) == _kinds_only(twin.lifecycle_events)
+    assert [x.event_type for x in dated.lifecycle_events] == [FIXING, FIXING, PAYMENT, PAYMENT]   # banked once
+    assert dated.state.fixings_banked == 2 and dated.state.pending == ()
+
+
+def test_a_target_hit_by_the_first_of_two_same_date_periods_kills_the_second():
+    """TARN spec section 6: "On a hit ... every later fixing is dead" (periods in schedule order)."""
+    dated = _shared_dated("tarn", target=0.9)                           # the first coupon (1.0) is clipped to 0.9
+    twin = _numeric_twin(dated, env())
+    dated.record_passed_fixings(env(val=FIX_DATES[0]))
+    (fixing,) = [x for x in dated.lifecycle_events if x.event_type is FIXING]  # the second period never banks
+    assert fixing.amount == 0.9 and fixing.redeemed and dated.is_redeemed and dated.is_terminal
+    assert [(p.amount, p.pay_date) for p in dated.state.pending] == [(0.9, FIX_DATES[0]), (100.0, FIX_DATES[0])]
+    e = env(vol=1e-7)                                                   # the engine walk applies the same rule
+    t = calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.CALENDAR_DAYS, 252)
+    expected = (0.9 + 100.0) * e.get_domestic_df(t)                     # nothing from the second period
+    assert is_close(_price(twin, e=e), expected, rel_tol=1e-6)
+    assert is_close(_price(_shared_dated("tarn", target=0.9), e=e), expected, rel_tol=1e-6)
+
+
+def test_friday_and_saturday_fixings_price_on_the_thursday_like_the_twin():
+    """OQ-3 case valued before the shared instant (was refused: OQ-4 status quo): both fixings at one business time,
+    one simulated spot; dated == numeric."""
+    dated = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                       target=50.0)
+    e_thu = env(val=THURSDAY, **BUS)
+    twin = _numeric_twin(dated, e_thu)
+    assert twin.fixing_times[0] == twin.fixing_times[1]
+    assert is_close(_price(twin, e=e_thu), _price(dated, e=e_thu), rel_tol=1e-12)
+
+
+# Prices at e2e07886 (the commit before this task; n=4_000, seed 7), frozen on the ARM64 dev machine: compared at
+# GOLDEN_REL_TOL because a frozen literal crosses architectures (test/golden_compare.py). The same-machine invariant
+# against the e2e07886 `_simulate` body below stays exact.
+_E2E07886_PRICES = {
+    ("numeric_tarn", "PSEUDO"): "0x1.969d22447738ap+6",
+    ("numeric_tarn", "QUASI"): "0x1.96954aa30923dp+6",
+    ("numeric_tarf", "PSEUDO"): "0x1.269000ddbd7f0p-4",
+    ("numeric_tarf", "QUASI"): "0x1.190e35665df27p-4",
+    ("dated_tarn", "PSEUDO"): "0x1.9669b703a8eecp+6",
+    ("dated_tarn", "QUASI"): "0x1.965e327b383c3p+6",
+    ("dated_tarf", "PSEUDO"): "0x1.25aac3449aeb8p-4",
+    ("dated_tarf", "QUASI"): "0x1.183baf0447154p-4",
+    ("dated_tarn_business_days", "PSEUDO"): "0x1.964ab26d97d67p+6",
+    ("dated_tarn_business_days", "QUASI"): "0x1.963cb125622e9p+6",
+}
+_DISTINCT_CASES = {
+    "numeric_tarn": lambda: (note(target=3.0), env()),
+    "numeric_tarf": lambda: (tarf(target=0.2), env()),
+    "dated_tarn": lambda: (dated_note(target=3.0, pay_dates=LAG2), env()),
+    "dated_tarf": lambda: (dated_tarf(target=0.2, pay_dates=LAG2), env()),
+    "dated_tarn_business_days": lambda: (dated_note(target=3.0), env(**BUS)),
+}
+
+
+def _e2e07886_simulate(self, fx_env, spot, sigma, fixings):
+    """Both engines' `_simulate` body at e2e07886."""
+    gen = self._make_generator(fx_env, spot, sigma, fixings)
+    paths, _ = gen.generate_paths()
+    return paths[:, 1:]
+
+
+@pytest.mark.parametrize("method", [PSEUDO, QUASI])
+@pytest.mark.parametrize("name", sorted(_DISTINCT_CASES))
+def test_distinct_fixing_times_take_the_old_engine_path_bitwise(name, method, monkeypatch):
+    """A schedule of distinct times is simulated exactly as at e2e07886: no reindexing (Task 8c)."""
+    product, e = _DISTINCT_CASES[name]()
+    eng = engine_for(product, n=4_000, method=method)
+    times = np.asarray(product.resolve(e).fixing_times, dtype=float)
+    live_spots = eng._simulate(e, 1.20, 0.10, times)
+    live = _price(product, method=method, e=e, n=4_000)
+    monkeypatch.setattr(type(eng), "_simulate", _e2e07886_simulate)
+    assert np.array_equal(eng._simulate(e, 1.20, 0.10, times), live_spots)    # same machine: byte-identical
+    assert _price(product, method=method, e=e, n=4_000) == live
+    assert math.isclose(live, float.fromhex(_E2E07886_PRICES[name, method.name]), rel_tol=GOLDEN_REL_TOL)

@@ -39,9 +39,10 @@ class FxTargetRedemptionForward(TargetRedemptionProduct):
 
     Attributes:
         strike: Forward strike ``K`` (quote per base).
-        fixing_times: Ascending, unique year-fraction fixing times of the
-            fixings not yet banked; a non-positive time is an unbanked past
-            fixing. An empty list is a terminal booking.
+        fixing_times: Ascending (non-decreasing: periods may share a fixing
+            time), finite year-fraction fixing times of the fixings not yet
+            banked; a non-positive time is an unbanked past fixing. An empty
+            list is a terminal booking.
         pay_times: Per-fixing settlement times (defaults to ``fixing_times``);
             each must be on or after its fixing.
         notional: Base-currency notional (cashflows are in domestic currency).

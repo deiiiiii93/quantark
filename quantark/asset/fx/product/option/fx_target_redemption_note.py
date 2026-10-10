@@ -57,7 +57,8 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
     resolve against the pricing environment.
 
     Attributes:
-        fixing_times: Ascending, unique, finite year-fraction fixing times.
+        fixing_times: Ascending (non-decreasing: periods may share a fixing time), finite year-fraction fixing
+            times.
         coupon_rate: Annualized coupon rate applied per period.
         notional: Note notional (domestic currency).
         target: Cumulative coupon-amount cap in domestic currency; ``math.inf`` disables redemption.
@@ -173,6 +174,13 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
         if self.initial_date is not None and not self.initial_date < self.fixing_dates[0]:
             raise ValidationError(
                 f"initial_date {self.initial_date} must be before the first fixing date {self.fixing_dates[0]}")
+        if self.initial_date is not None and len(set(self.fixing_dates)) != len(self.fixing_dates):
+            # user ruling 2026-10-10 on R26 (b): the DEFAULT derivation's later period on a shared fixing date runs
+            # from that date to itself; a contract stating its own accrual is not refused (Task 8d narrows this
+            # condition to the default derivation and adds accrual_end_dates to the message)
+            raise ValidationError(
+                "periods sharing a fixing date need their own accrual: under the default derivation (initial_date, "
+                "then each previous fixing date) the later period would have zero length - state accrual_factors")
         if self.accrual_factors is not None:
             if len(self.accrual_factors) != len(self.fixing_dates):
                 raise ValidationError("accrual_factors must align 1:1 with fixing_dates")
