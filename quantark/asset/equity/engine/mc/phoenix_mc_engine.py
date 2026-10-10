@@ -40,7 +40,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import safe_log
+from quantark.util.numerical import merge_time_nodes, node_index, safe_log
 
 from quantark.asset.equity.engine.mc.autocallable_dask_batch import (
     run_autocallable_dask_batches,
@@ -526,8 +526,9 @@ class PhoenixMCEngine(BaseEngine):
         ko_grid_times = [t for t in ko_times if t > 0.0]
         ki_grid_times = [t for t in ki_times if t > 0.0]
 
-        all_times_set = set(ko_grid_times) | set(ki_grid_times) | {T}
-        all_times = np.array(sorted(all_times_set), dtype=float)
+        # One node per instant (W17a): a knock-out record and a continuous-KI node that are one instant spelled an
+        # ulp apart become one node; a grid without such a pair is the sorted set of its times, bit for bit.
+        all_times = merge_time_nodes(ko_grid_times + ki_grid_times + [T], pin=T)
 
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)
@@ -535,7 +536,7 @@ class PhoenixMCEngine(BaseEngine):
         def path_index_for_time(time_val: float) -> int:
             if time_val <= 0.0:
                 return 0
-            return int(np.searchsorted(all_times, time_val)) + 1
+            return node_index(all_times, time_val) + 1
 
         ko_indices = np.array([path_index_for_time(t) for t in ko_times], dtype=int)
         if not ki_continuous and ki_times.size > 0:

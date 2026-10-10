@@ -61,7 +61,7 @@ from quantark.util.enum import (
 )
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_close, safe_log
+from quantark.util.numerical import Tolerance, is_close, merge_time_nodes, node_index, safe_log
 
 # Optional Dask import
 from quantark.asset.equity.engine.mc.autocallable_dask_batch import (
@@ -1097,16 +1097,18 @@ class SnowballMCEngine(BaseEngine):
 
         grid_times = [t for t in list(ko_times) + list(ki_times) if not at_valuation(t)]
 
-        # Combine all times and ensure maturity is included
-        all_times_set = set(grid_times) | {T}
-        all_times = np.array(sorted(all_times_set))
+        # Combine all times and ensure maturity is included: one node per instant (W17a). A knock-out record and a
+        # continuous-KI node can be one instant spelled an ulp apart (a dated record's (d - a) / 365, an aged
+        # numeric one's d / 365 - a / 365, a linspace node); kept as two nodes, the empty step between them re-dealt
+        # every random draw after it. A grid without such a pair is the sorted set of its times, bit for bit.
+        all_times = merge_time_nodes(grid_times + [T], pin=T)
 
         # Build dt_array
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)
 
         def indices_for(times):
-            return np.array([-1 if at_valuation(t) else int(np.searchsorted(all_times, t)) for t in times], dtype=int)
+            return np.array([-1 if at_valuation(t) else node_index(all_times, t) for t in times], dtype=int)
 
         # Find indices for KO and KI observations
         ko_indices = indices_for(ko_times)
@@ -1244,15 +1246,17 @@ class SnowballMCEngine(BaseEngine):
         def at_valuation(t):
             return t <= 0.0
 
-        all_times = np.array(
-            sorted(t for t in all_times_set if not at_valuation(t)), dtype=float
+        # One node per instant, as in _build_time_grid (W17a): two spellings of one instant (a record against a
+        # continuous-KI node, a REBASED t_ki + offset against another node) are merged into one node.
+        all_times = merge_time_nodes(
+            [t for t in all_times_set if not at_valuation(t)], pin=T
         )
         times_with_zero = np.concatenate([[0.0], all_times])
         dt_array = np.diff(times_with_zero)
 
         def indices_for(times):
             return np.array(
-                [-1 if at_valuation(t) else int(np.searchsorted(all_times, t)) for t in times],
+                [-1 if at_valuation(t) else node_index(all_times, t) for t in times],
                 dtype=int,
             )
 
@@ -1272,7 +1276,10 @@ class SnowballMCEngine(BaseEngine):
             # the last node of the first schedule; -1 when it ends at valuation: no future interval is monitored,
             # only the known spot (path column 0). Clamped to 0, a later hit switched a claim that had already
             # matured on the first schedule over to the second (review 2026-09-21 R8).
-            ki_horizon_idx = int(np.searchsorted(all_times, pre_maturity, side="right") - 1)
+            # (within Tolerance.ZERO: the node standing for pre_maturity may be its merged spelling just past it)
+            ki_horizon_idx = int(
+                np.searchsorted(all_times, pre_maturity + Tolerance.ZERO, side="right") - 1
+            )
         else:
             ki_indices = indices_for(ki_times)
             ki_horizon_idx = None

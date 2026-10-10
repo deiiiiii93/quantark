@@ -229,6 +229,29 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   (W15), a valuation after the final date still raises.
 
 ### Fixed
+- The autocallable MC time grid holds one node per instant (W17a, approved 2026-10-10). The snowball, KO-reset and
+  Phoenix MC grids (`SnowballMCEngine._build_time_grid` / `_build_time_grid_ko_reset`, `PhoenixMCEngine.
+  _build_time_grid`, inherited by the local-vol / Heston / QE / SLV snowball and Phoenix MC) were the sorted Python
+  `set` of their times, so one instant spelled two ways an ulp apart -- a knock-out record against a continuous-KI
+  `np.linspace` node (a dated record's `(d - a) / 365`, an aged numeric one's `d / 365 - a / 365`, `T * j / n`),
+  a REBASED `t_ki + offset`, or KI dates rounded to 10 decimals -- survived as two nodes ~1e-16 years apart. The
+  empty step carries no variance but adds a column of random draws and re-deals every draw after it, so a dated
+  contract and its aged numeric twin priced on two independent samples (W17 diagnosis: day 92 of a 256-path snowball
+  12.08 vs 11.34; at 1M paths the gap is within one standard error, both forms agree with the PDE / QUAD V2).
+  New `quantark.util.numerical.merge_time_nodes(times, tol=Tolerance.ZERO, pin=T)` collapses every run of nodes
+  closer than `tol` into its LAST member (a maturity within `tol` is pinned back to exactly `T`) and `node_index`
+  maps a time to the first merged node strictly after `t - tol`; the three grid builders use them. A grid with no
+  such run is bit-identical. Moved: only MC values whose grid held such a run, each a fresh draw of the same law --
+  on the W12 snowball / Phoenix, 6 dated and 8 numeric valuation days of 364 (e.g. BS snowball day 92 numeric,
+  256 paths seed 7: 10.756027 -> 11.461036 = the dated value), the continuous-KI KO-reset on days 26 / 65 / 78 / 82,
+  `test_ko_reset_event_stats_shape[Rebased]` pv 98.1788 -> 97.5565 (shape-only test) and the live gate
+  `test/pde_grid/test_anchor_certification.py::test_snowball_pde_vs_mc[False]` MC 96.645369 -> 96.621477 (|PDE - MC|
+  0.0213 -> 0.0026, gate 0.2). No golden or certificate anchor moved (probe over `test/modelvalidation`,
+  `test/mo_volmodels`, `test/pde_grid` and every autocallable-MC test file). Dated == numeric twin now within
+  8.9e-15 on every day and route measured. The range-accrual and Asian MC grids use the same set union but hold no
+  such pair (only observation times against `T`, spelled alike in both forms; every day measured): unchanged. New
+  `test/test_mc_time_node_merge.py`. Evidence: `docs/superpowers/specs/2026-10-10-snowball-mc-twin-diagnosis/`
+  (`moved_values.txt`).
 - A dated autocallable whose discrete knock-in records lie in the past prices like its numeric twin (W11). The
   knock-in resolvers (`SnowballOption.resolve_ki_observations`, inherited by `KnockOutResetSnowballOption`, and
   `PhoenixOption.resolve_ki_observations`) resolved EVERY record, so a dated record before the valuation date asked
