@@ -12,9 +12,11 @@ scenario, with a numeric contract showing no difference from its dated twin.
 **Architecture:** A new frozen state module (`TargetRedemptionState`, `PendingPayment`, events, `TARGET_HIT_RTOL`) and
 a shared base class `TargetRedemptionProduct` own the two schedule forms, validation, banking and the resolved view;
 `FxTargetRedemptionNote` / `FxTargetRedemptionForward` only supply their terms and per-fixing outcome. The two MC
-engines read only `product.resolve(fx_env)`. A new `quantark/asset/fx/lifecycle/` hook (`FxTargetRedemptionLifecycle`)
-registers and advances TARN/TARF positions inside the two FX run engines; `BaseFxEngine._fdm_theta` steps numeric
-products by the environment's year fraction (Q7).
+engines read only `product.resolve(fx_env)`. TARN/TARF implement W6's run-fixings product protocol, so W6's
+`RunFixingRecorder` (`quantark/util/run_fixings.py`, already wired into the FX backtest and FX dynamic scenario) ages,
+records and settles them inside the two FX run engines, which book their cash from `RunFixingDay` (re-plan
+2026-10-10; the planned `quantark/asset/fx/lifecycle/` hook is dropped, W6 spec §6); `BaseFxEngine._fdm_theta` steps
+numeric products by the environment's year fraction (Q7).
 
 **Tech Stack:** Python 3.10–3.13, NumPy, pandas (run engines only), pytest + xdist. No new dependencies.
 
@@ -32,6 +34,7 @@ The implementation branch is cut from `main` **after W5 and W1 land**. Neither i
 | `w5-missing-fixings` | `bfb9b88f` | `quantark/util/fixings.py`: `class MissingFixingWarning(UserWarning)`; `def fixing_label(index: int, record) -> str` (returns `#<index> t=<time:.6g>` when `record.observation_time is not None`, else `#<index> <record.observation_date.date().isoformat()>`); `def warn_filled_fixings(product_name: str, field: str, labels: Sequence[str], *, stacklevel: int = 3) -> None` (one warning naming every label, nothing when empty). Precedent only: `FxRangeAccrualOption.resolve_observations(self, fx_env: "FxPricingEnvironment", *, warn_missing_fixings: bool = True) -> Tuple[List[Tuple[float, bool]], List[Tuple[float, float, int]], float]`. |
 | `w1-tracker-clock` | `05ee1f9b` (the spec cites the fix commit `510bf6a7`; `05ee1f9b` is a docs commit on top) | `quantark/asset/equity/lifecycle/autocallable.py`: `class MaturedBeforeRunWarning(UserWarning)`. Also on the branch, **not used by this plan** (see Ruling R3): `def lifecycle_clock_origin(product: Any, start_date) -> Optional[pd.Timestamp]` (returns `product.initial_date` when set, else `start_date`). `MaturedBeforeRunWarning` is NOT re-exported from `quantark/asset/equity/lifecycle/__init__.py`; import it from the `autocallable` module. |
 | `w2-rebate-flag` | in progress | Not imported. **Rebase risk only**: it may touch shared accrual code and the `CHANGELOG.md` `[Unreleased]` section. This plan touches no equity accrual code. |
+| W6 run fixings (re-plan 2026-10-10) | `6f9c6e74`, on `main`; `w4b-tarn` is rebased onto it (Tasks 1–8 done) | `quantark/util/run_fixings.py`: `RunFixingRecorder` (`register(portfolio) -> RunFixingDay`, `advance(portfolio) -> RunFixingDay`, `days`, `recorded`), `RunFixingDay(date, fixings, product_events=(), pending_pv=0.0)`, `RecordedFixing(position_id, index, label, outcome, spot, gap)`, `participates`, `RUN_FIXINGS_PROTOCOL`; optional hooks `matured_before`, `lifecycle_events`, `pending_pv`; `quantark/util/fixings.py`: `is_history`, `snap_time`, `freeze_missing_fixings`; `FXBacktestEngine.run_fixings` / `FXDynamicScenarioEngine.run_fixings` (register / advance already wired). Tasks 9–12 build on it (section "Re-plan 2026-10-10 against W6"). |
 
 Landing order on `main` is ff-only (memory: landing worktree branches); W5/W1 shas may change on rebase, so Task 1
 verifies their **content**, not their shas.
@@ -49,6 +52,12 @@ verifies their **content**, not their shas.
 - **Never invent fallback semantics**: if something cannot be done correctly, write `# TODO(<why>)` and stop and
   report; a refusal (`ValidationError`) is allowed, a guessed value is not.
 - No MC engine imported inside PDE code (none of these tasks touch PDE code; keep it that way).
+- **Run semantics are W6's** (re-plan 2026-10-10; run-fixings spec §3.3 R1–R10, plan Rulings 2, 4, 8, 9, 10 and the
+  user's weekend ruling): a fixing at t = 0 is live; a fixing is decided at the spot of the first instant it was live,
+  a gap fixing at the previous instant's; an undated run never advances; time-of-day instants and a backwards clock
+  are refused; a same-date advance only refreshes the spot. Tasks 9–11 add no second clock, loop or ordering rule;
+  `lifecycle_events` stays append-only; nothing replaces a participant's product between `register` and `advance`
+  except the recorder, with copies that keep their records.
 - Test command for EVERY run (subagents at most `-n 2`; the controller runs the full suite at `-n 6`), with `<WT>`
   replaced by the implementation worktree's absolute path:
   `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest <paths> -n 2 -q`
@@ -90,6 +99,7 @@ verifies their **content**, not their shas.
 - **R3** The FX hook's clock origin is the pair environment's `valuation_date` at registration (spec §7.2), NOT W1's
   `lifecycle_clock_origin` — W1's helper returns `product.initial_date` first, which on a dated TARN is the accrual
   start, not the run's clock — cost: none for numeric (no `initial_date`); dated products need no origin.
+  *Re-plan 2026-10-10: superseded by W6 R6 (the same rule, held by `RunFixingRecorder`).*
 - **R4** P1(b) uses `accrual_start = FIX[n_banked − 1] − τ` (spec erratum above) — the spec's literal value gives a
   first factor of 2/12 at 91/365 — cost: none.
 - **R5** Theta parity (D4) is asserted as `|θ_numeric − θ_dated| <= 1e-12 × |price|` — θ is a difference of two prices
@@ -102,7 +112,8 @@ verifies their **content**, not their shas.
 - **R7** A dated fixing strictly after valuation that resolves to `is_zero` time (e.g. a Saturday fixing under a
   `BUSINESS_DAYS` env valued on the Friday) is refused at `resolve` with `ValidationError` — the engines need
   t > 0 and treating it as passed or as future would be invented semantics — cost: such a booking cannot be priced
-  on that day until a rule is chosen.
+  on that day until a rule is chosen. *Re-plan 2026-10-10: conflicts with W6 Ruling 2 inside runs; kept as
+  written pending open question OQ-2.*
 - **R8** Dated `get_delivery` mirrors `get_maturity` (0.0 after `delivery_date`) — `BaseFxEngine.calculate_greeks`
   calls `get_delivery`, so Greeks on an aged dated contract past its last pay date would otherwise raise — cost: none.
 - **R9** Q7 changes only `BaseFxEngine._fdm_theta` (spec §12). `localvol_greeks.py:60` and the Heston/SLV PDE thetas
@@ -117,19 +128,219 @@ verifies their **content**, not their shas.
 - **R12** Determined cash with `is_zero(amount)` is neither pending nor paid (spec "a non-zero c") — QuantArk numeric
   convention; both forms apply the same rule, so twin parity holds — cost: cash below 1e-10 currency units is dropped.
 
+## Re-plan 2026-10-10 against W6 (Tasks 9–12)
+
+**Context.** Tasks 1–8 are done on `w4b-tarn`, which was rebased onto W6 (`6f9c6e74`, run fixings). W6's spec §6
+(user-approved) decides that the general run-fixings recorder **subsumes** the FX lifecycle hook this plan's old
+Task 9 built; its plan's "Hand-off to W4b" fixes the interfaces. Main has since moved to `0d1e4133` (W8 / W9 /
+carried-KI): `git diff 6f9c6e74 0d1e4133 -- quantark/asset/fx quantark/backtest/fx quantark/dynamicscenario
+quantark/util` is empty (W8 touched only W6's tests and equity / replay / explain code), so nothing here depends on it
+beyond the W8 rule below. Inputs read: TARN spec rev 2 (+ Q7/Q8), W6 spec rev 2 and plan (Rulings 1–13, hand-off),
+`quantark/util/run_fixings.py`, the W6 wiring in `quantark/backtest/fx/engine.py` and
+`quantark/dynamicscenario/fx/engine.py`, `test/test_run_fixings*.py`, `test/run_fixings_fixtures.py`, and the FX range
+accrual's protocol (`fx_range_accrual_option.py:383-464`) as the worked example. Measured on this branch (scratchpad
+probe): a dated zero-lag TARN prices 102.0922 the day before its first fixing, **101.1173 on the fixing day** (the
+day's coupon 0.9863 already paid inside `resolve`) and 101.1319 the day after with the coupon booked — the OQ-1 dip.
+
+### Changes
+
+1. **Task 9 rewritten** — "TARN / TARF implement the run-fixings product protocol". No `quantark/asset/fx/lifecycle/`.
+   `TargetRedemptionProduct` gains `has_run_fixings`, `open_fixings`, `with_time_elapsed`, `with_history_settled`,
+   `matured_before`; `missing_fixing_fills` / `with_missing_fixings_filled` / `resolve`'s warning become strict
+   (`is_history`; t = 0 live, W6 D1); protocol indices become booking-relative. `quantark/util/run_fixings.py` gains
+   one generic optional hook (`settle_history` → `with_history_settled(env)`), called at registration after the W5b
+   fill and after each clock move's recording. Tests: product-level protocol tests and D2 in
+   `test_fx_target_redemption_lifecycle.py`; recorder-level tests (old Task 9 list, remapped) plus new W6-rule tests
+   (R8, Ruling 9, append-only events, index stability) and two status-quo pins (OQ-1, OQ-2) in the new
+   `test_fx_target_redemption_runs.py`; one generic stub test appended to `test/test_run_fixings.py`.
+2. **Task 10 rewritten** — the FX backtest's wiring is W6's; this task adds `booked_cash(product_events)` (in
+   `target_redemption_state.py`) and the `paid_cash` / `pending_pv` columns, value = MTM + cumulative paid cash. B1–B6
+   kept on flat paths with the same day indices; the weekend test now expects Friday's spot with `gap=True` (W6 D5); new
+   W8 twin test and an OQ-1 value pin.
+3. **Task 11 rewritten** — the FX dynamic scenario's wiring is W6's; this task adds the Q8 refusal (before cloning or
+   registering), the cash fields and the FIXING snapshots, all read from `RunFixingDay`.
+4. **Task 12 adjusted** — new Step 0 re-captures the B6 baseline and demo stdout on the W6 base (Task 1's captures
+   predate the rebase and W6 moves numeric FX range accruals in the B6 book); Steps 1–2 compare against the new
+   captures; Step 3 checks the W6 test files are untouched apart from the Task 9 append; Step 4's sign-off list gains
+   the W6-applied moves and the OQ answers; landing note: rebase onto current main and re-run Steps 0–3.
+5. **Header** — Architecture sentence, a W6 prerequisites row, a Global Constraints bullet (run semantics are W6's),
+   File Structure rows, annotations on Rulings R3 and R7, Review Focus (items 1, 2, 4, 5 retargeted; items 6, 7 new),
+   Self-review coverage and type-consistency lines.
+
+### Old Tasks 9–11 requirements: where each lives now
+
+| # | Old requirement (old task) | Status | Where now |
+|---|---|---|---|
+| 1 | `quantark/asset/fx/lifecycle/` (`FxTargetRedemptionLifecycle`, `FxLifecycleDay`, `FxLifecycleEntry`, `is_ageable`, `holds_ageable`) (T9) | Dropped | W6 spec §6 (user-approved): the recorder subsumes it. `FxLifecycleDay.events` → `RunFixingDay.product_events`; `.pending_pv` → `RunFixingDay.pending_pv`; `.paid_cash` → `booked_cash(...)` (T10); `holds_ageable` → the Q8 `isinstance` check (T11) |
+| 2 | `TargetRedemptionProduct.matured_before(fx_env)` (T9) | Kept, time-based (R16) | T9 product method; called by W6 `_register_position` (W6 Task 5 hook) |
+| 3 | Clock origin = pair env date at registration (old R3) | Satisfied by W6 | W6 R6: `_last[underlying]` set at `register` |
+| 4 | Matured before the run: `MaturedBeforeRunWarning`, position removed, value 0, no cash (T9) | Satisfied by W6 + T9 `matured_before` | T9 `test_matured_before_the_run_is_removed_with_a_warning`, T10 B5 |
+| 5 | Fixings before the run banked at the origin spot, one `MissingFixingWarning` per position (T9) | Satisfied by W6 R5 (fill) + T9 settle hook (banking) | T9 `test_register_fills_history_once_and_books_nothing`, T10 B5 |
+| 6 | A fixing ON the origin date banks silently at registration (T9) | Changed by W6 D1 (user) | Live at registration; recorded on the next instant at the origin day's spot as refreshed by a same-date advance (W6 Ruling 9), silently: T9 `test_a_fixing_on_the_origin_date_is_live_and_records_the_next_day_silently` |
+| 7 | Payments produced by registration are never booked (T9) | Kept | settle at registration + W6 Ruling 10 (register reports no events): T9 register test, T10 B5 |
+| 8 | `advance` before the last date → `ValidationError` (T9) | Satisfied by W6 R9 | T9 `test_the_run_clock_cannot_go_back`, T10 `test_b5_backwards_path_raises`, T11 `test_start_date_before_environment_date_raises` |
+| 9 | `advance(portfolio, date)` refuses an environment not on `date` (T9) | Dropped | The recorder takes the instant from the environment; there is no second date to disagree with |
+| 10 | Numeric `time_shift` by the environment's year fraction since the last date (T9) | Satisfied by W6 R6 (`run_step_dt`) + T9 `with_time_elapsed` (snap) | T9 `test_with_time_elapsed_is_a_snapping_copy_that_banks_nothing`, D2 |
+| 11 | `record_passed_fixings` at the day's spot for every fixing at or before the date (T9) | Changed by W6 D1/D2 + Ruling 4 | Strictly past fixings only, decided at the spot of the first instant they were live; banked by `with_history_settled`: T9 D2, gap, consecutive-fixing tests |
+| 12 | Calendar gaps: banked on the next path day at that day's spot, no warning (T9, T10 weekend test) | Changed by W6 D5 (user) | Previous instant's spot, `gap=True`, no warning: T9 `test_a_calendar_gap_records_at_the_previous_instants_spot_without_a_warning`, T10 `test_business_day_path_records_a_saturday_fixing_at_fridays_spot` |
+| 13 | A payment due between path days is booked, undiscounted, on the first path day on or after it (T9) | Kept | numeric `with_time_elapsed` (via `time_shift`), dated `with_history_settled`: T9 terminal-booking and short tests |
+| 14 | Day's paid cash = Σ quantity × PAYMENT (T9) | Moved | T10 `booked_cash` (used by T10, T11) |
+| 15 | Pending PV = Σ quantity × `pending_pv` (T9) | Satisfied by W6 (Task 5 hook) | `RunFixingDay.pending_pv` |
+| 16 | Other products untouched (T9) | Satisfied by W6 (`participates`) | T9 `test_other_products_are_untouched` |
+| 17 | Short position: signed cash and pending PV (T9, Review Focus 1) | Kept | T9 `test_a_short_position_carries_its_signed_quantity`, T10 `test_booked_cash_scales_by_the_signed_quantity_and_ignores_other_entries` |
+| 18 | Two pairs age independently (T9) | Kept | T9 `test_two_pairs_record_at_their_own_previous_spots` (each pair's previous spot, W6 D5) |
+| 19 | Terminal booking kept at PV(pending), paid on its day (T9) | Kept | T9 `test_a_terminal_booking_is_kept_at_its_pending_pv_and_paid_on_its_day` |
+| 20 | D2 twins age identically (T9) | Kept, rewritten on the recorder | T9 `test_d2_twins_age_identically` (live on its day, recorded next day) |
+| 21 | Fixtures `drive`, `book` (T9) | Kept | `drive` now replaces the env and calls `RunFixingRecorder.advance` |
+| 22 | CHANGELOG `FxTargetRedemptionLifecycle` bullet (T9) | Replaced | T9 protocol / hook bullets |
+| 23 | Backtest calls register / advance (T10) | Satisfied by W6 Task 8 | `backtest/fx/engine.py:50-51, 66` |
+| 24 | Rows `paid_cash` (cumulative) and `pending_pv`; `portfolio_value`, `final_value` include paid cash (T10) | Kept | T10, fed from `RunFixingDay` |
+| 25 | B1 numeric TARN ages; day 91 equals the rebuild (T10) | Kept, same values | T10 `test_b1_numeric_tarn_ages_in_the_backtest` (k/12 gap fixings on a flat path) |
+| 26 | B2 redeeming path: cash on pay days, terminal = Σ DF × pending, 0.0 after, no warning (T10) | Kept, same day indices | T10 `test_b2_redeeming_path_books_cash_on_its_pay_days` |
+| 27 | B3 quiet path: principal; negative TARF cash (T10) | Kept, same day indices | T10 B3 (the last fixing at t = 1.0 is live on day 365, recorded day 366; principal still day 367) |
+| 28 | B4 twins in one backtest (T10) | Kept | T10 `test_b4_twins_in_one_backtest` (spy on `RunFixingRecorder.advance`; also compares `RecordedFixing` rows) |
+| 29 | B5 registration rules; backwards path (T10) | Kept | T10 B5 tests (R9 message from W6) |
+| 30 | B6 vanilla-only backtest books nothing (T10) | Kept | T10 `test_b6_book_without_target_redemption_books_nothing` + T12 byte gate on the W6 base |
+| 31 | Backtest module docstring (T10) | Kept | T10 Step 3 |
+| 32 | `test/test_fx_backtest.py` passes unmodified (T10) | Kept | T10 Step 4 (plus `test/test_run_fixings_runs.py` unmodified) |
+| 33 | Q8: undated `DayPath` with a TARN / TARF refused before `register` (T11) | Kept | T11 (`isinstance(TargetRedemptionProduct)`, R18); W6 spec §6 keeps it |
+| 34 | `DayPath.start_date` before the environment's date → `ValidationError` (T11, Review Focus 4) | Satisfied by W6 R9 | T11 `test_start_date_before_environment_date_raises` |
+| 35 | Dynamic scenario calls register / advance (T11) | Satisfied by W6 Task 8 | `dynamicscenario/fx/engine.py:84-85, 98` |
+| 36 | `DayResult.paid_cash` / `realized_cash` / `pending_receivable_pv`; value and final value include paid cash (T11) | Kept | T11 |
+| 37 | FIXING snapshots: spot, payoff, cashflow (old R6), terminates_position (T11) | Kept | T11 `_fixing_snapshots` from `RunFixingDay.product_events` |
+| 38 | Dynamic redeeming path books cash; event days `[31, 61]` (T11) | Kept | T11 `test_dynamic_tarn_redeems_and_books_cash` |
+| 39 | Snapshot cashflow when paid on the fixing's banking day (T11) | Kept, renamed | T11 `test_dynamic_snapshot_cashflow_when_paid_in_the_recording_step` |
+| 40 | B4 dynamic twins; B6 dynamic (dated and undated) (T11) | Kept | T11 |
+| 41 | `LifecycleEventSnapshot` docstring gains `'FIXING'` (T11) | Kept | T11 |
+
+New W6 requirements with no old counterpart: `has_run_fixings`, `open_fixings`, `with_time_elapsed` (T9); t = 0 live
+and silent (T9); time-of-day instants refused (T9, W6 R8); same-date refresh (T9, W6 Ruling 9); append-only
+`lifecycle_events` (T9); a numeric participant aged to its maturity is exactly 0.0 and equals its dated twin (T10,
+W8); stable indices across numeric banking (T9).
+
+### Rulings made in this re-plan (each: what — why — cost if wrong)
+
+- **R13** A generic optional recorder hook `with_history_settled(env)` (`settle_history` in
+  `quantark/util/run_fixings.py`) banks recorded history and pays due cash; `with_fixings_recorded` keeps the built
+  rates-only semantics — `with_fixings_recorded(fills)` gets no environment, and a dated contract needs the date to bank
+  (its `as_of`) and to pay a pending payment whose date has come (the old hook's daily `record_passed_fixings`); the
+  W6 hand-off's "`with_fixings_recorded` banks … PAYMENT events" cannot be met for the dated form, and the built
+  rates-only form is what keeps the Greek freeze value-neutral — cost: one optional hook in a shared W6 module (two
+  call sites); no existing participant moves (they lack the hook); a reviewer may prefer the hook named differently.
+- **R14** Protocol indices are booking-relative (`_index_offset` = numeric fixings banked and dropped since
+  construction, dead ones included; dated = schedule position) — W6 keys each record's first-live spot by index across
+  steps (Ruling 4) and assumes records are never dropped (`RecordedFixing.index` comment); a numeric TARN drops banked
+  fixings (spec §6), so with listed positions a fixing that goes live on the instant an earlier one banks would inherit
+  the wrong first-live spot (pinned by `test_consecutive_daily_fixings_keep_their_own_live_spots_across_banking`) —
+  cost: numeric event labels after a banking read `#<booking index>`; informational only; inception twins share indices.
+- **R15** `with_history_settled` sets a dated `as_of` to the last banked fixing's date, not the valuation date — a
+  fixing dated on the valuation date (or at t = 0 on a business-day clock) is live and must stay unbanked, which
+  `as_of = valuation_date` would deny — cost: a dated contract inside a run carries an earlier `as_of` than
+  `record_passed_fixings` would give it; amounts, events and prices are identical.
+- **R16** `matured_before` and every live/history decision use the resolved TIME (`is_history`), not the date — W6
+  Ruling 2 (time-based gap flag) and the twin rule (a numeric twin only has times) — cost: only a weekend/holiday
+  last fixing on a `BUSINESS_DAYS` environment is affected (live on the run start instead of matured).
+- **R17** Run value = Σ position MTM + cumulative `booked_cash` of the steps; the day's cash is summed from 0.0 in
+  event order, then added to the running total — the TARN spec §7.2 ledger; fixes the exact float order the tests
+  assert — cost: none.
+- **R18** Q8 detects the book by `isinstance(product, TargetRedemptionProduct)` on the INPUT portfolio, before cloning —
+  the refusal must come before `register` (spec §12 Q8) and needs no clone — cost: a future subclass is refused too
+  (intended).
+- **R19** A TARN / TARF stays in a run after its last fixing (PV(pending), then exactly 0.0 after its last pay date),
+  whereas W6/W8 refuse a range accrual or Asian run past its maturity — TARN spec §4.2 (dated `get_maturity` 0.0 after
+  expiry) and §7.2 (pending cash still pays after the last fixing); both twins continue identically (T10 W8 test) —
+  cost: none against the TARN spec; differs from the other participants by design.
+- **R20** Task 12's B6 and demo references are re-captured from an export of the W6 base (`git archive
+  $(merge-base) quantark example`), not taken from Task 1 — Task 1 captured them before the rebase onto W6, and W6
+  ages the numeric FX range accruals in the B6 book — cost: B6 then cannot see a W6 defect (W6's own gates cover W6).
+- **Superseded** old R3 (clock origin): now W6 R6, same rule, held by the recorder. Old **R7** (refuse a dated future
+  fixing at zero time): kept as written pending **OQ-2**.
+
+### Conflicts between the TARN spec and W6
+
+Resolved by user-approved W6 decisions (no question needed; listed in Task 12's sign-off text):
+- **Gap fixings** (TARN §7.2: next instant's spot) → previous instant's spot, `gap=True` (W6 D5, spec §6/§9).
+- **Origin-day fixing** (TARN §7.2 register step 3: banked silently at registration) → live, recorded on the next
+  instant (W6 D1, spec §6).
+- **Today's fixing under Greeks** (built Task 6/7 freeze recorded a t = 0 fixing at the base spot) → live under bumps,
+  silent at pricing (W6 D1, hand-off note). Moves Greeks of a TARN / TARF valued ON a fixing date.
+- **Time-of-day run instants** → refused for TARN / TARF too (W6 D6).
+- **Undated paths** → W6 R7 never advances; TARN keeps its Q8 refusal (W6 spec §6).
+
+Interface conflicts resolved by rulings above (no value moves): W6 hand-off "`with_fixings_recorded` banks" → R13;
+"records are never dropped" → R14; W6/W8 refusal past maturity vs TARN continuing → R19.
+
+**Open questions for the user (each changes a value; the plan is written for the status quo (a) of both, and pins it
+with a named test that flips if the user picks (b)):**
+
+- **OQ-1 — cash due on the day of a live fixing (zero pay lag on a path day).** TARN spec §3 / §5.1 (theta-boundary R4):
+  cash whose pay time is at or before valuation is booked and NOT in the value. W6 D1/D2: the fixing dated day d is
+  live on day d and recorded on day d+1. Together: on day d the product's value already excludes the day's cash (the
+  resolve copy pays it), but the run books it only on day d+1 with the recording. Measured: a dated zero-lag TARN on
+  its first fixing day is valued 101.1173 with 0.0 paid; the next day 101.1319 with 0.9863 paid — the run's value dips
+  by one coupon for one day on every zero-lag fixing day that falls on a path instant (the default `pay_dates` of a
+  dated TARN), and a zero-lag fixing ON the run's first day books its cash on day 1 although the baseline excluded it
+  (a spurious +coupon P&L). Numeric k/12 fixings fall between path days and are not affected.
+  (a) Status quo: keep both rules; the dip stands (pinned by T9 `test_oq1_zero_lag_cash_of_a_live_fixing_is_booked_when_the_fixing_is_recorded`
+  and T10 `test_oq1_zero_lag_fixing_day_value_excludes_the_cash_until_it_is_booked`).
+  (b) Cash due today stays in today's value and is booked once strictly past (`is_history` of its pay time), in both
+  forms — the W8 convention (a dated contract on its exercise date prices its settled value) applied to TARN cash, and
+  W6 D1's "today is live" applied to cash. Moves: the price of a TARN / TARF valued on a pay date (+ that day's cash),
+  theta on the day before a pay date (no longer ≈ −cash) and on the pay date (≈ −cash), the terminal value on the last
+  pay date (the cash instead of 0.0); in runs, cash on a path-aligned pay date is booked the next instant (no dip).
+  Scope: a follow-up re-plan of built Task 2 (numeric pending `pay_time` may be exactly 0.0), Task 5 (`time_shift` /
+  dated sweep pay strictly past cash), Task 6 (`resolve` keeps t = 0 cash pending; engines add `amount × DF(0)`) and
+  Task 7, before Task 10.
+  (c) Book a live fixing's same-day cash provisionally in the run and de-duplicate when it is recorded — not
+  recommended: invented reconciliation semantics.
+  **Recommendation: (b)** — it removes the dip and the spurious first-day gain with one rule that matches W8 and W6 D1;
+  (a) leaves a known one-day P&L artefact in every run of a zero-lag dated TARN.
+
+- **OQ-2 — a dated future fixing (or pending pay date) that resolves to t = 0 on a business-day clock.** Plan Ruling
+  R7 (Task 7, built, `test_future_fixing_with_zero_year_fraction_is_refused`): `resolve` refuses it with
+  `ValidationError`. W6 Ruling 2 (and the FX range accrual): it is t = 0, i.e. live, priced at the current spot, and
+  recorded at the next instant at the spot of the first instant it was live. Under `BUSINESS_DAYS` a Saturday fixing is
+  t = 0 on the Friday, so a run on a business-day environment holding a dated TARN / TARF with a weekend- or
+  holiday-dated fixing or pay date stops on the business day before (the recorder's `pending_pv` hook prices it; pinned
+  by T9 `test_oq2_a_dated_fixing_at_zero_business_time_is_refused_the_day_before`), while its numeric twin (time 0.0
+  that day) prices — the twin rule is broken there.
+  (a) Status quo: keep R7 (refusal).
+  (b) Treat it as live: priced at the quoted spot like its twin and the FX range accrual, recorded on the next instant;
+  a pay date at t = 0 follows OQ-1's rule. Moves: refusal → a number (Task 7's two `zero year fraction` tests and the
+  CHANGELOG bullet flip). Scope: Task 7's dated banking / view decide passed vs live by resolved time instead of date
+  (and `record_passed_fixings` sets `as_of` to the last banked fixing date, as R15 does), before Task 10.
+  **Recommendation: (b)** — it restores numeric == dated on business-day clocks and matches W6 Ruling 2 and the FX
+  range accrual; dated TARNs on weekend dates are otherwise unusable in business-day runs.
+
+**Execution gate.** Task 9 can run now (its two pins state the status quo). Answer OQ-1 and OQ-2 before Task 10: a
+(b) answer needs its follow-up re-plan of Tasks 5–7 code first, and flips the named pins.
+
 ## Review Focus
 
-1. **A short position (negative quantity)** in a run: paid cash and pending PV scale by the signed quantity —
-   pinned by Task 9 `test_short_position_books_signed_cash`.
-2. **A run calendar that skips a fixing date** (business-day backtest index, fixing on a Saturday): banked on the
-   next path day at that day's spot, no warning, numeric twin banks the same day — pinned by Task 10
-   `test_business_day_path_banks_weekend_fixing_next_day`.
-3. **An environment with `spot_days > 0`**: banking uses the quoted `fx_env.spot`, not `effective_spot()` (Q3) —
-   pinned by Task 5 `test_banking_uses_quoted_spot_not_effective_spot`.
-4. **A dynamic scenario whose `DayPath.start_date` is before the environment's own date**: `ValidationError` (the
-   clock cannot go back), never a silent re-age — pinned by Task 11 `test_start_date_before_environment_date_raises`.
-5. **A dated future fixing that resolves to a zero year fraction** under `BUSINESS_DAYS`: `ValidationError` naming the
-   date, never a t = 0 path — pinned by Task 7 `test_future_fixing_with_zero_year_fraction_is_refused`.
+Updated by the re-plan 2026-10-10 (items 1, 2, 4, 5 retargeted to W6; 6, 7 new).
+
+1. **A short position (negative quantity)** in a run: the recorder reports events and pending PV with the signed
+   quantity, and paid cash scales by it — pinned by Task 9 `test_a_short_position_carries_its_signed_quantity` and
+   Task 10 `test_booked_cash_scales_by_the_signed_quantity_and_ignores_other_entries`.
+2. **A run calendar that skips a fixing date** (business-day backtest index, CALENDAR_DAYS environment, fixing on a
+   Saturday): recorded on Monday at FRIDAY's spot, `gap=True`, no warning, numeric twin identical (W6 D5) — pinned by
+   Task 10 `test_business_day_path_records_a_saturday_fixing_at_fridays_spot`.
+3. **An environment with `spot_days > 0`**: banking uses the quoted `fx_env.spot`, not `effective_spot()` (Q3; W6 R1
+   records the quoted spot too) — pinned by Task 5 `test_banking_uses_quoted_spot_not_effective_spot`.
+4. **A dynamic scenario whose `DayPath.start_date` is before the environment's own date**: `ValidationError` from the
+   recorder (W6 R9: the clock cannot go back), never a silent re-age — pinned by Task 11
+   `test_start_date_before_environment_date_raises`.
+5. **A dated future fixing that resolves to a zero year fraction** under `BUSINESS_DAYS`: refused at pricing (Ruling
+   R7), which inside a run stops the run on the business day before — status quo pending **OQ-2**; pinned by Task 7
+   `test_future_fixing_with_zero_year_fraction_is_refused` and Task 9
+   `test_oq2_a_dated_fixing_at_zero_business_time_is_refused_the_day_before`.
+6. **A numeric fixing that goes live on the instant an earlier fixing banks** (fixings on consecutive path days): the
+   later fixing keeps its own first-live spot and `gap=False` although the numeric contract dropped the earlier one
+   (Ruling R14) — pinned by Task 9 `test_consecutive_daily_fixings_keep_their_own_live_spots_across_banking`.
+7. **A zero-lag fixing on a path day** (a dated TARN's default `pay_dates`): its cash is out of the day's value but
+   booked only the next day — status quo pending **OQ-1**; pinned by Task 9
+   `test_oq1_zero_lag_cash_of_a_live_fixing_is_booked_when_the_fixing_is_recorded` and Task 10
+   `test_oq1_zero_lag_fixing_day_value_excludes_the_cash_until_it_is_booked`.
 
 ---
 
@@ -137,20 +348,21 @@ verifies their **content**, not their shas.
 
 | Path | Status | Responsibility |
 |---|---|---|
-| `quantark/asset/fx/product/option/target_redemption_state.py` | Create (T2) | `TARGET_HIT_RTOL`, `target_hit_tol`, `is_target_hit`, `PendingPayment`, `TargetRedemptionState`, `TerminalBookingWarning`, `TargetRedemptionEventType`, `TargetRedemptionEvent`, `ResolvedTargetRedemption`, `pending_present_value` |
-| `quantark/asset/fx/product/option/target_redemption_base.py` | Create (T3), extend (T5, T6, T7, T9) | `TargetRedemptionProduct(BaseFxProduct)`: forms, validation, terminal warning, `time_shift`, `record_passed_fixings`, `resolve`, `pending_pv`, `matured_before`, dated `get_maturity`/`get_delivery`; helpers `is_passed_time`, `event_label`, `signed_year_fraction` |
+| `quantark/asset/fx/product/option/target_redemption_state.py` | Create (T2), extend (T10) | `TARGET_HIT_RTOL`, `target_hit_tol`, `is_target_hit`, `PendingPayment`, `TargetRedemptionState`, `TerminalBookingWarning`, `TargetRedemptionEventType`, `TargetRedemptionEvent`, `ResolvedTargetRedemption`, `pending_present_value`; `booked_cash` (T10) |
+| `quantark/asset/fx/product/option/target_redemption_base.py` | Create (T3), extend (T5, T6, T7, T9) | `TargetRedemptionProduct(BaseFxProduct)`: forms, validation, terminal warning, `time_shift`, `record_passed_fixings`, `resolve`, `pending_pv`, dated `get_maturity`/`get_delivery`; W5 fill protocol; run-fixings protocol (T9: `has_run_fixings`, `open_fixings`, `with_time_elapsed`, `with_history_settled`, `matured_before`, booking-relative indices); helpers `is_passed_time`, `event_label`, `signed_year_fraction` |
 | `quantark/asset/fx/product/option/fx_target_redemption_note.py` | Modify (T3, T5, T7) | TARN terms, period sources, `coupon_amount`, `_fixing_outcome`, `_dated_factor` |
 | `quantark/asset/fx/product/option/fx_target_redemption_forward.py` | Modify (T4, T5, T7) | TARF terms, `_fixing_outcome` |
 | `quantark/asset/fx/product/option/__init__.py` | Modify (T2) | export the state names |
 | `quantark/asset/fx/engine/mc/fx_tarn_note_mc_engine.py`, `fx_tarf_mc_engine.py` | Modify (T6) | read `resolve`; terminal; start `acc`; pending PV; product hit tolerance |
 | `quantark/asset/fx/engine/base_fx_engine.py` | Modify (T8) | Q7 numeric theta step |
-| `quantark/asset/fx/lifecycle/__init__.py`, `target_redemption.py` | Create (T9) | `FxTargetRedemptionLifecycle`, `FxLifecycleDay`, `FxLifecycleEntry`, `is_ageable` |
-| `quantark/backtest/fx/engine.py` | Modify (T10) | register / advance / paid cash columns |
-| `quantark/dynamicscenario/fx/engine.py`, `quantark/dynamicscenario/results/dynamic_results.py` | Modify (T11) | Q8 refusal, register / advance, cash fields, FIXING snapshots |
+| `quantark/util/run_fixings.py` | Modify (T9) | optional hook `with_history_settled(env)` via `settle_history`, at registration and after each clock move's recording (re-plan Ruling R13). (`quantark/asset/fx/lifecycle/` is NOT created: W6 spec §6) |
+| `quantark/backtest/fx/engine.py` | Modify (T10) | paid cash ledger and `paid_cash` / `pending_pv` columns from `RunFixingDay` (register / advance are W6's) |
+| `quantark/dynamicscenario/fx/engine.py`, `quantark/dynamicscenario/results/dynamic_results.py` | Modify (T11) | Q8 refusal, cash fields and FIXING snapshots from `RunFixingDay` (register / advance are W6's) |
 | `test/test_fx_target_redemption_state.py` | Create (T2) | state module |
-| `test/fx_target_redemption_fixtures.py` | Create (T3), extend (T7, T9) | shared env/product builders, `_numeric_twin`, `drive` |
-| `test/test_fx_target_redemption_lifecycle.py` | Create (T3), extend (T4–T9) | R1, R2, P1–P5, D1–D5, T1, T2, WARN1–3 |
-| `test/test_fx_target_redemption_runs.py` | Create (T9), extend (T10, T11) | hook, B1–B6, Q8 |
+| `test/fx_target_redemption_fixtures.py` | Create (T3), extend (T7, T9) | shared env/product builders, `_numeric_twin`, `book`, `drive` |
+| `test/test_fx_target_redemption_lifecycle.py` | Create (T3), extend (T4–T9) | R1, R2, P1–P5, D1–D5, T1, T2, WARN1–3; run-fixings protocol unit tests (T9) |
+| `test/test_fx_target_redemption_runs.py` | Create (T9), extend (T10, T11) | recorder-level TARN/TARF rules, B1–B6, Q8, W8 twins, OQ-1/OQ-2 pins |
+| `test/test_run_fixings.py` | Modify (T9) | one appended generic test of the settle hook (W6's file, otherwise untouched) |
 | `test/test_fx_tarn_note_mc.py`, `test/test_fx_tarf_mc.py`, `test/execution/matrix_fixtures.py`, `example/fx_tarn_demo.py` | Modify (T3, T4) | constructor arguments only (C1) |
 | `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/` | Create (T1, T8, T12) | `w4b_baseline.py`, `q7_theta_plugin.py`, `q7_summarize.py`, `moved_values.txt` |
 
@@ -2967,40 +3179,88 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: FX lifecycle hook — `register` / `advance` (D2, B5 hook-level)
+### Task 9: TARN / TARF implement the run-fixings product protocol (W6; D2, B5 at recorder level)
 
-Spec §7.2, §10 D2, B5.
+Re-planned 2026-10-10 against W6 (see "Re-plan 2026-10-10 against W6"). Spec: TARN §6, §7.2 as amended by run-fixings
+spec §6 (user-approved), §10 D2 / B5; run-fixings spec §3.2, §3.3 (R1–R10), §6; W6 plan "Hand-off to W4b" and its
+Rulings 2, 4, 8, 9, 10, 11. **No `quantark/asset/fx/lifecycle/` is built**: W6's `RunFixingRecorder` is the loop.
 
 **Files:**
-- Create: `quantark/asset/fx/lifecycle/__init__.py`, `quantark/asset/fx/lifecycle/target_redemption.py`, `test/test_fx_target_redemption_runs.py`
-- Modify: `target_redemption_base.py` (add `matured_before`), `test/fx_target_redemption_fixtures.py` (add `drive`, `book`), `test/test_fx_target_redemption_lifecycle.py` (D2), `CHANGELOG.md`
+- Modify: `quantark/asset/fx/product/option/target_redemption_base.py`, `quantark/util/run_fixings.py` (one optional
+  hook, `settle_history`), `test/fx_target_redemption_fixtures.py` (add `book`, `drive`),
+  `test/test_fx_target_redemption_lifecycle.py` (protocol unit tests, D2), `test/test_run_fixings.py` (append one
+  generic hook test), `CHANGELOG.md`
+- Create: `test/test_fx_target_redemption_runs.py`
 
 **Interfaces:**
-- Consumes: Tasks 2–8; W1 `MaturedBeforeRunWarning`; W5 `warn_filled_fixings`.
-- Produces:
-  - `TargetRedemptionProduct.matured_before(fx_env) -> bool` (not terminal and the last fixing is strictly before valuation: numeric `t < 0 and not is_zero(t)`, dated `date < valuation_date`).
-  - `quantark.asset.fx.lifecycle`: `is_ageable(product) -> bool`; `FxLifecycleEntry(position_id: str, quantity: float, event: TargetRedemptionEvent)`; `FxLifecycleDay(date, paid_cash: float, events: Tuple[FxLifecycleEntry, ...], pending_pv: float)`; `FxTargetRedemptionLifecycle()` with `holds_ageable(portfolio) -> bool` (static), `register(portfolio) -> None`, `advance(portfolio, date) -> FxLifecycleDay`.
-  - Fixtures: `drive(portfolio, lifecycle, date, spot, pair="EURUSD") -> FxLifecycleDay`; `book(*products, quantities=None, n=2_000) -> (FXPortfolio, List[str])`.
+- Consumes: Tasks 2–8; W6 `quantark.util.run_fixings` (`RunFixingRecorder.register(portfolio) -> RunFixingDay`,
+  `.advance(portfolio) -> RunFixingDay`, `.days`, `.recorded`; `RunFixingDay(date, fixings, product_events,
+  pending_pv)`; `RecordedFixing(position_id, index, label, outcome, spot, gap)`; `participates(product)`); W5b
+  `quantark.util.fixings` (`is_history`, `snap_time`, `freeze_missing_fixings`, `MissingFixingWarning`); W1
+  `MaturedBeforeRunWarning` (raised by the recorder, imported by the tests from
+  `quantark.asset.equity.lifecycle.autocallable`).
+- Produces on `TargetRedemptionProduct` (TARN and TARF, both forms; W6 hand-off note 1):
+  - `has_run_fixings` (property) -> `True`.
+  - `open_fixings(fx_env) -> Dict[int, Tuple[float, str]]`: `{index: (time, label)}` of every fixing not banked and
+    without a recorded rate; numeric times as listed, dated times `signed_year_fraction(date, fx_env)`; none once
+    terminal.
+  - `with_time_elapsed(dt) -> TargetRedemptionProduct`: numeric — a copy aged by `time_shift(dt)` (pending cash
+    reaching its pay time leaves as a PAYMENT event, spec §6), fixing and pay times then `snap_time`d, maturity /
+    delivery refreshed, nothing banked; dated, or `is_zero(dt)`: `self`.
+  - `with_history_settled(fx_env) -> TargetRedemptionProduct` (new run hook, Ruling R13): a copy with every strictly
+    past (`is_history`) unbanked fixing that HAS a recorded rate banked at that rate, in order, stopping at the first
+    one that is live or unrecorded (clip, redemption, dead fixings, FIXING / PAYMENT events through the Task 5
+    arithmetic), and — dated — every pending payment with `pay_date <= valuation_date` paid; dated `as_of` becomes the
+    last banked fixing's date (Ruling R15). Nothing is ever filled at `fx_env`'s spot. `self` when nothing changes.
+  - `matured_before(fx_env) -> bool`: not terminal and the last fixing's time is `is_history` (numeric: listed time;
+    dated: `signed_year_fraction`) — Ruling R16.
+  - Changed: `missing_fixing_fills` / `with_missing_fixings_filled` list only `is_history` fixings (a t = 0 fixing is
+    live, W6 D1); `resolve` still banks a t = 0 fixing on its copy at the quoted (possibly bumped) spot but names only
+    `is_history` fixings in its `MissingFixingWarning`; protocol indices are booking-relative (Ruling R14): dated =
+    schedule position, numeric = `_index_offset` (fixings banked and dropped since construction, dead ones included) +
+    listed position; `with_fixings_recorded` maps them back; numeric FIXING / PAYMENT labels use the same index. At
+    construction `_index_offset == 0`, so every Task 2–8 index and label is unchanged.
+  - `lifecycle_events` stays append-only (W6 hand-off note 3): every path (`time_shift`, banking, settle) builds
+    `self.lifecycle_events + tuple(new)` on the product or its copy.
+- Produces in `quantark.util.run_fixings`: `settle_history(product, env) -> product` — calls the optional hook
+  `with_history_settled(env)` when the product has it, else returns the product. `RunFixingRecorder` calls it once at a
+  position's registration (after W5b's freeze, so registration's banking and payments are never reported — W6
+  Ruling 10, TARN §7.2 register step 4) and at every clock-moving `advance` right after `step_fixings` (before the
+  `lifecycle_events` diff, so the step's FIXING and PAYMENT events reach `RunFixingDay.product_events`). A same-date
+  `advance` (W6 Ruling 9) does not call it. Products without the hook (range accruals, Asians) are untouched.
+- Fixtures (`test/fx_target_redemption_fixtures.py`): `book(*products, quantities=None, n=2_000, fx_env=None) ->
+  (FXPortfolio, List[str])`; `drive(portfolio, recorder, date, spot, pair="EURUSD") -> RunFixingDay`.
+- Recorder precondition (W6 hand-off note 4): nothing in Tasks 9–11 replaces a participant's product between
+  `register` and `advance` except the recorder itself (with copies that keep their records).
+
+- [ ] **Step 0: Confirm W6 is in this branch's base**
+
+Run:
+```bash
+git -C <WT> merge-base --is-ancestor 6f9c6e74 HEAD && echo W6_IN_BASE
+env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -c "
+from quantark.util.run_fixings import RunFixingRecorder, RunFixingDay, participates
+from quantark.util.fixings import is_history, snap_time
+assert 'pending_pv' in RunFixingDay.__dataclass_fields__ and 'product_events' in RunFixingDay.__dataclass_fields__
+print('W6 interfaces present')"
+```
+Expected: `W6_IN_BASE` and `W6 interfaces present`. Otherwise STOP and report.
 
 - [ ] **Step 1: Fixtures and failing tests**
 
-Append to `test/fx_target_redemption_fixtures.py`:
+Append to `test/fx_target_redemption_fixtures.py` (move `import dataclasses` and the `FXPortfolio` import to the top
+of the module with the other imports):
 
 ```python
-import dataclasses  # (move the appended imports to the top of the module)
+import dataclasses
 
 from quantark.portfolio.fx import FXPortfolio
 
 
-def drive(portfolio, lifecycle, date, spot, pair="EURUSD"):
-    """Move ``pair``'s environment to ``date`` at ``spot`` and age the book (spec 7.2 ``advance``)."""
-    e = portfolio.pricing_environments[pair]
-    portfolio.pricing_environments[pair] = dataclasses.replace(e, valuation_date=date,
-                                                               spot_quote=SpotQuote(spot=spot))
-    return lifecycle.advance(portfolio, date)
-
-
 def book(*products, quantities=None, n=2_000, fx_env=None):
+    """An ``FXPortfolio`` on EURUSD holding ``products`` (quantity 1 each unless given), each with its MC engine; returns
+    ``(portfolio, position_ids)``. The products themselves are held: the run engines clone the book, the recorder
+    replaces a held product only with copies."""
     pf = FXPortfolio(portfolio_name="w4b", pricing_environments={"EURUSD": fx_env or env()})
     ids = []
     for i, prod in enumerate(products):
@@ -3008,13 +3268,177 @@ def book(*products, quantities=None, n=2_000, fx_env=None):
         ids.append(pf.add_position(product=prod, quantity=q, entry_price=0.0, underlying="EURUSD",
                                    engine=engine_for(prod, n=n)).position_id)
     return pf, ids
+
+
+def drive(portfolio, recorder, date, spot, pair="EURUSD"):
+    """Run instant ``date`` at ``spot`` on ``pair`` (a replaced environment, as the FX backtest's ``_apply_row``), then
+    ``recorder.advance`` (W6 run fixings); returns the ``RunFixingDay``."""
+    e = portfolio.pricing_environments[pair]
+    portfolio.pricing_environments[pair] = dataclasses.replace(e, valuation_date=date,
+                                                               spot_quote=SpotQuote(spot=spot))
+    return recorder.advance(portfolio)
 ```
 
-`test/test_fx_target_redemption_runs.py`:
+Append to `test/test_fx_target_redemption_lifecycle.py` (imports to add at the top: `book`, `drive` from
+`fx_target_redemption_fixtures`; `from quantark.util.run_fixings import RunFixingRecorder, participates`):
 
 ```python
-"""FX TARN / TARF ageing inside runs: the lifecycle hook, the FX backtest, the FX dynamic scenario (spec
-2026-10-09-fx-tarn-lifecycle-design.md section 7, tests B1-B6, Q8)."""
+# --- Run-fixings protocol (W6 hand-off; plan re-plan 2026-10-10) --------------------------------------------------
+
+DAY = 1 / 365
+
+
+def _days(product, n):
+    for _ in range(n):
+        product = product.with_time_elapsed(DAY)
+    return product
+
+
+@pytest.mark.parametrize("make", [lambda: note(target=3.0), lambda: tarf(target=0.20),
+                                  lambda: dated_note(target=3.0), lambda: dated_tarf(target=0.20)])
+def test_target_redemption_products_take_part_in_run_fixings(make):
+    product = make()
+    assert product.has_run_fixings and participates(product)
+
+
+def test_open_fixings_lists_the_unbanked_fixings_by_booking_index():
+    n, d = note(target=3.0), dated_note(target=3.0)
+    assert n.open_fixings(env())[0] == (FIX[0], "#0 t=0.0833333")
+    assert d.open_fixings(env())[11] == (1.0, "#11 2027-06-15")
+    assert sorted(n.open_fixings(env())) == sorted(d.open_fixings(env())) == list(range(12))
+    e = env(val=FIX_DATES[1] + timedelta(days=1))
+    banked = copy.deepcopy(d)
+    banked.record_passed_fixings(e)
+    assert sorted(banked.open_fixings(e)) == list(range(2, 12))
+
+
+def test_numeric_indices_count_from_the_booking_across_banking():
+    """Ruling R14: a numeric contract drops banked fixings, so its protocol index counts from the booking."""
+    aged = _days(note(target=50.0), 32)                                  # fixing #0 (30.4 days) is history
+    assert aged.missing_fixing_fills(env()) == {0: 1.20}
+    settled = aged.with_fixings_recorded({0: 1.20}).with_history_settled(env())
+    assert sorted(settled.open_fixings(env()))[:2] == [1, 2]             # #0 banked and dropped; #1 keeps its index
+    assert settled.with_fixings_recorded({0: 1.05}) is settled           # #0 is banked: nothing left to record
+    later = _days(settled, 30)                                           # #1 (60.8 days) is history on day 62
+    assert later.missing_fixing_fills(env(spot=1.30)) == {1: 1.30}
+    events = later.with_fixings_recorded({1: 1.30}).with_history_settled(env()).lifecycle_events
+    assert [(x.event_type, x.label[:3]) for x in events] == [(FIXING, "#0 "), (PAYMENT, "#0 "),
+                                                              (FIXING, "#1 "), (PAYMENT, "#1 ")]
+
+
+def test_with_time_elapsed_is_a_snapping_copy_that_banks_nothing():
+    n = note(fix=[31 / 365] + FIX[1:], target=3.0)
+    aged = _days(n, 31)
+    assert n.fixing_times[0] == 31 / 365 and aged is not n
+    assert aged.fixing_times[0] == 0.0 and aged.open_fixings(env())[0] == (0.0, "#0 t=0")
+    assert aged.state == INCEPTION and aged.lifecycle_events == ()
+    assert is_close(aged.maturity, 1.0 - 31 / 365, rel_tol=0.0, abs_tol=1e-14)
+    with pytest.warns(TerminalBookingWarning):
+        owed = note(fix=[], accrual_factors=[], target=1.5,
+                    state=TargetRedemptionState(1.5, pending=(PendingPayment(100.5, pay_time=10 / 365),)))
+    paid = _days(owed, 10)
+    assert owed.state.pending and paid.state.pending == ()
+    assert [(x.event_type, x.amount) for x in paid.lifecycle_events] == [(PAYMENT, 100.5)]
+    d = dated_note(target=3.0)
+    assert d.with_time_elapsed(0.5) is d and n.with_time_elapsed(0.0) is n
+
+
+@pytest.mark.parametrize("form", ["numeric", "dated"])
+def test_a_fixing_at_t0_is_live_silent_and_never_frozen(form):
+    """W6 D1: today's fixing moves with the (bumped) spot; only history is frozen or settled."""
+    if form == "numeric":
+        product, e = note(fix=[0.0] + FIX[1:], accrual_start=-30 / 365, target=3.0), env()
+    else:
+        product, e = dated_note(target=3.0), env(val=FIX_DATES[0])
+    assert product.missing_fixing_fills(e) == {}
+    assert freeze_missing_fixings(product, e) is product
+    assert product.with_history_settled(e) is product
+    assert product.open_fixings(e)[0][0] == 0.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        view = product.resolve(e)                                          # decided at the quoted spot, silently
+    banked = copy.deepcopy(product)
+    banked.record_passed_fixings(e)
+    assert view == banked.resolve(e)
+
+
+@pytest.mark.parametrize("form", ["numeric", "dated"])
+def test_with_history_settled_banks_only_recorded_history(form):
+    if form == "numeric":
+        product, e = _days(note(target=3.0, pay_times=[t + 2 / 365 for t in FIX]), 31), env()
+    else:
+        product, e = dated_note(target=3.0, pay_dates=LAG2), env(val=FIX_DATES[0] + timedelta(days=1))
+    assert product.with_history_settled(e) is product                    # history without a rate: never filled here
+    assert product.missing_fixing_fills(e) == {0: 1.20}
+    settled = product.with_fixings_recorded({0: 1.25}).with_history_settled(e)
+    assert [(x.event_type, x.fixing) for x in settled.lifecycle_events] == [(FIXING, 1.25)]
+    assert settled.state.accumulated > 0.0 and len(settled.state.pending) == 1   # paid two days after the fixing
+    assert product.state == INCEPTION and product.missing_fixing_fills(e) == {0: 1.20}  # the product is a copy
+    if form == "dated":
+        assert settled.state.as_of == FIX_DATES[0]                        # Ruling R15: the last banked fixing's date
+        paid = settled.with_history_settled(env(val=LAG2[0]))
+        assert [x.event_type for x in paid.lifecycle_events] == [FIXING, PAYMENT] and paid.state.pending == ()
+
+
+def test_matured_before_is_strict_history_of_the_last_fixing():
+    assert note(fix=[-60 / 365, -30 / 365], accrual_start=-90 / 365).matured_before(env())
+    assert not note(fix=[-60 / 365, 0.0], accrual_start=-90 / 365).matured_before(env())   # live today
+    two = dated_note(fixing_dates=FIX_DATES[:2])
+    assert two.matured_before(env(val=FIX_DATES[1] + timedelta(days=1)))
+    assert not two.matured_before(env(val=FIX_DATES[1]))
+    with pytest.warns(TerminalBookingWarning):
+        owed = note(fix=[], accrual_factors=[], target=1.5,
+                    state=TargetRedemptionState(1.5, pending=(PendingPayment(100.5, pay_time=10 / 365),)))
+    assert not owed.matured_before(env())                                # terminal: kept at PV(pending), spec 5.3
+
+
+_D2_SPOT = {("tarn", "quiet"): 1.05, ("tarn", "redeeming"): 1.20, ("tarn_no_principal", "quiet"): 1.05,
+            ("tarn_no_principal", "redeeming"): 1.20, ("tarf", "quiet"): 1.15, ("tarf", "redeeming"): 1.20}
+
+
+@pytest.mark.parametrize("path", ["quiet", "redeeming"])
+@pytest.mark.parametrize("kind", ["tarn", "tarn_no_principal", "tarf"])
+def test_d2_twins_age_identically(kind, path):
+    """D2 on the W6 recorder: a fixing is live on its own day in both forms and recorded the next day at that day's
+    spot; events, recordings and state bitwise, prices relative 1e-12, on every checkpoint."""
+    spot = _D2_SPOT[(kind, path)]
+    if kind == "tarf":
+        dated = dated_tarf(pay_dates=LAG2, target=0.075, gearing=2.0)
+    else:
+        dated = dated_note(pay_dates=LAG2, target=1.5, include_principal=(kind == "tarn"))
+    twin = _numeric_twin(dated, env())
+    pf, (pid_d, pid_n) = book(dated, twin, n=4_000, fx_env=env(spot=spot))
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    checkpoints = {FIX_DATES[1] - timedelta(days=1), FIX_DATES[1], FIX_DATES[1] + timedelta(days=1),
+                   VAL + timedelta(days=91), LAG2[1] + timedelta(days=1), LAG2[-1] + timedelta(days=1)}
+    events = {pid_d: [], pid_n: []}
+    recorded = {pid_d: [], pid_n: []}
+    day = VAL
+    while day < LAG2[-1] + timedelta(days=2):
+        day += timedelta(days=1)
+        result = drive(pf, rec, day, spot)
+        for pid, _q, ev in result.product_events:
+            events[pid].append((day, ev.event_type, ev.amount, ev.fixing, ev.redeemed))
+        for f in result.fixings:
+            recorded[f.position_id].append((day, f.index, f.outcome, f.spot, f.gap))
+        if day in checkpoints:
+            e = pf.pricing_environments["EURUSD"]
+            a, b = pf.positions[pid_d], pf.positions[pid_n]
+            assert a.product.state.accumulated == b.product.state.accumulated
+            assert [p.amount for p in a.product.state.pending] == [p.amount for p in b.product.state.pending]
+            assert is_close(a.get_market_value(e), b.get_market_value(e), rel_tol=1e-12)
+            if day == FIX_DATES[1]:                                    # live on its own day, in both forms (W6 D1)
+                assert a.product.open_fixings(e)[1][0] == b.product.open_fixings(e)[1][0] == 0.0
+    assert events[pid_d] and events[pid_d] == events[pid_n]
+    assert recorded[pid_d] and recorded[pid_d] == recorded[pid_n]
+```
+
+Create `test/test_fx_target_redemption_runs.py`:
+
+```python
+"""FX TARN / TARF ageing inside runs (spec 2026-10-09-fx-tarn-lifecycle-design.md section 7, tests B1-B6, Q8) on the
+W6 run-fixings recorder (spec 2026-10-09-run-fixings-design.md section 6; TARN plan re-plan 2026-10-10)."""
 import dataclasses
 import warnings
 from datetime import datetime, timedelta
@@ -3022,45 +3446,78 @@ from datetime import datetime, timedelta
 import pytest
 
 from fx_target_redemption_fixtures import (
-    FIX, FIX_DATES, INCEPTION, LAG2, PAIR, VAL, book, dated_note, drive, engine_for, env, note, tarf,
+    FIX, FIX_DATES, INCEPTION, LAG2, PAIR, TARGET_CAL, VAL, _numeric_twin, book, dated_note, drive, engine_for, env,
+    note, tarf,
 )
 from quantark.asset.equity.lifecycle.autocallable import MaturedBeforeRunWarning
 from quantark.asset.fx.engine.analytical import GarmanKohlhagenEngine
-from quantark.asset.fx.lifecycle import FxLifecycleDay, FxTargetRedemptionLifecycle
 from quantark.asset.fx.product import CurrencyPair
 from quantark.asset.fx.product.option import FxVanillaOption
 from quantark.asset.fx.product.option.target_redemption_state import (
     PendingPayment, TargetRedemptionEventType, TargetRedemptionState, TerminalBookingWarning,
 )
+from quantark.param import SpotQuote
+from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import MissingFixingWarning
+from quantark.util.run_fixings import RunFixingRecorder
 
 FIXING, PAYMENT = TargetRedemptionEventType.FIXING, TargetRedemptionEventType.PAYMENT
+BUS = dict(dc=DayCountConvention.BUSINESS_DAYS, calendar=TARGET_CAL)
 
 
-def test_register_banks_fixings_before_the_run_with_one_warning():
+def _rows(day, pid=None):
+    return [(f.index, f.outcome, f.spot, f.gap) for f in day.fixings if pid is None or f.position_id == pid]
+
+
+def _registered(*products, **kw):
+    pf, ids = book(*products, **kw)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    return pf, ids, rec
+
+
+# ================================================================ Task 9: the recorder drives TARN / TARF
+
+
+def test_register_fills_history_once_and_books_nothing():
     prod = note(fix=[-10 / 365, -5 / 365] + FIX[1:], accrual_start=-40 / 365, target=50.0)
     expected = prod.full_coupon(0) + prod.full_coupon(1)
     pf, (pid,) = book(prod)
-    life = FxTargetRedemptionLifecycle()
-    with pytest.warns(MissingFixingWarning) as rec:
-        life.register(pf)
-    msgs = [str(w.message) for w in rec if issubclass(w.category, MissingFixingWarning)]
-    assert len(msgs) == 1 and "#0" in msgs[0] and "#1" in msgs[0]
-    assert pf.positions[pid].product.state.accumulated == expected
-    day = life.advance(pf, VAL)
-    assert day.paid_cash == 0.0 and day.events == ()  # their payments were before the run: never booked
+    rec = RunFixingRecorder()
+    with pytest.warns(MissingFixingWarning) as caught:
+        day0 = rec.register(pf)
+    msgs = [str(w.message) for w in caught if issubclass(w.category, MissingFixingWarning)]
+    assert len(msgs) == 1 and "#0" in msgs[0] and "#1" in msgs[0]                 # W6 R5: once per position
+    held = pf.positions[pid].product
+    assert held.state.accumulated == expected
+    assert [x.event_type for x in held.lifecycle_events] == [FIXING, PAYMENT, FIXING, PAYMENT]
+    assert day0.product_events == () and day0.fixings == ()                       # W6 Ruling 10: nothing reported
+    assert rec.advance(pf).product_events == ()                                   # same date (Ruling 9): no cash
+    assert prod.state == INCEPTION and prod.lifecycle_events == ()               # the booked product is untouched
 
 
-def test_fixing_on_the_origin_date_banks_without_a_warning():
-    prod = dated_note(fixing_dates=[VAL] + FIX_DATES[1:], initial_date=VAL - timedelta(days=30), target=50.0)
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_a_fixing_on_the_origin_date_is_live_and_records_the_next_day_silently(form):
+    """Run-fixings spec 6 (W6 D1): not banked at registration; a same-date advance refreshes its spot (Ruling 9); it
+    is recorded on the first later instant at that refreshed spot, without a warning."""
+    if form == "dated":
+        prod = dated_note(fixing_dates=[VAL] + FIX_DATES[1:], pay_dates=[VAL + timedelta(days=2)] + LAG2[1:],
+                          initial_date=VAL - timedelta(days=30), target=50.0)
+    else:
+        prod = note(fix=[0.0] + FIX[1:], pay_times=[2 / 365] + [t + 2 / 365 for t in FIX[1:]],
+                    accrual_start=-30 / 365, target=50.0)
     pf, (pid,) = book(prod)
+    rec = RunFixingRecorder()
     with warnings.catch_warnings():
         warnings.simplefilter("error", MissingFixingWarning)
-        FxTargetRedemptionLifecycle().register(pf)
-    st = pf.positions[pid].product.state
-    assert st.as_of == VAL and st.accumulated > 0.0
+        rec.register(pf)
+        assert pf.positions[pid].product.state.accumulated == 0.0
+        drive(pf, rec, VAL, 1.05)
+        day1 = drive(pf, rec, VAL + timedelta(days=1), 1.30)
+    assert _rows(day1) == [(0, 1.05, 1.05, False)]
+    assert [(ev.event_type, ev.fixing, ev.amount) for _, _, ev in day1.product_events] == [(FIXING, 1.05, 0.0)]
 
 
 @pytest.mark.parametrize("make", [
@@ -3070,41 +3527,39 @@ def test_fixing_on_the_origin_date_banks_without_a_warning():
 ])
 def test_matured_before_the_run_is_removed_with_a_warning(make):
     pf, (pid,) = book(make())
-    life = FxTargetRedemptionLifecycle()
+    rec = RunFixingRecorder()
     with pytest.warns(MaturedBeforeRunWarning):
-        life.register(pf)
-    assert pid not in pf.positions
-    assert life.advance(pf, VAL) == FxLifecycleDay(date=VAL, paid_cash=0.0, events=(), pending_pv=0.0)
+        day0 = rec.register(pf)
+    assert pid not in pf.positions and day0.pending_pv == 0.0
+    day1 = drive(pf, rec, VAL + timedelta(days=1), 1.20)
+    assert (day1.product_events, day1.fixings, day1.pending_pv) == ((), (), 0.0)
 
 
-def test_terminal_booking_is_kept_at_its_pending_pv():
+def test_a_terminal_booking_is_kept_at_its_pending_pv_and_paid_on_its_day():
     with pytest.warns(TerminalBookingWarning):
         owed = note(fix=[], accrual_factors=[], target=1.5,
                     state=TargetRedemptionState(1.5, pending=(PendingPayment(100.5, pay_time=10 / 365),)))
     pf, (pid,) = book(owed)
-    life = FxTargetRedemptionLifecycle()
-    life.register(pf)
+    rec = RunFixingRecorder()
+    day0 = rec.register(pf)
     e = pf.pricing_environments["EURUSD"]
-    assert life.advance(pf, VAL).pending_pv == 0.0 + 100.5 * e.get_domestic_df(10 / 365)
-    paid = [drive(pf, life, VAL + timedelta(days=k), 1.20).paid_cash for k in range(1, 12)]
-    assert paid[9] == 100.5 and sum(p != 0.0 for p in paid) == 1  # booked on day 10 only
+    assert pid in pf.positions and day0.pending_pv == 100.5 * e.get_domestic_df(10 / 365)
+    paid = [[ev.amount for _, _, ev in drive(pf, rec, VAL + timedelta(days=k), 1.20).product_events
+             if ev.event_type is PAYMENT] for k in range(1, 12)]
+    assert paid[9] == [100.5] and sum(1 for p in paid if p) == 1                  # booked on day 10 only
 
 
-def test_clock_cannot_go_back():
-    pf, _ = book(note(target=3.0))
-    life = FxTargetRedemptionLifecycle()
-    life.register(pf)
-    drive(pf, life, VAL + timedelta(days=2), 1.20)
-    with pytest.raises(ValidationError, match="cannot go back"):
-        drive(pf, life, VAL + timedelta(days=1), 1.20)
+def test_the_run_clock_cannot_go_back():
+    pf, _, rec = _registered(note(target=3.0))
+    drive(pf, rec, VAL + timedelta(days=2), 1.20)
+    with pytest.raises(ValidationError, match="cannot go back"):                  # W6 R9
+        drive(pf, rec, VAL + timedelta(days=1), 1.20)
 
 
-def test_advance_needs_the_environment_on_that_date():
-    pf, _ = book(note(target=3.0))
-    life = FxTargetRedemptionLifecycle()
-    life.register(pf)
-    with pytest.raises(ValidationError, match="environment"):
-        life.advance(pf, VAL + timedelta(days=1))
+def test_a_time_of_day_instant_is_refused():
+    pf, _, rec = _registered(dated_note(target=3.0))
+    with pytest.raises(ValidationError, match="time of day"):                     # W6 R8
+        drive(pf, rec, VAL + timedelta(days=1, hours=15), 1.20)
 
 
 def test_other_products_are_untouched():
@@ -3113,314 +3568,553 @@ def test_other_products_are_untouched():
     pf, _ = book(note(target=3.0))
     pid = pf.add_position(product=vanilla, quantity=1.0, entry_price=0.0, underlying="EURUSD",
                           engine=GarmanKohlhagenEngine()).position_id
-    life = FxTargetRedemptionLifecycle()
-    life.register(pf)
-    drive(pf, life, VAL + timedelta(days=40), 1.20)
-    assert pf.positions[pid].product.maturity == 1.0
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    drive(pf, rec, VAL + timedelta(days=40), 1.20)
+    assert pf.positions[pid].product is vanilla and vanilla.maturity == 1.0
 
 
-def test_calendar_gap_banks_in_order_without_a_warning():
+def test_a_calendar_gap_records_at_the_previous_instants_spot_without_a_warning():
+    """W6 D5: the k/12 fixings #0 and #1 fall between two path instants: recorded at the PREVIOUS instant's spot
+    (1.20, coupons), not the new day's (1.05, below the strike), gap=True, no warning; banked in order."""
     prod = note(target=50.0)
     c = [prod.full_coupon(0), prod.full_coupon(1)]
-    pf, (pid,) = book(prod)
-    life = FxTargetRedemptionLifecycle()
-    life.register(pf)
+    pf, _, rec = _registered(prod)
     with warnings.catch_warnings():
         warnings.simplefilter("error", MissingFixingWarning)
-        day = drive(pf, life, VAL + timedelta(days=70), 1.20)  # k/12 fixings 1 and 2 fall inside the gap
-    kinds = [(e.event.event_type, e.event.amount) for e in day.events]
+        day = drive(pf, rec, VAL + timedelta(days=70), 1.05)
+    assert _rows(day) == [(0, 1.20, 1.20, True), (1, 1.20, 1.20, True)]
+    kinds = [(ev.event_type, ev.amount) for _, _, ev in day.product_events]
     assert kinds == [(FIXING, c[0]), (PAYMENT, c[0]), (FIXING, c[1]), (PAYMENT, c[1])]
-    assert day.paid_cash == (0.0 + 1.0 * c[0]) + 1.0 * c[1]
 
 
-def test_short_position_books_signed_cash():
-    lag = [t + 0.02 for t in FIX]
-    prod = tarf(gearing=2.0, target=0.2, pay_times=lag)
+def test_a_short_position_carries_its_signed_quantity():
+    prod = tarf(gearing=2.0, target=0.2, pay_times=[t + 0.02 for t in FIX])
     pf, (pid,) = book(prod, quantities=[-2.0])
-    life = FxTargetRedemptionLifecycle()
-    life.register(pf)
-    fixing_day = drive(pf, life, VAL + timedelta(days=31), 1.10)  # fixing 1 banks; cash pending
-    cf = pf.positions[pid].product.state.pending[0].amount
-    assert cf < 0.0
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    drive(pf, rec, VAL + timedelta(days=30), 1.10)                               # fixing #0 (30.4 days) still ahead
+    fixing_day = drive(pf, rec, VAL + timedelta(days=31), 1.10)                  # recorded at day 30's 1.10 (gap)
+    (cash,) = pf.positions[pid].product.state.pending
+    assert cash.amount < 0.0                                                     # below the 1.15 strike: a liability
+    assert [(q, ev.event_type) for _, q, ev in fixing_day.product_events] == [(-2.0, FIXING)]
     e = pf.pricing_environments["EURUSD"]
-    assert fixing_day.pending_pv == 0.0 + -2.0 * (0.0 + cf * e.get_domestic_df(
-        pf.positions[pid].product.state.pending[0].pay_time))
-    pay_day = drive(pf, life, VAL + timedelta(days=38), 1.10)
-    assert pay_day.paid_cash == 0.0 + -2.0 * cf and pay_day.paid_cash > 0.0
+    assert fixing_day.pending_pv == -2.0 * (cash.amount * e.get_domestic_df(cash.pay_time))
+    pay_day = drive(pf, rec, VAL + timedelta(days=38), 1.10)
+    assert [(q, ev.event_type, ev.amount) for _, q, ev in pay_day.product_events] == [(-2.0, PAYMENT, cash.amount)]
 
 
-def test_two_pairs_age_independently():
+def test_two_pairs_record_at_their_own_previous_spots():
     jpy_tarf = tarf(strike=145.0, currency_pair=CurrencyPair("USD", "JPY"), target=1e9)
     pf, (pid_eur,) = book(note(target=50.0))
     pf.pricing_environments["USDJPY"] = env(spot=150.0)
     pid_jpy = pf.add_position(product=jpy_tarf, quantity=1.0, entry_price=0.0, underlying="USDJPY",
                               engine=engine_for(jpy_tarf, n=2_000)).position_id
-    life = FxTargetRedemptionLifecycle()
-    life.register(pf)
-    pf.pricing_environments["USDJPY"] = dataclasses.replace(pf.pricing_environments["USDJPY"],
-                                                            valuation_date=VAL + timedelta(days=31))
-    day = drive(pf, life, VAL + timedelta(days=31), 1.05)  # EUR below the TARN strike: no coupon
-    by_pid = {e.position_id: e.event for e in day.events if e.event.event_type is FIXING}
-    assert by_pid[pid_eur].fixing == 1.05 and by_pid[pid_eur].amount == 0.0
-    assert by_pid[pid_jpy].fixing == 150.0 and by_pid[pid_jpy].amount == 1.0 * max(150.0 - 145.0, 0.0)
+    rec = RunFixingRecorder()
+    rec.register(pf)
+
+    def move(days, eur, jpy):
+        for pair, spot in (("EURUSD", eur), ("USDJPY", jpy)):
+            e = pf.pricing_environments[pair]
+            pf.pricing_environments[pair] = dataclasses.replace(e, valuation_date=VAL + timedelta(days=days),
+                                                                spot_quote=SpotQuote(spot=spot))
+        return rec.advance(pf)
+
+    move(30, 1.05, 151.0)
+    day = move(31, 1.30, 140.0)                                                  # both fixings #0 pass in the gap
+    by_pid = {pid: ev for pid, _, ev in day.product_events if ev.event_type is FIXING}
+    assert by_pid[pid_eur].fixing == 1.05 and by_pid[pid_eur].amount == 0.0      # below the TARN strike
+    assert by_pid[pid_jpy].fixing == 151.0 and by_pid[pid_jpy].amount == 1.0 * max(151.0 - 145.0, 0.0)
+
+
+def test_consecutive_daily_fixings_keep_their_own_live_spots_across_banking():
+    """Review Focus 6 / Ruling R14: on day 6 fixing #0 banks (the numeric twin drops it) while #1 goes live; #1 must
+    keep ITS first-live spot and gap=False, as in the dated contract."""
+    dates = [VAL + timedelta(days=k) for k in (5, 6, 7)]
+    dated = dated_note(fixing_dates=dates, pay_dates=[d + timedelta(days=3) for d in dates], target=50.0)
+    pf, (pid_d, pid_n), rec = _registered(dated, _numeric_twin(dated, env()))
+    spot = lambda k: 1.00 + 0.02 * k                                              # noqa: E731
+    for k in range(1, 10):
+        drive(pf, rec, VAL + timedelta(days=k), spot(k))
+    rows = {pid: [(f.index, f.outcome, f.spot, f.gap) for f in rec.recorded if f.position_id == pid]
+            for pid in (pid_d, pid_n)}
+    assert rows[pid_d] == rows[pid_n] == [(i, spot(5 + i), spot(5 + i), False) for i in range(3)]
+
+
+def test_lifecycle_events_are_append_only_in_a_run():
+    pf, (pid,), rec = _registered(dated_note(target=1.5, pay_dates=LAG2))
+    before = pf.positions[pid].product.lifecycle_events
+    for k in range(1, 70):
+        drive(pf, rec, VAL + timedelta(days=k), 1.20)
+        now = pf.positions[pid].product.lifecycle_events
+        assert now[:len(before)] == before
+        before = now
+    assert [ev.event_type for ev in before] == [FIXING, PAYMENT, FIXING, PAYMENT, PAYMENT]
+
+
+def test_oq1_zero_lag_cash_of_a_live_fixing_is_booked_when_the_fixing_is_recorded():
+    """PINS THE STATUS QUO of open question OQ-1 (re-plan 2026-10-10): the fixing dated day 30 (pay date = fixing
+    date) is live on day 30 (W6 D1) and pricing pays its cash inside the resolve copy (TARN spec 5.1), so day 30
+    books nothing and holds nothing pending; the cash is booked on day 31 with the recording. Flips if OQ-1 (b)."""
+    pf, _, rec = _registered(dated_note(target=3.0))
+    days = {k: drive(pf, rec, VAL + timedelta(days=k), 1.20) for k in range(1, 32)}
+    assert days[30].product_events == () and days[30].pending_pv == 0.0
+    assert [ev.event_type for _, _, ev in days[31].product_events] == [FIXING, PAYMENT]
+
+
+def test_oq2_a_dated_fixing_at_zero_business_time_is_refused_the_day_before():
+    """PINS THE STATUS QUO of open question OQ-2: under BUSINESS_DAYS a Saturday fixing is t = 0 on the Friday (W6
+    Ruling 2: live), but plan Ruling R7 refuses to price a dated future fixing at zero time; the recorder's pending-PV
+    hook prices it, so the run stops on the Friday. Flips if OQ-2 (b)."""
+    friday, saturday = datetime(2026, 8, 14), datetime(2026, 8, 15)
+    prod = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
+    pf, _, rec = _registered(prod, fx_env=env(**BUS))
+    drive(pf, rec, friday - timedelta(days=1), 1.20)
+    with pytest.raises(ValidationError, match="zero year fraction"):
+        drive(pf, rec, friday, 1.20)
 ```
 
-Append the D2 test to `test/test_fx_target_redemption_lifecycle.py` (imports: `from fx_target_redemption_fixtures
-import book, drive`, `from quantark.asset.fx.lifecycle import FxTargetRedemptionLifecycle`):
+Append to `test/test_run_fixings.py` (after `test_hooks_matured_events_pending_pv`):
 
 ```python
-_D2_SPOT = {("tarn", "quiet"): 1.05, ("tarn", "redeeming"): 1.20, ("tarn_no_principal", "quiet"): 1.05,
-            ("tarn_no_principal", "redeeming"): 1.20, ("tarf", "quiet"): 1.15, ("tarf", "redeeming"): 1.20}
+class _SettlingStub(_Stub):
+    """A _Stub whose run state settles on the instant (``with_history_settled``), like W4b's TARN paying cash."""
+
+    def with_history_settled(self, env):
+        if ("SETTLED", env.valuation_date) in self.lifecycle_events:
+            return self
+        return _SettlingStub(self.matured, self.lifecycle_events + [("SETTLED", env.valuation_date)], self.recorded)
+
+    def with_fixings_recorded(self, fills):
+        out = super().with_fixings_recorded(fills)
+        return out if out is self else _SettlingStub(out.matured, out.lifecycle_events, out.recorded)
 
 
-@pytest.mark.parametrize("path", ["quiet", "redeeming"])
-@pytest.mark.parametrize("kind", ["tarn", "tarn_no_principal", "tarf"])
-def test_d2_twins_age_identically(kind, path):
-    spot = _D2_SPOT[(kind, path)]
-    if kind == "tarf":
-        dated = dated_tarf(pay_dates=LAG2, target=0.075, gearing=2.0)
-    else:
-        dated = dated_note(pay_dates=LAG2, target=1.5, include_principal=(kind == "tarn"))
-    twin = _numeric_twin(dated, env())
-    pf, (pid_d, pid_n) = book(dated, twin, n=4_000, fx_env=env(spot=spot))
-    life = FxTargetRedemptionLifecycle()
-    life.register(pf)
-    checkpoints = {FIX_DATES[1] - timedelta(days=1), FIX_DATES[1], FIX_DATES[1] + timedelta(days=1),
-                   VAL + timedelta(days=91), LAG2[1] + timedelta(days=1), LAG2[-1] + timedelta(days=1)}
-    log = {pid_d: [], pid_n: []}
-    day = VAL
-    while day < LAG2[-1] + timedelta(days=2):
-        day += timedelta(days=1)
-        result = drive(pf, life, day, spot)
-        for pid in log:
-            log[pid].extend((day, x.event.event_type, x.event.amount, x.event.fixing, x.event.redeemed)
-                            for x in result.events if x.position_id == pid)
-        if day in checkpoints:
-            e = pf.pricing_environments["EURUSD"]
-            a, b = pf.positions[pid_d], pf.positions[pid_n]
-            assert a.product.state.accumulated == b.product.state.accumulated
-            assert [p.amount for p in a.product.state.pending] == [p.amount for p in b.product.state.pending]
-            assert is_close(a.get_market_value(e), b.get_market_value(e), rel_tol=1e-12)
-    assert log[pid_d] and log[pid_d] == log[pid_n]
+def test_settle_hook_runs_at_register_and_on_every_clock_move():
+    """W4b re-plan Ruling R13: ``with_history_settled`` runs after the first valuation's fill (its events never
+    reported) and after each clock move's recording (its events reported); a same-date advance does not call it."""
+    pf = _DuckBook(keep=(_SettlingStub(), 2.0))
+    rec = RunFixingRecorder()
+    day0 = rec.register(pf)
+    assert day0.product_events == () and pf.positions["keep"].product.lifecycle_events == [("SETTLED", F.START)]
+    assert rec.advance(pf).product_events == ()
+    F.move(pf, 1)
+    assert rec.advance(pf).product_events == (("keep", 2.0, ("SETTLED", F.START + timedelta(days=1))),)
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py -k "d2 or register or matured or terminal_booking_is_kept or clock or advance or untouched or gap or short or pairs" -n 2 -q`
-Expected: collection error `ModuleNotFoundError: No module named 'quantark.asset.fx.lifecycle'`.
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_run_fixings.py -k "run_fixings or open_fixings or booking_index or time_elapsed or t0 or history_settled or matured or d2 or register or origin or terminal_booking or clock or time_of_day or untouched or gap or short or pairs or consecutive or append or oq1 or oq2 or settle_hook" -n 2 -q`
+Expected: FAIL — `AttributeError: ... object has no attribute 'has_run_fixings'` / `'open_fixings'` / `'with_time_elapsed'` /
+`'with_history_settled'` / `'matured_before'`; the recorder-level tests fail because `participates()` is False (nothing
+is banked: e.g. `assert 0.0 == ...`, `DID NOT WARN`); `test_a_fixing_at_t0_is_live_silent_and_never_frozen` fails on
+`missing_fixing_fills(e) == {}` (today's fixing is listed); `test_settle_hook_runs_at_register_and_on_every_clock_move`
+fails (the recorder never calls the hook). The other W6 tests in `test/test_run_fixings.py` still pass.
 
 - [ ] **Step 3: Implement**
 
-Add to `TargetRedemptionProduct`:
+`quantark/asset/fx/product/option/target_redemption_base.py`:
+
+1. Imports: `from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings`.
+2. In BOTH `_init_dated` and `_init_numeric`, after `self._recorded_rates: Dict[int, float] = {}`:
+   ```python
+           #: Booking-relative index of the first listed fixing (numeric: fixings banked and dropped since construction,
+           #: dead ones included; dated: always 0, the schedule is whole). Run-fixings protocol indices (Ruling R14).
+           self._index_offset = 0
+   ```
+3. Replace `_bank_passed`, `_record_numeric` and `_record_dated` (the arithmetic of each banked fixing is unchanged;
+   only the loop's stop rule in `history_only` mode, the numeric label/offset and the dated `as_of` change):
 
 ```python
+    def _bank_passed(self, fx_env, *, history_only: bool = False) -> List[Tuple[int, str]]:
+        """``record_passed_fixings`` without the re-validation; returns ``(index, label)`` of every fixing banked at
+        ``fx_env.spot`` because it had no recorded rate (the fills; index = listed position numeric, schedule position
+        dated). ``history_only`` (the run's settle step, :meth:`with_history_settled`) banks only the leading strictly
+        past fixings that have a recorded rate and never fills."""
+        if self.is_numeric:
+            return self._record_numeric(fx_env, history_only=history_only)
+        return self._record_dated(fx_env, history_only=history_only)
+
+    def _bankable_numeric(self, position: int, history_only: bool) -> bool:
+        t = self.fixing_times[position]
+        if history_only:
+            return is_history(t) and position in self._recorded_rates
+        return is_passed_time(t)
+
+    def _record_numeric(self, fx_env, *, history_only: bool = False) -> List[Tuple[int, str]]:
+        filled: List[Tuple[int, str]] = []
+        acc = self.state.accumulated
+        pending = list(self.state.pending)
+        events: List[TargetRedemptionEvent] = []
+        fixings, pays = self.fixing_times, self.pay_times
+        factors = self.accrual_factors if self._has_accrual else None
+        offset = self._index_offset
+        banked = 0
+        while banked < len(fixings) and self._bankable_numeric(banked, history_only):
+            t, tp = fixings[banked], pays[banked]
+            label = event_label(offset + banked, time=t)
+            spot = self._rate(banked, fx_env, filled, label)
+            added, cash = self._fixing_outcome(factors[banked] if factors is not None else None, spot, acc)
+            acc = acc + added
+            hit = is_target_hit(acc, self.target)
+            ends = hit or banked == len(fixings) - 1
+            events.append(TargetRedemptionEvent(TargetRedemptionEventType.FIXING, cash, fixing=spot, time=t,
+                                                redeemed=ends, label=label))
+            self._settle_numeric(cash, tp, label, pending, events)
+            if ends:
+                self._settle_numeric(self._principal_amount(), tp, label, pending, events)
+            banked += 1
+            if hit:
+                banked = len(fixings)  # every later fixing is dead
+                break
+        self.fixing_times = fixings[banked:]
+        self.pay_times = pays[banked:]
+        if factors is not None:
+            self.accrual_factors = factors[banked:]
+        # the listed schedule lost its first ``banked`` fixings: recorded rates follow their fixings, and the
+        # booking-relative index of the first listed fixing moves on by as many
+        self._recorded_rates = {i - banked: r for i, r in self._recorded_rates.items() if i >= banked}
+        self._index_offset = offset + banked
+        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_time)))
+        self.lifecycle_events = self.lifecycle_events + tuple(events)
+        self._refresh_numeric_horizon()
+        return filled
+
+    def _record_dated(self, fx_env, *, history_only: bool = False) -> List[Tuple[int, str]]:
+        self._check_as_of(fx_env)
+        filled: List[Tuple[int, str]] = []
+        val, st = fx_env.valuation_date, self.state
+        events: List[TargetRedemptionEvent] = []
+        pending: list = []
+        for p in st.pending:  # cash due by the valuation date was paid
+            if p.pay_date <= val:
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.PAYMENT, p.amount,
+                                                    time=signed_year_fraction(p.pay_date, fx_env)))
+            else:
+                pending.append(p)
+        acc = st.accumulated
+        last_banked: Optional[datetime] = None
+        if not self.is_terminal:
+            last = len(self.fixing_dates) - 1
+            for i, fd in enumerate(self.fixing_dates):
+                if not self._is_unbanked(i):
+                    continue
+                if fd > val:
+                    break
+                t = signed_year_fraction(fd, fx_env)
+                if history_only and not (is_history(t) and i in self._recorded_rates):
+                    break  # a live (t = 0) or unrecorded fixing stays open: the settle step never fills
+                label = event_label(i, date=fd)
+                spot = self._rate(i, fx_env, filled, label)
+                added, cash = self._fixing_outcome(self._dated_factor(i, fx_env), spot, acc)
+                acc = acc + added
+                hit = is_target_hit(acc, self.target)
+                ends = hit or i == last
+                events.append(TargetRedemptionEvent(TargetRedemptionEventType.FIXING, cash, fixing=spot, time=t,
+                                                    redeemed=ends, label=label))
+                self._settle_dated(cash, self.pay_dates[i], label, fx_env, pending, events)
+                last_banked = fd
+                if ends:
+                    self._settle_dated(self._principal_amount(), self.pay_dates[i], label, fx_env, pending, events)
+                    break  # every later fixing is dead (or there is none)
+        # record_passed_fixings banks through the valuation date; the settle step only through its last banked fixing
+        # (Ruling R15): a fixing dated on the valuation date is live and must stay unbanked
+        as_of = val if not history_only else (last_banked if last_banked is not None else st.as_of)
+        self.state = TargetRedemptionState(acc, pending=tuple(sorted(pending, key=lambda p: p.pay_date)), as_of=as_of)
+        self.lifecycle_events = self.lifecycle_events + tuple(events)
+        # a banked or dead fixing's recorded rate is spent
+        self._recorded_rates = {i: r for i, r in self._recorded_rates.items()
+                                if not self.is_terminal and self._is_unbanked(i)}
+        return filled
+```
+
+4. In `resolve`, name only history in the warning (D1):
+
+```python
+            if warn_missing_fixings:
+                warn_filled_fixings(type(self).__name__, "a banked outcome",
+                                    [label for i, label in filled if self._is_history_index(i, fx_env)])
+```
+
+5. Replace the W5 fill protocol block (`missing_fixing_fills`, `_passed_fills`, `with_fixings_recorded`,
+   `with_missing_fixings_filled`) and add the run-fixings members:
+
+```python
+    # -- W5 fill protocol (user decision 2026-10-09: a filled past fixing does not move) ------------------------
+    def missing_fixing_fills(self, fx_env) -> Dict[int, float]:
+        """``{index: fx_env.spot}`` for every STRICTLY past (``is_history``) unbanked fixing that banking would fill at
+        the quoted spot (no recorded rate; fixings dead after a redemption inside the fill are not listed). A fixing at
+        t = 0 is live (W6 D1) and is not listed. ``index`` is booking-relative (Ruling R14). No warning; the product
+        is unchanged."""
+        offset = self._index_offset
+        return {offset + i: fx_env.spot for i, _ in self._history_fills(fx_env)}
+
+    def _is_history_index(self, position: int, fx_env) -> bool:
+        """Listed (numeric) or scheduled (dated) fixing ``position`` is strictly before valuation, by TIME (W6
+        Ruling 2: on a business-day clock a weekend date can resolve to t = 0)."""
+        if self.is_numeric:
+            return is_history(self.fixing_times[position])
+        return is_history(signed_year_fraction(self.fixing_dates[position], fx_env))
+
+    def _history_fills(self, fx_env) -> List[Tuple[int, str]]:
+        """``(position, label)`` of the strictly past fixings banking at ``fx_env`` would fill at its spot, found on a
+        probe copy."""
+        if not self._has_unbanked_passed(fx_env):
+            return []
+        return [(i, label) for i, label in deepcopy(self)._bank_passed(fx_env) if self._is_history_index(i, fx_env)]
+
+    def with_fixings_recorded(self, fills: Mapping[int, float]) -> "TargetRedemptionProduct":
+        """A COPY with each listed unbanked fixing's RATE recorded from ``fills`` (``{index: rate}``, booking-relative
+        as in ``missing_fixing_fills``); banking (``record_passed_fixings``, ``resolve``, ``with_history_settled``)
+        then uses that rate, so the outcome follows the contract's state at banking (a recorded fill can redeem it).
+        A fixing that already has a recorded rate keeps it; a banked or out-of-range index is skipped. Returns
+        ``self`` when nothing changes; the product is never changed. A rate recorded for a fixing still after
+        valuation is refused at ``resolve``."""
+        offset = self._index_offset
+        rates = dict(self._recorded_rates)
+        for index, rate in fills.items():
+            position = index - offset
+            if position in rates or not self._is_listed_unbanked(position):
+                continue
+            rate = float(rate)
+            if not math.isfinite(rate) or rate <= 0.0:
+                raise ValidationError(f"a recorded fixing rate must be positive and finite, got {rate}")
+            rates[position] = rate
+        if rates == self._recorded_rates:
+            return self
+        recorded = deepcopy(self)
+        recorded._recorded_rates = rates
+        return recorded
+
+    def with_missing_fixings_filled(self, fx_env, *, warn: bool = True) -> "TargetRedemptionProduct":
+        """This contract with every strictly past unbanked fixing's rate recorded at ``fx_env``'s QUOTED spot (Q3), on
+        a COPY, so that bumped and shocked repricings bank it at the base spot; a fixing at t = 0 stays live (W6 D1).
+        One ``MissingFixingWarning`` names the fixings filled (``warn=False`` skips it). Returns ``self`` when nothing
+        is missing; never mutates."""
+        filled = self._history_fills(fx_env)
+        if not filled:
+            return self
+        if warn:
+            warn_filled_fixings(type(self).__name__, "a banked outcome", [label for _, label in filled])
+        offset = self._index_offset
+        return self.with_fixings_recorded({offset + i: fx_env.spot for i, _ in filled})
+
+    # -- run-fixings protocol (spec 2026-10-09 run fixings 3.2 and 6; TARN plan re-plan 2026-10-10) ---------------
+    @property
+    def has_run_fixings(self) -> bool:
+        """Takes part in run fixings (``quantark.util.run_fixings``), both forms."""
+        return True
+
+    def open_fixings(self, fx_env) -> Dict[int, Tuple[float, str]]:
+        """``{index: (time, label)}`` of every fixing not banked and without a recorded rate: numeric times as listed,
+        dated times resolved against ``fx_env`` in its convention. ``index`` is booking-relative (Ruling R14). A
+        terminal contract has none (dead fixings are not open)."""
+        if self.is_terminal:
+            return {}
+        if self.is_numeric:
+            offset = self._index_offset
+            return {offset + i: (t, event_label(offset + i, time=t)) for i, t in enumerate(self.fixing_times)
+                    if i not in self._recorded_rates}
+        return {i: (signed_year_fraction(d, fx_env), event_label(i, date=d)) for i, d in enumerate(self.fixing_dates)
+                if self._is_unbanked(i) and i not in self._recorded_rates}
+
+    def with_time_elapsed(self, dt: float) -> "TargetRedemptionProduct":
+        """The run clock's step (run-fixings R6): a COPY of a numeric contract aged by :meth:`time_shift` (pending cash
+        reaching its pay time leaves as a PAYMENT event, spec 6) with every fixing and pay time within ``is_zero`` of
+        valuation snapped to exactly 0.0 (``snap_time``: a twin's fixing lands on t = 0 on its day), nothing banked.
+        A dated contract, or ``dt`` of zero, returns ``self``."""
+        if not self.is_numeric or is_zero(dt):
+            return self
+        aged = deepcopy(self)
+        aged.time_shift(dt)
+        aged.fixing_times = [snap_time(t) for t in aged.fixing_times]
+        aged.pay_times = [snap_time(t) for t in aged.pay_times]
+        aged._refresh_numeric_horizon()
+        aged.validate()
+        return aged
+
+    def with_history_settled(self, fx_env) -> "TargetRedemptionProduct":
+        """Run hook (``quantark.util.run_fixings.settle_history``, Ruling R13): a COPY with every strictly past
+        unbanked fixing that has a recorded rate banked at that rate, in order, stopping at the first live (t = 0) or
+        unrecorded one (clip, redemption, dead fixings, FIXING / PAYMENT events), and every pending payment dated on or
+        before ``fx_env``'s valuation paid (dated; numeric cash is paid by :meth:`with_time_elapsed`). Nothing is filled
+        at ``fx_env``'s spot. ``self`` when nothing changes."""
+        settled = deepcopy(self)
+        settled._bank_passed(fx_env, history_only=True)
+        if len(settled.lifecycle_events) == len(self.lifecycle_events):
+            return self
+        settled.validate()
+        return settled
+
     def matured_before(self, fx_env) -> bool:
-        """W1 rule: the contract is not terminal and its last fixing is strictly before ``fx_env``'s valuation, so
-        the state has not banked it (numeric: last listed time < 0 and not zero; dated: last fixing date before)."""
+        """W1 rule at a run's registration (run-fixings recorder hook): not terminal, and the last fixing is strictly
+        before ``fx_env``'s valuation by time (numeric: its listed time; dated: its resolved time, Ruling R16), so the
+        state has not banked it. A terminal booking is kept at PV(pending) (spec 5.3)."""
         if self.is_terminal:
             return False
         if self.is_numeric:
-            last = self.fixing_times[-1]
-            return last < 0.0 and not is_zero(last)
-        return self.fixing_dates[-1] < fx_env.valuation_date
+            return is_history(self.fixing_times[-1])
+        return is_history(signed_year_fraction(self.fixing_dates[-1], fx_env))
 ```
 
-`quantark/asset/fx/lifecycle/__init__.py`:
+`quantark/util/run_fixings.py`:
+
+1. Module docstring, append: "Optional product hooks for product-held run state (W4b TARN / TARF): ``matured_before(env)``,
+   ``lifecycle_events`` (append-only), ``pending_pv(env)`` and ``with_history_settled(env)`` (the recorded history
+   banked and the cash due paid, on a copy; ``settle_history``)."
+2. After `at_spot`, add:
 
 ```python
-"""Lifecycle of FX products inside runs (FX backtest, FX dynamic scenario)."""
-from .target_redemption import FxLifecycleDay, FxLifecycleEntry, FxTargetRedemptionLifecycle, is_ageable
-
-__all__ = ["FxLifecycleDay", "FxLifecycleEntry", "FxTargetRedemptionLifecycle", "is_ageable"]
+def settle_history(product: Any, env: Any) -> Any:
+    """The optional hook ``with_history_settled(env)`` of a product holding run state (W4b TARN / TARF): a copy with
+    its recorded strictly past fixings banked and the cash due by ``env``'s date paid, or the product itself. A product
+    without the hook is returned unchanged (TARN plan re-plan 2026-10-10, Ruling R13)."""
+    hook = getattr(product, "with_history_settled", None)
+    return hook(env) if callable(hook) else product
 ```
 
-`quantark/asset/fx/lifecycle/target_redemption.py`:
+3. In `RunFixingRecorder._register_position`, replace `frozen = freeze_missing_fixings(position.product, env)` with:
 
 ```python
-"""Day-by-day ageing of FX TARN / TARF positions inside the FX backtest and FX dynamic scenario.
-
-Spec: docs/superpowers/specs/2026-10-09-fx-tarn-lifecycle-design.md, section 7.2. ``register`` runs once on the run's
-working copy before the baseline is valued; ``advance`` runs every simulated day after the day's market is applied
-and the environment carries the day's date. Every other position is left exactly as it is.
-"""
-from __future__ import annotations
-
-import warnings
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Dict, List, Tuple
-
-from quantark.asset.equity.lifecycle.autocallable import MaturedBeforeRunWarning
-from quantark.asset.fx.product.option.fx_target_redemption_forward import FxTargetRedemptionForward
-from quantark.asset.fx.product.option.fx_target_redemption_note import FxTargetRedemptionNote
-from quantark.asset.fx.product.option.target_redemption_state import (
-    TargetRedemptionEvent,
-    TargetRedemptionEventType,
-)
-from quantark.util.calendar import calculate_year_fraction
-from quantark.util.exceptions import ValidationError
-from quantark.util.fixings import warn_filled_fixings
-from quantark.util.numerical import is_zero
-
-_AGEABLE = (FxTargetRedemptionNote, FxTargetRedemptionForward)
-
-
-def is_ageable(product) -> bool:
-    """True for the products this hook ages (FX TARN / TARF)."""
-    return isinstance(product, _AGEABLE)
-
-
-@dataclass(frozen=True)
-class FxLifecycleEntry:
-    """One product event of one position on one day."""
-
-    position_id: str
-    quantity: float
-    event: TargetRedemptionEvent
-
-
-@dataclass(frozen=True)
-class FxLifecycleDay:
-    """What ageing did on ``date``: quantity-scaled cash paid today, the events, and the pending cash's PV."""
-
-    date: datetime
-    paid_cash: float
-    events: Tuple[FxLifecycleEntry, ...]
-    pending_pv: float
-
-
-class FxTargetRedemptionLifecycle:
-    """Registers and ages the TARN / TARF positions of an FX portfolio (spec 7.2)."""
-
-    def __init__(self) -> None:
-        self._clock: Dict[str, datetime] = {}
-
-    @staticmethod
-    def holds_ageable(portfolio) -> bool:
-        return any(is_ageable(p.product) for p in portfolio.positions.values())
-
-    def register(self, portfolio) -> None:
-        """Clock origin = the pair environment's valuation date now (Ruling R3). A contract whose last fixing is
-        before it and unbanked warns ``MaturedBeforeRunWarning`` and leaves the working copy (W1). Fixings strictly
-        before it are banked at its spot with one ``MissingFixingWarning`` per position (W5); a fixing ON it is the
-        run's own fixing and banks silently. Payments this produces were before the baseline: never booked."""
-        for pid, position in list(portfolio.positions.items()):
-            product = position.product
-            if not is_ageable(product):
-                continue
-            fx_env = portfolio.pricing_environments[position.underlying]
-            origin = fx_env.valuation_date
-            if product.matured_before(fx_env):
-                warnings.warn(
-                    MaturedBeforeRunWarning(
-                        f"position {pid} ({type(product).__name__}): its last fixing is before the run start "
-                        f"{origin} and is not banked; it is not settled in the run, books no cash and is valued at "
-                        "zero"),
-                    stacklevel=2,
-                )
-                portfolio.remove_position(pid)
-                continue
-            start = len(product.lifecycle_events)
-            product.record_passed_fixings(fx_env)
-            before_run = [e.label for e in product.lifecycle_events[start:]
-                          if e.event_type is TargetRedemptionEventType.FIXING
-                          and e.time < 0.0 and not is_zero(e.time)]
-            warn_filled_fixings(type(product).__name__, "a banked outcome", before_run, stacklevel=3)
-            self._clock[pid] = origin
-
-    def advance(self, portfolio, date) -> FxLifecycleDay:
-        """Age every registered position to ``date``: numeric ``time_shift`` by the environment's year fraction since
-        its last date, then ``record_passed_fixings`` at the day's spot; book the day's PAYMENT events."""
-        paid = 0.0
-        pending_pv = 0.0
-        entries: List[FxLifecycleEntry] = []
-        for pid, prev in list(self._clock.items()):
-            position = portfolio.positions.get(pid)
-            if position is None:
-                raise ValidationError(f"position {pid} left the portfolio after registration")
-            fx_env = portfolio.pricing_environments[position.underlying]
-            if date < prev:
-                raise ValidationError(
-                    f"the lifecycle clock cannot go back: position {pid} was aged to {prev}, asked for {date}")
-            if fx_env.valuation_date != date:
-                raise ValidationError(
-                    f"advance({date}) needs the {position.underlying} environment on that date, it is on "
-                    f"{fx_env.valuation_date}")
-            product = position.product
-            start = len(product.lifecycle_events)
-            if product.is_numeric and date != prev:
-                dt = calculate_year_fraction(prev, date, fx_env.day_count_convention, fx_env.bus_days_in_year,
-                                             calendar=fx_env.calendar)
-                if not is_zero(dt):
-                    product.time_shift(dt)
-            product.record_passed_fixings(fx_env)
-            for event in product.lifecycle_events[start:]:
-                entries.append(FxLifecycleEntry(pid, position.quantity, event))
-                if event.event_type is TargetRedemptionEventType.PAYMENT:
-                    paid += position.quantity * event.amount
-            pending_pv += position.quantity * product.pending_pv(fx_env)
-            self._clock[pid] = date
-        return FxLifecycleDay(date=date, paid_cash=paid, events=tuple(entries), pending_pv=pending_pv)
+        # W5b's fill, then the product's own settle step (W4b): registration's banking and payments are before the
+        # baseline and are never reported (Ruling 10)
+        frozen = settle_history(freeze_missing_fixings(position.product, env), env)
 ```
+
+4. In `RunFixingRecorder.advance`, right after the `recorded, new = step_fixings(...)` call, add:
+
+```python
+            recorded = settle_history(recorded, env)   # W4b: bank what was just recorded, pay what is due
+```
+
+   (before the `RecordedFixing` loop; the `prev_events` / `new_events` diff below then reports the step's FIXING and
+   PAYMENT events.) Update the class docstring's hook sentence to name `with_history_settled`.
 
 Append to the CHANGELOG `### Added`:
 
 ```markdown
-- `quantark.asset.fx.lifecycle.FxTargetRedemptionLifecycle`: registers TARN / TARF positions at a run's start
-  (W1 matured-before-run rule, W5 missing-fixing rule) and ages them each simulated day (numeric `time_shift` by the
-  environment's year fraction, then `record_passed_fixings` at the day's spot), returning the day's paid cash, events
-  and pending PV.
+- FX TARN / TARF take part in run fixings (`quantark.util.run_fixings`, W6): `has_run_fixings`,
+  `open_fixings(fx_env)`, `with_time_elapsed(dt)` (a numeric copy aged by `time_shift`, times snapped to exactly 0.0,
+  nothing banked), `with_history_settled(fx_env)` (recorded history banked and cash due paid, on a copy) and
+  `matured_before(fx_env)`. In the FX backtest and FX dynamic scenario they age with the run's clock: a fixing is
+  recorded at the spot of the first instant it was live (a fixing between path instants at the previous instant's,
+  `gap=True`), banked in order with its cash; a contract whose last fixing is before the run start is removed with
+  `MaturedBeforeRunWarning`.
+- `RunFixingRecorder` calls an optional product hook `with_history_settled(env)` after the first valuation's fill and
+  after each clock move's recording (`settle_history`); products without it are unchanged.
+```
+
+and to `### Changed`:
+
+```markdown
+- FX TARN / TARF: a fixing at exactly the valuation instant (t = 0) is live (run-fixings D1):
+  `missing_fixing_fills` / `with_missing_fixings_filled` list only strictly past fixings, so the Greek freeze leaves
+  today's fixing to move with the bumped spot, and pricing decides it at the quoted spot without a
+  `MissingFixingWarning`. Numeric protocol indices and event labels count from the booking (fixings banked since
+  construction + listed position).
 ```
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py -n 2 -q`
-Expected: all pass.
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_fx_target_redemption_state.py test/test_fx_tarn_note_mc.py test/test_fx_tarf_mc.py test/test_fx_base_engine.py test/test_run_fixings.py test/test_run_fixings_runs.py -n 2 -q`
+Expected: all pass. `test/test_run_fixings.py` changed only by the appended stub test; `test/test_run_fixings_runs.py`
+unmodified (W6's range-accrual / Asian behaviour is unchanged: they have no `with_history_settled`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git -C <WT> add quantark/asset/fx/lifecycle/__init__.py quantark/asset/fx/lifecycle/target_redemption.py quantark/asset/fx/product/option/target_redemption_base.py test/fx_target_redemption_fixtures.py test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py CHANGELOG.md
-git -C <WT> commit -m "feat(fx-tarn): FxTargetRedemptionLifecycle registers and ages TARN/TARF positions day by day
+git -C <WT> add quantark/asset/fx/product/option/target_redemption_base.py quantark/util/run_fixings.py test/fx_target_redemption_fixtures.py test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_run_fixings.py CHANGELOG.md
+git -C <WT> commit -m "feat(fx-tarn): TARN/TARF implement the run-fixings protocol; the recorder settles product-held history
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 10: FX backtest ages TARN / TARF (B1–B5 backtest, B6 invariants)
+### Task 10: FX backtest books TARN / TARF cash on W6's recorder (B1–B5 backtest, B6 invariants)
 
-Spec §7.1, §7.3 (FX backtest), §10 B1–B6.
+Re-planned 2026-10-10 against W6. Spec §7.1, §7.3 (FX backtest), §10 B1–B6; run-fixings spec §3.5 (the FX backtest
+already calls `register` after its first row and `advance` after every row: `quantark/backtest/fx/engine.py:50-51,
+66`). This task adds ONLY the cash ledger and the two columns; it builds no wiring.
 
 **Files:**
-- Modify: `quantark/backtest/fx/engine.py:29-122`, `CHANGELOG.md`
+- Modify: `quantark/asset/fx/product/option/target_redemption_state.py` (add `booked_cash`),
+  `quantark/backtest/fx/engine.py:1-130`, `CHANGELOG.md`
 - Test: `test/test_fx_target_redemption_runs.py`
 
 **Interfaces:**
-- Consumes: `FxTargetRedemptionLifecycle` (Task 9).
-- Produces: backtest rows gain `paid_cash` (cumulative, quantity-scaled) and `pending_pv`; `portfolio_value` = Σ position MTM + cumulative paid cash; `final_value` likewise.
+- Consumes: Task 9 (TARN/TARF participate; `RunFixingDay.product_events` carries their FIXING / PAYMENT events with the
+  position's signed quantity; `RunFixingDay.pending_pv` = Σ quantity × `pending_pv`); `FXBacktestEngine.run_fixings`
+  (W6, the last run's recorder).
+- Produces:
+  - `quantark.asset.fx.product.option.target_redemption_state.booked_cash(product_events) -> float`: Σ quantity ×
+    amount over the PAYMENT `TargetRedemptionEvent`s of one step's `(position_id, quantity, event)` entries, summed in
+    order from 0.0; any other entry is ignored (used by Tasks 10 and 11).
+  - Backtest rows gain `paid_cash` (cumulative, quantity-scaled) and `pending_pv` (that row's
+    `RunFixingDay.pending_pv`); `portfolio_value` = Σ position MTM + cumulative paid cash; `final_value` likewise;
+    `portfolio_pnl` / `net_pnl` follow `portfolio_value`. A book without TARN/TARF: `paid_cash` stays 0.0 and every
+    stored number is unchanged (B6, Task 12).
+- Does not replace any participant's product (W6 recorder precondition).
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `test/test_fx_target_redemption_runs.py` (imports: `dataclasses`, `pandas as pd`,
-`from quantark.backtest.fx import FXBacktestConfig, FXBacktestEngine`,
-`from quantark.backtest.strategy.fx_delta_neutral_strategy import FXDeltaNeutralStrategy`,
-`from quantark.asset.fx.engine.mc import FxTargetRedemptionNoteMCEngine`, `from quantark.util.numerical import is_close`,
-`from fx_target_redemption_fixtures import _numeric_twin, dated_tarf, engine_for, following, mc`):
+Append to `test/test_fx_target_redemption_runs.py` (imports to add at the top: `copy`, `pandas as pd`,
+`from quantark.asset.fx.engine.mc import FxTargetRedemptionNoteMCEngine`,
+`from quantark.asset.fx.product.option.target_redemption_state import TargetRedemptionEvent, booked_cash`,
+`from quantark.backtest import FXBacktestConfig, FXBacktestEngine`,
+`from quantark.backtest.strategy import FXDeltaNeutralStrategy`,
+`from quantark.backtest.transaction_costs import ZeroCostModel`, `from quantark.util.numerical import is_close`; and
+`following`, `dated_tarf`, `mc` from `fx_target_redemption_fixtures`):
 
 ```python
+# ================================================================ Task 10: FX backtest
+
+
+def _path(index, spots):
+    return pd.DataFrame({"EURUSD_spot": spots, "EURUSD_vol": 0.10, "EURUSD_dom_rate": 0.05,
+                         "EURUSD_for_rate": 0.03}, index=index)
+
+
 def _flat_path(days, spot, start=VAL, freq="D"):
-    idx = pd.date_range(start, periods=days, freq=freq)
-    return pd.DataFrame({"EURUSD_spot": spot, "EURUSD_vol": 0.10, "EURUSD_dom_rate": 0.05,
-                         "EURUSD_for_rate": 0.03}, index=idx)
+    return _path(pd.date_range(start, periods=days, freq=freq), spot)
+
+
+def _run_backtest(pf, path):
+    engine = FXBacktestEngine(FXBacktestConfig(
+        portfolio=pf, market_path=path,
+        strategy=FXDeltaNeutralStrategy(delta_threshold=1e12, rebalance_frequency="on_threshold"),
+        transaction_cost_model=ZeroCostModel(), calculate_greeks=False))
+    return engine, engine.run()
 
 
 def _backtest(pf, path):
-    return FXBacktestEngine(FXBacktestConfig(portfolio=pf, market_path=path, strategy=FXDeltaNeutralStrategy(),
-                                             calculate_greeks=False)).run()
+    return _run_backtest(pf, path)[1]
+
+
+def _spy_advance(monkeypatch, keep=lambda day: True):
+    """Capture ``(RunFixingDay, {position id: (product, market value)})`` after each recorder advance of the run."""
+    seen = []
+    original = RunFixingRecorder.advance
+
+    def spy(self, portfolio):
+        day = original(self, portfolio)
+        if keep(day):
+            e = portfolio.pricing_environments["EURUSD"]
+            seen.append((day, {pid: (p.product, p.get_market_value(e)) for pid, p in portfolio.positions.items()}))
+        return day
+
+    monkeypatch.setattr(RunFixingRecorder, "advance", spy)
+    return seen
 
 
 LAG2D = [t + 2 / 365 for t in FIX]
+
+
+def test_booked_cash_scales_by_the_signed_quantity_and_ignores_other_entries():
+    pay = TargetRedemptionEvent(PAYMENT, -0.1, time=0.0)
+    fix = TargetRedemptionEvent(FIXING, -0.1, fixing=1.10)
+    assert booked_cash(()) == 0.0
+    assert booked_cash((("a", -2.0, pay), ("a", -2.0, fix), ("b", 1.0, ("SETTLED", None)))) == 0.0 + -2.0 * -0.1
 
 
 def test_b1_numeric_tarn_ages_in_the_backtest():
@@ -3434,7 +4128,7 @@ def test_b1_numeric_tarn_ages_in_the_backtest():
                    state=TargetRedemptionState(c0.full_coupon(0) + c0.full_coupon(1)))
     e91 = dataclasses.replace(env(), valuation_date=VAL + timedelta(days=91))
     assert is_close(mtm[91], FxTargetRedemptionNoteMCEngine(mc(n=2_000)).price(rebuilt, e91), rel_tol=1e-12)
-    assert rows[91]["paid_cash"] == c0.full_coupon(0) + c0.full_coupon(1)
+    assert rows[91]["paid_cash"] == c0.full_coupon(0) + c0.full_coupon(1)        # gap fixings, flat path: 1.20
 
 
 def test_b2_redeeming_path_books_cash_on_its_pay_days():
@@ -3449,7 +4143,7 @@ def test_b2_redeeming_path_books_cash_on_its_pay_days():
     assert paid[32] == 0.0 and paid[33] == c_first and paid[62] == c_first
     assert paid[63] == c_first + (c_second + 100.0)
     e = env()
-    for d in (61, 62):  # terminal from the second fixing day: value = sum DF x pending, no simulation
+    for d in (61, 62):  # terminal from the second fixing's recording day: value = sum DF x pending, no simulation
         t = LAG2D[1] - d / 365
         expected = 0.0 + c_second * e.get_domestic_df(t) + 100.0 * e.get_domestic_df(t)
         assert is_close(rows[d]["pending_pv"], expected, rel_tol=1e-12)
@@ -3463,6 +4157,7 @@ def test_b3_quiet_path_books_the_principal_and_negative_tarf_cash():
     pf, _ = book(tarn)
     rows = _backtest(pf, _flat_path(370, 1.05)).rows
     paid = [r["paid_cash"] for r in rows]
+    # the last fixing (t = 1.0, day 365) is live on day 365 and recorded on day 366 at 1.05; principal on day 367
     assert paid[366] == 0.0 and paid[367] == 100.0 and rows[-1]["portfolio_value"] == 100.0
     f = tarf(target=0.20, gearing=2.0, pay_times=LAG2D)
     pf, _ = book(f)
@@ -3483,26 +4178,18 @@ def test_b4_twins_in_one_backtest(monkeypatch):
     dt = dated_tarf(target=0.075, gearing=2.0, pay_dates=LAG2)
     nn, nt = _numeric_twin(dn, env()), _numeric_twin(dt, env())
     pf, (id_dn, id_nn, id_dt, id_nt) = book(dn, nn, dt, nt)
-    captured = []
-    orig = FxTargetRedemptionLifecycle.advance
-
-    def spy(self, portfolio, date):
-        day = orig(self, portfolio, date)
-        e = portfolio.pricing_environments["EURUSD"]
-        captured.append((day, {pid: p.get_market_value(e) for pid, p in portfolio.positions.items()}))
-        return day
-
-    monkeypatch.setattr(FxTargetRedemptionLifecycle, "advance", spy)
+    seen = _spy_advance(monkeypatch)
     _backtest(pf, _flat_path(100, 1.20))
-    for day, values in captured:
+    assert any(day.product_events for day, _ in seen)
+    for day, values in seen:
         for a, b in ((id_dn, id_nn), (id_dt, id_nt)):
-            ev = {pid: [(x.event.event_type, x.event.amount, x.event.fixing, x.event.redeemed)
-                        for x in day.events if x.position_id == pid] for pid in (a, b)}
+            ev = {pid: [(x.event_type, x.amount, x.fixing, x.redeemed) for p, _q, x in day.product_events if p == pid]
+                  for pid in (a, b)}
             assert ev[a] == ev[b]
-            paid = {pid: sum(x.quantity * x.event.amount for x in day.events
-                             if x.position_id == pid and x.event.event_type is PAYMENT) for pid in (a, b)}
-            assert paid[a] == paid[b]
-            assert is_close(values[a], values[b], rel_tol=1e-12)
+            assert _rows(day, a) == _rows(day, b)
+            assert booked_cash([x for x in day.product_events if x[0] == a]) == booked_cash(
+                [x for x in day.product_events if x[0] == b])
+            assert is_close(values[a][1], values[b][1], rel_tol=1e-12)
 
 
 def test_b5_backtest_registration_rules():
@@ -3511,7 +4198,7 @@ def test_b5_backtest_registration_rules():
     with pytest.warns(MissingFixingWarning) as rec:
         rows = _backtest(pf, _flat_path(5, 1.20)).rows
     assert len([w for w in rec if issubclass(w.category, MissingFixingWarning)]) == 1
-    assert all(r["paid_cash"] == 0.0 for r in rows)
+    assert all(r["paid_cash"] == 0.0 for r in rows)                             # paid before the baseline
     gone = note(fix=[-60 / 365, -30 / 365], accrual_start=-90 / 365)
     pf, _ = book(gone)
     with pytest.warns(MaturedBeforeRunWarning):
@@ -3522,37 +4209,66 @@ def test_b5_backtest_registration_rules():
 def test_b5_backwards_path_raises():
     pf, _ = book(note(target=3.0))
     idx = pd.DatetimeIndex([VAL, VAL + timedelta(days=2), VAL + timedelta(days=1)])
-    path = pd.DataFrame({"EURUSD_spot": 1.20, "EURUSD_vol": 0.10, "EURUSD_dom_rate": 0.05,
-                         "EURUSD_for_rate": 0.03}, index=idx)
-    with pytest.raises(ValidationError, match="cannot go back"):
-        _backtest(pf, path)
+    with pytest.raises(ValidationError, match="cannot go back"):                  # W6 R9
+        _backtest(pf, _path(idx, 1.20))
 
 
-def test_business_day_path_banks_weekend_fixing_next_day(monkeypatch):
+def test_business_day_path_records_a_saturday_fixing_at_fridays_spot():
+    """Review Focus 2 (W6 D5): a Saturday fixing on a weekday path under a CALENDAR_DAYS environment is never live
+    (t = 1/365 on Friday); it is recorded on Monday at FRIDAY's spot, gap=True, no warning, in both forms."""
     saturday = datetime(2026, 8, 15)
     dn = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
     nn = _numeric_twin(dn, env())
     pf, (id_d, id_n) = book(dn, nn)
-    seen = []
-    orig = FxTargetRedemptionLifecycle.advance
-
-    def spy(self, portfolio, date):
-        day = orig(self, portfolio, date)
-        seen.extend((date, x.position_id) for x in day.events if x.event.event_type is FIXING)
-        return day
-
-    monkeypatch.setattr(FxTargetRedemptionLifecycle, "advance", spy)
+    index = pd.bdate_range(VAL, periods=70)
+    spots = [1.20 + 0.001 * k for k in range(len(index))]
     with warnings.catch_warnings():
         warnings.simplefilter("error", MissingFixingWarning)
-        _backtest(pf, _flat_path(70, 1.20, freq="B"))
+        engine, _ = _run_backtest(pf, _path(index, spots))
+    friday_spot = spots[list(index).index(pd.Timestamp(2026, 8, 14))]
     monday = pd.Timestamp(following(saturday))
-    assert (monday, id_d) in seen and (monday, id_n) in seen
+    got = [(day.date, f.position_id, f.outcome, f.spot, f.gap) for day in engine.run_fixings.days
+           for f in day.fixings if f.index == 1]
+    assert got == [(monday, id_d, friday_spot, friday_spot, True), (monday, id_n, friday_spot, friday_spot, True)]
+
+
+def test_w8_twins_on_the_last_fixing_day_and_after_the_end(monkeypatch):
+    """W8 (on main): a numeric participant aged to its maturity is exactly 0.0 and equals its dated twin. A TARN stays
+    in the run after its end (Ruling R19): PV(pending) until its last pay date, then exactly 0.0."""
+    dn = dated_note(target=3.0, pay_dates=LAG2)
+    nn = _numeric_twin(dn, env())
+    pf, (id_d, id_n) = book(dn, nn)
+    last = pd.Timestamp(FIX_DATES[-1])                                            # day 365
+    seen = _spy_advance(monkeypatch, keep=lambda day: day.date >= last - pd.Timedelta(days=1))
+    rows = _backtest(pf, _flat_path(370, 1.05)).rows
+    on = {day.date: values for day, values in seen}
+    numeric_on_last, value_n = on[last][id_n]
+    assert numeric_on_last.maturity == 0.0 and numeric_on_last.fixing_times == [0.0]
+    assert is_close(on[last][id_d][1], value_n, rel_tol=1e-12)
+    after = on[pd.Timestamp(LAG2[-1])]
+    assert after[id_d][1] == after[id_n][1] == 0.0
+    assert rows[-1]["portfolio_value"] == rows[-1]["paid_cash"] == 0.0 + 1.0 * 100.0 + 1.0 * 100.0
+
+
+def test_oq1_zero_lag_fixing_day_value_excludes_the_cash_until_it_is_booked():
+    """PINS THE STATUS QUO of open question OQ-1: on its fixing day a zero-lag dated TARN is valued with that day's
+    coupon already paid (resolve banks the live fixing on a copy, spec 5.1) while the run books the coupon only on the
+    next day, when the fixing is recorded (W6 D1/D2): day 30's run value is short of the coupon. Flips if OQ-1 (b)."""
+    dn = dated_note(target=3.0)                                                   # pay dates = fixing dates
+    pf, _ = book(dn)
+    rows = _backtest(pf, _flat_path(33, 1.20)).rows
+    e30 = env(val=FIX_DATES[0])                                                   # day 30
+    banked = copy.deepcopy(dn)
+    banked.record_passed_fixings(e30)
+    coupon = banked.lifecycle_events[-1].amount
+    assert rows[30]["paid_cash"] == 0.0 and rows[31]["paid_cash"] == coupon
+    assert is_close(rows[30]["portfolio_value"], engine_for(banked, n=2_000).price(banked, e30), rel_tol=1e-12)
 
 
 def test_b6_book_without_target_redemption_books_nothing():
+    from quantark.portfolio.fx import FXPortfolio
     vanilla = FxVanillaOption(strike=1.2, option_type=OptionType.CALL, maturity=1.0, notional_foreign=1.0,
                               currency_pair=PAIR)
-    from quantark.portfolio.fx import FXPortfolio
     pf = FXPortfolio(portfolio_name="b6", pricing_environments={"EURUSD": env()})
     pf.add_position(product=vanilla, quantity=1.0, entry_price=0.0, underlying="EURUSD",
                     engine=GarmanKohlhagenEngine())
@@ -3562,31 +4278,44 @@ def test_b6_book_without_target_redemption_books_nothing():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py -k "b1 or b2 or b3 or b4 or b5 or b6 or business_day" -n 2 -q`
-Expected: FAIL — `KeyError: 'paid_cash'` (rows have no cash column) / frozen values.
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py -k "booked_cash or b1 or b2 or b3 or b4 or b5 or business_day or w8 or oq1_zero_lag_fixing_day or b6_book" -n 2 -q`
+Expected: collection error `ImportError: cannot import name 'booked_cash'`; after adding only the helper, FAIL with
+`KeyError: 'paid_cash'`.
 
 - [ ] **Step 3: Implement**
 
-In `quantark/backtest/fx/engine.py` (import `from quantark.asset.fx.lifecycle import FxTargetRedemptionLifecycle`):
+Append to `quantark/asset/fx/product/option/target_redemption_state.py` (add `Any`, `Iterable` to its `typing` import):
 
 ```python
-        # Apply first row, establish baseline.
-        first_ts = path.index[0]
-        self._apply_row(portfolio, pairs, path.iloc[0], first_ts)
-        lifecycle = FxTargetRedemptionLifecycle()   # spec 7.3: TARN/TARF age with the run's clock
-        lifecycle.register(portfolio)
-        initial_value = portfolio.get_portfolio_value()
-        ...
-        cum_paid = 0.0
+def booked_cash(product_events: Iterable[Tuple[str, float, Any]]) -> float:
+    """Quantity-scaled cash of the PAYMENT events among one run step's ``(position_id, quantity, event)`` entries
+    (``quantark.util.run_fixings.RunFixingDay.product_events``), summed in order from 0.0. Any other entry (a FIXING
+    event, another product's event) is ignored."""
+    total = 0.0
+    for _position_id, quantity, event in product_events:
+        if isinstance(event, TargetRedemptionEvent) and event.event_type is TargetRedemptionEventType.PAYMENT:
+            total += quantity * event.amount
+    return total
+```
+
+In `quantark/backtest/fx/engine.py` (import `from quantark.asset.fx.product.option.target_redemption_state import
+booked_cash`):
+
+```python
+        cum_hedge_pnl = 0.0
+        cum_costs = 0.0
+        cum_paid = 0.0   # TARN / TARF cash paid inside the run (spec 2026-10-09 fx-tarn 7.2): quantity-scaled, cumulative
+        num_hedges = 0
         rows = []
 
         for ts, row in path.iterrows():
             self._apply_row(portfolio, pairs, row, ts)
-            day = lifecycle.advance(portfolio, ts)   # a no-op on the registration date
-            cum_paid += day.paid_cash
-            ...
+            day = self.run_fixings.advance(portfolio)
+            cum_paid += booked_cash(day.product_events)
+            ...                                                       # hedge marking unchanged
             value = portfolio.get_portfolio_value() + cum_paid
-            ...
+            portfolio_pnl = value - initial_value
+            ...                                                       # Greeks / hedging unchanged
             rows.append({
                 ...existing keys unchanged...,
                 "paid_cash": cum_paid,
@@ -3600,44 +4329,63 @@ In `quantark/backtest/fx/engine.py` (import `from quantark.asset.fx.lifecycle im
             ...
         )
 ```
-Update the module docstring: "TARN / TARF positions age with the run (fixings bank at each row's spot, determined
-cash moves to `paid_cash` on its pay date); `portfolio_value` includes cumulative paid cash."
+(`initial_value` stays `portfolio.get_portfolio_value()` right after `register`: cash paid by registration is before
+the baseline and never booked.) Module docstring, append: "TARN / TARF positions age with the run on the run-fixings
+recorder (their fixings recorded and banked, determined cash booked into `paid_cash` on its pay date);
+`portfolio_value` includes cumulative paid cash and each row carries the pending cash's PV (`pending_pv`)."
 
-Append to the CHANGELOG `### Changed`:
+Append to the CHANGELOG `### Added`:
 
 ```markdown
-- `FXBacktestEngine` ages TARN / TARF positions with the run: each row banks the fixings due at its spot and books
-  determined cash on its pay date. Rows gain `paid_cash` (cumulative) and `pending_pv`; `portfolio_value` and
-  `final_value` include paid cash. A book without TARN / TARF is unchanged to the bit (cash columns 0.0).
+- `target_redemption_state.booked_cash(product_events)`: the quantity-scaled PAYMENT cash of one run step's
+  `RunFixingDay.product_events`.
+```
+
+and to `### Changed`:
+
+```markdown
+- `FXBacktestEngine` books TARN / TARF cash: rows gain `paid_cash` (cumulative, quantity-scaled) and `pending_pv`;
+  `portfolio_value` and `final_value` include paid cash. A book without TARN / TARF is unchanged (cash columns 0.0).
 ```
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_backtest.py test/test_fx_integration_demo.py -n 2 -q`
-Expected: all pass; `test/test_fx_backtest.py` unmodified.
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_backtest.py test/test_fx_integration_demo.py test/test_run_fixings_runs.py -n 2 -q`
+Expected: all pass; `test/test_fx_backtest.py` and `test/test_run_fixings_runs.py` unmodified.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git -C <WT> add quantark/backtest/fx/engine.py test/test_fx_target_redemption_runs.py CHANGELOG.md
-git -C <WT> commit -m "feat(fx-backtest): TARN/TARF age with the run; paid cash and pending PV columns
+git -C <WT> add quantark/asset/fx/product/option/target_redemption_state.py quantark/backtest/fx/engine.py test/test_fx_target_redemption_runs.py CHANGELOG.md
+git -C <WT> commit -m "feat(fx-backtest): TARN/TARF cash from the run-fixings recorder; paid cash and pending PV columns
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 11: FX dynamic scenario ages TARN / TARF (Q8, snapshots, B4 dynamic, B6 invariants)
+### Task 11: FX dynamic scenario books TARN / TARF cash on W6's recorder (Q8, snapshots, B4 dynamic, B6 invariants)
 
-Spec §7.3 (dynamic scenario), §12 Q8, §10 B4/B6.
+Re-planned 2026-10-10 against W6. Spec §7.3 (dynamic scenario), §12 Q8, §10 B4/B6; run-fixings spec §3.3 R7 (an
+undated run never advances), R9 (the clock cannot go back), §3.5 (the FX dynamic scenario already calls `register` on
+the working copy and `advance` on every dated day: `quantark/dynamicscenario/fx/engine.py:84-85, 93-98`), §6 (TARN
+keeps its Q8 refusal). This task adds the Q8 refusal, the cash fields and the FIXING snapshots; it builds no wiring.
 
 **Files:**
-- Modify: `quantark/dynamicscenario/fx/engine.py:59-123`, `quantark/dynamicscenario/results/dynamic_results.py:97` (docstring: add `'FIXING'`), `CHANGELOG.md`
+- Modify: `quantark/dynamicscenario/fx/engine.py:1-132`, `quantark/dynamicscenario/results/dynamic_results.py`
+  (`LifecycleEventSnapshot` docstring: add `'FIXING'`), `CHANGELOG.md`
 - Test: `test/test_fx_target_redemption_runs.py`
 
 **Interfaces:**
-- Consumes: Task 9 hook.
-- Produces: `FXDynamicScenarioEngine.run` raises `ValidationError` naming `DayPath.start_date` for an undated path with a TARN/TARF; fills `DayResult.paid_cash` / `realized_cash` (cumulative), `pending_receivable_pv`, `lifecycle_events` (one `LifecycleEventSnapshot(event_type="FIXING", ...)` per FIXING; `cashflow` per Ruling R6); `portfolio_value`, `final_value` include cumulative paid cash.
+- Consumes: Task 9 (participation), Task 10 (`booked_cash`); `FXDynamicScenarioEngine.run_fixings` (W6).
+- Produces: `FXDynamicScenarioEngine.run` raises `ValidationError` naming `DayPath.start_date` when `start_date is None`
+  and the input book holds a `TargetRedemptionProduct` (Ruling R18), before cloning or registering; on dated days fills
+  `DayResult.paid_cash` / `realized_cash` (cumulative), `pending_receivable_pv` (`RunFixingDay.pending_pv`) and
+  `lifecycle_events` (one `LifecycleEventSnapshot(event_type="FIXING", ...)` per FIXING event of the step:
+  `spot` = the fixing rate (the recorded spot), `payoff` = the cash it determined, `cashflow` = quantity × that fixing's
+  cash paid in the same step (Ruling R6, matched by label), `terminates_position` = `redeemed`,
+  `observation_index=None`); `portfolio_value` and `final_value` include cumulative paid cash. A start date before the
+  environment's date is refused by the recorder (W6 R9). Does not replace any participant's product.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3646,6 +4394,9 @@ Append (imports: `from quantark.dynamicscenario import FXDynamicScenarioConfig, 
 `from quantark.stresstest.stress.stress_types import StressType`):
 
 ```python
+# ================================================================ Task 11: FX dynamic scenario
+
+
 def _held_path(days, spot, start=VAL):
     steps = [DayStep(day_index=i, changes=[ParameterChange("spot", StressType.VALUE, spot)]) for i in range(days)]
     return DayPath(name="held", steps=steps, start_date=start)
@@ -3663,7 +4414,7 @@ def test_q8_undated_path_with_a_tarn_is_refused():
 
 def test_start_date_before_environment_date_raises():
     pf, _ = book(note(target=3.0))
-    with pytest.raises(ValidationError, match="cannot go back"):
+    with pytest.raises(ValidationError, match="cannot go back"):                  # W6 R9
         _scenario(pf, _held_path(5, 1.20, start=VAL - timedelta(days=1)))
 
 
@@ -3677,18 +4428,18 @@ def test_dynamic_tarn_redeems_and_books_cash():
     assert days[33].paid_cash == c_first and days[33].realized_cash == c_first
     assert days[63].paid_cash == c_first + (c_second + 100.0)
     fixings = [(i, s) for i, d in enumerate(days) for s in d.lifecycle_events]
-    assert [i for i, _ in fixings] == [31, 61]
+    assert [i for i, _ in fixings] == [31, 61]                                    # k/12 fixings between days (D5)
     first, second = fixings[0][1], fixings[1][1]
     assert (first.event_type, first.spot, first.payoff, first.cashflow, first.terminates_position) == (
-        "FIXING", 1.20, c_first, 0.0, False)  # pay lag: nothing paid on the fixing day (Ruling R6)
+        "FIXING", 1.20, c_first, 0.0, False)  # pay lag: nothing paid in the recording step (Ruling R6)
     assert (second.payoff, second.terminates_position, second.position_id) == (c_second, True, pid)
     assert days[61].pending_receivable_pv > 0.0 and days[69].pending_receivable_pv == 0.0
     assert days[69].portfolio_value == days[69].paid_cash
     assert res.final_value == days[69].paid_cash
 
 
-def test_dynamic_snapshot_cashflow_when_paid_on_the_fixing_day():
-    c0 = note(target=1.5)
+def test_dynamic_snapshot_cashflow_when_paid_in_the_recording_step():
+    c0 = note(target=1.5)                                                         # pay time = fixing time
     pf, _ = book(c0, quantities=[3.0])
     days = _scenario(pf, _held_path(70, 1.20)).day_results
     c_first = c0.full_coupon(0)
@@ -3704,6 +4455,7 @@ def test_b4_twins_in_one_dynamic_scenario():
     nn, nt = _numeric_twin(dn, env()), _numeric_twin(dt, env())
     pf, (id_dn, id_nn, id_dt, id_nt) = book(dn, nn, dt, nt)
     days = _scenario(pf, _held_path(100, 1.20)).day_results
+    assert any(d.lifecycle_events for d in days)
     for d in days:
         by = {}
         for s in d.lifecycle_events:
@@ -3717,7 +4469,7 @@ def test_b6_dynamic_book_without_target_redemption_books_nothing():
     pf.add_position(product=FxVanillaOption(strike=1.2, option_type=OptionType.CALL, maturity=1.0,
                                             notional_foreign=1.0, currency_pair=PAIR),
                     quantity=1.0, entry_price=0.0, underlying="EURUSD", engine=GarmanKohlhagenEngine())
-    for start in (VAL, None):
+    for start in (VAL, None):                                                    # Q8 refuses only a TARN / TARF book
         days = _scenario(pf, _held_path(10, 1.20, start=start)).day_results
         assert all(d.paid_cash == 0.0 and d.pending_receivable_pv == 0.0 and d.lifecycle_events == []
                    for d in days)
@@ -3726,26 +4478,30 @@ def test_b6_dynamic_book_without_target_redemption_books_nothing():
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py -k "q8 or start_date or dynamic" -n 2 -q`
-Expected: FAIL — no refusal on the undated path; `paid_cash` stays 0.0.
+Expected: FAIL — `DID NOT RAISE` on the undated path (W6 R7 runs it frozen); `paid_cash` stays 0.0 and
+`lifecycle_events` stays empty. `test_start_date_before_environment_date_raises` already passes (W6 R9).
 
 - [ ] **Step 3: Implement**
 
-In `quantark/dynamicscenario/fx/engine.py` (imports: `from quantark.asset.fx.lifecycle import
-FxTargetRedemptionLifecycle`, `from quantark.asset.fx.product.option.target_redemption_state import
-TargetRedemptionEventType`, `LifecycleEventSnapshot` from the results module):
+In `quantark/dynamicscenario/fx/engine.py` (imports: `from quantark.asset.fx.product.option.target_redemption_base
+import TargetRedemptionProduct`, `from quantark.asset.fx.product.option.target_redemption_state import (
+TargetRedemptionEvent, TargetRedemptionEventType, booked_cash)`, and `LifecycleEventSnapshot` from
+`quantark.dynamicscenario.results.dynamic_results`):
 
 ```python
         start_time = time.time()
-        working = self._clone_portfolio(portfolio)
-        lifecycle = FxTargetRedemptionLifecycle()
-        if day_path.start_date is None and lifecycle.holds_ageable(working):
-            raise ValidationError(  # spec 12 Q8 (a): no clock is invented
+        if day_path.start_date is None and any(isinstance(p.product, TargetRedemptionProduct)
+                                               for p in portfolio.positions.values()):
+            raise ValidationError(  # TARN spec 12 Q8 (a): no clock is invented (an undated run never advances, W6 R7)
                 "the book holds an FX TARN / TARF, which ages by date: set DayPath.start_date (an undated path "
                 "cannot age it)")
-        lifecycle.register(working)
+        working = self._clone_portfolio(portfolio)
+        # Run fixings (...existing comment...)
+        self.run_fixings = RunFixingRecorder()
+        self.run_fixings.register(working)
         baseline_value = working.get_portfolio_value()
         previous_value = baseline_value
-        cum_paid = 0.0
+        cum_paid = 0.0   # TARN / TARF cash paid inside the run (spec 2026-10-09 fx-tarn 7.3)
         day_results: List[DayResult] = []
 
         for day_step in day_path:
@@ -3756,13 +4512,16 @@ TargetRedemptionEventType`, `LifecycleEventSnapshot` from the results module):
             if day_date is not None:
                 for env in working.pricing_environments.values():
                     env.valuation_date = day_date
-                day = lifecycle.advance(working, day_date)
-                cum_paid += day.paid_cash
+                # (existing comment)
+                day = self.run_fixings.advance(working)
+                cum_paid += booked_cash(day.product_events)
                 pending_pv = day.pending_pv
                 snapshots = self._fixing_snapshots(working, day, day_date)
 
             value = working.get_portfolio_value() + cum_paid
-            ...
+            daily_pnl = value - previous_value
+            cumulative_pnl = value - baseline_value
+            ...                                                    # Greeks unchanged
             day_results.append(DayResult(
                 ...existing fields...,
                 lifecycle_events=snapshots,
@@ -3780,49 +4539,51 @@ and the helper:
 ```python
     @staticmethod
     def _fixing_snapshots(portfolio, day, day_date) -> List[LifecycleEventSnapshot]:
-        """One FIXING snapshot per banked fixing; ``cashflow`` = quantity x that fixing's cash paid the same day
-        (an immediate PAYMENT carries its FIXING's label - Ruling R6 of the W4b plan)."""
+        """One FIXING snapshot per TARN / TARF fixing banked in the step (``RunFixingDay.product_events``);
+        ``cashflow`` = quantity x that fixing's cash paid in the same step (an immediate PAYMENT carries its FIXING's
+        label - Ruling R6 of the W4b plan)."""
+        fixing, payment = TargetRedemptionEventType.FIXING, TargetRedemptionEventType.PAYMENT
         out: List[LifecycleEventSnapshot] = []
-        for entry in day.events:
-            ev = entry.event
-            if ev.event_type is not TargetRedemptionEventType.FIXING:
+        for pid, quantity, ev in day.product_events:
+            if not (isinstance(ev, TargetRedemptionEvent) and ev.event_type is fixing):
                 continue
-            position = portfolio.positions[entry.position_id]
-            paid = sum(x.event.amount for x in day.events
-                       if x.position_id == entry.position_id
-                       and x.event.event_type is TargetRedemptionEventType.PAYMENT
-                       and x.event.label == ev.label)
+            paid = 0.0
+            for other_pid, _q, other in day.product_events:
+                if (other_pid == pid and isinstance(other, TargetRedemptionEvent) and other.event_type is payment
+                        and other.label == ev.label):
+                    paid += other.amount
+            position = portfolio.positions[pid]
             out.append(LifecycleEventSnapshot(
-                position_id=entry.position_id, underlying=position.underlying,
-                product_type=type(position.product).__name__, event_type="FIXING", date=day_date,
-                observation_index=None, spot=ev.fixing, barrier=None, payoff=ev.amount,
-                cashflow=entry.quantity * paid, terminates_position=ev.redeemed,
+                position_id=pid, underlying=position.underlying, product_type=type(position.product).__name__,
+                event_type="FIXING", date=day_date, observation_index=None, spot=ev.fixing, barrier=None,
+                payoff=ev.amount, cashflow=quantity * paid, terminates_position=ev.redeemed,
             ))
         return out
 ```
 
 In `dynamic_results.py` `LifecycleEventSnapshot` docstring: `event_type: One of 'KO', 'KI', 'COUPON', 'MATURITY',
-'EXPIRY', 'FIXING'`.
+'EXPIRY', 'FIXING'` (FIXING: an FX TARN / TARF fixing banked; the position stays in the book, valued at its pending
+cash, when `terminates_position`).
 
 Append to the CHANGELOG `### Changed`:
 
 ```markdown
-- `FXDynamicScenarioEngine` ages TARN / TARF positions on a dated `DayPath` (fixings bank at the day's spot;
-  determined cash moves to `paid_cash` / `realized_cash` on its pay date; one `FIXING` lifecycle snapshot per banked
-  fixing; `pending_receivable_pv` filled). An undated `DayPath` with a TARN / TARF in the book raises
-  `ValidationError` (user decision Q8 a). Books without TARN / TARF are unchanged to the bit.
+- `FXDynamicScenarioEngine` books TARN / TARF cash on a dated `DayPath` (determined cash moves to `paid_cash` /
+  `realized_cash` on its pay date; one `FIXING` lifecycle snapshot per banked fixing; `pending_receivable_pv` filled).
+  An undated `DayPath` with a TARN / TARF in the book raises `ValidationError` (user decision Q8 a). Books without
+  TARN / TARF are unchanged.
 ```
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_dynamic_scenario.py test/test_fx_integration_demo.py -n 2 -q`
-Expected: all pass; `test/test_fx_dynamic_scenario.py` unmodified.
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_dynamic_scenario.py test/test_fx_integration_demo.py test/test_run_fixings_runs.py -n 2 -q`
+Expected: all pass; `test/test_fx_dynamic_scenario.py` and `test/test_run_fixings_runs.py` unmodified.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git -C <WT> add quantark/dynamicscenario/fx/engine.py quantark/dynamicscenario/results/dynamic_results.py test/test_fx_target_redemption_runs.py CHANGELOG.md
-git -C <WT> commit -m "feat(fx-dynamic): TARN/TARF age on dated paths; undated paths with them are refused (Q8)
+git -C <WT> commit -m "feat(fx-dynamic): TARN/TARF cash and FIXING snapshots from the run-fixings recorder; undated paths with them are refused (Q8)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -3831,18 +4592,39 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 12: Final gate (B6 byte compare, demos, full suite, sign-off list)
 
-Spec §8, §10 B6/C1.
+Spec §8, §10 B6/C1. Re-planned 2026-10-10: Task 1's `baseline.json` and `demo_*.main.txt` were captured on
+2026-10-09 BEFORE this branch was rebased onto W6 (`6f9c6e74`); W6 ages the numeric FX range accruals that the B6 book
+holds, so those files no longer describe this branch's base. Step 0 re-captures both on the W6 base (Ruling R20).
 
 **Files:**
 - Modify: `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`, `CHANGELOG.md` (review only)
+- Output (untracked, never committed): `<WT>/.superpowers/w4b/w6base/` (an export of the base),
+  `<WT>/.superpowers/w4b/baseline_w6.json`, `<WT>/.superpowers/w4b/demo_<name>.w6.txt`
 
 **Interfaces:**
-- Consumes: everything above; Task 1 baselines.
+- Consumes: everything above; `w4b_baseline.py` (Task 1).
 - Produces: a branch ready for the whole-branch review and the user's sign-off.
+
+- [ ] **Step 0: Re-capture the B6 baseline and the demo stdout on the W6 base**
+
+Run:
+```bash
+BASE=$(git -C <WT> merge-base HEAD main); echo "$BASE"
+rm -rf <WT>/.superpowers/w4b/w6base && mkdir -p <WT>/.superpowers/w4b/w6base
+git -C <WT> archive "$BASE" quantark example | tar -x -C <WT>/.superpowers/w4b/w6base
+env PYTHONPATH=<WT>/.superpowers/w4b/w6base /Users/fuxinyao/quant-ark/.venv/bin/python <WT>/docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/w4b_baseline.py capture <WT>/.superpowers/w4b/baseline_w6.json
+for f in fx_tarn_demo fx_backtest_demo fx_dynamic_scenario_demo fx_portfolio_risk_demo; do
+  env PYTHONPATH=<WT>/.superpowers/w4b/w6base /Users/fuxinyao/quant-ark/.venv/bin/python <WT>/.superpowers/w4b/w6base/example/$f.py > <WT>/.superpowers/w4b/demo_$f.w6.txt 2>&1; done
+```
+Expected: `$BASE` is the W6 commit the branch sits on (`6f9c6e74` unless the branch was rebased since; after a
+rebase onto a newer main, re-run this step); `captured 4 cases to .../baseline_w6.json`; four demo files written
+(the base's `fx_tarn_demo` runs its own, pre-W4b constructors). Diff `baseline_w6.json` against Task 1's
+`baseline.json` for the record (expected differences: only values of the dated runs, which hold numeric FX range
+accruals that W6 now ages) and note the count in `moved_values.txt` (Step 4).
 
 - [ ] **Step 1: B6 byte gate**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python <WT>/docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/w4b_baseline.py compare <WT>/.superpowers/w4b/baseline.json`
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python <WT>/docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/w4b_baseline.py compare <WT>/.superpowers/w4b/baseline_w6.json`
 Expected: `B6 OK: every stored number bitwise equal; new cash columns 0.0`. Any diff: STOP, report (a book without
 TARN/TARF must not move).
 
@@ -3852,7 +4634,7 @@ Run:
 ```bash
 for f in fx_tarn_demo fx_backtest_demo fx_dynamic_scenario_demo fx_portfolio_risk_demo; do
   env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python <WT>/example/$f.py > <WT>/.superpowers/w4b/demo_$f.branch.txt 2>&1
-  cmp <WT>/.superpowers/w4b/demo_$f.main.txt <WT>/.superpowers/w4b/demo_$f.branch.txt && echo "$f SAME"; done
+  cmp <WT>/.superpowers/w4b/demo_$f.w6.txt <WT>/.superpowers/w4b/demo_$f.branch.txt && echo "$f SAME"; done
 ```
 Expected: four `SAME`.
 
@@ -3861,8 +4643,10 @@ Expected: four `SAME`.
 Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test -n 6 -q` then
 `git -C <WT> checkout -- example/mo_volmodels/data/mo_barrier_sample.json example/mo_volmodels/data/mo_calibration_explainer_sample.html`.
 Expected: pass except the known pre-existing `mo_volmodels` / `otc` failures on main (memory: 4 tests since 0.7.0) —
-compare the failing node ids against a `main` run; any other failure blocks. A `mo` smoke "fingerprint drift" is a
-shared-artifact race: re-run that test with `-n0` before calling it a defect.
+compare the failing node ids against a run of the W6 base; any other failure blocks. A `mo` smoke "fingerprint
+drift" is a shared-artifact race: re-run that test with `-n0` before calling it a defect. `git -C <WT> diff
+$(git -C <WT> merge-base HEAD main) --stat -- test/test_run_fixings.py test/test_run_fixings_runs.py` shows only the
+Task 9 append to `test/test_run_fixings.py`.
 
 - [ ] **Step 4: Complete the sign-off list**
 
@@ -3880,6 +4664,21 @@ Append to `moved_values.txt`:
 # accepted -> refused; pricing after a bare time_shift: exception -> MissingFixingWarning fill (M2); a backtest or
 # dated dynamic scenario holding a TARN/TARF: frozen -> aged with paid cash (M7); an undated dynamic scenario holding
 # a TARN/TARF: ran frozen -> ValidationError (Q8).
+#
+# Re-plan 2026-10-10 (W6), run-fixings decisions applied to TARN / TARF (user-approved in the W6 spec):
+# - a fixing at t = 0 is live (D1): the Greek freeze no longer records it at the base spot, so delta / gamma of a
+#   TARN / TARF valued ON a fixing date move with the coupon condition (previously frozen); no existing test asserted
+#   them. MissingFixingWarning for a t = 0 fill: warned -> silent.
+# - in runs a fixing is recorded at the spot of the instant it was live; a fixing between two path instants at the
+#   PREVIOUS instant's spot, gap=True (D5) - the TARN spec (7.2) had the next instant's.
+# - a fixing on the run's first date is live at registration and recorded on the next instant (TARN spec 7.2 banked it
+#   at registration); a run instant with a time of day holding a TARN / TARF is refused (D6).
+# - numeric FIXING / PAYMENT event labels count from the booking (#<fixings banked since construction + position>);
+#   informational only.
+# B6 / demo references re-captured on the W6 base (Task 12 Step 0): <N> rows of baseline.json -> baseline_w6.json
+# differ, all numeric FX range accruals in the dated runs (W6's own moved values).
+# Open questions OQ-1 / OQ-2 (plan section "Re-plan 2026-10-10 against W6"): <the user's answers, and any value the
+# chosen option moved>.
 ```
 Verify the CHANGELOG block has `### Added`, `### Changed`, `### Fixed` with the bullets from Tasks 2–11 and no empty
 heading.
@@ -3894,16 +4693,25 @@ git -C <WT> commit -m "docs(fx-tarn): moved-values list for sign-off; final gate
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-Landing (controller, after the whole-branch review): the user signs off `moved_values.txt`; only then ff-merge.
+Landing (controller, after the whole-branch review): the user signs off `moved_values.txt`; the branch is rebased
+onto the current `main` (W8/W9 touched no FX or run-fixings library code at `0d1e4133`, but re-run Step 0–3 after
+the rebase); only then ff-merge.
 
 ---
 
 ## Self-review (done while writing)
 
 - **Spec coverage:** §3 → T2/T3; §4.1 → T3/T4; §4.2/§4.3 → T7; §5.1/§5.2 → T6/T7; §5.3 → T3/T4/T6/T7; §5.4 → T3/T6/T7;
-  §6 → T5/T7/T8; §7.2 → T9; §7.3 → T10/T11; §8 → T3/T4/T12; §10 P1–P5 → T6; D1/D3/D4/D5 → T7, D2 → T9, D4 business → T8;
+  §6 → T5/T7/T8; §7.2 → T9 (on W6's recorder, as amended by run-fixings spec §6); §7.3 → T10/T11; §8 → T3/T4/T12; §10 P1–P5 → T6; D1/D3/D4/D5 → T7, D2 → T9, D4 business → T8;
   B1–B5 → T9/T10/T11, B6 → T1/T10/T11/T12; WARN1 → T3/T4/T6/T7, WARN2 → T6 (P3) and T10 (B2), WARN3 → T6/T7; R1/R2 →
   T3/T4/T7; T1/T2 → T6; C1 → T3/T4/T12; §12 Q7 → T8, Q8 → T11.
 - **Type consistency:** `resolve(fx_env, *, warn_missing_fixings=True)`, `pending_pv(fx_env)`, `matured_before(fx_env)`,
-  `coupon_amount(factor)`, `_fixing_outcome(factor, spot, accumulated)`, `FxLifecycleDay(date, paid_cash, events,
-  pending_pv)`, `FxLifecycleEntry(position_id, quantity, event)` are used with the same names in every task.
+  `coupon_amount(factor)`, `_fixing_outcome(factor, spot, accumulated)`, `open_fixings(fx_env)`,
+  `with_time_elapsed(dt)`, `with_history_settled(fx_env)`, `booked_cash(product_events)`, W6's
+  `RunFixingDay(date, fixings, product_events, pending_pv)` and `RecordedFixing(position_id, index, label, outcome,
+  spot, gap)` are used with the same names in every task. (Re-plan 2026-10-10: `FxLifecycleDay` / `FxLifecycleEntry`
+  no longer exist.)
+- **Re-plan self-check (2026-10-10):** every old Task 9–11 requirement is in the mapping table of "Re-plan 2026-10-10
+  against W6"; W6 hand-off notes 1–5 map to Task 9 (protocol, hooks, append-only events, R4/R7/R8/R9/Ruling 9, W8),
+  Task 10 (W8 twins) and Task 11 (R7 + Q8); W6 Ruling 2's time-based gap flag drives R16 and OQ-2; the user's weekend
+  ruling (weekend rows carry Friday's spot) is why no guard is added for a business-day clock with weekend rows.
