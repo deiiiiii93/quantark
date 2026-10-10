@@ -176,6 +176,11 @@ day's coupon 0.9863 already paid inside `resolve`) and 101.1319 the day after wi
    banked set, `as_of` never past the valuation date via `_state_date`, Friday + Saturday test, OQ-4 pin); Task 9's
    `_record_dated` block, settle test, `fixings_banked` property, D2 parity and a run-level Friday + Saturday test; R15
    and R22 superseded, R24 and R25 added; new open question OQ-4.
+8. **User answers 2026-10-10: R24 approved; OQ-4 (b), generalised ("two period dates can share the same fixing
+   date")** — new Task 8c (re-opens Tasks 3, 4, 6, 7: equal fixing dates / times accepted, engines simulate each
+   distinct time once, periods in schedule order with the spec §6 dead-after-hit rule, R26); Task 8b's OQ-4 pin is
+   dropped; Task 9 gains a run-level shared-date test; Re-plan section, Task 12 sign-off, Review Focus 9 and
+   Self-review follow.
 
 ### Old Tasks 9–11 requirements: where each lives now
 
@@ -273,7 +278,9 @@ W8); stable indices across numeric banking (T9).
 - **R23** The two follow-ups are numbered **Task 8a / Task 8b** and run before Task 9 (Tasks 9–12 keep their numbers
   and cross-references): Task 9 replaces `_record_dated` wholesale, so the amended cash and passed-by-time rules must
   already be in place; its replacement block carries them — cost: none.
-- **R24** (Task 8b, OQ-3 ruling) The `as_of` that banking writes is `_state_date(fx_env)`: the valuation date, moved
+- **R24** (Task 8b, OQ-3 ruling; **USER-APPROVED 2026-10-10**: under `BUSINESS_DAYS`, banking on a non-business
+  day writes `as_of` = the preceding business day; never after the valuation date; on calendar clocks the valuation
+  date) The `as_of` that banking writes is `_state_date(fx_env)`: the valuation date, moved
   back over the days at zero time from it — valued on a Saturday under `BUSINESS_DAYS` (a weekend row, W6 Ruling 4)
   it is the Friday, the same instant; under `CALENDAR_DAYS` / ACT conventions it is the valuation date itself. Why:
   the ruling keeps the "a pending `pay_date` must not precede `as_of`" check, and on a Saturday row a zero-lag Friday
@@ -286,6 +293,13 @@ W8); stable indices across numeric banking (T9).
   it — that is what such a booking meant under spec §4.2, so every existing booking and test keeps its banked set — and
   the "cash needs a banked fixing" rule is stated by count (`as_of is None or banked count == 0` refused), which equals
   the old "`as_of` before the first fixing" refusal for every such booking — cost: none.
+- **R26** (Task 8c, OQ-4 b) A dated TARN whose periods derive from `initial_date` cannot share a fixing date: the
+  later period would run from a fixing date to the same date (zero accrual), so it is refused with `ValidationError`
+  asking for explicit `accrual_factors` — the user's "each period keeps its own cash" needs each period's own accrual,
+  and a zero-length derived period would be an invented coupon of 0; the numeric form already refuses the same case
+  (built "accrual_factors must be positive" check on `accrual_start`-derived factors) — cost: such a booking must state
+  its factors; a TARF and a TARN with explicit factors are unaffected; distinct dates resolving to one time keep their
+  positive derived factors.
 - **Superseded** old R3 (clock origin): now W6 R6, same rule, held by the recorder. Old **R7** (refuse a dated future
   fixing or pay date at zero time): **superseded by the user's OQ-2 (b) answer, 2026-10-10 — reversed by Task 8b**.
 
@@ -342,36 +356,41 @@ cash) → 11 (FX dynamic cash, Q8) → 12 (final gate).
   _state_date(fx_env)` (Task 7); numeric form unchanged — its banked fixings are the dropped ones, counted by Task 9's
   `_index_offset` (R14), and Task 9's `fixings_banked` property reports both forms alike (asserted in D2). Tests: the
   Friday + Saturday case prices on the Friday in both forms (dated == numeric, state and payments; the numeric twin is
-  booked on the Friday — see OQ-4) and Monday does not bank the Saturday fixing again (Task 8b
+  booked on the Friday; Task 8c adds the Thursday) and Monday does not bank the Saturday fixing again (Task 8b
   `test_oq3_friday_and_saturday_fixings_price_on_friday_and_bank_once`; in a run, Task 9
   `test_oq3_friday_and_saturday_fixings_in_a_run_are_recorded_once_at_fridays_spot`). Moved values: none beyond Tasks
   8a / 8b's (a dated state now states its count — not a value).
 
-**Task order now:** 1–8 (done) → **8a** (OQ-1 b) → **8b** (OQ-2 b + OQ-3 ruling) → 9 → 10 → 11 → 12.
+**Task order now:** 1–8 (done) → **8a** (OQ-1 b) → **8b** (OQ-2 b + OQ-3 ruling) → **8c** (OQ-4 b) → 9 → 10 → 11
+→ 12.
 
-### New open question raised by the OQ-3 case (plan written for its status quo (a), pinned)
+### OQ-4 answered 2026-10-10: (b), generalised by the user
 
-- **OQ-4 — two scheduled fixings that resolve to the same time** (the OQ-3 Friday + Saturday pair under
-  `BUSINESS_DAYS`, valued on any earlier day). Both forms fail BEFORE the Friday: the dated view lists both fixings at
-  one time and the engines' path generator (`FxGKPathGenerator`) refuses times that are not strictly increasing; the
-  numeric form (Task 3 validation) refuses equal fixing times, so the twin cannot even be booked. From the Friday on
-  everything works (Task 8b). Pinned by Task 8b `test_oq4_two_fixings_at_one_business_time_cannot_be_priced_before_it`.
-  Inside a run the recorder itself works (it never calls an engine), but the run's valuation of the position on the
-  Thursday raises.
-  (a) Status quo: such a contract cannot be priced until the shared instant (a `ValidationError` naming the times).
-  (b) Allow equal resolved fixing times: the numeric form accepts non-decreasing `fixing_times`; the two MC engines
-  simulate the distinct times and apply each fixing at its time's simulated spot (two fixings at one instant see the
-  same spot, as on the Friday itself). Moves: refusal → a number for such contracts only; every other price is
-  unchanged (distinct times take the same path). Scope: Task 3 validation, Task 6 engines (`_simulate` / the walks),
-  a twin test before the Friday.
-  (c) Adopt a following / Monday convention for weekend fixings — excluded by the ruling (a separate future decision).
-  **Recommendation: (b)** — it makes the OQ-3 contract priceable on every day in both forms with no other value moving;
-  (a) leaves a contract the ruling explicitly supports unpriceable for the days before its weekend.
+- **Question:** two scheduled fixings at one resolved time (the OQ-3 Friday + Saturday pair valued before the Friday)
+  could not be priced in either form (the path generator needs strictly increasing times; the numeric form refused
+  equal times).
+- **Decision:** "two period dates can share the same fixing date": equal fixing DATES and equal fixing TIMES are a
+  legitimate schedule; both engines simulate each distinct time once and every period sharing it fixes at that spot;
+  target accumulation and redemption run through the periods in schedule order; each period keeps its own pay date and
+  cash; per-fixing banking banks every period sharing the date together.
+- **Spec rule for a period after the hit on the same date (cited, not invented):** TARN spec §6,
+  `record_passed_fixings`, TARN bullet: "On a hit (`is_redeemed`), the principal (with `include_principal`) at `pay_i`
+  is handled the same way and every later fixing is dead", applied to the fixings "in order, stopping once the
+  contract is terminal"; TARF bullet: "the hit rule as for the TARN. On a final hit the geared unfavourable leg is still
+  paid" (the hitting period's own leg); spec §5.2: the engines' `alive` mask. A later period on the same date is a later
+  fixing in schedule order, so it is dead: no coupon, no cash, no FIXING event; the principal pays at the hitting
+  period's `pay_i`. No open question.
+- **Implemented by Task 8c** (re-opens Tasks 3, 4, 6, 7; Ruling R26). Moved values: contracts with equal fixing
+  times / dates (and dated dates that resolve to one time, valued before it) go from `ValidationError` to a price equal
+  to their twin; nothing else moves (a schedule of distinct times takes exactly the old engine path).
+  `test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2]` still raises, now by R26 instead of uniqueness.
+
+No open question remains from this re-plan.
 
 ## Review Focus
 
 Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by the user's OQ-1 / OQ-2 answers
-(items 5, 7), the OQ-3 ruling (item 8) and the new OQ-4 (item 9).
+(items 5, 7), the OQ-3 ruling (item 8) and the OQ-4 (b) answer (item 9).
 
 1. **A short position (negative quantity)** in a run: the recorder reports events and pending PV with the signed
    quantity, and paid cash scales by it — pinned by Task 9 `test_a_short_position_carries_its_signed_quantity` and
@@ -404,9 +423,13 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by
    row, `as_of` is the Friday (R24) — pinned by Task 8b `test_oq3_friday_and_saturday_fixings_price_on_friday_and_bank_once`,
    `test_as_of_on_a_weekend_valuation_is_the_friday`, Task 9
    `test_oq3_friday_and_saturday_fixings_in_a_run_are_recorded_once_at_fridays_spot`.
-9. **The same pair valued BEFORE the Friday**: two fixings at one business time — refused by the engines and the
-   numeric form, status quo pending **OQ-4** — pinned by Task 8b
-   `test_oq4_two_fixings_at_one_business_time_cannot_be_priced_before_it`.
+9. **Periods sharing a fixing date or time** (OQ-4 b): one simulated spot per distinct time, periods in schedule order,
+   a period after the hit on the same date dead (spec §6), each period its own pay date and cash, banked together once;
+   the Friday + Saturday pair prices on the Thursday like its twin — pinned by Task 8c
+   `test_engines_simulate_a_shared_time_once`, `test_two_periods_on_one_fixing_date_price_like_the_twin_and_each_is_paid`,
+   `test_a_target_hit_by_the_first_of_two_same_date_periods_kills_the_second`,
+   `test_friday_and_saturday_fixings_price_on_the_thursday_like_the_twin`, and Task 9
+   `test_periods_sharing_a_fixing_date_are_recorded_and_banked_once_in_a_run`.
 ---
 
 ## File Structure
@@ -414,11 +437,11 @@ Updated by the re-plan 2026-10-10 (items 1, 2, 4 retargeted to W6; 6 new) and by
 | Path | Status | Responsibility |
 |---|---|---|
 | `quantark/asset/fx/product/option/target_redemption_state.py` | Create (T2), extend (T8a, T8b `fixings_banked`, T10) | `TARGET_HIT_RTOL`, `target_hit_tol`, `is_target_hit`, `PendingPayment`, `TargetRedemptionState`, `TerminalBookingWarning`, `TargetRedemptionEventType`, `TargetRedemptionEvent`, `ResolvedTargetRedemption`, `pending_present_value`; `booked_cash` (T10) |
-| `quantark/asset/fx/product/option/target_redemption_base.py` | Create (T3), extend (T5, T6, T7, T8a, T8b, T9) | `TargetRedemptionProduct(BaseFxProduct)`: forms, validation, terminal warning, `time_shift`, `record_passed_fixings`, `resolve`, `pending_pv`, dated `get_maturity`/`get_delivery`; W5 fill protocol; run-fixings protocol (T9: `has_run_fixings`, `open_fixings`, `with_time_elapsed`, `with_history_settled`, `matured_before`, booking-relative indices); helpers `is_passed_time`, `event_label`, `signed_year_fraction` |
-| `quantark/asset/fx/product/option/fx_target_redemption_note.py` | Modify (T3, T5, T7) | TARN terms, period sources, `coupon_amount`, `_fixing_outcome`, `_dated_factor` |
-| `quantark/asset/fx/product/option/fx_target_redemption_forward.py` | Modify (T4, T5, T7) | TARF terms, `_fixing_outcome` |
+| `quantark/asset/fx/product/option/target_redemption_base.py` | Create (T3), extend (T5, T6, T7, T8a, T8b, T8c, T9) | `TargetRedemptionProduct(BaseFxProduct)`: forms, validation, terminal warning, `time_shift`, `record_passed_fixings`, `resolve`, `pending_pv`, dated `get_maturity`/`get_delivery`; W5 fill protocol; run-fixings protocol (T9: `has_run_fixings`, `open_fixings`, `with_time_elapsed`, `with_history_settled`, `matured_before`, booking-relative indices); helpers `is_passed_time`, `event_label`, `signed_year_fraction` |
+| `quantark/asset/fx/product/option/fx_target_redemption_note.py` | Modify (T3, T5, T7, T8c R26) | TARN terms, period sources, `coupon_amount`, `_fixing_outcome`, `_dated_factor` |
+| `quantark/asset/fx/product/option/fx_target_redemption_forward.py` | Modify (T4, T5, T7, T8c docstring) | TARF terms, `_fixing_outcome` |
 | `quantark/asset/fx/product/option/__init__.py` | Modify (T2) | export the state names |
-| `quantark/asset/fx/engine/mc/fx_tarn_note_mc_engine.py`, `fx_tarf_mc_engine.py` | Modify (T6) | read `resolve`; terminal; start `acc`; pending PV; product hit tolerance |
+| `quantark/asset/fx/engine/mc/fx_tarn_note_mc_engine.py`, `fx_tarf_mc_engine.py` | Modify (T6, T8c: one spot per distinct time) | read `resolve`; terminal; start `acc`; pending PV; product hit tolerance |
 | `quantark/asset/fx/engine/base_fx_engine.py` | Modify (T8) | Q7 numeric theta step |
 | `quantark/util/run_fixings.py` | Modify (T9) | optional hook `with_history_settled(env)` via `settle_history`, at registration and after each clock move's recording (re-plan Ruling R13). (`quantark/asset/fx/lifecycle/` is NOT created: W6 spec §6) |
 | `quantark/backtest/fx/engine.py` | Modify (T10) | paid cash ledger and `paid_cash` / `pending_pv` columns from `RunFixingDay` (register / advance are W6's) |
@@ -3722,8 +3745,8 @@ def test_oq3_friday_and_saturday_fixings_price_on_friday_and_bank_once():
     passed by time (the Saturday one live like the Friday one, at Friday's spot): the dated contract prices, equal to
     its numeric twin, and banks them once; as_of stays the Friday, so the Friday coupon due that day does not precede
     it. On Monday nothing is banked again (fixing identity) and both coupons are paid, as in the twin. The twin is
-    booked on the Friday from the dated view: before the Friday both fixings sit at one business time, which the
-    numeric form cannot list (open question OQ-4), so FIXING events are compared from the Friday on."""
+    booked on the Friday from the dated view, so FIXING events are compared from the Friday on (Task 8c adds the
+    Thursday valuation, both fixings at one business time, and twin event parity for shared fixing dates)."""
     dated = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
                        target=50.0)
     e_fri, e_mon = env(val=FRIDAY, **BUS), env(val=MONDAY, **BUS)
@@ -3763,28 +3786,15 @@ def test_as_of_on_a_weekend_valuation_is_the_friday():
         twin.time_shift(calculate_year_fraction(THURSDAY, SATURDAY, DayCountConvention.BUSINESS_DAYS, 252,
                                                 calendar=TARGET_CAL))
         assert is_close(_price(twin, e=e_sat), _price(d, e=e_sat), rel_tol=1e-12)
-
-
-def test_oq4_two_fixings_at_one_business_time_cannot_be_priced_before_it():
-    """PINS THE STATUS QUO of open question OQ-4 (re-plan 2026-10-10): on the Thursday the Friday and Saturday
-    fixings resolve to the same business time; the engines' path generator needs strictly increasing times and the
-    numeric form refuses equal fixing times, so neither form prices before the Friday. Flips if OQ-4 (b)."""
-    dated = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
-                       target=50.0)
-    e_thu = env(val=THURSDAY, **BUS)
-    with pytest.raises(ValidationError, match="strictly increasing"):
-        _price(dated, e=e_thu)
-    with pytest.raises(ValidationError, match="unique"):
-        _numeric_twin(dated, e_thu)
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py -k "fixings_banked or banked_count or only_as_of or counts_banked or zero_business_time or oq3 or oq4 or weekend_valuation or pays_cash_once" -n 2 -q`
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py -k "fixings_banked or banked_count or only_as_of or counts_banked or zero_business_time or oq3 or weekend_valuation or pays_cash_once" -n 2 -q`
 Expected: FAIL — `TypeError: ... unexpected keyword argument 'fixings_banked'` (state tests, the count refusals and the
 8a record test), `AttributeError: ... '_banked_count'`, `ValidationError: ... resolves to a zero year fraction` (both
-flipped R7 tests, the OQ-3 test and the weekend-valuation test). The OQ-4 pin already passes (it pins today's
-refusals).
+flipped R7 tests, the OQ-3 test and the weekend-valuation test). (The OQ-4 status-quo pin that an earlier
+revision put here is not written: the user answered OQ-4 (b), implemented by Task 8c.)
 
 - [ ] **Step 3: Implement**
 
@@ -3971,6 +3981,228 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8c: Periods may share a fixing date or time (OQ-4 (b), user decision 2026-10-10)
+
+Follow-up that re-opens built Tasks 3, 4, 6 and 7. User decision OQ-4 (b), generalised: "two period dates can share
+the same fixing date". Equal fixing DATES (dated form) and equal fixing TIMES (numeric form, and dated dates that
+resolve to one time, e.g. Friday + Saturday under `BUSINESS_DAYS`) are a legitimate schedule. This amends TARN spec
+§4.1 / §4.2 ("ascending, unique" → ascending, i.e. non-decreasing).
+
+**Rules (all from the user decision or the existing spec; nothing invented):**
+- Both MC engines simulate each DISTINCT fixing time once; each period's fixing takes the spot at its time, so periods
+  sharing a time share one spot.
+- Target accumulation and redemption go through the periods in SCHEDULE order, deterministically. A period after the
+  one that hits the target — on the same date or later — is dead, by the spec's existing rule: TARN spec §6
+  (`record_passed_fixings`, TARN bullet) "On a hit (`is_redeemed`), the principal (with `include_principal`) at `pay_i`
+  is handled the same way and **every later fixing is dead**", applied "for each unbanked fixing at or before
+  valuation, **in order**, stopping once the contract is terminal"; TARF bullet: "the hit rule as for the TARN. On a
+  final hit the geared unfavourable leg is still paid" (the hitting period's own leg); spec §5.2 / engines: the `alive`
+  mask stops every later period's cash. The principal goes with the hitting period's `pay_i`.
+- Each period keeps its own pay date / pay time and its own cash (its own accrual factor for the TARN).
+- Per-fixing banking (OQ-3, Task 8b) banks every period sharing the date together, each once, by identity.
+- **Ruling R26:** a dated TARN whose periods derive from `initial_date` cannot share a fixing date (the second period
+  would run from a fixing date to the same date: zero accrual); it is refused with `ValidationError` asking for explicit
+  `accrual_factors`. The numeric form already refuses the same case through its built "accrual_factors must be
+  positive" check (factors `t_i − t_{i−1}` from `accrual_start`). Distinct dates that resolve to one time (Friday +
+  Saturday) keep their positive derived factors (ACT/365 by default).
+
+**Files:**
+- Modify: `quantark/asset/fx/product/option/target_redemption_base.py` (`_validate_numeric_schedule`,
+  `_validate_dated_schedule`: the uniqueness checks go), `quantark/asset/fx/product/option/fx_target_redemption_note.py`
+  (`_validate_dated_accrual`: R26; docstring), `quantark/asset/fx/product/option/fx_target_redemption_forward.py`
+  (docstring), `quantark/asset/fx/engine/mc/fx_tarn_note_mc_engine.py` and `fx_tarf_mc_engine.py` (`_simulate`),
+  `CHANGELOG.md`, `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`
+- Test: `test/test_fx_target_redemption_lifecycle.py` (new tests; Task 8b's OQ-4 pin is not written — see the note in
+  Task 8b)
+
+**Interfaces:**
+- Consumes: Tasks 8a, 8b.
+- Produces: `fixing_times` / `fixing_dates` non-decreasing (equal values allowed); both engines'
+  `_simulate(fx_env, spot, sigma, fixings) -> np.ndarray (P, M)` with one column per PERIOD, columns of periods that
+  share a time identical (one simulated spot); for a schedule of distinct times the generator input and the returned
+  array are exactly today's (bitwise: no reindexing).
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `test/test_fx_target_redemption_lifecycle.py` (and add `import numpy as np` to its imports):
+
+```python
+# --- OQ-4 (b), user decision 2026-10-10: periods may share a fixing date / time ------------------------------------
+
+SHARED_FACTORS = [1 / 12, 1 / 24] + [1 / 12] * 11
+
+
+def _shared_dated(kind, target, **kw):
+    """Thirteen periods: the first two share FIX_DATES[0]; the second pays two days later."""
+    dates = [FIX_DATES[0]] + FIX_DATES
+    pays = [FIX_DATES[0], LAG2[0]] + FIX_DATES[1:]
+    if kind == "tarf":
+        return dated_tarf(fixing_dates=dates, pay_dates=pays, target=target, **kw)
+    return dated_note(fixing_dates=dates, pay_dates=pays, accrual_factors=SHARED_FACTORS, target=target, **kw)
+
+
+def test_numeric_form_accepts_equal_fixing_times():
+    n = note(fix=[FIX[0], FIX[0]] + FIX[1:], pay_times=[FIX[0], FIX[0] + 2 / 365] + FIX[1:],
+             accrual_factors=SHARED_FACTORS, target=50.0)
+    assert n.fixing_times[:2] == [FIX[0], FIX[0]]
+    with pytest.raises(ValidationError, match="ascending"):
+        note(fix=[FIX[1], FIX[0]] + FIX[2:], target=50.0)              # decreasing is still refused
+
+
+def test_r26_a_dated_tarn_derived_from_initial_date_cannot_share_a_fixing_date():
+    with pytest.raises(ValidationError, match="accrual_factors"):
+        dated_note(fixing_dates=[FIX_DATES[0]] + FIX_DATES, target=50.0)  # initial_date=VAL: a zero-length period
+
+
+def test_engines_simulate_a_shared_time_once():
+    e = env()
+    eng = engine_for(note(target=50.0), n=1_000)
+    t0, t1 = FIX[0], FIX[1]
+    shared = eng._simulate(e, 1.20, 0.10, np.array([t0, t0, t1]))
+    distinct = eng._simulate(e, 1.20, 0.10, np.array([t0, t1]))
+    assert np.array_equal(shared[:, 0], shared[:, 1]) and np.array_equal(shared[:, [0, 2]], distinct)
+    tarf_eng = engine_for(tarf(target=0.2), n=1_000)
+    assert np.array_equal(tarf_eng._simulate(e, 1.20, 0.10, np.array([t0, t0, t1]))[:, [0, 2]],
+                          tarf_eng._simulate(e, 1.20, 0.10, np.array([t0, t1])))
+
+
+@pytest.mark.parametrize("kind", ["tarn", "tarf"])
+def test_two_periods_on_one_fixing_date_price_like_the_twin_and_each_is_paid(kind):
+    dated = _shared_dated(kind, target=50.0)
+    twin = _numeric_twin(dated, env())
+    assert twin.fixing_times[0] == twin.fixing_times[1]
+    assert is_close(_price(twin), _price(dated), rel_tol=1e-12)
+    e0, e3 = env(val=FIX_DATES[0]), env(val=FIX_DATES[0] + timedelta(days=3))
+    twin.time_shift(calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.CALENDAR_DAYS, 252))
+    for product in (dated, twin):
+        product.record_passed_fixings(e0)                              # the shared date: both periods bank together
+    fixings = [x for x in dated.lifecycle_events if x.event_type is FIXING]
+    assert len(fixings) == 2 and _kinds_only(dated.lifecycle_events) == _kinds_only(twin.lifecycle_events)
+    assert fixings[0].fixing == fixings[1].fixing == 1.20                # one spot for both
+    assert dated.state.fixings_banked == 2
+    assert [p.pay_date for p in dated.state.pending] == [FIX_DATES[0], LAG2[0]]      # each its own pay date
+    assert [p.amount for p in dated.state.pending] == [x.amount for x in fixings]    # each its own cash
+    twin.time_shift(3 / 365)
+    for product, e in ((dated, e3), (twin, e3)):
+        product.record_passed_fixings(e)
+    assert _kinds_only(dated.lifecycle_events) == _kinds_only(twin.lifecycle_events)
+    assert [x.event_type for x in dated.lifecycle_events] == [FIXING, FIXING, PAYMENT, PAYMENT]   # banked once
+    assert dated.state.fixings_banked == 2 and dated.state.pending == ()
+
+
+def test_a_target_hit_by_the_first_of_two_same_date_periods_kills_the_second():
+    """TARN spec section 6: "On a hit ... every later fixing is dead" (periods in schedule order)."""
+    dated = _shared_dated("tarn", target=0.9)                           # the first coupon (1.0) is clipped to 0.9
+    twin = _numeric_twin(dated, env())
+    dated.record_passed_fixings(env(val=FIX_DATES[0]))
+    (fixing,) = [x for x in dated.lifecycle_events if x.event_type is FIXING]  # the second period never banks
+    assert fixing.amount == 0.9 and fixing.redeemed and dated.is_redeemed and dated.is_terminal
+    assert [(p.amount, p.pay_date) for p in dated.state.pending] == [(0.9, FIX_DATES[0]), (100.0, FIX_DATES[0])]
+    e = env(vol=1e-7)                                                   # the engine walk applies the same rule
+    t = calculate_year_fraction(VAL, FIX_DATES[0], DayCountConvention.CALENDAR_DAYS, 252)
+    expected = (0.9 + 100.0) * e.get_domestic_df(t)                     # nothing from the second period
+    assert is_close(_price(twin, e=e), expected, rel_tol=1e-6)
+    assert is_close(_price(_shared_dated("tarn", target=0.9), e=e), expected, rel_tol=1e-6)
+
+
+def test_friday_and_saturday_fixings_price_on_the_thursday_like_the_twin():
+    """OQ-3 case valued before the shared instant (was refused: OQ-4 status quo): both fixings at one business time,
+    one simulated spot; dated == numeric."""
+    dated = dated_note(fixing_dates=[FRIDAY, SATURDAY, datetime(2026, 9, 15)], initial_date=datetime(2026, 7, 15),
+                       target=50.0)
+    e_thu = env(val=THURSDAY, **BUS)
+    twin = _numeric_twin(dated, e_thu)
+    assert twin.fixing_times[0] == twin.fixing_times[1]
+    assert is_close(_price(twin, e=e_thu), _price(dated, e=e_thu), rel_tol=1e-12)
+```
+
+(`FRIDAY`, `SATURDAY`, `THURSDAY`, `BUS`, `_kinds_only` come from Task 8b's and Task 7's sections of the same module.)
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_lifecycle.py -k "equal_fixing_times or r26 or shared_time or one_fixing_date or same_date_periods or on_the_thursday" -n 2 -q`
+Expected: FAIL — `ValidationError: fixing_times must be unique` / `fixing_dates must be unique` (construction and the
+twins), `ValidationError: times must be strictly increasing and positive` (the engine `_simulate` test); the R26 test
+already raises (uniqueness) but on the wrong message (`accrual_factors` not matched).
+
+- [ ] **Step 3: Implement**
+
+`target_redemption_base.py`: delete the two uniqueness checks
+(`if len(set(dates)) != len(dates): raise ValidationError("fixing_dates must be unique")` in `_validate_dated_schedule`
+and `if len(set(fixings)) != len(fixings): raise ValidationError("fixing_times must be unique")` in
+`_validate_numeric_schedule`); the "must be ascending" checks stay and now mean non-decreasing (`list(x) != sorted(x)`).
+
+`fx_target_redemption_note.py`, `_validate_dated_accrual`, after the `initial_date` check:
+
+```python
+        if self.initial_date is not None and len(set(self.fixing_dates)) != len(self.fixing_dates):
+            # Ruling R26: a period derived from the previous fixing date to a shared fixing date has zero length
+            raise ValidationError(
+                "periods sharing a fixing date need explicit accrual_factors: a period derived from initial_date and "
+                "the previous fixing date would have zero length")
+```
+Docstrings (`fx_target_redemption_note.py:59`, `fx_target_redemption_forward.py:42`): "Ascending (non-decreasing:
+periods may share a fixing time), finite year-fraction fixing times."
+
+Both engines (`fx_tarn_note_mc_engine.py`, `fx_tarf_mc_engine.py`), `_simulate`:
+
+```python
+    def _simulate(self, fx_env, spot, sigma, fixings) -> np.ndarray:
+        """Spots at each PERIOD's fixing, (P, M). Each distinct fixing time is simulated once; periods sharing a time
+        share its spot (user decision OQ-4 b). A schedule of distinct times is simulated exactly as before."""
+        times, period_of = np.unique(fixings, return_inverse=True)
+        gen = self._make_generator(fx_env, spot, sigma, times)
+        paths, _ = gen.generate_paths()
+        spots = paths[:, 1:]  # drop S_0 column -> one column per distinct time
+        return spots if times.size == fixings.size else spots[:, period_of]
+```
+
+The walks (`_accumulate`) need no change: they already go through the periods in schedule order with the `alive` mask
+(a period after the hit is dead, spec §6 / §5.2) and each period's own `df_pay[i]`. `_record_numeric` /
+`_record_dated` need no change: they bank in schedule order by time and stop on a hit (Task 8b's dated loop banks every
+period whose time has passed, so periods sharing a date bank together and are counted once each).
+
+Append to the CHANGELOG `### Changed`:
+
+```markdown
+- FX TARN / TARF periods may share a fixing date or time (user decision OQ-4 b, 2026-10-10): `fixing_dates` /
+  `fixing_times` must be non-decreasing instead of strictly increasing. Both MC engines simulate each distinct fixing
+  time once and every period sharing it fixes at that spot; periods are accumulated in schedule order (a period after
+  the target hit is dead), each with its own pay date and cash. A dated TARN deriving its periods from `initial_date`
+  cannot share a fixing date (zero-length period): it states `accrual_factors`.
+```
+
+Append to `moved_values.txt`:
+
+```text
+#
+# Task 8c - OQ-4 (b), user decision 2026-10-10: periods may share a fixing date / time.
+# Contracts with equal fixing times (numeric) or equal fixing dates (dated, explicit accrual_factors / TARF), and dated
+# contracts whose distinct dates resolve to one time (Friday + Saturday under BUSINESS_DAYS valued before that
+# instant): ValidationError (unique / strictly increasing) -> priced, equal to the twin. Nothing else moves: a schedule
+# of distinct times takes exactly the old engine path (no reindexing).
+# Same refusal, new reason: test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] (initial_date-derived) still raises
+# ValidationError, now Ruling R26 (zero-length period; state accrual_factors) instead of "fixing_dates must be unique".
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_state.py test/test_fx_target_redemption_lifecycle.py test/test_fx_tarn_note_mc.py test/test_fx_tarf_mc.py test/test_fx_base_engine.py -n 2 -q`
+Expected: all pass, unmodified apart from this task's additions (every existing schedule has distinct times, so every
+existing price, Greek and event is bitwise unchanged). Any other failure: STOP and report it as an unlisted mover.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C <WT> add quantark/asset/fx/product/option/target_redemption_base.py quantark/asset/fx/product/option/fx_target_redemption_note.py quantark/asset/fx/product/option/fx_target_redemption_forward.py quantark/asset/fx/engine/mc/fx_tarn_note_mc_engine.py quantark/asset/fx/engine/mc/fx_tarf_mc_engine.py test/test_fx_target_redemption_lifecycle.py CHANGELOG.md
+git -C <WT> add -f docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt
+git -C <WT> commit -m "feat(fx-tarn): periods may share a fixing date or time; one simulated spot per distinct time (OQ-4 b)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: TARN / TARF implement the run-fixings product protocol (W6; D2, B5 at recorder level)
 
 Re-planned 2026-10-10 against W6 (see "Re-plan 2026-10-10 against W6"). Spec: TARN §6, §7.2 as amended by run-fixings
@@ -3985,7 +4217,8 @@ Rulings 2, 4, 8, 9, 10, 11. **No `quantark/asset/fx/lifecycle/` is built**: W6's
 - Create: `test/test_fx_target_redemption_runs.py`
 
 **Interfaces:**
-- Consumes: Tasks 2–8, 8a (cash due today stays pending until its pay time is strictly past) and 8b (dated fixings
+- Consumes: Tasks 2–8, 8a (cash due today stays pending until its pay time is strictly past), 8c (periods may share a
+  fixing date / time) and 8b (dated fixings
   banked per fixing — `fixings_banked`, `_banked_count`, `_is_unbanked` by identity, `as_of` = `_state_date`; a fixing
   or pay date at zero business time is passed/due by time); W6 `quantark.util.run_fixings` (`RunFixingRecorder.register(portfolio) -> RunFixingDay`,
   `.advance(portfolio) -> RunFixingDay`, `.days`, `.recorded`; `RunFixingDay(date, fixings, product_events,
@@ -4490,7 +4723,7 @@ def test_a_weekend_fixing_on_a_business_day_clock_is_live_on_friday():
 def test_oq3_friday_and_saturday_fixings_in_a_run_are_recorded_once_at_fridays_spot():
     """OQ-3 ruling in a run (BUSINESS_DAYS, weekday instants): the Friday fixing and the Saturday fixing are both live
     on the Friday (W6 Ruling 4); on Monday both are recorded at Friday's spot, gap=False, banked by identity with
-    their cash; nothing is banked again later. (Recorder level: pricing either form before the Friday is OQ-4.)"""
+    their cash; nothing is banked again later. (Pricing either form before the Friday: Task 8c.)"""
     friday, saturday, monday = datetime(2026, 8, 14), datetime(2026, 8, 15), datetime(2026, 8, 17)
     dated = dated_note(fixing_dates=[datetime(2026, 7, 15), friday, saturday, datetime(2026, 9, 15)], target=50.0)
     pf, (pid,), rec = _registered(dated, fx_env=env(**BUS))
@@ -4504,6 +4737,23 @@ def test_oq3_friday_and_saturday_fixings_in_a_run_are_recorded_once_at_fridays_s
     assert (held.fixings_banked, held.state.as_of) == (3, monday)
     tue = drive(pf, rec, monday + timedelta(days=1), 1.30)
     assert tue.product_events == () and pf.positions[pid].product.fixings_banked == 3
+
+
+def test_periods_sharing_a_fixing_date_are_recorded_and_banked_once_in_a_run():
+    """OQ-4 (b), Task 8c: two periods on one fixing date are both live on it, recorded the next day at its spot (one
+    RecordedFixing each, gap=False) and banked together once; each keeps its own pay date (the second pays two days
+    later)."""
+    dates = [FIX_DATES[0]] + FIX_DATES
+    dated = dated_note(fixing_dates=dates, pay_dates=[FIX_DATES[0], LAG2[0]] + FIX_DATES[1:],
+                       accrual_factors=[1 / 12, 1 / 24] + [1 / 12] * 11, target=50.0)
+    pf, (pid,), rec = _registered(dated)
+    days = {k: drive(pf, rec, VAL + timedelta(days=k), 1.20 + 0.001 * k) for k in range(1, 34)}
+    spot30 = 1.20 + 0.001 * 30                                                   # FIX_DATES[0] is day 30
+    assert _rows(days[31]) == [(0, spot30, spot30, False), (1, spot30, spot30, False)]
+    assert [ev.event_type for _, _, ev in days[31].product_events] == [FIXING, PAYMENT, FIXING]
+    assert pf.positions[pid].product.fixings_banked == 2
+    assert days[32].product_events == ()                                         # nothing banked again
+    assert [ev.event_type for _, _, ev in days[33].product_events] == [PAYMENT]  # the second period's own pay date
 ```
 
 Append to `test/test_run_fixings.py` (after `test_hooks_matured_events_pending_pv`):
@@ -4536,7 +4786,7 @@ def test_settle_hook_runs_at_register_and_on_every_clock_move():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_run_fixings.py -k "run_fixings or open_fixings or booking_index or time_elapsed or t0 or history_settled or matured or d2 or register or origin or terminal_booking or clock or time_of_day or untouched or gap or short or pairs or consecutive or append or zero_lag or weekend_fixing or oq3 or settle_hook" -n 2 -q`
+Run: `env PYTHONPATH=<WT>:<WT>/test /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest test/test_fx_target_redemption_runs.py test/test_fx_target_redemption_lifecycle.py test/test_run_fixings.py -k "run_fixings or open_fixings or booking_index or time_elapsed or t0 or history_settled or matured or d2 or register or origin or terminal_booking or clock or time_of_day or untouched or gap or short or pairs or consecutive or append or zero_lag or weekend_fixing or oq3 or periods_sharing or settle_hook" -n 2 -q`
 Expected: FAIL — `AttributeError: ... object has no attribute 'has_run_fixings'` / `'open_fixings'` / `'with_time_elapsed'` /
 `'with_history_settled'` / `'matured_before'`; the recorder-level tests fail because `participates()` is False (nothing
 is banked: e.g. `assert 0.0 == ...`, `DID NOT WARN`); `test_a_fixing_at_t0_is_live_silent_and_never_frozen` fails on
@@ -5569,7 +5819,11 @@ Append to `moved_values.txt`:
 # after the valuation date (R24: on a weekend row, the Friday), no check dropped. Moved values: none beyond Tasks 8a /
 # 8b; not a value: aged dated states state their count, and a dated state's as_of on a non-business valuation date
 # reads the preceding business date.
-# OQ-4 (equal resolved fixing times before the shared instant): <the user's answer; under (b) the OQ-4 pin flips>.
+# R24 user-approved 2026-10-10.
+# OQ-4 (b), user 2026-10-10 (Task 8c block above): periods may share a fixing date / time. Contracts with equal fixing
+# times or dates, and dated dates resolving to one time valued before it: ValidationError -> priced (= twin). Nothing
+# else moves. test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] still refused (now Ruling R26, zero-length
+# initial_date-derived period).
 ```
 Verify the CHANGELOG block has `### Added`, `### Changed`, `### Fixed` with the bullets from Tasks 2–11 and no empty
 heading.
@@ -5608,7 +5862,8 @@ the rebase); only then ff-merge.
   (per-fixing banked count; R15, R22 superseded; R24, R25 added) with the Friday + Saturday case in 8b and Task 9.
   Task 9's `_record_dated` replacement carries the 8a cash sweep and 8b's per-fixing loop, count and `_state_date`; no
   task relies on `as_of` as a banked high-water mark, and no task still pins an answered question's old behaviour.
-  Open: OQ-4 (pinned in 8b).
+  R24 user-approved. OQ-4 (b) → Task 8c (cites spec §6 "every later fixing is dead" for a period after the hit on the
+  same date; R26). No open question remains.
 - **Re-plan self-check (2026-10-10):** every old Task 9–11 requirement is in the mapping table of "Re-plan 2026-10-10
   against W6"; W6 hand-off notes 1–5 map to Task 9 (protocol, hooks, append-only events, R4/R7/R8/R9/Ruling 9, W8),
   Task 10 (W8 twins) and Task 11 (R7 + Q8); W6 Ruling 2's time-based gap flag drives R16 and OQ-2; the user's weekend
