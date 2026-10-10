@@ -106,3 +106,169 @@
 # W6 participants (equity RA / Asian, FX domestic / foreign / quanto RA, dated and numeric; registration at day 0 and
 #   with history at day 6; daily advances incl. a same-date advance): RunFixingDay records, held products' records and
 #   market values byte-identical 4a82ec61 vs Task 9 (509 lines, sha1 6603215e7a9c28bca258e39eeeb82ef3740c9469).
+#
+# Task 10 (FX backtest) and Task 11 (FX dynamic scenario) - no existing expected value moved (no existing test or demo
+# put a TARN / TARF in an FX run). New behaviour (frozen -> aged, with paid cash), pinned in
+# test/test_fx_target_redemption_runs.py: test_b1_numeric_tarn_ages_in_the_backtest,
+# test_b2_redeeming_path_books_cash_on_its_pay_days, test_b3_quiet_path_books_the_principal_and_negative_tarf_cash
+# (principal day 368: booked the instant after its pay date, OQ-1 b), test_b4_twins_in_one_backtest,
+# test_b5_backtest_registration_rules, test_w8_twins_on_the_last_fixing_day_and_after_the_end,
+# test_zero_lag_fixing_day_value_keeps_the_coupon_no_dip, test_business_day_path_records_a_saturday_fixing_at_fridays_spot,
+# test_dynamic_tarn_redeems_and_books_cash, test_dynamic_snapshot_cashflow_when_paid_in_the_recording_step,
+# test_b4_twins_in_one_dynamic_scenario (two books since Task 12: cash and pending PV compared too),
+# test_q8_undated_path_with_a_tarn_is_refused (an undated path with a TARN / TARF: ran frozen -> ValidationError).
+# Not a value: an empty backtest book (every position removed) reports portfolio_value 0.0 (float) instead of 0 (int).
+# Task 12 regressions from the Task 10 / 11 review probes (same file): short / long two-pair quantity linearity,
+# BUSINESS_DAYS weekend rows (twins, weekend == Friday, Saturday cash booked Monday), dynamic Greeks on == off with
+# the input book untouched, dynamic == backtest bitwise on paid_cash / pending_pv, and
+# test_a_non_target_redemption_backtest_value_is_pinned (a GK vanilla backtest, 30 hedges: final_value
+# 0x1.3d44b9ded6c7bp-1, total_hedge_pnl -0x1.c3c234176532ap-5, last net_pnl 0x1.dd61d56818418p-7; byte-identical on
+# c02296cb and 77cc6462; asserted at GOLDEN_REL_TOL because a frozen literal crosses architectures).
+#
+# Pinning tests of the blocks above (test/test_fx_target_redemption_lifecycle.py unless named):
+# 8a: test_moved_values_around_a_pay_date (the table), test_value_on_a_pay_date_holds_the_cash_due_that_day,
+#   test_numeric_cash_due_today_stays_pending_until_its_pay_time_is_past,
+#   test_dated_record_banks_through_the_valuation_date_and_pays_cash_once_it_is_past.
+# 8b: test_future_fixing_at_zero_business_time_is_live_like_its_twin, test_pending_pay_date_at_zero_business_time_is_due_today,
+#   test_oq3_friday_and_saturday_fixings_price_on_friday_and_bank_once, test_as_of_on_a_weekend_valuation_is_the_friday,
+#   test_record_counts_banked_fixings_and_as_of_is_the_valuation_date, test_banked_count_ahead_of_valuation_is_refused,
+#   test_a_saturday_fixing_banked_on_the_friday_stays_valid_under_business_days_only.
+# 8c: test_numeric_form_accepts_equal_fixing_times, test_two_periods_on_one_fixing_date_price_like_the_twin_and_each_is_paid,
+#   test_friday_and_saturday_fixings_price_on_the_thursday_like_the_twin,
+#   test_distinct_fixing_times_take_the_old_engine_path_bitwise (e2e07886 prices at GOLDEN_REL_TOL),
+#   test_the_default_derivation_refuses_any_zero_derived_factor (Ruling 1, both intraday pairs),
+#   test_a_business_days_contract_count_refuses_a_zero_derived_factor_at_resolve (Ruling 1, Fri -> Sat),
+#   test_a_banked_count_that_splits_a_shared_date_is_refused (Ruling 2), test_a_redeemed_state_may_stop_inside_a_shared_date,
+#   test_a_hit_at_the_first_of_two_final_periods_is_not_an_early_redemption (Ruling 3),
+#   test_an_as_of_between_two_same_date_fixings_is_refused (fix round 2), test_as_of_only_bookings_on_distinct_dates_are_unchanged,
+#   test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] (same refusal, new reason).
+# 8d: test_accrual_end_dates_on_the_fixing_dates_reproduce_the_default_bitwise,
+#   test_two_periods_sharing_a_fixing_date_accrue_their_own_period_dates_like_the_twin,
+#   test_a_shared_fixing_date_needs_period_dates_or_factors, test_accrual_end_dates_refusals (OQ-5 / OQ-6 refusals),
+#   test_stated_accrual_end_dates_keep_the_positive_factor_check.
+# 9: (a) test_a_fixing_at_t0_is_live_silent_and_never_frozen pins the behaviour (today's fixing moves with the bump);
+#   the TARF delta / gamma numbers listed in (a) are a scratchpad probe measurement, no test pins those literals;
+#   (b) test_a_banked_count_at_a_shared_date_boundary_is_accepted[0-tarn|0-tarf] (warning -> silent);
+#   (c) test_numeric_indices_count_from_the_booking_across_banking, test_open_fixings_lists_the_unbanked_fixings_by_booking_index.
+#   Runs (test/test_fx_target_redemption_runs.py): test_a_fixing_on_the_origin_date_is_live_and_records_the_next_day_silently
+#   (D1 / D6 first date), test_a_calendar_gap_records_at_the_previous_instants_spot_without_a_warning (D5 gap spot),
+#   test_a_time_of_day_instant_is_refused (D6 / R8), test_consecutive_daily_fixings_keep_their_own_live_spots_across_banking
+#   (R14), test_weekend_rows_quoting_another_spot_record_the_live_fixings_at_their_first_live_spot (Task 9 fix round 1).
+#
+# Q7 (spec section 12, Task 8): numeric FX theta (BaseFxEngine._fdm_theta) steps by the environment's year fraction.
+# Measured by q7_theta_plugin.py on 77cc6462 (Task 12), at -n 2 over the 65 test files that reach FX code (every
+# test/test_*.py that imports or names FX products, environments, portfolios or the TARN / run-fixings / execution
+# matrix fixtures: 1356 passed, 2 skipped), NOT the whole suite (Task 12 Step 3 belongs to the controller; adding
+# `-p q7_theta_plugin` and the evidence folder to PYTHONPATH there would cover the rest). Every logged call below is
+# under BUSINESS_DAYS except one ACT_360; none is asserted by a pre-existing test: the test_q7_* (test_fx_base_engine.py)
+# and test_d4_theta_twins_agree_business_days rows are Task 8's own new tests, and W6's test_run_fixings_runs.py
+# thetas (backtests with calculate_greeks on numeric FX range accruals) are computed but not asserted (the file passes
+# unmodified). Pattern: a weekday theta under BUSINESS_DAYS scales by 365/252 (step 1/365 -> 1/252), a Friday or
+# Saturday theta (zero business days ahead) becomes 0.0, ACT_360 steps 1/360.
+# Q7 numeric FX theta moves: 44 distinct calls (old step theta_days/365 -> env year fraction)
+Q7 | test/test_fx_base_engine.py::test_q7_act_360_steps_one_360th | GarmanKohlhagenEngine / FxVanillaOption | ACT_360 @ 2026-06-12 00:00:00 | dt 0.0027397260273972603 -> 0.002777777777777778 | theta -9.142077500917667e-05 -> -9.269121552192561e-05
+Q7 | test/test_fx_base_engine.py::test_q7_business_days_numeric_theta_matches_dated | GarmanKohlhagenEngine / FxVanillaOption | BUSINESS_DAYS @ 2026-06-12 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta -9.134814228247551e-05 -> 0.0
+Q7 | test/test_fx_target_redemption_lifecycle.py::test_d4_theta_twins_agree_business_days[val0-tarf] | FxTarnForwardMCEngine / FxTargetRedemptionForward | BUSINESS_DAYS @ 2026-06-12 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta 0.0007941741056419135 -> 0.0
+Q7 | test/test_fx_target_redemption_lifecycle.py::test_d4_theta_twins_agree_business_days[val0-tarn] | FxTargetRedemptionNoteMCEngine / FxTargetRedemptionNote | BUSINESS_DAYS @ 2026-06-12 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta 0.018338383138399195 -> 0.0
+Q7 | test/test_fx_target_redemption_lifecycle.py::test_d4_theta_twins_agree_business_days[val1-tarf] | FxTarnForwardMCEngine / FxTargetRedemptionForward | BUSINESS_DAYS @ 2026-06-15 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 0.0007386041159023887 -> 0.0011484968777246696
+Q7 | test/test_fx_target_redemption_lifecycle.py::test_d4_theta_twins_agree_business_days[val1-tarn] | FxTargetRedemptionNoteMCEngine / FxTargetRedemptionNote | BUSINESS_DAYS @ 2026-06-15 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 0.015567609665083637 -> 0.02296721561046411
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-01 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 61.72999313531909 -> 88.42806460527572
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-02 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 59.560598223029956 -> 85.80070799222085
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-03 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 59.49997643354436 -> 86.11718528927304
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-04 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 60.70540520598297 -> 87.83591702398917
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-05 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta 61.89252847042371 -> 0.0
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-06 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta 63.68884240459738 -> 0.0
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-07 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 65.49345451247063 -> 94.79356399501557
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-08 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 67.07074799147085 -> 96.9357168155475
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-09 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 68.30076086175904 -> 98.48736910410662
+Q7 | test/test_run_fixings_runs.py::test_business_day_clock_on_a_calendar_path_records_at_the_last_live_instant | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-10 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 68.81113248536349 -> 98.85496596200028
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-01 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 30.324015640770085 -> 43.87811588760087
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-02 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 30.917273420258425 -> 44.69943227658223
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-03 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 32.22971927840263 -> 46.51077938805611
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-04 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 35.102172192695434 -> 50.52709718828919
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-05 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta 41.183135231567576 -> 0.0
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-08 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 91.10114327359406 -> 133.29392423054378
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-09 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 101.37596427586323 -> 149.72328866462703
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-10 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 82.76321948991608 -> 123.36212433885885
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-11 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 12.249889165694185 -> 17.83061804396857
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_ruling2_a_saturday_record_on_a_business_day_clock_is_live_on_friday | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-12 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta -98.9065074725695 -> 0.0
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-01 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 61.72999313531909 -> 88.42806460527572
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-02 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 58.057031055137486 -> 83.6910324955752
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-03 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 56.793167015275685 -> 82.1372488871857
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-04 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 56.14470410146896 -> 81.09574253434039
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-05 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta 54.953749998519925 -> 0.0
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-08 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 90.37191321656428 -> 133.2117155250744
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-09 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 70.48852808996526 -> 104.5997387052048
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-10 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta 11.924273818320216 -> 17.33922109301784
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-11 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta -74.13084977133258 -> -112.23994016590586
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-12 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta -127.93081536436148 -> 0.0
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-15 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta -12.208446317759808 -> -16.518163180307965
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-16 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta -7.66729685161954 -> -11.096221188621712
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-17 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta -8.676341999103897 -> -12.601918000265869
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-18 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta -9.348547749474164 -> -13.572517944816354
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-19 00:00:00 | dt 0.0027397260273972603 -> 0.0 | theta -9.605710911215283 -> 0.0
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-22 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta -8.424257198392297 -> -12.21268644709562
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-23 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta -7.730146254391002 -> -11.202465489890528
+Q7 | test/test_run_fixings_runs.py::test_fx_backtest_x2_on_a_business_day_clock | FxRangeAccrualAnalyticalEngine / FxRangeAccrualOption | BUSINESS_DAYS @ 2024-01-24 00:00:00 | dt 0.0027397260273972603 -> 0.003968253968253968 | theta -6.955031691824843 -> -10.075726155104348
+# Q7 scope note (Ruling R9): localvol_greeks.py:60 and the Heston / Heston-SLV PDE thetas keep theta_days/365
+# (not BaseFxEngine._fdm_theta); their numeric/dated gap under non-calendar envs is a follow-up, not changed here.
+# Non-integral theta_days: the numeric step becomes the env year fraction of a partial day (0.0 under CALENDAR_DAYS),
+# as the dated branch already computes; no test in the suite sets theta_days (grep: none).
+# Q7 behaviour (not a value): a numeric FX theta under a BUSINESS_DAYS env with no calendar raises ValidationError
+# (calculate_year_fraction), where it stepped 1/365; its dated twin already refused such an env (Task 8 ruling).
+#
+# Constructor-only edits (no expected value moved): test/test_fx_tarn_note_mc.py::_note,
+# test/test_fx_tarf_mc.py::_tarf, test/execution/matrix_fixtures.py fx_tarn / fx_tarf, example/fx_tarn_demo.py
+# (demo stdout byte-identical to main).
+# test/test_fx_tarn_note_mc.py::_det_pv gained acc0=0.0 (default reproduces the old reference).
+#
+# Behaviour changes with no previously asserted value (spec section 8 "Expected to move"):
+# theta within one day of a fixing: exception -> number (M3; pinned by test_t1_theta_steps_over_a_fixing);
+# construction without state / period start: accepted -> refused (test_r1_rebuild_without_a_period_source_is_refused,
+# test_r2_missing_state_is_a_validation_error_not_a_type_error); pricing after a bare time_shift: exception ->
+# MissingFixingWarning fill (M2; test_warn3_dated_passed_fixing_is_filled_with_one_warning and the Task 8 fill tests);
+# a backtest or dated dynamic scenario holding a TARN/TARF: frozen -> aged with paid cash (M7; Task 10 / 11 tests
+# above); an undated dynamic scenario holding a TARN/TARF: ran frozen -> ValidationError (Q8).
+#
+# Re-plan 2026-10-10 (W6), run-fixings decisions applied to TARN / TARF (user-approved in the W6 spec):
+# - a fixing at t = 0 is live (D1): the Greek freeze no longer records it at the base spot, so delta / gamma of a
+#   TARN / TARF valued ON a fixing date move with the coupon condition (previously frozen); no existing test asserted
+#   them. MissingFixingWarning for a t = 0 fill: warned -> silent.
+# - in runs a fixing is recorded at the spot of the instant it was live; a fixing between two path instants at the
+#   PREVIOUS instant's spot, gap=True (D5) - the TARN spec (7.2) had the next instant's.
+# - a fixing on the run's first date is live at registration and recorded on the next instant (TARN spec 7.2 banked it
+#   at registration); a run instant with a time of day holding a TARN / TARF is refused (D6).
+# - numeric FIXING / PAYMENT event labels count from the booking (#<fixings banked since construction + position>);
+#   informational only.
+# B6 / demo references re-captured (Task 12 Step 0) on the branch's ACTUAL base: `git merge-base main HEAD` = main
+# c02296cb (W6 6f9c6e74 + W8 / W9 / carried-KI / W11 / W13a), not W6 alone, because the branch was rebased onto
+# c02296cb on 2026-10-10. 139 rows of baseline.json -> baseline_w6.json differ (691 leaves: backtest_92_no_greeks 91
+# rows + final_value, backtest_20_greeks 19 rows + final_value, dynamic_dated 29 days + final + total_pnl; day 0 and
+# the whole undated dynamic run unchanged), all numeric FX range accruals in the dated runs (W6's own moved values):
+# with the three range accruals dropped from the B6 book, Task 1's base 259cc668 (pre-W6) and c02296cb capture
+# bitwise-identical rows (0 differing leaves). Demo stdout on c02296cb is byte-identical to Task 1's main captures
+# (all four demos). Gates on 77cc6462: B6 compare "B6 OK: every stored number bitwise equal; new cash columns 0.0";
+# demo stdout fx_tarn_demo / fx_backtest_demo / fx_dynamic_scenario_demo / fx_portfolio_risk_demo all SAME.
+# User answers 2026-10-10 (plan section "Re-plan 2026-10-10 against W6"): OQ-1 (b) - cash due today stays in today's
+# value (Task 8a block above: pay-date prices + cash, theta the day before + cash, theta on the pay date - cash, the
+# terminal value on the last pay date = that cash, validation of pay_time 0.0 / pay_date == as_of); OQ-2 (b) - a dated
+# fixing or pay date at zero business time is live (Task 8b block above: ValidationError -> priced like the twin;
+# Ruling R7 superseded). In runs: a payment on a path-aligned pay date is booked on the next instant (B3 principal
+# day 367 -> 368 against the pre-8a plan text; nothing on main asserted it), and a zero-lag fixing day keeps its
+# coupon in the run value (no dip, no false first-day gain).
+# OQ-3 (user ruling 2026-10-10): banked fixings tracked per fixing (TargetRedemptionState.fixings_banked), as_of never
+# after the valuation date (R24: on a weekend row, the Friday), no check dropped. Moved values: none beyond Tasks 8a /
+# 8b; not a value: aged dated states state their count, and a dated state's as_of on a non-business valuation date
+# reads the preceding business date.
+# R24 user-approved 2026-10-10.
+# OQ-4 (b), user 2026-10-10 (Task 8c block above): periods may share a fixing date / time. Contracts with equal fixing
+# times or dates, and dated dates resolving to one time valued before it: ValidationError -> priced (= twin). Nothing
+# else moves. test_r2_dated_refusals[fixing_dates=FIX_DATES[:1] * 2] still refused (now the default derivation's
+# zero-length period; R26 superseded by the user's ruling (b)).
+# R26 (b), user 2026-10-10 (Task 8d block above): the TARN's own accrual period dates (accrual_end_dates). Existing
+# bookings: none move (no accrual_end_dates = today's derivation, bitwise). New bookings with accrual_end_dates
+# (including periods sharing a fixing date without accrual_factors): TypeError (unknown keyword) -> priced (= twin).
+# Refused, pending OQ-5 / OQ-6 (non-blocking): an accrual end before its fixing or after its pay date; gapped or
+# overlapping periods by dates (accrual_factors books both).
+#
+FULL SUITE (controller): <pending>
