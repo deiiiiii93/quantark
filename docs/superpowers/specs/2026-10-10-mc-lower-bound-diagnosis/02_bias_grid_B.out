@@ -1,0 +1,61 @@
+
+PART B: knobs at 4096 paths (RQMC: 4096 per batch)
+cell                               method            paths   R        bias   bias_se      t    emp_sd    eng_se   pair_se  bias_bp refused
+put S90 T=1d flat lag0             plain              4096  64  +5.862e-04  1.98e-03  +0.30  1.58e-02  1.47e-02       nan   +0.587    0.53   BS=9.9942468793 BS-bound=+0.000e+00
+put S90 T=1d flat lag0             antithetic         4096  64  -1.482e-06  1.96e-05  -0.08  1.57e-04  1.47e-02  1.54e-04   -0.001    0.55   BS=9.9942468793 BS-bound=+0.000e+00
+put S90 T=1d flat lag0             qmc                4096  64  +4.941e-06  1.19e-05  +0.42  9.51e-05  1.47e-02       nan   +0.005    0.53   BS=9.9942468793 BS-bound=+0.000e+00
+put S90 T=1d flat lag0             rqmc              16384   8  +6.667e-06  1.82e-05  +0.37  5.16e-05  3.82e-05       nan   +0.007    0.50   BS=9.9942468793 BS-bound=+0.000e+00
+put S90 T=5d flat lag0             plain              4096  64  +1.284e-03  4.42e-03  +0.29  3.53e-02  3.29e-02       nan   +1.288    0.53   BS=9.9712420994 BS-bound=+1.624e-06
+put S90 T=5d flat lag0             antithetic         4096  64  -9.039e-06  9.80e-05  -0.09  7.84e-04  3.29e-02  7.72e-04   -0.009    0.56   BS=9.9712420994 BS-bound=+1.624e-06
+put S90 T=5d flat lag0             qmc                4096  64  +6.515e-06  3.10e-05  +0.21  2.48e-04  3.29e-02       nan   +0.007    0.55   BS=9.9712420994 BS-bound=+1.624e-06
+put S90 T=5d flat lag0             rqmc              23552   8  +2.382e-05  4.28e-05  +0.56  1.21e-04  8.20e-05       nan   +0.024    0.38   BS=9.9712420994 BS-bound=+1.624e-06
+put S90 T=30d flat lag0            plain              4096  64  +4.059e-03  1.07e-02  +0.38  8.52e-02  7.79e-02       nan   +4.098    0.19   BS=9.9034608124 BS-bound=+7.579e-02
+put S90 T=30d flat lag0            antithetic         4096  64  +1.258e-03  7.24e-04  +1.74  5.79e-03  7.78e-02  5.81e-03   +1.270    0.00   BS=9.9034608124 BS-bound=+7.579e-02
+put S90 T=30d flat lag0            qmc                4096  64  +9.132e-04  8.03e-04  +1.14  6.42e-03  7.78e-02       nan   +0.922    0.00   BS=9.9034608124 BS-bound=+7.579e-02
+put S90 T=30d flat lag0            rqmc             131072   8  +2.262e-04  4.83e-04  +0.47  1.37e-03  1.09e-03       nan   +0.228    0.00   BS=9.9034608124 BS-bound=+7.579e-02
+put S90 T=365d flat lag0           plain              4096  64  +1.929e-02  2.63e-02  +0.73  2.11e-01  1.86e-01       nan  +16.013    0.00   BS=12.0464256175 BS-bound=+4.106e+00
+put S90 T=365d flat lag0           antithetic         4096  64  -3.549e-03  9.22e-03  -0.38  7.38e-02  1.86e-01  7.57e-02   -2.946    0.00   BS=12.0464256175 BS-bound=+4.106e+00
+put S90 T=365d flat lag0           qmc                4096  64  -2.325e-03  5.41e-03  -0.43  4.33e-02  1.86e-01       nan   -1.930    0.00   BS=12.0464256175 BS-bound=+4.106e+00
+put S90 T=365d flat lag0           rqmc             131072   8  -1.481e-03  1.93e-03  -0.77  5.46e-03  6.90e-03       nan   -1.229    0.00   BS=12.0464256175 BS-bound=+4.106e+00
+put S90 T=1d flat lag2d            plain              4096  64  +5.861e-04  1.98e-03  +0.30  1.58e-02  1.47e-02       nan   +0.587    0.53   BS=9.9926041245 BS-bound=+7.105e-15
+put S90 T=1d flat lag2d            antithetic         4096  64  -1.482e-06  1.96e-05  -0.08  1.57e-04  1.47e-02  1.54e-04   -0.001    0.55   BS=9.9926041245 BS-bound=+7.105e-15
+put S90 T=1d flat lag2d            qmc                4096  64  +4.940e-06  1.19e-05  +0.42  9.51e-05  1.47e-02       nan   +0.005    0.53   BS=9.9926041245 BS-bound=+7.105e-15
+put S90 T=1d flat lag2d            rqmc              16384   8  +6.666e-06  1.82e-05  +0.37  5.16e-05  3.82e-05       nan   +0.007    0.50   BS=9.9926041245 BS-bound=+7.105e-15
+put S90 T=1d term lag0             plain              4096  64  +5.862e-04  1.98e-03  +0.30  1.58e-02  1.47e-02       nan   +0.586    0.53   BS=9.9989754447 BS-bound=+0.000e+00
+put S90 T=1d term lag0             antithetic         4096  64  -1.482e-06  1.96e-05  -0.08  1.57e-04  1.47e-02  1.54e-04   -0.001    0.55   BS=9.9989754447 BS-bound=+0.000e+00
+put S90 T=1d term lag0             qmc                4096  64  +4.941e-06  1.19e-05  +0.42  9.51e-05  1.47e-02       nan   +0.005    0.53   BS=9.9989754447 BS-bound=+0.000e+00
+put S90 T=1d term lag0             rqmc              16384   8  +6.667e-06  1.82e-05  +0.37  5.16e-05  3.82e-05       nan   +0.007    0.50   BS=9.9989754447 BS-bound=+0.000e+00
+put S90 T=1d term lag2d            plain              4096  64  +5.861e-04  1.98e-03  +0.30  1.58e-02  1.47e-02       nan   +0.586    0.53   BS=9.9978271952 BS-bound=-1.776e-15
+put S90 T=1d term lag2d            antithetic         4096  64  -1.482e-06  1.96e-05  -0.08  1.57e-04  1.47e-02  1.54e-04   -0.001    0.55   BS=9.9978271952 BS-bound=-1.776e-15
+put S90 T=1d term lag2d            qmc                4096  64  +4.940e-06  1.19e-05  +0.42  9.51e-05  1.47e-02       nan   +0.005    0.53   BS=9.9978271952 BS-bound=-1.776e-15
+put S90 T=1d term lag2d            rqmc              16384   8  +6.666e-06  1.82e-05  +0.37  5.16e-05  3.82e-05       nan   +0.007    0.50   BS=9.9978271952 BS-bound=-1.776e-15
+put S90 T=1y term lag2d            plain              4096  64  +1.868e-02  2.54e-02  +0.73  2.03e-01  1.79e-01       nan  +16.905    0.00   BS=11.0498342357 BS-bound=+4.556e+00
+put S90 T=1y term lag2d            antithetic         4096  64  -4.195e-03  9.80e-03  -0.43  7.84e-02  1.79e-01  8.18e-02   -3.797    0.00   BS=11.0498342357 BS-bound=+4.556e+00
+put S90 T=1y term lag2d            qmc                4096  64  -3.293e-03  5.18e-03  -0.64  4.14e-02  1.79e-01       nan   -2.980    0.00   BS=11.0498342357 BS-bound=+4.556e+00
+put S90 T=1y term lag2d            rqmc             131072   8  -1.054e-03  2.08e-03  -0.51  5.88e-03  6.84e-03       nan   -0.954    0.00   BS=11.0498342357 BS-bound=+4.556e+00
+call S110 T=1d flat lag0           plain              4096  64  -7.165e-04  2.42e-03  -0.30  1.94e-02  1.80e-02       nan   -0.716    0.47   BS=10.0052051830 BS-bound=+0.000e+00
+call S110 T=1d flat lag0           antithetic         4096  64  +1.811e-06  2.40e-05  +0.08  1.92e-04  1.80e-02  1.89e-04   +0.002    0.44   BS=10.0052051830 BS-bound=+0.000e+00
+call S110 T=1d flat lag0           qmc                4096  64  -6.039e-06  1.45e-05  -0.42  1.16e-04  1.80e-02       nan   -0.006    0.47   BS=10.0052051830 BS-bound=+0.000e+00
+call S110 T=1d flat lag0           rqmc              16384   8  -8.148e-06  2.23e-05  -0.37  6.31e-05  4.67e-05       nan   -0.008    0.50   BS=10.0052051830 BS-bound=+0.000e+00
+call S110 T=1d term lag2d          plain              4096  64  -7.164e-04  2.42e-03  -0.30  1.94e-02  1.80e-02       nan   -0.716    0.47   BS=9.9993281957 BS-bound=-1.776e-15
+call S110 T=1d term lag2d          antithetic         4096  64  +1.811e-06  2.40e-05  +0.08  1.92e-04  1.80e-02  1.89e-04   +0.002    0.44   BS=9.9993281957 BS-bound=-1.776e-15
+call S110 T=1d term lag2d          qmc                4096  64  -6.038e-06  1.45e-05  -0.42  1.16e-04  1.80e-02       nan   -0.006    0.47   BS=9.9993281957 BS-bound=-1.776e-15
+call S110 T=1d term lag2d          rqmc              16384   8  -8.147e-06  2.23e-05  -0.37  6.31e-05  4.67e-05       nan   -0.008    0.50   BS=9.9993281957 BS-bound=-1.776e-15
+call S110 T=1y flat lag0           plain              4096  64  -1.132e-02  3.46e-02  -0.33  2.76e-01  2.81e-01       nan   -7.325    0.00   BS=15.4535308833 BS-bound=+3.593e+00
+call S110 T=1y flat lag0           antithetic         4096  64  -4.441e-03  2.04e-02  -0.22  1.63e-01  2.81e-01  1.67e-01   -2.874    0.00   BS=15.4535308833 BS-bound=+3.593e+00
+call S110 T=1y flat lag0           qmc                4096  64  -5.889e-03  5.35e-03  -1.10  4.28e-02  2.81e-01       nan   -3.811    0.00   BS=15.4535308833 BS-bound=+3.593e+00
+call S110 T=1y flat lag0           rqmc             131072   8  +3.013e-03  2.42e-03  +1.25  6.84e-03  6.21e-03       nan   +1.950    0.00   BS=15.4535308833 BS-bound=+3.593e+00
+put S100 ATM T=1d flat             plain              4096  64  +6.277e-04  1.36e-03  +0.46  1.09e-02  9.46e-03       nan  +15.131    0.00   BS=0.4148732212 BS-bound=+4.149e-01
+put S100 ATM T=1d flat             antithetic         4096  64  -2.781e-04  8.52e-04  -0.33  6.82e-03  9.47e-03  6.90e-03   -6.704    0.00   BS=0.4148732212 BS-bound=+4.149e-01
+put S100 ATM T=1d flat             qmc                4096  64  -3.982e-04  2.53e-04  -1.57  2.02e-03  9.47e-03       nan   -9.598    0.00   BS=0.4148732212 BS-bound=+4.149e-01
+put S100 ATM T=1d flat             rqmc             131072   8  +7.073e-05  1.24e-04  +0.57  3.50e-04  3.58e-04       nan   +1.705    0.00   BS=0.4148732212 BS-bound=+4.149e-01
+put S100 ATM T=1y flat             plain              4096  64  +1.126e-02  2.15e-02  +0.52  1.72e-01  1.50e-01       nan  +16.393    0.00   BS=6.8668912053 BS-bound=+6.867e+00
+put S100 ATM T=1y flat             antithetic         4096  64  -5.240e-03  1.29e-02  -0.41  1.03e-01  1.50e-01  1.08e-01   -7.631    0.00   BS=6.8668912053 BS-bound=+6.867e+00
+put S100 ATM T=1y flat             qmc                4096  64  -7.046e-03  4.43e-03  -1.59  3.54e-02  1.50e-01       nan  -10.261    0.00   BS=6.8668912053 BS-bound=+6.867e+00
+put S100 ATM T=1y flat             rqmc             131072   8  +8.570e-04  2.11e-03  +0.41  5.96e-03  6.54e-03       nan   +1.248    0.00   BS=6.8668912053 BS-bound=+6.867e+00
+call S100 ATM T=1y term lag2d      plain              4096  64  +7.035e-04  2.68e-02  +0.03  2.15e-01  2.21e-01       nan   +0.735    0.00   BS=9.5686511196 BS-bound=+6.164e+00
+call S100 ATM T=1y term lag2d      antithetic         4096  64  -4.362e-03  2.02e-02  -0.22  1.61e-01  2.21e-01  1.70e-01   -4.559    0.00   BS=9.5686511196 BS-bound=+6.164e+00
+call S100 ATM T=1y term lag2d      qmc                4096  64  -6.122e-03  5.08e-03  -1.20  4.07e-02  2.21e-01       nan   -6.398    0.00   BS=9.5686511196 BS-bound=+6.164e+00
+call S100 ATM T=1y term lag2d      rqmc             131072   8  +1.496e-03  2.17e-03  +0.69  6.14e-03  7.11e-03       nan   +1.563    0.00   BS=9.5686511196 BS-bound=+6.164e+00
+
+elapsed 31.1s

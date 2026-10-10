@@ -1,0 +1,19 @@
+BS = 9.99424688
+antithetic      n=   256 seed=  7 steps=   1: price=9.99521893 bound=9.99424688 price-bound=+9.721e-04 eng_se=5.29e-02
+antithetic      n=   256 seed=  7 steps= 100: price=9.99345301 bound=9.99424688 price-bound=-7.939e-04 eng_se=6.36e-02
+antithetic      n=   256 seed=  7 steps= 252: price=9.99412415 bound=9.99424688 price-bound=-1.227e-04 eng_se=5.97e-02
+antithetic      n=   256 seed= 42 steps=   1: price=9.99605366 bound=9.99424688 price-bound=+1.807e-03 eng_se=4.70e-02
+antithetic      n=   256 seed= 42 steps= 100: price=9.99328740 bound=9.99424688 price-bound=-9.595e-04 eng_se=6.45e-02
+antithetic      n=   256 seed= 42 steps= 252: price=9.99315094 bound=9.99424688 price-bound=-1.096e-03 eng_se=6.52e-02
+qmc+antithetic  n= 16384 seed=  7 steps=   1: price=9.99425620 bound=9.99424688 price-bound=+9.323e-06 eng_se=7.36e-03
+qmc+antithetic  n= 16384 seed=  7 steps= 100: price=9.99420541 bound=9.99424688 price-bound=-4.146e-05 eng_se=7.37e-03
+qmc+antithetic  n= 16384 seed=  7 steps= 252: price=9.99426778 bound=9.99424688 price-bound=+2.090e-05 eng_se=7.36e-03
+qmc+antithetic  n= 16384 seed= 42 steps=   1: price=9.99425149 bound=9.99424688 price-bound=+4.613e-06 eng_se=7.36e-03
+qmc+antithetic  n= 16384 seed= 42 steps= 100: price=9.99421480 bound=9.99424688 price-bound=-3.208e-05 eng_se=7.36e-03
+qmc+antithetic  n= 16384 seed= 42 steps= 252: price=9.99420468 bound=9.99424688 price-bound=-4.219e-05 eng_se=7.36e-03
+qmc             n= 16384 seed=  7 steps=   1: price=9.99425620 bound=9.99424688 price-bound=+9.323e-06 eng_se=7.36e-03
+qmc             n= 16384 seed=  7 steps= 100: price=9.99420541 bound=9.99424688 price-bound=-4.146e-05 eng_se=7.37e-03
+qmc             n= 16384 seed=  7 steps= 252: price=9.99426778 bound=9.99424688 price-bound=+2.090e-05 eng_se=7.36e-03
+qmc             n= 16384 seed= 42 steps=   1: price=9.99425149 bound=9.99424688 price-bound=+4.613e-06 eng_se=7.36e-03
+qmc             n= 16384 seed= 42 steps= 100: price=9.99421480 bound=9.99424688 price-bound=-3.208e-05 eng_se=7.36e-03
+qmc             n= 16384 seed= 42 steps= 252: price=9.99420468 bound=9.99424688 price-bound=-4.219e-05 eng_se=7.36e-03

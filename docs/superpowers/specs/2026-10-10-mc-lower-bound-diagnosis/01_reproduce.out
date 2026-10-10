@@ -1,0 +1,31 @@
+MCParams of the test: MCParams(bump_size=None, bump_config=BumpConfig(spot_bump=0.01, gamma_spot_bump=None, vol_bump=0.01, time_bump_days=1, time_bump_mode='auto', rate_bump=0.0001, div_bump=0.0001), bus_days_in_year=252, seed=7, num_paths=256, time_steps=100, use_business_day_grid=False, use_qmc=False, use_antithetic=True, rqmc_target_std=0.0001, rqmc_target_std_mode='absolute', rqmc_target_std_floor=0.0, rqmc_min_batches=4, rqmc_max_batches=32, rqmc_target_std_scale=None, rqmc_paths_mode='per_batch')
+dated   S= 90.0 T=0.002739726027 (1/365=0.002739726027) r(T)=0.030000 q=0.010000 vol=0.2000
+    barrier engine: REFUSED PricingError: Price (9.993453) below discounted European lower bound (9.994247)
+    EuropeanMC raw = 9.99345301  se = 6.357e-02  bound = 9.99424688  raw-bound = -7.939e-04 (-0.01 se)
+    BS closed form = 9.9942468793  BS-bound = +0.000e+00  raw-BS = -7.939e-04
+    timing: payment_df=0.999917811597 determination_df=0.999917811597 delay_df=1.000000000000 payment_time=0.002739726027
+dated   S=110.0 T=0.002739726027 (1/365=0.002739726027) r(T)=0.030000 q=0.010000 vol=0.2000
+    barrier engine: priced 0.00000000
+    EuropeanMC raw = 0.00000000  se = 0.000e+00  bound = 0.00000000  raw-bound = +0.000e+00 (+nan se)
+    BS closed form = 0.0000000000  BS-bound = +4.863e-21  raw-BS = -4.863e-21
+    timing: payment_df=0.999917811597 determination_df=0.999917811597 delay_df=1.000000000000 payment_time=0.002739726027
+dated   S= 75.0 T=0.002739726027 (1/365=0.002739726027) r(T)=0.030000 q=0.010000 vol=0.2000
+    barrier engine: REFUSED PricingError: Price (24.993174) below discounted European lower bound (24.993836)
+    EuropeanMC raw = 24.99317437  se = 5.298e-02  bound = 24.99383593  raw-bound = -6.616e-04 (-0.01 se)
+    BS closed form = 24.9938359261  BS-bound = +0.000e+00  raw-BS = -6.616e-04
+    timing: payment_df=0.999917811597 determination_df=0.999917811597 delay_df=1.000000000000 payment_time=0.002739726027
+numeric S= 90.0 T=0.002739726027 (1/365=0.002739726027) r(T)=0.030000 q=0.010000 vol=0.2000
+    barrier engine: REFUSED PricingError: Price (9.993453) below discounted European lower bound (9.994247)
+    EuropeanMC raw = 9.99345301  se = 6.357e-02  bound = 9.99424688  raw-bound = -7.939e-04 (-0.01 se)
+    BS closed form = 9.9942468793  BS-bound = +0.000e+00  raw-BS = -7.939e-04
+    timing: payment_df=0.999917811597 determination_df=0.999917811597 delay_df=1.000000000000 payment_time=0.002739726027
+numeric S=110.0 T=0.002739726027 (1/365=0.002739726027) r(T)=0.030000 q=0.010000 vol=0.2000
+    barrier engine: priced 0.00000000
+    EuropeanMC raw = 0.00000000  se = 0.000e+00  bound = 0.00000000  raw-bound = +0.000e+00 (+nan se)
+    BS closed form = 0.0000000000  BS-bound = +4.863e-21  raw-BS = -4.863e-21
+    timing: payment_df=0.999917811597 determination_df=0.999917811597 delay_df=1.000000000000 payment_time=0.002739726027
+numeric S= 75.0 T=0.002739726027 (1/365=0.002739726027) r(T)=0.030000 q=0.010000 vol=0.2000
+    barrier engine: REFUSED PricingError: Price (24.993174) below discounted European lower bound (24.993836)
+    EuropeanMC raw = 24.99317437  se = 5.298e-02  bound = 24.99383593  raw-bound = -6.616e-04 (-0.01 se)
+    BS closed form = 24.9938359261  BS-bound = +0.000e+00  raw-BS = -6.616e-04
+    timing: payment_df=0.999917811597 determination_df=0.999917811597 delay_df=1.000000000000 payment_time=0.002739726027
