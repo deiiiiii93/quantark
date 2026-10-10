@@ -4,6 +4,10 @@ FX backtest engine.
 Steps an FX book through a market path (per-pair spot / vol / two-rate levels),
 reprices each day, and neutralises spot delta with a linear FX spot hedge,
 tracking hedge P&L and transaction costs.
+
+TARN / TARF positions age with the run on the run-fixings recorder (their fixings recorded and banked, determined cash
+booked into ``paid_cash`` on its pay date); ``portfolio_value`` includes cumulative paid cash and each row carries the
+pending cash's PV (``pending_pv``).
 """
 from __future__ import annotations
 
@@ -11,6 +15,7 @@ import dataclasses
 from copy import deepcopy
 from typing import Dict
 
+from quantark.asset.fx.product.option.target_redemption_state import booked_cash
 from quantark.asset.fx.riskmeasures.fx_greeks_calculator import FxGreeksCalculator
 from quantark.backtest.fx.config import FXBacktestConfig
 from quantark.backtest.fx.results import FXBacktestResults
@@ -58,12 +63,15 @@ class FXBacktestEngine:
 
         cum_hedge_pnl = 0.0
         cum_costs = 0.0
+        # TARN / TARF cash paid inside the run (spec 2026-10-09 fx-tarn 7.2): quantity-scaled, cumulative
+        cum_paid = 0.0
         num_hedges = 0
         rows = []
 
         for ts, row in path.iterrows():
             self._apply_row(portfolio, pairs, row, ts)
-            self.run_fixings.advance(portfolio)
+            day = self.run_fixings.advance(portfolio)
+            cum_paid += booked_cash(day.product_events)
 
             # Mark the existing hedge to the new spot before rebalancing.
             for pair in pairs:
@@ -71,7 +79,7 @@ class FXBacktestEngine:
                 cum_hedge_pnl += hedge[pair] * (spot - prev_spot[pair])
                 prev_spot[pair] = spot
 
-            value = portfolio.get_portfolio_value()
+            value = portfolio.get_portfolio_value() + cum_paid
             portfolio_pnl = value - initial_value
 
             delta_pre_total = 0.0
@@ -117,12 +125,14 @@ class FXBacktestEngine:
                 "delta_post": delta_post_total,
                 "hedged": hedged_today,
                 "hedge_notional": sum(hedge.values()),
+                "paid_cash": cum_paid,
+                "pending_pv": day.pending_pv,
             })
 
         return FXBacktestResults(
             rows=rows,
             initial_value=initial_value,
-            final_value=portfolio.get_portfolio_value(),
+            final_value=portfolio.get_portfolio_value() + cum_paid,
             num_hedges=num_hedges,
             total_transaction_costs=cum_costs,
             total_hedge_pnl=cum_hedge_pnl,

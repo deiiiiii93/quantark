@@ -48,6 +48,8 @@ backtest and FX dynamic scenario.
   `MaturedBeforeRunWarning`.
 - `RunFixingRecorder` calls an optional product hook `with_history_settled(env)` after the first valuation's fill and
   after each clock move's recording (`settle_history`); products without it are unchanged.
+- `target_redemption_state.booked_cash(product_events)`: the quantity-scaled PAYMENT cash of one run step's
+  `RunFixingDay.product_events`.
 
 ### Changed
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
@@ -90,6 +92,8 @@ backtest and FX dynamic scenario.
   Saturday fixings at Friday's spot (was a `KeyError`, a gap at the weekend spot, or a split shared-date refusal).
   W6's range accruals and Asians record exactly as before. `ProductReplay` refuses a TARN / TARF (`ValidationError`):
   it does not settle product-held history.
+- `FXBacktestEngine` books TARN / TARF cash: rows gain `paid_cash` (cumulative, quantity-scaled) and `pending_pv`;
+  `portfolio_value` and `final_value` include paid cash. A book without TARN / TARF is unchanged (cash columns 0.0).
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be

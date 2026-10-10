@@ -1,27 +1,35 @@
 """FX TARN / TARF ageing inside runs (spec 2026-10-09-fx-tarn-lifecycle-design.md section 7, tests B1-B6, Q8) on the
 W6 run-fixings recorder (spec 2026-10-09-run-fixings-design.md section 6; TARN plan re-plan 2026-10-10)."""
+import copy
 import dataclasses
 import warnings
 from datetime import datetime, timedelta
 
+import pandas as pd
 import pytest
 
 from fx_target_redemption_fixtures import (
-    FIX, FIX_DATES, INCEPTION, LAG2, PAIR, TARGET_CAL, VAL, _numeric_twin, book, dated_note, drive, engine_for, env,
-    note, tarf,
+    FIX, FIX_DATES, INCEPTION, LAG2, PAIR, TARGET_CAL, VAL, _numeric_twin, book, dated_note, dated_tarf, drive,
+    engine_for, env, following, mc, note, tarf,
 )
 from quantark.asset.equity.lifecycle.autocallable import MaturedBeforeRunWarning
 from quantark.asset.fx.engine.analytical import GarmanKohlhagenEngine
+from quantark.asset.fx.engine.mc import FxTargetRedemptionNoteMCEngine
 from quantark.asset.fx.product import CurrencyPair
 from quantark.asset.fx.product.option import FxVanillaOption
 from quantark.asset.fx.product.option.target_redemption_state import (
-    PendingPayment, TargetRedemptionEventType, TargetRedemptionState, TerminalBookingWarning,
+    PendingPayment, TargetRedemptionEvent, TargetRedemptionEventType, TargetRedemptionState, TerminalBookingWarning,
+    booked_cash,
 )
+from quantark.backtest import FXBacktestConfig, FXBacktestEngine
+from quantark.backtest.strategy import FXDeltaNeutralStrategy
+from quantark.backtest.transaction_costs import ZeroCostModel
 from quantark.param import SpotQuote
 from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import MissingFixingWarning
+from quantark.util.numerical import is_close
 from quantark.util.run_fixings import RunFixingRecorder
 
 FIXING, PAYMENT = TargetRedemptionEventType.FIXING, TargetRedemptionEventType.PAYMENT
@@ -342,3 +350,240 @@ def test_product_replay_refuses_a_target_redemption_product(make):
         ProductReplay(product=make(), product_quantity=1.0, has_lifecycle=True, lifecycle=None, surface_engine=None,
                       event_stats_engine=None, engine_config=None, market_data=None, start_date=None,
                       underlying="EURUSD", actions_sink=[], event_prob_sink=[], daily_event_sink=[], surfaces_sink=[])
+
+
+# ================================================================ Task 10: FX backtest
+
+
+def _path(index, spots):
+    return pd.DataFrame({"EURUSD_spot": spots, "EURUSD_vol": 0.10, "EURUSD_dom_rate": 0.05,
+                         "EURUSD_for_rate": 0.03}, index=index)
+
+
+def _flat_path(days, spot, start=VAL, freq="D"):
+    return _path(pd.date_range(start, periods=days, freq=freq), spot)
+
+
+def _run_backtest(pf, path):
+    engine = FXBacktestEngine(FXBacktestConfig(
+        portfolio=pf, market_path=path,
+        strategy=FXDeltaNeutralStrategy(delta_threshold=1e12, rebalance_frequency="on_threshold"),
+        transaction_cost_model=ZeroCostModel(), calculate_greeks=False))
+    return engine, engine.run()
+
+
+def _backtest(pf, path):
+    return _run_backtest(pf, path)[1]
+
+
+def _spy_advance(monkeypatch, keep=lambda day: True):
+    """Capture ``(RunFixingDay, {position id: (product, market value)})`` after each recorder advance of the run."""
+    seen = []
+    original = RunFixingRecorder.advance
+
+    def spy(self, portfolio):
+        day = original(self, portfolio)
+        if keep(day):
+            e = portfolio.pricing_environments["EURUSD"]
+            seen.append((day, {pid: (p.product, p.get_market_value(e)) for pid, p in portfolio.positions.items()}))
+        return day
+
+    monkeypatch.setattr(RunFixingRecorder, "advance", spy)
+    return seen
+
+
+LAG2D = [t + 2 / 365 for t in FIX]
+
+
+def test_booked_cash_scales_by_the_signed_quantity_and_ignores_other_entries():
+    pay = TargetRedemptionEvent(PAYMENT, -0.1, time=0.0)
+    fix = TargetRedemptionEvent(FIXING, -0.1, fixing=1.10)
+    assert booked_cash(()) == 0.0
+    assert booked_cash((("a", -2.0, pay), ("a", -2.0, fix), ("b", 1.0, ("SETTLED", None)))) == 0.0 + -2.0 * -0.1
+
+
+def test_b1_numeric_tarn_ages_in_the_backtest():
+    c0 = note(target=3.0)
+    pf, _ = book(c0)
+    rows = _backtest(pf, _flat_path(92, 1.20)).rows
+    mtm = [r["portfolio_value"] - r["paid_cash"] for r in rows]
+    assert mtm[0] != mtm[91]
+    tau = 91 / 365
+    rebuilt = note(fix=[t - tau for t in FIX[2:]], accrual_factors=c0.accrual_factors[2:], target=3.0,
+                   state=TargetRedemptionState(c0.full_coupon(0) + c0.full_coupon(1)))
+    e91 = dataclasses.replace(env(), valuation_date=VAL + timedelta(days=91))
+    assert is_close(mtm[91], FxTargetRedemptionNoteMCEngine(mc(n=2_000)).price(rebuilt, e91), rel_tol=1e-12)
+    assert rows[91]["paid_cash"] == c0.full_coupon(0) + c0.full_coupon(1)        # gap fixings, flat path: 1.20
+
+
+def test_b2_redeeming_path_books_cash_on_its_pay_days():
+    c0 = note(target=1.5, pay_times=LAG2D)
+    pf, _ = book(c0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", TerminalBookingWarning)
+        rows = _backtest(pf, _flat_path(70, 1.20)).rows
+    c_first = c0.full_coupon(0)
+    c_second = min(c0.full_coupon(1), 1.5 - c_first)
+    paid = [r["paid_cash"] for r in rows]
+    assert paid[32] == 0.0 and paid[33] == c_first and paid[62] == c_first
+    assert paid[63] == c_first + (c_second + 100.0)
+    e = env()
+    for d in (61, 62):  # terminal from the second fixing's recording day: value = sum DF x pending, no simulation
+        t = LAG2D[1] - d / 365
+        expected = 0.0 + c_second * e.get_domestic_df(t) + 100.0 * e.get_domestic_df(t)
+        assert is_close(rows[d]["pending_pv"], expected, rel_tol=1e-12)
+        assert is_close(rows[d]["portfolio_value"] - paid[d], rows[d]["pending_pv"], rel_tol=1e-12)
+    for d in range(63, 70):
+        assert rows[d]["pending_pv"] == 0.0 and rows[d]["portfolio_value"] == paid[d]
+
+
+def test_b3_quiet_path_books_the_principal_and_negative_tarf_cash():
+    tarn = note(target=3.0, pay_times=LAG2D)
+    pf, _ = book(tarn)
+    rows = _backtest(pf, _flat_path(370, 1.05)).rows
+    paid = [r["paid_cash"] for r in rows]
+    # the last fixing (t = 1.0, day 365) is live on day 365 and recorded on day 366 at 1.05; its principal is due on
+    # day 367 (1 + 2/365 years: still in the value that day, Task 8a) and booked on day 368
+    assert paid[366] == 0.0 and paid[367] == 0.0 and rows[367]["pending_pv"] == 100.0
+    assert paid[368] == 100.0 and rows[-1]["portfolio_value"] == 100.0
+    f = tarf(target=0.20, gearing=2.0, pay_times=LAG2D)
+    pf, _ = book(f)
+    rows = _backtest(pf, _flat_path(370, 1.05)).rows
+    paid = [r["paid_cash"] for r in rows]
+    steps = [b - a for a, b in zip([0.0] + paid[:-1], paid)]
+    assert sum(1 for s in steps if s < 0.0) == 12 and all(s <= 0.0 for s in steps)
+    diff = 1.0 * (1.05 - 1.15)
+    cf = 0.0 - 2.0 * (1.0 * max(-diff, 0.0))
+    expected = 0.0
+    for _ in range(12):
+        expected = expected + (0.0 + 1.0 * cf)
+    assert paid[-1] == expected
+
+
+def test_b4_twins_in_one_backtest(monkeypatch):
+    dn = dated_note(target=1.5, pay_dates=LAG2)
+    dt = dated_tarf(target=0.075, gearing=2.0, pay_dates=LAG2)
+    nn, nt = _numeric_twin(dn, env()), _numeric_twin(dt, env())
+    pf, (id_dn, id_nn, id_dt, id_nt) = book(dn, nn, dt, nt)
+    seen = _spy_advance(monkeypatch)
+    _backtest(pf, _flat_path(100, 1.20))
+    assert any(day.product_events for day, _ in seen)
+    for day, values in seen:
+        for a, b in ((id_dn, id_nn), (id_dt, id_nt)):
+            ev = {pid: [(x.event_type, x.amount, x.fixing, x.redeemed) for p, _q, x in day.product_events if p == pid]
+                  for pid in (a, b)}
+            assert ev[a] == ev[b]
+            assert _rows(day, a) == _rows(day, b)
+            assert booked_cash([x for x in day.product_events if x[0] == a]) == booked_cash(
+                [x for x in day.product_events if x[0] == b])
+            assert is_close(values[a][1], values[b][1], rel_tol=1e-12)
+
+
+def test_b5_backtest_registration_rules():
+    early = note(fix=[-10 / 365] + FIX[1:], accrual_start=-40 / 365, target=50.0)
+    pf, _ = book(early)
+    with pytest.warns(MissingFixingWarning) as rec:
+        rows = _backtest(pf, _flat_path(5, 1.20)).rows
+    assert len([w for w in rec if issubclass(w.category, MissingFixingWarning)]) == 1
+    assert all(r["paid_cash"] == 0.0 for r in rows)                             # paid before the baseline
+    gone = note(fix=[-60 / 365, -30 / 365], accrual_start=-90 / 365)
+    pf, _ = book(gone)
+    with pytest.warns(MaturedBeforeRunWarning):
+        rows = _backtest(pf, _flat_path(5, 1.20)).rows
+    assert all(r["portfolio_value"] == 0.0 and r["paid_cash"] == 0.0 for r in rows)
+
+
+def test_b5_backwards_path_raises():
+    pf, _ = book(note(target=3.0))
+    idx = pd.DatetimeIndex([VAL, VAL + timedelta(days=2), VAL + timedelta(days=1)])
+    with pytest.raises(ValidationError, match="cannot go back"):                  # W6 R9
+        _backtest(pf, _path(idx, 1.20))
+
+
+def test_business_day_path_records_a_saturday_fixing_at_fridays_spot():
+    """Review Focus 2 (W6 D5): a Saturday fixing on a weekday path under a CALENDAR_DAYS environment is never live
+    (t = 1/365 on Friday); it is recorded on Monday at FRIDAY's spot, gap=True, no warning, in both forms."""
+    saturday = datetime(2026, 8, 15)
+    dn = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
+    nn = _numeric_twin(dn, env())
+    pf, (id_d, id_n) = book(dn, nn)
+    index = pd.bdate_range(VAL, periods=70)
+    spots = [1.20 + 0.001 * k for k in range(len(index))]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        engine, _ = _run_backtest(pf, _path(index, spots))
+    friday_spot = spots[list(index).index(pd.Timestamp(2026, 8, 14))]
+    monday = pd.Timestamp(following(saturday))
+    got = [(day.date, f.position_id, f.outcome, f.spot, f.gap) for day in engine.run_fixings.days
+           for f in day.fixings if f.index == 1]
+    assert got == [(monday, id_d, friday_spot, friday_spot, True), (monday, id_n, friday_spot, friday_spot, True)]
+
+
+def test_w8_twins_on_the_last_fixing_day_and_after_the_end(monkeypatch):
+    """W8 (on main): a numeric participant aged to its maturity is exactly 0.0 and equals its dated twin. A TARN stays
+    in the run after its end (Ruling R19): PV(pending) through its last pay date (the cash due that day included,
+    Task 8a), then exactly 0.0."""
+    dn = dated_note(target=3.0, pay_dates=LAG2)
+    nn = _numeric_twin(dn, env())
+    pf, (id_d, id_n) = book(dn, nn)
+    last = pd.Timestamp(FIX_DATES[-1])                                            # day 365
+    seen = _spy_advance(monkeypatch, keep=lambda day: day.date >= last - pd.Timedelta(days=1))
+    rows = _backtest(pf, _flat_path(370, 1.05)).rows
+    on = {day.date: values for day, values in seen}
+    numeric_on_last, value_n = on[last][id_n]
+    assert numeric_on_last.maturity == 0.0 and numeric_on_last.fixing_times == [0.0]
+    assert is_close(on[last][id_d][1], value_n, rel_tol=1e-12)
+    due = on[pd.Timestamp(LAG2[-1])]                                              # last pay date: cash due today
+    assert due[id_d][1] == due[id_n][1] == 100.0
+    after = on[pd.Timestamp(LAG2[-1]) + pd.Timedelta(days=1)]
+    assert after[id_d][1] == after[id_n][1] == 0.0
+    assert rows[-1]["portfolio_value"] == rows[-1]["paid_cash"] == 0.0 + 1.0 * 100.0 + 1.0 * 100.0
+
+
+def test_zero_lag_fixing_day_value_keeps_the_coupon_no_dip():
+    """OQ-1 (b), user 2026-10-10 (Task 8a): on its fixing day a zero-lag dated TARN keeps that day's coupon in its
+    value (pending, due today); the run books it the next day, when the fixing is recorded. No dip."""
+    dn = dated_note(target=3.0)                                                   # pay dates = fixing dates
+    pf, _ = book(dn)
+    rows = _backtest(pf, _flat_path(33, 1.20)).rows
+    e30 = env(val=FIX_DATES[0])                                                   # day 30
+    banked = copy.deepcopy(dn)
+    banked.record_passed_fixings(e30)
+    coupon = banked.state.pending[0].amount
+    assert rows[30]["paid_cash"] == 0.0 and rows[30]["pending_pv"] == coupon
+    assert rows[31]["paid_cash"] == coupon and rows[31]["pending_pv"] == 0.0
+    assert is_close(rows[30]["portfolio_value"], engine_for(banked, n=2_000).price(banked, e30), rel_tol=1e-12)
+    for d in (30, 31):                                     # flat market: carry only, never a coupon-sized step
+        assert abs(rows[d]["portfolio_value"] - rows[d - 1]["portfolio_value"]) < 0.1 * coupon
+
+
+def test_business_day_clock_weekend_fixing_twins_in_a_backtest(monkeypatch):
+    """OQ-2 (b), user 2026-10-10 (Task 8b): on a BUSINESS_DAYS environment and a weekday path the Saturday fixing is
+    live on the Friday in both forms (W6 Ruling 2), the run does not stop, Monday records it at Friday's spot with
+    gap=False, and the twins agree every day."""
+    saturday = datetime(2026, 8, 15)
+    dn = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
+    nn = _numeric_twin(dn, env(**BUS))
+    pf, (id_d, id_n) = book(dn, nn, fx_env=env(**BUS))
+    seen = _spy_advance(monkeypatch)
+    index = pd.bdate_range(VAL, periods=70)
+    spots = [1.20 + 0.001 * k for k in range(len(index))]
+    engine, _ = _run_backtest(pf, _path(index, spots))
+    friday_spot = spots[list(index).index(pd.Timestamp(2026, 8, 14))]
+    monday = pd.Timestamp(following(saturday))
+    got = [(day.date, f.position_id, f.outcome, f.spot, f.gap) for day in engine.run_fixings.days
+           for f in day.fixings if f.index == 1]
+    assert got == [(monday, id_d, friday_spot, friday_spot, False), (monday, id_n, friday_spot, friday_spot, False)]
+    for _day, values in seen:
+        assert is_close(values[id_d][1], values[id_n][1], rel_tol=1e-12)
+
+
+def test_b6_book_without_target_redemption_books_nothing():
+    from quantark.portfolio.fx import FXPortfolio
+    vanilla = FxVanillaOption(strike=1.2, option_type=OptionType.CALL, maturity=1.0, notional_foreign=1.0,
+                              currency_pair=PAIR)
+    pf = FXPortfolio(portfolio_name="b6", pricing_environments={"EURUSD": env()})
+    pf.add_position(product=vanilla, quantity=1.0, entry_price=0.0, underlying="EURUSD",
+                    engine=GarmanKohlhagenEngine())
+    res = _backtest(pf, _flat_path(20, 1.20))
+    assert all(r["paid_cash"] == 0.0 and r["pending_pv"] == 0.0 for r in res.rows)

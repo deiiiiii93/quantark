@@ -11,7 +11,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Final, Optional, Sequence, Tuple
+from typing import Any, Final, Iterable, Optional, Sequence, Tuple
 
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import is_history
@@ -147,3 +147,14 @@ def pending_present_value(pending: Sequence[Tuple[float, float]], fx_env) -> flo
     for pay_time, amount in pending:
         pv += amount * fx_env.get_domestic_df(pay_time)
     return pv
+
+
+def booked_cash(product_events: Iterable[Tuple[str, float, Any]]) -> float:
+    """Quantity-scaled cash of the PAYMENT events among one run step's ``(position_id, quantity, event)`` entries
+    (``quantark.util.run_fixings.RunFixingDay.product_events``), summed in order from 0.0. Any other entry (a FIXING
+    event, another product's event) is ignored."""
+    total = 0.0
+    for _position_id, quantity, event in product_events:
+        if isinstance(event, TargetRedemptionEvent) and event.event_type is TargetRedemptionEventType.PAYMENT:
+            total += quantity * event.amount
+    return total
