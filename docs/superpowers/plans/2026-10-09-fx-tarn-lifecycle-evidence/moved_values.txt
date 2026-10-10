@@ -77,3 +77,32 @@
 #   30/360 US, BUSINESS_DAYS, calendar-env, intraday first fixing, LAG2 pays, band, targets 3 / 50 / inf) - resolved
 #   factors, PSEUDO and QUASI prices, three ageing steps (events, state, aged factors and price), as_of bookings:
 #   232 lines, byte-identical (sha1 a33276e91924ece6142767455a23d19e3da7bf24).
+#
+# Task 9 - TARN / TARF implement the run-fixings protocol (W6 D1: a fixing at exactly t = 0 is live).
+# (a) missing_fixing_fills / with_missing_fixings_filled list only STRICTLY past fixings, so W5b's freeze no longer pins
+#   today's fixing at the quoted spot: under calculate_greeks (and VaR / stress shocks) it moves with the bumped spot.
+#   Prices do not move (resolve still banks a t = 0 fixing at the quoted spot). Measured 4a82ec61 -> Task 9, MC
+#   20,000 paths seed 7, fixture contracts (scratchpad probe d1_moved.py):
+#     numeric TARN, fix [0.0] + k/12, accrual_start -30/365, target 3, valued VAL: price and every Greek unchanged
+#       (today's coupon is a digital at 1.10, spot 1.20: no bump crosses it).
+#     dated TARN, FIX_DATES, valued FIX_DATES[0], target 3: price and every Greek unchanged (same reason).
+#     numeric TARF, fix [0.0] + k/12, target 0.2, valued VAL: price 0.0704891643084694 unchanged;
+#       delta 2.896285162711585 -> 3.2895433011423396; delta_premium alike; fwd_delta 2.984490177538452 ->
+#       3.389724809298543; delta_percentage 49.30604908357964 -> 56.000833604669566;
+#       gamma 117.91477392062612 -> 129.65295291037964; gamma_percentage 2408.8422115865565 -> 2648.6376171793304;
+#       theta, vega, rho_dom, rho_for unchanged.
+#     dated TARF, FIX_DATES, valued FIX_DATES[0], target 0.2: price 0.09420111783478018 unchanged;
+#       delta 2.6840171085174642 -> 3.0741102745208164; delta_premium alike; fwd_delta 2.758946323323691 ->
+#       3.1599296489080495; delta_percentage 34.19089501538581 -> 39.16017574117344;
+#       gamma 209.60250085497682 -> 208.4573996696815; gamma_percentage 3204.076641219307 -> 3186.5721174437253;
+#       theta, vega, rho_dom, rho_for unchanged.
+# (b) Warnings: pricing / Greeks with a fixing at t = 0 no longer emit MissingFixingWarning for it (only strictly past
+#   fixings are named). Test moved: test_a_banked_count_at_a_shared_date_boundary_is_accepted[0-tarn|tarf] (two
+#   shared-date fixings on the valuation date, banked 0) expected `MissingFixingWarning "2 past fixings"`; now silent.
+# (c) Numeric labels / protocol indices count from the booking (Ruling R14): after record_passed_fixings banks k
+#   fixings, the next listed fixing's FIXING / PAYMENT label and missing_fixing_fills index are #k (were #0). At
+#   construction the offset is 0: every pre-Task-9 label and index is unchanged; no existing test pinned a post-banking
+#   numeric label.
+# W6 participants (equity RA / Asian, FX domestic / foreign / quanto RA, dated and numeric; registration at day 0 and
+#   with history at day 6; daily advances incl. a same-date advance): RunFixingDay records, held products' records and
+#   market values byte-identical 4a82ec61 vs Task 9 (509 lines, sha1 6603215e7a9c28bca258e39eeeb82ef3740c9469).

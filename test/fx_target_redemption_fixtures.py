@@ -1,6 +1,7 @@
 """Shared builders for the FX TARN / TARF lifecycle tests (spec 2026-10-09-fx-tarn-lifecycle-design.md, section 2.2
 fixture: twelve monthly fixings at k/12, TARN notional 100 / coupon 12% / strike 1.10, TARF strike 1.15 / notional 1,
 EURUSD 1.20, r_d 5%, r_f 3%, vol 10%)."""
+import dataclasses
 from datetime import datetime, timedelta
 
 from quantark.asset.fx.engine.mc import FxTargetRedemptionNoteMCEngine, FxTarnForwardMCEngine
@@ -9,6 +10,7 @@ from quantark.asset.fx.product import CurrencyPair
 from quantark.asset.fx.product.option import FxTargetRedemptionForward, FxTargetRedemptionNote
 from quantark.asset.fx.product.option.target_redemption_state import PendingPayment, TargetRedemptionState
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.portfolio.fx import FXPortfolio
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.calendar import DayCountConvention
 from quantark.util.calendar.business_calendar import CalendarType, create_calendar
@@ -99,3 +101,27 @@ def _numeric_twin(dated, fx_env):
                                       accrual_factors=list(view.accrual_factors), **common)
     return FxTargetRedemptionForward(strike=dated.strike, notional=dated.notional, gearing=dated.gearing,
                                      is_buy_base=dated.is_buy_base, **common)
+
+
+# --- run fixings (W6 recorder; TARN plan re-plan 2026-10-10, Task 9) ------------------------------------------------
+
+def book(*products, quantities=None, n=2_000, fx_env=None):
+    """An ``FXPortfolio`` on EURUSD holding ``products`` (quantity 1 each unless given), each with its MC engine; returns
+    ``(portfolio, position_ids)``. The products themselves are held: the run engines clone the book, the recorder
+    replaces a held product only with copies."""
+    pf = FXPortfolio(portfolio_name="w4b", pricing_environments={"EURUSD": fx_env or env()})
+    ids = []
+    for i, prod in enumerate(products):
+        q = 1.0 if quantities is None else quantities[i]
+        ids.append(pf.add_position(product=prod, quantity=q, entry_price=0.0, underlying="EURUSD",
+                                   engine=engine_for(prod, n=n)).position_id)
+    return pf, ids
+
+
+def drive(portfolio, recorder, date, spot, pair="EURUSD"):
+    """Run instant ``date`` at ``spot`` on ``pair`` (a replaced environment, as the FX backtest's ``_apply_row``), then
+    ``recorder.advance`` (W6 run fixings); returns the ``RunFixingDay``."""
+    e = portfolio.pricing_environments[pair]
+    portfolio.pricing_environments[pair] = dataclasses.replace(e, valuation_date=date,
+                                                               spot_quote=SpotQuote(spot=spot))
+    return recorder.advance(portfolio)

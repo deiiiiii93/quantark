@@ -13,6 +13,10 @@ calendar-day clock, where a record is live at one instant only (R3 amendment / R
 takes the previous instant's spot, ``gap=True``; R5 the first valuation is W5b's freeze; R6 a numeric contract
 ages by the environment's year fraction; R7 an undated run never advances; R8 time-of-day instants are refused; R9
 the clock never goes back; R10 the run's working positions get copies, the booked product is never mutated.
+
+Optional product hooks for product-held run state (W4b TARN / TARF): ``matured_before(env)``, ``lifecycle_events``
+(append-only), ``pending_pv(env)`` and ``with_history_settled(env)`` (the recorded history banked and the cash due
+paid, on a copy; ``settle_history``).
 """
 from __future__ import annotations
 
@@ -88,6 +92,14 @@ def at_spot(env: Any, spot: float) -> Any:
     return dataclasses.replace(env, spot_quote=dataclasses.replace(env.spot_quote, spot=float(spot)))
 
 
+def settle_history(product: Any, env: Any) -> Any:
+    """The optional hook ``with_history_settled(env)`` of a product holding run state (W4b TARN / TARF): a copy with
+    its recorded strictly past fixings banked and the cash due by ``env``'s date paid, or the product itself. A product
+    without the hook is returned unchanged (TARN plan re-plan 2026-10-10, Ruling R13)."""
+    hook = getattr(product, "with_history_settled", None)
+    return hook(env) if callable(hook) else product
+
+
 def step_fixings(product: Any, env: Any, *, prev_date: Any, prev_spot: float,
                  run_fills: Mapping[int, Any],
                  live_spots: Optional[Mapping[int, float]] = None) -> Tuple[Any, Dict[int, Any]]:
@@ -133,6 +145,11 @@ class RunFixingRecorder:
     ``freeze_portfolio_fixings`` in the run engines), and ``advance(portfolio)`` after every later path instant's
     market and date are applied, before anything is priced.
 
+    A product holding run state may carry the optional hook ``with_history_settled(env)`` (``settle_history``): it is
+    called once at a position's registration, after the fill (its banking and payments are not reported), and at
+    every clock-moving ``advance`` right after the step's recording (its FIXING / PAYMENT events are reported in
+    ``RunFixingDay.product_events``); a same-date ``advance`` (Ruling 9) does not call it.
+
     Precondition: between ``register`` and ``advance`` a run must not replace a participant's product except with a
     copy that keeps its records (outcomes included); a reset to the booked product would re-record its fixings.
     """
@@ -169,7 +186,9 @@ class RunFixingRecorder:
                 stacklevel=3)
             portfolio.remove_position(pid)
             return False
-        frozen = freeze_missing_fixings(position.product, env)
+        # W5b's fill, then the product's own settle step (W4b): registration's banking and payments are before the
+        # baseline and are never reported (Ruling 10)
+        frozen = settle_history(freeze_missing_fixings(position.product, env), env)
         if frozen is not position.product:
             position.product = frozen
         self._live[pid] = update_live(frozen.open_fixings(env), env.valuation_date, env.spot)
@@ -230,6 +249,7 @@ class RunFixingRecorder:
             labels = aged.open_fixings(env)
             recorded, new = step_fixings(aged, env, prev_date=prev_date, prev_spot=prev_spot, run_fills={},
                                          live_spots={i: s for i, (_d, s) in live.items()})
+            recorded = settle_history(recorded, env)   # W4b: bank what was just recorded, pay what is due
             for index in sorted(new):
                 fixings.append(RecordedFixing(position_id=pid, index=index, label=labels[index][1],
                                               outcome=new[index],

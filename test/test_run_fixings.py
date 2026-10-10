@@ -615,3 +615,28 @@ def test_hooks_matured_events_pending_pv():
         days.append(rec.advance(pf))
     assert days[4].product_events == (("keep", -3.0, ("FIXING", 105.0)),)  # the step to day 5
     assert days[4].pending_pv == -3.0 * 2.0 and days[5].product_events == ()
+
+
+class _SettlingStub(_Stub):
+    """A _Stub whose run state settles on the instant (``with_history_settled``), like W4b's TARN paying cash."""
+
+    def with_history_settled(self, env):
+        if ("SETTLED", env.valuation_date) in self.lifecycle_events:
+            return self
+        return _SettlingStub(self.matured, self.lifecycle_events + [("SETTLED", env.valuation_date)], self.recorded)
+
+    def with_fixings_recorded(self, fills):
+        out = super().with_fixings_recorded(fills)
+        return out if out is self else _SettlingStub(out.matured, out.lifecycle_events, out.recorded)
+
+
+def test_settle_hook_runs_at_register_and_on_every_clock_move():
+    """W4b re-plan Ruling R13: ``with_history_settled`` runs after the first valuation's fill (its events never
+    reported) and after each clock move's recording (its events reported); a same-date advance does not call it."""
+    pf = _DuckBook(keep=(_SettlingStub(), 2.0))
+    rec = RunFixingRecorder()
+    day0 = rec.register(pf)
+    assert day0.product_events == () and pf.positions["keep"].product.lifecycle_events == [("SETTLED", F.START)]
+    assert rec.advance(pf).product_events == ()
+    F.move(pf, 1)
+    assert rec.advance(pf).product_events == (("keep", 2.0, ("SETTLED", F.START + timedelta(days=1))),)

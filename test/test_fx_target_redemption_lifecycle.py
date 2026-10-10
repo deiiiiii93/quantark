@@ -19,8 +19,10 @@ from fx_target_redemption_fixtures import (
     TARGET_CAL,
     VAL,
     _numeric_twin,
+    book,
     dated_note,
     dated_tarf,
+    drive,
     engine_for,
     env,
     following,
@@ -43,6 +45,7 @@ from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import MissingFixingWarning, freeze_missing_fixings
 from quantark.util.numerical import is_close
+from quantark.util.run_fixings import RunFixingRecorder, participates
 
 FIXING, PAYMENT = TargetRedemptionEventType.FIXING, TargetRedemptionEventType.PAYMENT
 
@@ -1434,10 +1437,8 @@ def test_a_banked_count_at_a_shared_date_boundary_is_accepted(kind, k):
     as_of = FIX_DATES[0] if k <= 2 else FIX_DATES[1]
     booked = _shared_dated(kind, target=50.0, state=TargetRedemptionState(0.0, as_of=as_of, fixings_banked=k))
     assert booked.state.fixings_banked == k
-    if k == 0:                                                         # both shared-date fixings passed, unbanked
-        with pytest.warns(MissingFixingWarning, match="2 past fixings"):
-            _price(booked, e=env(val=as_of), n=2_000)
-    else:
+    with warnings.catch_warnings():  # k == 0: both shared-date fixings are at t = 0, live: decided silently (W6 D1)
+        warnings.simplefilter("error", MissingFixingWarning)
         _price(booked, e=env(val=as_of), n=2_000)
 
 
@@ -1650,3 +1651,158 @@ def test_stated_accrual_end_dates_keep_the_positive_factor_check():
                    day_count_convention=DayCountConvention.BUSINESS_DAYS)
     with pytest.raises(ValidationError, match="zero length"):
         d.resolve(env(calendar=TARGET_CAL))
+
+
+# --- Run-fixings protocol (W6 hand-off; plan re-plan 2026-10-10) --------------------------------------------------
+
+DAY = 1 / 365
+
+
+def _days(product, n):
+    for _ in range(n):
+        product = product.with_time_elapsed(DAY)
+    return product
+
+
+@pytest.mark.parametrize("make", [lambda: note(target=3.0), lambda: tarf(target=0.20),
+                                  lambda: dated_note(target=3.0), lambda: dated_tarf(target=0.20)])
+def test_target_redemption_products_take_part_in_run_fixings(make):
+    product = make()
+    assert product.has_run_fixings and participates(product)
+
+
+def test_open_fixings_lists_the_unbanked_fixings_by_booking_index():
+    n, d = note(target=3.0), dated_note(target=3.0)
+    assert n.open_fixings(env())[0] == (FIX[0], "#0 t=0.0833333")
+    assert d.open_fixings(env())[11] == (1.0, "#11 2027-06-15")
+    assert sorted(n.open_fixings(env())) == sorted(d.open_fixings(env())) == list(range(12))
+    e = env(val=FIX_DATES[1] + timedelta(days=1))
+    banked = copy.deepcopy(d)
+    banked.record_passed_fixings(e)
+    assert sorted(banked.open_fixings(e)) == list(range(2, 12))
+
+
+def test_numeric_indices_count_from_the_booking_across_banking():
+    """Ruling R14: a numeric contract drops banked fixings, so its protocol index counts from the booking."""
+    aged = _days(note(target=50.0), 32)                                  # fixing #0 (30.4 days) is history
+    assert aged.missing_fixing_fills(env()) == {0: 1.20}
+    settled = aged.with_fixings_recorded({0: 1.20}).with_history_settled(env())
+    assert sorted(settled.open_fixings(env()))[:2] == [1, 2]             # #0 banked and dropped; #1 keeps its index
+    assert settled.with_fixings_recorded({0: 1.05}) is settled           # #0 is banked: nothing left to record
+    later = _days(settled, 30)                                           # #1 (60.8 days) is history on day 62
+    assert later.missing_fixing_fills(env(spot=1.30)) == {1: 1.30}
+    events = later.with_fixings_recorded({1: 1.30}).with_history_settled(env()).lifecycle_events
+    assert [(x.event_type, x.label[:3]) for x in events] == [(FIXING, "#0 "), (PAYMENT, "#0 "),
+                                                              (FIXING, "#1 "), (PAYMENT, "#1 ")]
+
+
+def test_with_time_elapsed_is_a_snapping_copy_that_banks_nothing():
+    n = note(fix=[31 / 365] + FIX[1:], target=3.0)
+    aged = _days(n, 31)
+    assert n.fixing_times[0] == 31 / 365 and aged is not n
+    assert aged.fixing_times[0] == 0.0 and aged.open_fixings(env())[0] == (0.0, "#0 t=0")
+    assert aged.state == INCEPTION and aged.lifecycle_events == ()
+    assert is_close(aged.maturity, 1.0 - 31 / 365, rel_tol=0.0, abs_tol=1e-14)
+    with pytest.warns(TerminalBookingWarning):
+        owed = note(fix=[], accrual_factors=[], target=1.5,
+                    state=TargetRedemptionState(1.5, pending=(PendingPayment(100.5, pay_time=10 / 365),)))
+    due = _days(owed, 10)                                                # its pay day: due today (Task 8a)
+    assert due.state.pending == (PendingPayment(100.5, pay_time=0.0),) and due.lifecycle_events == ()
+    paid = _days(owed, 11)
+    assert owed.state.pending and paid.state.pending == ()
+    assert [(x.event_type, x.amount) for x in paid.lifecycle_events] == [(PAYMENT, 100.5)]
+    d = dated_note(target=3.0)
+    assert d.with_time_elapsed(0.5) is d and n.with_time_elapsed(0.0) is n
+
+
+@pytest.mark.parametrize("form", ["numeric", "dated"])
+def test_a_fixing_at_t0_is_live_silent_and_never_frozen(form):
+    """W6 D1: today's fixing moves with the (bumped) spot; only history is frozen or settled."""
+    if form == "numeric":
+        product, e = note(fix=[0.0] + FIX[1:], accrual_start=-30 / 365, target=3.0), env()
+    else:
+        product, e = dated_note(target=3.0), env(val=FIX_DATES[0])
+    assert product.missing_fixing_fills(e) == {}
+    assert freeze_missing_fixings(product, e) is product
+    assert product.with_history_settled(e) is product
+    assert product.open_fixings(e)[0][0] == 0.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MissingFixingWarning)
+        view = product.resolve(e)                                          # decided at the quoted spot, silently
+    banked = copy.deepcopy(product)
+    banked.record_passed_fixings(e)
+    assert view == banked.resolve(e)
+
+
+@pytest.mark.parametrize("form", ["numeric", "dated"])
+def test_with_history_settled_banks_only_recorded_history(form):
+    if form == "numeric":
+        product, e = _days(note(target=3.0, pay_times=[t + 2 / 365 for t in FIX]), 31), env()
+    else:
+        product, e = dated_note(target=3.0, pay_dates=LAG2), env(val=FIX_DATES[0] + timedelta(days=1))
+    assert product.with_history_settled(e) is product                    # history without a rate: never filled here
+    assert product.missing_fixing_fills(e) == {0: 1.20}
+    settled = product.with_fixings_recorded({0: 1.25}).with_history_settled(e)
+    assert [(x.event_type, x.fixing) for x in settled.lifecycle_events] == [(FIXING, 1.25)]
+    assert settled.state.accumulated > 0.0 and len(settled.state.pending) == 1   # paid two days after the fixing
+    assert product.state == INCEPTION and product.missing_fixing_fills(e) == {0: 1.20}  # the product is a copy
+    if form == "dated":
+        assert (settled.state.fixings_banked, settled.state.as_of) == (1, e.valuation_date)   # per fixing (Task 8b)
+        assert settled.with_history_settled(env(val=LAG2[0])) is settled          # due today: pending (Task 8a)
+        paid = settled.with_history_settled(env(val=LAG2[0] + timedelta(days=1)))
+        assert [x.event_type for x in paid.lifecycle_events] == [FIXING, PAYMENT] and paid.state.pending == ()
+
+
+def test_matured_before_is_strict_history_of_the_last_fixing():
+    assert note(fix=[-60 / 365, -30 / 365], accrual_start=-90 / 365).matured_before(env())
+    assert not note(fix=[-60 / 365, 0.0], accrual_start=-90 / 365).matured_before(env())   # live today
+    two = dated_note(fixing_dates=FIX_DATES[:2])
+    assert two.matured_before(env(val=FIX_DATES[1] + timedelta(days=1)))
+    assert not two.matured_before(env(val=FIX_DATES[1]))
+    with pytest.warns(TerminalBookingWarning):
+        owed = note(fix=[], accrual_factors=[], target=1.5,
+                    state=TargetRedemptionState(1.5, pending=(PendingPayment(100.5, pay_time=10 / 365),)))
+    assert not owed.matured_before(env())                                # terminal: kept at PV(pending), spec 5.3
+
+
+_D2_SPOT = {("tarn", "quiet"): 1.05, ("tarn", "redeeming"): 1.20, ("tarn_no_principal", "quiet"): 1.05,
+            ("tarn_no_principal", "redeeming"): 1.20, ("tarf", "quiet"): 1.15, ("tarf", "redeeming"): 1.20}
+
+
+@pytest.mark.parametrize("path", ["quiet", "redeeming"])
+@pytest.mark.parametrize("kind", ["tarn", "tarn_no_principal", "tarf"])
+def test_d2_twins_age_identically(kind, path):
+    """D2 on the W6 recorder: a fixing is live on its own day in both forms and recorded the next day at that day's
+    spot; events, recordings and state bitwise, prices relative 1e-12, on every checkpoint."""
+    spot = _D2_SPOT[(kind, path)]
+    if kind == "tarf":
+        dated = dated_tarf(pay_dates=LAG2, target=0.075, gearing=2.0)
+    else:
+        dated = dated_note(pay_dates=LAG2, target=1.5, include_principal=(kind == "tarn"))
+    twin = _numeric_twin(dated, env())
+    pf, (pid_d, pid_n) = book(dated, twin, n=4_000, fx_env=env(spot=spot))
+    rec = RunFixingRecorder()
+    rec.register(pf)
+    checkpoints = {FIX_DATES[1] - timedelta(days=1), FIX_DATES[1], FIX_DATES[1] + timedelta(days=1),
+                   VAL + timedelta(days=91), LAG2[1] + timedelta(days=1), LAG2[-1] + timedelta(days=1)}
+    events = {pid_d: [], pid_n: []}
+    recorded = {pid_d: [], pid_n: []}
+    day = VAL
+    while day < LAG2[-1] + timedelta(days=2):
+        day += timedelta(days=1)
+        result = drive(pf, rec, day, spot)
+        for pid, _q, ev in result.product_events:
+            events[pid].append((day, ev.event_type, ev.amount, ev.fixing, ev.redeemed))
+        for f in result.fixings:
+            recorded[f.position_id].append((day, f.index, f.outcome, f.spot, f.gap))
+        if day in checkpoints:
+            e = pf.pricing_environments["EURUSD"]
+            a, b = pf.positions[pid_d], pf.positions[pid_n]
+            assert a.product.state.accumulated == b.product.state.accumulated
+            assert a.product.fixings_banked == b.product.fixings_banked          # same fixing identity (OQ-3)
+            assert [p.amount for p in a.product.state.pending] == [p.amount for p in b.product.state.pending]
+            assert is_close(a.get_market_value(e), b.get_market_value(e), rel_tol=1e-12)
+            if day == FIX_DATES[1]:                                    # live on its own day, in both forms (W6 D1)
+                assert a.product.open_fixings(e)[1][0] == b.product.open_fixings(e)[1][0] == 0.0
+    assert events[pid_d] and events[pid_d] == events[pid_n]
+    assert recorded[pid_d] and recorded[pid_d] == recorded[pid_n]

@@ -39,6 +39,15 @@ backtest and FX dynamic scenario.
   `accrual_factors`. One end per fixing, strictly increasing, each between its fixing and pay dates; it requires
   `initial_date` and excludes `accrual_factors`. Without it the ends are the fixing dates: every existing booking keeps
   its factors and value exactly; such a contract still cannot share a fixing date (a zero-length period).
+- FX TARN / TARF take part in run fixings (`quantark.util.run_fixings`, W6): `has_run_fixings`,
+  `open_fixings(fx_env)`, `with_time_elapsed(dt)` (a numeric copy aged by `time_shift`, times snapped to exactly 0.0,
+  nothing banked), `with_history_settled(fx_env)` (recorded history banked and cash due paid, on a copy) and
+  `matured_before(fx_env)`. In the FX backtest and FX dynamic scenario they age with the run's clock: a fixing is
+  recorded at the spot of the first instant it was live (a fixing between path instants at the previous instant's,
+  `gap=True`), banked in order with its cash; a contract whose last fixing is before the run start is removed with
+  `MaturedBeforeRunWarning`.
+- `RunFixingRecorder` calls an optional product hook `with_history_settled(env)` after the first valuation's fill and
+  after each clock move's recording (`settle_history`); products without it are unchanged.
 
 ### Changed
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
@@ -70,6 +79,11 @@ backtest and FX dynamic scenario.
   construction; a zero-business-day period under a `BUSINESS_DAYS` contract count, at resolve), which a dated contract
   priced before. A dated state's banked count (`fixings_banked`, or derived from `as_of`) may not stop inside the
   periods fixing on one calendar date unless the target was hit. `mean_redemption_fraction` does not count a hit at the final fixing time as early.
+- FX TARN / TARF: a fixing at exactly the valuation instant (t = 0) is live (run-fixings D1):
+  `missing_fixing_fills` / `with_missing_fixings_filled` list only strictly past fixings, so the Greek freeze leaves
+  today's fixing to move with the bumped spot, and pricing decides it at the quoted spot without a
+  `MissingFixingWarning`. Numeric protocol indices and event labels count from the booking (fixings banked since
+  construction + listed position).
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be
