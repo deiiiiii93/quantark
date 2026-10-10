@@ -33,6 +33,12 @@ backtest and FX dynamic scenario.
   backtests bank it at the base spot under every bump and shock (one `MissingFixingWarning` per call, none per bump).
   Banking (`record_passed_fixings`, `resolve`) uses a recorded rate in place of the quoted spot; a rate recorded for a
   fixing still after valuation is refused with `ValidationError`.
+- `FxTargetRedemptionNote(accrual_end_dates=...)` (dated form; user ruling 2026-10-10 on R26, option (b)): each
+  period's own accrual end date, separate from its fixing date. Period `i` accrues from `initial_date` (first) or the
+  previous period's end to its own end in the contract day count, so periods may share a fixing date without explicit
+  `accrual_factors`. One end per fixing, strictly increasing, each between its fixing and pay dates; it requires
+  `initial_date` and excludes `accrual_factors`. Without it the ends are the fixing dates: every existing booking keeps
+  its factors and value exactly; such a contract still cannot share a fixing date (a zero-length period).
 
 ### Changed
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`

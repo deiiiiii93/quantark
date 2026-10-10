@@ -59,3 +59,21 @@
 #   falls strictly between two fixings on one calendar date (10:00 / 15:00, as_of 12:00) is refused like the explicit
 #   count, same redeemed / terminal exemption. e2e07886 and 4c2b924b accepted the booking (e2e07886 then refused it at
 #   pricing on the equal fixing times). As_of-only bookings on distinct dates: unchanged (same banked counts).
+#
+# Task 8d - user ruling 2026-10-10 on R26, option (b): the TARN's own accrual period dates (accrual_end_dates).
+# Existing bookings: no value moves (accrual_end_dates=None calls calculate_year_fraction with today's dates; pinned
+# bitwise by test_accrual_end_dates_on_the_fixing_dates_reproduce_the_default_bitwise, calendar and business-day).
+# New bookings: accrual_end_dates given (incl. periods sharing a fixing date without accrual_factors): TypeError ->
+# priced, equal to the numeric twin built from the per-period factors.
+# Narrowed refusal (Task 8c): a shared fixing date is refused only under the default derivation; message now names
+# accrual_end_dates or accrual_factors.
+# Refused pending OQ-5 / OQ-6 (non-blocking): an accrual end before its fixing date or after its pay date; gapped or
+# overlapping periods by dates. Both still book with accrual_factors.
+# Also refused (Task 8c's positive-factor invariant kept on the stated path, numeric == dated twin): stated ends that
+#   are strictly increasing but zero whole days apart under ACT/365 etc. (10:00 / 15:00 on one date; at construction)
+#   or zero business days apart under a BUSINESS_DAYS contract count (Friday -> Saturday; at resolve). New keyword:
+#   these bookings could not be made before (TypeError), so nothing moves.
+# Bitwise evidence (a4203cc9 vs branch): 29 default-derivation dated TARNs (ACT_365 default / explicit, ACT_360,
+#   30/360 US, BUSINESS_DAYS, calendar-env, intraday first fixing, LAG2 pays, band, targets 3 / 50 / inf) - resolved
+#   factors, PSEUDO and QUASI prices, three ageing steps (events, state, aged factors and price), as_of bookings:
+#   232 lines, byte-identical (sha1 a33276e91924ece6142767455a23d19e3da7bf24).

@@ -27,7 +27,8 @@ Principal handling is a config flag:
     strip); the PV is **not** a full note value.
 
 Accrual: numeric form - the first listed period starts at ``accrual_start`` (or the caller states explicit
-factors); dated form - period ``i`` runs from ``initial_date`` / the previous fixing date to this fixing date in the
+factors); dated form - period ``i`` runs from ``initial_date`` / the previous period's accrual end to its own accrual end
+(``accrual_end_dates``; by default the fixing dates, i.e. the previous fixing date to this fixing date) in the
 contract ``day_count_convention`` (default ACT/365), or explicit factors. No start is assumed. The contract carries
 its realized ``state``.
 
@@ -74,6 +75,9 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
         initial_date: Dated form: start of the first period (exclusive with ``accrual_factors``).
         day_count_convention: Dated form: the coupon accrual day count for ``initial_date``-derived factors
             (``None`` = ACT/365).
+        accrual_end_dates: Dated form: each period's accrual end, 1:1 with ``fixing_dates``, strictly increasing,
+            between the period's fixing and pay dates; requires ``initial_date``, excludes ``accrual_factors``;
+            ``None`` = the fixing dates (periods may then not share a fixing date).
     """
 
     _has_accrual = True
@@ -100,6 +104,7 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
         pay_dates: Optional[List[datetime]] = None,
         initial_date: Optional[datetime] = None,
         day_count_convention: Optional[DayCountConvention] = None,
+        accrual_end_dates: Optional[List[datetime]] = None,
     ):
         self.coupon_rate = coupon_rate
         self.notional = notional
@@ -115,6 +120,14 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
                 if value is not None:
                     raise ValidationError(
                         f"{name} belongs to the numeric form; a dated TARN takes pay_dates and initial_date")
+            if accrual_end_dates is not None and accrual_factors is not None:
+                raise ValidationError(
+                    "accrual_end_dates sets the derived accrual factors; it cannot be combined with explicit "
+                    "accrual_factors")
+            if accrual_end_dates is not None and initial_date is None:
+                raise ValidationError(
+                    "accrual_end_dates needs initial_date: the first period accrues from initial_date to "
+                    "accrual_end_dates[0]")
             if initial_date is None and accrual_factors is None:
                 raise ValidationError(
                     "a dated TARN derives its periods from initial_date or states explicit accrual_factors")
@@ -126,18 +139,21 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
                     "accrual_factors")
             self.initial_date = initial_date
             self.day_count_convention = day_count_convention
+            self.accrual_end_dates = list(accrual_end_dates) if accrual_end_dates is not None else None
             self.accrual_factors = [float(a) for a in accrual_factors] if accrual_factors is not None else None
             self._init_dated(fixing_dates, pay_dates, currency_pair, state)
             self.validate()
             self._refresh_dated_horizon()
         else:
             for name, value in (("pay_dates", pay_dates), ("initial_date", initial_date),
-                                ("day_count_convention", day_count_convention)):
+                                ("day_count_convention", day_count_convention),
+                                ("accrual_end_dates", accrual_end_dates)):
                 if value is not None:
                     raise ValidationError(
                         f"{name} belongs to the dated form; a numeric TARN takes pay_times and accrual_start")
             self.initial_date = None
             self.day_count_convention = None
+            self.accrual_end_dates = None
             fixings = [float(t) for t in fixing_times]
             self.accrual_factors = self._numeric_accruals(fixings, accrual_start, accrual_factors, state)
             self._init_numeric(fixings, pay_times, currency_pair, state)
@@ -174,22 +190,44 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
         if self.initial_date is not None and not self.initial_date < self.fixing_dates[0]:
             raise ValidationError(
                 f"initial_date {self.initial_date} must be before the first fixing date {self.fixing_dates[0]}")
+        if self.accrual_end_dates is not None:
+            self._validate_accrual_end_dates()
         if self.initial_date is not None:
-            self._check_default_periods()
+            self._check_period_lengths()
         if self.accrual_factors is not None:
             if len(self.accrual_factors) != len(self.fixing_dates):
                 raise ValidationError("accrual_factors must align 1:1 with fixing_dates")
             if any((not math.isfinite(a)) or a <= 0.0 for a in self.accrual_factors):
                 raise ValidationError("accrual_factors must be positive and finite")
 
-    def _check_default_periods(self) -> None:
-        """The default derivation refuses any non-positive derived factor (user ruling 2026-10-10 on R26 (b), by
-        factor - Task 8c fix round 1): a later period on the fixing date (or, ACT/365 counting whole days, the same
-        day) of the previous one has zero length. Decided here for every count that needs no environment; a
-        BUSINESS_DAYS count needs the environment's calendar and is decided at resolve (``_dated_factor``)."""
+    def _validate_accrual_end_dates(self) -> None:
+        """One accrual end per period; period ``i`` runs from the previous end (``initial_date`` for the first). An
+        end lies between its fixing date (the observation end) and its pay date (the settlement end)."""
+        ends, dates, pays = self.accrual_end_dates, self.fixing_dates, self.pay_dates
+        if len(ends) != len(dates):
+            raise ValidationError("accrual_end_dates must align 1:1 with fixing_dates")
+        if any(not isinstance(e, datetime) for e in ends):
+            raise ValidationError("accrual_end_dates must be datetimes")
+        if any(not prev < e for prev, e in zip(ends, ends[1:])):
+            raise ValidationError(
+                "accrual_end_dates must be strictly increasing: each period accrues from the previous period's end, "
+                "so an equal end is a zero-length period")
+        for i, (f, e, p) in enumerate(zip(dates, ends, pays)):
+            if not f <= e <= p:
+                raise ValidationError(
+                    f"accrual end date {e.date()} of period {i} must lie between its fixing date {f.date()} and its "
+                    f"pay date {p.date()}")
+
+    def _check_period_lengths(self) -> None:
+        """A derived period (``initial_date`` / the previous accrual end -> this accrual end) must accrue a positive
+        factor (Task 8c fix round 1, by factor; user ruling 2026-10-10 on R26 (b)): under the default derivation a
+        later period on the fixing date (or, ACT/365 counting whole days, the same day) of the previous one has zero
+        length; stated ``accrual_end_dates`` are strictly increasing but may still be zero whole days apart. Decided
+        here for every count that needs no environment; a BUSINESS_DAYS count needs the environment's calendar and is
+        decided at resolve (``_dated_factor``)."""
         convention = self._derived_convention()
-        starts = [self.initial_date] + list(self.fixing_dates[:-1])
-        for index, (start, end) in enumerate(zip(starts, self.fixing_dates)):
+        for index in range(len(self.fixing_dates)):
+            start, end = self._accrual_start(index), self._accrual_end(index)
             if not start < end:
                 raise self._zero_length(index, 0.0)
             if convention is not DayCountConvention.BUSINESS_DAYS:
@@ -201,23 +239,36 @@ class FxTargetRedemptionNote(TargetRedemptionProduct):
         return DayCountConvention.ACT_365 if self.day_count_convention is None else self.day_count_convention
 
     def _zero_length(self, index: int, factor: float) -> ValidationError:
-        # Task 8d narrows this condition to the default derivation and adds accrual_end_dates to the message
-        start = self.initial_date if index == 0 else self.fixing_dates[index - 1]
+        start, end, convention = self._accrual_start(index), self._accrual_end(index), self._derived_convention().name
+        if self.accrual_end_dates is None:
+            return ValidationError(
+                f"period {index} ({start} -> {end}) derives accrual factor {factor} in {convention}: periods "
+                "sharing a fixing date need their own accrual: under the default derivation (initial_date, then "
+                "each previous fixing date) the later period would have zero length - state accrual_end_dates or "
+                "accrual_factors")
         return ValidationError(
-            f"period {index} ({start} -> {self.fixing_dates[index]}) under the default derivation (initial_date, then "
-            f"each previous fixing date) would have zero length (derived accrual factor {factor} in "
-            f"{self._derived_convention().name}) - periods sharing a fixing date need their own accrual: state "
-            "accrual_factors")
+            f"period {index} ({start} -> {end}) of accrual_end_dates derives accrual factor {factor} in "
+            f"{convention}: it would have zero length - a period must accrue a positive factor (state ends further "
+            "apart, or accrual_factors)")
+
+    def _accrual_start(self, index: int) -> datetime:
+        """Period ``index``'s accrual start: ``initial_date`` for the first, else the previous period's end."""
+        return self.initial_date if index == 0 else self._accrual_end(index - 1)
+
+    def _accrual_end(self, index: int) -> datetime:
+        """Period ``index``'s accrual end: ``accrual_end_dates[index]``, else its fixing date (the default)."""
+        return self.fixing_dates[index] if self.accrual_end_dates is None else self.accrual_end_dates[index]
 
     def _dated_factor(self, index: int, fx_env) -> float:
-        """Explicit factor, else ``initial_date`` / previous fixing date -> this fixing date in the contract day count
-        (``None`` = ACT_365), resolved against the environment's calendar (a BUSINESS_DAYS count needs it). A
-        non-positive derived factor is refused (``_check_default_periods``)."""
+        """Explicit factor, else ``initial_date`` / the previous period's accrual end -> this period's accrual end
+        (``accrual_end_dates``; default: the fixing dates) in the contract day count (``None`` = ACT_365), resolved
+        against the environment's calendar (a BUSINESS_DAYS count needs it). A non-positive derived factor is
+        refused (``_check_period_lengths``)."""
         if self.accrual_factors is not None:
             return self.accrual_factors[index]
-        start = self.initial_date if index == 0 else self.fixing_dates[index - 1]
-        factor = calculate_year_fraction(start, self.fixing_dates[index], self._derived_convention(),
-                                         fx_env.bus_days_in_year, calendar=fx_env.calendar)
+        factor = calculate_year_fraction(self._accrual_start(index), self._accrual_end(index),
+                                         self._derived_convention(), fx_env.bus_days_in_year,
+                                         calendar=fx_env.calendar)
         if not factor > 0.0:
             raise self._zero_length(index, factor)
         return factor

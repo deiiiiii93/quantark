@@ -1552,3 +1552,101 @@ def test_as_of_only_bookings_on_distinct_dates_are_unchanged(kind):
     with pytest.warns(TerminalBookingWarning):                          # every fixing banked: a terminal booking
         booked = _dated(kind, state=TargetRedemptionState(0.0, as_of=FIX_DATES[-1]))
     assert booked._banked_count() == len(FIX_DATES)
+
+
+# --- R26 (b), user ruling 2026-10-10: the TARN's own accrual period dates (accrual_end_dates) ---------------------
+
+def _by_period_dates(**kw):
+    """Twelve periods accruing VAL -> FIX_DATES[0] -> ... -> FIX_DATES[11] (the default contract's periods); periods 0
+    and 1 both FIX on FIX_DATES[0], period k >= 1 fixes on FIX_DATES[k - 1], and each pays at its accrual end."""
+    return dated_note(fixing_dates=[FIX_DATES[0]] + FIX_DATES[:-1], accrual_end_dates=list(FIX_DATES),
+                      pay_dates=list(FIX_DATES), target=kw.pop("target", 50.0), **kw)
+
+
+@pytest.mark.parametrize("calendar", ["calendar", "business"])
+def test_accrual_end_dates_on_the_fixing_dates_reproduce_the_default_bitwise(calendar):
+    if calendar == "calendar":
+        dates, e, kw, convention = FIX_DATES, env(), {}, DayCountConvention.ACT_365
+    else:
+        convention = DayCountConvention.BUSINESS_DAYS
+        dates, e, kw = BUS_DATES, env(**BUS), dict(day_count_convention=convention)
+    default = dated_note(fixing_dates=dates, **kw)
+    stated = dated_note(fixing_dates=dates, accrual_end_dates=list(dates), **kw)
+    assert default.accrual_end_dates is None
+    today = tuple(calculate_year_fraction(s, d, convention, e.bus_days_in_year, calendar=e.calendar)
+                  for s, d in zip([VAL] + dates[:-1], dates))
+    assert default.resolve(e).accrual_factors == today       # the default is today's derivation, call for call
+    assert stated.resolve(e).accrual_factors == today
+    assert _price(stated, e=e) == _price(default, e=e)
+
+
+def test_two_periods_sharing_a_fixing_date_accrue_their_own_period_dates_like_the_twin():
+    dated = _by_period_dates()
+    assert dated.fixing_dates[0] == dated.fixing_dates[1] and dated.accrual_factors is None   # no factors stated
+    view = dated.resolve(env())
+    own = tuple(calculate_year_fraction(s, d, DayCountConvention.ACT_365, 252)
+                for s, d in zip([VAL] + FIX_DATES[:-1], FIX_DATES))
+    assert view.accrual_factors == own                        # each period over its own dates, not its fixing interval
+    assert view.accrual_factors[0] != view.accrual_factors[1]  # 30 and 31 days on one fixing date
+    twin = _numeric_twin(dated, env())
+    assert twin.fixing_times[0] == twin.fixing_times[1]
+    assert twin.accrual_factors == list(own)                  # the twin carries the same per-period factors
+    assert twin.pay_times == list(view.pay_times)             # and the same per-period pay times
+    assert is_close(_price(twin), _price(dated), rel_tol=1e-12)
+    dated.record_passed_fixings(env(val=FIX_DATES[0]))        # both periods fix on FIX_DATES[0], at one spot
+    fixings = [x for x in dated.lifecycle_events if x.event_type is FIXING]
+    assert len(fixings) == 2 and fixings[0].fixing == fixings[1].fixing == 1.20
+    assert [x.amount for x in fixings] == [dated.coupon_amount(f) for f in own[:2]]   # each its own factor's coupon
+    assert dated.state.fixings_banked == 2
+    assert [(p.amount, p.pay_date) for p in dated.state.pending] == [
+        (fixings[0].amount, FIX_DATES[0]), (fixings[1].amount, FIX_DATES[1])]          # each its own pay date
+
+
+def test_a_shared_fixing_date_needs_period_dates_or_factors():
+    shared, pays = [FIX_DATES[0]] + FIX_DATES[:-1], list(FIX_DATES)
+    with pytest.raises(ValidationError, match="zero length - state accrual_end_dates or accrual_factors"):
+        dated_note(fixing_dates=shared, pay_dates=pays)       # default derivation: period 1 runs FIX_DATES[0] -> itself
+    assert _by_period_dates().accrual_end_dates == FIX_DATES  # its own period dates: accepted
+    assert dated_note(fixing_dates=shared, pay_dates=pays, accrual_factors=[1 / 12] * 12).accrual_end_dates is None
+
+
+_SHARED = [FIX_DATES[0]] + FIX_DATES[:-1]
+
+
+@pytest.mark.parametrize("kw, match", [
+    (dict(accrual_end_dates=FIX_DATES[:-1]), "align 1:1"),
+    (dict(accrual_end_dates=[d.date() for d in FIX_DATES]), "datetimes"),
+    (dict(fixing_dates=_SHARED, pay_dates=list(FIX_DATES), accrual_end_dates=list(_SHARED)), "strictly increasing"),
+    (dict(pay_dates=LAG2, accrual_end_dates=[FIX_DATES[1], FIX_DATES[0]] + FIX_DATES[2:]), "strictly increasing"),
+    (dict(accrual_end_dates=[FIX_DATES[0] - timedelta(days=1)] + FIX_DATES[1:]), "between its fixing date"),
+    (dict(pay_dates=LAG2, accrual_end_dates=[LAG2[0] + timedelta(days=1)] + FIX_DATES[1:]), "between its fixing date"),
+    (dict(accrual_end_dates=list(FIX_DATES), accrual_factors=[1 / 12] * 12), "cannot be combined"),
+    (dict(accrual_end_dates=list(FIX_DATES), initial_date=None), "needs initial_date"),
+], ids=["unaligned", "not_datetimes", "equal_end", "decreasing", "end_before_fixing", "end_after_pay",
+        "with_accrual_factors", "without_initial_date"])
+def test_accrual_end_dates_refusals(kw, match):
+    with pytest.raises(ValidationError, match=match):
+        dated_note(**kw)
+
+
+def test_accrual_end_dates_belong_to_the_dated_tarn_only():
+    with pytest.raises(ValidationError, match="belongs to the dated form"):
+        note(accrual_end_dates=list(FIX_DATES))
+    with pytest.raises(TypeError):                            # the TARF has no accrual term (TARN spec 2.3)
+        dated_tarf(accrual_end_dates=list(FIX_DATES))
+
+
+def test_stated_accrual_end_dates_keep_the_positive_factor_check():
+    """Task 8c's invariant on the stated path too (numeric == dated twin: the numeric form refuses a non-positive
+    factor): strictly increasing ends one whole-day count apart by zero derive factor 0.0 and are refused - ACT/365
+    (whole days) at construction, a BUSINESS_DAYS count (Friday -> Saturday) at resolve."""
+    ten, three = datetime(2026, 7, 15, 10), datetime(2026, 7, 15, 15)
+    with pytest.raises(ValidationError, match="zero length"):
+        dated_note(fixing_dates=[ten, ten] + FIX_DATES[1:], accrual_end_dates=[ten, three] + FIX_DATES[1:],
+                   pay_dates=[three, three] + FIX_DATES[1:], target=50.0)
+    d = dated_note(fixing_dates=[FRIDAY, FRIDAY, datetime(2026, 9, 15)], accrual_end_dates=[FRIDAY, SATURDAY,
+                   datetime(2026, 9, 15)], pay_dates=[SATURDAY, SATURDAY, datetime(2026, 9, 15)],
+                   initial_date=datetime(2026, 7, 15), target=50.0,
+                   day_count_convention=DayCountConvention.BUSINESS_DAYS)
+    with pytest.raises(ValidationError, match="zero length"):
+        d.resolve(env(calendar=TARGET_CAL))
