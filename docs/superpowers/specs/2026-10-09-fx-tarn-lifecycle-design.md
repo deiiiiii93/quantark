@@ -199,7 +199,7 @@ schedule argument; `state` is keyword-only and has no default (Q1).
 
 | Field | Product | Rule |
 |---|---|---|
-| `fixing_times` | both | Years from valuation, ascending (non-decreasing: periods may share a fixing time, OQ-4), finite. Lists **only the fixings not yet banked**. A time ≤ 0 or `is_zero` is an unbanked past fixing: accepted, and filled at pricing with a `MissingFixingWarning` (§5.4). May be empty: the contract is terminal (§5.3); a terminal TARN then states `accrual_factors=[]`. |
+| `fixing_times` | both | Years from valuation, ascending (non-decreasing: periods may share a fixing time, OQ-4), finite. Lists **only the fixings not yet banked**. A strictly past time (`t < 0`, not `is_zero`) is an unbanked past fixing: accepted, and filled at pricing with a `MissingFixingWarning` (§5.4). A time at exactly 0 is live (W6 D1, user D2 ruling): it is decided at the quoted spot, with no warning. May be empty: the contract is terminal (§5.3); a terminal TARN then states `accrual_factors=[]`. |
 | `pay_times` | both | As today (default = fixing times; each ≥ its fixing; non-decreasing). |
 | `accrual_start: Optional[float]` | TARN | Time the first LISTED period began (< 0 if before valuation). **Exactly one** of `accrual_start` / `accrual_factors` (Q2): neither → refused (A1.2), both → refused. `accrual_start < fixing_times[0]`. Factors `t_i − t_{i−1}` with `t_{−1} = accrual_start` are computed once at construction and are contract terms from then on. |
 | `accrual_factors` | TARN | Explicit per-listed-period factors (as today). |
@@ -228,7 +228,7 @@ is empty; `delivery` = `max(pay_times)` or the same terminal value.
 - **Banked vs unbanked (OQ-3, R25)**: fixing `i` is banked iff `i < fixings_banked`; a booking stating only `as_of`
   has `fixings_banked` = the number of fixing dates on or before `as_of`; neither stated: 0. Banking is per fixing, so
   a fixing is never banked twice whatever the dates. The rest are unbanked; an unbanked fixing that is passed by
-  resolved time (R16) is a missing past fixing (§5.4).
+  resolved time (R16) is banked at the quoted spot; if it is strictly past it is a missing past fixing (§5.4), and if it is at zero time it is live (no warning).
 - **Live at zero time (OQ-2 b)**: a fixing or pay date after the valuation date that resolves to zero time (a
   Saturday under `BUSINESS_DAYS`, valued on the Friday) is live: not refused; the fixing is decided at the quoted
   spot and its cash is due today (stays in the value, OQ-1 b).
@@ -289,9 +289,11 @@ Both products expose `resolve(fx_env, *, warn_missing_fixings=True) -> ResolvedT
 | `redeemed`, `terminal` | derived as in §3 / §4 |
 
 `resolve` never changes the product. If it finds unbanked fixings at or before valuation (numeric `t <= 0` or
-`is_zero(t)`; dated: unbanked by count and passed by resolved time, R16, so a later-dated fixing at zero business
-time is live and banked here, OQ-2), it banks them on a **copy** through `record_passed_fixings(fx_env)` at
-the quoted spot (Q3) and emits one `MissingFixingWarning` naming them (W5's `warn_filled_fixings`). Pending cash
+`is_zero(t)`; dated: unbanked by count and passed by resolved time, R16), it banks them on a **copy** through
+`record_passed_fixings(fx_env)` at the quoted spot (Q3). A fixing at exactly zero time is LIVE in both forms (W6 D1;
+dated, a later-dated fixing at zero business time, OQ-2): it is decided at the quoted spot and **no warning** is
+emitted. Only strictly past (`is_history`, `t < 0`) fixings are missing: one `MissingFixingWarning` names them (W5's
+`warn_filled_fixings`). Pending cash
 whose pay time is strictly past is excluded (booked); cash due today stays (OQ-1 b). A numeric contract with no passed fixing skips the copy
 and returns its own lists, so its inception arithmetic is unchanged.
 
@@ -337,8 +339,8 @@ default accrual derivation with any non-positive derived factor ("zero length": 
 zero-business-day period); `accrual_end_dates` that break the rules in §4.2 (not 1:1, not strictly increasing, outside
 fixing..pay, without `initial_date`, with `accrual_factors`, on the numeric form, or giving a non-positive factor).
 
-Filled with a `MissingFixingWarning`, never refused: an unbanked fixing at or before valuation, in either form, at
-pricing time. This replaces rev 1's refusal of a numeric fixing ≤ 0, which the W5 rule forbids.
+Filled with a `MissingFixingWarning`, never refused: an unbanked fixing strictly before valuation (`t < 0`), in either
+form, at pricing time. A fixing at exactly zero time is live and is decided at the quoted spot without a warning. This replaces rev 1's refusal of a numeric fixing ≤ 0, which the W5 rule forbids.
 
 Not detectable from numbers alone: a booking that states a wrong period start or a wrong `accumulated`. Both are
 mandatory, so a caller has to write them down; nothing defaults them silently.
@@ -413,9 +415,11 @@ is left exactly as today (§9).
      after line 44; dynamic scenario: the environment's own date, before line 80). A numeric product's times are read
      as years from this date — the date the run first values it, as the equity `FloatMaturityRoller` anchors a numeric
      maturity at first sight (`float_roll.py:51-71`).
-  2. **Matured before the run** (W1 rule): the last fixing is strictly before the origin (numeric: last listed time
-     < 0 and not `is_zero`; dated: last fixing date < origin) **and** is not banked by the state → one
-     `MaturedBeforeRunWarning`; the position is removed from the working copy (value 0, no cash, no Greeks).
+  2. **Matured before the run** (W1 rule; `matured_before`, decided by TIME, R16, and banked by COUNT): the contract
+     is not terminal (not redeemed, and its banked count does not cover every fixing) **and** its last fixing is
+     strictly before the origin by resolved time (`is_history`; numeric: the last listed time; dated: the last fixing
+     date's resolved time, so a weekend last fixing on a `BUSINESS_DAYS` clock is live at the origin, not matured)
+     → one `MaturedBeforeRunWarning`; the position is removed from the working copy (value 0, no cash, no Greeks).
      A terminal booking (§5.3) is not this case: it is kept and valued at PV(pending).
   3. **Fixings before the run**: unbanked fixings strictly before the origin are banked at the origin's spot through
      `record_passed_fixings`, with one `MissingFixingWarning` per position naming them (W5 rule). A fixing on the
@@ -488,7 +492,7 @@ Numbers unchanged.
 | `example/fx_tarn_demo.py` (lines 74, 85, 97, 109) | 2 TARF + 2 TARN | demo stdout |
 
 - `test_default_accruals_are_period_lengths` passes `accrual_start=0.0` and asserts the same `[0.5, 0.5, 0.5]`.
-- `test_rejects_*` keep their messages. A non-positive fixing time and an empty `fixing_times` stop being refused
+- `test_rejects_*` keep their messages. A non-positive fixing time and an empty `fixing_times` stop being refused (superseded by the 2026-10-10 amendments: a fixing at exactly t = 0 is live and warns nothing; only a strictly past fixing is filled with a warning)
   (an unbanked past fixing, §5.4; a terminal booking, §5.3); no existing test asserts either refusal (grep of both
   test files), so none changes.
 - No golden in `test/execution/goldens/` contains either engine (grep count 0).
