@@ -1,0 +1,14 @@
+KI 114.45 production PV (200, 60, 800): as-is DIVERGED nan  |  floor DIVERGED nan  |  floor + guarded reflection 94.678183
+KI 114.45 production Greeks: as-is price 94.675163 delta -0.955188 gamma -0.047581  |  floor price 94.675349 delta -0.955185 gamma -0.047586  |  floor + guarded reflection price 94.675349 delta -0.955185 gamma -0.047586
+KI 139.80 production Greeks: as-is PricingError  |  floor price 98.313775 delta -0.599596 gamma -0.072751  |  floor + guarded reflection price 98.313775 delta -0.599596 gamma -0.072751
+KI 125 n=(312, 48, 192): as-is DIVERGED -1.341e+173  |  floor 95.437076  |  floor + guarded reflection 95.437076
+KI 125 n=(317, 48, 192): as-is DIVERGED -1.149e+30  |  floor 95.437002  |  floor + guarded reflection 95.437002
+KI 125 n=(384, 48, 192): as-is DIVERGED -1.652e+158  |  floor 95.436925  |  floor + guarded reflection 95.436925
+KI 125 n=(322, 48, 192): as-is 95.436638  |  floor 95.437296  |  floor + guarded reflection 95.437296
+inertness of the guarded reflection alone (library floor kept), float.hex():
+   2D rev continuous (288,48,192) 95.4371440373018 vs 95.4371440373018  bit-identical
+   2D std continuous    99.55753989636924 vs 99.55753989636924  bit-identical
+   2D rev discrete      95.81313708993714 vs 95.81313708993714  bit-identical
+   2D rev BSM limit     95.35715846165232 vs 95.35715846165232  bit-identical
+   1D std continuous    99.41621551577873 vs 99.41621551577873  bit-identical
+   1D rev continuous    95.35537486568889 vs 95.35537486568889  bit-identical

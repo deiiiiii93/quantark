@@ -404,6 +404,25 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   (`SnowballPDESolver._set_boundary_conditions_v0_beside_v1_rows`). Prices move at round-off (|move| <= 4e-13) on
   the contracts measured, and by up to 8.1e-5 only when the knock-in level sits just inside the grid's lower edge.
   Discrete knock-in is untouched (`docs/superpowers/specs/2026-10-09-heston-2d-v0-evidence/`).
+- 2D Heston / SLV ADI core (`HestonSLVADICore._A1`, `v0_boundary="degenerate_pde"`, the 2D snowball / Phoenix / DCN
+  default): the explicit S-operator now carries the degenerate v = 0 column, `(r - q) U_x - r U`. The implicit
+  S-solve already carried the S-drift and the -rU reaction on every variance column, so the v = 0 row evolved under
+  theta x A1, consistent only on a fully implicit step (W7 ruling Q1, 2026-10-10). The standard certain-V0 control
+  under Heston at (96, 24, 48), every damping step off, goes from +2.478e-3 to -9.31e-7 against its closed form; with
+  the default damping +3.827e-3 -> +3.761e-3 (the rest is the damped steps' dt^2 term, by design: ruling Q4).
+  Every 2D Heston / SLV price on that boundary moves: `adi2d-snowball-greeks` re-certified by amendment
+  (2026-10-10; 28 of 28 anchors moved, low_feller delta +2.66e-4 / +2.57e-4 the largest; both candidates ADMITTED,
+  the low_feller errors against the banked reference shrink); the reverse continuous-KI Heston Phoenix (KO 97 / KI
+  125) at (192, 48, 192) 95.7019 -> 95.5960, now monotone in refinement; the Feller-violating Heston DCN at (151, 41)
+  -89176.7 -> -90111.4 per 1,000,000 notional. Values: `docs/superpowers/specs/2026-10-09-heston-2d-v0-evidence/moved_values.txt`.
+- Phoenix PDE (1D, and the 1D statistics march of the 2D Heston / SLV Phoenix): under continuous knock-in the
+  not-knocked-in edge beyond the knock-in level copies the knocked-in row of the step; `PhoenixAdapter` marched
+  every V0 memory state before the knocked-in surfaces and never exposed them, so the row was 0.0 (W7 ruling Q2). A
+  V0 group now sets V1's rows of the step first and exposes them for that row, as the snowball adapter does, and the
+  Phoenix statistics copy the knocked-in row too (`PhoenixStatistics._alive_ki_edge_copies_ki = True`). Moves short
+  continuous-KI Phoenixes whose edge sits near the knock-in level (three months, reverse KI 150: +1.737e-5);
+  `phoenix-flat-bsm` re-certified by amendment (2026-10-10; near_expiry pv -2.8e-16, delta +6.9e-17, the other 124
+  anchors bit for bit).
 - Dated records without `initial_date` no longer accrue from the valuation date (coupons shrank as the contract
   aged).
 - Phoenix `get_ko_payoff` keeps `accrued_offset`.

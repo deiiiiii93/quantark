@@ -1,0 +1,12 @@
+default              n_x in [100, 1200]:  24 of 1101 within 0.02 cells  e.g. [139, 171, 185, 229, 266, 284, 312, 317, 384, 480, 508, 534]
+default              n_x in [100, 1200]:  54 of 1101 within 0.05 cells  e.g. [133, 136, 139, 168, 171, 185, 218, 229, 253, 266, 284, 312]
+default              n_x in [100, 1200]: 110 of 1101 within 0.10 cells  e.g. [109, 124, 127, 130, 133, 136, 139, 165, 168, 171, 182, 185]
+default              n_x=200: nearest live node 0.6003 cells below the barrier
+default              n_x=300: nearest live node 0.7459 cells below the barrier
+default              n_x=600: nearest live node 0.5458 cells below the barrier
+production controls  n_x in [100, 1200]:  24 of 1101 within 0.02 cells  e.g. [139, 171, 185, 229, 266, 284, 312, 317, 384, 480, 508, 534]
+production controls  n_x in [100, 1200]:  54 of 1101 within 0.05 cells  e.g. [133, 136, 139, 168, 171, 185, 218, 229, 253, 266, 284, 312]
+production controls  n_x in [100, 1200]: 110 of 1101 within 0.10 cells  e.g. [109, 124, 127, 130, 133, 136, 139, 165, 168, 171, 182, 185]
+production controls  n_x=200: nearest live node 0.6003 cells below the barrier
+production controls  n_x=300: nearest live node 0.7459 cells below the barrier
+production controls  n_x=600: nearest live node 0.5458 cells below the barrier

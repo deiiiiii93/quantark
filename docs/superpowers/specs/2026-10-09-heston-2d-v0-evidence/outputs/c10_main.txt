@@ -1,0 +1,20 @@
+library: /private/tmp/claude-501/-Users-fuxinyao-quant-ark/cca3f369-302d-41df-82ec-52a6d89c5a89/scratchpad/main_src/quantark/__init__.py
+phoenix rev (96, 24, 48)                 95.80583366487876
+phoenix std (96, 24, 48)                 99.6584285663212
+phoenix rev (192, 48, 192)               95.7019158885206
+phoenix std (192, 48, 192)               99.66087925957936
+phoenix rev (192, 96, 192)               95.6240958915262
+phoenix std (192, 96, 192)               99.66157262584147
+phoenix rev (288, 72, 288)               95.6465862991391
+phoenix std (288, 72, 288)               99.66265783229008
+phoenix rev (384, 96, 384)               95.61949574546776
+phoenix std (384, 96, 384)               99.66167566267653
+phoenix rev (96, 24, 48) + Q3 floor      95.80583366487876
+phoenix rev (192, 48, 192) + Q3 floor    95.7019158885206
+phoenix rev (192, 96, 192) + Q3 floor    95.6240958915262
+phoenix rev (288, 72, 288) + Q3 floor    95.6465862991391
+phoenix rev (384, 96, 384) + Q3 floor    95.61949574546776
+dcn notional                             1000000.0
+dcn (151, 41)                            -89176.7328541755
+dcn (251, 81)                            -93526.9527911329
+dcn (501, 201)                           -93543.44836028352

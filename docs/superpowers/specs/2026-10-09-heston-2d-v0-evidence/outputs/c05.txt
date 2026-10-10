@@ -1,0 +1,15 @@
+1. n_x = 600
+   n=(600, 48, 192): as-is 95.436519  barrier-cell floor 95.436519  correction off 95.555819
+   n=(600, 60, 800): as-is 95.424723  barrier-cell floor 95.424723  correction off 95.483864
+2. production path
+   as-is: PV on (200, 60, 800) 95.426394; Greeks price 95.424085  delta -0.901871  gamma -0.057579  (34 s)
+   barrier-cell floor: PV on (200, 60, 800) 95.426394; Greeks price 95.424085  delta -0.901871  gamma -0.057579  (33 s)
+   Greek grid policy: resolved (300, 135, 3200), barrier_minimum_n_x 600, reason: production Greek spatial floor; production Greek time-density floor
+3. inertness of the floor (as-is vs floor)
+   2D std continuous    99.55753989636924 vs 99.55753989636924  bit-identical
+   2D rev discrete      95.81313708993714 vs 95.81313708993714  bit-identical
+   2D rev BSM limit     95.35715846165232 vs 95.35715846165232  bit-identical
+   2D std (96,24,48)    99.57145679052677 vs 99.57145679052677  bit-identical
+   1D std continuous    99.41621551577873 vs 99.41621551577873  bit-identical
+   1D rev continuous    95.35537486568889 vs 95.35537486568889  bit-identical
+   1D rev KI 115        95.19649181432759 vs 95.19649181432759  bit-identical

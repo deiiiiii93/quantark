@@ -1,0 +1,55 @@
+desk: heston snowball std (96, 24, 48)                         MOVED  99.5714531628685 -> 99.57145679052677  (diff +3.628e-06)
+desk: heston snowball rev (96, 24, 48)                         MOVED  95.65809619352738 -> 95.6580416994062  (diff -5.449e-05)
+desk: slv snowball std (96, 24, 48)                            MOVED  99.5714531628685 -> 99.57145679052677  (diff +3.628e-06)
+desk: heston phoenix std (96, 24, 48)                          MOVED  99.6584285663212 -> 99.6590400814417  (diff +6.115e-04)
+desk: heston phoenix rev (96, 24, 48)                          MOVED  95.80583366487876 -> 95.80007187459861  (diff -5.762e-03)
+desk: heston snowball std (192, 48, 192)                       MOVED  99.55743408254703 -> 99.55742771778475  (diff -6.365e-06)
+desk: heston snowball rev (192, 48, 192)                       MOVED  95.43836889681646 -> 95.43820661650878  (diff -1.623e-04)
+desk: slv snowball std (192, 48, 192)                          MOVED  99.55743408254703 -> 99.55742771778475  (diff -6.365e-06)
+desk: heston phoenix std (192, 48, 192)                        MOVED  99.66087925957936 -> 99.6607256389226  (diff -1.536e-04)
+desk: heston phoenix rev (192, 48, 192)                        MOVED  95.7019158885206 -> 95.59602982772209  (diff -1.059e-01)
+desk: heston snowball std KI=10.5 (96,24,48)                   MOVED  104.98156721955854 -> 104.9816451079538  (diff +7.789e-05)
+desk: heston snowball std KI=11.0 (96,24,48)                   MOVED  104.98068353806138 -> 104.98073622760198  (diff +5.269e-05)
+desk: heston snowball std KI=12.0 (96,24,48)                   MOVED  104.97981888450174 -> 104.97984123429977  (diff +2.235e-05)
+desk: heston snowball std KI=15.0 (96,24,48)                   MOVED  104.97550604648768 -> 104.97550689726765  (diff +8.508e-07)
+desk: heston snowball std delta,gamma (96,24,48)               MOVED  0.21807874654821546 / -0.03417010492799477 -> 0.21807821201254285 / -0.034170077372266405  (diff -5.345e-07 / +2.756e-08)
+byte book 2D: heston_snowball                                  MOVED  97.99960730539338 -> 97.9996073172236  (diff +1.183e-08)
+byte book 2D: slv_snowball                                     MOVED  97.99960730539338 -> 97.9996073172236  (diff +1.183e-08)
+byte book 2D: heston_phoenix                                   MOVED  -2.406498274944137 -> -2.406515084913724  (diff -1.681e-05)
+control: std KO 500 flat default damping                       MOVED  103.59792564857715 / 0.0038269543097868564 -> 103.5978600177609 / 0.0037613234935349737  (diff -6.563e-05 / -6.563e-05)
+control: std KO 500 ann default damping                        MOVED  113.01591821601804 / 0.004174185908183858 -> 113.015846618758 / 0.00410258864815205  (diff -7.160e-05 / -7.160e-05)
+control: rev KO 20 flat default damping                        MOVED  103.60284064609566 / 0.008741951828298511 -> 103.60277501576914 / 0.008676321501781104  (diff -6.563e-05 / -6.563e-05)
+control: rev KO 20 ann default damping                         MOVED  113.01785170452337 / 0.006107674413513564 -> 113.01778010780292 / 0.006036077693067909  (diff -7.160e-05 / -7.160e-05)
+control: rev KO 2 flat default damping                         MOVED  103.59792471571069 / 0.0038260214433307738 -> 103.59785908487207 / 0.003760390604711006  (diff -6.563e-05 / -6.563e-05)
+control: rev KO 2 ann default damping                          MOVED  113.01591782228184 / 0.004173792171982882 -> 113.0158462250034 / 0.004102194893548017  (diff -7.160e-05 / -7.160e-05)
+control: std KO 500 flat damping off                           MOVED  103.596576423388 / 0.002477729120641925 -> 103.59409776305795 / -9.312094135793814e-07  (diff -2.479e-03 / -2.479e-03)
+control: std KO 500 ann damping off                            MOVED  113.01444708695456 / 0.00270305684470884 -> 113.01174309387109 / -9.362387629607838e-07  (diff -2.704e-03 / -2.704e-03)
+control: rev KO 20 flat damping off                            MOVED  103.60153163357167 / 0.007432939304308661 -> 103.59905297102186 / 0.004954276754503439  (diff -2.479e-03 / -2.479e-03)
+control: rev KO 20 ann damping off                             MOVED  113.01640351663359 / 0.004659486523735268 -> 113.01369952348574 / 0.0019554933758882953  (diff -2.704e-03 / -2.704e-03)
+control: rev KO 2 flat damping off                             MOVED  103.59657662414516 / 0.0024779298777986014 -> 103.59409796380953 / -7.304578275579843e-07  (diff -2.479e-03 / -2.479e-03)
+control: rev KO 2 ann damping off                              MOVED  113.01444717592165 / 0.002703145811793206 -> 113.01174318282817 / -8.472816830362717e-07  (diff -2.704e-03 / -2.704e-03)
+dcn: Heston DCN_A (151, 41) defaults                           MOVED  -89176.7328541755 -> -90111.4177797157  (diff -9.347e+02)
+1D phoenix: T=2.0 std plain KI=75.0                            bit-identical  95.1671781536434
+1D phoenix: T=2.0 std plain KI=60.0                            bit-identical  97.19617986300194
+1D phoenix: T=2.0 std plain KI=50.0                            bit-identical  98.3296535151179
+1D phoenix: T=2.0 std memory KI=75.0                           bit-identical  95.20145566371757
+1D phoenix: T=2.0 std memory KI=60.0                           bit-identical  97.20083662073816
+1D phoenix: T=2.0 std memory KI=50.0                           bit-identical  98.33028040813689
+1D phoenix: T=2.0 rev plain KI=125.0                           bit-identical  91.47507173290649
+1D phoenix: T=2.0 rev plain KI=150.0                           bit-identical  93.2790747648763
+1D phoenix: T=2.0 rev plain KI=200.0                           bit-identical  97.40879830409872
+1D phoenix: T=2.0 rev memory KI=125.0                          bit-identical  91.53687946708273
+1D phoenix: T=2.0 rev memory KI=150.0                          bit-identical  93.29444171693542
+1D phoenix: T=2.0 rev memory KI=200.0                          bit-identical  97.40967252953445
+1D phoenix: T=0.25 std plain KI=75.0                           MOVED  99.53632077069922 -> 99.53632077069926  (diff +4.263e-14)
+1D phoenix: T=0.25 std plain KI=60.0                           MOVED  99.62817517540444 -> 99.6281753103281  (diff +1.349e-07)
+1D phoenix: T=0.25 std plain KI=50.0                           MOVED  99.62820030792582 -> 99.62820030792776  (diff +1.933e-12)
+1D phoenix: T=0.25 std memory KI=75.0                          MOVED  99.53632696494235 -> 99.5363269649424  (diff +5.684e-14)
+1D phoenix: T=0.25 std memory KI=60.0                          MOVED  99.62817517540552 -> 99.62817531032918  (diff +1.349e-07)
+1D phoenix: T=0.25 std memory KI=50.0                          MOVED  99.62820030792582 -> 99.62820030792776  (diff +1.933e-12)
+1D phoenix: T=0.25 rev plain KI=125.0                          bit-identical  98.94981294511284
+1D phoenix: T=0.25 rev plain KI=150.0                          MOVED  99.61948040448334 -> 99.61949777718145  (diff +1.737e-05)
+1D phoenix: T=0.25 rev plain KI=200.0                          MOVED  99.62227336703607 -> 99.62227336703585  (diff -2.274e-13)
+1D phoenix: T=0.25 rev memory KI=125.0                         bit-identical  98.94991045054026
+1D phoenix: T=0.25 rev memory KI=150.0                         MOVED  99.6194804060806 -> 99.61949777877878  (diff +1.737e-05)
+1D phoenix: T=0.25 rev memory KI=200.0                         MOVED  99.62227336703607 -> 99.62227336703585  (diff -2.274e-13)

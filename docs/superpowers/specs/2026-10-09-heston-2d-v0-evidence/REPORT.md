@@ -133,3 +133,141 @@ x-grid, reverse orientation. Not diagnosed further.
    `PRODUCTION_BARRIER_GREEK_MIN_N_X = 600` lands in that regime.
 4. Change the 2D damping default? Recommended: no; it converges as dt².
 5. Retire the reverse 2D certain-V0 control (use the standard orientation, or KO 2 / KI 10000)? Recommended: yes.
+
+---
+
+## Follow-up 2026-10-10: user rulings Q1–Q5
+
+Branch rebased onto main 0d1e4133 (tag `pre-rebase-w7` = a4b26aa5, the pre-rebase head; no conflicts; W7 tests
+re-run: 37 passed). Commits: bccd5cfc (Q1), 4bb994e0 (Q2), 8772c1fc (Q5), then the certificates, CHANGELOG and this
+evidence. Every moved value vs main 0d1e4133 is in `moved_values.txt` (generated from the banked anchors and `c09` /
+`c10`, main measured on a `git archive` export of 0d1e4133, the branch on the worktree, same machine).
+
+### Q1 — `HestonSLVADICore._A1` on the degenerate v = 0 column: APPLIED, `adi2d-snowball-greeks` amended
+
+- `adi_core_v0_column.patch` applied as is (bccd5cfc).
+- TDD regression (`TestHeston2DCertainV0Control`): the standard control KO 500 / discrete KI 1 at (96, 24, 48) within
+  1e−6 of its closed form, failed first at +2.478e−3, passes at −9.31e−7. **Deviation from the ruling's wording**: with
+  event damping off alone the patched value is +3.95e−5 — the Rannacher start's own θ = 1 term (`b07` predicts
+  +4.05e−5), not a defect — so the test switches the terminal damping off too (both off: as-is +2.478e−3, patched
+  −9.312e−7, the numbers the ruling quotes).
+- Amendment `adi2d-snowball-greeks/2026-10-10` by the procedure's own run (`amend example/modelvalidation/
+  adi2d_snowball_greeks.yaml --parent …/2026-10-06/certificate.json --reason …`, 1613 s on one process): the imported
+  benchmark carried and never run, every candidate re-ran, 28 of 28 cells moved and were translated (shifts ≤ 0.0146
+  contracts), none carried; both candidates ADMITTED; 2026-10-06 retired in place (`superseded_by`). The anchors moved
+  exactly as `b06` predicted (low_feller delta +2.655e−4 / +2.568e−4, gamma −4.89e−5 / −4.85e−5; sigma_collapse delta
+  −1.23e−5 / −1.25e−5; the other 20 ≤ 5.1e−10). Error against the banked reference, contracts: low_feller delta
+  Heston −0.1066 → −0.0919 (gauge 0.211 → 0.196), SLV −0.1591 → −0.1449 (0.298 → 0.284); low_feller gamma
+  0.0592 → 0.0565 / 0.0396 → 0.0369; sigma_collapse SLV delta −0.0294 → −0.0301 (within its s.e.).
+- Other movers (`c09`, `c10`): the certain-V0 controls at default damping −6.56e−5 flat / −7.16e−5 annualized in
+  every orientation (std +3.827e−3 → +3.761e−3; the rest is the damping, Q4); with damping off standard −9.31e−7,
+  reverse KO 2 −7.30e−7. Desk-like 2D prices −1.6e−4 … +6.1e−4 except the reverse continuous-KI Heston Phoenix
+  (KO 97 / KI 125): −5.76e−3 at (96, 24, 48), −0.1059 at (192, 48, 192). `c10` ladders it: main 95.806 / 95.702 /
+  95.624 / 95.647 / 95.619 (non-monotone; n_v 48 → 96 moves it 0.078), branch 95.800 / 95.596 / 95.584 / 95.580 /
+  95.573 (monotone; 0.012); library MC 95.567 ± 0.045 — main's (192, 48, 192) 3.0 s.e. off, the branch's 0.65. The
+  Q3 floor is bit-identical on that whole ladder (the move is Q1, not Q3). The Feller-violating Heston DCN (DCN_A, per
+  1,000,000) at (151, 41): −89,176.7 → −90,111.4, toward its refined values (main −93,527 / −93,543, branch −94,008 /
+  −93,751 at (251, 81) / (501, 201)); the library QE-M MC (4× the test's paths) −93,203 ± 825 cannot rank main and
+  branch at (501, 201) (208 apart = 0.25 s.e.). Byte book 2D rows: heston / slv snowball +1.18e−8, heston phoenix
+  −1.68e−5.
+- Tests at the Q1 state: ADI core, 2D vol-engine, Heston / SLV snowball / Phoenix / DCN PDE, `pde_statistics`,
+  `pde_core`, `pde_bitwise`, `test/execution`, Phoenix PDE, `test_snowball_pde_v0_rows`: 2935 passed, 6 skipped;
+  anchors + banked certificates + mo_volmodels ADI certifications + replay goldens: 151 passed, 45 skipped, 1 failed —
+  `adi2d-snowball-greeks/2026-10-06` (28 anchors, as predicted), now superseded.
+
+### Q2 — the 1D Phoenix continuous-KI copy row: FIXED, `phoenix-flat-bsm` amended
+
+- `PhoenixAdapter.boundaries` (4bb994e0): under continuous KI a `v0[k]` group first sets V1's rows of the step on
+  `v1[k]` (the `v1[k]` group rewrites the same values), then exposes `v1[k]` as `_grid_v1` for the V0 call only, as
+  `SnowballAdapter.boundaries` does; discrete KI takes the unchanged path. `PhoenixStatistics._alive_ki_edge_copies_ki`
+  = True. It is bit-identical to `a05`'s helper patch on all 24 `a05` cases, so `a05`'s moves stand (T = 2 bit-
+  identical; T = 0.25 up to +1.737e−5, reverse KI 150; +1.349e−7 standard KI 60).
+- TDD: `TestPhoenix1DContinuousKICopyRow` — edge row == V1's row (standard / reverse × plain / memory) failed with 0.0
+  first; the statistics reconcile within 1e−10 where the row matters (with the flag left False: +1.349e−7 / +1.737e−5).
+  `pde_statistics/test_rows.py::test_phoenix_rows` pinned the old 0.0 row ("Phoenix never exposes the knocked-in
+  grid") and now asserts the copied knocked-in row.
+- Amendment `phoenix-flat-bsm/2026-10-10` (`amend … --rerun-candidate equity.phoenix.pde`, 5 s): 42 cells re-run,
+  84 carried, all three candidates ADMITTED; 2 of 126 anchors moved, exactly the predicted near_expiry pv −2.776e−16,
+  delta +6.939e−17; 2026-10-06 retired in place.
+- Tests at the Q2 state: `pde_statistics`, `pde_core`, `pde_bitwise`, every `test_phoenix_*`, `test_snowball_pde_v0_rows`,
+  `test_continuous_ki_scope`, replay goldens + event-stats refusal, anchors + banked certificates: 1105 passed, 33
+  skipped, 3 failed — `test_phoenix_rows` (updated above) and the two superseded 2026-10-06 certificates.
+
+### Q5 — the reverse 2D certain-V0 control: REPLACED by KO 2 / KI 10000
+
+- `c01` runs `b05`'s own `premium` (independent full-truncation log-Euler Heston MC, no library engine) at KO 2: no
+  knock-out on 1e8 paths at 10 and at 40 substeps, so |premium| ≤ max|KO cash · DF − cf| × 3 / N = 18.84 × 3e−8 =
+  5.65e−7 at 95% (rule of three) — below the control test's 1e−6. Trend: KO 10 +1.31e−4 ± 1.1e−5, KO 5 +7.0e−6 ±
+  2.5e−6 (KO 20 +4.90e−3, KO 15 +1.05e−3 from `b05`). Decision: replace (not drop).
+- `HESTON_REVERSE_CONTROL_KO = 2.0` in `test_snowball_pde_v0_rows.py` (the 1D BSM controls keep 20); the 2D reverse
+  rows test reads it (the 2D grid reaches past it, S_min 1.97, so the lower edge is the knock-out edge, branch
+  `v0_lower_ko`), and the control price test runs both orientations: reverse KO 2 −7.30e−7 (KO 20 would be +4.95e−3).
+
+### Q4 — the 2D damping default: unchanged (ruling).
+### Q3 — the reverse continuous-KI Heston divergence: DIAGNOSED (no library change)
+
+Contract: `a02`'s reverse snowball, KO 97 / continuous KI 125, W3's Heston. Standalone runtime-patched scripts
+(`c02_q3_common.py` holds the patches; `c03`–`c08`), both arms back to back in one process.
+
+**Two mechanisms, both in `_ContinuousKIFirstPassage._geometry` (the FIRST_PASSAGE crossing correction, shared with
+the 1D solvers), both reverse-only, both on the near-zero-variance columns of the 2D surface.**
+
+1. **The half-cell λ floor never acts on a reverse product.** λ = d[k*] / a[k*] is a slope, and the floor (added for
+   the vol-model continuous-KI 1e13 blow-up on the ADI concentrated grid, `snowball_pde_solver.py` `_geometry`) keeps k* at least half a cell from
+   the barrier. It measures the cell as `a[live[1]] - a[live[0]]`, the two live nodes of LOWEST INDEX. On a standard
+   (down) product those are the two nearest the barrier. On a reverse (up) product the live side is below the
+   barrier, so they are the two lowest-spot nodes, `a` decreases with the index, the "cell" is negative
+   (−4.9e−2 … −7.5e−2 on every n_x scanned) and the floor removes nothing. On a column whose σ√dt is below one cell
+   (the v = 0 column, σ² floored at 1e−10, and v = 3e−5, 1.9e−4), k* is then the live node nearest the barrier, and
+   when the grid puts that node a few thousandths of a cell below 125, λ is a step height over a near-zero distance.
+2. **The reflection factor overflows** (`c07`, `c08`): G = exp(−2 μ_e a / σ²) · [m Φ(m/s) + s φ(m/s)]. On an up barrier
+   μ_e = −μ < 0 when r − q > σ²/2, so the factor is exp(+…); with σ² = 1e−10 a node within 10 s of the barrier
+   (a < ~1e−5) enters the band, the factor is inf and the bracket 0: inf × 0 = NaN, written into V0. The product is
+   bounded (exp(−2 μ_e a/σ²) φ(m/s) = φ((μ_e dt + a)/s)); only its evaluation overflows. The floor does not touch it.
+
+**Decision matrix.**
+
+| Probe (script) | Result | Reads |
+|---|---|---|
+| n_x scan 288 … 384 at (n_x, 48, 192), every n_x (`c03`) | diverges at 312 (−1.3e173), 317 (−1.1e30), 384 (−1.7e158): nearest live node 0.0039 / 0.0182 / 0.0046 cells below the barrier; finite but off by up to −6.6e−4 at 322 / 327 / 365 (0.027 … 0.037 cells); finite elsewhere (95.4333 … 95.4380) | alignment, not resolution: `a02`'s "finite at n_x ≤ 288" was a sample; 312 already diverges |
+| crossing correction off (`c03`) | finite on all 97 n_x, +0.099 … +0.149 above the floored arm (the uncorrected O(√dt) bias) | the correction is the amplifier |
+| half-cell floor measured at the barrier (`c03`, `c04`) | finite on all 97 n_x (95.4333 … 95.4381); it moves the 51 of 97 grids whose nearest node is within half a cell (finite ones by at most 6.6e−4); at 384 k* moves 0.0046 → 1.0046 cells, max λ at the first step 2.4e6 → 1.3e4 | cures mechanism 1 |
+| per-step growth at the barrier (`c04`) | as-is 384: the live band's max \|V0\| grows ×4 … ×17 per backward step (×8 typical; λ 2.4e6 → 7.9e31 in 28 steps) on the v = 3e−5 / 1.9e−4 columns; 288 and the floored 384: growth ≤ 1.000 | an explicit feedback: λ ∝ d / a, d grows with V0 |
+| BSM limit, standard orientation, discrete twin (`a02`, `c05`) | finite; the floor is bit-identical on each | the floor already measured the right cell there; BSM has no near-zero-variance column |
+| n_x = `PRODUCTION_BARRIER_GREEK_MIN_N_X` = 600 (`c05`) | (600, 48, 192) 95.436519, (600, 60, 800) 95.424723; floor bit-identical (nearest node 0.546 cells) | safe for KI 125 by alignment |
+| production path for this contract (`c05`) | `ADI_2D_PRODUCTION_ENGINE_CONTROLS`, PV on (200, 60, 800) 95.426394; `calculate_greeks` resolves (300, 135, 3200): price 95.424085, Δ −0.901871, Γ −0.057579. Under continuous KI `greek_time_grid_policy` returns before its dense-KI branch, so `barrier_greek_min_n_x` = 600 is never applied | safe for KI 125 by alignment |
+| how often (`c06`, geometry only) | 24 of 1101 n_x in [100, 1200] put the node within 0.02 cells (54 within 0.05); production n_x 200 / 300 / 600 at 0.60 / 0.75 / 0.55 cells | ~2% of grids |
+| other KI levels on the production grids (`c07`, KI 110 … 140 step 0.05) | 13 of 601 levels within 0.02 cells on n_x 200, 13 on 300. KI 139.80 (0.0010 cells on the Greek grid): production **Greeks raise PricingError (non-finite)**, floor → 98.313775 / −0.599596 / −0.072751. KI 114.45 (0.0009 cells on the PV grid): production **PV NaN**, floor alone still NaN | the production profile does land in it |
+| guarded reflection (`c08`) | KI 114.45 PV: as-is NaN, floor NaN, floor + guarded reflection 94.678183; the six divergent cases above all finite with both; the guarded reflection alone is bit-identical on six finite checks (2D std / rev / discrete / BSM limit, 1D std / rev) | cures mechanism 2 without moving a finite value |
+
+**PROPOSED fix (not applied; Q3 is diagnose-only).** In `_ContinuousKIFirstPassage._geometry`:
+
+1. Measure the half-cell floor on the cell AT the barrier, on both orientations:
+   `near = live[np.argsort(a[live], kind="stable")]`, `resolved = live[a[live] >= 0.5 * (a[near[1]] - a[near[0]])]`
+   (one changed line; `c02_q3_common._geometry_barrier_cell`). On a standard product `near` is `live`, so it is
+   bit-identical by construction; every 1D layout is barrier-aligned (`c05`: 1D bit-identical).
+2. Evaluate G in one exponent on the band nodes where the naive exponent exceeds 700 (np.exp overflows past ~709):
+   `m · exp(−2 μ_e a/σ² + log_ndtr(m/s)) + s · φ((μ_e dt + a)/s)` (`c08._g_guarded`); every value that is finite today
+   keeps its bits. The same closed form, not a fallback.
+
+What it would move: reverse 2D continuous-KI prices wherever the nearest live node sits within half a cell of the
+barrier (`c03`: 51 of 97 grids, e.g. 288 +5.0e−5, 289 +9.8e−5, 322 +6.6e−4), plus the divergent ones. No
+banked certificate prices reverse 2D continuous KI (`adi2d-snowball-greeks` monitors KI discretely), so no anchor is
+expected to move; to be confirmed by the anchor guards and the byte book when applied. Suggested tests: the `c03`
+divergent grids (312 / 317 / 384) finite and within 1e−3 of their neighbours, KI 139.80 production Greeks finite,
+KI 114.45 production PV finite, and the standard-orientation / 1D bit-identity.
+
+### Open questions (2026-10-10)
+
+1. **Sign the moved anchors** before landing: `adi2d-snowball-greeks/2026-10-10` (28 values) and
+   `phoenix-flat-bsm/2026-10-10` (2 values), both in `moved_values.txt`.
+2. **Q3 fix**: apply the two-part proposal (barrier-cell floor + guarded reflection) as its own change? It moves the
+   reverse 2D continuous-KI prices whose nearest live node is within half a cell of the barrier (51 of 97 grids in
+   `c03`, finite ones by ≤ 6.6e−4) and removes the NaN / divergent / PricingError cases; it is bit-identical on every
+   standard-orientation, discrete-KI, BSM-limit and 1D check run. Recommended: yes, with the regression tests listed.
+3. `greek_time_grid_policy` applies `barrier_greek_min_n_x` (600) only to dense DISCRETE KI; a continuous-KI contract
+   gets the generic Greek floor (300, 135, 1600/yr). Intended? (Not a cause of Q3: 600 is not safe by construction
+   either, `c06`.)
+4. Q1's regression test switches the terminal damping off as well as the event damping (above); confirm.
+5. Q1 moves the Feller-violating 2D Heston DCN by about 1% of its PV on a coarse (151, 41) grid, toward the refined
+   values; a sharper DCN reference would be needed to rank main and branch on the fine grid.

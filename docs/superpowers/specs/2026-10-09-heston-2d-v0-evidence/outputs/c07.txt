@@ -1,0 +1,24 @@
+n_x=200: 13 of 601 KI levels within 0.02 cells; nearest five KI 114.45 at 0.0009, KI 136.95 at 0.0021, KI 110.55 at 0.0035, KI 120.00 at 0.0088, KI 130.95 at 0.0103
+n_x=300: 13 of 601 KI levels within 0.02 cells; nearest five KI 139.80 at 0.0010, KI 135.80 at 0.0022, KI 137.65 at 0.0029, KI 130.75 at 0.0047, KI 126.60 at 0.0052
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/asset/equity/engine/pde/snowball_pde_solver.py:151: RuntimeWarning: overflow encountered in exp
+  G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/asset/equity/engine/pde/snowball_pde_solver.py:151: RuntimeWarning: invalid value encountered in multiply
+  G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/docs/superpowers/specs/2026-10-09-heston-2d-v0-evidence/c02_q3_common.py:58: RuntimeWarning: overflow encountered in exp
+  G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/docs/superpowers/specs/2026-10-09-heston-2d-v0-evidence/c02_q3_common.py:58: RuntimeWarning: invalid value encountered in multiply
+  G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
+KI 114.45 (nearest on n_x=200): as-is PV DIVERGED nan; Greeks price 94.675163  delta -0.955188  gamma -0.047581
+KI 114.45 (nearest on n_x=200): floor PV DIVERGED nan; Greeks price 94.675349  delta -0.955185  gamma -0.047586
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:664: RuntimeWarning: overflow encountered in multiply
+  U_xx = (U[:-2, 1:-1] * wm2[:, None] + U[1:-1, 1:-1] * w02[:, None]
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:665: RuntimeWarning: overflow encountered in multiply
+  + U[2:, 1:-1] * wp2[:, None])
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:982: RuntimeWarning: overflow encountered in multiply
+  U_xv = Ux[:, :-2] * wvm + Ux[:, 1:-1] * wv0 + Ux[:, 2:] * wvp
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:982: RuntimeWarning: invalid value encountered in add
+  U_xv = Ux[:, :-2] * wvm + Ux[:, 1:-1] * wv0 + Ux[:, 2:] * wvp
+/Users/fuxinyao/quant-ark/.claude/worktrees/agent-a3fc8a045e831e597/quantark/volmodels/adi_core.py:1154: RuntimeWarning: invalid value encountered in subtract
+  rhs = source - theta_loc * dt_step * A1U                    # (N_S, N_V), fresh array
+KI 139.80 (nearest on n_x=300): as-is PV 98.327205; Greeks PricingError: Heston/SLV Snowball Greek readout is non-finite
+KI 139.80 (nearest on n_x=300): floor PV 98.327205; Greeks price 98.313775  delta -0.599596  gamma -0.072751

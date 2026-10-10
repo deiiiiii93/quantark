@@ -1,0 +1,468 @@
+{
+ "desk: heston snowball std (96, 24, 48)": {
+  "repr": [
+   "99.5714531628685"
+  ],
+  "hex": [
+   "0x1.8e492b0496dd2p+6"
+  ]
+ },
+ "desk: heston snowball rev (96, 24, 48)": {
+  "repr": [
+   "95.65809619352738"
+  ],
+  "hex": [
+   "0x1.7ea1e3f7f349fp+6"
+  ]
+ },
+ "desk: slv snowball std (96, 24, 48)": {
+  "repr": [
+   "99.5714531628685"
+  ],
+  "hex": [
+   "0x1.8e492b0496dd2p+6"
+  ]
+ },
+ "desk: heston phoenix std (96, 24, 48)": {
+  "repr": [
+   "99.6584285663212"
+  ],
+  "hex": [
+   "0x1.8ea23b191c683p+6"
+  ]
+ },
+ "desk: heston phoenix rev (96, 24, 48)": {
+  "repr": [
+   "95.80583366487876"
+  ],
+  "hex": [
+   "0x1.7f392c75d2ae3p+6"
+  ]
+ },
+ "desk: heston snowball std (192, 48, 192)": {
+  "repr": [
+   "99.55743408254703"
+  ],
+  "hex": [
+   "0x1.8e3ad00008dc7p+6"
+  ]
+ },
+ "desk: heston snowball rev (192, 48, 192)": {
+  "repr": [
+   "95.43836889681646"
+  ],
+  "hex": [
+   "0x1.7dc0e3c6ada42p+6"
+  ]
+ },
+ "desk: slv snowball std (192, 48, 192)": {
+  "repr": [
+   "99.55743408254703"
+  ],
+  "hex": [
+   "0x1.8e3ad00008dc7p+6"
+  ]
+ },
+ "desk: heston phoenix std (192, 48, 192)": {
+  "repr": [
+   "99.66087925957936"
+  ],
+  "hex": [
+   "0x1.8ea4bd8859fe0p+6"
+  ]
+ },
+ "desk: heston phoenix rev (192, 48, 192)": {
+  "repr": [
+   "95.7019158885206"
+  ],
+  "hex": [
+   "0x1.7ecec309e6f48p+6"
+  ]
+ },
+ "desk: heston snowball std KI=10.5 (96,24,48)": {
+  "repr": [
+   "104.98156721955854"
+  ],
+  "hex": [
+   "0x1.a3ed1ff50b518p+6"
+  ]
+ },
+ "desk: heston snowball std KI=11.0 (96,24,48)": {
+  "repr": [
+   "104.98068353806138"
+  ],
+  "hex": [
+   "0x1.a3ec384e2ecc0p+6"
+  ]
+ },
+ "desk: heston snowball std KI=12.0 (96,24,48)": {
+  "repr": [
+   "104.97981888450174"
+  ],
+  "hex": [
+   "0x1.a3eb55a443c0bp+6"
+  ]
+ },
+ "desk: heston snowball std KI=15.0 (96,24,48)": {
+  "repr": [
+   "104.97550604648768"
+  ],
+  "hex": [
+   "0x1.a3e6eb0e9adc0p+6"
+  ]
+ },
+ "desk: heston snowball std delta,gamma (96,24,48)": {
+  "repr": [
+   "0.21807874654821546",
+   "-0.03417010492799477"
+  ],
+  "hex": [
+   "0x1.bea011e304a00p-3",
+   "-0x1.17ebe76555000p-5"
+  ]
+ },
+ "byte book 2D: heston_snowball": {
+  "repr": [
+   "97.99960730539338"
+  ],
+  "hex": [
+   "0x1.87ff990eb6077p+6"
+  ]
+ },
+ "byte book 2D: slv_snowball": {
+  "repr": [
+   "97.99960730539338"
+  ],
+  "hex": [
+   "0x1.87ff990eb6077p+6"
+  ]
+ },
+ "byte book 2D: heston_phoenix": {
+  "repr": [
+   "-2.406498274944137"
+  ],
+  "hex": [
+   "-0x1.340822ae61fb6p+1"
+  ]
+ },
+ "control: std KO 500 flat default damping": {
+  "repr": [
+   "103.59792564857715",
+   "0.0038269543097868564"
+  ],
+  "hex": [
+   "0x1.9e64469f08505p+6",
+   "0x1.f59b473528000p-9"
+  ]
+ },
+ "control: std KO 500 ann default damping": {
+  "repr": [
+   "113.01591821601804",
+   "0.004174185908183858"
+  ],
+  "hex": [
+   "0x1.c4104cdd64d52p+6",
+   "0x1.118f37f68c000p-8"
+  ]
+ },
+ "control: rev KO 20 flat default damping": {
+  "repr": [
+   "103.60284064609566",
+   "0.008741951828298511"
+  ],
+  "hex": [
+   "0x1.9e694f0eeeb8bp+6",
+   "0x1.1e74ce9a56000p-7"
+  ]
+ },
+ "control: rev KO 20 ann default damping": {
+  "repr": [
+   "113.01785170452337",
+   "0.006107674413513564"
+  ],
+  "hex": [
+   "0x1.c41247b79c6c4p+6",
+   "0x1.9045c5dc54000p-8"
+  ]
+ },
+ "control: rev KO 2 flat default damping": {
+  "repr": [
+   "103.59792471571069",
+   "0.0038260214433307738"
+  ],
+  "hex": [
+   "0x1.9e6446606dca4p+6",
+   "0x1.f57bf9f220000p-9"
+  ]
+ },
+ "control: rev KO 2 ann default damping": {
+  "repr": [
+   "113.01591782228184",
+   "0.004173792171982882"
+  ],
+  "hex": [
+   "0x1.c4104cc2f87f0p+6",
+   "0x1.11889ce104000p-8"
+  ]
+ },
+ "control: std KO 500 flat damping off": {
+  "repr": [
+   "103.596576423388",
+   "0.002477729120641925"
+  ],
+  "hex": [
+   "0x1.9e62e4ee10108p+6",
+   "0x1.44c2cb1540000p-9"
+  ]
+ },
+ "control: std KO 500 ann damping off": {
+  "repr": [
+   "113.01444708695456",
+   "0.00270305684470884"
+  ],
+  "hex": [
+   "0x1.c40ecb3797f82p+6",
+   "0x1.624b897e98000p-9"
+  ]
+ },
+ "control: rev KO 20 flat damping off": {
+  "repr": [
+   "103.60153163357167",
+   "0.007432939304308661"
+  ],
+  "hex": [
+   "0x1.9e67f7e896cc9p+6",
+   "0x1.e7200739a4000p-8"
+  ]
+ },
+ "control: rev KO 20 ann damping off": {
+  "repr": [
+   "113.01640351663359",
+   "0.004659486523735268"
+  ],
+  "hex": [
+   "0x1.c410cc155dec3p+6",
+   "0x1.315d363c50000p-8"
+  ]
+ },
+ "control: rev KO 2 flat damping off": {
+  "repr": [
+   "103.59657662414516",
+   "0.0024779298777986014"
+  ],
+  "hex": [
+   "0x1.9e62e4fb890bdp+6",
+   "0x1.44c98792e8000p-9"
+  ]
+ },
+ "control: rev KO 2 ann damping off": {
+  "repr": [
+   "113.01444717592165",
+   "0.002703145811793206"
+  ],
+  "hex": [
+   "0x1.c40ecb3d90698p+6",
+   "0x1.624e85b748000p-9"
+  ]
+ },
+ "dcn: Heston DCN_A (151, 41) defaults": {
+  "repr": [
+   "-89176.7328541755"
+  ],
+  "hex": [
+   "-0x1.5c58bb9c54cc8p+16"
+  ]
+ },
+ "1D phoenix: T=2.0 std plain KI=75.0": {
+  "repr": [
+   "95.1671781536434"
+  ],
+  "hex": [
+   "0x1.7cab30bffa043p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 std plain KI=60.0": {
+  "repr": [
+   "97.19617986300194"
+  ],
+  "hex": [
+   "0x1.84c8e35fbee89p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 std plain KI=50.0": {
+  "repr": [
+   "98.3296535151179"
+  ],
+  "hex": [
+   "0x1.895190b0e9c57p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 std memory KI=75.0": {
+  "repr": [
+   "95.20145566371757"
+  ],
+  "hex": [
+   "0x1.7cce4a64bd0b3p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 std memory KI=60.0": {
+  "repr": [
+   "97.20083662073816"
+  ],
+  "hex": [
+   "0x1.84cda81d77a36p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 std memory KI=50.0": {
+  "repr": [
+   "98.33028040813689"
+  ],
+  "hex": [
+   "0x1.89523506fdd47p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 rev plain KI=125.0": {
+  "repr": [
+   "91.47507173290649"
+  ],
+  "hex": [
+   "0x1.6de6793450598p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 rev plain KI=150.0": {
+  "repr": [
+   "93.2790747648763"
+  ],
+  "hex": [
+   "0x1.751dc5c671216p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 rev plain KI=200.0": {
+  "repr": [
+   "97.40879830409872"
+  ],
+  "hex": [
+   "0x1.85a29c05cb0eap+6"
+  ]
+ },
+ "1D phoenix: T=2.0 rev memory KI=125.0": {
+  "repr": [
+   "91.53687946708273"
+  ],
+  "hex": [
+   "0x1.6e25c3bb240e9p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 rev memory KI=150.0": {
+  "repr": [
+   "93.29444171693542"
+  ],
+  "hex": [
+   "0x1.752d822123435p+6"
+  ]
+ },
+ "1D phoenix: T=2.0 rev memory KI=200.0": {
+  "repr": [
+   "97.40967252953445"
+  ],
+  "hex": [
+   "0x1.85a3813211ae2p+6"
+  ]
+ },
+ "1D phoenix: T=0.25 std plain KI=75.0": {
+  "repr": [
+   "99.53632077069922"
+  ],
+  "hex": [
+   "0x1.8e253145a9465p+6"
+  ]
+ },
+ "1D phoenix: T=0.25 std plain KI=60.0": {
+  "repr": [
+   "99.62817517540444"
+  ],
+  "hex": [
+   "0x1.8e83405a6a15ap+6"
+  ]
+ },
+ "1D phoenix: T=0.25 std plain KI=50.0": {
+  "repr": [
+   "99.62820030792582"
+  ],
+  "hex": [
+   "0x1.8e8346f10783ap+6"
+  ]
+ },
+ "1D phoenix: T=0.25 std memory KI=75.0": {
+  "repr": [
+   "99.53632696494235"
+  ],
+  "hex": [
+   "0x1.8e2532e5598fbp+6"
+  ]
+ },
+ "1D phoenix: T=0.25 std memory KI=60.0": {
+  "repr": [
+   "99.62817517540552"
+  ],
+  "hex": [
+   "0x1.8e83405a6a1a6p+6"
+  ]
+ },
+ "1D phoenix: T=0.25 std memory KI=50.0": {
+  "repr": [
+   "99.62820030792582"
+  ],
+  "hex": [
+   "0x1.8e8346f10783ap+6"
+  ]
+ },
+ "1D phoenix: T=0.25 rev plain KI=125.0": {
+  "repr": [
+   "98.94981294511284"
+  ],
+  "hex": [
+   "0x1.8bcc9bc3c24efp+6"
+  ]
+ },
+ "1D phoenix: T=0.25 rev plain KI=150.0": {
+  "repr": [
+   "99.61948040448334"
+  ],
+  "hex": [
+   "0x1.8e7a591237134p+6"
+  ]
+ },
+ "1D phoenix: T=0.25 rev plain KI=200.0": {
+  "repr": [
+   "99.62227336703607"
+  ],
+  "hex": [
+   "0x1.8e7d353ac25dfp+6"
+  ]
+ },
+ "1D phoenix: T=0.25 rev memory KI=125.0": {
+  "repr": [
+   "98.94991045054026"
+  ],
+  "hex": [
+   "0x1.8bccb5533ccbdp+6"
+  ]
+ },
+ "1D phoenix: T=0.25 rev memory KI=150.0": {
+  "repr": [
+   "99.6194804060806"
+  ],
+  "hex": [
+   "0x1.8e7a591252841p+6"
+  ]
+ },
+ "1D phoenix: T=0.25 rev memory KI=200.0": {
+  "repr": [
+   "99.62227336703607"
+  ],
+  "hex": [
+   "0x1.8e7d353ac25dfp+6"
+  ]
+ }
+}
