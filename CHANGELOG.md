@@ -179,6 +179,22 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   refused everywhere. The knocked-in KO-reset's numeric twin now settles on V2 (3 at 104, -10 at 90) while the dated
   KO-reset keeps its pre-existing refusal on V2 (a schedule-1 record in the past fails settlement resolution, at any
   valuation date).
+- The vol-model European and barrier routes settle on the exercise date (W9, user ruling 2026-10-10): at T = 0 (a
+  dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) each short-circuits before its
+  model runs to the expiry code of its Black-Scholes counterpart of the same method, instead of raising `maturity must
+  be positive` / `t_grid must be strictly increasing`. Heston analytical, Heston / local-vol / SLV MC European: the
+  new `settlement_support.expiry_terminal_value` (the BS analytical and MC engines' expiry branch, now shared);
+  Heston / SLV European PDE: `european_expiry_outcome` (the BS European PDE route); local-vol / Heston / SLV barrier
+  MC: `barrier_expiry_value` (factored from `BarrierOptionMCEngine._price_expiry_payoff`); Heston / SLV barrier PDE:
+  `barrier_expiry_outcome` (the BS barrier PDE route). The nine `TODO(dated-expiry)` markers are gone. European call
+  K100: 10 at spot 110, 0 at 90; up-and-out call K100 B130 rebate 5: 10, 0, 5 at 110, 90, 135; a two-day settlement
+  lag discounts them (9.99836 at 110). `calculate_greeks` on the exercise date returns the counterpart's keys and
+  values (price, delta, gamma; the analytical / MC routes by bump-and-reprice, the PDE routes from the payoff slope)
+  where it raised. A valuation after the exercise instant (the next day, or later on the exercise day) and a numeric
+  maturity below 0 still refuse. Not changed: a knock-in carried as triggered (`_otc_lifecycle_knocked_in`) is not
+  read at T = 0 by any Black-Scholes barrier route (up-and-in call B130 rebate 5 at spot 110: the rebate 5, not the
+  payoff 10), so the vol-model barrier routes now return the same (open question in the W9 report). Evidence:
+  `docs/superpowers/specs/2026-10-10-volmodel-expiry-settles-evidence/`.
 - A numeric run-fixings participant (range accrual, record Asian) is no longer floored at a 1e-8 maturity in the
   replay (run-fixings plan Ruling 12, superseded now the dated twin settles on its exercise date): on its maturity
   day it is exactly 0.0 and prices its dated twin's settled value (numeric Asian pricing copy on T: 6.9999999965 ->
