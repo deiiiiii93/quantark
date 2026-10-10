@@ -1,0 +1,477 @@
+# Moved values: a knock-in carried as triggered decides the exercise date (ruling 2026-10-10)
+# measure.py on three trees (git archive of quantark; the branch's test cells), summarize.py:
+#   section A: 07c799cf (W9 head) -> branch, every form. Only cells carrying a knock-in move: rebate -> payoff.
+#   section B: main 6f9c6e74 -> branch, NUMERIC form only (the dated contract raises on main at T = 0; W8). A numeric
+#     twin carried as knocked in at maturity 0.0 paid the rebate on main too ("value -> value" rows: wrong on main).
+#     "raised -> value" rows are W8 / W9 / Q1 (vol-model routes and QUAD V2 settling at T = 0), not this change;
+#     listed for completeness.
+# Unmoved (A): every not-carried cell, every day-before cell (T = 1/365), every autocallable cell.
+
+## A. 07c799cf -> branch
+# 222 of 1400 measured values moved: 222 value -> value
+# cell | form | quantity | old -> new | pinned by
+barrier:up_in_call-analytical-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-analytical-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-analytical-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-analytical-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-analytical-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-analytical-90 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-analytical-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-analytical-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-analytical-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-analytical-90 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-analytical-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-analytical-90 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-analytical-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-analytical-110 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-analytical-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-analytical-110 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-analytical-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-analytical-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-analytical-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-analytical-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-mc-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-mc-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-mc-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-mc-90 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-mc-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-mc-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-mc-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-mc-90 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-mc-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-mc-90 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-mc-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-mc-110 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-mc-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-mc-110 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-mc-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-mc-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-pde-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-pde-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-pde-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-pde-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-pde-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-pde-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-quad-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-quad-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-quad-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-quad-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-quad-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-quad-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-quad-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-quad-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-quad-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-quad-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-lv_mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-lv_mc-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-90 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-lv_mc-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-lv_mc-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_mc-90 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-lv_mc-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_mc-90 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-lv_mc-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_mc-110 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-lv_mc-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_mc-110 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-lv_mc-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-lv_mc-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-lv_mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-lv_mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-lv_pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_pde-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_pde-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_pde-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_pde-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_pde-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_pde-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-lv_pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-lv_pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-heston_mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-heston_mc-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-90 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-heston_mc-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-heston_mc-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_mc-90 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-heston_mc-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_mc-90 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-heston_mc-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_mc-110 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-heston_mc-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_mc-110 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-heston_mc-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-heston_mc-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-heston_mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-heston_mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-heston_pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_pde-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_pde-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_pde-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_pde-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_pde-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_pde-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-heston_pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-heston_pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_mc-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_mc-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-slv_mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-slv_mc-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_mc-90 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-slv_mc-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_mc-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-slv_mc-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_mc-90 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-slv_mc-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_mc-90 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-slv_mc-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_mc-110 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-slv_mc-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_mc-110 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-slv_mc-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-slv_mc-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-slv_mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-slv_mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-slv_pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_pde-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_pde-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_pde-90 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_pde-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_pde-110 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_pde-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-slv_pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-slv_pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-analytical-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-analytical-110 | dated | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:double_knock_in_call-analytical-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-analytical-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:double_knock_in_call-analytical-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-analytical-90 | dated | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:double_knock_in_call-analytical-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-analytical-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:double_knock_in_call-pde-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-pde-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-pde-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-quad-110 | dated | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-quad-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-quad-90 | dated | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-quad-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+greeks:up_in_call-pde-110 | dated | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-pde-110 | dated | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-pde-110 | numeric | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-pde-110 | numeric | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-lv_pde-110 | dated | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-lv_pde-110 | dated | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-lv_pde-110 | numeric | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-lv_pde-110 | numeric | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-heston_pde-110 | dated | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-heston_pde-110 | dated | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-heston_pde-110 | numeric | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-heston_pde-110 | numeric | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-slv_pde-110 | dated | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-slv_pde-110 | dated | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-slv_pde-110 | numeric | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-slv_pde-110 | numeric | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | dated | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | dated | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | dated | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | dated | greeks_delta | 0.0 -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_delta | 0.0 -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | dated | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | dated | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | dated | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | dated | greeks_delta | 0.0 -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_delta | 0.0 -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | dated | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | dated | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | dated | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | dated | greeks_delta | 0.0 -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_delta | 0.0 -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | dated | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | dated | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | dated | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | dated | greeks_delta | 0.0 -> 1.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_delta | 0.0 -> 1.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | dated | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | dated | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | dated | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | dated | greeks_delta | 0.0 -> 1.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_price | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_delta | 0.0 -> 1.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+
+## B. main 6f9c6e74 -> branch (numeric form)
+# 239 of 704 measured values moved (numeric form only): 187 raised -> value, 52 value -> value
+# cell | form | quantity | old -> new | pinned by
+barrier:up_in_call-analytical-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-analytical-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-analytical-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-analytical-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-analytical-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-analytical-90 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-analytical-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-analytical-110 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-analytical-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-analytical-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-mc-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-mc-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-mc-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-mc-90 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-mc-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-mc-110 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-mc-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-mc-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-pde-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-pde-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-pde-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-quad-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-quad-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-quad-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-quad-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-quad-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-lv_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-lv_mc-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-90 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-lv_mc-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-lv_mc-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_mc-135 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-lv_mc-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-lv_mc-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_mc-90 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-lv_mc-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-lv_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-lv_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-lv_mc-75 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_mc-75 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-lv_mc-75 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-lv_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-lv_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-lv_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-lv_mc-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-lv_mc-135 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-lv_mc-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-lv_pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-lv_pde-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_pde-90 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-lv_pde-110 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-lv_pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-heston_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-heston_mc-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-90 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-heston_mc-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-heston_mc-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_mc-135 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-heston_mc-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-heston_mc-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_mc-90 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-heston_mc-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-heston_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-heston_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-heston_mc-75 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_mc-75 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-heston_mc-75 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-heston_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-heston_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-heston_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-heston_mc-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-heston_mc-135 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-heston_mc-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-heston_pde-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_pde-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-heston_pde-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_pde-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-heston_pde-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-heston_pde-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-heston_pde-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_pde-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-heston_pde-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_pde-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-heston_pde-75 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-heston_pde-75 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-heston_pde-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-heston_pde-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-heston_pde-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-heston_pde-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-slv_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-slv_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-slv_mc-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_mc-90 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-slv_mc-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-slv_mc-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_mc-135 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call-slv_mc-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-slv_mc-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_mc-90 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-slv_mc-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-slv_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-slv_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-slv_mc-75 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_mc-75 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:down_in_put-slv_mc-75 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-slv_mc-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-slv_mc-110 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-slv_mc-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-slv_mc-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-slv_mc-135 | numeric | price_carried_state | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:up_in_call_discrete-slv_mc-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-slv_pde-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_pde-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-slv_pde-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_pde-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call-slv_pde-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call-slv_pde-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-slv_pde-90 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_pde-90 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-slv_pde-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_pde-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:down_in_put-slv_pde-75 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:down_in_put-slv_pde-75 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 25.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-slv_pde-110 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-slv_pde-110 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 5.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:up_in_call_discrete-slv_pde-135 | numeric | price_carried_flag | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:up_in_call_discrete-slv_pde-135 | numeric | price_not_carried | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_expiry_carried_knock_in.py::test_a_knock_in_not_carried_is_decided_by_todays_observation
+barrier:double_knock_in_call-analytical-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-analytical-110 | numeric | price_carried_state | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:double_knock_in_call-analytical-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-analytical-90 | numeric | price_carried_state | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_knock_in_carried_by_the_lifecycle_state_settles_the_payoff
+barrier:double_knock_in_call-pde-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-pde-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-quad-110 | numeric | price_carried_flag | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+barrier:double_knock_in_call-quad-90 | numeric | price_carried_flag | 5.0 -> 0.0 | test_expiry_carried_knock_in.py::test_a_carried_knock_in_settles_the_payoff_on_the_exercise_date
+greeks:up_in_call-pde-110 | numeric | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-pde-110 | numeric | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-lv_pde-110 | numeric | price | 5.0 -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-lv_pde-110 | numeric | delta | 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-heston_pde-110 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-heston_pde-110 | numeric | delta | RAISES ValidationError: t_grid must be strictly increasing -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-heston_pde-110 | numeric | gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-slv_pde-110 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-slv_pde-110 | numeric | delta | RAISES ValidationError: t_grid must be strictly increasing -> 1.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+greeks:up_in_call-slv_pde-110 | numeric | gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_expiry_carried_knock_in.py::test_carried_knock_in_greeks_on_the_exercise_date_are_the_payoffs
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:lv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:lv_barrier_mc-up_in_call_knocked_in-135 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:lv_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:lv_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 0.9999999999999957 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:lv_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-135 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 0.9999999999999957 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 0.9999999999999948 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-110 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-135 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 0.9999999999999957 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_mc-up_in_call_knocked_in-135 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 1.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-135 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:heston_barrier_pde-up_in_call_knocked_in-135 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-135 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 1.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:heston_barrier_pde-up_in_call_knocked_in-135 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | price_bsm | 5.0 -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 10.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 1.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-110 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-135 | numeric | price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_settles_a_carried_knock_in_at_its_payoff
+w9:slv_barrier_pde-up_in_call_knocked_in-135 | numeric | greeks_price | RAISES ValidationError: t_grid must be strictly increasing -> 35.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-135 | numeric | greeks_delta | RAISES ValidationError: t_grid must be strictly increasing -> 1.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+w9:slv_barrier_pde-up_in_call_knocked_in-135 | numeric | greeks_gamma | RAISES ValidationError: t_grid must be strictly increasing -> 0.0 | test_dated_expiry_settles.py::test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_counterparts
+autocall:snowball-quad_v2-carried-101 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 0.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:snowball-quad_v2-carried-101 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> 0.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:snowball-quad_v2-carried-90 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -10.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:snowball-quad_v2-carried-90 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> -10.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:snowball-quad_v2-carried-104 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 15.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:snowball-quad_v2-carried-104 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> 15.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:snowball-quad_v2-plain-90 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 15.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:snowball-quad_v2-plain-74 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -25.99999999999997 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:snowball-quad_v2-plain-104 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 15.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix-quad_v2-carried-101 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix-quad_v2-carried-101 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:phoenix-quad_v2-carried-98 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -0.9999999999999574 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix-quad_v2-carried-98 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> -0.9999999999999574 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:phoenix-quad_v2-carried-90 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -9.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix-quad_v2-carried-90 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> -9.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:phoenix-quad_v2-carried-104 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix-quad_v2-carried-104 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:phoenix-quad_v2-plain-90 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix-quad_v2-plain-74 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 0.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix-quad_v2-plain-60 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -40.000000000000014 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix_plain-quad_v2-carried-101 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix_plain-quad_v2-carried-101 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:phoenix_plain-quad_v2-carried-98 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -0.9999999999999574 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix_plain-quad_v2-carried-98 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> -0.9999999999999574 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:phoenix_plain-quad_v2-carried-90 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -9.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix_plain-quad_v2-carried-90 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> -9.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:phoenix_plain-quad_v2-carried-104 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix_plain-quad_v2-carried-104 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:phoenix_plain-quad_v2-plain-90 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 1.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix_plain-quad_v2-plain-74 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 0.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:phoenix_plain-quad_v2-plain-60 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -40.000000000000014 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:ko_reset_absolute-quad_v2-carried-101 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 3.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:ko_reset_absolute-quad_v2-carried-101 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> 3.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:ko_reset_absolute-quad_v2-carried-90 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> -10.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:ko_reset_absolute-quad_v2-carried-90 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> -10.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state
+autocall:ko_reset_absolute-quad_v2-carried-104 | numeric | price | RAISES ValidationError: Maturity must be positive, got 0.0 -> 3.0 | test_expiry_carried_knock_in.py::test_an_autocallable_on_its_exercise_date_settles_its_knock_in_state
+autocall:ko_reset_absolute-quad_v2-carried-104 | numeric | price_carried_state | RAISES ValidationError: Maturity must be positive, got 0.0 -> 3.0 | test_expiry_carried_knock_in.py::test_quad_v2_settles_a_knock_in_carried_by_the_lifecycle_state

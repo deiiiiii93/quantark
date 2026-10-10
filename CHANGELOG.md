@@ -193,7 +193,8 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   where it raised. A valuation after the exercise instant (the next day, or later on the exercise day) and a numeric
   maturity below 0 still refuse. Not changed: a knock-in carried as triggered (`_otc_lifecycle_knocked_in`) is not
   read at T = 0 by any Black-Scholes barrier route (up-and-in call B130 rebate 5 at spot 110: the rebate 5, not the
-  payoff 10), so the vol-model barrier routes now return the same (open question in the W9 report). Evidence:
+  payoff 10), so the vol-model barrier routes now return the same (open question in the W9 report; fixed below,
+  "A knock-in carried as triggered decides the exercise date"). Evidence:
   `docs/superpowers/specs/2026-10-10-volmodel-expiry-settles-evidence/`.
 - A numeric run-fixings participant (range accrual, record Asian) is no longer floored at a 1e-8 maturity in the
   replay (run-fixings plan Ruling 12, superseded now the dated twin settles on its exercise date): on its maturity
@@ -211,6 +212,25 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   `test_accumulator_mc_engine` expiry cases 5.0 -> 10.0 and -5.0 -> -15.0.
 
 ### Fixed
+- A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
+  At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
+  decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
+  (`lifecycle_state.knocked_in` or the product's `_otc_lifecycle_knocked_in`), while the day before the same state
+  priced the knocked-in vanilla. The knock-in decision at T = 0 is now the carried state first
+  (`monitoring_ended.knock_in_carried`, the helper the T > 0 path reads), then today's observation: knocked in pays
+  the payoff, only a contract never knocked in the rebate. Fixed in the shared expiry code, so every route gets it:
+  `BarrierAnalyticalEngine._price_at_maturity`; `barrier_expiry_value` (BS barrier MC, and the local-vol / Heston /
+  SLV barrier MC routes); the PDE knock-in adapters' `maturity_value` (BS and local-vol barrier PDE, the Heston / SLV
+  barrier PDE routes through `barrier_expiry_outcome`, double barrier PDE; greeks: delta the payoff slope); the QUAD
+  barrier and double barrier expired price; `DoubleBarrierOptionAnalyticalEngine._price_zero_maturity`. Up-and-in
+  call K100 B130 rebate 5 carried as knocked in: 5.0 -> 10.0 at spot 110, 5.0 -> 0.0 at 90 (both forms, every
+  route); down-and-in put B80: 5.0 -> 10.0 at 90, 5.0 -> 0.0 at 110; double knock-in 80/130: 5.0 -> 10.0 at 110.
+  The numeric twins moved from the same wrong values on main. A knock-in not carried, a carried knock-out / touch
+  (terminal lifecycle state, read before maturity on both sides of T = 0) and every autocallable with a knock-in
+  term (snowball, Phoenix, KO-reset, on MC / PDE / QUAD V1 / V2 / local vol / Heston / SLV, which already read the
+  carried state at T = 0) are unchanged. New `test/test_expiry_carried_knock_in.py` (hand settled values, both
+  forms, both carriers, day-before continuity); W9's `up_in_call_knocked_in` cells are now also pinned to the hand
+  value. Evidence: `docs/superpowers/specs/2026-10-10-carried-knock-in-at-expiry-evidence/`.
 - Snowball / Phoenix / KO-reset PDE (1D BSM and local vol, 2D Heston and SLV): the not-knocked-in (V0) Dirichlet
   rows are built by edge. The knock-out edge is the upper row on a standard product and the LOWER row on a reverse
   one; it carries the knock-out payoff once it lies beyond every knock-out level. A reverse product used to price
