@@ -1,0 +1,439 @@
+# quantark from /private/tmp/claude-501/-Users-fuxinyao-quant-ark/cca3f369-302d-41df-82ec-52a6d89c5a89/scratchpad/base/quantark/__init__.py
+autocall:heston_pde-snowball-d10 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball-d10 | numeric | price | 10.087011726414525
+autocall:heston_pde-snowball-d45 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball-d45 | dated | greeks_price | 10.434390896808384
+autocall:heston_pde-snowball-d45 | dated | greeks_delta | 0.6698105795218217
+autocall:heston_pde-snowball-d45 | dated | greeks_gamma | 0.0027470242617493312
+autocall:heston_pde-snowball-d45 | numeric | price | 10.434390896808384
+autocall:heston_pde-snowball-d45 | numeric | greeks_price | 10.434390896808384
+autocall:heston_pde-snowball-d45 | numeric | greeks_delta | 0.6698105795218217
+autocall:heston_pde-snowball-d45 | numeric | greeks_gamma | 0.0027470242617493312
+autocall:heston_pde-snowball-d90 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball-d90 | numeric | price | 10.856730925955747
+autocall:heston_pde-snowball-d92 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball-d92 | dated | greeks_price | 10.88711764319127
+autocall:heston_pde-snowball-d92 | dated | greeks_delta | 0.5321204868790472
+autocall:heston_pde-snowball-d92 | dated | greeks_gamma | -0.034216602157167486
+autocall:heston_pde-snowball-d92 | numeric | price | 10.887117643191292
+autocall:heston_pde-snowball-d92 | numeric | greeks_price | 10.887117643191292
+autocall:heston_pde-snowball-d92 | numeric | greeks_delta | 0.5321204868790472
+autocall:heston_pde-snowball-d92 | numeric | greeks_gamma | -0.03421660215717459
+autocall:heston_pde-snowball-d200 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball-d200 | numeric | price | 12.7206663351809
+autocall:heston_pde-snowball_discrete_ki-d10 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball_discrete_ki-d10 | numeric | price | 10.851752229002232
+autocall:heston_pde-snowball_discrete_ki-d45 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball_discrete_ki-d45 | dated | greeks_price | 11.205058831596277
+autocall:heston_pde-snowball_discrete_ki-d45 | dated | greeks_delta | 0.5536501854715077
+autocall:heston_pde-snowball_discrete_ki-d45 | dated | greeks_gamma | 0.001503116182828279
+autocall:heston_pde-snowball_discrete_ki-d45 | numeric | price | 11.205058831596277
+autocall:heston_pde-snowball_discrete_ki-d45 | numeric | greeks_price | 11.205058831596277
+autocall:heston_pde-snowball_discrete_ki-d45 | numeric | greeks_delta | 0.5536501854715077
+autocall:heston_pde-snowball_discrete_ki-d45 | numeric | greeks_gamma | 0.001503116182828279
+autocall:heston_pde-snowball_discrete_ki-d90 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball_discrete_ki-d90 | numeric | price | 11.63641859257248
+autocall:heston_pde-snowball_discrete_ki-d92 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball_discrete_ki-d92 | dated | greeks_price | 11.662712976653914
+autocall:heston_pde-snowball_discrete_ki-d92 | dated | greeks_delta | 0.43051850707699035
+autocall:heston_pde-snowball_discrete_ki-d92 | dated | greeks_gamma | -0.028480727613706236
+autocall:heston_pde-snowball_discrete_ki-d92 | numeric | price | 11.66271297665393
+autocall:heston_pde-snowball_discrete_ki-d92 | numeric | greeks_price | 11.66271297665393
+autocall:heston_pde-snowball_discrete_ki-d92 | numeric | greeks_delta | 0.4305185070769939
+autocall:heston_pde-snowball_discrete_ki-d92 | numeric | greeks_gamma | -0.02848072761370979
+autocall:heston_pde-snowball_discrete_ki-d200 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-snowball_discrete_ki-d200 | numeric | price | 13.343220840079905
+autocall:heston_pde-phoenix-d10 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-phoenix-d10 | numeric | price | 2.7473956527473242
+autocall:heston_pde-phoenix-d45 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-phoenix-d45 | dated | greeks_price | 2.8325760391390493
+autocall:heston_pde-phoenix-d45 | dated | greeks_delta | -0.26610552708297486
+autocall:heston_pde-phoenix-d45 | dated | greeks_gamma | -0.07690936460007292
+autocall:heston_pde-phoenix-d45 | numeric | price | 2.8325760391390493
+autocall:heston_pde-phoenix-d45 | numeric | greeks_price | 2.8325760391390493
+autocall:heston_pde-phoenix-d45 | numeric | greeks_delta | -0.26610552708297486
+autocall:heston_pde-phoenix-d45 | numeric | greeks_gamma | -0.07690936460007292
+autocall:heston_pde-phoenix-d90 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-phoenix-d90 | numeric | price | 3.3552087917041997
+autocall:heston_pde-phoenix-d92 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-phoenix-d92 | dated | greeks_price | 2.3823737630390145
+autocall:heston_pde-phoenix-d92 | dated | greeks_delta | -0.2125481812463037
+autocall:heston_pde-phoenix-d92 | dated | greeks_gamma | -0.043642546988218456
+autocall:heston_pde-phoenix-d92 | numeric | price | 2.3823737630390096
+autocall:heston_pde-phoenix-d92 | numeric | greeks_price | 2.3823737630390096
+autocall:heston_pde-phoenix-d92 | numeric | greeks_delta | -0.21254818124630304
+autocall:heston_pde-phoenix-d92 | numeric | greeks_gamma | -0.043642546988220676
+autocall:heston_pde-phoenix-d200 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:heston_pde-phoenix-d200 | numeric | price | 2.8289174149654985
+autocall:slv_pde-snowball-d10 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball-d10 | numeric | price | 10.087011726414525
+autocall:slv_pde-snowball-d45 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball-d45 | dated | greeks_price | 10.434390896808384
+autocall:slv_pde-snowball-d45 | dated | greeks_delta | 0.6698105795218217
+autocall:slv_pde-snowball-d45 | dated | greeks_gamma | 0.0027470242617493312
+autocall:slv_pde-snowball-d45 | numeric | price | 10.434390896808384
+autocall:slv_pde-snowball-d45 | numeric | greeks_price | 10.434390896808384
+autocall:slv_pde-snowball-d45 | numeric | greeks_delta | 0.6698105795218217
+autocall:slv_pde-snowball-d45 | numeric | greeks_gamma | 0.0027470242617493312
+autocall:slv_pde-snowball-d90 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball-d90 | numeric | price | 10.856730925955747
+autocall:slv_pde-snowball-d92 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball-d92 | dated | greeks_price | 10.88711764319127
+autocall:slv_pde-snowball-d92 | dated | greeks_delta | 0.5321204868790472
+autocall:slv_pde-snowball-d92 | dated | greeks_gamma | -0.034216602157167486
+autocall:slv_pde-snowball-d92 | numeric | price | 10.887117643191292
+autocall:slv_pde-snowball-d92 | numeric | greeks_price | 10.887117643191292
+autocall:slv_pde-snowball-d92 | numeric | greeks_delta | 0.5321204868790472
+autocall:slv_pde-snowball-d92 | numeric | greeks_gamma | -0.03421660215717459
+autocall:slv_pde-snowball-d200 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball-d200 | numeric | price | 12.7206663351809
+autocall:slv_pde-snowball_discrete_ki-d10 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball_discrete_ki-d10 | numeric | price | 10.851752229002232
+autocall:slv_pde-snowball_discrete_ki-d45 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball_discrete_ki-d45 | dated | greeks_price | 11.205058831596277
+autocall:slv_pde-snowball_discrete_ki-d45 | dated | greeks_delta | 0.5536501854715077
+autocall:slv_pde-snowball_discrete_ki-d45 | dated | greeks_gamma | 0.001503116182828279
+autocall:slv_pde-snowball_discrete_ki-d45 | numeric | price | 11.205058831596277
+autocall:slv_pde-snowball_discrete_ki-d45 | numeric | greeks_price | 11.205058831596277
+autocall:slv_pde-snowball_discrete_ki-d45 | numeric | greeks_delta | 0.5536501854715077
+autocall:slv_pde-snowball_discrete_ki-d45 | numeric | greeks_gamma | 0.001503116182828279
+autocall:slv_pde-snowball_discrete_ki-d90 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball_discrete_ki-d90 | numeric | price | 11.63641859257248
+autocall:slv_pde-snowball_discrete_ki-d92 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball_discrete_ki-d92 | dated | greeks_price | 11.662712976653914
+autocall:slv_pde-snowball_discrete_ki-d92 | dated | greeks_delta | 0.43051850707699035
+autocall:slv_pde-snowball_discrete_ki-d92 | dated | greeks_gamma | -0.028480727613706236
+autocall:slv_pde-snowball_discrete_ki-d92 | numeric | price | 11.66271297665393
+autocall:slv_pde-snowball_discrete_ki-d92 | numeric | greeks_price | 11.66271297665393
+autocall:slv_pde-snowball_discrete_ki-d92 | numeric | greeks_delta | 0.4305185070769939
+autocall:slv_pde-snowball_discrete_ki-d92 | numeric | greeks_gamma | -0.02848072761370979
+autocall:slv_pde-snowball_discrete_ki-d200 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+autocall:slv_pde-snowball_discrete_ki-d200 | numeric | price | 13.343220840079905
+autocall:slv_pde-phoenix-d10 | dated | price | 2.482014174252303
+autocall:slv_pde-phoenix-d10 | numeric | price | 2.482014174252303
+autocall:slv_pde-phoenix-d45 | dated | price | 2.859271321696413
+autocall:slv_pde-phoenix-d45 | dated | greeks_price | 2.859271321696413
+autocall:slv_pde-phoenix-d45 | dated | greeks_delta | -0.41315032728458645
+autocall:slv_pde-phoenix-d45 | dated | greeks_gamma | 0.28125296733185845
+autocall:slv_pde-phoenix-d45 | numeric | price | 2.859271321696413
+autocall:slv_pde-phoenix-d45 | numeric | greeks_price | 2.859271321696413
+autocall:slv_pde-phoenix-d45 | numeric | greeks_delta | -0.41315032728458645
+autocall:slv_pde-phoenix-d45 | numeric | greeks_gamma | 0.28125296733185845
+autocall:slv_pde-phoenix-d90 | dated | price | 3.361775067008866
+autocall:slv_pde-phoenix-d90 | numeric | price | 3.361775067008866
+autocall:slv_pde-phoenix-d92 | dated | price | 2.3721376882934053
+autocall:slv_pde-phoenix-d92 | dated | greeks_price | 2.3721376882934053
+autocall:slv_pde-phoenix-d92 | dated | greeks_delta | -0.14573843131119846
+autocall:slv_pde-phoenix-d92 | dated | greeks_gamma | -0.00938759362162589
+autocall:slv_pde-phoenix-d92 | numeric | price | 2.3721376882933867
+autocall:slv_pde-phoenix-d92 | numeric | greeks_price | 2.3721376882933867
+autocall:slv_pde-phoenix-d92 | numeric | greeks_delta | -0.14573843131118758
+autocall:slv_pde-phoenix-d92 | numeric | greeks_gamma | -0.00938759362159347
+autocall:slv_pde-phoenix-d200 | dated | price | 2.605946832042323
+autocall:slv_pde-phoenix-d200 | numeric | price | 2.605946832042323
+stats:heston_pde-snowball-d45 | dated | pv | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+stats:heston_pde-snowball-d45 | dated | sum_ko_probability | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+stats:heston_pde-snowball-d45 | numeric | pv | 10.434390896808384
+stats:heston_pde-snowball-d45 | numeric | sum_ko_probability | 0.7423046758828852
+stats:slv_pde-snowball-d45 | dated | pv | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+stats:slv_pde-snowball-d45 | dated | sum_ko_probability | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+stats:slv_pde-snowball-d45 | numeric | pv | 10.434390896808384
+stats:slv_pde-snowball-d45 | numeric | sum_ko_probability | 0.7423046758828852
+barrier:lv_mc-up_out_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call-d10 | numeric | price | 2.5460128720856594
+barrier:lv_mc-up_out_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call-d90 | numeric | price | 2.800572124744688
+barrier:lv_mc-up_out_call-d90 | numeric | greeks_price | 2.800572124744688
+barrier:lv_mc-up_out_call-d90 | numeric | greeks_delta | 0.08252186406880813
+barrier:lv_mc-up_out_call-d90 | numeric | greeks_gamma | 0.09179361842961375
+barrier:lv_mc-up_out_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call-d92 | numeric | price | 2.819653711196308
+barrier:lv_mc-up_in_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_in_call-d10 | numeric | price | 9.098340480548416
+barrier:lv_mc-up_in_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_in_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_in_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_in_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_in_call-d90 | numeric | price | 7.738781981734055
+barrier:lv_mc-up_in_call-d90 | numeric | greeks_price | 7.738781981734055
+barrier:lv_mc-up_in_call-d90 | numeric | greeks_delta | 0.47410612467901414
+barrier:lv_mc-up_in_call-d90 | numeric | greeks_gamma | -0.07012907792593648
+barrier:lv_mc-up_in_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_in_call-d92 | numeric | price | 7.690342220152996
+barrier:lv_mc-down_out_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_out_put-d10 | numeric | price | 2.2926001714742323
+barrier:lv_mc-down_out_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_out_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_out_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_out_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_out_put-d90 | numeric | price | 2.3283249999355426
+barrier:lv_mc-down_out_put-d90 | numeric | greeks_price | 2.3283249999355426
+barrier:lv_mc-down_out_put-d90 | numeric | greeks_delta | -0.04963228388663654
+barrier:lv_mc-down_out_put-d90 | numeric | greeks_gamma | 0.06335954923258003
+barrier:lv_mc-down_out_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_out_put-d92 | numeric | price | 2.339842682125451
+barrier:lv_mc-down_in_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_in_put-d10 | numeric | price | 7.427892873999371
+barrier:lv_mc-down_in_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_in_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_in_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_in_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_in_put-d90 | numeric | price | 6.715891178364334
+barrier:lv_mc-down_in_put-d90 | numeric | greeks_price | 6.715891178364334
+barrier:lv_mc-down_in_put-d90 | numeric | greeks_delta | -0.38634189510655936
+barrier:lv_mc-down_in_put-d90 | numeric | greeks_gamma | -0.041695008728895644
+barrier:lv_mc-down_in_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-down_in_put-d92 | numeric | price | 6.685772872264958
+barrier:lv_mc-up_out_call_pay_at_hit-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.555337590944306
+barrier:lv_mc-up_out_call_pay_at_hit-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call_pay_at_hit-d90 | numeric | price | 2.80563198883398
+barrier:lv_mc-up_out_call_pay_at_hit-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:lv_mc-up_out_call_pay_at_hit-d92 | numeric | price | 2.8246899096295435
+barrier:heston_mc-up_out_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call-d10 | numeric | price | 2.9469081038438665
+barrier:heston_mc-up_out_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call-d90 | numeric | price | 3.350045801746008
+barrier:heston_mc-up_out_call-d90 | numeric | greeks_price | 3.350045801746008
+barrier:heston_mc-up_out_call-d90 | numeric | greeks_delta | 0.13097624490848392
+barrier:heston_mc-up_out_call-d90 | numeric | greeks_gamma | -0.07247257064147616
+barrier:heston_mc-up_out_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call-d92 | numeric | price | 3.3717063638294276
+barrier:heston_mc-up_in_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_in_call-d10 | numeric | price | 7.843235529564025
+barrier:heston_mc-up_in_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_in_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_in_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_in_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_in_call-d90 | numeric | price | 6.478222053117753
+barrier:heston_mc-up_in_call-d90 | numeric | greeks_price | 6.478222053117753
+barrier:heston_mc-up_in_call-d90 | numeric | greeks_delta | 0.4578990865612247
+barrier:heston_mc-up_in_call-d90 | numeric | greeks_gamma | 0.10171565095050372
+barrier:heston_mc-up_in_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_in_call-d92 | numeric | price | 6.430916795985629
+barrier:heston_mc-down_out_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_out_put-d10 | numeric | price | 1.9980151970439577
+barrier:heston_mc-down_out_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_out_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_out_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_out_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_out_put-d90 | numeric | price | 2.0820899103504575
+barrier:heston_mc-down_out_put-d90 | numeric | greeks_price | 2.0820899103504575
+barrier:heston_mc-down_out_put-d90 | numeric | greeks_delta | -0.07720971694957224
+barrier:heston_mc-down_out_put-d90 | numeric | greeks_gamma | 0.09775634999989391
+barrier:heston_mc-down_out_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_out_put-d92 | numeric | price | 2.0898751277445458
+barrier:heston_mc-down_in_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_in_put-d10 | numeric | price | 7.8458771394769755
+barrier:heston_mc-down_in_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_in_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_in_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_in_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_in_put-d90 | numeric | price | 7.067456910687232
+barrier:heston_mc-down_in_put-d90 | numeric | greeks_price | 7.067456910687232
+barrier:heston_mc-down_in_put-d90 | numeric | greeks_delta | -0.3183529503782281
+barrier:heston_mc-down_in_put-d90 | numeric | greeks_gamma | -0.06851326969079441
+barrier:heston_mc-down_in_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-down_in_put-d92 | numeric | price | 7.04068014976896
+barrier:heston_mc-up_out_call_pay_at_hit-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call_pay_at_hit-d10 | numeric | price | 2.9553154655185754
+barrier:heston_mc-up_out_call_pay_at_hit-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call_pay_at_hit-d90 | numeric | price | 3.3541090191925367
+barrier:heston_mc-up_out_call_pay_at_hit-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_mc-up_out_call_pay_at_hit-d92 | numeric | price | 3.3758135444532638
+barrier:slv_mc-up_out_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call-d10 | numeric | price | 3.0108372431085577
+barrier:slv_mc-up_out_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call-d90 | numeric | price | 3.3497427529218804
+barrier:slv_mc-up_out_call-d90 | numeric | greeks_price | 3.3497427529218804
+barrier:slv_mc-up_out_call-d90 | numeric | greeks_delta | 0.14711235191853334
+barrier:slv_mc-up_out_call-d90 | numeric | greeks_gamma | -0.004368042034773367
+barrier:slv_mc-up_out_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call-d92 | numeric | price | 3.3716927238981507
+barrier:slv_mc-up_in_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_in_call-d10 | numeric | price | 7.762549011906231
+barrier:slv_mc-up_in_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_in_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_in_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_in_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_in_call-d90 | numeric | price | 6.470131983999961
+barrier:slv_mc-up_in_call-d90 | numeric | greeks_price | 6.470131983999961
+barrier:slv_mc-up_in_call-d90 | numeric | greeks_delta | 0.4394705811952031
+barrier:slv_mc-up_in_call-d90 | numeric | greeks_gamma | 0.03174032791405601
+barrier:slv_mc-up_in_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_in_call-d92 | numeric | price | 6.422987862047697
+barrier:slv_mc-down_out_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_out_put-d10 | numeric | price | 2.0414664840122354
+barrier:slv_mc-down_out_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_out_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_out_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_out_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_out_put-d90 | numeric | price | 2.0926211133737813
+barrier:slv_mc-down_out_put-d90 | numeric | greeks_price | 2.0926211133737813
+barrier:slv_mc-down_out_put-d90 | numeric | greeks_delta | -0.09938226624478341
+barrier:slv_mc-down_out_put-d90 | numeric | greeks_gamma | 0.031555446405381105
+barrier:slv_mc-down_out_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_out_put-d92 | numeric | price | 2.078735332409349
+barrier:slv_mc-down_in_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_in_put-d10 | numeric | price | 7.837653275947294
+barrier:slv_mc-down_in_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_in_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_in_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_in_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_in_put-d90 | numeric | price | 7.081564219239464
+barrier:slv_mc-down_in_put-d90 | numeric | greeks_price | 7.081564219239464
+barrier:slv_mc-down_in_put-d90 | numeric | greeks_delta | -0.2981424831438142
+barrier:slv_mc-down_in_put-d90 | numeric | greeks_gamma | -0.004183160526016749
+barrier:slv_mc-down_in_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-down_in_put-d92 | numeric | price | 7.076191638549064
+barrier:slv_mc-up_out_call_pay_at_hit-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call_pay_at_hit-d10 | numeric | price | 3.0192306268442786
+barrier:slv_mc-up_out_call_pay_at_hit-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call_pay_at_hit-d90 | numeric | price | 3.3538344195287006
+barrier:slv_mc-up_out_call_pay_at_hit-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_mc-up_out_call_pay_at_hit-d92 | numeric | price | 3.3758440656644533
+barrier:heston_pde-up_out_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call-d10 | numeric | price | 2.8220952069048875
+barrier:heston_pde-up_out_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call-d90 | numeric | price | 3.072586434973146
+barrier:heston_pde-up_out_call-d90 | numeric | greeks_price | 3.072586434973146
+barrier:heston_pde-up_out_call-d90 | numeric | greeks_delta | 0.09170264051300281
+barrier:heston_pde-up_out_call-d90 | numeric | greeks_gamma | -0.012264554242653603
+barrier:heston_pde-up_out_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call-d92 | numeric | price | 3.077746667621893
+barrier:heston_pde-up_in_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+barrier:heston_pde-up_in_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_in_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_in_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_in_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_in_call-d90 | numeric | price | 8.583716518743854
+barrier:heston_pde-up_in_call-d90 | numeric | greeks_price | 8.583716518743854
+barrier:heston_pde-up_in_call-d90 | numeric | greeks_delta | 0.4898089611854415
+barrier:heston_pde-up_in_call-d90 | numeric | greeks_gamma | 0.01226417821272996
+barrier:heston_pde-up_in_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_in_call-d92 | numeric | price | 8.54297277112127
+barrier:heston_pde-down_out_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_out_put-d10 | numeric | price | 2.1213044826221585
+barrier:heston_pde-down_out_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_out_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_out_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_out_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_out_put-d90 | numeric | price | 2.2382431129318823
+barrier:heston_pde-down_out_put-d90 | numeric | greeks_price | 2.2382431129318823
+barrier:heston_pde-down_out_put-d90 | numeric | greeks_delta | -0.08838880272355265
+barrier:heston_pde-down_out_put-d90 | numeric | greeks_gamma | -0.0012714168900167522
+barrier:heston_pde-down_out_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_out_put-d92 | numeric | price | 2.2415962543130568
+barrier:heston_pde-down_in_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+barrier:heston_pde-down_in_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_in_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_in_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_in_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_in_put-d90 | numeric | price | 7.890545506597376
+barrier:heston_pde-down_in_put-d90 | numeric | greeks_price | 7.890545506597376
+barrier:heston_pde-down_in_put-d90 | numeric | greeks_delta | -0.32302744164671005
+barrier:heston_pde-down_in_put-d90 | numeric | greeks_gamma | 0.0012714567809108956
+barrier:heston_pde-down_in_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-down_in_put-d92 | numeric | price | 7.86255756050391
+barrier:heston_pde-up_out_call_pay_at_hit-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.831772319806173
+barrier:heston_pde-up_out_call_pay_at_hit-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call_pay_at_hit-d90 | numeric | price | 3.077921291359586
+barrier:heston_pde-up_out_call_pay_at_hit-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:heston_pde-up_out_call_pay_at_hit-d92 | numeric | price | 3.08298722129217
+barrier:slv_pde-up_out_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call-d10 | numeric | price | 2.8220952069048875
+barrier:slv_pde-up_out_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call-d90 | numeric | price | 3.072586434973146
+barrier:slv_pde-up_out_call-d90 | numeric | greeks_price | 3.072586434973146
+barrier:slv_pde-up_out_call-d90 | numeric | greeks_delta | 0.09170264051300281
+barrier:slv_pde-up_out_call-d90 | numeric | greeks_gamma | -0.012264554242653603
+barrier:slv_pde-up_out_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call-d92 | numeric | price | 3.077746667621893
+barrier:slv_pde-up_in_call-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_in_call-d10 | numeric | price | 10.175846966805189
+barrier:slv_pde-up_in_call-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_in_call-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_in_call-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_in_call-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_in_call-d90 | numeric | price | 8.583716518743854
+barrier:slv_pde-up_in_call-d90 | numeric | greeks_price | 8.583716518743854
+barrier:slv_pde-up_in_call-d90 | numeric | greeks_delta | 0.4898089611854415
+barrier:slv_pde-up_in_call-d90 | numeric | greeks_gamma | 0.01226417821272996
+barrier:slv_pde-up_in_call-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_in_call-d92 | numeric | price | 8.54297277112127
+barrier:slv_pde-down_out_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_out_put-d10 | numeric | price | 2.1213044826221585
+barrier:slv_pde-down_out_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_out_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_out_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_out_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_out_put-d90 | numeric | price | 2.2382431129318823
+barrier:slv_pde-down_out_put-d90 | numeric | greeks_price | 2.2382431129318823
+barrier:slv_pde-down_out_put-d90 | numeric | greeks_delta | -0.08838880272355265
+barrier:slv_pde-down_out_put-d90 | numeric | greeks_gamma | -0.0012714168900167522
+barrier:slv_pde-down_out_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_out_put-d92 | numeric | price | 2.2415962543130568
+barrier:slv_pde-down_in_put-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_in_put-d10 | numeric | price | 8.913081886773865
+barrier:slv_pde-down_in_put-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_in_put-d90 | dated | greeks_price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_in_put-d90 | dated | greeks_delta | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_in_put-d90 | dated | greeks_gamma | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_in_put-d90 | numeric | price | 7.890545506597376
+barrier:slv_pde-down_in_put-d90 | numeric | greeks_price | 7.890545506597376
+barrier:slv_pde-down_in_put-d90 | numeric | greeks_delta | -0.32302744164671005
+barrier:slv_pde-down_in_put-d90 | numeric | greeks_gamma | 0.0012714567809108956
+barrier:slv_pde-down_in_put-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-down_in_put-d92 | numeric | price | 7.86255756050391
+barrier:slv_pde-up_out_call_pay_at_hit-d10 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call_pay_at_hit-d10 | numeric | price | 2.831772319806173
+barrier:slv_pde-up_out_call_pay_at_hit-d90 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call_pay_at_hit-d90 | numeric | price | 3.077921291359586
+barrier:slv_pde-up_out_call_pay_at_hit-d92 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+barrier:slv_pde-up_out_call_pay_at_hit-d92 | numeric | price | 3.08298722129217
+carried_before:up_in_call_discrete-heston_mc-110 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+carried_before:up_in_call_discrete-heston_mc-110 | numeric | price | 10.0040210938834
+carried_before:up_in_call_discrete-heston_pde-110 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+carried_before:up_in_call_discrete-heston_pde-110 | numeric | price | 10.005302356981751
+carried_before:up_in_call_discrete-slv_mc-110 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+carried_before:up_in_call_discrete-slv_mc-110 | numeric | price | 10.004023740799624
+carried_before:up_in_call_discrete-slv_pde-110 | dated | price | RAISES ValidationError: discrete monitoring requires observation_dates
+carried_before:up_in_call_discrete-slv_pde-110 | numeric | price | 10.005302356981751
+carried_before:snowball-heston_pde-101 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+carried_before:snowball-heston_pde-101 | numeric | price | 0.3672746504851031
+carried_before:snowball-heston_pde-90 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+carried_before:snowball-heston_pde-90 | numeric | price | -9.994159919054173
+carried_before:snowball-slv_pde-101 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+carried_before:snowball-slv_pde-101 | numeric | price | 0.3672746504851031
+carried_before:snowball-slv_pde-90 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+carried_before:snowball-slv_pde-90 | numeric | price | -9.994159919054173
+carried_before:phoenix_plain-heston_pde-101 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+carried_before:phoenix_plain-heston_pde-101 | numeric | price | 0.899391141184293
+carried_before:phoenix_plain-heston_pde-98 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+carried_before:phoenix_plain-heston_pde-98 | numeric | price | -1.0076147696176014
+carried_before:phoenix_plain-heston_pde-90 | dated | price | RAISES ValidationError: a date-based knock-out observation schedule needs a pricing environment to resolve its observation t
+carried_before:phoenix_plain-heston_pde-90 | numeric | price | -8.994235049916913
+carried_before:phoenix_plain-slv_pde-101 | dated | price | 0.8938458725234875
+carried_before:phoenix_plain-slv_pde-101 | numeric | price | 0.8938458725234855
+carried_before:phoenix_plain-slv_pde-98 | dated | price | -1.0105067072546594
+carried_before:phoenix_plain-slv_pde-98 | numeric | price | -1.0105067072546594
+carried_before:phoenix_plain-slv_pde-90 | dated | price | -8.993998947100081
+carried_before:phoenix_plain-slv_pde-90 | numeric | price | -8.993998947100081

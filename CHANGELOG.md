@@ -280,6 +280,24 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   (MC 19767.09; the day before 19739.93); carried knock-in at 6300, knock-out today -23212.00 -> 9998.05 (= MC).
   The grid spot curve (`calculate_spot_greeks_curve`, `BranchSolution`) folds the same row per level. 90 values
   move on the measured observation dates; nothing else (evidence `moved_values.txt`).
+- The vol-model routes resolve DATED observation schedules (W12, user-approved). (1) The Heston and SLV snowball and
+  Phoenix PDE (2D ADI) refused a dated knock-out schedule at any date before maturity ("a date-based knock-out
+  observation schedule needs a pricing environment to resolve its observation times"): their S-axis grid request
+  (`_layer_x_nodes`, and the bump context's frozen layout) never received the environment the 1D adapter stashes.
+  Both now call `_stash_grid_request_env` before `grid_request`, as the 1D adapter does. (2) The local-vol, Heston and
+  SLV barrier MC and the Heston and SLV barrier PDE read only the legacy `observation_dates`, which a dated schedule
+  leaves unset ("discrete monitoring requires observation_dates"). A dated schedule is now resolved against the
+  environment exactly as the Black-Scholes barrier MC resolves it (`schedule.resolve(env, default_barrier=,
+  default_payoff=, require_single=True, product=)`, new `engine/vol_barrier_schedule.discrete_observation_times`)
+  and the resolved times feed the kernels; a numeric schedule is still read from `observation_dates` verbatim. The
+  limits are unchanged and identical for both forms: per-observation varying barriers / payoffs, an observation
+  after maturity, a record behind the valuation date (refused by the resolution, as on the Black-Scholes routes),
+  a delayed pay-at-hit rebate, a memory Phoenix on the 2D PDE. Moved values: dated forms only, raised -> price;
+  every numeric value is unmoved (PDE byte book and the modelvalidation anchors bit-identical). The dated twin
+  equals the numeric twin aged to the same date (153 of 201 measured values bitwise, worst 3.5e-12 relative: the
+  last ulp of the resolved times). New `test/test_vol_dated_schedules.py`; the W9 / carried-KI pins on these
+  refusals are removed (`_BEFORE_REFUSED`, `AUTOCALL_BEFORE_REFUSED` in `test/test_expiry_carried_knock_in.py`).
+  Evidence: `docs/superpowers/specs/2026-10-10-vol-dated-schedules-evidence/`.
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
