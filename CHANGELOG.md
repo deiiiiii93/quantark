@@ -238,6 +238,22 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   splits are gone (`test_dated_expiry_settles` `DATED_REFUSED_ANY_DATE`, `test_expiry_carried_knock_in` KO-reset
   entries in `AUTOCALL_REFUSED` / `AUTOCALL_BEFORE_REFUSED`). Evidence:
   `docs/superpowers/specs/2026-10-10-ko-reset-past-records-evidence/`.
+- `EuropeanMCEngine`'s no-arbitrage lower-bound check is statistical (W13, user decision 2026-10-10; diagnosis
+  `docs/superpowers/specs/2026-10-10-mc-lower-bound-diagnosis/`). A deep in-the-money European near expiry is worth
+  its discounted intrinsic bound (Black-Scholes minus the bound is 0.0 in double precision one day out), so the
+  unbiased estimate fell below the bound about half the time and the hard `price < bound - 1e-6` check refused it
+  (38-62 % of seeds at every path count and method; no estimator bias measured, |bias| < 3e-6). The engine now
+  refuses only an estimate more than `max(Tolerance.PRECISION, 4 * std_error)` below the bound
+  (`EuropeanMCEngine.LOWER_BOUND_STD_ERRORS = 4.0`; the std error it reports, in contract units) and keeps the hard
+  `Tolerance.PRECISION` (1e-6) floor when the std error is zero or undefined. The estimator is unchanged: every price
+  that passed before is bit-identical (1162 of 1162 grid cells); only refused cells now price (182 of 182, raised ->
+  their own estimate; `moved_values.txt`). The BS barrier MC prices the day-before carried knock-in down-in put
+  through this engine: 9.993453009252772 at spot 90 and 24.993174367657804 at spot 75 (dated form; the numeric twin
+  differs in the last digits), so `("mc", "down_in_put")` leaves `_BEFORE_REFUSED` in
+  `test_expiry_carried_knock_in.py` and its day-before continuity assertion runs. Under antithetic and plain QMC the
+  reported std error is the iid formula and overstates the real error (up to about 800x measured), so the check is
+  loose there; the std error formula, `EuropeanQuadEngine`'s check and RQMC seeding are unchanged (open questions in
+  the diagnosis).
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in

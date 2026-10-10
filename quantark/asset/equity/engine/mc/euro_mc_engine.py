@@ -22,7 +22,7 @@ from quantark.asset.equity.engine.mc.term_inputs import McTermInputs, build_mc_t
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
 from quantark.util.exceptions import ValidationError, PricingError
-from quantark.util.numerical import safe_exp
+from quantark.util.numerical import Tolerance, is_valid_number, safe_exp
 
 from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
 from quantark.asset.equity.process.bsm.qmc_sobol import (
@@ -71,6 +71,10 @@ class EuropeanMCEngine(BaseEngine):
     supports_lifecycle_state = True
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
+
+    #: An estimate is refused only when it sits more than this many reported std
+    #: errors below the discounted European lower bound (W13, user decision 2026-10-10).
+    LOWER_BOUND_STD_ERRORS = 4.0
 
     def __init__(
         self,
@@ -213,13 +217,31 @@ class EuropeanMCEngine(BaseEngine):
             timing.payment_df,
             timing.delay_df,
         )
-        if price < lower_bound - 1e-6:
+        tolerance = self._lower_bound_tolerance(std_error)
+        if price < lower_bound - tolerance:
             raise PricingError(
                 f"Price ({price:.6f}) below discounted European lower bound "
-                f"({lower_bound:.6f})"
+                f"({lower_bound:.6f}) by more than {tolerance:.6g} "
+                f"(std error {std_error:.6g})"
             )
 
         return price + pending_receivable_pv(lifecycle_state, pricing_env)
+
+    @classmethod
+    def _lower_bound_tolerance(cls, std_error: float) -> float:
+        """Slack below the no-arbitrage lower bound before an estimate is refused.
+
+        A deep in-the-money European near expiry is worth its bound (zero time
+        value), so an unbiased estimate falls below it about half the time
+        (W13 diagnosis, docs/superpowers/specs/2026-10-10-mc-lower-bound-diagnosis).
+        The check therefore refuses only an estimate more than
+        ``LOWER_BOUND_STD_ERRORS`` reported std errors (contract units) below the
+        bound, never with less slack than ``Tolerance.PRECISION``; a zero or
+        undefined std error keeps that hard floor.
+        """
+        if not is_valid_number(std_error):
+            return Tolerance.PRECISION
+        return max(Tolerance.PRECISION, cls.LOWER_BOUND_STD_ERRORS * std_error)
 
     def _european_lower_bound(
         self,

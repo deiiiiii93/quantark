@@ -111,8 +111,8 @@ def _aged(product, valuation: datetime):
 
 
 def _mc():
-    """256 antithetic paths: the day-before knocked-in vanilla stays above the BS MC engine's European lower-bound
-    check (the settled values on the exercise date read no path)."""
+    """256 antithetic paths (the settled values on the exercise date read no path). The day-before knocked-in put
+    sits 0.012 std errors below its European lower bound, inside the BS MC engine's statistical check (W13)."""
     return MCParams(seed=7, num_paths=256, use_antithetic=True)
 
 
@@ -195,12 +195,10 @@ DOUBLE_PRODUCT = ("double_knock_in_call", _double_knock_in,
                   _knock_in_value(_CALL, lambda s: s <= 80.0 or s >= 130.0), (110.0, 90.0, 135.0))
 
 #: (route, product) cells whose DAY-BEFORE price is refused for a reason that is not the exercise date (pre-existing,
-#: T > 0): the BS barrier MC prices a knock-in as the European MC engine, whose lower-bound sanity check refuses its
-#: one-day deep in-the-money put estimate (9.9940 against a 9.9943 bound with 256 antithetic paths); the Heston and
-#: SLV barrier kernels read a discrete schedule from ``observation_dates`` only ("discrete monitoring requires
-#: observation_dates")
-_BEFORE_REFUSED = {("mc", "down_in_put")} | {(route, "up_in_call_discrete")
-                                            for route in ("heston_mc", "heston_pde", "slv_mc", "slv_pde")}
+#: T > 0): the Heston and SLV barrier kernels read a discrete schedule from ``observation_dates`` only ("discrete
+#: monitoring requires observation_dates"). (The BS barrier MC's one-day deep in-the-money put, once refused by the
+#: European MC engine's hard lower-bound check, prices since that check became statistical: W13.)
+_BEFORE_REFUSED = {(route, "up_in_call_discrete") for route in ("heston_mc", "heston_pde", "slv_mc", "slv_pde")}
 
 BARRIER_CASES = ([(route, factory, state_ok, *product) for route, factory, state_ok in BARRIER_ROUTES
                   for product in BARRIER_PRODUCTS]
