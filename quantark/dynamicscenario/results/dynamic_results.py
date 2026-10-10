@@ -95,7 +95,9 @@ class LifecycleEventSnapshot:
         position_id: Position the event applies to
         underlying: Underlying asset name
         product_type: Product class name
-        event_type: One of 'KO', 'KI', 'COUPON', 'MATURITY', 'EXPIRY'
+        event_type: One of 'KO', 'KI', 'COUPON', 'MATURITY', 'EXPIRY', 'FIXING' (FIXING: an FX TARN / TARF
+            fixing banked; the position stays in the book, valued at its pending cash, when
+            ``terminates_position``)
         date: Event date (None when the path has no calendar dates)
         observation_index: Index in the product observation schedule, if any
         spot: Underlying close used for the observation

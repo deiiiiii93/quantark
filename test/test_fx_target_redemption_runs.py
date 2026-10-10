@@ -24,7 +24,10 @@ from quantark.asset.fx.product.option.target_redemption_state import (
 from quantark.backtest import FXBacktestConfig, FXBacktestEngine
 from quantark.backtest.strategy import FXDeltaNeutralStrategy
 from quantark.backtest.transaction_costs import ZeroCostModel
+from quantark.dynamicscenario import FXDynamicScenarioConfig, FXDynamicScenarioEngine
+from quantark.dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
 from quantark.param import SpotQuote
+from quantark.stresstest.stress.stress_types import StressType
 from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import OptionType
 from quantark.util.exceptions import ValidationError
@@ -587,3 +590,99 @@ def test_b6_book_without_target_redemption_books_nothing():
                     engine=GarmanKohlhagenEngine())
     res = _backtest(pf, _flat_path(20, 1.20))
     assert all(r["paid_cash"] == 0.0 and r["pending_pv"] == 0.0 for r in res.rows)
+
+
+# ================================================================ Task 11: FX dynamic scenario
+
+
+def _held_path(days, spot, start=VAL):
+    steps = [DayStep(day_index=i, changes=[ParameterChange("spot", StressType.VALUE, spot)]) for i in range(days)]
+    return DayPath(name="held", steps=steps, start_date=start)
+
+
+def _scenario(pf, path):
+    return FXDynamicScenarioEngine(FXDynamicScenarioConfig(calculate_greeks=False)).run(pf, path)
+
+
+def test_q8_undated_path_with_a_tarn_is_refused():
+    pf, _ = book(note(target=3.0))
+    with pytest.raises(ValidationError, match="DayPath.start_date"):
+        _scenario(pf, _held_path(5, 1.20, start=None))
+
+
+def test_start_date_before_environment_date_raises():
+    pf, _ = book(note(target=3.0))
+    with pytest.raises(ValidationError, match="cannot go back"):                  # W6 R9
+        _scenario(pf, _held_path(5, 1.20, start=VAL - timedelta(days=1)))
+
+
+def test_dynamic_tarn_redeems_and_books_cash():
+    c0 = note(target=1.5, pay_times=LAG2D)
+    pf, (pid,) = book(c0)
+    res = _scenario(pf, _held_path(70, 1.20))
+    days = res.day_results
+    c_first = c0.full_coupon(0)
+    c_second = min(c0.full_coupon(1), 1.5 - c_first)
+    assert days[33].paid_cash == c_first and days[33].realized_cash == c_first
+    assert days[63].paid_cash == c_first + (c_second + 100.0)
+    fixings = [(i, s) for i, d in enumerate(days) for s in d.lifecycle_events]
+    assert [i for i, _ in fixings] == [31, 61]                                    # k/12 fixings between days (D5)
+    first, second = fixings[0][1], fixings[1][1]
+    assert (first.event_type, first.spot, first.payoff, first.cashflow, first.terminates_position) == (
+        "FIXING", 1.20, c_first, 0.0, False)  # pay lag: nothing paid in the recording step (Ruling R6)
+    assert (second.payoff, second.terminates_position, second.position_id) == (c_second, True, pid)
+    assert days[61].pending_receivable_pv > 0.0 and days[69].pending_receivable_pv == 0.0
+    assert days[69].portfolio_value == days[69].paid_cash
+    assert res.final_value == days[69].paid_cash
+
+
+def test_dynamic_snapshot_cashflow_when_paid_in_the_recording_step():
+    c0 = note(target=1.5)                                                         # pay time = fixing time
+    pf, _ = book(c0, quantities=[3.0])
+    days = _scenario(pf, _held_path(70, 1.20)).day_results
+    c_first = c0.full_coupon(0)
+    c_second = min(c0.full_coupon(1), 1.5 - c_first)
+    (s1,), (s2,) = days[31].lifecycle_events, days[61].lifecycle_events
+    assert s1.cashflow == 3.0 * c_first
+    assert s2.cashflow == 3.0 * (c_second + 100.0)
+
+
+def test_b4_twins_in_one_dynamic_scenario():
+    dn = dated_note(target=1.5, pay_dates=LAG2)
+    dt = dated_tarf(target=0.075, gearing=2.0, pay_dates=LAG2)
+    nn, nt = _numeric_twin(dn, env()), _numeric_twin(dt, env())
+    pf, (id_dn, id_nn, id_dt, id_nt) = book(dn, nn, dt, nt)
+    days = _scenario(pf, _held_path(100, 1.20)).day_results
+    assert any(d.lifecycle_events for d in days)
+    for d in days:
+        by = {}
+        for s in d.lifecycle_events:
+            by.setdefault(s.position_id, []).append((s.payoff, s.cashflow, s.terminates_position, s.spot))
+        assert by.get(id_dn) == by.get(id_nn) and by.get(id_dt) == by.get(id_nt)
+
+
+def test_business_day_clock_weekend_fixing_twins_in_a_dynamic_scenario():
+    """OQ-2 (b), user 2026-10-10 (Task 8b) on a daily dated DayPath (weekend rows carry Friday's spot, user ruling)
+    under BUSINESS_DAYS: the Saturday fixing is live Friday to Sunday and recorded on Monday in both forms; snapshots
+    identical, and the run does not stop on the Friday."""
+    saturday = datetime(2026, 8, 15)
+    dn = dated_note(fixing_dates=[datetime(2026, 7, 15), saturday, datetime(2026, 9, 15)], target=50.0)
+    nn = _numeric_twin(dn, env(**BUS))
+    pf, (id_d, id_n) = book(dn, nn, fx_env=env(**BUS))
+    days = _scenario(pf, _held_path(70, 1.20)).day_results
+    snaps = {pid: [(d.date, s.payoff, s.cashflow, s.spot, s.terminates_position) for d in days
+                   for s in d.lifecycle_events if s.position_id == pid] for pid in (id_d, id_n)}
+    assert snaps[id_d] == snaps[id_n]
+    assert [x[0] for x in snaps[id_d]] == [datetime(2026, 7, 16), datetime(2026, 8, 17)]
+
+
+def test_b6_dynamic_book_without_target_redemption_books_nothing():
+    from quantark.portfolio.fx import FXPortfolio
+    pf = FXPortfolio(portfolio_name="b6", pricing_environments={"EURUSD": env()})
+    pf.add_position(product=FxVanillaOption(strike=1.2, option_type=OptionType.CALL, maturity=1.0,
+                                            notional_foreign=1.0, currency_pair=PAIR),
+                    quantity=1.0, entry_price=0.0, underlying="EURUSD", engine=GarmanKohlhagenEngine())
+    for start in (VAL, None):                                                    # Q8 refuses only a TARN / TARF book
+        days = _scenario(pf, _held_path(10, 1.20, start=start)).day_results
+        assert all(d.paid_cash == 0.0 and d.pending_receivable_pv == 0.0 and d.lifecycle_events == []
+                   for d in days)

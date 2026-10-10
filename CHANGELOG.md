@@ -94,6 +94,10 @@ backtest and FX dynamic scenario.
   it does not settle product-held history.
 - `FXBacktestEngine` books TARN / TARF cash: rows gain `paid_cash` (cumulative, quantity-scaled) and `pending_pv`;
   `portfolio_value` and `final_value` include paid cash. A book without TARN / TARF is unchanged (cash columns 0.0).
+- `FXDynamicScenarioEngine` books TARN / TARF cash on a dated `DayPath` (determined cash moves to `paid_cash` /
+  `realized_cash` on its pay date; one `FIXING` lifecycle snapshot per banked fixing; `pending_receivable_pv` filled).
+  An undated `DayPath` with a TARN / TARF in the book raises `ValidationError` (user decision Q8 a). Books without
+  TARN / TARF are unchanged.
 
 ### Fixed
 - FX TARN / TARF theta within one day of a fixing raised (`Time to maturity must be non-negative` / `times must be

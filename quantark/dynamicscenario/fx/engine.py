@@ -5,13 +5,25 @@ Walks an FX portfolio day-by-day through a :class:`DayPath`, applying spot /
 vol / domestic-rate / foreign-rate changes to each pair's FxPricingEnvironment
 and recording value, P&L and FX greeks at every step. Reuses the generic
 ``DayResult`` / ``DynamicScenarioResults`` containers.
+
+TARN / TARF positions age with a dated run on the run-fixings recorder: each banked fixing is reported as one
+``FIXING`` lifecycle snapshot, determined cash moves into ``paid_cash`` / ``realized_cash`` once its pay date is past
+(on the next path instant), each day carries the pending cash's PV (``pending_receivable_pv``) and ``portfolio_value``
+includes cumulative paid cash. An undated path cannot age them and is refused (spec 2026-10-09 fx-tarn 12 Q8 a).
 """
 from __future__ import annotations
 
 import time
 from copy import deepcopy
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from quantark.asset.fx.product.option.target_redemption_base import TargetRedemptionProduct
+from quantark.asset.fx.product.option.target_redemption_state import (
+    TargetRedemptionEvent,
+    TargetRedemptionEventType,
+    booked_cash,
+)
 from quantark.asset.fx.riskmeasures.fx_greeks_calculator import FxGreeksCalculator
 from quantark.dynamicscenario.base import BaseDynamicScenarioEngine, RiskMetricsAdapter
 from quantark.dynamicscenario.fx.config import FXDynamicScenarioConfig
@@ -19,6 +31,7 @@ from quantark.dynamicscenario.path.day_path import DayPath, DayStep, ParameterCh
 from quantark.dynamicscenario.results.dynamic_results import (
     DayResult,
     DynamicScenarioResults,
+    LifecycleEventSnapshot,
     MarketState,
 )
 from quantark.portfolio.fx import FXPortfolio
@@ -78,6 +91,11 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
             )
 
         start_time = time.time()
+        if day_path.start_date is None and any(isinstance(p.product, TargetRedemptionProduct)
+                                               for p in portfolio.positions.values()):
+            raise ValidationError(  # TARN spec 12 Q8 (a): no clock is invented (an undated run never advances, W6 R7)
+                "the book holds an FX TARN / TARF, which ages by date: set DayPath.start_date (an undated path "
+                "cannot age it)")
         working = self._clone_portfolio(portfolio)
         # Run fixings (spec 2026-10-09 run fixings §3.5): registered on the WORKING copy at the first valuation (the
         # input portfolio is never touched); a fixing already missing is filled once at the baseline spot (R5).
@@ -85,19 +103,25 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
         self.run_fixings.register(working)
         baseline_value = working.get_portfolio_value()
         previous_value = baseline_value
+        cum_paid = 0.0   # TARN / TARF cash paid inside the run (spec 2026-10-09 fx-tarn 7.3): quantity-scaled
         day_results: List[DayResult] = []
 
         for day_step in day_path:
             day_date = day_path.get_date_for_day(day_step.day_index)
             self._apply_day_changes(working, day_step)
+            snapshots: List[LifecycleEventSnapshot] = []
+            pending_pv = 0.0
             if day_date is not None:
                 for env in working.pricing_environments.values():
                     env.valuation_date = day_date
                 # the clock moved: record the fixings it passed at the previous instant's spot (R3/R4); an undated
                 # path never moves the date, so nothing passes and nothing is advanced (R7)
-                self.run_fixings.advance(working)
+                day = self.run_fixings.advance(working)
+                cum_paid += booked_cash(day.product_events)
+                pending_pv = day.pending_pv
+                snapshots = self._fixing_snapshots(working, day, day_date)
 
-            value = working.get_portfolio_value()
+            value = working.get_portfolio_value() + cum_paid
             daily_pnl = value - previous_value
             cumulative_pnl = value - baseline_value
 
@@ -115,10 +139,14 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
                 net_pnl=cumulative_pnl,
                 greeks=greeks,
                 market_state=self._market_state(working),
+                lifecycle_events=snapshots,
+                pending_receivable_pv=pending_pv,
+                paid_cash=cum_paid,
+                realized_cash=cum_paid,
             ))
             previous_value = value
 
-        final_value = working.get_portfolio_value()
+        final_value = working.get_portfolio_value() + cum_paid
         return DynamicScenarioResults(
             path_name=day_path.name,
             baseline_value=baseline_value,
@@ -175,6 +203,29 @@ class FXDynamicScenarioEngine(BaseDynamicScenarioEngine):
                 env, for_shift=new - env.foreign_curve.get_rate(1.0))
         else:
             raise ValidationError(f"Unsupported FX dynamic parameter '{param}'")
+
+    @staticmethod
+    def _fixing_snapshots(portfolio: FXPortfolio, day: Any, day_date: datetime) -> List[LifecycleEventSnapshot]:
+        """One FIXING snapshot per TARN / TARF fixing banked in the step (``RunFixingDay.product_events``);
+        ``cashflow`` = quantity x that fixing's cash paid in the same step (an immediate PAYMENT carries its FIXING's
+        label - Ruling R6 of the W4b plan)."""
+        fixing, payment = TargetRedemptionEventType.FIXING, TargetRedemptionEventType.PAYMENT
+        out: List[LifecycleEventSnapshot] = []
+        for pid, quantity, ev in day.product_events:
+            if not (isinstance(ev, TargetRedemptionEvent) and ev.event_type is fixing):
+                continue
+            paid = 0.0
+            for other_pid, _q, other in day.product_events:
+                if (other_pid == pid and isinstance(other, TargetRedemptionEvent) and other.event_type is payment
+                        and other.label == ev.label):
+                    paid += other.amount
+            position = portfolio.positions[pid]
+            out.append(LifecycleEventSnapshot(
+                position_id=pid, underlying=position.underlying, product_type=type(position.product).__name__,
+                event_type="FIXING", date=day_date, observation_index=None, spot=ev.fixing, barrier=None,
+                payoff=ev.amount, cashflow=quantity * paid, terminates_position=ev.redeemed,
+            ))
+        return out
 
     @staticmethod
     def _market_state(portfolio: FXPortfolio) -> MarketState:
