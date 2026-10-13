@@ -24,7 +24,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings
 from quantark.util.numerical import is_zero, is_close, safe_log, safe_exp
 
-from .base_equity_option import BaseEquityOption
+from .base_equity_option import BaseEquityOption, maturity_reached
 
 if TYPE_CHECKING:
     from quantark.priceenv import PricingEnvironment
@@ -728,36 +728,40 @@ class AsianOption(BaseEquityOption):
 
     def settled_maturity_payoff(self, spot: float, pricing_env: "PricingEnvironment") -> float:
         """
-        The terminal payoff per contract settled ON the maturity instant, from this contract's recorded fixings.
+        The terminal payoff per contract, settled on or after the maturity instant from this contract's recorded
+        fixings.
 
         A run settles a run-fixings contract on the copy its run has recorded (spec 2026-10-13 I7 / A3): every
-        strictly past record carries its ``observed_price``; a record at t = 0 (today's, the maturity day's own
-        fixing) is live and fixes at ``spot``. The average is the contract's own (``resolve_observations`` weights,
-        ``get_average``) and the payoff ``get_payoff`` - the settled value the engines price at T = 0 (W8), without
-        the settlement-lag discount.
+        strictly past record carries its ``observed_price``; a record at t = 0 (valued ON the maturity instant: the
+        maturity day's own fixing) is live and fixes at ``spot``. A run whose clock skips the maturity date values
+        the contract on the first instant after it, every fixing already recorded (W6 gap rule). The average is the
+        contract's own (``resolve_observations`` weights, ``get_average``) and the payoff ``get_payoff`` - the
+        settled value the engines price at T = 0 (W8), without the settlement-lag discount.
 
         Args:
-            spot: The maturity day's spot (the live fixing and a floating strike's final spot)
-            pricing_env: Environment valued on the maturity instant
+            spot: The spot AT the maturity instant (the live fixing and a floating strike's final spot); for a run
+                that skipped the maturity date, the spot of the run instant before it (W6 gap rule)
+            pricing_env: Environment valued on or after the maturity instant
 
         Returns:
             Payoff per contract (``contract_multiplier`` applied)
 
         Raises:
-            ValidationError: Not valued on the maturity instant, a legacy schedule (no records), or a strictly
-                past record without its fixing (a run records every one before it settles)
+            ValidationError: Valued before the maturity instant, a schedule booked without ``observation_records``
+                (it carries no recorded fixing), or a strictly past record without its fixing (a run records every
+                one before it settles)
         """
         if self.observation_records is None:
-            # TODO(replay-settle): a legacy schedule has no recorded fixings to settle from
+            # TODO(replay-settle): a schedule booked without records carries none of its fixings; book records
             raise ValidationError(
-                "AsianOption.settled_maturity_payoff needs observation_records: a legacy schedule has no recorded "
-                "fixings to settle from"
+                "AsianOption.settled_maturity_payoff: the schedule was booked without observation_records, so it "
+                f"carries no recorded fixing for {self._legacy_observation_labels()}; book observation_records to "
+                "settle it"
             )
-        T = self.get_maturity(pricing_env)
-        if not is_zero(T):
-            # TODO(replay-settle): settle after the maturity instant (the run's clock skipped it)
+        if not maturity_reached(self, pricing_env):
             raise ValidationError(
-                f"AsianOption.settled_maturity_payoff values ON the maturity instant: time to maturity is {T}"
+                "AsianOption.settled_maturity_payoff values on or after the maturity instant: time to maturity is "
+                f"{self.get_maturity(pricing_env)}"
             )
         missing = self.missing_fixing_fills(pricing_env)
         if missing:
@@ -781,6 +785,16 @@ class AsianOption(BaseEquityOption):
             )
         average = settled.get_average(past_prices, weights=past_weights)
         return float(settled.get_payoff(spot, average=average))
+
+    def _legacy_observation_labels(self) -> List[str]:
+        """The observations of a schedule booked without records, for a message naming them."""
+        if self.observation_dates:
+            return [d.date().isoformat() if isinstance(d, datetime) else str(d) for d in self.observation_dates]
+        if self.observation_times is not None:
+            return [f"t={float(t):g}" for t in self.observation_times]
+        if self.num_observations is None:
+            return ["continuous averaging"]
+        return [f"{self.num_observations} uniform observations"]
 
     def intrinsic_value(
         self,

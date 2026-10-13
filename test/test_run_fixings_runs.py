@@ -87,8 +87,9 @@ def test_equity_backtest_numeric_participant_no_longer_warns_constant_maturity(t
     assert not [w for w in caught if "no roll rule" in str(w.message)]
 
 
-def _short(kind, form, expiry_day=10, days=(4, 8)):
-    """A twin expiring on run day ``expiry_day`` with fixings on ``days`` (default days 4 and 8)."""
+def _short(kind, form, expiry_day=10, days=(4, 8), floating=False, settlement_convention=None):
+    """A twin expiring on run day ``expiry_day`` with fixings on ``days`` (default days 4 and 8); ``floating`` books a
+    floating-strike Asian call."""
     from quantark.asset.equity.product.option import RangeAccrualObservationRecord, RangeAccrualOption
     from quantark.asset.equity.product.option.asian_option import AsianObservationRecord, AsianOption
     from quantark.util.enum import AsianStrikeType, AveragingType, OptionType
@@ -99,12 +100,15 @@ def _short(kind, form, expiry_day=10, days=(4, 8)):
     else:
         term = dict(maturity=expiry_day / 365.0)
         when = [dict(observation_time=d / 365.0) for d in days]
+    if settlement_convention is not None:
+        term["settlement_convention"] = settlement_convention
     if kind == "ra":
         extra = dict(initial_date=F.START) if form == "dated" else {}
         return RangeAccrualOption(initial_price=100.0, range_config=F._range_config(), **term, **extra,
                                   observation_records=[RangeAccrualObservationRecord(**w) for w in when])
-    return AsianOption(strike=100.0, option_type=OptionType.CALL, asian_strike_type=AsianStrikeType.FIXED,
-                       averaging_type=AveragingType.ARITHMETIC, **term,
+    strike = dict(strike=0.0, asian_strike_type=AsianStrikeType.FLOATING) if floating else dict(
+        strike=100.0, asian_strike_type=AsianStrikeType.FIXED)
+    return AsianOption(option_type=OptionType.CALL, averaging_type=AveragingType.ARITHMETIC, **strike, **term,
                        observation_records=[AsianObservationRecord(**w) for w in when])
 
 
@@ -401,7 +405,8 @@ def test_fx_dynamic_x3f_a_path_before_the_env_date_refuses_a_participant():
 
 
 # ================================================================ replay (the Asian: no range-accrual route, drift 1)
-def _replay(product, n=F.DAYS, first=0, spot_of=F.spot_on, explain=None):
+def _replay(product, n=F.DAYS, first=0, spot_of=F.spot_on, explain=None, skip=()):
+    """Replay run days ``first .. first + n - 1`` except the days in ``skip`` (holidays of the run calendar)."""
     from replay_golden import fixtures
 
     from quantark.backtest.replay.config import AutocallableEngineConfig
@@ -409,8 +414,10 @@ def _replay(product, n=F.DAYS, first=0, spot_of=F.spot_on, explain=None):
     from quantark.backtest.replay.market import AutocallableMarketDataSet
     from quantark.util.enum.engine_enums import EngineType
 
-    dates = pd.date_range(F.START + timedelta(days=first), periods=n, freq="D")
-    spots = [spot_of(first + k) for k in range(n)]
+    days = [first + k for k in range(n) if first + k not in skip]
+    dates = pd.DatetimeIndex([F.START + timedelta(days=d) for d in days])
+    spots = [spot_of(d) for d in days]
+    n = len(days)
     fut = [{"date": d, "contract": "IF2403", "futures_price": s * 1.004, "expiry_date": pd.Timestamp("2024-03-15"),
             "multiplier": 300.0} for d, s in zip(dates, spots)]
     cfg = fixtures.make_book_config()
@@ -650,3 +657,119 @@ def test_replay_through_maturity_books_the_payoff_of_the_recorded_fixings(kind, 
     (row,) = [row for row in eng._actions if row["action_type"] == "MATURITY"]   # booked once, on T, at T's spot
     assert row["date"] == pd.Timestamp(F.START + timedelta(days=10)) and row["spot"] == 111.0
     assert is_close(row["cashflow"], hand, rel_tol=1e-12)
+
+
+# ================================================================ I7 follow-up: a run whose clock skips T
+# The run calendar has T (day 10) as a holiday (user ruling 2026-10-13, A7' principle): the maturity fixing is decided
+# at the spot of the run instant before T (day 9: 110, inside [90, 110]) - the signed W6 gap rule - and the maturity is
+# booked on the first run day after T (day 11, spot 112) with the contract's own payment timing.
+def _hand_gap(kind, floating=False):
+    spots = [F.spot_on(4), F.spot_on(8), F.spot_on(9)]                          # 105, 109, 110: T's at day 9's spot
+    if kind == "ra":
+        return 100.0 * 0.10 * sum(1 for s in spots if 90.0 <= s <= 110.0) / 3.0   # all three inside: 10.0
+    average = sum(spots) / 3.0
+    return max(F.spot_on(9) - average, 0.0) if floating else max(average - 100.0, 0.0)
+
+
+@pytest.mark.parametrize("floating", [False, True])
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_replay_skipping_the_maturity_settles_on_the_next_run_day_with_t_at_the_previous_spot(kind, form, floating):
+    if kind == "ra" and floating:
+        pytest.skip("floating strike is an Asian term")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        eng, res, mtm = _replay(_short(kind, form, days=_THROUGH_T, floating=floating), n=13, skip=(10,))
+    replay = eng._replays[0]
+    hand = _hand_gap(kind, floating)
+    assert _hand_gap("asian") == pytest.approx(8.0) and _hand_gap("ra") == pytest.approx(10.0)
+    assert _hand_gap("asian", True) == pytest.approx(2.0)
+    assert replay._run_fills == ({0: 105.0, 1: 109.0, 2: 110.0} if kind == "asian" else {0: True, 1: True, 2: True})
+    assert replay.lifecycle.matured and not replay.lifecycle.alive
+    assert is_close(replay.lifecycle.realized_cashflows, hand, rel_tol=1e-12)
+    assert is_close(replay.paid_cash(), hand, rel_tol=1e-12)
+    states = res.states_df()                                                     # rows: days 0..9, 11, 12
+    assert list(states["date"].iloc[9:]) == [pd.Timestamp(F.START + timedelta(days=d)) for d in (9, 11, 12)]
+    assert mtm[9] > 0.0 and mtm[10] == 0.0 and mtm[11] == 0.0
+    assert states["cash"].iloc[9] == 0.0 and is_close(states["cash"].iloc[10], hand, rel_tol=1e-12)
+    (row,) = [row for row in eng._actions if row["action_type"] == "MATURITY"]
+    assert row["date"] == pd.Timestamp(F.START + timedelta(days=11)) and row["spot"] == F.spot_on(11)
+    assert row["gap"] is True and row["maturity_spot"] == F.spot_on(9)
+    assert is_close(row["cashflow"], hand, rel_tol=1e-12)
+    (entry,) = replay.lifecycle.ledger.cashflows
+    assert entry.metadata["gap"] is True and entry.metadata["maturity_spot"] == F.spot_on(9)
+    if form == "dated":                                                          # the contract's own timing
+        assert pd.Timestamp(entry.determination_date) == pd.Timestamp(F.START + timedelta(days=10))
+    else:
+        assert entry.determination_time == 10 / 365.0
+
+
+def test_replay_visiting_t_marks_the_maturity_fixing_not_a_gap():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        eng, _, _ = _replay(_short("asian", "dated", days=_THROUGH_T, floating=True), n=12)
+    (row,) = [row for row in eng._actions if row["action_type"] == "MATURITY"]
+    assert row["gap"] is False and row["maturity_spot"] == F.spot_on(10)
+    assert is_close(row["cashflow"], F.spot_on(10) - (105.0 + 109.0 + 111.0) / 3.0, rel_tol=1e-12)
+
+
+def test_replay_skipping_the_maturity_and_its_payment_date_books_the_cash_paid():
+    """T (day 10) and its payment date (T + 1 calendar day, day 11) are both run holidays: booked on day 12, paid."""
+    from quantark.asset.equity.settlement import SettlementConvention, SettlementLagUnit
+    from quantark.util.calendar import BusinessDayConvention
+
+    lag = SettlementConvention(lag=1, lag_unit=SettlementLagUnit.CALENDAR_DAYS,
+                               business_day_convention=BusinessDayConvention.UNADJUSTED)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        eng, res, mtm = _replay(_short("ra", "dated", days=_THROUGH_T, settlement_convention=lag), n=13,
+                                skip=(10, 11))
+    replay = eng._replays[0]
+    (row,) = [row for row in eng._actions if row["action_type"] == "MATURITY"]
+    assert row["date"] == pd.Timestamp(F.START + timedelta(days=12)) and row["gap"] is True
+    assert pd.Timestamp(row["payment_date"]) == pd.Timestamp(F.START + timedelta(days=11))
+    assert replay.lifecycle.settled and is_close(replay.paid_cash(), 10.0, rel_tol=1e-12)
+    states = res.states_df()
+    assert is_close(states["cash"].iloc[-1], 10.0, rel_tol=1e-12) and states["pending_receivable_pv"].iloc[-1] == 0.0
+    assert mtm[-1] == 0.0
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_settled_maturity_payoff_after_the_maturity_instant_reads_every_recorded_fixing(kind, form):
+    """Valued after T (the run skipped it): every fixing, T's included, must be recorded; ``spot`` is the spot at T."""
+    fills = {**_FILLS[kind], 2: 110.0 if kind == "asian" else True}
+    product = _short(kind, form, days=_THROUGH_T).with_fixings_recorded(fills)
+    if form == "numeric":
+        product = product.with_time_elapsed(11 / 365.0)
+    env = F.eq_env(11)
+    assert is_close(product.settled_maturity_payoff(110.0, env), _hand_gap(kind), rel_tol=1e-12)
+    unrecorded = _short(kind, form, days=_THROUGH_T).with_fixings_recorded(_FILLS[kind])
+    if form == "numeric":
+        unrecorded = unrecorded.with_time_elapsed(11 / 365.0)
+    with pytest.raises(ValidationError, match="fixing"):
+        unrecorded.settled_maturity_payoff(110.0, env)
+
+
+# ================================================================ I7 follow-up: an Asian booked without records
+def _legacy_asian(form):
+    from quantark.asset.equity.product.option.asian_option import AsianOption
+    from quantark.util.enum import AsianStrikeType, AveragingType, OptionType
+
+    term = dict(exercise_date=F.START + timedelta(days=10)) if form == "dated" else dict(maturity=10 / 365.0)
+    return AsianOption(strike=100.0, option_type=OptionType.CALL, asian_strike_type=AsianStrikeType.FIXED,
+                       averaging_type=AveragingType.ARITHMETIC, observation_times=[4 / 365.0, 8 / 365.0], **term)
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_legacy_asian_settlement_names_the_fixings_it_does_not_carry(form):
+    with pytest.raises(ValidationError, match="no recorded fixing"):
+        _legacy_asian(form).settled_maturity_payoff(111.0, F.eq_env(10))
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_replay_of_a_legacy_asian_through_t_refuses_with_a_validation_error_not_a_type_error(form):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(ValidationError, match="no recorded fixing"):
+            _replay(_legacy_asian(form), n=12)

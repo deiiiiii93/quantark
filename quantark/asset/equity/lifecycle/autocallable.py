@@ -565,13 +565,18 @@ class AutocallableLifecycleTracker:
         spot: float,
         *,
         settled_product: Any = None,
+        previous_spot: Optional[float] = None,
     ) -> Optional[LifecycleEvent]:
         """Determine the terminal payoff once contractual maturity is reached.
 
         ``product`` (the lifecycle copy) decides the timing. A run-fixings participant (an Asian or a range
         accrual, ``participates``) settles from ``settled_product``, the run-fixed copy its run recorded on this
-        date, through ``settled_maturity_payoff(spot, env)`` (spec 2026-10-13 I7 / A3); without it the maturity is
-        refused, since the lifecycle copy carries none of the run's fixings.
+        date, through ``settled_maturity_payoff`` (spec 2026-10-13 I7 / A3); without it the maturity is refused,
+        since the lifecycle copy carries none of the run's fixings. On the maturity date itself the maturity spot
+        is ``spot``; on a later run date (the run's clock skipped the maturity date) it is ``previous_spot``, the
+        spot of the run instant before the maturity (the W6 gap rule, ``gap=True`` on the event and the ledger
+        entry), and the entry keeps the contract's own determination and payment timing. Another product with
+        ``settled_maturity_payoff`` (an Asian booked without records) settles from what it carries, or refuses.
         """
         valuation_point = self._valuation_point(date, product)
         self.lifecycle.valuation_point = valuation_point
@@ -588,7 +593,21 @@ class AutocallableLifecycleTracker:
                     f"{type(product).__name__} settles its maturity from the run-fixed copy that records the run's "
                     "fixings (settled_product); the lifecycle copy carries none of them"
                 )
-            payoff = float(settled_product.settled_maturity_payoff(spot, env))
+            gap = self._due_after_determination(date, valuation_point, timing)
+            if gap and previous_spot is None:
+                raise ValidationError(
+                    f"{type(product).__name__} matured between run instants: its maturity fixing is decided at the "
+                    "previous run instant's spot (W6 gap rule), and none was given (previous_spot)"
+                )
+            maturity_spot = float(previous_spot) if gap else float(spot)
+            payoff = float(settled_product.settled_maturity_payoff(maturity_spot, env))
+            return self._book_maturity(
+                date, spot, payoff, timing, valuation_point,
+                metadata={"maturity_spot": maturity_spot, "gap": gap}, contract_timing=gap,
+            )
+        if callable(getattr(product, "settled_maturity_payoff", None)):
+            # an Asian booked without records: not a participant, it settles from what it carries or refuses
+            payoff = float(product.settled_maturity_payoff(spot, env))
         elif isinstance(product, PhoenixOption):
             # Phoenix takes the knock-in state second and the environment by keyword; the snowball
             # call below raised TypeError for every Phoenix alive at maturity. Its coupons are
@@ -608,9 +627,21 @@ class AutocallableLifecycleTracker:
         return self._book_maturity(date, spot, payoff, timing, valuation_point)
 
     def _book_maturity(
-        self, date: pd.Timestamp, spot: float, payoff: float, timing, valuation_point: ValuationPoint
+        self,
+        date: pd.Timestamp,
+        spot: float,
+        payoff: float,
+        timing,
+        valuation_point: ValuationPoint,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+        contract_timing: bool = False,
     ) -> Optional[LifecycleEvent]:
-        """Book a maturity of ``payoff`` per unit, settled with ``timing``; the MATURITY event or ``None``."""
+        """Book a maturity of ``payoff`` per unit, settled with ``timing``; the MATURITY event or ``None``.
+
+        ``metadata`` goes on the event and the ledger entry. ``contract_timing`` keeps a numeric entry on the
+        contract's own determination / payment times instead of today's valuation time (a maturity booked after
+        its instant)."""
         timestamp = pd.Timestamp(date).to_pydatetime()
         before = self._state_snapshot()
         cashflow = self.quantity * payoff
@@ -620,6 +651,8 @@ class AutocallableLifecycleTracker:
             cashflow,
             timing,
             valuation_point,
+            metadata=metadata,
+            contract_timing=contract_timing,
         )
         if self.lifecycle.mark_maturity(
             timestamp,
@@ -639,7 +672,7 @@ class AutocallableLifecycleTracker:
                 terminates_position=True,
                 state_before=before,
                 state_after=self._state_snapshot(),
-                metadata={"payoff": payoff},
+                metadata={"payoff": payoff, **(metadata or {})},
             )
         return None
 
@@ -935,6 +968,19 @@ class AutocallableLifecycleTracker:
         return elapsed_days >= due_days
 
     @staticmethod
+    def _due_after_determination(date, valuation_point, timing) -> bool:
+        """True when ``date`` lies strictly after the determination instant (the run's clock skipped it); the
+        day counting ``_timing_is_due`` uses."""
+        if timing.determination_date is not None:
+            return (
+                pd.Timestamp(date).normalize()
+                > pd.Timestamp(timing.determination_date).normalize()
+            )
+        elapsed_days = int(round(float(valuation_point.time) * 365.0))
+        due_days = int(round(float(timing.determination_time) * 365.0))
+        return elapsed_days > due_days
+
+    @staticmethod
     def _timing_is_due(date, valuation_point, timing) -> bool:
         if timing.determination_date is not None:
             return (
@@ -996,7 +1042,11 @@ class AutocallableLifecycleTracker:
         amount: float,
         timing,
         valuation_point: ValuationPoint,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+        contract_timing: bool = False,
     ) -> RealizedCashflow:
+        extra = {} if metadata is None else {"metadata": dict(metadata)}
         if (
             timing.determination_date is not None
             and timing.payment_date is not None
@@ -1007,8 +1057,18 @@ class AutocallableLifecycleTracker:
                 amount=amount,
                 determination_date=timing.determination_date,
                 payment_date=timing.payment_date,
+                **extra,
             )
 
+        if contract_timing:
+            return RealizedCashflow(
+                cashflow_id=cashflow_id,
+                event_type=event_type,
+                amount=amount,
+                determination_time=float(timing.determination_time),
+                payment_time=float(timing.payment_time),
+                **extra,
+            )
         delay = float(timing.payment_time) - float(timing.determination_time)
         determination_time = float(valuation_point.time)
         return RealizedCashflow(
@@ -1017,6 +1077,7 @@ class AutocallableLifecycleTracker:
             amount=amount,
             determination_time=determination_time,
             payment_time=determination_time + delay,
+            **extra,
         )
 
     @staticmethod

@@ -15,6 +15,7 @@ from quantark.asset.equity.settlement import SettlementConvention
 from ..base_equity_product import BaseEquityProduct
 from quantark.util.enum import OptionType, ExerciseType, TenorEnd
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 
 class BaseEquityOption(BaseEquityProduct):
@@ -738,3 +739,18 @@ def time_to_exercise(exercise_date: datetime, pricing_env) -> float:
         pricing_env.bus_days_in_year,
         calendar=getattr(pricing_env, "calendar", None),
     )
+
+
+def maturity_reached(option: "BaseEquityOption", pricing_env) -> bool:
+    """True when ``pricing_env`` values ``option`` on or after its maturity instant.
+
+    A dated contract compares the valuation date with ``exercise_date`` (the comparison ``time_to_exercise`` makes);
+    a numeric one reads its aged ``maturity`` (0.0 on the instant, negative once a run's clock has passed it). Unlike
+    ``get_maturity`` it does not refuse a valuation after the exercise date: a run whose clock skips the maturity date
+    settles on the first instant after it (spec 2026-10-13 I7 follow-up).
+    """
+    if option.exercise_date is not None:
+        return pricing_env.valuation_date >= option.exercise_date
+    if option.maturity is None:
+        raise ValidationError("Maturity is not set")
+    return option.maturity <= 0.0 or is_zero(option.maturity)

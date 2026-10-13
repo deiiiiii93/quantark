@@ -18,7 +18,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.fixings import fixing_label, is_history, snap_time, warn_filled_fixings
 from quantark.util.numerical import is_zero
 
-from .base_equity_option import BaseEquityOption
+from .base_equity_option import BaseEquityOption, maturity_reached
 from .range_accrual_config import RangeAccrualConfig, RangeAccrualObservationRecord
 
 if TYPE_CHECKING:
@@ -486,30 +486,32 @@ class RangeAccrualOption(BaseEquityOption):
 
     def settled_maturity_payoff(self, spot: float, pricing_env: "PricingEnvironment") -> float:
         """
-        The terminal payoff per contract settled ON the maturity instant, from this contract's recorded fixings.
+        The terminal payoff per contract, settled on or after the maturity instant from this contract's recorded
+        fixings.
 
         A run settles a run-fixings contract on the copy its run has recorded (spec 2026-10-13 I7 / A3): every
-        strictly past observation carries its ``observed_in_range``; one at t = 0 (the maturity day's own fixing) is
-        live and decided at ``spot`` through ``is_in_range``. The in-range weights, total weights and the
-        contract's accrual year fraction feed ``get_payoff`` - the settled value the engines price at T = 0 (W8),
-        without the settlement-lag discount.
+        strictly past observation carries its ``observed_in_range``; one at t = 0 (valued ON the maturity instant: the
+        maturity day's own fixing) is live and decided at ``spot`` through ``is_in_range``. A run whose clock skips
+        the maturity date values the contract on the first instant after it, every fixing already recorded (W6 gap
+        rule). The in-range weights, total weights and the contract's accrual year fraction feed ``get_payoff`` - the
+        settled value the engines price at T = 0 (W8), without the settlement-lag discount.
 
         Args:
-            spot: The maturity day's spot (decides the live fixing)
-            pricing_env: Environment valued on the maturity instant
+            spot: The spot AT the maturity instant (decides a live fixing); for a run that skipped the maturity
+                date, the spot of the run instant before it (W6 gap rule)
+            pricing_env: Environment valued on or after the maturity instant
 
         Returns:
             Payoff per contract (``contract_multiplier`` applied)
 
         Raises:
-            ValidationError: Not valued on the maturity instant, or a strictly past observation without its fixing
+            ValidationError: Valued before the maturity instant, or a strictly past observation without its fixing
                 (a run records every one before it settles)
         """
-        T = self.get_maturity(pricing_env)
-        if not is_zero(T):
-            # TODO(replay-settle): settle after the maturity instant (the run's clock skipped it)
+        if not maturity_reached(self, pricing_env):
             raise ValidationError(
-                f"RangeAccrualOption.settled_maturity_payoff values ON the maturity instant: time to maturity is {T}"
+                "RangeAccrualOption.settled_maturity_payoff values on or after the maturity instant: time to maturity "
+                f"is {self.get_maturity(pricing_env)}"
             )
         records = self.get_observation_records()
         missing = self.missing_fixing_fills(pricing_env)

@@ -199,6 +199,7 @@ class ProductReplay:
         # The missing past fixings decided at the run's first valuation ({record index: outcome}); None until then
         self._run_fills: Optional[dict] = None
         self._last: Optional[tuple] = None  # (date, spot) of the last date product_for_date first saw
+        self._previous: Optional[tuple] = None  # (date, spot) of the run instant before ``_last`` (W6 gap rule)
         self._live: Dict[int, tuple] = {}  # index -> (date, spot) first live (Ruling 4)
 
     @property
@@ -242,6 +243,7 @@ class ProductReplay:
                                         live_spots={i: s for i, (_d, s) in self._live.items()})
             self._run_fills.update(new)
             self._live = update_live(labels, day, pricing_env.spot, before=self._live, exclude=new)
+            self._previous = self._last
             self._last = (day, float(pricing_env.spot))
             return product
         if self._run_fills:
@@ -876,17 +878,38 @@ class ProductReplay:
         spot: float,
         *,
         settled_product: Any = None,
+        previous_spot: Optional[float] = None,
     ) -> None:
         """The tracker's ``settle_maturity_if_due``; a run-fixings participant passes ``settled_product``, its
-        run-fixed copy for ``date`` (``product_for_date``), which its maturity settles from."""
+        run-fixed copy for ``date`` (``product_for_date``), which its maturity settles from, and ``previous_spot``,
+        the spot of the run instant before ``date`` (``settle_run_fixings_maturity``)."""
         if settled_product is None:
             event = self._tracker.settle_maturity_if_due(date, product, env, spot)
         else:
-            event = self._tracker.settle_maturity_if_due(date, product, env, spot, settled_product=settled_product)
+            event = self._tracker.settle_maturity_if_due(
+                date, product, env, spot, settled_product=settled_product, previous_spot=previous_spot
+            )
         if event is not None:
             if self.record_events:
                 self.events_today.append(event)
             self.actions_sink.append(self._event_to_action_row(event))
+
+    def settle_run_fixings_maturity(
+        self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
+    ) -> Any:
+        """A run-fixings participant's day (spec 2026-10-13 I7 / A3): record ``date``'s fixings first
+        (``product_for_date``), then settle a maturity due on that run-fixed copy - on the maturity date at
+        ``spot``; on a later date (the run's clock skipped the maturity date) at the spot of the run instant before
+        ``date`` (W6 gap rule). Returns the run-fixed copy, the day's pricing copy."""
+        day = pd.Timestamp(date).normalize()
+        run_fixed = self.product_for_date(date, env)
+        previous = self._previous if self._last is not None and self._last[0] == day else None
+        self.settle_maturity_if_due(
+            date, product, env, spot,
+            settled_product=run_fixed,
+            previous_spot=None if previous is None else previous[1],
+        )
+        return run_fixed
 
     def apply_lifecycle_events(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float

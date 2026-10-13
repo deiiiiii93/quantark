@@ -429,12 +429,11 @@ class ReplayBacktestEngine:
                 )
                 if replay.has_run_fixings and replay.lifecycle.alive:
                     # A run-fixings participant steps today's fixings FIRST and settles a maturity due today on
-                    # that run-fixed copy, the maturity day's own fixing at today's spot (spec 2026-10-13 I7 / A3).
-                    # Any other product keeps the order below.
-                    run_fixed = replay.product_for_date(date, env)
-                    replay.settle_maturity_if_due(
-                        date, lifecycle_product, env, market["spot"],
-                        settled_product=run_fixed,
+                    # that run-fixed copy, the maturity day's own fixing at today's spot, or at the previous run
+                    # instant's when the run's clock skipped the maturity date (spec 2026-10-13 I7 / A3, W6 gap
+                    # rule). Any other product keeps the order below.
+                    run_fixed = replay.settle_run_fixings_maturity(
+                        date, lifecycle_product, env, market["spot"]
                     )
                 else:
                     run_fixed = None
