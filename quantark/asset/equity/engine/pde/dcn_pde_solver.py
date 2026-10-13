@@ -72,6 +72,7 @@ class DCNPDEEngine(BasePDESolver):
 
     engine_type = EngineType.PDE
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True  # DCNLifecycleState (W14), read by DCNAdapter
     _adapter_class = DCNAdapter
 
     def __init__(self, params: Optional[PDEParams] = None, **removed):
@@ -120,15 +121,16 @@ class DCNPDEEngine(BasePDESolver):
     def set_boundary_conditions(self, grid, x_vec, s_vec, t_idx, tau, product, pricing_env):
         raise PricingError("DCNAdapter.boundaries writes both surfaces; the single-surface hook is not used")
 
-    def price(self, product, pricing_env) -> float:
-        return self._run(product, pricing_env, OutputRequest(Operation.PRICE))
+    def price(self, product, pricing_env, *, lifecycle_state=None) -> float:
+        return self._run(product, pricing_env, OutputRequest(Operation.PRICE), lifecycle_state=lifecycle_state)
 
-    def calculate_greeks(self, product, pricing_env):
-        return self._run(product, pricing_env, OutputRequest(Operation.GREEKS, greeks=True))
+    def calculate_greeks(self, product, pricing_env, *, lifecycle_state=None):
+        return self._run(product, pricing_env, OutputRequest(Operation.GREEKS, greeks=True),
+                         lifecycle_state=lifecycle_state)
 
-    def price_detailed(self, product, pricing_env, **removed) -> DCNPDEResult:
+    def price_detailed(self, product, pricing_env, *, lifecycle_state=None, **removed) -> DCNPDEResult:
         reject_removed_kwargs(f"{type(self).__name__}.price_detailed", removed, REMOVED_DCN_NAMES)
-        problem = prepare(self, product, pricing_env, OutputRequest(Operation.PRICE),
+        problem = prepare(self, product, pricing_env, OutputRequest(Operation.PRICE), lifecycle_state=lifecycle_state,
                           frozen=self._frozen_base_layout, session=self._session_artefacts)
         pv = float(run(problem))
         if problem.terminal is not None:     # the final observation date (W10): settled, no grid

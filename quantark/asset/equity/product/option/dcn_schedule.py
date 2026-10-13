@@ -8,6 +8,7 @@ on calendar-coverage overrun.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Tuple
@@ -75,6 +76,40 @@ class DCNSchedule:
             ]
         )
 
+    def without_observed_through(self, through: datetime) -> "DCNSchedule":
+        """The post-close view of the valuation date (W14, amendment A1).
+
+        A copy with every monthly row and daily-KI date on or before
+        ``through`` removed: the day's close has been observed and its cash
+        and knock-in live in the lifecycle state. ``through`` must be this
+        schedule's ``valuation_date`` (times stay measured from it; the
+        valuation instant is no longer a monitoring date). ``spec`` is kept,
+        so ``spec.build`` returns the pre-close view.
+
+        Raises:
+            ValidationError: ``through`` is not the valuation date, or no
+                monthly row would remain (the final observation is observed:
+                the contract has matured and is priced from its matured
+                lifecycle state alone).
+        """
+        if through != self.valuation_date:
+            raise ValidationError(
+                "without_observed_through needs the schedule's own "
+                f"valuation_date {self.valuation_date:%Y-%m-%d}, got "
+                f"{through:%Y-%m-%d}"
+            )
+        monthly = tuple(m for m in self.monthly if m.observation_date > through)
+        if not monthly:
+            raise ValidationError(
+                "no monthly row remains after the final observation: the DCN "
+                "has matured; price its matured lifecycle state instead"
+            )
+        return dataclasses.replace(
+            self,
+            monthly=monthly,
+            daily_ki_dates=tuple(d for d in self.daily_ki_dates if d > through),
+        )
+
     def daily_ki_dataframe(self):
         import pandas as pd
 
@@ -124,10 +159,10 @@ def build_dcn_schedule(
         raise ValidationError("valuation_date before initial_date")
     if valuation_date > maturity_date:
         raise ValidationError("valuation_date after maturity_date")
-    if not calendar.is_business_day(valuation_date):
-        raise ValidationError(
-            "valuation_date must be a trading day on the schedule calendar"
-        )
+    # A7': a valuation date need not be a trading day of the schedule
+    # calendar (weekend, holiday, another market's run day). Rows and daily-KI
+    # dates are those on or after it, so none falls on a closed day; the grid
+    # then starts at an unmonitored valuation instant (``dcn_grid``).
 
     _assert_calendar_coverage(
         calendar, max(maturity_date, settlement_date) + timedelta(days=31)

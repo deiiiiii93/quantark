@@ -8,8 +8,9 @@ coupon barrier; on the FINAL row the loss leg pays when knocked in and not knock
 the valuation date to its own payment date (DF = 1 when paid today). Leg amounts are the kernel's arithmetic, so the MC
 route equals the kernel's one-column row bit for bit.
 
-Neutral module: no Monte Carlo import, so the PDE routes call it too. Decided-but-unpaid coupons from earlier rows are
-not carried (W14) and a knocked-out DCN is assumed alive (W14). Payment dates are the grid context's, i.e.
+Neutral module: no Monte Carlo import, so the PDE routes call it too. Decided-but-unpaid cash from earlier rows and a
+knocked-out or matured contract come in through a ``DCNLifecycleState`` (W14, ``resolve_dcn_lifecycle_state``). Payment
+dates are the grid context's, i.e.
 ``DCNOption.payment_dates()``: a ``settlement_convention`` times today's row as it times every later one (W15).
 """
 from __future__ import annotations
@@ -22,13 +23,16 @@ import numpy as np
 from quantark.asset.equity.engine.settlement_support import at_exercise_instant
 from quantark.asset.equity.product.option.dcn_grid import DCNGridContext, build_dcn_grid_context
 from quantark.priceenv.term_sampling import make_df_fn
+from quantark.execution.errors import CapabilityError
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
 __all__ = [
+    "DCNStateValuation",
     "DCNValuationRow",
     "at_final_observation",
     "observe_valuation_row",
+    "resolve_dcn_lifecycle_state",
     "settle_final_observation",
     "settled_row_delta",
 ]
@@ -130,3 +134,78 @@ def settled_row_delta(product, pricing_env, row: DCNValuationRow) -> float:
         return 0.0
     slope = (product.notional / product.initial_price) * product.participation * row.loss_df
     return float(row.direction_sign * slope)
+
+
+@dataclass(frozen=True)
+class DCNStateValuation:
+    """A validated ``DCNLifecycleState`` reduced to what a DCN engine adds.
+
+    ``pending_pv``: the ledger's pending receivable PV (signed, via
+    ``LifecycleCashflowLedger.pending_pv``). ``terminal``: knocked out or
+    matured -- the price IS ``pending_pv`` and the engine does not run.
+    """
+
+    pending_pv: float
+    terminal: bool
+
+
+def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Optional[DCNStateValuation]:
+    """Validate a DCN lifecycle state against the product and environment (W14, C2 / A1); ``None`` for no state.
+
+    Raises:
+        CapabilityError: a state that is not a ``DCNLifecycleState``.
+        ValidationError: a time-based valuation point or ledger flow (a DCN is dated); a valuation point that is not
+            the environment's (and the schedule's) valuation date; ``state.knocked_in`` differing from
+            ``product.knocked_in_at_valuation``; a ledger flow determined after the valuation date; or, for a state
+            that is still alive, a flow determined on a date that still has a monthly row in the product's schedule
+            (the engine would pay that row again -- the double-count guard). A terminal state runs no engine, so it
+            is exempt from the row check.
+    """
+    if lifecycle_state is None:
+        return None
+    from quantark.asset.equity.engine.settlement_support import pending_receivable_pv
+    from quantark.asset.equity.lifecycle.state import DCNLifecycleState
+
+    if not isinstance(lifecycle_state, DCNLifecycleState):
+        raise CapabilityError(
+            f"DCN engines take a DCNLifecycleState, got {type(lifecycle_state).__name__}"
+        )
+    valuation_date = pricing_env.valuation_date
+    if product.schedule.valuation_date != valuation_date:
+        raise ValidationError(
+            "a DCN lifecycle state needs the schedule's valuation date "
+            f"{product.schedule.valuation_date:%Y-%m-%d} to equal the environment's {valuation_date:%Y-%m-%d}"
+        )
+    point = lifecycle_state.valuation_point
+    if point is not None:
+        if point.date is None:
+            raise ValidationError("a DCN lifecycle state needs a date valuation point (a DCN is dated)")
+        if point.date != valuation_date:
+            raise ValidationError(
+                f"lifecycle valuation point {point.date:%Y-%m-%d} is not the valuation date {valuation_date:%Y-%m-%d}"
+            )
+    if bool(lifecycle_state.knocked_in) != bool(product.knocked_in_at_valuation):
+        raise ValidationError(
+            f"lifecycle state knocked_in={bool(lifecycle_state.knocked_in)} contradicts the product's "
+            f"knocked_in_at_valuation={bool(product.knocked_in_at_valuation)}"
+        )
+    terminal = not lifecycle_state.alive
+    rows = {m.observation_date for m in product.schedule.monthly}
+    for cashflow in lifecycle_state.ledger.cashflows:
+        determined = cashflow.determination_date
+        if determined is None or cashflow.payment_date is None:
+            raise ValidationError(
+                f"DCN ledger flow {cashflow.cashflow_id!r} needs a determination and a payment date"
+            )
+        if determined > valuation_date:
+            raise ValidationError(
+                f"DCN ledger flow {cashflow.cashflow_id!r} is determined {determined:%Y-%m-%d}, after the valuation "
+                f"date {valuation_date:%Y-%m-%d}"
+            )
+        if not terminal and determined in rows:
+            raise ValidationError(
+                f"DCN ledger flow {cashflow.cashflow_id!r} is determined {determined:%Y-%m-%d}, a date that still "
+                "has a monthly row in the product's schedule (it would be paid twice); price the post-close view "
+                "(DCNSchedule.without_observed_through)"
+            )
+    return DCNStateValuation(pending_pv=pending_receivable_pv(lifecycle_state, pricing_env), terminal=terminal)

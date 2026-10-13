@@ -374,6 +374,27 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   Moved values: none with `settlement_convention=None` (every DCN route byte-identical before/after, 28 pins);
   `test_autocallable_mc_settlement::test_dcn_explicit_payment_dates_remain_authoritative` (a YEAR_FRACTION
   convention silently ignored) became `test_dcn_year_fraction_convention_is_refused` (ValidationError).
+- Every DCN route prices a lifecycle state (W14a, spec I1 / C1 / C2 / A1). New
+  `quantark.asset.equity.lifecycle.DCNLifecycleState` (`valuation_point`, `ledger`, `knocked_in`, `knocked_out`,
+  `ko_date`, `matured`, `observed_row_indices`, `ki_date`; `alive`, `realized_cashflows`). GBM / local-vol / Heston /
+  QE / coupled-coarse MC, the GBM / local-vol / Heston PDE and their execution-session adapters (batch MC: pending PV
+  added in the reduction; terminal states and the final date answered natively; PDE session incl. grid rows) declare
+  `supports_lifecycle_state` and take `lifecycle_state=`: the engine value + the ledger's pending receivable PV; a
+  knocked-out or matured state prices exactly that PV (no simulation / march, greeks 0). Refused (ValidationError):
+  `state.knocked_in != product.knocked_in_at_valuation`, a valuation point other than the valuation date, an undated
+  flow, a flow determined after the valuation date, and (alive states) a flow determined on a date that still has a
+  monthly row in the product's schedule; another state type is a CapabilityError. New
+  `DCNSchedule.without_observed_through(d)` is the post-close view (rows and daily-KI dates <= d dropped); the grid
+  context's new `valuation_monitored` marks a valuation instant that is no knock-in test (t = 0 prepended; MC, PDE,
+  Heston PDE and grid rows then skip today's KI test). Pre-close == post-close (engine + ledger) to 1e-10 on GBM MC
+  (same seed, same grid) and PDE on coupon, knock-out, knock-in and final days. A7'(a): `build_dcn_schedule` accepts a
+  valuation date that is not a trading day of the schedule calendar (rows / KI dates on or after it, times ACT/365F
+  from it, no KI test until the next trading close); the cash-Greeks `theta_1d` rolls to the next trading day from it.
+  DCN_A at 5500 Fri..Tue 2024-06-07..11 (PDE standard): -47083.40, -46208.98, -45415.70, -44628.59, -43819.88.
+  Moved values: none with `lifecycle_state=None` on a trading day (40 pins byte-identical, every route, greeks, grid
+  rows, sessions, cash-Greeks report); closed-day valuations raise -> price;
+  `test_dcn_integration_seams::test_schedule_rejects_non_trading_valuation_date` became
+  `test_schedule_accepts_non_trading_valuation_date`.
 
 ### Fixed
 - The autocallable MC time grid holds one node per instant (W17a, approved 2026-10-10). The snowball, KO-reset and

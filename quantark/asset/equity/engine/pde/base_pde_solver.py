@@ -224,6 +224,11 @@ class BranchSolution(NamedTuple):
     t0_ko_barrier: float = 0.0
     t0_coupon_cash: Optional[float] = None
     t0_coupon_barrier: float = 0.0
+    # False when the valuation instant is not a knock-in test (a closed day, or the post-close view): a level at
+    # or below ki_barrier then reads the alive branch unless flagged. ``cash``: a lifecycle state's pending
+    # receivable PV (signed, W14), added to every level's price.
+    t0_monitored: bool = True
+    cash: float = 0.0
 
     def rows(self, spot_levels=None):
         levels = [float(s) for s in (self.s_vec if spot_levels is None else spot_levels)]
@@ -233,13 +238,16 @@ class BranchSolution(NamedTuple):
         out = []
         for spot in levels:
             if self.t0_ko_cash is not None and spot >= self.t0_ko_barrier:
-                out.append({"spot": spot, "price": self.t0_ko_cash, "delta": 0.0, "gamma": 0.0,
+                price = self.t0_ko_cash + self.cash if self.cash else self.t0_ko_cash
+                out.append({"spot": spot, "price": price, "delta": 0.0, "gamma": 0.0,
                             "calculation_mode": "engine_grid"})
                 continue
-            branch = "ki" if (self.knocked_in or spot <= self.ki_barrier) else "alive"
+            branch = "ki" if (self.knocked_in or (self.t0_monitored and spot <= self.ki_barrier)) else "alive"
             price, delta, gamma = _project_rows(surfaces[branch], [spot])[0]
             if self.t0_coupon_cash is not None and branch == "alive" and spot >= self.t0_coupon_barrier:
                 price = price + self.t0_coupon_cash
+            if self.cash:
+                price = price + self.cash
             out.append({"spot": spot, "price": price, "delta": delta, "gamma": gamma, "calculation_mode": "engine_grid"})
         return out
 

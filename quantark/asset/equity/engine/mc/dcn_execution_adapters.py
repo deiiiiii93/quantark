@@ -31,7 +31,10 @@ from typing import Optional
 
 import numpy as np
 
-from quantark.asset.equity.engine.dcn_valuation import at_final_observation
+from quantark.asset.equity.engine.dcn_valuation import (
+    at_final_observation,
+    resolve_dcn_lifecycle_state,
+)
 from quantark.asset.equity.engine.mc.dcn_mc_engine import (
     _finalize_dcn_result,
     _LegAccumulator,
@@ -156,6 +159,9 @@ class _DCNSimContext:
     # Heston-family engines carry market state on model_params rather than
     # the env vol surface; its fingerprint is verified after execution too.
     model_fp: str | None = None
+    # W14: the request's validated DCNLifecycleState (pending receivables,
+    # added to pv by ``_finalize_dcn_result``); None without a state.
+    receivables: object | None = None
 
 
 def _make_captured_df(rate_curve):
@@ -227,17 +233,43 @@ class _PinnedDrawProvider:
 
 
 class _DCNFinalObservation:
-    """Prepared payload of a DCN valued on its final observation date (W10,
-    ruling Q8): nothing to simulate; the kernel executes natively and the
-    engine settles the final row from ``dcn_valuation``."""
+    """Prepared payload of a DCN with nothing to simulate: valued on its
+    final observation date (W10, ruling Q8), or carrying a knocked-out /
+    matured lifecycle state (W14). The kernel executes natively and the
+    engine settles the final row from ``dcn_valuation`` / prices the
+    state's pending receivables."""
 
 
 def _final_observation_state(request):
-    if not at_final_observation(request.product):
+    state = resolve_dcn_lifecycle_state(
+        request.product, request.pricing_env, request.lifecycle_state
+    )
+    terminal = state is not None and state.terminal
+    if not terminal and not at_final_observation(request.product):
         return None
     return PreparedState(
         payload=_DCNFinalObservation(), descriptors=(), fingerprint=None,
         byte_estimate=None, handles=(),
+    )
+
+
+def _call_with_state(engine, request):
+    """The engine's own entry point with the request's lifecycle state (the
+    legacy adapter forwards a state to ``price`` only, never to
+    ``price_detailed``)."""
+    state = request.lifecycle_state
+    if request.operation is PricingOperation.PRICE:
+        value = engine.price(
+            request.product, request.pricing_env, lifecycle_state=state
+        )
+        return value, (("pv", float(value)),)
+    if request.operation is PricingOperation.PRICE_DETAILED:
+        value = engine.price_detailed(
+            request.product, request.pricing_env, lifecycle_state=state
+        )
+        return value, (("pv", float(value.pv)),)
+    raise CapabilityError(
+        f"operation {request.operation} unsupported by {_BATCH_ADAPTER_ID}"
     )
 
 
@@ -283,6 +315,22 @@ class _DCNBatchMixin:
             raise CapabilityError(
                 "pricing_env is required for product_env engines"
             )
+        if request.lifecycle_state is not None:
+            from quantark.asset.equity.engine.settlement_support import (
+                validate_settlement_capability,
+            )
+            from quantark.asset.equity.product.option.dcn_option import (
+                DCNOption,
+            )
+
+            validate_settlement_capability(
+                engine, request.product, request.lifecycle_state
+            )
+            if isinstance(request.product, DCNOption):
+                resolve_dcn_lifecycle_state(
+                    request.product, request.pricing_env,
+                    request.lifecycle_state,
+                )
 
     # -- preparation helpers ------------------------------------------------
     def _sim_context(self, clone, request, context,
@@ -333,6 +381,9 @@ class _DCNBatchMixin:
             model_fp=(
                 None if model_params is None
                 else try_fingerprint(model_params)
+            ),
+            receivables=resolve_dcn_lifecycle_state(
+                product, env, request.lifecycle_state
             ),
         )
 
@@ -497,6 +548,7 @@ class _DCNBatchMixin:
             sim.t0,
             pricing_env=sim.pricing_env,
             ctx=sim.ctx,
+            receivables=sim.receivables,
         )
         economics = (
             ("pv", float(result.pv)),
@@ -538,14 +590,19 @@ class _DCNBatchMixin:
     def execute_native(self, engine, request, normalized, context,
                        prepared=None):
         # Non-batch fallback (kernel prefers plan_batches when present):
-        # run the prepared clone through the legacy call path.
+        # run the prepared clone through the legacy call path; a lifecycle
+        # state goes through the engine's own keyword (W14).
         if prepared is not None and isinstance(
             prepared.payload, _DCNFinalObservation
         ):
+            if request.lifecycle_state is not None:
+                return _call_with_state(engine, request)
             return LegacyPriceAdapter.execute_native(
                 self, engine, request, normalized, context
             )
         if prepared is not None and isinstance(prepared.payload, _DCNSimContext):
+            if request.lifecycle_state is not None:
+                return _call_with_state(prepared.payload.engine, request)
             return LegacyPriceAdapter.execute_native(
                 self, prepared.payload.engine, request, normalized, context
             )

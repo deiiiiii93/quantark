@@ -36,13 +36,22 @@ class DCNGridContext:
     ko_pay_times: np.ndarray          # (n_obs,)
     loss_pay_time: float
     month_index_map: Tuple[Tuple[int, ...], ...]
+    # Column 0 (t = 0, the valuation instant) is a daily-KI date. False when
+    # the valuation date is not one: a closed day of the schedule calendar
+    # (A7') or the post-close view (A1); t = 0 is then prepended and the
+    # first knock-in test is column 1.
+    valuation_monitored: bool = True
 
 
 def build_dcn_grid_context(product: DCNOption) -> DCNGridContext:
     s = product.schedule
     v = s.valuation_date
-    times = np.array([_yf(v, d) for d in s.daily_ki_dates])
-    col_of = {d: i for i, d in enumerate(s.daily_ki_dates)}
+    if not s.daily_ki_dates or s.daily_ki_dates[0] < v:
+        raise ValidationError("DCN daily-KI dates must start on/after the valuation date")
+    monitored = s.daily_ki_dates[0] == v
+    first = 0 if monitored else 1  # unmonitored: t = 0 prepended
+    times = np.array(([] if monitored else [0.0]) + [_yf(v, d) for d in s.daily_ki_dates])
+    col_of = {d: i + first for i, d in enumerate(s.daily_ki_dates)}
     a = product.accrual_per_period
     # W15: every flow pays on the product's C4 dates (the convention's when set)
     pay_dates = product.payment_dates()
@@ -81,4 +90,5 @@ def build_dcn_grid_context(product: DCNOption) -> DCNGridContext:
         ko_pay_times=np.asarray(pay_k),
         loss_pay_time=_yf(v, pay_dates.loss_payment_date),
         month_index_map=tuple(kmap),
+        valuation_monitored=monitored,
     )

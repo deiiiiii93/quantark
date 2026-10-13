@@ -20,13 +20,17 @@ a discrete KI monitoring date, consistent with the MC engines.
 """
 from __future__ import annotations
 
+import dataclasses
 from typing import Optional
 
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.dcn_valuation import observe_valuation_row
+from quantark.asset.equity.engine.dcn_valuation import (
+    observe_valuation_row,
+    resolve_dcn_lifecycle_state,
+)
 from quantark.asset.equity.engine.pde.core.adapters.local_vol import LocalVolDCNAdapter
 from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     DCNPDEEngine,
@@ -60,14 +64,17 @@ class LocalVolDCNPDEEngine(LocalVolSurfaceMixin, DCNPDEEngine):
             raise ValidationError("local_vol_surface must be a LocalVolSurface or None")
         self._init_local_vol(local_vol_surface)
 
-    def price(self, product, pricing_env):
-        return self._with_surface(pricing_env, lambda: DCNPDEEngine.price(self, product, pricing_env))
+    def price(self, product, pricing_env, *, lifecycle_state=None):
+        return self._with_surface(pricing_env, lambda: DCNPDEEngine.price(
+            self, product, pricing_env, lifecycle_state=lifecycle_state))
 
-    def calculate_greeks(self, product, pricing_env):
-        return self._with_surface(pricing_env, lambda: DCNPDEEngine.calculate_greeks(self, product, pricing_env))
+    def calculate_greeks(self, product, pricing_env, *, lifecycle_state=None):
+        return self._with_surface(pricing_env, lambda: DCNPDEEngine.calculate_greeks(
+            self, product, pricing_env, lifecycle_state=lifecycle_state))
 
-    def price_detailed(self, product, pricing_env):
-        return self._with_surface(pricing_env, lambda: DCNPDEEngine.price_detailed(self, product, pricing_env))
+    def price_detailed(self, product, pricing_env, *, lifecycle_state=None):
+        return self._with_surface(pricing_env, lambda: DCNPDEEngine.price_detailed(
+            self, product, pricing_env, lifecycle_state=lifecycle_state))
 
     def _session_outputs(self, product, pricing_env, **kwargs):
         return self._with_surface(pricing_env, lambda: DCNPDEEngine._session_outputs(self, product, pricing_env, **kwargs))
@@ -90,6 +97,7 @@ class HestonDCNPDESolver(BaseEngine):
 
     engine_type = EngineType.PDE
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True  # DCNLifecycleState (W14)
 
     def __init__(
         self,
@@ -139,8 +147,8 @@ class HestonDCNPDESolver(BaseEngine):
         self.v0_boundary = str(v0_boundary)
         self.v_grid_power = float(v_grid_power)
 
-    def price(self, product, pricing_env) -> float:
-        return self.price_detailed(product, pricing_env).pv
+    def price(self, product, pricing_env, *, lifecycle_state=None) -> float:
+        return self.price_detailed(product, pricing_env, lifecycle_state=lifecycle_state).pv
 
     def _fine_grid(self, times: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Refine each daily interval into equal substeps; return the fine
@@ -165,9 +173,21 @@ class HestonDCNPDESolver(BaseEngine):
             return core._douglas_step(U, dt, tau_new, self.theta, t_mid)
         return core._cs_step(U, dt, tau_new, self.theta, t_mid)
 
-    def price_detailed(self, product, pricing_env) -> DCNPDEResult:
+    def price_detailed(self, product, pricing_env, *, lifecycle_state=None) -> DCNPDEResult:
+        """Price ``product``; a ``DCNLifecycleState`` adds its pending
+        receivables, and a knocked-out / matured one prices them alone (W14)."""
         if not isinstance(product, DCNOption):
             raise PricingError("HestonDCNPDESolver only supports DCNOption")
+        state = resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state)
+        if state is not None and state.terminal:
+            return DCNPDEResult(pv=state.pending_pv, direction_sign=product.direction_sign,
+                                num_space_nodes=0, num_time_steps=0)
+        result = self._price_contingent(product, pricing_env)
+        if state is None:
+            return result
+        return dataclasses.replace(result, pv=result.pv + state.pending_pv)
+
+    def _price_contingent(self, product, pricing_env) -> DCNPDEResult:
         ctx = build_dcn_grid_context(product)
         df = make_df_fn(pricing_env)
         # the monthly row observed today, pointwise at the spot: the final
@@ -309,9 +329,11 @@ class HestonDCNPDESolver(BaseEngine):
                     # every daily node is a KI monitoring date
                     v0 = np.where(ki_mask, v1, v0)
 
-        observed_ki_at_valuation = (
-            bool(product.knocked_in_at_valuation)
-            or float(pricing_env.spot) <= product.ki_barrier
+        # an unmonitored valuation instant (a closed day, or the post-close
+        # view) is no knock-in test: only the carried flag reads V1
+        observed_ki_at_valuation = bool(product.knocked_in_at_valuation) or (
+            ctx.valuation_monitored
+            and float(pricing_env.spot) <= product.ki_barrier
         )
         surface = v1 if observed_ki_at_valuation else v0
         pv_unsigned = core.interpolate(

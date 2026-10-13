@@ -22,6 +22,7 @@ from .manager import PortfolioLifecycleManager, ProcessedLifecycleEvent
 from .state import (
     AutocallableLifecycleState,
     BarrierLifecycleState,
+    DCNLifecycleState,
     EquityOptionLifecycleState,
     TerminalLifecycleState,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "is_float_rollable",
     "AutocallableLifecycleState",
     "BarrierLifecycleState",
+    "DCNLifecycleState",
     "EquityOptionLifecycleState",
     "TerminalLifecycleState",
     "KOResetLifecycleTracker",

@@ -3,7 +3,7 @@ Lifecycle state objects for equity structured products.
 
 ``AutocallableLifecycleState`` was extracted from the historical replay's
 strategy state (now ``quantark.backtest.replay.strategy_state``). ``BarrierLifecycleState`` is the simpler analogue for the
-vanilla barrier product family.
+vanilla barrier product family. ``DCNLifecycleState`` carries a DCN's realized decisions (W14).
 """
 
 from dataclasses import dataclass, field
@@ -321,6 +321,53 @@ class BarrierLifecycleState:
 
     @property
     def realized_cashflows(self) -> float:
+        if self.valuation_point is None:
+            return 0.0
+        return self.ledger.paid_total(self.valuation_point)
+
+
+@dataclass
+class DCNLifecycleState:
+    """Realized lifecycle state of a DCN (W14, contract C1 / A5).
+
+    What the run has already decided, as of ``valuation_point`` (a DATE: a
+    DCN is dated-only):
+
+    * ``ledger``: the realized coupon / knock-out / loss-leg cash, each a
+      dated ``RealizedCashflow`` (determination = its observation date,
+      payment = ``DCNOption.payment_dates()``), amounts SIGNED like the PV
+      (``direction_sign`` applied). Only flows whose determination date no
+      longer has a row in the priced product's schedule belong here; the
+      engines refuse any other (the double-count guard).
+    * ``knocked_in`` / ``ki_date``: the sticky daily knock-in; must equal the
+      priced product's ``knocked_in_at_valuation``.
+    * ``knocked_out`` / ``ko_date``, ``matured``: terminal flags. A terminal
+      state prices exactly the ledger's pending receivable PV.
+    * ``observed_row_indices``: monthly rows of the BOOKED schedule already
+      observed (run bookkeeping; engines do not read it).
+
+    It satisfies the ``EquityOptionLifecycleState`` protocol.
+    """
+
+    valuation_point: Optional[ValuationPoint] = None
+    ledger: LifecycleCashflowLedger = field(
+        default_factory=LifecycleCashflowLedger
+    )
+    knocked_in: bool = False
+    knocked_out: bool = False
+    ko_date: Optional[datetime] = None
+    matured: bool = False
+    observed_row_indices: set[int] = field(default_factory=set)
+    ki_date: Optional[datetime] = None
+
+    @property
+    def alive(self) -> bool:
+        """Neither knocked out nor matured: the contingent claim is still priced."""
+        return not (self.knocked_out or self.matured)
+
+    @property
+    def realized_cashflows(self) -> float:
+        """Ledger cash paid at or before the valuation point."""
         if self.valuation_point is None:
             return 0.0
         return self.ledger.paid_total(self.valuation_point)

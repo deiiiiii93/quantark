@@ -16,6 +16,7 @@ from quantark.asset.equity.riskmeasures.greeks.bump_envs import (
     shift_dividend_yield,
     shift_vol_surface,
 )
+from quantark.util.calendar import BusinessDayConvention
 from quantark.util.exceptions import ValidationError
 
 
@@ -79,7 +80,15 @@ def _date_rolled_theta(product, env, engine, calendar, base_pv):
             "date-rolled theta needs a product with a rebuildable schedule "
             "spec and an explicit calendar; refusing to approximate"
         )
-    rolled_date = calendar.trading_days_after(schedule.valuation_date, 1)
+    base_date = schedule.valuation_date
+    if calendar.is_business_day(base_date):
+        rolled_date = calendar.trading_days_after(base_date, 1)
+    else:
+        # a closed-day valuation (A7'): the next trading day is the first
+        # one strictly after it
+        rolled_date = calendar.adjust_date(
+            base_date, BusinessDayConvention.FOLLOWING
+        )
     rolled_schedule = dataclasses.replace(
         spec, valuation_date=rolled_date
     ).build(schedule.calendar)

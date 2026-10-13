@@ -27,7 +27,11 @@ from quantark.asset.equity.engine.event_stats import (
     DCNEventStats,
     payment_aware_cashflow_fields,
 )
-from quantark.asset.equity.engine.dcn_valuation import settle_final_observation
+from quantark.asset.equity.engine.dcn_valuation import (
+    DCNStateValuation,
+    resolve_dcn_lifecycle_state,
+    settle_final_observation,
+)
 from quantark.asset.equity.engine.mc.dcn_payoff import (
     DCNPathCashflows,
     compute_dcn_cashflows,
@@ -79,6 +83,9 @@ class DCNMCResult:
     prob_survive_no_ki: float
     prob_survive_ki: float
     event_stats: Optional[DCNEventStats] = field(repr=False, default=None)
+    # W14: PV of the lifecycle state's pending receivables (signed), included
+    # in ``pv``; the legs, s.e. and event statistics are the contingent claim's.
+    pv_pending_receivables: float = 0.0
 
     def to_dict(self) -> dict:
         d = {
@@ -153,11 +160,13 @@ def _finalize_dcn_result(
     *,
     pricing_env,
     ctx,
+    receivables: Optional[DCNStateValuation] = None,
 ) -> "DCNMCResult":
     """Assemble a DCNMCResult from a fully-populated accumulator.
 
     Shared verbatim by the direct path and the execution-framework batch
-    reducer so the two can never drift arithmetically.
+    reducer so the two can never drift arithmetically. ``receivables`` (a
+    lifecycle state's pending cash, W14) adds to ``pv`` only.
     """
     sign = product.direction_sign
     n = acc.n
@@ -224,6 +233,10 @@ def _finalize_dcn_result(
         pv=pv,
         **cashflow_fields,
     )
+    pending = 0.0
+    if receivables is not None:
+        pending = receivables.pending_pv
+        pv = pv + pending
     return DCNMCResult(
         pv=pv,
         std_error=stderr,
@@ -248,10 +261,28 @@ def _finalize_dcn_result(
         prob_survive_no_ki=stats.prob_survive_no_ki,
         prob_survive_ki=stats.prob_survive_ki,
         event_stats=stats,
+        pv_pending_receivables=pending,
     )
 
 
-def settled_dcn_result(product, pricing_env, ctx, seed, t0) -> "DCNMCResult":
+def receivables_only_result(product, seed, t0, receivables: DCNStateValuation) -> "DCNMCResult":
+    """A knocked-out or matured lifecycle state (W14): the price is the
+    ledger's pending receivable PV; nothing is simulated (``num_paths`` 0,
+    legs, s.e. and statistics 0, no event statistics)."""
+    n_obs = len(product.schedule.monthly)
+    zeros = tuple(0.0 for _ in range(n_obs))
+    return DCNMCResult(
+        pv=receivables.pending_pv, std_error=0.0, num_paths=0, seed=seed,
+        elapsed_seconds=time.perf_counter() - t0, direction_sign=product.direction_sign,
+        pv_fixed_coupons=0.0, pv_fixed_coupons_by_period=zeros, pv_ko_coupons=0.0,
+        pv_ko_coupons_by_period=zeros, pv_loss_leg=0.0, ki_probability=0.0, ko_probability=0.0,
+        ko_timing_distribution=zeros, coupon_probability=zeros, expected_life_years=0.0,
+        prob_survive_no_ki=0.0, prob_survive_ki=0.0, event_stats=None,
+        pv_pending_receivables=receivables.pending_pv,
+    )
+
+
+def settled_dcn_result(product, pricing_env, ctx, seed, t0, receivables=None) -> "DCNMCResult":
     """The DCN on its final observation date (W10, ruling Q6): the settled
     final row from ``dcn_valuation`` as a one-path result, so pv, legs and
     event statistics are the row's 0/1 decisions; ``std_error`` is 0.0 and
@@ -270,6 +301,7 @@ def settled_dcn_result(product, pricing_env, ctx, seed, t0) -> "DCNMCResult":
     acc.add(cf, ctx.times[ctx.obs_cols])
     return _finalize_dcn_result(
         acc, product, seed, 0.0, t0, pricing_env=pricing_env, ctx=ctx,
+        receivables=receivables,
     )
 
 
@@ -300,6 +332,7 @@ class DCNMCEngine(BaseEngine):
 
     engine_type = EngineType.MONTE_CARLO
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True  # DCNLifecycleState (W14)
     # Session-path hook (execution-framework adapter clones only): a callable
     # ``(n_dims, n_paths, batch_id) -> ndarray | None`` consulted before the
     # engine's own generators; None on every direct-path engine.
@@ -343,21 +376,38 @@ class DCNMCEngine(BaseEngine):
         self._last_result: Optional[DCNMCResult] = None
 
     # -- BaseEngine-compatible entry point --
-    def price(self, product, pricing_env) -> float:
-        return self.price_detailed(product, pricing_env).pv
+    def price(self, product, pricing_env, *, lifecycle_state=None) -> float:
+        if lifecycle_state is None:
+            return self.price_detailed(product, pricing_env).pv
+        return self.price_detailed(
+            product, pricing_env, lifecycle_state=lifecycle_state
+        ).pv
 
-    def price_detailed(self, product, pricing_env) -> DCNMCResult:
+    def price_detailed(
+        self, product, pricing_env, *, lifecycle_state=None
+    ) -> DCNMCResult:
+        """Price ``product``; a ``DCNLifecycleState`` adds its pending
+        receivables, and a knocked-out / matured one prices them alone (W14)."""
         if not isinstance(product, DCNOption):
             raise PricingError(
                 f"{type(self).__name__} only supports DCNOption, "
                 f"got {type(product).__name__}"
             )
         t0 = time.perf_counter()
+        receivables = resolve_dcn_lifecycle_state(
+            product, pricing_env, lifecycle_state
+        )
+        if receivables is not None and receivables.terminal:
+            result = receivables_only_result(product, self.seed, t0, receivables)
+            self._last_result = result
+            return result
         ctx = build_dcn_grid_context(product)
         if ctx.times.size == 1:
             # the final observation date (W10): the settled final row, no
             # simulation and no model preparation
-            result = settled_dcn_result(product, pricing_env, ctx, self.seed, t0)
+            result = settled_dcn_result(
+                product, pricing_env, ctx, self.seed, t0, receivables
+            )
             self._last_result = result
             return result
         dt_array = np.diff(ctx.times)
@@ -427,6 +477,7 @@ class DCNMCEngine(BaseEngine):
             t0,
             pricing_env=pricing_env,
             ctx=ctx,
+            receivables=receivables,
         )
         self._last_result = result
         return result

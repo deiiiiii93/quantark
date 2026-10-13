@@ -93,8 +93,15 @@ class DCNEvents:
         return (loss, loss), (alive_up, ki_up)
 
 
+def _receivables(product, env, lifecycle_state):
+    """The validated lifecycle state's (pending PV, terminal), or ``None`` (W14, ``dcn_valuation``)."""
+    from quantark.asset.equity.engine.dcn_valuation import resolve_dcn_lifecycle_state
+    return resolve_dcn_lifecycle_state(product, env, lifecycle_state)
+
+
 class DCNAdapter(FamilyAdapter):
-    """``DCNPDEEngine`` (spec 3C §5.4)."""
+    """``DCNPDEEngine`` (spec 3C §5.4). A ``DCNLifecycleState`` (W14) adds its pending receivables to the price
+    (greeks unchanged); a knocked-out or matured one prices them alone, flat, without a march."""
 
     def validate(self, product, env, request, lifecycle_state) -> None:
         from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
@@ -102,17 +109,29 @@ class DCNAdapter(FamilyAdapter):
         if not isinstance(product, DCNOption):
             raise PricingError(f"{type(self.solver).__name__} only supports DCNOption")
         validate_settlement_capability(self.solver, product, lifecycle_state)
+        _receivables(product, env, lifecycle_state)
 
     def terminal_outcome(self, product, env, request, lifecycle_state):
         """The valuation-date row when it ends the contract (``dcn_valuation``, pointwise at the spot, Q2): the final
         observation date (W10: the settled final row; greeks = its slope, gamma 0, Q6) or a knock-out today (W10b:
-        the knock-out coupon; greeks 0). Any other date marches."""
+        the knock-out coupon; greeks 0). A knocked-out / matured lifecycle state: its pending receivables, greeks 0.
+        Any other date marches."""
         from quantark.asset.equity.engine.dcn_valuation import observe_valuation_row, settled_row_delta
+        state = _receivables(product, env, lifecycle_state)
+        if state is not None and state.terminal:
+            price = state.pending_pv
+            if request.operation is Operation.GREEKS:
+                return TerminalOutcome("lifecycle", {"price": price, "delta": 0.0, "gamma": 0.0})
+            if request.operation is Operation.SESSION_OUTPUTS:
+                return TerminalOutcome("lifecycle", self._session_outputs(price, None))
+            return TerminalOutcome("lifecycle", price)
         row = observe_valuation_row(product, env)
         if row is None or not row.ends_contract:
             return None
         reason = "expired" if row.is_final else "knocked_out"
         price = row.pv
+        if state is not None:
+            price = price + state.pending_pv
         if request.operation is Operation.GREEKS:
             delta = settled_row_delta(product, env, row) if row.is_final else 0.0
             return TerminalOutcome(reason, {"price": price, "delta": delta, "gamma": 0.0})
@@ -167,8 +186,9 @@ class DCNAdapter(FamilyAdapter):
         product, env, layout, readout = prepared.product, prepared.env, prepared.layout, prepared.readout
         spot, sign = env.spot, float(product.direction_sign)
         flagged = bool(product.knocked_in_at_valuation)
+        monitored = prepared.events.ctx.valuation_monitored     # a closed day / post-close: no knock-in test today
         alive, ki = result.states["alive"][:, 0], result.states["ki"][:, 0]
-        column = ki if (flagged or spot <= product.ki_barrier) else alive
+        column = ki if (flagged or (monitored and spot <= product.ki_barrier)) else alive
         price = sign * readout.price(column, spot, layout)
         validate_readout(price, readout)
         # W10b: a monthly observation on the valuation date, decided pointwise at the spot. The march's t = 0 column
@@ -179,6 +199,10 @@ class DCNAdapter(FamilyAdapter):
         row = observe_valuation_row(product, env, ev.ctx, ev.df)
         if row is not None and row.coupon_paid:
             price = price + sign * row.coupon_pv
+        state = _receivables(product, env, prepared.lifecycle_state)
+        cash = 0.0 if state is None else state.pending_pv
+        if state is not None:
+            price = price + cash
         op = prepared.request.operation
         if op is Operation.GREEKS:
             delta, gamma = readout.delta_gamma(column, spot, layout)
@@ -195,6 +219,6 @@ class DCNAdapter(FamilyAdapter):
                                  t0_ko_barrier=float(product.ko_barrier))
                 solution = BranchSolution(alive=sign * alive, ki=sign * ki, x_vec=layout.spatial.x,
                                           s_vec=layout.spatial.s, ki_barrier=float(product.ki_barrier),
-                                          knocked_in=flagged, **today)
+                                          knocked_in=flagged, t0_monitored=monitored, cash=cash, **today)
             return self._session_outputs(price, solution)
         return price

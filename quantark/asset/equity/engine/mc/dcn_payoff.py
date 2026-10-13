@@ -62,7 +62,10 @@ def compute_dcn_cashflows(
     # contractual daily observation when it is on the SSE grid.  Column zero
     # is the known valuation-date close, so apply it before future segments.
     knocked_in = np.full(n_paths, bool(product.knocked_in_at_valuation))
-    knocked_in |= paths[:, 0] <= b_ki
+    if ctx.valuation_monitored:
+        # an unmonitored valuation instant (a closed day, or the post-close
+        # view) tests nothing at column zero: the first test is column one
+        knocked_in |= paths[:, 0] <= b_ki
     ko_obs_row = np.full(n_paths, -1, dtype=int)
     coupon_paid = np.zeros((n_paths, n_obs), dtype=bool)
     coupon_pv_by = np.zeros((n_paths, n_obs))
