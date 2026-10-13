@@ -371,3 +371,46 @@ class DCNLifecycleState:
         if self.valuation_point is None:
             return 0.0
         return self.ledger.paid_total(self.valuation_point)
+
+    # -- the run consumers' receivable view (A5): derived from the ledger, never stored twice --------------------
+    def _pending(self) -> tuple:
+        if self.valuation_point is None:
+            return self.ledger.cashflows
+        return self.ledger.pending(self.valuation_point)
+
+    @property
+    def pending_settlement_cashflow(self) -> float:
+        """Determined, not yet paid ledger cash (undiscounted)."""
+        return float(sum(cf.amount for cf in self._pending()))
+
+    @property
+    def settlement_date(self) -> Optional[datetime]:
+        """The last payment date of the pending cash, or ``None`` when nothing is pending."""
+        dates = [cf.payment_date for cf in self._pending() if cf.payment_date is not None]
+        return max(dates) if dates else None
+
+    @property
+    def settled(self) -> bool:
+        """Terminated (knocked out / matured) and every ledger flow paid."""
+        return not self.alive and not self._pending()
+
+    def advance_to(self, date: datetime) -> float:
+        """Move the valuation point forward to ``date`` (never backward); returns the cash that became paid."""
+        if self.valuation_point is not None and self.valuation_point.date is None:
+            raise ValidationError("a DCN lifecycle state is dated: its valuation point needs a date")
+        before = self.realized_cashflows
+        if self.valuation_point is None or date > self.valuation_point.date:
+            self.valuation_point = ValuationPoint(date=date)
+        return self.realized_cashflows - before
+
+    def settle(self) -> float:
+        """Post every pending flow (advance to the last pending payment date); returns the amount posted."""
+        last = self.settlement_date
+        return 0.0 if last is None else self.advance_to(last)
+
+    def mark_matured_before_run(self, maturity_date: datetime) -> bool:
+        """Matured before the run (W1 rule): dead and matured with no ledger entry. False when already dead."""
+        if not self.alive:
+            return False
+        self.matured = True
+        return True

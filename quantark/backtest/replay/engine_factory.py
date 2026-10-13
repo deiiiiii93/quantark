@@ -15,6 +15,8 @@ from quantark.asset.equity.engine.analytical import (
     SingleSharkfinOptionAnalyticalEngine,
 )
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.mc.dcn_mc_engine import DCNMCEngine
+from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import HestonDCNMCEngine, LocalVolDCNMCEngine
 from quantark.asset.equity.engine.mc.euro_mc_engine import EuropeanMCEngine
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
@@ -23,6 +25,8 @@ from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
     HestonSnowballMCEngine,
     LocalVolSnowballMCEngine,
 )
+from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
+from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import HestonDCNPDESolver, LocalVolDCNPDEEngine
 from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
     HestonSLVSnowballPDESolver,
     HestonSnowballPDESolver,
@@ -45,6 +49,7 @@ from quantark.asset.equity.product.option import (
     RangeAccrualOption,
     SingleSharkfinOption,
 )
+from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
@@ -103,6 +108,40 @@ def _apply_bump_overrides(engine, delta_bump_size, gamma_bump_size):
     return engine
 
 
+def _dcn_mc_kwargs(mc_params: MCParams, method: Any) -> dict:
+    """DCN MC engines take their own arguments (no ``MCParams``): paths, seed, Sobol (``use_qmc``) or antithetic;
+    one batch, one worker. A ``method`` has no DCN meaning and is refused rather than ignored."""
+    if method is not None:
+        raise ValidationError(f"the DCN MC engines take no method, got {method!r}")
+    return dict(num_paths=int(mc_params.num_paths), seed=int(mc_params.seed), use_sobol=bool(mc_params.use_qmc),
+                use_antithetic=bool(mc_params.use_antithetic), num_batches=1, num_workers=1)
+
+
+def _dcn_mc_engine(cls, mc_params: MCParams, method: Any, **kwargs) -> BaseEngine:
+    return cls(**_dcn_mc_kwargs(mc_params, method), **kwargs)
+
+
+def _create_dcn_vol_model_engine(vol_model, solver, calibrated, pde_params, mc_params, mc_method, options):
+    """The DCN's vol-model engines (A6): local-vol MC / PDE and Heston MC / PDE; no SLV DCN route exists."""
+    if vol_model == "localvol":
+        if calibrated.local_vol_surface is None:
+            raise ValidationError("vol_model='localvol' requires calibrated.local_vol_surface")
+        if solver == "pde":
+            return LocalVolDCNPDEEngine(local_vol_surface=calibrated.local_vol_surface,
+                                        params=pde_params or PDEParams(), **options)
+        return _dcn_mc_engine(LocalVolDCNMCEngine, mc_params or MCParams(), mc_method,
+                              local_vol_surface=calibrated.local_vol_surface, **options)
+    if vol_model == "heston":
+        if calibrated.heston_params is None:
+            raise ValidationError("vol_model='heston' requires calibrated.heston_params")
+        if solver == "pde":
+            return HestonDCNPDESolver(model_params=calibrated.heston_params, **options)
+        return _dcn_mc_engine(HestonDCNMCEngine, mc_params or MCParams(), mc_method,
+                              model_params=calibrated.heston_params, **options)
+    # TODO(dcn-slv): no SLV DCN engine exists (spec non-goal); refused, never priced with another model
+    raise ValidationError(f"no DCN engine for vol_model={vol_model!r}")
+
+
 def create_autocallable_engine(
     *,
     product: Any,
@@ -118,11 +157,15 @@ def create_autocallable_engine(
         selected = method if method is not None else config.method
         if selected is not None:
             raise removed_name_error("PDEEngine", "method")
+        if isinstance(product, DCNOption):
+            return DCNPDEEngine(params=config.pde_params or PDEParams())
         return PDEEngine(params=config.pde_params or PDEParams())
 
     if engine_type == EngineType.MONTE_CARLO:
         mc_params = config.mc_params or MCParams()
         selected_method = method if method is not None else config.method
+        if isinstance(product, DCNOption):
+            return _dcn_mc_engine(DCNMCEngine, mc_params, selected_method)
         if isinstance(product, EuropeanVanillaOption):
             return EuropeanMCEngine(params=mc_params, method=selected_method)
         if isinstance(product, PhoenixOption):
@@ -204,6 +247,7 @@ def create_vol_model_engine(
     engine_options: Optional[dict] = None,
     delta_bump_size: Optional[float] = None,
     gamma_bump_size: Optional[float] = None,
+    product: Any = None,
 ) -> BaseEngine:
     """Create a snowball engine wired to a per-day calibrated vol model.
 
@@ -229,6 +273,16 @@ def create_vol_model_engine(
         )
     if solver not in ("pde", "mc"):
         raise ValidationError(f"solver must be 'pde' or 'mc', got {solver!r}")
+
+    if isinstance(product, DCNOption):
+        try:
+            return _apply_bump_overrides(_create_dcn_vol_model_engine(
+                vol_model, solver, calibrated, pde_params, mc_params, mc_method, options,
+            ), delta_bump_size, gamma_bump_size)
+        except TypeError as exc:
+            raise ValidationError(
+                f"Invalid vol_model_engine_options for ({vol_model!r}, {solver!r}): {exc}"
+            ) from exc
 
     try:
         if vol_model == "localvol":

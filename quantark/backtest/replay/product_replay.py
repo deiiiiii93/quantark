@@ -27,7 +27,7 @@ import pandas as pd
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import StatisticsRefused
-from quantark.asset.equity.lifecycle import tracker_for
+from quantark.asset.equity.lifecycle import DCNLifecycleState, ValuationPoint, tracker_for
 from quantark.asset.equity.market import IndexFuturesQuote
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.param.div.forward_carry_curve import ForwardCarryCurve
@@ -818,8 +818,11 @@ class ProductReplay:
 
     def settle_pending_if_due(self, date: pd.Timestamp) -> float:
         """Post a pending terminal receivable once its settlement date is
-        reached; returns the amount posted (0.0 otherwise)."""
+        reached; returns the amount posted (0.0 otherwise). A DCN's ledger
+        (A4) posts every flow whose payment date has been reached."""
         lifecycle = self.lifecycle
+        if isinstance(lifecycle, DCNLifecycleState):
+            return lifecycle.advance_to(pd.Timestamp(date).normalize().to_pydatetime())
         if lifecycle.settled or lifecycle.settlement_date is None:
             return 0.0
         if pd.Timestamp(date).normalize() >= pd.Timestamp(
@@ -840,6 +843,10 @@ class ProductReplay:
         ledger's pending flows at the current valuation point instead.
         """
         lifecycle = self.lifecycle
+        if isinstance(lifecycle, DCNLifecycleState):
+            # A4: a DCN carries several dated receivables (coupons, knock-out, loss leg) in its ledger
+            point = ValuationPoint(date=pd.Timestamp(date).normalize().to_pydatetime())
+            return float(lifecycle.ledger.pending_pv(point, env))
         point = lifecycle.valuation_point
         if point is None or point.date is not None:
             pending = float(lifecycle.pending_settlement_cashflow)

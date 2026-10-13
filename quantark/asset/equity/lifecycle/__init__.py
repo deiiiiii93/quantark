@@ -15,6 +15,7 @@ from .cashflows import (
     ValuationPoint,
 )
 from .events import LifecycleEvent, LifecycleEventType
+from .dcn import DCNLifecycleTracker
 from .float_roll import FLOAT_ROLLABLE_PRODUCTS, FloatMaturityRoller, is_float_rollable
 from .snapping import snap_contract, snap_time
 from .ko_reset import KOResetLifecycleTracker, tracker_for
@@ -32,6 +33,7 @@ __all__ = [
     "COUPON_ARREARS_INDICES",
     "CalendarSchedule",
     "BarrierLifecycleTracker",
+    "DCNLifecycleTracker",
     "TRACKED_BARRIER_PRODUCTS",
     "LifecycleEvent",
     "LifecycleEventType",

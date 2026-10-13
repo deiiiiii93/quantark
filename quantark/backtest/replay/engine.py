@@ -18,6 +18,7 @@ from .config import (
     SurfaceGridConfig,
 )
 from .market import AutocallableMarketDataSet, ImpliedBasisYield, SignedDividendYield
+from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 
 from .strategy_state import AutocallableDeltaHedgeStrategy, AutocallableLifecycleState, FuturesHedgePosition
@@ -191,8 +192,11 @@ class ReplayBacktestEngine:
         # every pricing call; vol-model days swap this list wholesale.
         self._pricing_engines: list[Any] = []
         for bp in config.products:
-            # A KO-reset starts from the product's carried state (its tracker builds it); the others fresh.
-            lifecycle = None if isinstance(bp.product, KnockOutResetSnowballOption) else AutocallableLifecycleState()
+            # A KO-reset and a DCN start from the product's carried state (their trackers build it); the others fresh.
+            lifecycle = (
+                None if isinstance(bp.product, (KnockOutResetSnowballOption, DCNOption))
+                else AutocallableLifecycleState()
+            )
             self._pricing_engines.append(
                 create_pricing_engine(
                     bp.product,
@@ -680,8 +684,9 @@ class ReplayBacktestEngine:
                 engine_options=engine_config.vol_model_engine_options,
                 delta_bump_size=self.config.delta_bump_size,
                 gamma_bump_size=self.config.gamma_bump_size,
+                **({"product": replay.product} if isinstance(replay.product, DCNOption) else {}),
             )
-            for _ in self._replays
+            for replay in self._replays
         ]
         record = dict(calibrated.record)
         record["date"] = pd.Timestamp(date).date().isoformat()

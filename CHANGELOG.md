@@ -395,6 +395,26 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   rows, sessions, cash-Greeks report); closed-day valuations raise -> price;
   `test_dcn_integration_seams::test_schedule_rejects_non_trading_valuation_date` became
   `test_schedule_accepts_non_trading_valuation_date`.
+- DCNs age through runs (W14b, spec I1 / C3 / A1 / A4-A6 / A7'). New `quantark.asset.equity.lifecycle.DCNLifecycleTracker`
+  (`tracker_for` returns it for a `DCNOption`; `PortfolioLifecycleManager.register_positions` tracks DCN positions in
+  the equity backtest and the dynamic scenario; the replay builds it per product). Each close decides the BOOKED rows:
+  daily KI, then KO (ends the note), else the coupon, and on the final row the loss leg of a knocked-in survivor; cash
+  is a dated `RealizedCashflow` (`dcn:<kind>:<date>`, quantity x signed) payable on `DCNOption.payment_dates()`. Any run
+  calendar: every run day prices; a schedule date the run never visits is decided at the previous run instant's spot
+  (`gap=True` on the event and the ledger flow, W6 rule); dates before the run start are history (signed rule 3); a
+  first run day after an unvisited in-run date refuses (`TODO(dcn-run-start)`). Pricing copies: pre-close
+  `product_for_pricing(d, env, initial=True)`, post-close `.without_observed_through(d)`; the runs value the contingent
+  claim plus the ledger (MTM + pending PV + paid cash). `DCNLifecycleState` gains `pending_settlement_cashflow`,
+  `settlement_date`, `settled`, `settle()`, `advance_to()`, `mark_matured_before_run()`; `ProductReplay` reads a DCN's
+  ledger for its receivable PV and payments (A4; the autocallable path unchanged). Replay builds DCN engines
+  (`create_autocallable_engine`: `DCNMCEngine` from `MCParams` num_paths / seed / use_qmc / use_antithetic,
+  `DCNPDEEngine`; `create_vol_model_engine(product=)`: local-vol / Heston MC and PDE; SLV refused) and its config
+  admits a DCN under `vol_model` localvol / heston. Moved values: DCN runs (they priced the booked contract statically
+  every day, never deciding a row; the replay raised `PDEEngine settlement support is none`). DCN_A booked 2023-03-27,
+  spot 5500 / 4400 on 04-11..12 / 6100 from 05-04, PDE fast, dynamic scenario portfolio value: 04-03 -160297.41 ->
+  -156942.55 (coupon 10000 receivable), 04-11 -455784.67 -> -444194.19 (knocked in, coupon paid), 05-04 -10724.37 ->
+  19996.10 (knocked out, position closed), 05-12 -10724.37 -> 20000.00; the equity backtest moves identically; the
+  replay now runs (05-12 paid cash 20000). Replay goldens unchanged.
 
 ### Fixed
 - The autocallable MC time grid holds one node per instant (W17a, approved 2026-10-10). The snowball, KO-reset and

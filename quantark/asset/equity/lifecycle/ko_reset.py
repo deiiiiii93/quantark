@@ -618,9 +618,14 @@ def _last_observation_date(schedule) -> Optional[Any]:
     return max(dates) if dates else None
 
 
-def tracker_for(product: Any, **kwargs) -> AutocallableLifecycleTracker:
-    """The tracker a product's rules need: KO-reset or the snowball/Phoenix one."""
+def tracker_for(product: Any, **kwargs):
+    """The tracker a product's rules need: the DCN's (W14b), KO-reset, or the snowball/Phoenix one."""
+    from quantark.asset.equity.product.option.dcn_option import DCNOption
     from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
 
+    if isinstance(product, DCNOption):
+        from .dcn import DCNLifecycleTracker
+
+        return DCNLifecycleTracker(product=product, **kwargs)
     cls = KOResetLifecycleTracker if isinstance(product, KnockOutResetSnowballOption) else AutocallableLifecycleTracker
     return cls(product=product, **kwargs)

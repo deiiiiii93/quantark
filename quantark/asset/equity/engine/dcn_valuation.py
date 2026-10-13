@@ -31,6 +31,7 @@ __all__ = [
     "DCNStateValuation",
     "DCNValuationRow",
     "at_final_observation",
+    "check_dcn_ledger",
     "observe_valuation_row",
     "resolve_dcn_lifecycle_state",
     "settle_final_observation",
@@ -190,8 +191,16 @@ def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Option
             f"knocked_in_at_valuation={bool(product.knocked_in_at_valuation)}"
         )
     terminal = not lifecycle_state.alive
+    check_dcn_ledger(product, valuation_date, lifecycle_state.ledger, alive=not terminal)
+    return DCNStateValuation(pending_pv=pending_receivable_pv(lifecycle_state, pricing_env), terminal=terminal)
+
+
+def check_dcn_ledger(product, valuation_date, ledger, *, alive: bool) -> None:
+    """The double-count guard of ``resolve_dcn_lifecycle_state`` (A1), also run by the run tracker on every pricing
+    copy: every flow is dated, none is determined after ``valuation_date``, and -- while the contract is alive -- none
+    is determined on a date that still has a monthly row in ``product.schedule``."""
     rows = {m.observation_date for m in product.schedule.monthly}
-    for cashflow in lifecycle_state.ledger.cashflows:
+    for cashflow in ledger.cashflows:
         determined = cashflow.determination_date
         if determined is None or cashflow.payment_date is None:
             raise ValidationError(
@@ -202,10 +211,9 @@ def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Option
                 f"DCN ledger flow {cashflow.cashflow_id!r} is determined {determined:%Y-%m-%d}, after the valuation "
                 f"date {valuation_date:%Y-%m-%d}"
             )
-        if not terminal and determined in rows:
+        if alive and determined in rows:
             raise ValidationError(
                 f"DCN ledger flow {cashflow.cashflow_id!r} is determined {determined:%Y-%m-%d}, a date that still "
                 "has a monthly row in the product's schedule (it would be paid twice); price the post-close view "
                 "(DCNSchedule.without_observed_through)"
             )
-    return DCNStateValuation(pending_pv=pending_receivable_pv(lifecycle_state, pricing_env), terminal=terminal)

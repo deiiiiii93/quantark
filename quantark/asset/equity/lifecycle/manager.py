@@ -48,6 +48,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.util.run_fixings import participates
@@ -132,7 +133,17 @@ class PortfolioLifecycleManager:
         matured: List[str] = []
         for position_id, position in list(portfolio.positions.items()):
             product = position.product
-            if isinstance(product, (SnowballOption, PhoenixOption)):
+            if isinstance(product, DCNOption):
+                # W14b: the DCN's own tracker (lifecycle/dcn.py); valued from its pre-close copy at base_date
+                tracker = tracker_for(product, quantity=position.quantity, start_date=self.base_date)
+                env = deepcopy(portfolio.pricing_environments[position.underlying])
+                if tracker.retire_if_matured_before_run(env):
+                    matured.append(position_id)
+                    continue
+                self._autocallable[position_id] = tracker
+                position.lifecycle_state = tracker.lifecycle
+                position.product = tracker.product_for_pricing(self.base_date, env, initial=True)
+            elif isinstance(product, (SnowballOption, PhoenixOption)):
                 # A KO-reset (a SnowballOption) gets its own tracker (spec 2026-10-08); an un-knocked
                 # REBASED one only prices on Monte Carlo (section 6a).
                 require_rebased_provider(

@@ -672,7 +672,16 @@ class ReplayBacktestConfig:
                 KnockOutResetSnowballOption,
             )
 
+            from quantark.asset.equity.product.option.dcn_option import DCNOption
+
             for bp in self.products:
+                if isinstance(bp.product, DCNOption):
+                    # the DCN's local-vol / Heston MC and PDE engines (create_vol_model_engine, A6); no SLV route
+                    if self.engine_config.vol_model == "heston_slv":
+                        raise ValidationError(
+                            f"position_id={bp.position_id}: no DCN engine for vol_model='heston_slv'"
+                        )
+                    continue
                 if not isinstance(bp.product, SnowballOption):
                     raise ValidationError(
                         "vol_model != 'bsm' supports SnowballOption products "
