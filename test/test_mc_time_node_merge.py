@@ -310,8 +310,7 @@ def test_dated_twin_equals_numeric_on_collision_days(route, day):
 
 @pytest.mark.parametrize("day", KO_RESET_COLLISION_DAYS)
 def test_ko_reset_continuous_ki_twin_on_collision_days(day):
-    """BS MC only: the local-vol / Heston MC refuse a continuous-knock-in KO-reset on both forms (a recorded
-    step-variance shape mismatch, a separate pre-existing ticket)."""
+    """BS MC (the local-vol / Heston / SLV MC twins: ``test_ko_reset_vol_mc_continuous_ki.py``)."""
     dated = _price(ko_reset, lambda: SnowballMCEngine(params=_mc()), False, "dated", day)
     numeric = _price(ko_reset, lambda: SnowballMCEngine(params=_mc()), False, "numeric", day)
     assert np.isfinite(dated) and dated == pytest.approx(numeric, rel=REL), (dated, numeric)

@@ -312,13 +312,24 @@ class _SubstepRefinementMixin:
         """The variance recorded by THIS thread's most recent simulate."""
         return self._bridge_variance_store().get(threading.get_ident())
 
-    def _ki_bridge_step_log_variance(self, paths):
+    def _ki_bridge_step_log_variance(self, paths, horizon_steps=None):
         recorded = self._bridge_variance_store().get(threading.get_ident())
         if recorded is None:
             raise PricingError(
                 f"{type(self).__name__} ran the continuous-KI bridge without "
                 "recording the variance its own paths accumulated"
             )
+        # A KO-reset hands the bridge its paths cut at the knock-in horizon
+        # (the caller names it): the record covers the whole grid, so its
+        # leading ``horizon_steps`` steps describe those paths.
+        if horizon_steps is not None:
+            if paths.shape[1] - 1 != horizon_steps or recorded.shape[1] < horizon_steps:
+                raise PricingError(
+                    f"recorded step variance {recorded.shape} does not cover "
+                    f"the {horizon_steps}-step knock-in horizon of these paths "
+                    f"{(paths.shape[0], paths.shape[1] - 1)}"
+                )
+            recorded = recorded[:, :horizon_steps]
         # Shape, not identity: with substeps_per_interval > 1 the recorded
         # nodes are handed on as a strided view, so the array the payoffs see
         # is not the one simulate built. Shape plus per-thread scoping is what

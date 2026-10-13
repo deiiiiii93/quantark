@@ -668,7 +668,7 @@ class PhoenixMCEngine(BaseEngine):
         return ki_triggered, first_ki_idx
 
     def _ki_bridge_step_log_variance(
-        self, paths: np.ndarray
+        self, paths: np.ndarray, horizon_steps: Optional[int] = None
     ) -> Optional[np.ndarray]:
         """Log-variance accumulated over each monitoring interval, per path.
 

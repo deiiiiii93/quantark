@@ -1550,7 +1550,7 @@ class SnowballMCEngine(BaseEngine):
         return ki_triggered, first_ki_idx
 
     def _ki_bridge_step_log_variance(
-        self, paths: np.ndarray
+        self, paths: np.ndarray, horizon_steps: Optional[int] = None
     ) -> Optional[np.ndarray]:
         """Log-variance accumulated over each monitoring interval, per path.
 
@@ -1560,6 +1560,10 @@ class SnowballMCEngine(BaseEngine):
         constant-vol engine is exactly served by ``sigma**2 * dt`` -- but a
         local-vol, Heston or SLV path accumulates variance those engines
         simulate and this engine never sees. They override.
+
+        ``horizon_steps``: the paths are the leading ``horizon_steps`` steps of
+        the simulated grid (a KO-reset's knock-in horizon); ``None`` means the
+        whole grid.
         """
         return None
 
@@ -1571,6 +1575,7 @@ class SnowballMCEngine(BaseEngine):
         sigma: float,
         is_reverse: bool,
         rng_seed: int,
+        horizon_steps: Optional[int] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Continuous KI monitoring with Brownian-bridge barrier correction.
@@ -1578,6 +1583,8 @@ class SnowballMCEngine(BaseEngine):
         The path is simulated on a discrete grid. If both endpoints of an interval
         are on the non-breached side of the KI barrier, a Brownian-bridge estimate
         is used to sample whether a barrier hit occurred within the interval.
+        ``horizon_steps``: ``paths`` are the leading steps of the simulated grid
+        (see ``_ki_bridge_step_log_variance``).
         """
         if ki_barrier <= 0:
             raise ValidationError(f"ki_barrier must be positive, got {ki_barrier}")
@@ -1618,7 +1625,9 @@ class SnowballMCEngine(BaseEngine):
             raise ValidationError("all_times must be strictly increasing and > 0")
 
         rng = np.random.default_rng(int(rng_seed))
-        step_log_variance = self._ki_bridge_step_log_variance(paths)
+        step_log_variance = self._ki_bridge_step_log_variance(
+            paths, horizon_steps=horizon_steps
+        )
 
         # Sample step-wise hit events using the Brownian-bridge probabilities.
         # If a hit occurs in step k, we record the right endpoint index k.
@@ -1990,6 +1999,7 @@ class SnowballMCEngine(BaseEngine):
                         sigma=float(sigma),
                         is_reverse=product.is_reverse,
                         rng_seed=int(rng_seed),
+                        horizon_steps=ki_horizon_idx + 1,
                     )
                 )
             else:

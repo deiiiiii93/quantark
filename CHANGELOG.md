@@ -370,6 +370,13 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   such pair (only observation times against `T`, spelled alike in both forms; every day measured): unchanged. New
   `test/test_mc_time_node_merge.py`. Evidence: `docs/superpowers/specs/2026-10-10-snowball-mc-twin-diagnosis/`
   (`moved_values.txt`).
+- The local-vol, Heston and SLV snowball MC price a KO-reset with a CONTINUOUS knock-in (W17 side ticket). The
+  KO-reset path hands the Brownian bridge its paths cut at the knock-in horizon (schedule 1) while these engines
+  record the per-step log-variance over the whole grid, so the shape check raised `PricingError` ("recorded step
+  variance ... does not describe these paths") on every such contract. The caller now names the horizon
+  (`horizon_steps`) and the record is sliced to it; any other mismatch still raises. Flat-IV local-vol MC agrees with
+  the BS MC within 4 standard errors; dated == numeric twin within 1e-10. Moved values: none (raise -> price). New
+  `test/test_ko_reset_vol_mc_continuous_ki.py`.
 - A dated autocallable whose discrete knock-in records lie in the past prices like its numeric twin (W11). The
   knock-in resolvers (`SnowballOption.resolve_ki_observations`, inherited by `KnockOutResetSnowballOption`, and
   `PhoenixOption.resolve_ki_observations`) resolved EVERY record, so a dated record before the valuation date asked
