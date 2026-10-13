@@ -536,6 +536,22 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   `refuse_knock_in_record_payoff`, the message every route raises), making the W18 Q3 "every route" rule true: e.g.
   analytical up-and-in, records paying 4.5 (rebate 5): 16.16050 -> refused; double knock-in, records 1.5 (rebate 2):
   analytical 6.24155 / QUAD 5.91733 -> refused. QUAD plain schedules and EXPIRY monitoring bit-identical.
+  QUAD prices a DISCRETE schedule with a record on the valuation instant that the spot has NOT crossed (it raised
+  "t_grid must be strictly increasing" on the barrier, one-touch, double-barrier and double one-touch adapters, plain
+  contracts included): the record is decided "not hit" there and leaves the lattice (I5 / A14, as the BS barrier MC)
+  -- bitwise the contract aged past it; a sole such record leaves the never-hit value (the remaining-contract
+  replication, as once monitoring has ended); two records on that instant stay refused. The double one-touch /
+  no-touch QUAD adapter decides at the valuation instant on the deciding record too (`valuation_double_barrier_terms`;
+  a double one-touch pays its payoff; its rebate lattice no longer skipped when only the records pay). No analytical
+  engine prices `DoubleOneTouchOption` (`analytical/double_no_touch.py` is a probability function on explicit
+  levels), so there is nothing to fix there. Moved values (QUAD 401 points, aged onto the 3-month record, spot inside):
+  raised -> priced, e.g. up-and-out call 120: 4.37956, up-and-in: 14.74546, one-touch: 2.40644, no-touch: 2.88655,
+  double knock-out: 5.57745, double one-touch: 0.77959, double no-touch: 4.10917; sole record: knock-out 14.23864
+  (the vanilla), knock-in / no-touch 4.88876 (the rebate at the terminal), touches 0.0, double knock-out 7.56296.
+  Double one-touch 130/75, records 125/80: spot 127 (beyond the next record) 4.31809 -> 4.85223 (hit-paid, at 77:
+  4.64745 -> 5.0), expired at 127 0.0 -> 5.0, records paying 2.5 aged onto a record: raised -> 2.44438; rebate 0 with
+  records paying 4.5: 0.0 -> 1.77979; double no-touch at 127: 0.53413 -> 0.0, expired 5.0 -> 0.0. Plain double
+  one-touch / no-touch (28 cells) bit-identical.
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in

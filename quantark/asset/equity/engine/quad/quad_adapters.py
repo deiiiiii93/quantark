@@ -1281,13 +1281,12 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
                     )
                     else context.terminal_payment_df
                 ),
+                pricing_env=pricing_env,
             )
             return value * context.contract_multiplier
 
-        touched = (
-            context.spot >= product.upper_barrier
-            or context.spot <= product.lower_barrier
-        )
+        # W18c: a DISCRETE schedule is touched now on its deciding record's levels, paying its payoff
+        touched, cash = _double_terms_now(product, pricing_env, context.spot)
         if product.observation_type != ObservationType.EXPIRY and touched:
             if product.touch_type == TouchType.DOUBLE_ONE_TOUCH:
                 pay_at_hit = product.payment_at_hit
@@ -1296,7 +1295,7 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
                     if pay_at_hit
                     else context.terminal_payment_df
                 )
-                value = product.rebate * payment_df
+                value = cash * payment_df
                 return value * context.contract_multiplier
             return 0.0
 
@@ -1306,7 +1305,7 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
                 "Use a continuous engine for continuous barriers."
             )
 
-        if product.rebate <= 0.0:
+        if product.rebate <= 0.0 and not (product.is_double_one_touch and _records_pay_cash(product)):
             return 0.0
 
         return None
@@ -1461,12 +1460,18 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         spot: float,
         maturity: float,
         rate: float, df: Optional[float] = None,
+        pricing_env: Optional[PricingEnvironment] = None,
     ) -> float:
-        touched = spot >= product.upper_barrier or spot <= product.lower_barrier
+        """The value at maturity; a DISCRETE schedule decides on its record at the exercise instant, its levels and
+        a double one-touch its payoff (W18c; ``pricing_env`` resolves it)."""
+        if pricing_env is not None:
+            touched, cash = _double_terms_now(product, pricing_env, spot)
+        else:
+            touched, cash = spot >= product.upper_barrier or spot <= product.lower_barrier, product.rebate
         discount = (df if df is not None else math.exp(-rate * maturity))
         if product.touch_type == TouchType.DOUBLE_ONE_TOUCH:
             if touched:
-                return product.rebate * discount
+                return cash * discount
             return 0.0
         return product.rebate * discount if not touched else 0.0
 

@@ -20,8 +20,10 @@ from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import BarrierOption, DoubleBarrierOption
 from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 
 from quantark.asset.equity.engine.monitoring_ended import (ended_without_knock_in, knock_in_carried,
@@ -87,6 +89,19 @@ class DiscreteQuadEngine(BaseEngine):
             return early_price
 
         resolved = adapter.resolve_schedule(product, pricing_env, context)
+        if product.observation_type == ObservationType.DISCRETE:
+            # A record at the valuation instant is decided before the lattice (``early_price``: a crossed record
+            # short-circuits, W18b / W18c), so one that reaches here was not crossed: decided "not hit", it leaves the
+            # observation set (I5 / A14, as the Black-Scholes barrier MC; a zero first interval is no lattice step).
+            # Two records on that instant are refused, as any repeated time, never filtered.
+            if sum(1 for rec in resolved if is_zero(rec.observation_time)) > 1:
+                raise ValidationError("Observation times must be strictly increasing.")
+            ahead = [rec for rec in resolved if not is_zero(rec.observation_time)]
+            if not ahead and resolved:
+                # the sole record was it: nothing is left to observe -- the never-hit value, the remaining contract
+                # (as once monitoring has ended)
+                return remaining_replication(product).price(pricing_env)
+            resolved = ahead
         inputs = adapter.build_inputs(product, resolved, context)
         observation_times = np.asarray(inputs.observation_times, dtype=float)
 

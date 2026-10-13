@@ -470,7 +470,30 @@ def _quad():
 
 
 #: the QUAD kinds: (analytical kind giving the contract and spots) -- the sharkfins have no QUAD adapter
-QUAD_KINDS = [n for n in KINDS if not n.startswith(("single_sharkfin", "double_sharkfin"))]
+def _double_touch(levels, upper, lower, payoff=None, touch_type=None, pay_at_hit=False):
+    from quantark.asset.equity.product.option import DoubleOneTouchOption
+
+    return DoubleOneTouchOption(upper_barrier=upper, lower_barrier=lower, maturity=1.0, rebate=5.0,
+                                payment_at_hit=pay_at_hit, touch_type=touch_type or TouchType.DOUBLE_ONE_TOUCH,
+                                observation_type=ObservationType.DISCRETE,
+                                observation_schedule=_schedule(levels, payoff, double=True))
+
+
+#: the QUAD-only kinds: the double one-touch / no-touch (no analytical engine prices them)
+QUAD_ONLY_KINDS = {
+    "double_one_touch": Kind(None, _double_kind(lambda lv, u, lo, **kw: _double_touch(lv, u, lo, **kw)),
+                             (130.0, 75.0), (125.0, 80.0), 127.0, 100.0),
+    "double_one_touch_pay_at_hit": Kind(None, _double_kind(
+        lambda lv, u, lo, **kw: _double_touch(lv, u, lo, pay_at_hit=True, **kw)), (130.0, 75.0), (125.0, 80.0),
+        77.0, 100.0),
+    "double_no_touch": Kind(None, _double_kind(
+        lambda lv, u, lo, **kw: _double_touch(lv, u, lo, touch_type=TouchType.DOUBLE_NO_TOUCH, **kw)),
+        (130.0, 75.0), (125.0, 80.0), 127.0, 100.0, False),
+}
+#: the QUAD kinds: the analytical kinds QUAD prices (the sharkfins have no QUAD adapter) and the double touches
+QK = {**{n: k for n, k in KINDS.items() if not n.startswith(("single_sharkfin", "double_sharkfin"))},
+      **QUAD_ONLY_KINDS}
+QUAD_KINDS = list(QK)
 
 #: (aged years, keep the landing record, which spot); an uncrossed record ON the valuation instant is not a QUAD cell:
 #: the lattice refuses it ("t_grid must be strictly increasing", pre-existing, the QUAD twin of I5)
@@ -504,7 +527,7 @@ def _quad_price(kind: Kind, level, record_level, cell, payoff=None, product_cash
 @pytest.mark.parametrize("name", QUAD_KINDS)
 def test_quad_records_at_another_level_price_as_the_contract_booked_at_that_level(name, cell):
     """``product.barrier`` B, every record at L: QUAD prices bitwise the contract booked at L."""
-    kind = KINDS[name]
+    kind = QK[name]
     assert _quad_price(kind, kind.product_level, kind.record_level, cell) == _quad_price(
         kind, kind.record_level, kind.record_level, cell)
 
@@ -519,7 +542,7 @@ def test_quad_decision_at_the_valuation_instant_matches_the_black_scholes_barrie
     from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
     from quantark.asset.equity.param import MCParams
 
-    kind = KINDS[name]
+    kind = QK[name]
     payoff = 2.5 if kind.knocks_out else None
     product, spot = _quad_product(kind, kind.product_level, kind.record_level, cell, payoff=payoff)
     quad_value = _quiet(lambda: _quad().price(product, env(spot)))
@@ -533,11 +556,11 @@ def test_quad_decision_at_the_valuation_instant_matches_the_black_scholes_barrie
 
 
 @pytest.mark.parametrize("cell", ["beyond_the_next_record_at_inception", "record_now_between", "expired_between"])
-@pytest.mark.parametrize("name", [n for n in QUAD_KINDS if KINDS[n].knocks_out])
+@pytest.mark.parametrize("name", [n for n in QUAD_KINDS if QK[n].knocks_out])
 def test_quad_knock_out_decided_now_pays_the_record_payoff(name, cell):
     """Records paying 2.5: a knock-out (one-touch) decided at the valuation instant pays 2.5, bitwise the contract
     booked with cash 2.5."""
-    kind = KINDS[name]
+    kind = QK[name]
     priced = _quad_price(kind, kind.product_level, kind.record_level, cell, payoff=2.5)
     booked = _quad_price(kind, kind.record_level, kind.record_level, cell, payoff=2.5, product_cash=2.5)
     assert priced == booked
@@ -545,11 +568,11 @@ def test_quad_knock_out_decided_now_pays_the_record_payoff(name, cell):
 
 
 @pytest.mark.parametrize("cell", ["forward_from_inception", "forward_mid_life"])
-@pytest.mark.parametrize("name", [n for n in QUAD_KINDS if KINDS[n].knocks_out])
+@pytest.mark.parametrize("name", [n for n in QUAD_KINDS if QK[n].knocks_out])
 def test_quad_zero_product_cash_still_prices_the_record_payoff(name, cell):
     """The product's knock-out cash 0, records paying 4.5: the forward lattice pays the records' payoff (its gate no
     longer reads only the product's rebate) -- bitwise the contract booked with cash 4.5."""
-    kind = KINDS[name]
+    kind = QK[name]
     priced = _quad_price(kind, kind.record_level, kind.record_level, cell, payoff=4.5, product_cash=0.0)
     booked = _quad_price(kind, kind.record_level, kind.record_level, cell, payoff=4.5, product_cash=4.5)
     assert priced == booked
@@ -560,12 +583,55 @@ def test_quad_prices_mixed_levels_natively(name):
     """QUAD has no closed-form restriction: mixed remaining levels price (finite, positive), no refusal."""
     import math
 
-    kind = KINDS[name]
+    kind = QK[name]
     product = kind.build(kind.product_level, kind.record_level)
     for record in product.observation_schedule.records[1::2]:
         _set_level(record, kind.product_level)
     value = _quiet(lambda: _quad().price(product, env(kind.inside)))
     assert math.isfinite(value) and value > 0.0
+
+
+@pytest.mark.parametrize("record_level", ["product_level", "record_level"])
+@pytest.mark.parametrize("name", QUAD_KINDS)
+def test_quad_an_uncrossed_record_at_the_valuation_instant_leaves_the_lattice(name, record_level):
+    """I5 on QUAD (A14): the record on the valuation instant, not crossed by the spot, is decided "not hit" there
+    and leaves the lattice -- bitwise the contract aged past it (it raised "t_grid must be strictly increasing")."""
+    kind = QK[name]
+    level = getattr(kind, record_level)
+    on_record = _aged(kind.build(kind.product_level, level), 0.25, keep_landing=True)
+    aged_past = _aged(kind.build(kind.product_level, level), 0.25, keep_landing=False)
+    e = env(kind.inside)
+    assert _quiet(lambda: _quad().price(on_record, e)) == _quiet(lambda: _quad().price(aged_past, e))
+
+
+def _sole_record(kind: Kind, keep_landing: bool):
+    """The contract with only its 3-month record, aged onto it (``keep_landing``) or past it (monitoring ended)."""
+    product = kind.build(kind.product_level, kind.record_level)
+    product.observation_schedule.records = [product.observation_schedule.records[2]]
+    return _aged(product, 0.25, keep_landing=keep_landing)
+
+
+@pytest.mark.parametrize("name", QUAD_KINDS)
+def test_quad_a_sole_uncrossed_record_at_the_valuation_instant_leaves_the_never_hit_value(name):
+    """Nothing is left to observe: the never-hit value (A14) -- bitwise the contract whose monitoring has ended (its
+    remaining-contract replication: a knock-out the vanilla, a knock-in or no-touch its rebate, a touch nothing)."""
+    kind = QK[name]
+    e = env(kind.inside)
+    on_record = _quiet(lambda: _quad().price(_sole_record(kind, True), e))
+    assert on_record == _quiet(lambda: _quad().price(_sole_record(kind, False), e))
+
+
+@pytest.mark.parametrize("name", QUAD_KINDS)
+def test_quad_two_records_on_the_valuation_instant_stay_refused(name):
+    """A repeated observation time is refused, never silently filtered (T3 CP1)."""
+    from copy import deepcopy
+
+    kind = QK[name]
+    product = _aged(kind.build(kind.product_level, kind.record_level), 0.25, keep_landing=True)
+    records = product.observation_schedule.records
+    records.insert(0, deepcopy(records[0]))
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        _quiet(lambda: _quad().price(product, env(kind.inside)))
 
 
 # ======================================================================================================================
@@ -701,3 +767,32 @@ def test_quad_plain_schedules_and_expiry_monitoring_are_unchanged(cell, name):
         _aged(product, years, keep_landing=keep)
     spot = hit if which == "hit" else inside
     assert _quiet(lambda: _quad().price(product, env(spot))) == pytest.approx(QUAD_BEFORE[cell, name], **TOL)
+
+
+#: plain double one-touch / no-touch on QUAD (records at 130/75), pre-T6-follow-up values (179da8b6):
+#: (touch type, hit-paid) -> {cell: value}; cells as ``_QUAD_PLAIN_CELLS`` (spot 100 inside, 131 hit)
+DOUBLE_TOUCH_BEFORE = {
+    ("DOUBLE_ONE_TOUCH", False): {"DISCRETE": 1.237339494728514, "DISCRETE_mid": 0.686059220544024,
+                                  "DISCRETE_hit": 4.888756185966682, "DISCRETE_beyond": 4.896094822847298,
+                                  "DISCRETE_expired": 0.0, "DISCRETE_expired_hit": 5.0, "EXPIRY": 0.8246314413957159},
+    ("DOUBLE_ONE_TOUCH", True): {"DISCRETE": 1.2487415733305751, "DISCRETE_mid": 0.689481565224967,
+                                 "DISCRETE_hit": 5.0, "DISCRETE_beyond": 5.0, "DISCRETE_expired": 0.0,
+                                 "DISCRETE_expired_hit": 5.0, "EXPIRY": 0.8246314413957159},
+    ("DOUBLE_NO_TOUCH", False): {"DISCRETE": 3.6148881730140268, "DISCRETE_mid": 4.2100356023032734,
+                                 "DISCRETE_hit": 0.0, "DISCRETE_beyond": 0.0, "DISCRETE_expired": 5.0,
+                                 "DISCRETE_expired_hit": 0.0, "EXPIRY": 4.027596226346825},
+}
+
+
+@pytest.mark.parametrize("cell", list(_QUAD_PLAIN_CELLS))
+@pytest.mark.parametrize("touch,hit_paid", list(DOUBLE_TOUCH_BEFORE))
+def test_quad_plain_double_touch_is_unchanged(touch, hit_paid, cell):
+    years, keep, which = _QUAD_PLAIN_CELLS[cell]
+    product = _double_touch([(130.0, 75.0)] * 12, 130.0, 75.0, touch_type=TouchType[touch], pay_at_hit=hit_paid)
+    if cell == "EXPIRY":
+        product = _monitored(product, ObservationType.EXPIRY)
+    elif years:
+        _aged(product, years, keep_landing=keep)
+    spot = 131.0 if which == "hit" else 100.0
+    assert _quiet(lambda: _quad().price(product, env(spot))) == pytest.approx(
+        DOUBLE_TOUCH_BEFORE[touch, hit_paid][cell], **TOL)
