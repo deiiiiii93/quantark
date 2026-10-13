@@ -726,6 +726,62 @@ class AsianOption(BaseEquityOption):
 
         return payoff * self.contract_multiplier
 
+    def settled_maturity_payoff(self, spot: float, pricing_env: "PricingEnvironment") -> float:
+        """
+        The terminal payoff per contract settled ON the maturity instant, from this contract's recorded fixings.
+
+        A run settles a run-fixings contract on the copy its run has recorded (spec 2026-10-13 I7 / A3): every
+        strictly past record carries its ``observed_price``; a record at t = 0 (today's, the maturity day's own
+        fixing) is live and fixes at ``spot``. The average is the contract's own (``resolve_observations`` weights,
+        ``get_average``) and the payoff ``get_payoff`` - the settled value the engines price at T = 0 (W8), without
+        the settlement-lag discount.
+
+        Args:
+            spot: The maturity day's spot (the live fixing and a floating strike's final spot)
+            pricing_env: Environment valued on the maturity instant
+
+        Returns:
+            Payoff per contract (``contract_multiplier`` applied)
+
+        Raises:
+            ValidationError: Not valued on the maturity instant, a legacy schedule (no records), or a strictly
+                past record without its fixing (a run records every one before it settles)
+        """
+        if self.observation_records is None:
+            # TODO(replay-settle): a legacy schedule has no recorded fixings to settle from
+            raise ValidationError(
+                "AsianOption.settled_maturity_payoff needs observation_records: a legacy schedule has no recorded "
+                "fixings to settle from"
+            )
+        T = self.get_maturity(pricing_env)
+        if not is_zero(T):
+            # TODO(replay-settle): settle after the maturity instant (the run's clock skipped it)
+            raise ValidationError(
+                f"AsianOption.settled_maturity_payoff values ON the maturity instant: time to maturity is {T}"
+            )
+        missing = self.missing_fixing_fills(pricing_env)
+        if missing:
+            labels = [fixing_label(idx, self.observation_records[idx]) for idx in missing]
+            raise ValidationError(
+                f"AsianOption.settled_maturity_payoff: past fixing(s) {labels} carry no observed_price; record them "
+                "before settling"
+            )
+        live = {
+            idx: float(spot)
+            for idx, rec in enumerate(self.observation_records)
+            if rec.observed_price is None and is_zero(rec.resolve_time(pricing_env))
+        }
+        settled = self.with_fixings_recorded(live)
+        past_prices, past_weights, future_times, _, _ = settled.resolve_observations(
+            pricing_env, warn_missing_fixings=False
+        )
+        if future_times or not past_prices:
+            raise ValidationError(
+                "AsianOption.settled_maturity_payoff: an observation falls after the maturity instant"
+            )
+        average = settled.get_average(past_prices, weights=past_weights)
+        return float(settled.get_payoff(spot, average=average))
+
     def intrinsic_value(
         self,
         spot: float,

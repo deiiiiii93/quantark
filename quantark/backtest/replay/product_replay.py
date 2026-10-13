@@ -861,10 +861,28 @@ class ProductReplay:
             return 0.0
         return float(self.lifecycle.ledger.paid_total(point))
 
+    @property
+    def has_run_fixings(self) -> bool:
+        """True when the replayed contract takes part in run fixings (an Asian or a range accrual with records):
+        on each date the engine steps its fixings first and settles a maturity on that run-fixed copy (spec
+        2026-10-13 I7 / A3)."""
+        return participates(self.product)
+
     def settle_maturity_if_due(
-        self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
+        self,
+        date: pd.Timestamp,
+        product: Any,
+        env: PricingEnvironment,
+        spot: float,
+        *,
+        settled_product: Any = None,
     ) -> None:
-        event = self._tracker.settle_maturity_if_due(date, product, env, spot)
+        """The tracker's ``settle_maturity_if_due``; a run-fixings participant passes ``settled_product``, its
+        run-fixed copy for ``date`` (``product_for_date``), which its maturity settles from."""
+        if settled_product is None:
+            event = self._tracker.settle_maturity_if_due(date, product, env, spot)
+        else:
+            event = self._tracker.settle_maturity_if_due(date, product, env, spot, settled_product=settled_product)
         if event is not None:
             if self.record_events:
                 self.events_today.append(event)

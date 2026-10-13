@@ -484,6 +484,59 @@ class RangeAccrualOption(BaseEquityOption):
 
         return payoff
 
+    def settled_maturity_payoff(self, spot: float, pricing_env: "PricingEnvironment") -> float:
+        """
+        The terminal payoff per contract settled ON the maturity instant, from this contract's recorded fixings.
+
+        A run settles a run-fixings contract on the copy its run has recorded (spec 2026-10-13 I7 / A3): every
+        strictly past observation carries its ``observed_in_range``; one at t = 0 (the maturity day's own fixing) is
+        live and decided at ``spot`` through ``is_in_range``. The in-range weights, total weights and the
+        contract's accrual year fraction feed ``get_payoff`` - the settled value the engines price at T = 0 (W8),
+        without the settlement-lag discount.
+
+        Args:
+            spot: The maturity day's spot (decides the live fixing)
+            pricing_env: Environment valued on the maturity instant
+
+        Returns:
+            Payoff per contract (``contract_multiplier`` applied)
+
+        Raises:
+            ValidationError: Not valued on the maturity instant, or a strictly past observation without its fixing
+                (a run records every one before it settles)
+        """
+        T = self.get_maturity(pricing_env)
+        if not is_zero(T):
+            # TODO(replay-settle): settle after the maturity instant (the run's clock skipped it)
+            raise ValidationError(
+                f"RangeAccrualOption.settled_maturity_payoff values ON the maturity instant: time to maturity is {T}"
+            )
+        records = self.get_observation_records()
+        missing = self.missing_fixing_fills(pricing_env)
+        if missing:
+            labels = [fixing_label(idx, records[idx]) for idx in missing]
+            raise ValidationError(
+                f"RangeAccrualOption.settled_maturity_payoff: past fixing(s) {labels} carry no observed_in_range; "
+                "record them before settling"
+            )
+        live = {
+            idx: self.is_in_range(float(spot), idx, rec)
+            for idx, rec in enumerate(records)
+            if rec.observed_in_range is None and is_zero(rec.resolve_time(pricing_env))
+        }
+        settled = self.with_fixings_recorded(live)
+        past, future, total_weights = settled.resolve_observations(pricing_env, warn_missing_fixings=False)
+        if future:
+            raise ValidationError(
+                "RangeAccrualOption.settled_maturity_payoff: an observation falls after the maturity instant"
+            )
+        in_range_weights = sum(weight for weight, in_range in past if in_range)
+        return float(
+            settled.get_payoff(
+                spot, in_range_weights=in_range_weights, total_weights=total_weights, pricing_env=pricing_env
+            )
+        )
+
     def resolve_observations(
         self,
         pricing_env: "PricingEnvironment",

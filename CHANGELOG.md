@@ -109,6 +109,16 @@ backtest and FX dynamic scenario.
   Saturday fixings at Friday's spot (was a `KeyError`, a gap at the weekend spot, or a split shared-date refusal).
   W6's range accruals and Asians record exactly as before. `ProductReplay` refuses a TARN / TARF (`ValidationError`):
   it does not settle product-held history.
+- Replay settles an Asian / range accrual at maturity (spec 2026-10-13 I7 / A3): `AsianOption` and
+  `RangeAccrualOption` gain `settled_maturity_payoff(spot, pricing_env)`, the terminal payoff from the contract's
+  recorded fixings with a fixing on the maturity instant (t = 0) decided at `spot` (refused off the maturity instant,
+  for an unrecorded past fixing, or for a legacy Asian schedule). For a run-fixings participant the replay steps the
+  day's fixings first and settles on that run-fixed copy (`AutocallableLifecycleTracker.settle_maturity_if_due(...,
+  settled_product=)`; without it a participant's maturity raises `ValidationError`), so the maturity day's own fixing
+  is taken at that day's spot; every other product keeps the old order (replay goldens unchanged). The replay's
+  analytical engine factory builds `RangeAccrualAnalyticalEngine` for a range accrual (was refused).
+  `PortfolioLifecycleManager` never tracks an Asian / range accrual, so the equity backtest and dynamic scenario are
+  unchanged. Moved values: none (raise -> settled cash).
 - `FXBacktestEngine` books TARN / TARF cash once its pay date is past (on the next path instant): rows gain
   `paid_cash` (cumulative, quantity-scaled) and `pending_pv`; `portfolio_value` and `final_value` include paid cash.
   A book without TARN / TARF is unchanged (cash columns 0.0).

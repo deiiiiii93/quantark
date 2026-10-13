@@ -11,6 +11,7 @@ from quantark.asset.equity.engine.analytical import (
     DoubleBarrierOptionAnalyticalEngine,
     DoubleSharkfinOptionAnalyticalEngine,
     OneTouchAnalyticalEngine,
+    RangeAccrualAnalyticalEngine,
     SingleSharkfinOptionAnalyticalEngine,
 )
 from quantark.asset.equity.engine.base_engine import BaseEngine
@@ -41,6 +42,7 @@ from quantark.asset.equity.product.option import (
     DoubleSharkfinOption,
     EuropeanVanillaOption,
     OneTouchOption,
+    RangeAccrualOption,
     SingleSharkfinOption,
 )
 from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
@@ -59,6 +61,8 @@ def _create_analytical_engine(product: Any, config: AutocallableEngineConfig) ->
         return BlackScholesEngine(params=params)
     if isinstance(product, AsianOption):
         return AsianOptionAnalyticalEngine(params=params, method=config.method)
+    if isinstance(product, RangeAccrualOption):
+        return RangeAccrualAnalyticalEngine(params=params)
     if isinstance(product, BarrierOption):
         return BarrierAnalyticalEngine(params=params)
     if isinstance(product, DoubleBarrierOption):

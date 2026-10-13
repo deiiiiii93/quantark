@@ -427,15 +427,26 @@ class ReplayBacktestEngine:
                 replay.apply_lifecycle_events(
                     date, lifecycle_product, env, market["spot"]
                 )
-                replay.settle_maturity_if_due(
-                    date, lifecycle_product, env, market["spot"]
-                )
+                if replay.has_run_fixings and replay.lifecycle.alive:
+                    # A run-fixings participant steps today's fixings FIRST and settles a maturity due today on
+                    # that run-fixed copy, the maturity day's own fixing at today's spot (spec 2026-10-13 I7 / A3).
+                    # Any other product keeps the order below.
+                    run_fixed = replay.product_for_date(date, env)
+                    replay.settle_maturity_if_due(
+                        date, lifecycle_product, env, market["spot"],
+                        settled_product=run_fixed,
+                    )
+                else:
+                    run_fixed = None
+                    replay.settle_maturity_if_due(
+                        date, lifecycle_product, env, market["spot"]
+                    )
                 replay.settle_pending_if_due(date)
 
                 price = 0.0
                 greeks: dict[str, float] = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
                 if replay.lifecycle.alive:
-                    product = replay.product_for_date(date, env)
+                    product = run_fixed if run_fixed is not None else replay.product_for_date(date, env)
                     price = float(engine.price(product, env))
                     greeks = replay.calculate_greeks(product, env, engine=engine)
                     if self.config.calculate_event_probabilities:

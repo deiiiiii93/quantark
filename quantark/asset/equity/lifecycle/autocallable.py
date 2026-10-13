@@ -558,9 +558,21 @@ class AutocallableLifecycleTracker:
         )
 
     def settle_maturity_if_due(
-        self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
+        self,
+        date: pd.Timestamp,
+        product: Any,
+        env: PricingEnvironment,
+        spot: float,
+        *,
+        settled_product: Any = None,
     ) -> Optional[LifecycleEvent]:
-        """Determine the terminal payoff once contractual maturity is reached."""
+        """Determine the terminal payoff once contractual maturity is reached.
+
+        ``product`` (the lifecycle copy) decides the timing. A run-fixings participant (an Asian or a range
+        accrual, ``participates``) settles from ``settled_product``, the run-fixed copy its run recorded on this
+        date, through ``settled_maturity_payoff(spot, env)`` (spec 2026-10-13 I7 / A3); without it the maturity is
+        refused, since the lifecycle copy carries none of the run's fixings.
+        """
         valuation_point = self._valuation_point(date, product)
         self.lifecycle.valuation_point = valuation_point
         if self.retire_if_matured_before_run(env) or not self.lifecycle.alive:
@@ -570,7 +582,14 @@ class AutocallableLifecycleTracker:
         if not self._timing_is_due(date, valuation_point, timing):
             return None
 
-        if isinstance(product, PhoenixOption):
+        if participates(product):
+            if settled_product is None:
+                raise ValidationError(
+                    f"{type(product).__name__} settles its maturity from the run-fixed copy that records the run's "
+                    "fixings (settled_product); the lifecycle copy carries none of them"
+                )
+            payoff = float(settled_product.settled_maturity_payoff(spot, env))
+        elif isinstance(product, PhoenixOption):
             # Phoenix takes the knock-in state second and the environment by keyword; the snowball
             # call below raised TypeError for every Phoenix alive at maturity. Its coupons are
             # ledger entries of their own (``_observe_phoenix_coupon``), so none is folded in here.

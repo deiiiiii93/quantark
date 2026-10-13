@@ -87,13 +87,12 @@ def test_equity_backtest_numeric_participant_no_longer_warns_constant_maturity(t
     assert not [w for w in caught if "no roll rule" in str(w.message)]
 
 
-def _short(kind, form, expiry_day=10):
-    """A twin expiring on run day ``expiry_day`` with fixings on days 4 and 8."""
+def _short(kind, form, expiry_day=10, days=(4, 8)):
+    """A twin expiring on run day ``expiry_day`` with fixings on ``days`` (default days 4 and 8)."""
     from quantark.asset.equity.product.option import RangeAccrualObservationRecord, RangeAccrualOption
     from quantark.asset.equity.product.option.asian_option import AsianObservationRecord, AsianOption
     from quantark.util.enum import AsianStrikeType, AveragingType, OptionType
 
-    days = (4, 8)
     if form == "dated":
         term = dict(exercise_date=F.START + timedelta(days=expiry_day))
         when = [dict(observation_date=F.START + timedelta(days=d)) for d in days]
@@ -550,8 +549,8 @@ def test_equity_backtest_explain_a_numeric_participant_reaching_its_maturity(kin
 
 def test_replay_numeric_participant_on_its_maturity_is_zero_and_equals_the_dated_twin():
     """The replay's pricing copy on T: the numeric Asian aged to exactly 0.0 (no longer floored at 1e-8) prices the
-    dated twin's settled value. (The replay's own maturity settlement of an Asian is out of scope -- run-fixings spec
-    §10, cash for range accruals or Asians at expiry inside runs -- so the path stops the day before T.)"""
+    dated twin's settled value. The replay then runs THROUGH T (spec 2026-10-13 I7 / A3): it settles on T with that
+    value as terminal cash (fixings 105 and 109, no settlement lag) and values the dead contract at 0 from T on."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         copies = {}
@@ -563,3 +562,91 @@ def test_replay_numeric_participant_on_its_maturity_is_zero_and_equals_the_dated
         dated = F.quiet_price(engine, copies["dated"], F.eq_env(10))
         assert is_close(dated, _SHORT_SETTLED["asian"], rel_tol=1e-12)
         assert is_close(F.quiet_price(engine, copies["numeric"], F.eq_env(10)), dated, rel_tol=1e-12)
+        for form in ("dated", "numeric"):                                        # through T: days 0..11
+            eng, _, mtm = _replay(_short("asian", form), n=12)
+            life = eng._replays[0].lifecycle
+            assert life.matured and not life.alive
+            assert is_close(life.realized_cashflows, dated, rel_tol=1e-12), form
+            assert mtm[9] > 0.0 and mtm[10] == 0.0 and mtm[11] == 0.0
+
+
+# ================================================================ I7: replay settles an Asian / range accrual on T
+# Spec 2026-10-13 I7 + A3, C7 ``settled_maturity_payoff``. Fixings on days 4, 8 and T = day 10 itself: spots 105, 109
+# and 111 (outside [90, 110]); the fixing on T is decided at T's own spot, never at the day before's (110, inside).
+_THROUGH_T = (4, 8, 10)
+
+
+def _hand_settled(kind, spot_t=None):
+    """By hand, from the path: each fixing at its own day's spot (T's at ``spot_t``, default T's path spot)."""
+    spots = [F.spot_on(4), F.spot_on(8), F.spot_on(10) if spot_t is None else spot_t]
+    if kind == "asian":                                                          # arithmetic fixed-strike call, K 100
+        return max(sum(spots) / 3.0 - 100.0, 0.0)
+    inside = sum(1 for s in spots if 90.0 <= s <= 110.0)                         # equal weights, rate not annualized
+    return 100.0 * 0.10 * inside / 3.0
+
+
+def _at_maturity(kind, form, fills):
+    product = _short(kind, form, days=_THROUGH_T).with_fixings_recorded(fills)
+    return product.with_time_elapsed(10 / 365.0) if form == "numeric" else product
+
+
+_FILLS = {"asian": {0: 105.0, 1: 109.0}, "ra": {0: True, 1: True}}
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_settled_maturity_payoff_reads_the_recorded_fixings_and_decides_t_at_the_spot(kind, form):
+    product = _at_maturity(kind, form, _FILLS[kind])
+    env = F.eq_env(10)
+    assert _hand_settled("asian") == pytest.approx(25.0 / 3.0) and _hand_settled("ra") == pytest.approx(20.0 / 3.0)
+    paid = product.settled_maturity_payoff(111.0, env)
+    assert is_close(paid, _hand_settled(kind), rel_tol=1e-12)
+    assert is_close(product.settled_maturity_payoff(100.0, env), _hand_settled(kind, 100.0), rel_tol=1e-12)
+    # the engine's settled value on the exercise instant (W8) is the same number (no settlement lag)
+    assert is_close(F.quiet_price(F.ENGINES[kind](), product, env), paid, rel_tol=1e-12)
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_settled_maturity_payoff_refuses_before_maturity_and_an_unrecorded_past_fixing(kind, form):
+    with pytest.raises(ValidationError, match="fixing"):
+        _at_maturity(kind, form, {0: _FILLS[kind][0]}).settled_maturity_payoff(111.0, F.eq_env(10))
+    early = _short(kind, form, days=_THROUGH_T).with_fixings_recorded(_FILLS[kind])
+    if form == "numeric":
+        early = early.with_time_elapsed(9 / 365.0)
+    with pytest.raises(ValidationError, match="maturity"):
+        early.settled_maturity_payoff(110.0, F.eq_env(9))
+
+
+def test_tracker_refuses_a_run_fixings_participant_without_its_run_fixed_copy():
+    from quantark.asset.equity.lifecycle.ko_reset import tracker_for
+
+    product = _short("asian", "dated", days=_THROUGH_T)
+    tracker = tracker_for(product, quantity=1.0, start_date=pd.Timestamp(F.START), has_lifecycle=False)
+    day = pd.Timestamp(F.START + timedelta(days=10))
+    with pytest.raises(ValidationError, match="run-fixed"):
+        tracker.settle_maturity_if_due(day, tracker.product_for_lifecycle(), F.eq_env(10), 111.0)
+    assert tracker.lifecycle.alive
+
+
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+@pytest.mark.parametrize("kind", ["ra", "asian"])
+def test_replay_through_maturity_books_the_payoff_of_the_recorded_fixings(kind, form):
+    """AC11: the replay records days 4 and 8 at their own spots, steps T first and settles on T on that run-fixed
+    copy, T's fixing at T's spot: terminal cash == the hand payoff, PV 0 from T on."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        eng, res, mtm = _replay(_short(kind, form, days=_THROUGH_T), n=12)       # days 0..11, T = day 10
+    replay = eng._replays[0]
+    hand = _hand_settled(kind)
+    assert replay._run_fills == ({0: 105.0, 1: 109.0} if kind == "asian" else {0: True, 1: True})
+    assert replay.lifecycle.matured and not replay.lifecycle.alive
+    assert is_close(replay.lifecycle.realized_cashflows, hand, rel_tol=1e-12)
+    assert is_close(replay.paid_cash(), hand, rel_tol=1e-12)
+    assert mtm[9] > 0.0 and mtm[10] == 0.0 and mtm[11] == 0.0
+    states = res.states_df()
+    assert states["cash"].iloc[9] == 0.0 and is_close(states["cash"].iloc[10], hand, rel_tol=1e-12)
+    assert is_close(states["portfolio_value"].iloc[11], hand, rel_tol=1e-12)
+    (row,) = [row for row in eng._actions if row["action_type"] == "MATURITY"]   # booked once, on T, at T's spot
+    assert row["date"] == pd.Timestamp(F.START + timedelta(days=10)) and row["spot"] == 111.0
+    assert is_close(row["cashflow"], hand, rel_tol=1e-12)
