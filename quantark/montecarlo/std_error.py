@@ -55,8 +55,13 @@ def antithetic_pair_means(batch_samples: np.ndarray, n_paths: int) -> np.ndarray
 
 
 def mean_and_std_error(units: np.ndarray) -> Tuple[float, float]:
-    """Mean and ``std(ddof=1) / sqrt(len)`` of independent units."""
+    """Mean and ``std(ddof=1) / sqrt(len)`` of independent units.
+
+    Fewer than two units carry no spread: the standard error is NaN (the mean is NaN for no units).
+    """
     u = np.asarray(units, dtype=float)
+    if u.size < 2:
+        return (float(u.mean()) if u.size else math.nan), math.nan
     return float(u.mean()), float(u.std(ddof=1)) / math.sqrt(len(u))
 
 

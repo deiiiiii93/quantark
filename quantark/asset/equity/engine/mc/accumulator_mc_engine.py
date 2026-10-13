@@ -535,7 +535,7 @@ class AccumulatorMCEngine(BaseEngine):
             bool(self.params.use_antithetic) and self.method == MonteCarloMethod.PSEUDO
         )
         if antithetic and len(discounted) <= 2:
-            return mean_payoff, 0.0  # one pair: no spread to estimate
+            return mean_payoff, float("nan")  # one pair: no spread to estimate
         return mean_payoff, sample_std_error(discounted, antithetic=antithetic)
 
     def get_last_std_error(self) -> Optional[float]:

@@ -24,6 +24,11 @@ def _estimator(engine, result) -> str:
         return "scramble_means" if getattr(result, "batches_used", None) else "pathwise_iid"
     if method == "QUASI":
         return "pathwise_iid_on_qmc (not a valid QMC error)"
+    pairs = getattr(engine, "_antithetic_pairs_in_paths", None)
+    if method == "PSEUDO" and getattr(getattr(engine, "params", None), "use_antithetic", False) and (
+        pairs() if callable(pairs) else True
+    ):
+        return "antithetic_pair_means"
     return "pathwise_iid"
 
 

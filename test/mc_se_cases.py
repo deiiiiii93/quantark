@@ -391,3 +391,72 @@ def run_case(name, antithetic, n_paths):
 
 # The autocallable vol engines simulate 2 * ceil(n / 2) rows (the draws are [z; -z] over an even row count).
 EVEN_ROWS = {"snowball_lv", "snowball_heston", "phoenix_lv", "phoenix_heston"}
+
+
+# -- CP3 additions: FX TARN note, KO-reset snowball (plain + vol), QE / Heston-SLV snowball and Phoenix ---------------
+
+def _fx_tarn(n, a):
+    from quantark.asset.fx.engine.mc import FxTargetRedemptionNoteMCEngine
+    from quantark.asset.fx.product import CurrencyPair
+    from quantark.asset.fx.product.option import FxTargetRedemptionNote
+    from quantark.asset.fx.product.option.target_redemption_state import TargetRedemptionState
+
+    note = FxTargetRedemptionNote(fixing_times=[0.25, 0.5, 0.75, 1.0], coupon_rate=0.08, notional=1.0, strike=1.20,
+                                  currency_pair=CurrencyPair("EUR", "USD"), state=TargetRedemptionState(0.0),
+                                  accrual_start=0.0)
+    e = FxTargetRedemptionNoteMCEngine(params=_fx_mc(n, a))
+    p = e.price(note, _fx_env())
+    return p, float(e.get_last_result().std_error)
+
+
+def _ko_reset(model, n, a):
+    from test_dated_expiry_settles import HESTON, SLV_LEVERAGE
+    from test_mc_time_node_merge import env, ko_reset
+    from quantark.asset.equity.engine import mc as m
+
+    params = _mc(n, a, steps=12)
+    e = {
+        "base": lambda: m.SnowballMCEngine(params=params),
+        "lv": lambda: m.LocalVolSnowballMCEngine(params=params),
+        "heston": lambda: m.HestonSnowballMCEngine(HESTON, params=params),
+        "slv": lambda: m.HestonSLVSnowballMCEngine(HESTON, params=params, leverage_surface=SLV_LEVERAGE),
+    }[model]()
+    p = e.price(ko_reset("dated", 0), env(100.0, 0, grid=True))
+    return p, float(e.get_last_result().std_error)
+
+
+def _autocall_more(kind, model, n, a):
+    from test_dated_expiry_settles import HESTON, SLV_LEVERAGE
+    from quantark.asset.equity.engine import mc as m
+
+    params = _mc(n, a, steps=12)
+    names = {
+        ("snowball", "qe"): lambda: m.QESnowballMCEngine(HESTON, params=params),
+        ("snowball", "slv"): lambda: m.HestonSLVSnowballMCEngine(HESTON, params=params, leverage_surface=SLV_LEVERAGE),
+        ("snowball", "slv_qe"): lambda: m.HestonSLVQESnowballMCEngine(HESTON, params=params, leverage_surface=SLV_LEVERAGE),
+        ("phoenix", "qe"): lambda: m.QEPhoenixMCEngine(HESTON, params=params),
+        ("phoenix", "slv"): lambda: m.HestonSLVPhoenixMCEngine(HESTON, params=params, leverage_surface=SLV_LEVERAGE),
+        ("phoenix", "slv_qe"): lambda: m.HestonSLVQEPhoenixMCEngine(HESTON, params=params, leverage_surface=SLV_LEVERAGE),
+    }
+    e = names[(kind, model)]()
+    product = _snowball_product() if kind == "snowball" else _phoenix_product()
+    p = e.price(product, _grid_env())
+    return p, float(e.get_last_result().std_error)
+
+
+CASES.update({
+    "fx_tarn": _fx_tarn,
+    "ko_reset_base_iid": lambda n, a: _ko_reset("base", n, a),
+    "ko_reset_lv": lambda n, a: _ko_reset("lv", n, a),
+    "ko_reset_heston": lambda n, a: _ko_reset("heston", n, a),
+    "ko_reset_slv": lambda n, a: _ko_reset("slv", n, a),
+    "snowball_qe": lambda n, a: _autocall_more("snowball", "qe", n, a),
+    "snowball_slv": lambda n, a: _autocall_more("snowball", "slv", n, a),
+    "snowball_slv_qe": lambda n, a: _autocall_more("snowball", "slv_qe", n, a),
+    "phoenix_qe": lambda n, a: _autocall_more("phoenix", "qe", n, a),
+    "phoenix_slv": lambda n, a: _autocall_more("phoenix", "slv", n, a),
+    "phoenix_slv_qe": lambda n, a: _autocall_more("phoenix", "slv_qe", n, a),
+})
+UNPAIRED.add("ko_reset_base_iid")
+EVEN_ROWS.update({"ko_reset_lv", "ko_reset_heston", "ko_reset_slv", "snowball_qe", "snowball_slv", "snowball_slv_qe",
+                  "phoenix_qe", "phoenix_slv", "phoenix_slv_qe"})
