@@ -15,6 +15,7 @@ from scipy import stats
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_barrier_level,
     forward_knock_out_cash,
+    refuse_knock_in_record_payoff,
     refuse_mixed_forward_levels,
     valuation_barrier_terms,
 )
@@ -101,6 +102,7 @@ class BarrierAnalyticalEngine(BaseEngine):
                 f"got {type(product).__name__}"
             )
         validate_settlement_capability(self, product, lifecycle_state)
+        refuse_knock_in_record_payoff(product)      # one rebate per knock-in, as on every route (W18 Q3, R19)
         fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
         if fixed_pv is not None:
             return fixed_pv

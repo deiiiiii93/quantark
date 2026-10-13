@@ -18,7 +18,7 @@ from quantark.asset.equity.engine.quad.term_inputs import build_quad_term_params
 from quantark.asset.equity.engine.quad.quad_core import QuadratureCore
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
-from quantark.asset.equity.product.option import BarrierOption
+from quantark.asset.equity.product.option import BarrierOption, DoubleBarrierOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
@@ -58,7 +58,7 @@ class DiscreteQuadEngine(BaseEngine):
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
         adapter = resolve_quad_adapter(product)
-        if isinstance(product, BarrierOption):
+        if isinstance(product, (BarrierOption, DoubleBarrierOption)):
             refuse_knock_in_record_payoff(product)      # one rebate per knock-in, as on every route (W18b)
         if knock_in_carried(product) and product.get_maturity(pricing_env) > 0.0:
             # a knock-in carried as triggered (spec 2026-10-07 R4): the adapter's own triggered value, its vanilla

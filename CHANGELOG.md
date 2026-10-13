@@ -520,6 +520,22 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   Single sharkfin `knock_out_rebate` 0, records paying 2.5: 1.93449 -> 3.25999; records at 115, now at 117: 1.46580
   -> 2.44438 (2.5 at the terminal). Plain contracts (records at `product.barrier`, paying the product's cash)
   bit-identical. New `test/test_barrier_schedule_level_analytical_quad.py`.
+  The QUAD barrier, one-touch and double-barrier adapters (`quad_adapters.py`) decide at the valuation instant as
+  the Black-Scholes barrier MC does (W18b): the immediate hit / touch and the expired branch read the first record at
+  or after the valuation instant (`valuation_barrier_terms` / `valuation_double_barrier_terms`), its level(s), and a
+  knock-out (one-touch) pays its payoff; the forward lattice was already record-aware and prices mixed levels natively
+  (no refusal). The knock-out / one-touch rebate lattice is no longer skipped when the product's own cash is 0 but the
+  records pay cash. Moved values (QUAD 401 points; up-and-out call `barrier` 120 / records 115, K 100): spot 117 beyond
+  the next record 4.50422 -> 4.85223 (5 at the terminal), records paying 4.5 aged onto a record at 117: raised "t_grid
+  must be strictly increasing" -> 4.39988, up-and-in at 117: 21.32214 -> 20.97413 (the vanilla), expired at 117: 17.0
+  -> 5.0; rebate 0 with records paying 4.5, spot 110: 1.40591 -> 3.81059; one-touch 120 / records 115 at 117: 4.28985
+  -> 4.85223, expired at 117: 0.0 -> 5.0, rebate 0 records paying 4.5: 0.0 -> 2.40468; double knock-out 130/75 /
+  records 125/80 at 127: 2.48798 -> 1.94089, expired at 127: 27.0 -> 2.0 -- each equal, bitwise, to the contract
+  booked at the records' terms and to the BS MC decision. A knock-in whose records pay other than `product.rebate` is
+  now refused on the analytical barrier and double-barrier engines and on the QUAD double barrier too (Ruling R19,
+  `refuse_knock_in_record_payoff`, the message every route raises), making the W18 Q3 "every route" rule true: e.g.
+  analytical up-and-in, records paying 4.5 (rebate 5): 16.16050 -> refused; double knock-in, records 1.5 (rebate 2):
+  analytical 6.24155 / QUAD 5.91733 -> refused. QUAD plain schedules and EXPIRY monitoring bit-identical.
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in

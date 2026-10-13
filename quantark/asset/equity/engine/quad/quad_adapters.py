@@ -12,6 +12,10 @@ from typing import Sequence, TYPE_CHECKING
 
 import numpy as np
 
+from quantark.asset.equity.engine.barrier_schedule_rules import (
+    valuation_barrier_terms,
+    valuation_double_barrier_terms,
+)
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
@@ -315,6 +319,38 @@ class BaseDiscreteQuadAdapter(QuadInputAdapter):
         return float(timing.payment_df)
 
 
+def _single_terms_now(product, pricing_env: PricingEnvironment, spot: float) -> tuple[bool, float]:
+    """(hit, knock-out cash) decided at the valuation instant on a single barrier (W18c, spec 2026-10-13 I4).
+
+    A DISCRETE schedule decides as the Black-Scholes barrier MC does (W18b): on the first record at or after the
+    valuation instant -- its level and payoff (``valuation_barrier_terms``); CONTINUOUS / EXPIRY monitoring on
+    ``product.barrier`` and ``product.rebate``.
+    """
+    if product.observation_type == ObservationType.DISCRETE:
+        level, cash = valuation_barrier_terms(product, pricing_env)
+        return (spot >= level if product.is_up_barrier else spot <= level), cash
+    return product.is_barrier_hit(spot), product.rebate
+
+
+def _double_terms_now(product, pricing_env: PricingEnvironment, spot: float) -> tuple[bool, float]:
+    """``_single_terms_now`` for a double barrier (``valuation_double_barrier_terms``)."""
+    if product.observation_type == ObservationType.DISCRETE:
+        upper, lower, cash = valuation_double_barrier_terms(product, pricing_env)
+        return (spot >= upper or spot <= lower), cash
+    return product.is_barrier_hit(spot), product.rebate
+
+
+def _records_pay_cash(product) -> bool:
+    """Whether a DISCRETE schedule's records pay knock-out cash (W18c: a hit pays its record's payoff, which the
+    forward lattice reads; the product's own rebate is only their default)."""
+    schedule = getattr(product, "observation_schedule", None)
+    return (
+        product.observation_type == ObservationType.DISCRETE
+        and schedule is not None
+        and any(rec.payoff is not None and rec.payoff > 0.0 for rec in schedule.records)
+    )
+
+
 class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
     """Adapter for barrier options in discrete quadrature."""
 
@@ -364,14 +400,12 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         if context.maturity < engine.MIN_MATURITY:
             value = self._barrier_expired_price(
                 product, context.spot, context.rate, context.maturity,
-                df=context.terminal_payment_df,
+                df=context.terminal_payment_df, pricing_env=pricing_env,
             )
             return value * context.contract_multiplier
 
-        if (
-            product.observation_type != ObservationType.EXPIRY
-            and product.is_barrier_hit(context.spot)
-        ):
+        hit, cash = _single_terms_now(product, pricing_env, context.spot)
+        if product.observation_type != ObservationType.EXPIRY and hit:
             if product.is_knock_out:
                 value = self._barrier_immediate_ko_price(
                     product, context.rate, context.maturity,
@@ -380,6 +414,7 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
                         if product.pay_at_hit
                         else context.terminal_payment_df
                     ),
+                    cash=cash,
                 )
                 return value * context.contract_multiplier
             value = self._vanilla_price(product, pricing_env, engine)
@@ -426,7 +461,7 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         a_plus = np.zeros_like(k_plus, dtype=float)
         b_plus = np.zeros_like(k_plus, dtype=float)
 
-        if product.rebate > 0.0:
+        if product.rebate > 0.0 or (product.is_knock_out and _records_pay_cash(product)):
             # For knock-in products the core prices the complementary knock-out
             # structure and the actual rebate is paid at expiry (if never
             # knocked in), so pay_at_hit must not leak into the parity
@@ -594,15 +629,21 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
 
     def _barrier_expired_price(
         self, product: BarrierOption, spot: float, rate: float, maturity: float, df: Optional[float] = None,
+        pricing_env: Optional[PricingEnvironment] = None,
     ) -> float:
-        hit = product.is_barrier_hit(spot)
+        """The value at maturity; a DISCRETE schedule decides on its record at the exercise instant, its level and
+        a knock-out its payoff (W18c; ``pricing_env`` resolves it)."""
+        if pricing_env is not None:
+            hit, cash = _single_terms_now(product, pricing_env, spot)
+        else:
+            hit, cash = product.is_barrier_hit(spot), product.rebate
         if product.is_call():
             intrinsic = max(spot - product.strike, 0.0)
         else:
             intrinsic = max(product.strike - spot, 0.0)
         vanilla = intrinsic * product.participation_rate
         if product.is_knock_out:
-            value = product.rebate if hit else vanilla
+            value = cash if hit else vanilla
         else:
             # a knock-in carried as triggered first (ruling 2026-10-10), as ``price`` reads it before maturity
             from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
@@ -615,12 +656,16 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
 
     def _barrier_immediate_ko_price(
         self, product: BarrierOption, rate: float, maturity: float, df: Optional[float] = None,
+        cash: Optional[float] = None,
     ) -> float:
+        """A knock-out decided now pays ``cash`` (the deciding record's payoff, W18c; default ``product.rebate``)."""
+        if cash is None:
+            cash = product.rebate
         if df is not None:
-            return product.rebate * df
+            return cash * df
         if product.pay_at_hit:
-            return product.rebate
-        return product.rebate * math.exp(-rate * maturity)
+            return cash
+        return cash * math.exp(-rate * maturity)
 
     def _vanilla_price(
         self,
@@ -696,13 +741,12 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
                     if pay_at_hit
                     else context.terminal_payment_df
                 ),
+                pricing_env=pricing_env,
             )
             return value * context.contract_multiplier
 
-        if (
-            product.observation_type != ObservationType.EXPIRY
-            and product.is_barrier_hit(context.spot)
-        ):
+        touched, cash = _single_terms_now(product, pricing_env, context.spot)
+        if product.observation_type != ObservationType.EXPIRY and touched:
             if product.is_one_touch:
                 pay_at_hit = product.payment_at_hit
                 payment_df = (
@@ -710,7 +754,7 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
                     if pay_at_hit
                     else context.terminal_payment_df
                 )
-                value = product.rebate * payment_df
+                value = cash * payment_df
                 return value * context.contract_multiplier
             return 0.0
 
@@ -720,7 +764,7 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
                 "Use OneTouchAnalyticalEngine for continuous monitoring."
             )
 
-        if product.rebate <= 0.0:
+        if product.rebate <= 0.0 and not (product.is_one_touch and _records_pay_cash(product)):
             return 0.0
 
         return None
@@ -758,7 +802,7 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         a_plus = np.zeros_like(k_plus, dtype=float)
         b_plus = np.zeros_like(k_plus, dtype=float)
 
-        if product.rebate > 0.0:
+        if product.rebate > 0.0 or (product.is_one_touch and _records_pay_cash(product)):
             # No-touch rebates are paid at expiry by definition; only a genuine
             # one-touch can pay at hit. Mirrors OneTouchAnalyticalEngine.
             pay_at_hit = product.payment_at_hit if product.is_one_touch else False
@@ -831,12 +875,18 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         maturity: float,
         rate: float,
         pay_at_hit: bool, df: Optional[float] = None,
+        pricing_env: Optional[PricingEnvironment] = None,
     ) -> float:
-        touched = product.is_barrier_hit(spot)
+        """The value at maturity; a DISCRETE schedule decides on its record at the exercise instant, its level and
+        a one-touch its payoff (W18c; ``pricing_env`` resolves it)."""
+        if pricing_env is not None:
+            touched, cash = _single_terms_now(product, pricing_env, spot)
+        else:
+            touched, cash = product.is_barrier_hit(spot), product.rebate
         discount = (df if df is not None else math.exp(-rate * maturity))
         if product.is_one_touch:
             if touched:
-                return product.rebate * discount
+                return cash * discount
             return 0.0
         return product.rebate * discount if not touched else 0.0
 
@@ -898,17 +948,15 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         if is_zero(context.maturity, tol=engine.MIN_MATURITY):
             value = self._double_barrier_expired_price(
                 product, context.spot, context.rate, context.maturity,
-                df=context.terminal_payment_df,
+                df=context.terminal_payment_df, pricing_env=pricing_env,
             )
             return value * context.contract_multiplier
 
-        if (
-            product.observation_type != ObservationType.EXPIRY
-            and product.is_barrier_hit(context.spot)
-        ):
+        hit, cash = _double_terms_now(product, pricing_env, context.spot)
+        if product.observation_type != ObservationType.EXPIRY and hit:
             if product.is_knock_out:
                 rebate_discount = context.terminal_payment_df
-                return product.rebate * rebate_discount * context.contract_multiplier
+                return cash * rebate_discount * context.contract_multiplier
             vanilla_price = self._vanilla_price(product, pricing_env, engine)
             return vanilla_price * context.contract_multiplier
 
@@ -1097,14 +1145,20 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         spot: float,
         rate: float,
         maturity: float, df: Optional[float] = None,
+        pricing_env: Optional[PricingEnvironment] = None,
     ) -> float:
-        hit = product.is_barrier_hit(spot)
+        """The value at maturity; a DISCRETE schedule decides on its record at the exercise instant, its levels and
+        a knock-out its payoff (W18c; ``pricing_env`` resolves it)."""
+        if pricing_env is not None:
+            hit, cash = _double_terms_now(product, pricing_env, spot)
+        else:
+            hit, cash = product.is_barrier_hit(spot), product.rebate
         if product.is_call():
             intrinsic = max(spot - product.strike, 0.0)
         else:
             intrinsic = max(product.strike - spot, 0.0)
         if product.is_knock_out:
-            value = product.rebate if hit else intrinsic
+            value = cash if hit else intrinsic
         else:
             # a knock-in carried as triggered first (ruling 2026-10-10), as ``price`` reads it before maturity
             from quantark.asset.equity.engine.monitoring_ended import knock_in_carried
