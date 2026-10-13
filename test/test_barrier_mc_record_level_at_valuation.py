@@ -253,3 +253,10 @@ def test_a_sole_uncrossed_record_at_the_valuation_instant_leaves_the_never_hit_v
         assert abs(priced - vanilla) <= 4.0 * engine.get_last_std_error()
     else:
         assert priced == pytest.approx(REBATE * e.get_discount_factor(tau), rel=1e-12)
+
+
+def test_two_records_on_the_valuation_instant_are_refused():
+    """A repeated observation time is refused (as before T3); the t=0 filter must not hide one of the two."""
+    product = _aged(_product("up_out_call", "numeric", 120.0, 115.0, (91, 91, 200)), 91, keep_landing=True)
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        _quiet(lambda: _engine().price(product, env(110.0, _on(91))))

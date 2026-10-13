@@ -415,7 +415,9 @@ class BarrierOptionMCEngine(BaseEngine):
 
         # A record at the valuation instant is decided before any path is simulated (``price``: a crossed record
         # short-circuits, W18b), so one that reaches the grid was not crossed: decided "not hit", it leaves the grid
-        # (a zero first step is not a simulation step).
+        # (a zero first step is not a simulation step). Two records on that instant are refused, as any repeated time.
+        if sum(1 for rec in resolved if is_zero(rec.observation_time)) > 1:
+            raise ValidationError("Observation times must be strictly increasing.")
         resolved = [rec for rec in resolved if not is_zero(rec.observation_time)]
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
         if np.any(obs_times < 0.0) or np.any(obs_times > T):
