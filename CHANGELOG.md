@@ -414,7 +414,10 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   spot 5500 / 4400 on 04-11..12 / 6100 from 05-04, PDE fast, dynamic scenario portfolio value: 04-03 -160297.41 ->
   -156942.55 (coupon 10000 receivable), 04-11 -455784.67 -> -444194.19 (knocked in, coupon paid), 05-04 -10724.37 ->
   19996.10 (knocked out, position closed), 05-12 -10724.37 -> 20000.00; the equity backtest moves identically; the
-  replay now runs (05-12 paid cash 20000). Replay goldens unchanged.
+  replay now runs (05-12 paid cash 20000). Replay goldens unchanged. Refused (ValidationError): a run instant with a
+  time of day (signed W6 Q2(a), `TODO(run-fixings)`), PnL explain of a run holding a DCN (`TODO(dcn-explain)`), and a
+  pre-close copy while an in-run schedule date before it is undecided; a dead or expired note's pricing copy is
+  terminal (`get_maturity` 0.0), never a refusal.
 
 ### Fixed
 - The autocallable MC time grid holds one node per instant (W17a, approved 2026-10-10). The snowball, KO-reset and

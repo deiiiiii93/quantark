@@ -235,7 +235,10 @@ class ReplayBacktestEngine:
         self._explain_recorder = None
         self._explain_frames = None
         if getattr(config, "pnl_explain", None) is not None:
+            from quantark.asset.equity.lifecycle.dcn import refuse_dcn_pnl_explain
             from quantark.pnlexplain.equity.recorder import ReplayPnLExplainRecorder
+
+            refuse_dcn_pnl_explain([bp.product for bp in config.products], "replay")
             self._explain_recorder = ReplayPnLExplainRecorder(config.pnl_explain)
             for replay in self._replays:
                 replay.record_events = True

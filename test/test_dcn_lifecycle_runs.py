@@ -31,7 +31,7 @@ from quantark.asset.equity.engine.mc import DCNMCEngine
 from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import HestonDCNMCEngine, LocalVolDCNMCEngine
 from quantark.asset.equity.engine.pde.dcn_pde_solver import DCNPDEEngine
 from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import HestonDCNPDESolver, LocalVolDCNPDEEngine
-from quantark.asset.equity.lifecycle import DCNLifecycleState, LifecycleEventType, tracker_for
+from quantark.asset.equity.lifecycle import DCNLifecycleState, LifecycleEventType, ValuationPoint, tracker_for
 from quantark.asset.equity.lifecycle.autocallable import MaturedBeforeRunWarning
 from quantark.asset.equity.lifecycle.dcn import DCNLifecycleTracker
 from quantark.asset.equity.param import MCParams, PDEParams
@@ -212,6 +212,8 @@ def test_tracker_aged_equals_booked(route, day, post):
     else:
         aged = t.product_for_pricing(pd.Timestamp(day), env, initial=True)
     s = t.lifecycle
+    if not post:
+        s = dataclasses.replace(s, valuation_point=ValuationPoint(date=day))      # priced as of the day's open
     knocked_in = s.knocked_in if post else bool(s.knocked_in and s.ki_date is not None and s.ki_date < day)
     fresh = _fresh(day, knocked_in, post)
     engine = AC2_ROUTES[route]
@@ -243,7 +245,7 @@ def test_pre_close_equals_post_close_through_the_tracker(route, day):
     env = flat_env_on(day)
     engine = AC2_ROUTES[route]
     pre = engine().price(t.product_for_pricing(pd.Timestamp(day), env, initial=True), env, lifecycle_state=None) \
-        + t.lifecycle.ledger.pending_pv(t.lifecycle.valuation_point, env)
+        + t.lifecycle.ledger.pending_pv(ValuationPoint(date=day), env)
     run_tracker(t, [day])
     post_product = t.product_for_pricing(pd.Timestamp(day), env) if t.lifecycle.alive else None
     post = (engine().price(post_product, env) if post_product is not None else 0.0) \
@@ -449,3 +451,80 @@ def test_any_run_calendar_makes_the_same_decisions():
     assert list(actions["action_type"]) == ["COUPON", "KI", "KO"]
     assert list(actions["gap"]) == [True, False, False]                  # flagged as a gap decision
     assert pd.Timestamp(actions["date"].iloc[0]) == pd.Timestamp(COUPON_ROW)
+
+
+# --- CP5 fixes -------------------------------------------------------------------------------------------------
+
+def _term_dividend_config():
+    return AutocallableEngineConfig(pricing_engine_type=EngineType.PDE, pde_params=PDEParams(accuracy="fast"),
+                                    dividend_source="futures_curve")
+
+
+def test_term_dividend_replay_runs_past_a_knock_out():
+    """The replay samples replays[0]'s remaining maturity every day, alive or not (``_remaining_maturity_years``)."""
+    results = replay_run(_term_dividend_config(), fixed_dividend_yield=None)
+    frame = _replay_frame(results)
+    assert frame.loc["2023-05-12", "paid"] == pytest.approx(2.0 * CASH, rel=1e-14)
+
+
+def test_term_dividend_replay_runs_through_the_loss_leg_lag():
+    start, end = datetime(2024, 12, 27), datetime(2025, 1, 10)
+    p = make_dcn(DCN_A, valuation_date=start, knocked_in_at_valuation=True)
+    import dcn_run_fixtures as fx
+
+    original = fx.spot_on
+    fx.spot_on = lambda d: 4300.0
+    try:
+        frame = _replay_frame(replay_run(_term_dividend_config(), product=p, days=sse_days(start, end),
+                                         fixed_dividend_yield=None))
+    finally:
+        fx.spot_on = original
+    loss = -(p.notional / p.initial_price) * p.participation * (p.k_loss - 4300.0)
+    assert frame.loc["2025-01-07", "paid"] == pytest.approx(loss, rel=1e-15)
+
+
+def test_dead_or_expired_pricing_copy_is_terminal():
+    start = datetime(2024, 12, 27)
+    p = make_dcn(DCN_A, valuation_date=start, knocked_in_at_valuation=True)
+    t = tracker(p, start=start)
+    for d in sse_days(start, datetime(2025, 1, 3)):
+        t.observe(pd.Timestamp(d), p, flat_env_on(d, 4300.0), 4300.0)
+    assert t.lifecycle.matured
+    for d in (datetime(2025, 1, 3), datetime(2025, 1, 6)):
+        copy = t.product_for_pricing(pd.Timestamp(d), flat_env_on(d))
+        assert copy.get_maturity() == 0.0
+
+
+def test_pricing_accessor_is_pure():
+    t = tracker()
+    run_tracker(t, through(datetime(2023, 3, 31)))
+    point = t.lifecycle.valuation_point
+    t.product_for_pricing(pd.Timestamp(COUPON_ROW), flat_env_on(COUPON_ROW), initial=True)
+    assert t.lifecycle.valuation_point == point
+
+
+def test_pre_close_view_refuses_undecided_dates():
+    t = tracker()
+    run_tracker(t, through(datetime(2023, 3, 30)))
+    with pytest.raises(ValidationError, match="undecided"):
+        t.product_for_pricing(pd.Timestamp("2023-04-04"), flat_env_on(datetime(2023, 4, 4)), initial=True)
+
+
+def test_time_of_day_run_instants_are_refused():
+    t = tracker()
+    with pytest.raises(ValidationError, match="time of day"):
+        t.observe(pd.Timestamp("2023-03-27 15:00"), t.product, flat_env_on(BOOKED), 5500.0)
+    t.observe(pd.Timestamp("2023-03-27 00:00"), t.product, flat_env_on(BOOKED), 5500.0)   # midnight: a date
+
+
+@pytest.mark.parametrize("consumer", ["backtest", "replay"])
+def test_pnl_explain_of_a_dcn_run_is_refused(consumer):
+    from quantark.pnlexplain.config import PnLExplainConfig
+
+    with pytest.raises(ValidationError, match="dcn-explain"):
+        if consumer == "backtest":
+            backtest_run(_pde(), pnl_explain=PnLExplainConfig())
+        else:
+            replay_run(AutocallableEngineConfig(pricing_engine_type=EngineType.PDE,
+                                                pde_params=PDEParams(accuracy="fast")),
+                       pnl_explain=PnLExplainConfig())

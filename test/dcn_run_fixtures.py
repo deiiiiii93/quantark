@@ -106,7 +106,7 @@ class PathAdapter:
         )
 
 
-def backtest_run(engine, product=None, days=None, quantity=1.0, handle=True):
+def backtest_run(engine, product=None, days=None, quantity=1.0, handle=True, pnl_explain=None):
     from quantark.backtest import BacktestConfig, BacktestEngine, ZeroCostModel
     from quantark.backtest.strategy import DeltaNeutralStrategy
     from quantark.portfolio import Position
@@ -119,7 +119,7 @@ def backtest_run(engine, product=None, days=None, quantity=1.0, handle=True):
         strategy=DeltaNeutralStrategy(delta_threshold=1e12), start_date=days[0], end_date=days[-1],
         underlying=UNDERLYING, initial_positions=[position], market_data_adapter=adapter,
         transaction_cost_model=ZeroCostModel(), handle_lifecycle_events=handle, calculate_greeks=False,
-        logging_level="ERROR")
+        logging_level="ERROR", pnl_explain=pnl_explain)
     return BacktestEngine(config).run()
 
 
@@ -130,18 +130,20 @@ def replay_market(days=None):
 
     days = sse_days() if days is None else days
     idx = pd.DatetimeIndex([pd.Timestamp(d) for d in days])
+    # one listed contract, always live through the run (>= 7 days to expiry for a futures_curve carry)
+    expiry = max(pd.Timestamp("2023-12-15"), idx[-1] + pd.Timedelta(days=200))
     spots = np.array([spot_on(d) for d in idx])
     return AutocallableMarketDataSet.from_dataframes(
         spot_data=pd.DataFrame({"date": idx, "spot": spots}),
         vol_data=pd.DataFrame({"date": idx, "volatility": np.full(len(idx), FLAT["sigma"])}),
         rate_data=pd.DataFrame({"date": idx, "rate": np.full(len(idx), FLAT["r"])}),
         futures_data=pd.DataFrame({"date": idx, "contract": ["IC2312"] * len(idx), "futures_price": spots,
-                                   "expiry_date": [pd.Timestamp("2023-12-15")] * len(idx),
+                                   "expiry_date": [expiry] * len(idx),
                                    "multiplier": [200.0] * len(idx)}),
     )
 
 
-def replay_run(engine_config, product=None, days=None, quantity=1.0):
+def replay_run(engine_config, product=None, days=None, quantity=1.0, fixed_dividend_yield=FLAT["q"], pnl_explain=None):
     from quantark.backtest.replay import (
         BookAutocallableBacktestConfig, BookAutocallableBacktestEngine, BookProduct, HedgeSpec,
     )
@@ -152,6 +154,7 @@ def replay_run(engine_config, product=None, days=None, quantity=1.0):
                               has_lifecycle=True)],
         market_data=replay_market(days), hedge=HedgeSpec(kind="spot", multiplier=1.0),
         engine_config=engine_config, underlying=UNDERLYING, start_date=days[0], end_date=days[-1],
-        fixed_dividend_yield=FLAT["q"], calculate_event_probabilities=False, terminate_on_lifecycle_end=False,
+        fixed_dividend_yield=fixed_dividend_yield, calculate_event_probabilities=False,
+        terminate_on_lifecycle_end=False, pnl_explain=pnl_explain,
     )
     return BookAutocallableBacktestEngine(cfg).run()

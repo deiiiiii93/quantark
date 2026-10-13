@@ -97,7 +97,10 @@ class BacktestEngine:
         self.run_fixings: RunFixingRecorder = RunFixingRecorder()
         self._fixings_registered: bool = False
         if getattr(config, "pnl_explain", None) is not None:
+            from quantark.asset.equity.lifecycle.dcn import refuse_dcn_pnl_explain
             from quantark.pnlexplain.equity.recorder import PnLExplainRecorder
+
+            refuse_dcn_pnl_explain([p.product for p in config.initial_positions], "BacktestEngine")
             self._explain_recorder = PnLExplainRecorder(config.pnl_explain)
 
     def run(self) -> "BacktestResults":

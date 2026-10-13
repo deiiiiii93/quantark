@@ -41,11 +41,34 @@ from .cashflows import RealizedCashflow
 from .events import LifecycleEvent, LifecycleEventType
 from .state import DCNLifecycleState
 
-__all__ = ["DCNLifecycleTracker"]
+__all__ = ["DCNLifecycleTracker", "refuse_dcn_pnl_explain"]
 
 
 def _day(value) -> datetime:
     return pd.Timestamp(value).normalize().to_pydatetime()
+
+
+def _require_date_instant(instant) -> None:
+    """W6 Q2(a): a run instant holding a DCN must be a date (midnight); a time of day is refused."""
+    stamp = pd.Timestamp(instant)
+    if stamp != stamp.normalize():
+        # TODO(run-fixings): intraday run instants -- a fixing-time term on the DCN's observations
+        raise ValidationError(
+            f"run instant {stamp} carries a time of day: a DCN's observations are dated closes with no fixing "
+            "time, so a run holding a DCN must step on dates (signed W6 Q2(a), run fixings R8)"
+        )
+
+
+def refuse_dcn_pnl_explain(products, consumer: str) -> None:
+    """PnL explain of a run holding a DCN is not built (out of scope, R22): refused, never half-explained."""
+    from quantark.asset.equity.product.option.dcn_option import DCNOption
+
+    if any(isinstance(p, DCNOption) for p in products):
+        # TODO(dcn-explain): explain a DCN run (pre/post-close views, ledger receivables) in quantark.pnlexplain
+        raise ValidationError(
+            f"{consumer}: PnL explain does not support a DCNOption position yet (TODO(dcn-explain)); "
+            "run it with pnl_explain=None"
+        )
 
 
 class DCNLifecycleTracker:
@@ -130,22 +153,34 @@ class DCNLifecycleTracker:
         return self.product
 
     def product_for_pricing(self, date, pricing_env=None, *, initial: bool = False) -> Any:
-        """The DCN to price on ``date`` (A1): pre-close with ``initial`` or before ``date`` is observed, else
-        post-close. A date before the booking's valuation date returns the booked contract untouched (I1). The state's
-        valuation point moves to ``date`` (pricing is as of that day), and the copy is checked against the ledger
-        (the double-count guard)."""
+        """The DCN to price on ``date`` (A1); a pure accessor (the state is not touched).
+
+        * before the booking's valuation date: the booked contract, untouched (I1);
+        * a dead note (knocked out / matured) or a date past the final observation: a terminal copy, never a refusal
+          (run consumers sample a dead product's remaining maturity; it is never priced): the post-close view of
+          ``date`` while a row remains after it, else the contract on its final observation date (``get_maturity``
+          0.0);
+        * pre-close (``initial``, or ``date`` not yet observed): ``spec.build(valuation_date=date)``; refused while a
+          run-time schedule date before ``date`` is still undecided (it would be in neither the copy nor the ledger);
+        * post-close (after ``observe(date)``): the same ``.without_observed_through(date)``.
+
+        A live copy is checked against the ledger (the double-count guard).
+        """
         from quantark.asset.equity.engine.dcn_valuation import check_dcn_ledger
 
+        _require_date_instant(date)
         d = _day(date)
         if d < self._booked.valuation_date:
             return self.product
-        if d > self.final_observation_date:
-            raise ValidationError(
-                f"the DCN's final observation {self.final_observation_date.date()} is before {d.date()}: "
-                "it has matured; value its lifecycle state"
-            )
         state = self.lifecycle
-        state.advance_to(d)
+        final = self.final_observation_date
+        if not state.alive or d > final:
+            if d < final and any(t > d for t in self._row_of):
+                schedule = dataclasses.replace(self._booked.spec, valuation_date=d).build(self._booked.calendar)
+                schedule = schedule.without_observed_through(d)
+            else:
+                schedule = dataclasses.replace(self._booked.spec, valuation_date=final).build(self._booked.calendar)
+            return _rebuild(self.product, schedule=schedule, knocked_in_at_valuation=bool(state.knocked_in))
         schedule = dataclasses.replace(self._booked.spec, valuation_date=d).build(self._booked.calendar)
         post = (not initial and self.has_lifecycle and self._observed_through is not None
                 and self._observed_through >= d)
@@ -153,14 +188,30 @@ class DCNLifecycleTracker:
             schedule = schedule.without_observed_through(d)
             knocked_in = state.knocked_in
         else:
+            self._require_decided_before(d)
             knocked_in = state.knocked_in and (state.ki_date is None or state.ki_date < d)
         product = _rebuild(self.product, schedule=schedule, knocked_in_at_valuation=bool(knocked_in))
         check_dcn_ledger(product, d, state.ledger, alive=state.alive)
         return product
 
+    def _require_decided_before(self, d: datetime) -> None:
+        """A pre-close copy at ``d`` needs every run-time schedule date before ``d`` decided (CP5)."""
+        if not self.has_lifecycle:
+            return
+        lower = self._last[0] if self._last is not None else None
+        start = _day(self.start_date) if self.start_date is not None else None
+        pending = [t for t in self._decision_dates
+                   if t < d and (lower is None or t > lower) and (start is None or t >= start)]
+        if pending:
+            raise ValidationError(
+                f"DCN schedule date(s) {', '.join(f'{t:%Y-%m-%d}' for t in pending)} before {d.date()} are "
+                "undecided: observe the run instants first (a pre-close copy would drop them)"
+            )
+
     # -- decisions -------------------------------------------------------------------------------------------------
     def observe(self, date, product: Any = None, env=None, spot: float = None, **_ignored) -> List[LifecycleEvent]:
         """Decide this close and every schedule date since the last run instant (A7' gap rule)."""
+        _require_date_instant(date)
         d = _day(date)
         state = self.lifecycle
         state.advance_to(d)
