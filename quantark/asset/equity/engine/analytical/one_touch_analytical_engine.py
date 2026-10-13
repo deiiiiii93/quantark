@@ -9,6 +9,7 @@ from scipy import stats
 
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_barrier_level,
+    forward_knock_out_cash,
     refuse_mixed_forward_levels,
     valuation_barrier_terms,
 )
@@ -118,6 +119,11 @@ class OneTouchAnalyticalEngine(BaseEngine):
         # feeds only the input checks)
         vol = pricing_env.get_vol(forward_level if forward_level is not None else product.barrier, maturity)
         rebate = product.rebate
+        # the cash of a future touch: a DISCRETE one-touch pays the touching record's payoff (W18c follow-up); a
+        # no-touch pays its rebate when nothing touches
+        forward_cash = (
+            forward_knock_out_cash(product, pricing_env) if discrete and product.is_one_touch else rebate
+        )
 
         pay_at_hit = product.payment_at_hit if product.is_one_touch else False
 
@@ -153,7 +159,8 @@ class OneTouchAnalyticalEngine(BaseEngine):
                 # Beyond the barrier with no observation due: the next observation decides
                 return (
                     self._price_beyond_discrete(
-                        product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level
+                        product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level,
+                        forward_cash,
                     )
                     + pending_pv
                 )
@@ -208,7 +215,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
                 rate=rate,
                 div=div,
                 vol=vol,
-                rebate=rebate,
+                rebate=forward_cash,
                 pay_at_hit=pay_at_hit,
                 is_up=product.is_up_barrier,
                 hit_lag=hit_lag,
@@ -269,19 +276,20 @@ class OneTouchAnalyticalEngine(BaseEngine):
         vol: float,
         terminal_timing,
         forward_level: float,
+        forward_cash: float,
     ) -> float:
         """A spot beyond a discretely monitored barrier with no observation due (``first_observation``).
 
         A touch at the first future observation ``t1`` pays the one-touch's rebate (at the hit, after the constant
         hit lag, or at the terminal payment time) and ends the no-touch; otherwise the continuation is this
         engine's shifted formula from ``t1`` (no observation left: no touch), on ``forward_level``, the level the
-        remaining records share (W18c).
+        remaining records share; a one-touch pays ``forward_cash``, their payoff (W18c).
         """
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
             raise PricingError("Discrete monitoring requires a populated ObservationSchedule.")
-        rebate = product.rebate
-        schedule.assert_analytical_ready(default_payoff=rebate, pricing_env=pricing_env)
+        schedule.assert_analytical_ready(default_payoff=product.rebate, pricing_env=pricing_env)
+        rebate = forward_cash
         frequency = schedule.ensure_regular_frequency(schedule.times)
         first = first_future_observation(
             self._resolved_records(product, pricing_env),

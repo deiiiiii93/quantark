@@ -240,9 +240,19 @@ CELLS = {
 }
 
 
-def _price(kind: Kind, level, record_level, cell, payoff=None):
+def _set_cash(product, cash: float) -> None:
+    """The product's own knock-out cash (``rebate``, a sharkfin's ``knock_out_rebate``), set after booking."""
+    if hasattr(product, "knock_out_rebate"):
+        product.knock_out_rebate = cash
+    else:
+        product.rebate = cash
+
+
+def _price(kind: Kind, level, record_level, cell, payoff=None, product_cash=None):
     years, keep, which = CELLS[cell]
     product = kind.build(level, record_level, payoff=payoff)
+    if product_cash is not None:
+        _set_cash(product, product_cash)
     if years:
         _aged(product, years, keep_landing=keep)
     spot = kind.between if which == "between" else kind.inside
@@ -258,6 +268,32 @@ def test_records_at_another_level_price_as_the_contract_booked_at_that_level(nam
     priced = _price(kind, kind.product_level, kind.record_level, cell)
     booked = _price(kind, kind.record_level, kind.record_level, cell)
     assert priced == booked
+
+
+#: the cells priced forward (the knock-out cash of a future hit enters) and one decided now
+FORWARD_CELLS = ["forward_from_inception", "forward_mid_life", "record_now_inside",
+                 "between_observations_beyond_the_records", "record_now_between"]
+
+
+@pytest.mark.parametrize("product_cash", [None, 0.0], ids=["product_cash", "zero_product_cash"])
+@pytest.mark.parametrize("cell", FORWARD_CELLS)
+@pytest.mark.parametrize("name", [n for n, k in KINDS.items() if k.knocks_out])
+def test_a_future_hit_pays_the_record_payoff(name, cell, product_cash):
+    """Every record at L paying 4.5, the product's own knock-out cash 5 (a sharkfin's 3), or 0: a future hit pays
+    the hit record's payoff (the MC's ``payoffs[first_idx]``, the PDE) -- bitwise the contract booked at L with cash
+    4.5. A zero product cash does not skip the knock-out cash leg (the single sharkfin's touch leg)."""
+    kind = KINDS[name]
+    priced = _price(kind, kind.product_level, kind.record_level, cell, payoff=4.5, product_cash=product_cash)
+    booked = _price(kind, kind.record_level, kind.record_level, cell, payoff=4.5, product_cash=4.5)
+    assert priced == booked
+
+
+def test_a_zero_cash_single_sharkfin_knocked_out_now_pays_the_record_payoff():
+    """``knock_out_rebate`` 0, records paying 2.5: the record on the valuation instant breached at 115 pays 2.5 at
+    the terminal payment time."""
+    kind = KINDS["single_sharkfin_call"]
+    priced = _price(kind, kind.product_level, kind.record_level, "record_now_between", payoff=2.5, product_cash=0.0)
+    assert priced == pytest.approx(2.5 * env(100.0).get_discount_factor(0.75), **TOL)
 
 
 @pytest.mark.parametrize("name", [n for n, k in KINDS.items() if k.knocks_out and "pay_at_hit" not in n])

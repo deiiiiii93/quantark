@@ -7,6 +7,7 @@ for the no-hit rebate.
 """
 
 import math
+from dataclasses import replace
 from typing import Optional
 
 import numpy as np
@@ -14,6 +15,7 @@ from scipy import stats
 
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_double_barrier_levels,
+    forward_knock_out_cash,
     refuse_mixed_forward_levels,
 )
 from quantark.asset.equity.engine.base_engine import BaseEngine
@@ -28,6 +30,7 @@ from quantark.asset.equity.engine.settlement_support import (
 from quantark.asset.equity.engine.monitoring_ended import monitoring_ended, remaining_replication
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import DoubleBarrierOption, DoubleSharkfinOption
+from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
 from quantark.asset.equity.settlement import (
     CashflowKind,
     SettlementRequest,
@@ -324,7 +327,8 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         multiplier = product.contract_multiplier
         participation = product.participation_rate
         is_call = product.is_call()
-        ko_cash, no_hit_cash = product.knock_out_rebate, product.no_hit_rebate
+        # a later hit pays the hit record's payoff (W18c follow-up)
+        ko_cash, no_hit_cash = forward_knock_out_cash(product, pricing_env), product.no_hit_rebate
         db = self._double_barrier_engine
 
         def cash_df(settlement_time: float) -> float:
@@ -429,7 +433,16 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
     def _price_no_rebate_knock_out(
         self, product: DoubleSharkfinOption, pricing_env: PricingEnvironment
     ) -> float:
-        """Value the capped participation leg as a double knock-out option."""
+        """Value the capped participation leg as a double knock-out option: no cash on a hit, so its records pay
+        nothing (the knock-out cash leg pays it; a record paying it here would count it twice, W18c)."""
+        schedule = product.observation_schedule
+        if schedule is not None:
+            schedule = ObservationSchedule(
+                records=[replace(rec, payoff=0.0) for rec in schedule.records],
+                aggregation_mode=schedule.aggregation_mode,
+                frequency=schedule.frequency,
+                monitoring_ended=schedule.monitoring_ended,
+            )
         double_barrier = DoubleBarrierOption(
             strike=product.strike,
             option_type=product.option_type,
@@ -443,7 +456,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             rebate=0.0,
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
-            observation_schedule=product.observation_schedule,
+            observation_schedule=schedule,
             contract_multiplier=1.0,
         )
         return self._double_barrier_engine.price(double_barrier, pricing_env)
@@ -505,14 +518,15 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
 
         ``hit_lag`` is the constant year-fraction settlement delay of the
         continuous hit-paid leg (0.0 = pays at the hit; the unlagged path is
-        bitwise unchanged).
+        bitwise unchanged). A DISCRETE hit pays the hit record's payoff (``forward_knock_out_cash``, W18c).
         """
-        if product.knock_out_rebate <= 0.0:
+        cash = forward_knock_out_cash(product, pricing_env)
+        if cash <= 0.0:
             return 0.0
 
         if product.observation_type == ObservationType.EXPIRY or not product.pay_at_hit:
             return (
-                product.knock_out_rebate
+                cash
                 * resolve_terminal_timing(product, pricing_env).payment_df
                 * (1.0 - survival_prob)
             )
@@ -544,7 +558,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 # E[e^{-r(tau+L)} 1{tau<=T}] = e^{-rL} E[e^{-r tau} 1{tau<=T}]
                 hit_discount_factor *= safe_exp(-rate * hit_lag)
 
-        return product.knock_out_rebate * max(float(hit_discount_factor), 0.0)
+        return cash * max(float(hit_discount_factor), 0.0)
 
     def _discrete_hit_discount_factor(
         self,

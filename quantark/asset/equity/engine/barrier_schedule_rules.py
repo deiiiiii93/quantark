@@ -159,3 +159,21 @@ def refuse_mixed_forward_levels(schedule, pricing_env, **ready_kwargs) -> None:
     schedule.assert_analytical_ready(pricing_env=pricing_env, **ready_kwargs)
     raise ValidationError(  # unreachable: forward_*_level returned None, so the level check above has raised
         "Analytical barrier shift requires one barrier level across the remaining observation records.")
+
+
+def forward_knock_out_cash(product, pricing_env) -> float:
+    """The cash a FUTURE knock-out hit pays on a closed form (W18c follow-up): the hit record's payoff, as the
+    barrier MC's ``payoffs[first_idx]`` and the PDE pay it.
+
+    DISCRETE: the payoff of the first remaining record (t > 0) -- ``assert_analytical_ready`` requires one fixed
+    payoff across the records before any forward value, so it is every remaining record's; an unset payoff takes the
+    product's knock-out cash (``rebate`` / a sharkfin's ``knock_out_rebate``). CONTINUOUS / EXPIRY monitoring, or no
+    record ahead: the product's knock-out cash.
+    """
+    schedule = getattr(product, "observation_schedule", None)
+    if product.observation_type != ObservationType.DISCRETE or schedule is None or not schedule.records:
+        return _knock_out_cash(product)
+    remaining = schedule.remaining_records(pricing_env)
+    if not remaining or remaining[0].payoff is None:
+        return _knock_out_cash(product)
+    return float(remaining[0].payoff)

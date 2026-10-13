@@ -14,6 +14,7 @@ from scipy import stats
 
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_barrier_level,
+    forward_knock_out_cash,
     refuse_mixed_forward_levels,
     valuation_barrier_terms,
 )
@@ -133,10 +134,15 @@ class BarrierAnalyticalEngine(BaseEngine):
             hit_now = obs_type != ObservationType.EXPIRY and product.is_barrier_hit(spot)
             forward_level = product.barrier
             beyond_forward = hit_now
+        # the cash of a future hit: a DISCRETE knock-out pays the hit record's payoff (W18c follow-up); a knock-in's
+        # rebate is paid when nothing hits
+        forward_cash = (
+            forward_knock_out_cash(product, pricing_env) if discrete and product.is_knock_out else product.rebate
+        )
         if (
             product.is_knock_out
             and product.pay_at_hit
-            and product.rebate > 0
+            and forward_cash > 0
             and obs_type != ObservationType.EXPIRY
             and not (hit_now or beyond_forward)
         ):
@@ -160,7 +166,8 @@ class BarrierAnalyticalEngine(BaseEngine):
                 # Beyond the barrier with no observation due: the next observation decides
                 return (
                     self._price_beyond_discrete(
-                        product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level
+                        product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level,
+                        forward_cash,
                     )
                     + pending_pv
                 )
@@ -227,6 +234,7 @@ class BarrierAnalyticalEngine(BaseEngine):
                 vol=vol,
                 maturity=maturity,
                 participation=participation,
+                rebate=forward_cash,
             ) + pending_pv
 
         if obs_type == ObservationType.CONTINUOUS:
@@ -323,13 +331,15 @@ class BarrierAnalyticalEngine(BaseEngine):
         vol: float,
         terminal_timing,
         forward_level: float,
+        rebate: float,
     ) -> float:
         """A spot beyond a discretely monitored barrier with no observation due (``first_observation``).
 
         The breach at the first future observation ``t1`` pays the knock-out's rebate (at the hit, after the
         constant hit lag, or at the terminal payment time) or knocks the option in (Black-Scholes from ``t1``);
         otherwise the continuation is this engine's shifted formula from ``t1`` (no observation left: no barrier),
-        on ``forward_level``, the level the remaining records share (W18c).
+        on ``forward_level``, the level the remaining records share, a knock-out hit paying ``rebate``, their payoff
+        (W18c).
         """
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
@@ -352,7 +362,6 @@ class BarrierAnalyticalEngine(BaseEngine):
         carry = rate - div
         delay = terminal_timing.delay_df
         participation = product.participation_rate
-        rebate = product.rebate
         is_call = product.is_call()
         terminal_df = math.exp(-rate * tau) * delay
         hit_lag = 0.0
@@ -452,7 +461,10 @@ class BarrierAnalyticalEngine(BaseEngine):
         vol: float,
         maturity: float,
         participation: float,
+        rebate: Optional[float] = None,
     ) -> float:
+        """The closed form on ``barrier``; ``rebate``: the cash of the rebate leg (default ``product.rebate``; a
+        DISCRETE knock-out's remaining records' payoff, W18c)."""
         b = rate - div
         ko_price = self._price_knock_out_closed_form(
             spot=pricing_env.spot,
@@ -466,7 +478,7 @@ class BarrierAnalyticalEngine(BaseEngine):
             is_up=product.is_up_barrier,
         )
 
-        rebate_val = self._price_rebate_leg(product, pricing_env)
+        rebate_val = self._price_rebate_leg(product, pricing_env, rebate=rebate)
         terminal_delay = resolve_terminal_timing(
             product,
             pricing_env,

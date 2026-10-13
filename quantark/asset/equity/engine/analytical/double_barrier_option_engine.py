@@ -17,6 +17,7 @@ from scipy import stats
 
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_double_barrier_levels,
+    forward_knock_out_cash,
     refuse_mixed_forward_levels,
     valuation_double_barrier_terms,
 )
@@ -171,6 +172,9 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         U, L = forward if forward is not None else (product.upper_barrier, product.lower_barrier)
 
         self._validate_inputs(S, K, T, r, q, sigma, L, U)
+        # the cash of a future hit: a DISCRETE knock-out pays the hit record's payoff (W18c follow-up); a knock-in's
+        # rebate is paid when the corridor is never left
+        rebate = forward_knock_out_cash(product, pricing_env) if discrete and product.is_knock_out else product.rebate
 
         # Edge case: zero maturity
         if is_zero(T):
@@ -182,7 +186,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
 
         # Edge case: zero volatility
         if is_zero(sigma):
-            return self._price_zero_vol(product, S, T, r, q, multiplier, L, U)
+            return self._price_zero_vol(product, S, T, r, q, multiplier, L, U, rebate)
 
         # EXPIRY: nothing is observed before maturity, and the closed form holds from any spot (spec 3C §5.8)
         if obs_type == ObservationType.EXPIRY:
@@ -190,7 +194,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
 
         # Outside the corridor with no observation due: the next observation decides
         if discrete and not hit_now and (S >= U or S <= L):
-            return self._price_beyond_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
+            return self._price_beyond_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier, rebate)
 
         # Spot already outside barriers: continuously, or at an observation at the valuation instant
         if hit_now:
@@ -204,7 +208,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             return self._bs_engine.price(vanilla, pricing_env) * multiplier
 
         if obs_type == ObservationType.DISCRETE:
-            return self._price_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
+            return self._price_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier, rebate)
 
         if obs_type == ObservationType.CONTINUOUS:
             return self._price_continuous(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
@@ -271,6 +275,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         L: float,
         U: float,
         multiplier: float,
+        rebate: float,
     ) -> float:
         """A spot outside a discretely monitored corridor with no observation due (``first_observation``).
 
@@ -302,17 +307,17 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
 
         if product.is_knock_out:
             def hit_value(s: float) -> float:
-                return product.rebate * rebate_df * multiplier
+                return rebate * rebate_df * multiplier
         else:
             def hit_value(s: float) -> float:
                 return vanilla(s) * multiplier
 
         def continuation(s: float) -> float:
             if first.remaining == 0:
-                return (vanilla(s) if product.is_knock_out else product.rebate * rebate_df) * multiplier
+                return (vanilla(s) if product.is_knock_out else rebate * rebate_df) * multiplier
             return self._price_continuous(
                 product=product, pricing_env=pricing_env, S=s, K=K, T=tau, r=r, q=q, sigma=sigma,
-                L=lower_shifted, U=upper_shifted, multiplier=multiplier, vanilla_price=vanilla(s),
+                L=lower_shifted, U=upper_shifted, multiplier=multiplier, vanilla_price=vanilla(s), rebate=rebate,
             )
 
         return through_first_observation(
@@ -331,16 +336,17 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         multiplier: float,
         L: float,
         U: float,
+        rebate: float,
     ) -> float:
         """Price when volatility is zero (deterministic path), on the corridor ``L``..``U`` (a DISCRETE schedule's
-        remaining records' levels, W18c)."""
+        remaining records' levels, W18c), a hit paying ``rebate`` (their payoff on a knock-out)."""
         forward = float(spot * safe_exp((r - q) * T))
         is_outside = forward >= U or forward <= L
         discount = float(safe_exp(-r * T))
 
         if product.is_knock_out:
             if is_outside:
-                return product.rebate * multiplier
+                return rebate * multiplier
             payoff = product.get_payoff(forward) / multiplier  # get_payoff already applies multiplier
             return payoff * discount
 
@@ -348,7 +354,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         if is_outside:
             payoff = product.get_payoff(forward) / multiplier
             return payoff * discount
-        return product.rebate * multiplier
+        return rebate * multiplier
 
     def _price_continuous(
         self,
@@ -366,9 +372,13 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         delta1: float = 0.0,
         delta2: float = 0.0,
         vanilla_price: Optional[float] = None,
+        rebate: Optional[float] = None,
     ) -> float:
         """Price using Ikeda & Kuintomo continuous formula (``vanilla_price``: the knock-in parity's vanilla,
-        read from ``pricing_env`` when not given)."""
+        read from ``pricing_env`` when not given; ``rebate``: default ``product.rebate``, a DISCRETE knock-out's
+        remaining records' payoff, W18c)."""
+        if rebate is None:
+            rebate = product.rebate
         b = r - q
         ko_price = self._price_knock_out_ikeda_kuintomo(
             S=S,
@@ -386,19 +396,19 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
 
         if product.is_knock_out:
             price = max(ko_price, 0.0)
-            if not is_zero(product.rebate):
+            if not is_zero(rebate):
                 # the rebate is paid only if a barrier is hit (spec 3C decision 28)
                 p_inside = double_no_touch(S, T, r, q, sigma, L, U)
-                price += product.rebate * float(safe_exp(-r * T)) * (1.0 - p_inside)
+                price += rebate * float(safe_exp(-r * T)) * (1.0 - p_inside)
             return price * multiplier
 
         # Knock-in via parity
         if vanilla_price is None:
             vanilla_price = self._bs_engine.price(self._create_vanilla(product), pricing_env)
         price = max(vanilla_price - max(ko_price, 0.0), 0.0)
-        if not is_zero(product.rebate):
+        if not is_zero(rebate):
             # a knock-in's rebate is paid if the corridor is never left
-            price += product.rebate * float(safe_exp(-r * T)) * double_no_touch(S, T, r, q, sigma, L, U)
+            price += rebate * float(safe_exp(-r * T)) * double_no_touch(S, T, r, q, sigma, L, U)
         return float(price * multiplier)
 
     def _price_discrete(
@@ -414,8 +424,9 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         L: float,
         U: float,
         multiplier: float,
+        rebate: Optional[float] = None,
     ) -> float:
-        """Price discrete observation using barrier shift."""
+        """Price discrete observation using barrier shift (``rebate``: a knock-out's remaining records' payoff)."""
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
             raise PricingError(
@@ -449,6 +460,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             L=lower_shifted,
             U=upper_shifted,
             multiplier=multiplier,
+            rebate=rebate,
         )
 
     def _price_expiry(

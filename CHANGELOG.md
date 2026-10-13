@@ -501,16 +501,25 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   (`forward_barrier_level` / `forward_double_barrier_levels`). Remaining records with different levels have no
   closed form: `ObservationSchedule.assert_analytical_ready` (new `pricing_env` argument, `remaining_records`,
   `remaining_levels`) raises `ValidationError`, as it does for mixed payoffs; a record on the valuation instant still
-  decides there. The single sharkfin's no-rebate knock-out leg no longer carries the record payoffs (its one-touch
-  leg pays the cash). CONTINUOUS / EXPIRY monitoring unchanged. Moved values (flat 20% vol, r 3%, q 1%, K 100, T 1,
+  decides there. A future knock-out hit pays the hit record's payoff too (the MC's `payoffs[first_idx]`, the PDE):
+  the forward closed form and the first-observation hit value use the remaining records' payoff
+  (`forward_knock_out_cash`; one fixed payoff is already required, an unset payoff takes `rebate` /
+  `knock_out_rebate`); knock-ins and no-touches keep their rebate. The sharkfins' no-rebate knock-out legs no longer
+  carry the record payoffs (their cash legs pay them), and a single sharkfin with `knock_out_rebate` 0 whose records
+  pay cash no longer skips its touch leg. CONTINUOUS / EXPIRY monitoring unchanged. Moved values (flat 20% vol, r 3%, q 1%, K 100, T 1,
   monthly records; "now" = aged to the 3-month record): up-and-out call `barrier` 120, records 115, spot 110:
   4.14526 -> 3.95226 (up-and-in 16.16050 -> 16.35350); same, now, spot 117: 4.79158 -> 4.88876 (records paying
   4.5: -> 4.39988); one-touch up 120 / records 115, spot 110: 2.65102 -> 3.37817, now at 117: 3.58628 -> 4.88876;
   double knock-out 130/75, records 125/80, spot 100: 4.52666 -> 3.68421, now at 127: 4.07797 -> 2.0; single
   sharkfin 120 / 115, spot 110: 3.52510 -> 2.89580, now at 117: 3.61756 -> 2.93325; double sharkfin 130/75 /
   125/80, spot 100: 5.49710 -> 4.65465, now at 127: 5.05572 -> 2.93325 -- each equal, bitwise, to the contract
-  booked at the records' levels; mixed remaining levels value -> refused. Plain contracts (records at
-  `product.barrier`) bit-identical. New `test/test_barrier_schedule_level_analytical_quad.py`.
+  booked at the records' levels; mixed remaining levels value -> refused. Records paying 4.5 (product cash 5, a
+  sharkfin's 3), spot 110 / 100: up-and-out call records at 120: 4.14526 -> 3.88016, records at 115: 4.14526 ->
+  3.61444; one-touch: 2.65102 -> 2.38591; double knock-out (rebate 2): 4.52666 -> 5.12593; single sharkfin: 3.52510
+  -> 4.32040; double sharkfin: 5.49710 -> 5.85667 -- each equal, bitwise, to the contract booked with cash 4.5.
+  Single sharkfin `knock_out_rebate` 0, records paying 2.5: 1.93449 -> 3.25999; records at 115, now at 117: 1.46580
+  -> 2.44438 (2.5 at the terminal). Plain contracts (records at `product.barrier`, paying the product's cash)
+  bit-identical. New `test/test_barrier_schedule_level_analytical_quad.py`.
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in

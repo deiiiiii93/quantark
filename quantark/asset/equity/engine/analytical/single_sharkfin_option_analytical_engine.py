@@ -13,7 +13,7 @@ analytical engines using the Broadie-Glasserman-Kou barrier shift.
 from dataclasses import replace
 from typing import Optional
 
-from quantark.asset.equity.engine.barrier_schedule_rules import forward_barrier_level
+from quantark.asset.equity.engine.barrier_schedule_rules import forward_barrier_level, forward_knock_out_cash
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -141,7 +141,7 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             hit_or_beyond = product.is_barrier_hit(spot)
         if (
             product.pay_at_hit
-            and product.knock_out_rebate > 0
+            and forward_knock_out_cash(product, pricing_env) > 0
             and product.observation_type != ObservationType.EXPIRY
             and not hit_or_beyond
         ):
@@ -264,8 +264,14 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
         rebate: float,
         touch_type: TouchType,
     ) -> float:
-        """Value a fixed cash leg conditional on touch or no-touch."""
-        if rebate <= 0.0:
+        """Value a fixed cash leg conditional on touch or no-touch. A DISCRETE touch pays the touching record's
+        payoff (the one-touch engine reads it, W18c): the knock-out cash leg is skipped only when neither the product
+        nor any record pays cash."""
+        if rebate <= 0.0 and not (
+            touch_type == TouchType.ONE_TOUCH
+            and product.observation_type == ObservationType.DISCRETE
+            and any(rec.payoff is not None and rec.payoff > 0.0 for rec in product.observation_schedule.records)
+        ):
             return 0.0
 
         touch_option = OneTouchOption(
