@@ -22,6 +22,7 @@ from typing import Dict, Optional
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.fx.engine.base_fx_engine import BaseFxEngine, FxEngineParams
 from quantark.asset.fx.engine.mc.fx_mc_params import FxMCParams
 from quantark.asset.fx.engine.mc.fx_tarf_mc_engine import FxTarnMCResult
@@ -96,7 +97,10 @@ class FxTargetRedemptionNoteMCEngine(BaseFxEngine):
         if self.mc.method == MonteCarloMethod.QUASI:
             std_error: Optional[float] = None
         else:
-            std_error = float(pv.std(ddof=1)) / math.sqrt(pv.size)
+            # Antithetic runs report the pair-mean s.e. (spec I3/A9).
+            std_error = sample_std_error(
+                pv, antithetic=bool(self.mc.use_antithetic)
+            )
         if price < 0:
             raise PricingError(f"Negative price computed: {price}")
         self._last_result = FxTarnMCResult(

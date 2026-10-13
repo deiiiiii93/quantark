@@ -481,6 +481,9 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
     def _uses_qmc(self) -> bool:
         return self.method in _QMC_METHODS
 
+    def _antithetic_pairs_in_paths(self) -> bool:
+        return bool(getattr(self.params, "use_antithetic", False)) and not self._uses_qmc()
+
     def _rqmc_scheme_label(self) -> str:
         label = super()._rqmc_scheme_label()
         if self.rqmc_affine_spot_factor:

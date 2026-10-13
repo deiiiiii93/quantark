@@ -6,6 +6,7 @@ import math
 from typing import Optional, Union, Tuple
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -376,6 +377,11 @@ class EuropeanMCEngine(BaseEngine):
         """
         Price using normal MC or QMC (non-randomized).
 
+        The standard error is the iid formula, or the antithetic pair-mean formula
+        (``quantark.montecarlo.std_error``) when ``use_antithetic`` runs on PSEUDO paths.
+        For plain (non-randomized) QMC the iid formula is NOT a valid error bar -- Sobol
+        points are not independent samples; use ``MonteCarloMethod.RANDOMIZED_QUASI``.
+
         Args:
             product: European vanilla option
             S: Spot price
@@ -402,9 +408,13 @@ class EuropeanMCEngine(BaseEngine):
         discounted_payoffs = discount_factor * payoffs
 
         mean_payoff = float(discounted_payoffs.mean())
-        std_payoff = float(discounted_payoffs.std(ddof=1))
-
-        std_error = std_payoff / math.sqrt(len(payoffs))
+        # Antithetic runs report the pair-mean s.e. (spec I3/A9); plain QMC keeps the
+        # iid formula, which is NOT a valid error bar for deterministic QMC (use RQMC).
+        std_error = sample_std_error(
+            discounted_payoffs,
+            antithetic=bool(self.params.use_antithetic)
+            and self.method == MonteCarloMethod.PSEUDO,
+        )
 
         return mean_payoff, std_error
 

@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import (
@@ -2276,6 +2277,15 @@ class SnowballMCEngine(BaseEngine):
 
         return payoffs, settlement_times, stats, extra
 
+    def _antithetic_pairs_in_paths(self) -> bool:
+        """True when the simulated paths are the ``[z; -z]`` antithetic layout (spec I3/A9).
+
+        The plain GBM engine draws iid paths whatever ``use_antithetic`` says, so it never pairs; the
+        vol-model subclasses override this. The Dask batch route reduces sum / sum-of-squares and cannot
+        recover pair means, so it keeps the iid formula.
+        """
+        return False  # TODO(w16): Dask route (_price_parallel) keeps the iid s.e.; pair sums are not in sum_x/sum_x2
+
     def _price_mc_or_qmc(
         self,
         product: SnowballOption,
@@ -2320,8 +2330,11 @@ class SnowballMCEngine(BaseEngine):
 
         # Compute price and standard error
         price = float(discounted_payoffs.mean())
-        std_payoff = float(discounted_payoffs.std(ddof=1))
-        std_error = std_payoff / math.sqrt(len(payoffs))
+        # Antithetic vol-model runs report the pair-mean s.e. (spec I3/A9); plain QMC keeps the iid
+        # formula, which is NOT a valid error bar for deterministic QMC (use RQMC).
+        std_error = sample_std_error(
+            discounted_payoffs, antithetic=self._antithetic_pairs_in_paths()
+        )
 
         return SnowballMCResult(
             price=price,
@@ -2365,8 +2378,12 @@ class SnowballMCEngine(BaseEngine):
         discounted_payoffs = payoffs * discount_factors
 
         price = float(discounted_payoffs.mean())
-        std_payoff = float(discounted_payoffs.std(ddof=1))
-        std_error = std_payoff / math.sqrt(len(payoffs)) if len(payoffs) > 0 else 0.0
+        if len(payoffs) > 0:
+            std_error = sample_std_error(
+                discounted_payoffs, antithetic=self._antithetic_pairs_in_paths()
+            )
+        else:
+            std_error = 0.0
 
         return SnowballMCResult(
             price=price,

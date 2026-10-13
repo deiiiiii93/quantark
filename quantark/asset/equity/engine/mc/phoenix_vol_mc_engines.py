@@ -65,6 +65,9 @@ class _VolModelPhoenixMCBase(_SubstepRefinementMixin, PhoenixMCEngine):
     def _uses_qmc(self) -> bool:
         return self.method in _QMC_METHODS
 
+    def _antithetic_pairs_in_paths(self) -> bool:
+        return bool(getattr(self.params, "use_antithetic", False)) and not self._uses_qmc()
+
     def _validate_rng_controls(self, use_antithetic: bool) -> None:
         if self._uses_qmc() and use_antithetic:
             raise ValidationError(

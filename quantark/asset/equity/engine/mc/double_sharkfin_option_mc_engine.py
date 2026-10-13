@@ -7,6 +7,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -763,8 +764,13 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         mean_payoff = float(discounted.mean())
         if len(discounted) <= 1:
             return mean_payoff * product.contract_multiplier, 0.0
-        std_payoff = float(discounted.std(ddof=1))
-        std_error = std_payoff / math.sqrt(len(discounted))
+        # Antithetic runs report the pair-mean s.e. (spec I3/A9); plain QMC keeps the
+        # iid formula, which is NOT a valid error bar for deterministic QMC (use RQMC).
+        std_error = sample_std_error(
+            discounted,
+            antithetic=bool(self.params.use_antithetic)
+            and self.method == MonteCarloMethod.PSEUDO,
+        )
         multiplier = product.contract_multiplier
         return mean_payoff * multiplier, std_error * multiplier
 

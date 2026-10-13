@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -613,8 +614,13 @@ class RangeAccrualMCEngine(BaseEngine):
 
         # Compute price and standard error
         price = float(discounted_payoffs.mean())
-        std_payoff = float(discounted_payoffs.std(ddof=1))
-        std_error = std_payoff / math.sqrt(len(payoffs))
+        # Antithetic runs report the pair-mean s.e. (spec I3/A9); plain QMC keeps the
+        # iid formula, which is NOT a valid error bar for deterministic QMC (use RQMC).
+        std_error = sample_std_error(
+            discounted_payoffs,
+            antithetic=bool(self.params.use_antithetic)
+            and self.method == MonteCarloMethod.PSEUDO,
+        )
 
         return RangeAccrualMCResult(
             price=price,

@@ -40,6 +40,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.fx.engine.base_fx_engine import BaseFxEngine, FxEngineParams
 from quantark.asset.fx.process.garman_kohlhagen_process import GarmanKohlhagenProcess
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
@@ -198,7 +199,11 @@ class FxRangeAccrualMCEngine(BaseFxEngine):
         ratio_per_path = (past_in_range + path_future_weight) / total_weights
 
         price = float(pv_per_path.mean())
-        std_error = float(pv_per_path.std(ddof=1)) / math.sqrt(pv_per_path.size)
+        # Antithetic runs report the pair-mean s.e. (spec I3/A9); the QMC path keeps the
+        # iid formula, which is NOT a valid error bar for deterministic QMC.
+        std_error = sample_std_error(
+            pv_per_path, antithetic=self.use_antithetic and not self.use_qmc
+        )
         if price < 0:
             raise PricingError(f"Negative price computed: {price}")
 

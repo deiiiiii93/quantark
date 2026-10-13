@@ -419,6 +419,23 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   reported std error is the iid formula and overstates the real error (up to about 800x measured), so the check is
   loose there; the std error formula, `EuropeanQuadEngine`'s check and RQMC seeding are unchanged (open questions in
   the diagnosis).
+- Antithetic MC runs report the pair-mean standard error (W16, signed W13 follow-up 1, spec I3/A9). Within each batch
+  the samples are `[z; -z][:n]`; with `m = ceil(n/2)` the pairs are `(i, m+i)`, an odd `n` leaves the unpaired
+  `z[m-1]` out of the s.e. only, the pair means of all batches pool into one unit set, and the s.e. is
+  `std(units, ddof=1)/sqrt(#units)`. New `quantark.montecarlo.std_error` (`antithetic_pair_means`,
+  `mean_and_std_error`, `sample_std_error`) is used by the European, digital, Asian, range-accrual, American, barrier
+  (continuous, discrete, expiry), accumulator, single and double sharkfin MC engines, the vol-model (local vol,
+  Heston, QE, Heston-SLV) snowball and Phoenix engines, the DCN GBM / local-vol / Heston engines and their execution
+  adapters, and the FX barrier, sharkfin, range-accrual, TARF and TARN MC engines. Plain QMC keeps the iid formula,
+  now documented as not a valid error bar for deterministic QMC (use `RANDOMIZED_QUASI`). The plain GBM snowball and
+  Phoenix engines draw iid paths whatever `use_antithetic` says and keep the iid s.e.; the Dask batch route of the
+  snowball and Phoenix engines reduces sum / sum-of-squares and keeps the iid s.e. (`# TODO(w16)`). The W13a lower-bound
+  check inherits the corrected s.e.: no refusal flips (0 of 300 seeds refused at spots 90 and 75, 1 and 5 days, 256
+  antithetic paths, before and after; the one-day deep-ITM put s.e. falls 0.0636 to 0.0007). Moved values: reported
+  standard errors only (examples, 2000 antithetic paths, fixed seed: European call 0.3435 -> 0.2671, cash-or-nothing
+  0.1085 -> 0.0193, American put 0.1991 -> 0.1115, FX TARF 0.00722 -> 0.00052, DCN GBM 3220 -> 2680, Phoenix local-vol
+  0.01441 -> 0.01022; range accrual rises 353 -> 497 because its payoff is even in z and the iid formula understated
+  it); prices bit-identical. New `test/test_mc_std_error_antithetic.py`.
 - The DCN PDE routes pay a monthly observation that falls on the valuation date (W10b, user ruling Q5 2026-10-10).
   The GBM, local-vol and Heston DCN PDE dropped it (the march never applies t = 0) while every MC route paid it, so
   the PDE value lost the day's coupon overnight. They now decide the row pointwise at the spot through the W10

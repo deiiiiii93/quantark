@@ -14,6 +14,7 @@ from typing import Dict, Optional
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.fx.engine.mc.fx_barrier_mc_engine import FxBarrierMCEngine
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.asset.fx.product.option.fx_sharkfin_option import FxSharkfinOption
@@ -81,7 +82,10 @@ class FxSharkfinMCEngine(FxBarrierMCEngine):
         if self.mc.method == MonteCarloMethod.QUASI:
             std_error: Optional[float] = None
         else:
-            std_error = float(payoffs.std(ddof=1)) / math.sqrt(payoffs.size)
+            # Antithetic runs report the pair-mean s.e. (spec I3/A9).
+            std_error = sample_std_error(
+                payoffs, antithetic=bool(self.mc.use_antithetic)
+            )
         if price < 0:
             raise PricingError(f"Negative price computed: {price}")
         self._last_result = FxSharkfinMCResult(

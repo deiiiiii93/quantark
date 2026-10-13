@@ -7,6 +7,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -426,10 +427,15 @@ class AmericanOptionMCEngine(BaseEngine):
 
         price = float(payoffs.mean())
         if payoffs.shape[0] > 1:
-            std_payoff = float(payoffs.std(ddof=1))
-            std_error = safe_divide(
-                std_payoff, safe_sqrt(payoffs.shape[0]), fallback=0.0
-            )
+            if bool(self.params.use_antithetic) and self.method == MonteCarloMethod.PSEUDO:
+                # Pair-mean s.e. on antithetic runs (spec I3/A9). Plain QMC keeps the iid
+                # formula, which is NOT a valid error bar for deterministic QMC (use RQMC).
+                std_error = sample_std_error(payoffs, antithetic=True)
+            else:
+                std_payoff = float(payoffs.std(ddof=1))
+                std_error = safe_divide(
+                    std_payoff, safe_sqrt(payoffs.shape[0]), fallback=0.0
+                )
         else:
             std_error = 0.0
 

@@ -7,6 +7,7 @@ from typing import Optional, Union, Tuple
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.barrier_schedule_rules import (  # noqa: F401 - re-exported (W18c moved them)
     _beyond,
     _record_time,
@@ -728,8 +729,13 @@ class BarrierOptionMCEngine(BaseEngine):
             )
 
         mean_payoff = float(discounted.mean())
-        std_payoff = float(discounted.std(ddof=1))
-        std_error = std_payoff / math.sqrt(len(discounted))
+        # Antithetic runs report the pair-mean s.e. (spec I3/A9); plain QMC keeps the
+        # iid formula, which is NOT a valid error bar for deterministic QMC (use RQMC).
+        std_error = sample_std_error(
+            discounted,
+            antithetic=bool(self.params.use_antithetic)
+            and self.method == MonteCarloMethod.PSEUDO,
+        )
 
         return mean_payoff, std_error
 
@@ -838,8 +844,13 @@ class BarrierOptionMCEngine(BaseEngine):
         discounted = payoffs * self._terminal_df
 
         mean_payoff = float(discounted.mean())
-        std_payoff = float(discounted.std(ddof=1))
-        std_error = std_payoff / math.sqrt(len(discounted))
+        # Antithetic runs report the pair-mean s.e. (spec I3/A9); plain QMC keeps the
+        # iid formula, which is NOT a valid error bar for deterministic QMC (use RQMC).
+        std_error = sample_std_error(
+            discounted,
+            antithetic=bool(self.params.use_antithetic)
+            and self.method == MonteCarloMethod.PSEUDO,
+        )
 
         return mean_payoff, std_error
 

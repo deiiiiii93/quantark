@@ -35,6 +35,7 @@ from quantark.asset.equity.engine.mc.qmc_draws import qmc_normals
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.asset.equity.product.option.dcn_option import DCNOption
+from quantark.montecarlo.std_error import antithetic_pair_means, mean_and_std_error
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
@@ -270,6 +271,23 @@ def settled_dcn_result(product, pricing_env, ctx, seed, t0) -> "DCNMCResult":
     )
 
 
+def pathwise_stderr(batch_totals, sign, n, *, antithetic: bool) -> float:
+    """Pathwise standard error of the pooled per-path totals of all batches.
+
+    ``batch_totals`` is one array per batch.  Plain runs use the iid formula on the pooled paths.  An antithetic
+    run pairs WITHIN each batch (``[z; -z][:batch]`` layout, spec I3/A9), pools the pair means of all batches
+    into one unit set, and reports ``std(units, ddof=1) / sqrt(#units)``.  Single-batch Sobol keeps the iid
+    formula, which is only a conservative proxy for deterministic QMC (use ``num_batches >= 2``).
+    """
+    if antithetic:
+        units = np.concatenate(
+            [antithetic_pair_means(sign * t, len(t)) for t in batch_totals]
+        )
+        return mean_and_std_error(units)[1]
+    totals = sign * np.concatenate(batch_totals)
+    return float(totals.std(ddof=1) / np.sqrt(n))
+
+
 class DCNMCEngine(BaseEngine):
     """GBM MC engine for DCNOption; flat markets are just flat curves.
 
@@ -396,8 +414,9 @@ class DCNMCEngine(BaseEngine):
             # pseudorandom IID paths (exact), or single-batch Sobol where
             # the pathwise formula is only a conservative upper-bound proxy
             # — use num_batches >= 2 for a valid QMC error estimate.
-            totals = sign * np.concatenate(acc.totals)
-            stderr = float(totals.std(ddof=1) / np.sqrt(n))
+            stderr = pathwise_stderr(
+                acc.totals, sign, n, antithetic=self._antithetic_pairs_in_draws()
+            )
         result = _finalize_dcn_result(
             acc,
             product,
@@ -409,6 +428,14 @@ class DCNMCEngine(BaseEngine):
         )
         self._last_result = result
         return result
+
+    def _antithetic_pairs_in_draws(self) -> bool:
+        """True when each batch's draws are the per-batch ``[z; -z][:n]`` layout (see ``_draws``)."""
+        return (
+            bool(self.use_antithetic)
+            and not self.use_sobol
+            and self._draw_provider is None
+        )
 
     # -- per-price-call setup (overridable; base = nothing to prepare) --
     def _prepare_simulation(self, product, pricing_env) -> None:

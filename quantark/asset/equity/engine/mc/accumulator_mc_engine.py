@@ -19,6 +19,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
+from quantark.montecarlo.std_error import sample_std_error
 from quantark.asset.equity.engine.accumulator_valuation import (
     realized_value,
     settle_at_expiry,
@@ -528,8 +529,14 @@ class AccumulatorMCEngine(BaseEngine):
         mean_payoff = float(discounted.mean())
         if len(discounted) <= 1:
             return mean_payoff, 0.0
-        std_payoff = float(discounted.std(ddof=1))
-        return mean_payoff, std_payoff / math.sqrt(len(discounted))
+        # Antithetic runs report the pair-mean s.e. (spec I3/A9); plain QMC keeps the
+        # iid formula, which is NOT a valid error bar for deterministic QMC (use RQMC).
+        antithetic = (
+            bool(self.params.use_antithetic) and self.method == MonteCarloMethod.PSEUDO
+        )
+        if antithetic and len(discounted) <= 2:
+            return mean_payoff, 0.0  # one pair: no spread to estimate
+        return mean_payoff, sample_std_error(discounted, antithetic=antithetic)
 
     def get_last_std_error(self) -> Optional[float]:
         """Return the standard error from the most recent pricing run."""

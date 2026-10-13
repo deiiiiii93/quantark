@@ -25,6 +25,11 @@ from .qmc_variance_reduction import (
     gbm_control_variate,
     apply_variance_reduction_to_normals,
 )
+from .std_error import (
+    antithetic_pair_means,
+    mean_and_std_error,
+    sample_std_error,
+)
 from .control_weights import (
     CrossFittedControl,
     cross_fitted_control,
@@ -63,6 +68,9 @@ __all__ = [
     "importance_sampling_weights",
     "gbm_control_variate",
     "apply_variance_reduction_to_normals",
+    "antithetic_pair_means",
+    "mean_and_std_error",
+    "sample_std_error",
     "CrossFittedControl",
     "cross_fitted_control",
     "ConditionalSnowballMoments",

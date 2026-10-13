@@ -35,6 +35,7 @@ from quantark.asset.equity.engine.dcn_valuation import at_final_observation
 from quantark.asset.equity.engine.mc.dcn_mc_engine import (
     _finalize_dcn_result,
     _LegAccumulator,
+    pathwise_stderr,
 )
 from quantark.asset.equity.engine.mc.dcn_payoff import compute_dcn_cashflows
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
@@ -484,8 +485,10 @@ class _DCNBatchMixin:
             means = np.array([float(sign * m) for m in batch_means])
             stderr = float(means.std(ddof=1) / np.sqrt(means.size))
         else:
-            totals = sign * np.concatenate(acc.totals)
-            stderr = float(totals.std(ddof=1) / np.sqrt(acc.n))
+            stderr = pathwise_stderr(
+                acc.totals, sign, acc.n,
+                antithetic=sim.engine._antithetic_pairs_in_draws(),
+            )
         result = _finalize_dcn_result(
             acc,
             sim.product,
