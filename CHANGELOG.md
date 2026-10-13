@@ -440,6 +440,12 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   replications whose base seeds sit closer than their batch count share scrambles. `SobolNormalGenerator._make_engine`
   and `docs/execution/policy-guide.md` ("RQMC seeds and replications") state the rule: space base seeds by at least
   the batch count, or derive them from a hash / `SeedSequence`. Seeding unchanged. Moved values: none.
+- `EuropeanQuadEngine` lower-bound check scales with the notional (W16, signed W13 follow-up 2: measure first).
+  Near-expiry measurement (`docs/superpowers/specs/2026-10-13-quad-near-expiry-evidence/`, 1680 cells to 1e-9 y): no
+  refusals at ordinary scale, but the ABSOLUTE `1e-4` tolerance refused correct deep-in-the-money prices once the price
+  reached ~1e8 (20 false refusals in the scale probe; relative error <= 2e-11). Tolerance is now
+  `max(1e-4, Tolerance.RELATIVE * bound)`: every bound below 1e5 unchanged, a price 1% below the bound still refused.
+  Moved values: none (refusal -> price at large notionals). Gauss-Legendre ATM error ~4e-3 (all maturities) logged.
 - The DCN PDE routes pay a monthly observation that falls on the valuation date (W10b, user ruling Q5 2026-10-10).
   The GBM, local-vol and Heston DCN PDE dropped it (the march never applies t = 0) while every MC route paid it, so
   the PDE value lost the day's coupon overnight. They now decide the row pointwise at the spot through the W10

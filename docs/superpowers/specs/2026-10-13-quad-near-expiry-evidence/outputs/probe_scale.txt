@@ -1,0 +1,81 @@
+(1) ATM relative error by maturity, spot 100, vol 0.3
+  SIMPSON         1e-6y  quad 0.01196927479 bs 0.01196926815 rel 5.547e-07
+  SIMPSON         1d     quad 0.6291626864 bs 0.629150429 rel 1.948e-05
+  SIMPSON         1m     quad 3.531872691 bs 3.531944374 rel 2.030e-05
+  SIMPSON         1y     quad 12.69419741 bs 12.69400453 rel 1.520e-05
+  SIMPSON         5y     quad 28.57832386 bs 28.57837323 rel 1.727e-06
+  GAUSS_LEGENDRE  1e-6y  quad 0.01201842379 bs 0.01196926815 rel 4.107e-03
+  GAUSS_LEGENDRE  1d     quad 0.6317170066 bs 0.629150429 rel 4.079e-03
+  GAUSS_LEGENDRE  1m     quad 3.545072742 bs 3.531944374 rel 3.717e-03
+  GAUSS_LEGENDRE  1y     quad 12.70054638 bs 12.69400453 rel 5.153e-04
+  GAUSS_LEGENDRE  5y     quad 28.49070482 bs 28.57837323 rel 3.068e-03
+
+(2) deep ITM, tiny maturity, growing notional scale (absolute tolerance 1e-4)
+  SIMPSON         S 10000 mult 10000 PUT K/S 1.2 1e-9y: ok err 1.238e-05 rel 6.2e-13
+  SIMPSON         S 10000 mult 10000 CALL K/S 0.8 1e-9y: ok err 1.249e-05 rel 6.2e-13
+  SIMPSON         S 10000 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 1.238e-03 rel 6.2e-13
+  SIMPSON         S 10000 mult 1e+06 PUT K/S 1.2 1s: ok err 1.462e-04 rel 7.3e-14
+  SIMPSON         S 10000 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 1.249e-03 rel 6.2e-13
+  SIMPSON         S 10000 mult 1e+06 CALL K/S 0.8 1s: ok err 1.512e-04 rel 7.6e-14
+  SIMPSON         S 100000 mult 10000 PUT K/S 1.2 1e-9y: REFUSED (Price (199999999.973896) below discounted European lower bound (199999999.974000)) true price 199999999.974000
+  SIMPSON         S 100000 mult 10000 PUT K/S 1.2 1s: ok err 1.535e-05 rel 7.7e-14
+  SIMPSON         S 100000 mult 10000 CALL K/S 0.8 1e-9y: REFUSED (Price (200000000.013896) below discounted European lower bound (200000000.014000)) true price 200000000.014000
+  SIMPSON         S 100000 mult 10000 CALL K/S 0.8 1s: ok err 1.454e-05 rel 7.3e-14
+  SIMPSON         S 100000 mult 1e+06 PUT K/S 1.2 1e-9y: REFUSED (Price (19999999997.389622) below discounted European lower bound (19999999997.399994)) true price 19999999997.399994
+  SIMPSON         S 100000 mult 1e+06 PUT K/S 1.2 1s: ok err 1.534e-03 rel 7.7e-14
+  SIMPSON         S 100000 mult 1e+06 PUT K/S 1.2 1d: ok err 1.907e-05 rel 9.5e-16
+  SIMPSON         S 100000 mult 1e+06 CALL K/S 0.8 1e-9y: REFUSED (Price (20000000001.389572) below discounted European lower bound (20000000001.400009)) true price 20000000001.400009
+  SIMPSON         S 100000 mult 1e+06 CALL K/S 0.8 1s: ok err 1.453e-03 rel 7.3e-14
+  SIMPSON         S 100000 mult 1e+06 CALL K/S 0.8 1d: ok err -4.578e-05 rel 2.3e-15
+  SIMPSON         S 1e+06 mult 300 PUT K/S 1.2 1e-9y: ok err 3.763e-05 rel 6.3e-13
+  SIMPSON         S 1e+06 mult 300 CALL K/S 0.8 1e-9y: ok err 3.704e-05 rel 6.2e-13
+  SIMPSON         S 1e+06 mult 10000 PUT K/S 1.2 1e-9y: ok err 1.254e-03 rel 6.3e-13
+  SIMPSON         S 1e+06 mult 10000 PUT K/S 1.2 1s: ok err 1.583e-04 rel 7.9e-14
+  SIMPSON         S 1e+06 mult 10000 CALL K/S 0.8 1e-9y: ok err 1.235e-03 rel 6.2e-13
+  SIMPSON         S 1e+06 mult 10000 CALL K/S 0.8 1s: ok err 1.373e-04 rel 6.9e-14
+  SIMPSON         S 1e+06 mult 10000 CALL K/S 0.8 1d: ok err -1.192e-05 rel 6.0e-15
+  SIMPSON         S 1e+06 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 1.254e-01 rel 6.3e-13
+  SIMPSON         S 1e+06 mult 1e+06 PUT K/S 1.2 1s: ok err 1.584e-02 rel 7.9e-14
+  SIMPSON         S 1e+06 mult 1e+06 PUT K/S 1.2 1d: ok err 7.019e-04 rel 3.5e-15
+  SIMPSON         S 1e+06 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 1.235e-01 rel 6.2e-13
+  SIMPSON         S 1e+06 mult 1e+06 CALL K/S 0.8 1s: ok err 1.373e-02 rel 6.9e-14
+  SIMPSON         S 1e+06 mult 1e+06 CALL K/S 0.8 1d: REFUSED (Price (200038353837.562469) below discounted European lower bound (200038353837.563660)) true price 200038353837.563660
+  GAUSS_LEGENDRE  S 10000 mult 300 PUT K/S 1.2 1e-9y: ok err 1.015e-05 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 300 CALL K/S 0.8 1e-9y: ok err 1.015e-05 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 10000 PUT K/S 1.2 1e-9y: ok err 3.383e-04 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 10000 PUT K/S 1.2 1s: REFUSED (Price (19999999.917448) below discounted European lower bound (19999999.917555)) true price 19999999.917555
+  GAUSS_LEGENDRE  S 10000 mult 10000 CALL K/S 0.8 1e-9y: ok err 3.384e-04 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 10000 CALL K/S 0.8 1s: REFUSED (Price (20000000.044287) below discounted European lower bound (20000000.044394)) true price 20000000.044394
+  GAUSS_LEGENDRE  S 10000 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 3.383e-02 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 1e+06 PUT K/S 1.2 1s: REFUSED (Price (1999999991.744805) below discounted European lower bound (1999999991.755454)) true price 1999999991.755454
+  GAUSS_LEGENDRE  S 10000 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 3.384e-02 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 1e+06 CALL K/S 0.8 1s: REFUSED (Price (2000000004.428727) below discounted European lower bound (2000000004.439371)) true price 2000000004.439371
+  GAUSS_LEGENDRE  S 100000 mult 300 PUT K/S 1.2 1e-9y: ok err 1.015e-04 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 300 PUT K/S 1.2 1s: ok err -3.193e-05 rel 5.3e-12
+  GAUSS_LEGENDRE  S 100000 mult 300 CALL K/S 0.8 1e-9y: ok err 1.015e-04 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 300 CALL K/S 0.8 1s: ok err -3.195e-05 rel 5.3e-12
+  GAUSS_LEGENDRE  S 100000 mult 10000 PUT K/S 1.2 1e-9y: ok err 3.384e-03 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 10000 PUT K/S 1.2 1s: REFUSED (Price (199999999.174481) below discounted European lower bound (199999999.175545)) true price 199999999.175545
+  GAUSS_LEGENDRE  S 100000 mult 10000 CALL K/S 0.8 1e-9y: ok err 3.383e-03 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 10000 CALL K/S 0.8 1s: REFUSED (Price (200000000.442872) below discounted European lower bound (200000000.443937)) true price 200000000.443937
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 3.384e-01 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 PUT K/S 1.2 1s: REFUSED (Price (19999999917.448116) below discounted European lower bound (19999999917.554539)) true price 19999999917.554539
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 PUT K/S 1.2 1d: ok err 5.722e-05 rel 2.9e-15
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 3.383e-01 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 CALL K/S 0.8 1s: REFUSED (Price (20000000044.287201) below discounted European lower bound (20000000044.393703)) true price 20000000044.393703
+  GAUSS_LEGENDRE  S 1e+06 mult 300 PUT K/S 1.2 1e-9y: ok err 1.015e-03 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 300 PUT K/S 1.2 1s: REFUSED (Price (59999999.752345) below discounted European lower bound (59999999.752664)) true price 59999999.752664
+  GAUSS_LEGENDRE  S 1e+06 mult 300 CALL K/S 0.8 1e-9y: ok err 1.015e-03 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 300 CALL K/S 0.8 1s: REFUSED (Price (60000000.132861) below discounted European lower bound (60000000.133181)) true price 60000000.133181
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 PUT K/S 1.2 1e-9y: ok err 3.384e-02 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 PUT K/S 1.2 1s: REFUSED (Price (1999999991.744818) below discounted European lower bound (1999999991.755455)) true price 1999999991.755455
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 PUT K/S 1.2 1d: ok err 1.144e-05 rel 5.7e-15
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 CALL K/S 0.8 1e-9y: ok err 3.383e-02 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 CALL K/S 0.8 1s: REFUSED (Price (2000000004.428713) below discounted European lower bound (2000000004.439371)) true price 2000000004.439371
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 3.384e+00 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 PUT K/S 1.2 1s: REFUSED (Price (199999999174.481842) below discounted European lower bound (199999999175.545532)) true price 199999999175.545532
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 PUT K/S 1.2 1d: ok err 1.129e-03 rel 5.6e-15
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 3.383e+00 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 CALL K/S 0.8 1s: REFUSED (Price (200000000442.871307) below discounted European lower bound (200000000443.937134)) true price 200000000443.937134
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 CALL K/S 0.8 1d: REFUSED (Price (200038353837.562866) below discounted European lower bound (200038353837.563660)) true price 200038353837.563660
+done

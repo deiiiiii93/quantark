@@ -453,3 +453,34 @@ def run_all_tests():
 if __name__ == "__main__":
     success = run_all_tests()
     sys.exit(0 if success else 1)
+
+
+# W16 near-expiry measurement (docs/superpowers/specs/2026-10-13-quad-near-expiry-evidence): the lower-bound check's
+# absolute 1e-4 refused correct deep-in-the-money prices once the notional scale grew (relative error ~1e-12).
+_BIG = [(QuadratureMethod.SIMPSON, 1e5, 1e4, OptionType.PUT, 1.2, 1e-9),
+        (QuadratureMethod.SIMPSON, 1e5, 1e4, OptionType.CALL, 0.8, 1e-9),
+        (QuadratureMethod.GAUSS_LEGENDRE, 1e4, 1e4, OptionType.PUT, 1.2, 1.0 / (365 * 24 * 3600)),
+        (QuadratureMethod.GAUSS_LEGENDRE, 1e5, 1e4, OptionType.CALL, 0.8, 1.0 / (365 * 24 * 3600))]
+
+
+def _big_env(spot):
+    return PricingEnvironment(spot_quote=SpotQuote(spot=spot), vol_surface=FlatVolSurface(volatility=0.3),
+                              rate_curve=FlatRateCurve(rate=0.03), div_yield=ContinuousDividendYield(0.01),
+                              valuation_date=datetime(2026, 1, 5))
+
+
+@pytest.mark.parametrize("method,spot,mult,option_type,moneyness,maturity", _BIG)
+def test_lower_bound_check_scales_with_the_notional(method, spot, mult, option_type, moneyness, maturity):
+    product = EuropeanVanillaOption(strike=spot * moneyness, option_type=option_type, maturity=maturity,
+                                    contract_multiplier=mult)
+    env = _big_env(spot)
+    price = EuropeanQuadEngine(method=method).price(product, env)
+    assert price == pytest.approx(BlackScholesEngine().price(product, env), rel=1e-9)
+
+
+def test_lower_bound_check_still_refuses_a_price_far_below_the_bound(monkeypatch):
+    product = EuropeanVanillaOption(strike=1.2e5, option_type=OptionType.PUT, maturity=1e-9, contract_multiplier=1e4)
+    engine = EuropeanQuadEngine()
+    monkeypatch.setattr(engine, "_price_simpson", lambda *a, **k: 0.99 * 2e4)   # 1% below the bound per unit
+    with pytest.raises(NumericalError, match="below discounted European lower bound"):
+        engine.price(product, _big_env(1e5))

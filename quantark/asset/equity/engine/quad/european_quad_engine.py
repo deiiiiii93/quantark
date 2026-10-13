@@ -24,7 +24,10 @@ from quantark.asset.equity.param import QuadParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError, NumericalError, PricingError
 from quantark.util.enum.engine_enums import EngineType, QuadratureMethod
-from quantark.util.numerical import safe_exp
+from quantark.util.numerical import Tolerance, safe_exp
+
+
+_LOWER_BOUND_ABS_TOL = 1e-4
 
 
 class EuropeanQuadEngine(BaseEngine):
@@ -183,7 +186,10 @@ class EuropeanQuadEngine(BaseEngine):
             timing.payment_df,
             timing.delay_df,
         )
-        if price < lower_bound - 1e-4:  # Small tolerance for numerical errors
+        # Quadrature and rounding error scale with the price: an absolute 1e-4 alone refused correct deep-ITM prices
+        # at large notionals (relative error <= 2e-11 measured, W16 near-expiry evidence); the 1e-4 floor keeps every
+        # bound below 1e5 exactly as before.
+        if price < lower_bound - max(_LOWER_BOUND_ABS_TOL, Tolerance.RELATIVE * lower_bound):
             raise NumericalError(
                 f"Price ({price:.6f}) below discounted European lower bound "
                 f"({lower_bound:.6f})"

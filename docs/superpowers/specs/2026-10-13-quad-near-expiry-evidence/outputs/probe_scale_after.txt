@@ -1,0 +1,81 @@
+(1) ATM relative error by maturity, spot 100, vol 0.3
+  SIMPSON         1e-6y  quad 0.01196927479 bs 0.01196926815 rel 5.547e-07
+  SIMPSON         1d     quad 0.6291626864 bs 0.629150429 rel 1.948e-05
+  SIMPSON         1m     quad 3.531872691 bs 3.531944374 rel 2.030e-05
+  SIMPSON         1y     quad 12.69419741 bs 12.69400453 rel 1.520e-05
+  SIMPSON         5y     quad 28.57832386 bs 28.57837323 rel 1.727e-06
+  GAUSS_LEGENDRE  1e-6y  quad 0.01201842379 bs 0.01196926815 rel 4.107e-03
+  GAUSS_LEGENDRE  1d     quad 0.6317170066 bs 0.629150429 rel 4.079e-03
+  GAUSS_LEGENDRE  1m     quad 3.545072742 bs 3.531944374 rel 3.717e-03
+  GAUSS_LEGENDRE  1y     quad 12.70054638 bs 12.69400453 rel 5.153e-04
+  GAUSS_LEGENDRE  5y     quad 28.49070482 bs 28.57837323 rel 3.068e-03
+
+(2) deep ITM, tiny maturity, growing notional scale (absolute tolerance 1e-4)
+  SIMPSON         S 10000 mult 10000 PUT K/S 1.2 1e-9y: ok err 1.238e-05 rel 6.2e-13
+  SIMPSON         S 10000 mult 10000 CALL K/S 0.8 1e-9y: ok err 1.249e-05 rel 6.2e-13
+  SIMPSON         S 10000 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 1.238e-03 rel 6.2e-13
+  SIMPSON         S 10000 mult 1e+06 PUT K/S 1.2 1s: ok err 1.462e-04 rel 7.3e-14
+  SIMPSON         S 10000 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 1.249e-03 rel 6.2e-13
+  SIMPSON         S 10000 mult 1e+06 CALL K/S 0.8 1s: ok err 1.512e-04 rel 7.6e-14
+  SIMPSON         S 100000 mult 10000 PUT K/S 1.2 1e-9y: ok err -1.037e-04 rel 5.2e-13
+  SIMPSON         S 100000 mult 10000 PUT K/S 1.2 1s: ok err 1.535e-05 rel 7.7e-14
+  SIMPSON         S 100000 mult 10000 CALL K/S 0.8 1e-9y: ok err -1.044e-04 rel 5.2e-13
+  SIMPSON         S 100000 mult 10000 CALL K/S 0.8 1s: ok err 1.454e-05 rel 7.3e-14
+  SIMPSON         S 100000 mult 1e+06 PUT K/S 1.2 1e-9y: ok err -1.037e-02 rel 5.2e-13
+  SIMPSON         S 100000 mult 1e+06 PUT K/S 1.2 1s: ok err 1.534e-03 rel 7.7e-14
+  SIMPSON         S 100000 mult 1e+06 PUT K/S 1.2 1d: ok err 1.907e-05 rel 9.5e-16
+  SIMPSON         S 100000 mult 1e+06 CALL K/S 0.8 1e-9y: ok err -1.044e-02 rel 5.2e-13
+  SIMPSON         S 100000 mult 1e+06 CALL K/S 0.8 1s: ok err 1.453e-03 rel 7.3e-14
+  SIMPSON         S 100000 mult 1e+06 CALL K/S 0.8 1d: ok err -4.578e-05 rel 2.3e-15
+  SIMPSON         S 1e+06 mult 300 PUT K/S 1.2 1e-9y: ok err 3.763e-05 rel 6.3e-13
+  SIMPSON         S 1e+06 mult 300 CALL K/S 0.8 1e-9y: ok err 3.704e-05 rel 6.2e-13
+  SIMPSON         S 1e+06 mult 10000 PUT K/S 1.2 1e-9y: ok err 1.254e-03 rel 6.3e-13
+  SIMPSON         S 1e+06 mult 10000 PUT K/S 1.2 1s: ok err 1.583e-04 rel 7.9e-14
+  SIMPSON         S 1e+06 mult 10000 CALL K/S 0.8 1e-9y: ok err 1.235e-03 rel 6.2e-13
+  SIMPSON         S 1e+06 mult 10000 CALL K/S 0.8 1s: ok err 1.373e-04 rel 6.9e-14
+  SIMPSON         S 1e+06 mult 10000 CALL K/S 0.8 1d: ok err -1.192e-05 rel 6.0e-15
+  SIMPSON         S 1e+06 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 1.254e-01 rel 6.3e-13
+  SIMPSON         S 1e+06 mult 1e+06 PUT K/S 1.2 1s: ok err 1.584e-02 rel 7.9e-14
+  SIMPSON         S 1e+06 mult 1e+06 PUT K/S 1.2 1d: ok err 7.019e-04 rel 3.5e-15
+  SIMPSON         S 1e+06 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 1.235e-01 rel 6.2e-13
+  SIMPSON         S 1e+06 mult 1e+06 CALL K/S 0.8 1s: ok err 1.373e-02 rel 6.9e-14
+  SIMPSON         S 1e+06 mult 1e+06 CALL K/S 0.8 1d: ok err -1.190e-03 rel 5.9e-15
+  GAUSS_LEGENDRE  S 10000 mult 300 PUT K/S 1.2 1e-9y: ok err 1.015e-05 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 300 CALL K/S 0.8 1e-9y: ok err 1.015e-05 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 10000 PUT K/S 1.2 1e-9y: ok err 3.383e-04 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 10000 PUT K/S 1.2 1s: ok err -1.065e-04 rel 5.3e-12
+  GAUSS_LEGENDRE  S 10000 mult 10000 CALL K/S 0.8 1e-9y: ok err 3.384e-04 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 10000 CALL K/S 0.8 1s: ok err -1.064e-04 rel 5.3e-12
+  GAUSS_LEGENDRE  S 10000 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 3.383e-02 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 1e+06 PUT K/S 1.2 1s: ok err -1.065e-02 rel 5.3e-12
+  GAUSS_LEGENDRE  S 10000 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 3.384e-02 rel 1.7e-11
+  GAUSS_LEGENDRE  S 10000 mult 1e+06 CALL K/S 0.8 1s: ok err -1.064e-02 rel 5.3e-12
+  GAUSS_LEGENDRE  S 100000 mult 300 PUT K/S 1.2 1e-9y: ok err 1.015e-04 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 300 PUT K/S 1.2 1s: ok err -3.193e-05 rel 5.3e-12
+  GAUSS_LEGENDRE  S 100000 mult 300 CALL K/S 0.8 1e-9y: ok err 1.015e-04 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 300 CALL K/S 0.8 1s: ok err -3.195e-05 rel 5.3e-12
+  GAUSS_LEGENDRE  S 100000 mult 10000 PUT K/S 1.2 1e-9y: ok err 3.384e-03 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 10000 PUT K/S 1.2 1s: ok err -1.064e-03 rel 5.3e-12
+  GAUSS_LEGENDRE  S 100000 mult 10000 CALL K/S 0.8 1e-9y: ok err 3.383e-03 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 10000 CALL K/S 0.8 1s: ok err -1.065e-03 rel 5.3e-12
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 3.384e-01 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 PUT K/S 1.2 1s: ok err -1.064e-01 rel 5.3e-12
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 PUT K/S 1.2 1d: ok err 5.722e-05 rel 2.9e-15
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 3.383e-01 rel 1.7e-11
+  GAUSS_LEGENDRE  S 100000 mult 1e+06 CALL K/S 0.8 1s: ok err -1.065e-01 rel 5.3e-12
+  GAUSS_LEGENDRE  S 1e+06 mult 300 PUT K/S 1.2 1e-9y: ok err 1.015e-03 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 300 PUT K/S 1.2 1s: ok err -3.191e-04 rel 5.3e-12
+  GAUSS_LEGENDRE  S 1e+06 mult 300 CALL K/S 0.8 1e-9y: ok err 1.015e-03 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 300 CALL K/S 0.8 1s: ok err -3.197e-04 rel 5.3e-12
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 PUT K/S 1.2 1e-9y: ok err 3.384e-02 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 PUT K/S 1.2 1s: ok err -1.064e-02 rel 5.3e-12
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 PUT K/S 1.2 1d: ok err 1.144e-05 rel 5.7e-15
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 CALL K/S 0.8 1e-9y: ok err 3.383e-02 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 10000 CALL K/S 0.8 1s: ok err -1.066e-02 rel 5.3e-12
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 PUT K/S 1.2 1e-9y: ok err 3.384e+00 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 PUT K/S 1.2 1s: ok err -1.064e+00 rel 5.3e-12
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 PUT K/S 1.2 1d: ok err 1.129e-03 rel 5.6e-15
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 CALL K/S 0.8 1e-9y: ok err 3.383e+00 rel 1.7e-11
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 CALL K/S 0.8 1s: ok err -1.066e+00 rel 5.3e-12
+  GAUSS_LEGENDRE  S 1e+06 mult 1e+06 CALL K/S 0.8 1d: ok err -7.935e-04 rel 4.0e-15
+done
