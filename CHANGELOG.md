@@ -70,6 +70,14 @@ backtest and FX dynamic scenario.
   `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`.
   **Breaking:** `calculate_greeks` on any numeric FX product under a `BUSINESS_DAYS` environment with no calendar now
   raises `ValidationError` in theta (it used to step `theta_days / 365`); a business-day count needs the calendar.
+- FX local-vol and Heston theta (`fx_local_vol_model_greeks`, `FxHestonPDESolver`, `FxHestonSLVPDESolver`, and the LV/Heston
+  analytical and MC engines that share the first) step a numeric (`maturity=`) product by the environment's year
+  fraction of `theta_days` calendar days, as `BaseFxEngine._fdm_theta` does, instead of `theta_days / 365`. The
+  `min(step, 0.5 * maturity)` cap is kept and theta is rescaled to a per-calendar-day figure; a zero step (BUSINESS_DAYS
+  Friday or holiday) gives theta 0.0 and BUSINESS_DAYS without a calendar raises `ValidationError`. Moved values:
+  none under `CALENDAR_DAYS` / `ACT_365` (bitwise); on a 1-year ATM EUR/USD call (notional 1e6, flat 10% vol) `ACT_360`
+  local-vol theta -97.0526 -> -98.4012 and BUSINESS_DAYS-on-a-Friday -97.0526 -> 0.0 (coarse-grid Heston PDE 434.64 ->
+  432.38 and 0.0; Heston-SLV PDE 462.84 -> 460.54 and 0.0).
 - FX TARN / TARF cash due on the valuation date stays in the value (user decision OQ-1 b, 2026-10-10, as W8 values a
   dated contract on its date at its settled value): determined cash is booked (a `PAYMENT` event, out of the value)
   once its pay time is strictly past. A numeric pending `pay_time` of 0.0 and a dated pending `pay_date` equal to

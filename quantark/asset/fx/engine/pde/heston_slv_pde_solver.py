@@ -7,6 +7,7 @@ from typing import Dict, Optional, Union
 
 from quantark.asset.fx.engine.base_fx_engine import BaseFxEngine, FxEngineParams
 from quantark.asset.fx.engine.localvol_common import check_fx_v1_restrictions, fx_contract_value
+from quantark.asset.fx.engine.localvol_greeks import fx_numeric_theta
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.param.rrf import ParallelShiftRateCurve
 from quantark.priceenv import FxPricingEnvironment
@@ -95,12 +96,8 @@ class FxHestonSLVPDESolver(BaseFxEngine):
         g["rho_for"] = (self._price(product, env_fu) - self._price(product, env_fd)) / (2.0 * rb) / 100.0
         maturity_attr = getattr(product, "maturity", None)
         if maturity_attr is not None and maturity_attr > 0:
-            eff = min(self.params.theta_days / 365.0, 0.5 * float(maturity_attr))
-            shifted = deepcopy(product)
-            shifted.maturity = float(maturity_attr) - eff
-            if getattr(shifted, "delivery", None) is not None:
-                shifted.delivery = shifted.delivery - eff
-            g["theta"] = (self._price(shifted, fx_env) - base) / (eff * 365.0)
+            g["theta"] = fx_numeric_theta(
+                self._price, product, fx_env, base, self.params.theta_days)
         else:
             from datetime import timedelta
             env_fut = deepcopy(fx_env)

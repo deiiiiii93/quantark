@@ -11,7 +11,43 @@ from datetime import timedelta
 from typing import Callable, Dict
 
 from quantark.param.rrf import ParallelShiftRateCurve
+from quantark.util.calendar import calculate_year_fraction
+from quantark.util.numerical import is_zero
 from quantark.util.numerical.constants import Tolerance
+
+
+def fx_numeric_theta(
+    price_fn: Callable,
+    product,
+    fx_env,
+    base: float,
+    theta_days: int,
+) -> float:
+    """Theta (per calendar day) of a numeric (``maturity=``) FX product.
+
+    The step is the environment's year fraction of ``theta_days`` calendar days (spec I8 / A10, user decision Q7), so
+    it matches the step the dated twin's times take when the valuation date moves. Maturity and delivery shrink by
+    ``eff = min(dt_env, 0.5 * maturity)`` and the difference is rescaled linearly to a per-calendar-day figure:
+    ``(V(T - eff) - V) * dt_env / (eff * theta_days)``. A zero environment step (BUSINESS_DAYS weekend/holiday) gives
+    0.0; BUSINESS_DAYS without a calendar raises ValidationError (from ``calculate_year_fraction``). Under
+    CALENDAR_DAYS / ACT_365 ``dt_env == theta_days / 365.0`` and the historical expression is kept bitwise.
+    """
+    maturity = product.maturity
+    future_date = fx_env.valuation_date + timedelta(days=theta_days)
+    dt_env = calculate_year_fraction(
+        fx_env.valuation_date, future_date, fx_env.day_count_convention, fx_env.bus_days_in_year,
+        calendar=fx_env.calendar)
+    if is_zero(dt_env):
+        return 0.0
+    eff = min(dt_env, 0.5 * float(maturity))  # never shrink past expiry
+    shifted = deepcopy(product)
+    shifted.maturity = float(maturity) - eff
+    if getattr(shifted, "delivery", None) is not None:
+        shifted.delivery = shifted.delivery - eff
+    future = price_fn(shifted, fx_env)
+    if dt_env == theta_days / 365.0:
+        return (future - base) / (eff * 365.0)
+    return (future - base) * dt_env / (eff * theta_days)
 
 
 def fx_local_vol_model_greeks(
@@ -57,16 +93,10 @@ def fx_local_vol_model_greeks(
 
     # Theta: daily decay. Shrink float maturity AND delivery (preserving expiry==delivery);
     # for date-based products advance the valuation date so theta is always provided.
-    dt = theta_days / 365.0
     maturity = getattr(product, "maturity", None)
     if maturity is not None and maturity > 0:
-        eff = min(dt, 0.5 * maturity)  # never shrink past expiry
-        shifted = deepcopy(product)
-        shifted.maturity = maturity - eff
-        if getattr(shifted, "delivery", None) is not None:
-            shifted.delivery = shifted.delivery - eff
-        future = price_with_surface(shifted, fx_env, lv_surface)
-        greeks["theta"] = (future - base) / (eff * 365.0)
+        greeks["theta"] = fx_numeric_theta(
+            lambda p, e: price_with_surface(p, e, lv_surface), product, fx_env, base, theta_days)
     else:
         env_fut = deepcopy(fx_env)
         env_fut.valuation_date = fx_env.valuation_date + timedelta(days=theta_days)
