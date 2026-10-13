@@ -22,7 +22,7 @@ from quantark.util.calendar import (
     calculate_year_fraction,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_zero
+from quantark.util.numerical import is_close, is_zero
 
 if TYPE_CHECKING:
     from quantark.priceenv import PricingEnvironment
@@ -321,6 +321,17 @@ def knock_in_decided_at_valuation(product, spot: float, pricing_env) -> bool:
             if at_valuation_instant(record.observation_time) and record.barrier is not None
         ]
     return any((spot >= level) if product.is_reverse else (spot <= level) for level in levels)
+
+
+def _same_levels(a: tuple, b: tuple, tolerance: float) -> bool:
+    """Whether two ``(barrier, upper_barrier, lower_barrier)`` tuples are the same levels: the same levels set, each
+    pair within ``tolerance`` (relative and absolute)."""
+    for x, y in zip(a, b):
+        if (x is None) != (y is None):
+            return False
+        if x is not None and not is_close(float(x), float(y), rel_tol=tolerance, abs_tol=tolerance):
+            return False
+    return True
 
 
 def refuse_accumulate(schedule: Optional["ObservationSchedule"], product_name: str) -> None:
@@ -688,21 +699,56 @@ class ObservationSchedule:
                 return False
         return True
 
+    def remaining_records(self, pricing_env: PricingEnv = None) -> List[ObservationRecord]:
+        """The records strictly after the valuation instant (t > 0), in schedule order.
+
+        A record at the valuation instant (t = 0: a numeric time within ``Tolerance.ZERO`` of zero, or a dated record
+        on the valuation date) is decided at valuation on the known spot; one behind it is history. A dated record
+        after the valuation date is resolved through ``pricing_env`` (required then). The analytical engines'
+        ``first_future_observation`` keeps the same records.
+        """
+        remaining = []
+        for rec in self.records:
+            if rec.observation_time is None and rec.observation_date is not None and pricing_env is not None:
+                if rec.observation_date <= pricing_env.valuation_date:
+                    continue
+            t = float(rec.resolve_time(pricing_env))
+            if t > 0.0 and not is_zero(t):
+                remaining.append(rec)
+        return remaining
+
+    def remaining_levels(self, pricing_env: PricingEnv = None, tolerance: float = 1e-8) -> List[tuple]:
+        """The distinct ``(barrier, upper_barrier, lower_barrier)`` levels of the remaining records (t > 0), in order.
+
+        Two records share a level when every set level agrees within ``tolerance`` (the payoff check's tolerance)
+        and the same levels are unset. One entry: a uniform forward level; none: no record remains.
+        """
+        distinct: List[tuple] = []
+        for rec in self.remaining_records(pricing_env):
+            levels = (rec.barrier, rec.upper_barrier, rec.lower_barrier)
+            if not any(_same_levels(levels, seen, tolerance) for seen in distinct):
+                distinct.append(levels)
+        return distinct
+
     def assert_analytical_ready(
         self,
         default_payoff: float = 0.0,
         tolerance: float = 1e-8,
         business_days_in_year: float = 252.0,
+        pricing_env: PricingEnv = None,
     ) -> None:
         """
         Validate preconditions for analytical engines that rely on barrier shift:
-        regular observation frequency and fixed payoff across observations.
+        regular observation frequency, fixed payoff across observations, and one
+        barrier level (both levels on a double barrier) across the remaining
+        observations (W18c, spec 2026-10-13 A8).
 
         Args:
             default_payoff: Default payoff value to use for records without explicit payoffs
             tolerance: Tolerance for validation checks (default: 1e-8 for numerical stability)
             business_days_in_year: Number of business days in a year used for validating
                 business-day frequency conventions (default: 252.0).
+            pricing_env: Resolves dated records for the level check (``remaining_records``).
 
         Raises:
             ValidationError: If schedule is not suitable for analytical pricing
@@ -720,6 +766,13 @@ class ObservationSchedule:
         ):
             raise ValidationError(
                 "Analytical barrier shift requires a fixed payoff across observation records."
+            )
+        levels = self.remaining_levels(pricing_env, tolerance=tolerance)
+        if len(levels) > 1:
+            # TODO(w18c): a remaining schedule with per-record levels has no closed form; price it on MC/PDE/QUAD
+            raise ValidationError(
+                "Analytical barrier shift requires one barrier level: the levels differ across the remaining "
+                f"observation records ({levels[0]} vs {levels[1]}, as (barrier, upper, lower))."
             )
 
     @property

@@ -15,6 +15,11 @@ from typing import Optional
 
 from scipy import stats
 
+from quantark.asset.equity.engine.barrier_schedule_rules import (
+    forward_double_barrier_levels,
+    refuse_mixed_forward_levels,
+    valuation_double_barrier_terms,
+)
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -150,9 +155,20 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)
-        L = product.lower_barrier
-        U = product.upper_barrier
         multiplier = product.contract_multiplier
+        obs_type = product.observation_type
+        discrete = obs_type == ObservationType.DISCRETE
+        if discrete:
+            # W18c (spec 2026-10-13 I4, A8): a DISCRETE schedule is breached now only by a record at the valuation
+            # instant, at its own levels; forward, the closed form monitors the corridor every remaining record
+            # shares (None: the levels differ -- no closed form, refused before any forward value)
+            hit_now = self._breached_at_valuation(product, pricing_env, S)
+            forward = forward_double_barrier_levels(product, pricing_env)
+        else:
+            hit_now = product.is_barrier_hit(S)
+            forward = (product.upper_barrier, product.lower_barrier)
+        # mixed remaining levels price no forward value: the product's corridor then feeds only the input checks
+        U, L = forward if forward is not None else (product.upper_barrier, product.lower_barrier)
 
         self._validate_inputs(S, K, T, r, q, sigma, L, U)
 
@@ -160,27 +176,28 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         if is_zero(T):
             return self._price_zero_maturity(product, pricing_env, S, multiplier, knocked_in=knocked_in)
 
+        if discrete and forward is None and (not hit_now or is_zero(sigma)):
+            # a forward value needs one corridor; so does the zero-volatility shortcut, which reads none of the records
+            refuse_mixed_forward_levels(product.observation_schedule, pricing_env, default_payoff=product.rebate)
+
         # Edge case: zero volatility
         if is_zero(sigma):
-            return self._price_zero_vol(product, S, T, r, q, multiplier)
-
-        obs_type = product.observation_type
+            return self._price_zero_vol(product, S, T, r, q, multiplier, L, U)
 
         # EXPIRY: nothing is observed before maturity, and the closed form holds from any spot (spec 3C §5.8)
         if obs_type == ObservationType.EXPIRY:
             return self._price_expiry(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
 
         # Outside the corridor with no observation due: the next observation decides
-        if (
-            obs_type == ObservationType.DISCRETE
-            and product.is_barrier_hit(S)
-            and not self._breached_at_valuation(product, pricing_env, S)
-        ):
+        if discrete and not hit_now and (S >= U or S <= L):
             return self._price_beyond_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
 
         # Spot already outside barriers: continuously, or at an observation at the valuation instant
-        if product.is_barrier_hit(S):
+        if hit_now:
             if product.is_knock_out:
+                # the deciding record's payoff on a DISCRETE schedule (W18c), the rebate otherwise
+                if discrete:
+                    return valuation_double_barrier_terms(product, pricing_env)[2] * multiplier
                 return product.rebate * multiplier
             # Knock-in: already activated, price as vanilla
             vanilla = self._create_vanilla(product)
@@ -224,13 +241,16 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
     ) -> float:
         """Return price at maturity: a knock-in carried as triggered (``knocked_in``, ruling 2026-10-10) pays the
         payoff; otherwise a discrete schedule is breached only by its records at the valuation instant, each at its
-        own levels, and continuous and expiry monitoring observe the spot."""
+        own levels (a knock-out hit there pays that record's payoff, W18c), and continuous and expiry monitoring
+        observe the spot."""
         if product.observation_type == ObservationType.DISCRETE:
             hit = self._breached_at_valuation(product, pricing_env, spot)
         else:
             hit = product.is_barrier_hit(spot)
         if product.is_knock_out:
             if hit:
+                if product.observation_type == ObservationType.DISCRETE:
+                    return valuation_double_barrier_terms(product, pricing_env)[2] * multiplier
                 return product.rebate * multiplier
             return product.get_payoff(spot)
         # Knock-in: carried as triggered, or hit now
@@ -261,7 +281,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
             raise PricingError("Discrete barrier monitoring requires ObservationSchedule.")
-        schedule.assert_analytical_ready(default_payoff=product.rebate)
+        schedule.assert_analytical_ready(default_payoff=product.rebate, pricing_env=pricing_env)
         freq = schedule.ensure_regular_frequency(schedule.times)
         first = first_future_observation(self._resolved_records(product, pricing_env), schedule, single=False)
         tau = T - first.time
@@ -309,10 +329,13 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         r: float,
         q: float,
         multiplier: float,
+        L: float,
+        U: float,
     ) -> float:
-        """Price when volatility is zero (deterministic path)."""
+        """Price when volatility is zero (deterministic path), on the corridor ``L``..``U`` (a DISCRETE schedule's
+        remaining records' levels, W18c)."""
         forward = float(spot * safe_exp((r - q) * T))
-        is_outside = product.is_barrier_hit(forward)
+        is_outside = forward >= U or forward <= L
         discount = float(safe_exp(-r * T))
 
         if product.is_knock_out:
@@ -398,7 +421,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             raise PricingError(
                 "Discrete barrier monitoring requires ObservationSchedule."
             )
-        schedule.assert_analytical_ready(default_payoff=product.rebate)
+        schedule.assert_analytical_ready(default_payoff=product.rebate, pricing_env=pricing_env)
         freq = schedule.ensure_regular_frequency(schedule.times)
 
         lower_shifted = apply_barrier_shift(

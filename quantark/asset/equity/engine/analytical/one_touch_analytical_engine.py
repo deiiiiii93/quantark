@@ -7,6 +7,11 @@ from typing import Optional
 
 from scipy import stats
 
+from quantark.asset.equity.engine.barrier_schedule_rules import (
+    forward_barrier_level,
+    refuse_mixed_forward_levels,
+    valuation_barrier_terms,
+)
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -94,9 +99,24 @@ class OneTouchAnalyticalEngine(BaseEngine):
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
+        obs_type = product.observation_type
+        discrete = obs_type == ObservationType.DISCRETE
+        if discrete:
+            # W18c (spec 2026-10-13 I4): a DISCRETE schedule is touched now only by a record at the valuation instant,
+            # at its own level; forward, the closed form monitors the level every remaining record shares (None:
+            # they differ -- no closed form, refused before any forward value)
+            hit_now = self._breached_at_valuation(product, pricing_env, spot)
+            forward_level = forward_barrier_level(product, pricing_env)
+            beyond_forward = forward_level is not None and self._beyond(product, spot, forward_level)
+        else:
+            hit_now = obs_type != ObservationType.EXPIRY and product.is_barrier_hit(spot)
+            forward_level = product.barrier
+            beyond_forward = hit_now
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
-        vol = pricing_env.get_vol(product.barrier, maturity)
+        # the volatility at the monitored level (mixed remaining levels price no forward value: product.barrier then
+        # feeds only the input checks)
+        vol = pricing_env.get_vol(forward_level if forward_level is not None else product.barrier, maturity)
         rebate = product.rebate
 
         pay_at_hit = product.payment_at_hit if product.is_one_touch else False
@@ -108,8 +128,8 @@ class OneTouchAnalyticalEngine(BaseEngine):
         hit_lag = 0.0
         if (
             pay_at_hit
-            and product.observation_type != ObservationType.EXPIRY
-            and not product.is_barrier_hit(spot)
+            and obs_type != ObservationType.EXPIRY
+            and not (hit_now or beyond_forward)
         ):
             hit_lag = constant_hit_lag_year_fraction(product, pricing_env, maturity)
 
@@ -126,23 +146,23 @@ class OneTouchAnalyticalEngine(BaseEngine):
             )
             return value + pending_pv
 
-        obs_type = product.observation_type
-
-        if (
-            obs_type == ObservationType.DISCRETE
-            and product.is_barrier_hit(spot)
-            and not self._breached_at_valuation(product, pricing_env, spot)
-        ):
-            # Beyond the barrier with no observation due: the next observation decides
-            return (
-                self._price_beyond_discrete(
-                    product, pricing_env, spot, maturity, rate, div, vol, terminal_timing
+        if discrete and not hit_now:
+            if forward_level is None:
+                refuse_mixed_forward_levels(product.observation_schedule, pricing_env, default_payoff=rebate)
+            if beyond_forward:
+                # Beyond the barrier with no observation due: the next observation decides
+                return (
+                    self._price_beyond_discrete(
+                        product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level
+                    )
+                    + pending_pv
                 )
-                + pending_pv
-            )
 
-        if obs_type != ObservationType.EXPIRY and product.is_barrier_hit(spot):
+        if hit_now:
             if product.is_one_touch:
+                # the deciding record's payoff on a DISCRETE schedule (W18c), the rebate otherwise
+                if discrete:
+                    rebate = valuation_barrier_terms(product, pricing_env)[1]
                 if pay_at_hit:
                     event_timing = SettlementResolver.resolve_contingent(
                         product,
@@ -167,10 +187,10 @@ class OneTouchAnalyticalEngine(BaseEngine):
                 raise PricingError(
                     "Discrete monitoring requires a populated ObservationSchedule."
                 )
-            schedule.assert_analytical_ready(default_payoff=rebate)
+            schedule.assert_analytical_ready(default_payoff=rebate, pricing_env=pricing_env)
             frequency = schedule.ensure_regular_frequency(schedule.times)
             barrier = apply_barrier_shift(
-                barrier=product.barrier,
+                barrier=forward_level,
                 is_up_barrier=product.is_up_barrier,
                 volatility=vol,
                 observation_interval=frequency,
@@ -225,12 +245,16 @@ class OneTouchAnalyticalEngine(BaseEngine):
             product=product,
         )
 
+    @staticmethod
+    def _beyond(product: OneTouchOption, spot: float, level: float) -> bool:
+        return (spot >= level) if product.is_up_barrier else (spot <= level)
+
     def _breached_at_valuation(
         self, product: OneTouchOption, pricing_env: PricingEnvironment, spot: float
     ) -> bool:
         """Whether an observation at the valuation instant is breached by the spot, at its own level."""
         return any(
-            (spot >= rec.barrier) if product.is_up_barrier else (spot <= rec.barrier)
+            self._beyond(product, spot, rec.barrier)
             for rec in observed_at_valuation(self._resolved_records(product, pricing_env))
         )
 
@@ -244,18 +268,20 @@ class OneTouchAnalyticalEngine(BaseEngine):
         div: float,
         vol: float,
         terminal_timing,
+        forward_level: float,
     ) -> float:
         """A spot beyond a discretely monitored barrier with no observation due (``first_observation``).
 
         A touch at the first future observation ``t1`` pays the one-touch's rebate (at the hit, after the constant
         hit lag, or at the terminal payment time) and ends the no-touch; otherwise the continuation is this
-        engine's shifted formula from ``t1`` (no observation left: no touch).
+        engine's shifted formula from ``t1`` (no observation left: no touch), on ``forward_level``, the level the
+        remaining records share (W18c).
         """
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
             raise PricingError("Discrete monitoring requires a populated ObservationSchedule.")
         rebate = product.rebate
-        schedule.assert_analytical_ready(default_payoff=rebate)
+        schedule.assert_analytical_ready(default_payoff=rebate, pricing_env=pricing_env)
         frequency = schedule.ensure_regular_frequency(schedule.times)
         first = first_future_observation(
             self._resolved_records(product, pricing_env),
@@ -265,7 +291,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
         )
         tau = maturity - first.time
         shifted = apply_barrier_shift(
-            barrier=product.barrier,
+            barrier=forward_level,
             is_up_barrier=product.is_up_barrier,
             volatility=vol,
             observation_interval=frequency,
@@ -461,13 +487,17 @@ class OneTouchAnalyticalEngine(BaseEngine):
         terminal_payment_df: float,
     ) -> float:
         """Handle payoffs when maturity is effectively zero: a discrete schedule touches only through its records
-        at the valuation instant, each at its own level."""
+        at the valuation instant, each at its own level, and a one-touch touched there pays that record's payoff
+        (W18c)."""
+        rebate = product.rebate
         if product.observation_type == ObservationType.DISCRETE:
             touched = self._breached_at_valuation(product, pricing_env, spot)
         else:
             touched = product.is_barrier_hit(spot)
         if product.is_one_touch:
             if touched:
+                if product.observation_type == ObservationType.DISCRETE:
+                    rebate = valuation_barrier_terms(product, pricing_env)[1]
                 if pay_at_hit:
                     event_timing = SettlementResolver.resolve_contingent(
                         product,
@@ -479,10 +509,10 @@ class OneTouchAnalyticalEngine(BaseEngine):
                         ),
                         pricing_env,
                     )
-                    return product.rebate * event_timing.payment_df
-                return product.rebate * terminal_payment_df
+                    return rebate * event_timing.payment_df
+                return rebate * terminal_payment_df
             return 0.0
-        return product.rebate * terminal_payment_df if not touched else 0.0
+        return rebate * terminal_payment_df if not touched else 0.0
 
     def _validate_inputs(
         self,

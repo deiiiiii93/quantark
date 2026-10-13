@@ -10,8 +10,10 @@ Discrete monitoring is handled by the underlying barrier and one-touch
 analytical engines using the Broadie-Glasserman-Kou barrier shift.
 """
 
+from dataclasses import replace
 from typing import Optional
 
+from quantark.asset.equity.engine.barrier_schedule_rules import forward_barrier_level
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -28,6 +30,7 @@ from quantark.asset.equity.product.option import (
     OneTouchOption,
     SingleSharkfinOption,
 )
+from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import BarrierDirection, BarrierType, ObservationType, TouchType
@@ -123,11 +126,24 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             no_hit_rebate=product.no_hit_rebate,
             contract_multiplier=product.contract_multiplier,
         )
+        if product.observation_type == ObservationType.DISCRETE:
+            # W18c (spec 2026-10-13 I4): hit now only by a record at the valuation instant, at its own level;
+            # forward, the level every remaining record shares (None: they differ -- the legs refuse)
+            hit_now = self._record_hit_at_valuation(product, pricing_env, spot) is not None
+            forward_level = forward_barrier_level(product, pricing_env)
+            hit_or_beyond = hit_now or (
+                forward_level is not None
+                and (spot >= forward_level if self._barrier_direction(product) == BarrierDirection.UP
+                     else spot <= forward_level)
+            )
+        else:
+            hit_now = False
+            hit_or_beyond = product.is_barrier_hit(spot)
         if (
             product.pay_at_hit
             and product.knock_out_rebate > 0
             and product.observation_type != ObservationType.EXPIRY
-            and not product.is_barrier_hit(spot)
+            and not hit_or_beyond
         ):
             # Fail closed BEFORE pricing when the first-hit lag is not one constant;
             # the knock-out cash leg (one-touch engine) applies the exp(-r L) factor
@@ -149,6 +165,11 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
                 f"Unsupported observation type: {product.observation_type}"
             )
 
+        if product.observation_type == ObservationType.DISCRETE and not hit_now:
+            # the legs' "no closed form" refusals on the sharkfin's own records (mixed payoffs or levels, A8): the
+            # knock-out leg no longer carries the record payoffs, and a zero knock-out cash leg is skipped
+            product.observation_schedule.assert_analytical_ready(
+                default_payoff=product.knock_out_rebate, pricing_env=pricing_env)
         ko_option_value = self._price_no_rebate_knock_out(product, pricing_env)
         knock_out_rebate_value = self._price_touch_leg(
             product=product,
@@ -181,6 +202,15 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
         each at its own level and paying its own cash; continuous and expiry monitoring observe the spot."""
         if product.observation_type != ObservationType.DISCRETE:
             return product.get_payoff(spot) * terminal_payment_df
+        hit = self._record_hit_at_valuation(product, pricing_env, spot)
+        if hit is None:
+            return product.get_no_hit_payoff(spot) * terminal_payment_df
+        return hit.payoff * terminal_payment_df * product.contract_multiplier
+
+    def _record_hit_at_valuation(
+        self, product: SingleSharkfinOption, pricing_env: PricingEnvironment, spot: float
+    ):
+        """The first record at the valuation instant the spot breaches at its own level, or None."""
         records = observed_at_valuation(
             resolve_current_records(
                 product.observation_schedule,
@@ -193,14 +223,21 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
         )
         up = self._barrier_direction(product) == BarrierDirection.UP
         hits = [rec for rec in records if (spot >= rec.barrier if up else spot <= rec.barrier)]
-        if not hits:
-            return product.get_no_hit_payoff(spot) * terminal_payment_df
-        return hits[0].payoff * terminal_payment_df * product.contract_multiplier
+        return hits[0] if hits else None
 
     def _price_no_rebate_knock_out(
         self, product: SingleSharkfinOption, pricing_env: PricingEnvironment
     ) -> float:
-        """Value the capped sharkfin participation leg as a knock-out option."""
+        """Value the capped sharkfin participation leg as a knock-out option: no cash on a hit, so its records pay
+        nothing (the one-touch leg pays the knock-out cash; a record paying it here would count it twice, W18c)."""
+        schedule = product.observation_schedule
+        if schedule is not None:
+            schedule = ObservationSchedule(
+                records=[replace(rec, payoff=0.0) for rec in schedule.records],
+                aggregation_mode=schedule.aggregation_mode,
+                frequency=schedule.frequency,
+                monitoring_ended=schedule.monitoring_ended,
+            )
         barrier_option = BarrierOption(
             strike=product.strike,
             option_type=product.option_type,
@@ -215,7 +252,7 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             pay_at_hit=False,
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
-            observation_schedule=product.observation_schedule,
+            observation_schedule=schedule,
             contract_multiplier=1.0,
         )
         return self._barrier_engine.price(barrier_option, pricing_env)

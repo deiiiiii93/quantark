@@ -7,7 +7,12 @@ from typing import Optional, Union, Tuple
 
 import numpy as np
 
-from quantark.asset.equity.engine.barrier_schedule_rules import refuse_knock_in_record_payoff
+from quantark.asset.equity.engine.barrier_schedule_rules import (  # noqa: F401 - re-exported (W18c moved them)
+    _beyond,
+    _record_time,
+    refuse_knock_in_record_payoff,
+    valuation_barrier_terms,
+)
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -38,7 +43,6 @@ from quantark.util.exceptions import ValidationError, PricingError
 from quantark.util.numerical import (
     is_zero,
     is_close,
-    is_greater_than_or_close,
     validate_positive,
     validate_non_negative,
     safe_log,
@@ -868,50 +872,6 @@ class BarrierOptionMCEngine(BaseEngine):
             f"BarrierOptionMCEngine(method={self.method.name}, "
             f"brownian_bridge={self.use_brownian_bridge})"
         )
-
-
-def _beyond(product: BarrierOption, spot: float, level: float) -> bool:
-    """``product.is_barrier_hit`` at ``level``: up >= level, down <= level."""
-    return spot >= level if product.is_up_barrier else spot <= level
-
-
-def _record_time(record, pricing_env) -> Optional[float]:
-    """A record's time from the valuation instant, or ``None`` when it lies behind it. A dated record on the
-    valuation instant is at 0.0 (the settlement resolver's rule); one before it is past and never resolved (the year
-    fraction refuses a date behind the valuation date)."""
-    if record.observation_date is not None and record.observation_time is None:
-        if record.observation_date < pricing_env.valuation_date:
-            return None
-        if record.observation_date == pricing_env.valuation_date:
-            return 0.0
-    t = float(record.resolve_time(pricing_env))
-    return t if is_greater_than_or_close(t, 0.0) else None
-
-
-def valuation_barrier_terms(product: BarrierOption, pricing_env) -> Tuple[float, float]:
-    """(level, knock-out cash) deciding a DISCRETE barrier at the valuation instant (W18b, user approval 2026-10-10).
-
-    The first record at or after the valuation instant decides -- the record on the valuation date when there is
-    one, the next observation otherwise (the barrier PDE's ``_next_observation`` rule): its own level (a record
-    without one takes ``product.barrier``, the product's normalisation) and its payoff (unset: ``product.rebate``),
-    as this engine's discrete path reads each resolved record (``_build_discrete_grid``, ``payoffs[first_idx]``).
-    CONTINUOUS / EXPIRY monitoring, or no record left: ``product.barrier`` and ``product.rebate``.
-    """
-    default = (float(product.barrier), float(product.rebate))
-    schedule = getattr(product, "observation_schedule", None)
-    if product.observation_type != ObservationType.DISCRETE or schedule is None or not schedule.records:
-        return default
-    first = None
-    for record in schedule.records:
-        t = _record_time(record, pricing_env)
-        if t is not None and (first is None or t < first[0]):
-            first = (t, record)
-    if first is None:
-        return default
-    record = first[1]
-    level = record.barrier if record.barrier is not None else product.barrier
-    cash = record.payoff if record.payoff is not None else product.rebate
-    return float(level), float(cash)
 
 
 def barrier_expiry_value(product: BarrierOption, spot: float, terminal_df: float, pricing_env,

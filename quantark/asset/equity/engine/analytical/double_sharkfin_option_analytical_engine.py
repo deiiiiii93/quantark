@@ -12,6 +12,10 @@ from typing import Optional
 import numpy as np
 from scipy import stats
 
+from quantark.asset.equity.engine.barrier_schedule_rules import (
+    forward_double_barrier_levels,
+    refuse_mixed_forward_levels,
+)
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -129,12 +133,24 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(product.strike, maturity)
+        discrete = product.observation_type == ObservationType.DISCRETE
+        if discrete:
+            # W18c (spec 2026-10-13 I4, A8): breached now only by a record at the valuation instant, at its own
+            # levels; forward, the corridor every remaining record shares (None: the levels differ -- no closed
+            # form, refused before any forward value)
+            hit_record = self._breached_at_valuation(product, pricing_env, spot)
+            forward = forward_double_barrier_levels(product, pricing_env)
+        else:
+            hit_record = None
+            forward = (product.upper_barrier, product.lower_barrier)
+        # mixed remaining levels price no forward value: the product's corridor then feeds only the input checks
+        upper, lower = forward if forward is not None else (product.upper_barrier, product.lower_barrier)
 
         self._validate_inputs(
             spot=spot,
             strike=product.strike,
-            lower_barrier=product.lower_barrier,
-            upper_barrier=product.upper_barrier,
+            lower_barrier=lower,
+            upper_barrier=upper,
             maturity=maturity,
             rate=rate,
             div=div,
@@ -160,23 +176,30 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 f"Unsupported observation type: {product.observation_type}"
             )
 
-        if (
-            product.observation_type == ObservationType.DISCRETE
-            and product.is_barrier_hit(spot)
-            and not self._breached_at_valuation(product, pricing_env, spot)
-        ):
-            # Outside the corridor with no observation due: the next observation decides
-            return (
-                self._price_beyond_discrete(
-                    product, pricing_env, spot, maturity, rate, div, vol, terminal_timing
+        if discrete and hit_record is None:
+            if forward is None:
+                refuse_mixed_forward_levels(
+                    product.observation_schedule, pricing_env, default_payoff=product.knock_out_rebate,
+                    business_days_in_year=product.business_days_in_year)
+            if spot >= upper or spot <= lower:
+                # Outside the corridor with no observation due: the next observation decides
+                return (
+                    self._price_beyond_discrete(
+                        product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, upper, lower
+                    )
+                    + pending_pv
                 )
-                + pending_pv
-            )
 
-        if product.observation_type != ObservationType.EXPIRY and product.is_barrier_hit(spot):
+        if hit_record is not None or (
+            not discrete
+            and product.observation_type != ObservationType.EXPIRY
+            and product.is_barrier_hit(spot)
+        ):
+            # the deciding record's payoff on a DISCRETE schedule (W18c), the knock-out rebate otherwise
             return (
                 self._price_already_hit(
-                    product, pricing_env, terminal_timing.payment_df
+                    product, pricing_env, terminal_timing.payment_df,
+                    cash=hit_record.payoff if hit_record is not None else None,
                 )
                 + pending_pv
             )
@@ -197,7 +220,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
 
         option_leg = self._price_no_rebate_knock_out(product, pricing_env)
         survival_prob = self._survival_probability(
-            product, maturity, rate, div, vol, pricing_env
+            product, maturity, rate, div, vol, pricing_env, upper, lower
         )
         knock_out_cash = self._price_knock_out_cash_leg(
             product=product,
@@ -208,6 +231,8 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             pricing_env=pricing_env,
             survival_prob=survival_prob,
             hit_lag=hit_lag,
+            upper=upper,
+            lower=lower,
         )
         no_hit_cash = (
             product.no_hit_rebate
@@ -277,16 +302,19 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         div: float,
         vol: float,
         terminal_timing,
+        upper: float,
+        lower: float,
     ) -> float:
         """A spot outside a discretely monitored corridor with no observation due (``first_observation``).
 
         A breach at the first future observation ``t1`` pays the knock-out cash (at the record's payment time when
         hit-paid, else at the terminal payment time); otherwise the continuation is this engine's shifted value
         from ``t1``: the participation leg (Ikeda-Kunitomo on the shifted corridor), the knock-out cash on the
-        remaining observations and the no-hit cash. Under the engine's flat rate throughout.
+        remaining observations and the no-hit cash. Under the engine's flat rate throughout. ``upper`` / ``lower``:
+        the corridor the remaining records share (W18c).
         """
         schedule = product.observation_schedule
-        lower_shifted, upper_shifted = self._shift_discrete_barriers(product, vol)
+        lower_shifted, upper_shifted = self._shift_discrete_barriers(product, vol, pricing_env, upper, lower)
         resolved = self._resolved_records(product, pricing_env)
         first = first_future_observation(resolved, schedule, single=False)
         t1 = first.time
@@ -372,8 +400,12 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         product: DoubleSharkfinOption,
         pricing_env: PricingEnvironment,
         terminal_payment_df: float,
+        cash: Optional[float] = None,
     ) -> float:
-        """Return the value when a monitored product is already hit."""
+        """Return the value when a monitored product is already hit: ``cash`` (the deciding record's payoff on a
+        DISCRETE schedule, W18c), by default the knock-out rebate."""
+        if cash is None:
+            cash = product.knock_out_rebate
         if product.pay_at_hit:
             timing = SettlementResolver.resolve_contingent(
                 product,
@@ -389,7 +421,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         else:
             payment_df = terminal_payment_df
         return (
-            product.knock_out_rebate
+            cash
             * payment_df
             * product.contract_multiplier
         )
@@ -424,9 +456,14 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         div: float,
         vol: float,
         pricing_env: PricingEnvironment,
+        upper: Optional[float] = None,
+        lower: Optional[float] = None,
     ) -> float:
         """Probability that neither double sharkfin barrier is hit (spec 3C §5.8: the no-touch probability
-        carries its own error bound and is not clipped; a ``NumericalError`` from it propagates)."""
+        carries its own error bound and is not clipped; a ``NumericalError`` from it propagates). DISCRETE: on the
+        corridor ``upper`` / ``lower`` the remaining records share (W18c; default the product's)."""
+        if upper is None or lower is None:
+            upper, lower = product.upper_barrier, product.lower_barrier
         if product.observation_type == ObservationType.EXPIRY:
             prob = self._prob_inside_at_expiry(
                 spot=pricing_env.spot,
@@ -443,7 +480,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                                    product.lower_barrier, product.upper_barrier)
         if product.observation_type == ObservationType.DISCRETE:
             lower_barrier, upper_barrier = self._shift_discrete_barriers(
-                product, vol
+                product, vol, pricing_env, upper, lower
             )
             return double_no_touch(pricing_env.spot, maturity, rate, div, vol, lower_barrier, upper_barrier)
         raise PricingError(
@@ -460,8 +497,11 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         pricing_env: PricingEnvironment,
         survival_prob: float,
         hit_lag: float = 0.0,
+        upper: Optional[float] = None,
+        lower: Optional[float] = None,
     ) -> float:
-        """Value the fixed cash leg paid when either barrier is hit.
+        """Value the fixed cash leg paid when either barrier is hit (DISCRETE: on the corridor ``upper`` /
+        ``lower`` the remaining records share, W18c).
 
         ``hit_lag`` is the constant year-fraction settlement delay of the
         continuous hit-paid leg (0.0 = pays at the hit; the unlagged path is
@@ -486,6 +526,8 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 vol=vol,
                 spot=pricing_env.spot,
                 pricing_env=pricing_env,
+                upper=upper,
+                lower=lower,
             )
         else:
             hit_discount_factor = self._continuous_hit_discount_factor(
@@ -513,9 +555,11 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         vol: float,
         spot: float,
         pricing_env: PricingEnvironment,
+        upper: float,
+        lower: float,
     ) -> float:
         """Approximate discounted first-hit probability on a discrete grid."""
-        lower_barrier, upper_barrier = self._shift_discrete_barriers(product, vol)
+        lower_barrier, upper_barrier = self._shift_discrete_barriers(product, vol, pricing_env, upper, lower)
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
             raise PricingError(
@@ -620,9 +664,14 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         return high
 
     def _shift_discrete_barriers(
-        self, product: DoubleSharkfinOption, vol: float
+        self,
+        product: DoubleSharkfinOption,
+        vol: float,
+        pricing_env: PricingEnvironment,
+        upper: float,
+        lower: float,
     ) -> tuple[float, float]:
-        """Apply BGK shifts to discrete lower and upper barriers."""
+        """Apply BGK shifts to the discrete corridor ``lower`` / ``upper`` (the remaining records' levels, W18c)."""
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
             raise PricingError(
@@ -631,19 +680,20 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         schedule.assert_analytical_ready(
             default_payoff=product.knock_out_rebate,
             business_days_in_year=product.business_days_in_year,
+            pricing_env=pricing_env,
         )
         frequency = schedule.ensure_regular_frequency(
             schedule.times,
             business_days_in_year=product.business_days_in_year,
         )
         lower_barrier = apply_barrier_shift(
-            barrier=product.lower_barrier,
+            barrier=lower,
             is_up_barrier=False,
             volatility=vol,
             observation_interval=frequency,
         )
         upper_barrier = apply_barrier_shift(
-            barrier=product.upper_barrier,
+            barrier=upper,
             is_up_barrier=True,
             volatility=vol,
             observation_interval=frequency,
