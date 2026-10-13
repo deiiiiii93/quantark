@@ -61,7 +61,7 @@ from .dcn_schedule import (
     DCNScheduleSpec,
     build_dcn_schedule,
 )
-from .dcn_option import DCNDirection, DCNOption
+from .dcn_option import DCNDirection, DCNOption, DCNPaymentDates
 
 __all__ = [
     "BaseEquityOption",
@@ -121,6 +121,7 @@ __all__ = [
     # DCN (digital coupon note)
     "DCNOption",
     "DCNDirection",
+    "DCNPaymentDates",
     "DCNSchedule",
     "DCNScheduleSpec",
     "DCNMonthlyObservation",

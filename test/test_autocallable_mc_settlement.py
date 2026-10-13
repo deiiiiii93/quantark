@@ -36,6 +36,7 @@ from quantark.param import (
     SpotQuote,
 )
 from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError
 from quantark.util.enum import (
     CouponPayType,
     ObservationType,
@@ -191,17 +192,16 @@ def test_ko_reset_pre_and_post_ko_payments_keep_event_lag():
         )
 
 
-def test_dcn_explicit_payment_dates_remain_authoritative():
+def test_dcn_year_fraction_convention_is_refused():
+    """W15 (A2): a DCN's convention now times all its cash, on DATES, so a
+    YEAR_FRACTION lag is refused (it used to be ignored in favour of the
+    schedule's explicit payment dates). Day-based conventions are covered by
+    test/test_dcn_settlement_convention.py."""
     product = make_dcn(DCN_A)
     product.settlement_convention = _lagged()
-    result = DCNMCEngine(
-        num_paths=256,
-        seed=3,
-        use_sobol=False,
-    ).price_detailed(product, flat_env(**FLAT))
-
-    assert result.pv == (
-        result.pv_fixed_coupons
-        + result.pv_ko_coupons
-        + result.pv_loss_leg
-    )
+    with pytest.raises(ValidationError, match="YEAR_FRACTION"):
+        DCNMCEngine(
+            num_paths=256,
+            seed=3,
+            use_sobol=False,
+        ).price_detailed(product, flat_env(**FLAT))

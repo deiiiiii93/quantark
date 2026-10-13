@@ -2,8 +2,9 @@
 
 Time grid = the contract's actual trading-day grid (ACT/365F), so daily KI is
 exact discrete monitoring by construction — NO barrier continuity correction.
-Each cash flow discounts at its own payment time (incl. the loss leg at the
-independent settlement_date). PV and all legs are signed by direction_sign,
+Each cash flow discounts at its own payment time, from
+``DCNOption.payment_dates()`` (the loss leg at the independent settlement_date,
+or every flow on the settlement convention's dates when one is set, W15). PV and all legs are signed by direction_sign,
 and pv is DEFINED as the sum of the signed legs (exact invariant).
 
 Simulation is batched (``num_batches``) so large path counts (2^20+) run at
@@ -168,6 +169,7 @@ def _finalize_dcn_result(
 
     ko_probability = float(acc.ko_timing_count.sum() / n)
     observations = product.schedule.monthly
+    pay_dates = product.payment_dates()  # C4: the dates ctx's pay times use
     observation_times = np.asarray(
         ctx.times[ctx.obs_cols],
         dtype=float,
@@ -201,9 +203,9 @@ def _finalize_dcn_result(
             observations[-1].observation_date,
         ],
         payment_dates=[
-            *(row.coupon_payment_date for row in observations),
-            *(row.ko_payment_date for row in observations),
-            product.settlement_date,
+            *pay_dates.coupon_payment_dates,
+            *pay_dates.ko_payment_dates,
+            pay_dates.loss_payment_date,
         ],
     )
     stats = DCNEventStats(

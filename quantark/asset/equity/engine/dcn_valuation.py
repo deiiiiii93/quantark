@@ -9,7 +9,8 @@ the valuation date to its own payment date (DF = 1 when paid today). Leg amounts
 route equals the kernel's one-column row bit for bit.
 
 Neutral module: no Monte Carlo import, so the PDE routes call it too. Decided-but-unpaid coupons from earlier rows are
-not carried (W14) and a knocked-out DCN is assumed alive (W14); ``settlement_convention`` is ignored, as at T > 0 (W15).
+not carried (W14) and a knocked-out DCN is assumed alive (W14). Payment dates are the grid context's, i.e.
+``DCNOption.payment_dates()``: a ``settlement_convention`` times today's row as it times every later one (W15).
 """
 from __future__ import annotations
 

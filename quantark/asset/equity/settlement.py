@@ -19,6 +19,7 @@ from quantark.util.calendar import (
     calculate_year_fraction,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 if TYPE_CHECKING:
     from quantark.priceenv import PricingEnvironment
@@ -178,6 +179,86 @@ def effective_settlement_calendar(product, pricing_env):
 def calendar_identity(calendar) -> Optional[tuple]:
     """``calendar.identity()``, or ``None`` for no calendar."""
     return None if calendar is None else calendar.identity()
+
+
+def payment_date_by_convention(
+    convention: SettlementConvention,
+    determination_date: datetime,
+    calendar: Optional[Calendar],
+) -> datetime:
+    """The payment DATE a settlement convention derives from a determination date.
+
+    The date arithmetic of the convention, shared by
+    :meth:`SettlementResolver.resolve_contingent` and products that resolve
+    their own dated flows (``DCNOption.payment_dates``):
+
+    * zero lag pays at the determination date, unadjusted;
+    * ``BUSINESS_DAYS``: ``calendar.add_business_days`` then the convention's
+      business-day adjustment (requires ``calendar``);
+    * ``CALENDAR_DAYS``: plain days, then the adjustment unless
+      ``UNADJUSTED`` (an adjustment requires ``calendar``).
+
+    ``YEAR_FRACTION`` lags have no payment date and are refused.
+
+    Args:
+        convention: The product's settlement convention.
+        determination_date: The date the cashflow amount is determined.
+        calendar: The calendar the payment date rolls on (the caller picks
+            it: the convention's own, else the product's or environment's).
+
+    Returns:
+        The payment date.
+
+    Raises:
+        ValidationError: A ``YEAR_FRACTION`` lag, a non-datetime
+            determination date, or a missing calendar the rule needs.
+    """
+    if not isinstance(convention, SettlementConvention):
+        raise ValidationError(
+            "settlement convention must be SettlementConvention, "
+            f"got {type(convention).__name__}"
+        )
+    if convention.lag_unit is SettlementLagUnit.YEAR_FRACTION:
+        raise ValidationError(
+            "YEAR_FRACTION settlement lags have no payment date"
+        )
+    if not isinstance(determination_date, datetime):
+        raise ValidationError(
+            "determination date must be datetime, got "
+            f"{type(determination_date).__name__}"
+        )
+    if is_zero(convention.lag):
+        return determination_date
+
+    if convention.lag_unit is SettlementLagUnit.BUSINESS_DAYS:
+        if calendar is None:
+            raise ValidationError(
+                "business-day settlement requires a settlement or pricing calendar"
+            )
+        payment_date = calendar.add_business_days(
+            determination_date, int(convention.lag)
+        )
+        return calendar.adjust_date(
+            payment_date, convention.business_day_convention
+        )
+    if convention.lag_unit is SettlementLagUnit.CALENDAR_DAYS:
+        payment_date = determination_date + timedelta(days=int(convention.lag))
+        if (
+            convention.business_day_convention
+            is not BusinessDayConvention.UNADJUSTED
+        ):
+            if calendar is None:
+                raise ValidationError(
+                    "calendar-day settlement adjustment requires a "
+                    "settlement or pricing calendar"
+                )
+            payment_date = calendar.adjust_date(
+                payment_date, convention.business_day_convention
+            )
+        return payment_date
+    raise ValidationError(
+        f"unsupported settlement lag unit: {convention.lag_unit!r}"
+    )
 
 
 class SettlementResolver:
@@ -406,40 +487,11 @@ class SettlementResolver:
                 "authoritative determination date"
             )
 
-        calendar = effective_settlement_calendar(product, pricing_env)
-
-        if convention.lag_unit is SettlementLagUnit.BUSINESS_DAYS:
-            if calendar is None:
-                raise ValidationError(
-                    "business-day settlement requires a settlement or pricing calendar"
-                )
-            payment_date = calendar.add_business_days(
-                determination_date, int(convention.lag)
-            )
-            payment_date = calendar.adjust_date(
-                payment_date, convention.business_day_convention
-            )
-        elif convention.lag_unit is SettlementLagUnit.CALENDAR_DAYS:
-            payment_date = determination_date + timedelta(
-                days=int(convention.lag)
-            )
-            if (
-                convention.business_day_convention
-                is not BusinessDayConvention.UNADJUSTED
-            ):
-                if calendar is None:
-                    raise ValidationError(
-                        "calendar-day settlement adjustment requires a "
-                        "settlement or pricing calendar"
-                    )
-                payment_date = calendar.adjust_date(
-                    payment_date, convention.business_day_convention
-                )
-        else:
-            raise ValidationError(
-                f"unsupported settlement lag unit: {convention.lag_unit!r}"
-            )
-
+        payment_date = payment_date_by_convention(
+            convention,
+            determination_date,
+            effective_settlement_calendar(product, pricing_env),
+        )
         return (
             payment_date,
             cls._time_from_date(payment_date, pricing_env, "derived payment"),
@@ -554,4 +606,5 @@ __all__ = [
     "SettlementLagUnit",
     "SettlementRequest",
     "SettlementResolver",
+    "payment_date_by_convention",
 ]

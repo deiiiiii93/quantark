@@ -3,21 +3,29 @@
 Payoff semantics (problem §3.1): daily KI (sticky) gates all future fixed
 coupons; monthly KO has priority over the fixed coupon on its date; loss leg
 pays -(N/S0)·part·max(K_loss - S_T, 0) at the independent settlement_date.
+Payment timing of every flow comes from :meth:`DCNOption.payment_dates` (W15):
+the schedule's offset dates and ``settlement_date`` without a
+``settlement_convention``, the convention's dates with one.
 PV sign: direction_sign (+1 BUYER / -1 SELLER) applied uniformly to the PV
 and every leg PV (mirrors the cashleg buyer-perspective sign convention).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, Tuple
 
-from quantark.asset.equity.settlement import SettlementConvention
+from quantark.asset.equity.settlement import (
+    SettlementConvention,
+    SettlementLagUnit,
+    payment_date_by_convention,
+)
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import validate_positive
 
-from .dcn_schedule import DCNSchedule
+from .dcn_schedule import DCNSchedule, _assert_calendar_coverage
 
 _DAYS_PER_YEAR = 365.0  # ACT/365F fixed by the problem
 
@@ -27,6 +35,21 @@ class DCNDirection(Enum):
 
     BUYER = 1
     SELLER = -1
+
+
+@dataclass(frozen=True)
+class DCNPaymentDates:
+    """Payment date of every DCN flow (contract C4).
+
+    ``coupon_payment_dates`` / ``ko_payment_dates`` align with
+    ``schedule.monthly`` (one entry per row, whether or not the row is
+    coupon / KO eligible); ``loss_payment_date`` pays the loss leg determined
+    at the final observation date.
+    """
+
+    coupon_payment_dates: Tuple[datetime, ...]
+    ko_payment_dates: Tuple[datetime, ...]
+    loss_payment_date: datetime
 
 
 class DCNOption(BaseEquityProduct):
@@ -127,6 +150,49 @@ class DCNOption(BaseEquityProduct):
             * max(self.k_loss - float(spot), 0.0)
         )
 
+    def payment_dates(self) -> DCNPaymentDates:
+        """The payment date of every flow: the single timing source (C4).
+
+        Without a ``settlement_convention`` these are the schedule rows'
+        offset-derived ``coupon_payment_date`` / ``ko_payment_date`` and
+        ``settlement_date``. With one, the convention REPLACES them: coupon
+        and KO pay ``payment_date_by_convention`` from the row's observation
+        date, the loss leg from the final observation date, rolled on the
+        convention's own calendar, else the schedule's. Pricing-environment
+        independent.
+
+        Raises:
+            ValidationError: A ``YEAR_FRACTION`` convention (no dates), or a
+                convention date past the calendar's holiday coverage.
+        """
+        rows = self.schedule.monthly
+        convention = self.settlement_convention
+        if convention is None:
+            return DCNPaymentDates(
+                coupon_payment_dates=tuple(m.coupon_payment_date for m in rows),
+                ko_payment_dates=tuple(m.ko_payment_date for m in rows),
+                loss_payment_date=self.settlement_date,
+            )
+        _refuse_year_fraction(convention)
+        calendar = (
+            convention.calendar
+            if convention.calendar is not None
+            else self.schedule.calendar
+        )
+        by_observation = tuple(
+            payment_date_by_convention(convention, m.observation_date, calendar)
+            for m in rows
+        )
+        loss = payment_date_by_convention(
+            convention, rows[-1].observation_date, calendar
+        )
+        _assert_calendar_coverage(calendar, max(*by_observation, loss))
+        return DCNPaymentDates(
+            coupon_payment_dates=by_observation,
+            ko_payment_dates=by_observation,
+            loss_payment_date=loss,
+        )
+
     def validate(self) -> None:
         if (
             self.settlement_convention is not None
@@ -135,6 +201,8 @@ class DCNOption(BaseEquityProduct):
             raise ValidationError(
                 "settlement_convention must be SettlementConvention or None"
             )
+        if self.settlement_convention is not None:
+            _refuse_year_fraction(self.settlement_convention)
         validate_positive(self.notional, "notional")
         validate_positive(self.initial_price, "initial_price")
         validate_positive(self.participation, "participation")
@@ -159,3 +227,13 @@ class DCNOption(BaseEquityProduct):
             raise ValidationError(
                 "loss-leg settlement_date before final observation date"
             )
+
+
+def _refuse_year_fraction(convention: SettlementConvention) -> None:
+    """A dated-only DCN (and its date ledger) needs payment DATES (W15, A2)."""
+    if convention.lag_unit is SettlementLagUnit.YEAR_FRACTION:
+        raise ValidationError(
+            "DCN settlement_convention with a YEAR_FRACTION lag is not "
+            "supported: a DCN pays on dates (use BUSINESS_DAYS or "
+            "CALENDAR_DAYS)"
+        )

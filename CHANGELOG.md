@@ -360,6 +360,20 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   shrinks (evidence: `docs/superpowers/specs/2026-10-10-dcn-final-observation-evidence/`). Not changed: decided but
   unpaid coupons are not carried (W14), a knocked-out DCN is assumed alive (W14), `settlement_convention` is ignored
   (W15), a valuation after the final date still raises.
+- A DCN's `settlement_convention` times ALL of its cash (W15, spec I2 / amendment A2), where it was ignored. New
+  `DCNOption.payment_dates() -> DCNPaymentDates` (`coupon_payment_dates`, `ko_payment_dates` per schedule row,
+  `loss_payment_date`; no pricing-env argument) is the single timing source: without a convention it returns the
+  schedule's offset dates and `settlement_date`; with one, coupon and KO pay from their observation date and the loss
+  leg from the final observation date via the new public `quantark.asset.equity.settlement.payment_date_by_convention
+  (convention, determination_date, calendar)`, on the convention's calendar, else the schedule's (any calendar, not
+  only SSE). `build_dcn_grid_context` reads it, so every route honours it: GBM / local-vol / Heston / QE /
+  coupled-coarse MC, the execution-session adapters, the GBM / local-vol / Heston PDE and the valuation-date row
+  (`dcn_valuation`); the MC event statistics' payment dates are C4's. `SettlementResolver._resolve_payment` now
+  derives day-lag dates through the same helper (bitwise for every product). A `YEAR_FRACTION` lag on a DCN raises
+  ValidationError (in `validate()`, and in `payment_dates()` if set afterwards): a dated DCN pays on dates.
+  Moved values: none with `settlement_convention=None` (every DCN route byte-identical before/after, 28 pins);
+  `test_autocallable_mc_settlement::test_dcn_explicit_payment_dates_remain_authoritative` (a YEAR_FRACTION
+  convention silently ignored) became `test_dcn_year_fraction_convention_is_refused` (ValidationError).
 
 ### Fixed
 - The autocallable MC time grid holds one node per instant (W17a, approved 2026-10-10). The snowball, KO-reset and

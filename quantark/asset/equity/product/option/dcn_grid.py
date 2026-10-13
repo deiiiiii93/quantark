@@ -2,7 +2,9 @@
 imports. Shared by the MC payoff kernel and the PDE solver (spec WP1.3/1.4).
 
 Times are ACT/365F year fractions from ``schedule.valuation_date`` (fixed by
-the problem; ``annualized_days=365``).
+the problem; ``annualized_days=365``). Payment times come from
+``DCNOption.payment_dates()`` (W15): the one place the settlement convention
+enters, so every route that reads this context honours it.
 """
 from __future__ import annotations
 
@@ -42,10 +44,12 @@ def build_dcn_grid_context(product: DCNOption) -> DCNGridContext:
     times = np.array([_yf(v, d) for d in s.daily_ki_dates])
     col_of = {d: i for i, d in enumerate(s.daily_ki_dates)}
     a = product.accrual_per_period
+    # W15: every flow pays on the product's C4 dates (the convention's when set)
+    pay_dates = product.payment_dates()
     obs_cols, is_c, is_k, acc_c, acc_k, pay_c, pay_k, kmap = (
         [], [], [], [], [], [], [], []
     )
-    for m in s.monthly:
+    for j, m in enumerate(s.monthly):
         if m.observation_date not in col_of:
             raise ValidationError(
                 f"observation {m.observation_date:%Y-%m-%d} not on the daily grid"
@@ -63,8 +67,8 @@ def build_dcn_grid_context(product: DCNOption) -> DCNGridContext:
         )
         acc_c.append(a * coupon_periods if m.is_coupon_obs else 0.0)
         acc_k.append(a * ko_periods if m.is_ko_obs else 0.0)
-        pay_c.append(_yf(v, m.coupon_payment_date))
-        pay_k.append(_yf(v, m.ko_payment_date))
+        pay_c.append(_yf(v, pay_dates.coupon_payment_dates[j]))
+        pay_k.append(_yf(v, pay_dates.ko_payment_dates[j]))
         kmap.append(m.month_indices)
     return DCNGridContext(
         times=times,
@@ -75,6 +79,6 @@ def build_dcn_grid_context(product: DCNOption) -> DCNGridContext:
         ko_accruals=np.asarray(acc_k),
         coupon_pay_times=np.asarray(pay_c),
         ko_pay_times=np.asarray(pay_k),
-        loss_pay_time=_yf(v, product.settlement_date),
+        loss_pay_time=_yf(v, pay_dates.loss_payment_date),
         month_index_map=tuple(kmap),
     )
