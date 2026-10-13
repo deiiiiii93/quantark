@@ -469,6 +469,11 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   as the PDE does (the MC previously simulated and failed on the zero-length step). Moved values: only contracts
   whose record level differs from `product.barrier` (or a knock-out record paying other than the rebate), spot
   between the levels; plain contracts bit-identical. New `test/test_barrier_mc_record_level_at_valuation.py`.
+- The Black-Scholes barrier MC prices a DISCRETE schedule with a record on the valuation instant that the spot has
+  NOT crossed (it raised "dt_array must have strictly positive entries"). Such a record is decided "not hit" at the
+  valuation instant (W18b) and leaves the simulated grid: the price equals, bitwise, the contract aged past that
+  record; a sole such record leaves the never-hit value (knock-out: the vanilla; knock-in: the rebate at the
+  terminal). Moved values: none (raise -> price).
 - A knock-in whose discrete schedule records pay other than `product.rebate` is refused on every route (W18b, user
   ruling 2026-10-10, option (a)). A knock-in's rebate is paid when no observation hits, so no record's payoff can
   apply. The 1D PDE core already refused it (spec 3C §5.2 (a): the Black-Scholes and local-vol barrier PDE, and the

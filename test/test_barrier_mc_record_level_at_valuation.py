@@ -215,3 +215,41 @@ def test_continuous_monitoring_keeps_the_product_barrier():
     e = env(121.0, INITIAL)
     assert _quiet(lambda: _engine().price(BarrierOption(**kw), e)) == pytest.approx(
         REBATE * e.get_discount_factor(1.0), **TOL)
+
+
+# ======================================================================================================================
+# (c) a record on the valuation instant the spot has not crossed (the "inside" cells; dt_array crash before T3)
+# ======================================================================================================================
+
+@pytest.mark.parametrize("kind", list(KINDS))
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_an_uncrossed_record_at_the_valuation_instant_is_decided_not_hit(kind, form):
+    """Day 91 holds an observation and the spot is inside both levels: the record is decided "not hit" at the
+    valuation instant (W18b) and leaves the simulated grid -- bitwise the contract aged past it."""
+    _, _, barrier, level, spots = KINDS[kind]
+    e = env(spots[2], _on(91))
+    priced = _quiet(lambda: _engine().price(_mid(kind, form, barrier, level, 91, True), e))
+    dropped = _quiet(lambda: _engine().price(_mid(kind, form, barrier, level, 91, False), e))
+    assert priced == dropped
+
+
+@pytest.mark.parametrize("kind", list(KINDS))
+@pytest.mark.parametrize("form", ["dated", "numeric"])
+def test_a_sole_uncrossed_record_at_the_valuation_instant_leaves_the_never_hit_value(kind, form):
+    """The only record sits on the valuation instant, uncrossed: nothing is left to observe. A knock-out is the
+    vanilla (within 4 s.e. of Black-Scholes), a knock-in the rebate paid at the terminal."""
+    from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
+
+    barrier_type, option_type, barrier, level, spots = KINDS[kind]
+    product = _aged(_product(kind, form, barrier, level, (91,)), 91, keep_landing=True)
+    e = env(spots[2], _on(91))
+    engine = _engine()
+    priced = _quiet(lambda: engine.price(product, e))
+    tau = product.get_maturity(e)
+    if barrier_type.is_knock_out:
+        vanilla = BlackScholesEngine().price(
+            EuropeanVanillaOption(strike=100.0, option_type=option_type, maturity=tau), e)
+        assert abs(priced - vanilla) <= 4.0 * engine.get_last_std_error()
+    else:
+        assert priced == pytest.approx(REBATE * e.get_discount_factor(tau), rel=1e-12)
