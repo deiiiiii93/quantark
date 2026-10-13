@@ -436,6 +436,10 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   0.1085 -> 0.0193, American put 0.1991 -> 0.1115, FX TARF 0.00722 -> 0.00052, DCN GBM 3220 -> 2680, Phoenix local-vol
   0.01441 -> 0.01022; range accrual rises 353 -> 497 because its payoff is even in z and the iid formula understated
   it); prices bit-identical. New `test/test_mc_std_error_antithetic.py`.
+- RQMC seed spacing is documented (W16, signed W13 follow-up 3): batch `b` scrambles with `base_seed + b`, so
+  replications whose base seeds sit closer than their batch count share scrambles. `SobolNormalGenerator._make_engine`
+  and `docs/execution/policy-guide.md` ("RQMC seeds and replications") state the rule: space base seeds by at least
+  the batch count, or derive them from a hash / `SeedSequence`. Seeding unchanged. Moved values: none.
 - The DCN PDE routes pay a monthly observation that falls on the valuation date (W10b, user ruling Q5 2026-10-10).
   The GBM, local-vol and Heston DCN PDE dropped it (the march never applies t = 0) while every MC route paid it, so
   the PDE value lost the day's coupon overnight. They now decide the row pointwise at the spot through the W10

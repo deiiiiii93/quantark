@@ -210,7 +210,15 @@ class SobolNormalGenerator:
         Create a new Sobol engine for the given dimension and batch.
 
         A different seed is used for each batch_id to obtain independent
-        scrambled Sobol sequences (RQMC).
+        scrambled Sobol sequences (RQMC): batch ``b`` scrambles with seed
+        ``base_seed + b``.
+
+        Seed spacing: two runs share a scramble whenever their seeds collide,
+        e.g. ``base_seed=s`` batch 1 and ``base_seed=s+1`` batch 0. Independent
+        replications (a study repeating an RQMC estimate) must space their
+        base seeds by at least the batch count they use, or derive them from a
+        hash / ``numpy.random.SeedSequence``; consecutive base seeds give
+        overlapping, correlated batches and an understated spread.
         """
         self._check_scipy()
         # Use different seeds for different batches to obtain independent scrambles

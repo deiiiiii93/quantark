@@ -101,3 +101,22 @@ Every outcome carries a `ReproducibilityManifest`
 (`execution-manifest/0`; see `docs/execution/schemas/`) and immutable
 diagnostics recording resolved policy values with their sources, admission
 clamps, cache/lease events, retries, and scenario dedupe counts.
+
+## RQMC seeds and replications
+
+A randomized-QMC estimate scrambles batch `b` with seed `base_seed + b`
+(`SobolNormalGenerator._make_engine`; several MC engines additionally offset by
+`seed + batch_id * 1000`, and the DCN engine by `_BATCH_SEED_STRIDE`). Its
+standard error comes from the spread of the batch means, so the batches must be
+independent scrambles. Two runs collide when their seed arithmetic meets: base
+seed `s` batch 1 is base seed `s + 1` batch 0. When a study replicates an RQMC
+estimate (repeated runs to measure spread or bias), space the replications'
+base seeds by at least the batch count each run uses (by the engine's stride
+where it has one), or derive them from a hash or `numpy.random.SeedSequence`
+(`quantark.modelvalidation.study.batch_seed`, mode `"substream"`). Consecutive
+base seeds give overlapping batches and an understated spread. Seeding itself
+is unchanged; this is a usage rule.
+
+Deterministic (non-randomized) QMC reports the iid formula over its points,
+which is not a valid error bar for a low-discrepancy sequence; use
+`RANDOMIZED_QUASI` when an error estimate matters.
