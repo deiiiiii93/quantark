@@ -107,6 +107,16 @@ def test_matured_before_the_run_is_removed_with_a_warning(make):
     assert (day1.product_events, day1.fixings, day1.pending_pv) == ((), (), 0.0)
 
 
+def test_a_stale_invalid_matured_booking_is_refused_at_registration():
+    """The state claims an as_of after the run start: refused, never dropped with the matured-before warning."""
+    stale = dated_note(fixing_dates=[VAL - timedelta(days=60), VAL - timedelta(days=30)],
+                       initial_date=VAL - timedelta(days=90),
+                       state=TargetRedemptionState(0.0, as_of=VAL + timedelta(days=3), fixings_banked=1))
+    pf, _ = book(stale)
+    with pytest.raises(ValidationError, match="after the valuation date"):
+        RunFixingRecorder().register(pf)
+
+
 def test_a_terminal_booking_is_kept_at_its_pending_pv_and_paid_after_its_day():
     with pytest.warns(TerminalBookingWarning):
         owed = note(fix=[], accrual_factors=[], target=1.5,

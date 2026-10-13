@@ -45,7 +45,10 @@ backtest and FX dynamic scenario.
   `matured_before(fx_env)`. In the FX backtest and FX dynamic scenario they age with the run's clock: a fixing is
   recorded at the spot of the first instant it was live (a fixing between path instants at the previous instant's,
   `gap=True`), banked in order with its cash; a contract whose last fixing is before the run start is removed with
-  `MaturedBeforeRunWarning`.
+  `MaturedBeforeRunWarning`. A dated booking is validated against the run's environment first (`_check_as_of`), so a
+  stale invalid one (a state claiming an `as_of` or banked fixing after the run start, or pending cash already past)
+  raises `ValidationError` at registration instead of being dropped with the warning; numeric bookings are unchanged.
+  Moved values: none (a refusal replaces a warning on invalid bookings only).
 - `RunFixingRecorder` calls an optional product hook `with_history_settled(env)` after the first valuation's fill and
   after each clock move's recording (`settle_history`); products without it are unchanged.
 - `target_redemption_state.booked_cash(product_events)`: the quantity-scaled PAYMENT cash of one run step's

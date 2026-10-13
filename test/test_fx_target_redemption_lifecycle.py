@@ -1774,6 +1774,18 @@ def test_matured_before_is_strict_history_of_the_last_fixing():
     assert not owed.matured_before(env())                                # terminal: kept at PV(pending), spec 5.3
 
 
+def test_matured_before_refuses_a_stale_invalid_dated_booking():
+    """A dated booking whose state claims the future is refused at registration, not dropped with a warning."""
+    late = FIX_DATES[1] + timedelta(days=1)
+    stale = dated_note(fixing_dates=FIX_DATES[:2],
+                       state=TargetRedemptionState(0.0, as_of=late + timedelta(days=5), fixings_banked=1))
+    with pytest.raises(ValidationError, match="after the valuation date"):
+        stale.matured_before(env(val=late))
+    valid = dated_note(fixing_dates=FIX_DATES[:2])
+    assert valid.matured_before(env(val=late))                           # valid matured booking: W1 warn-and-zero
+    assert note(fix=[-60 / 365, -30 / 365], accrual_start=-90 / 365).matured_before(env())   # numeric unchanged
+
+
 _D2_SPOT = {("tarn", "quiet"): 1.05, ("tarn", "redeeming"): 1.20, ("tarn_no_principal", "quiet"): 1.05,
             ("tarn_no_principal", "redeeming"): 1.20, ("tarf", "quiet"): 1.15, ("tarf", "redeeming"): 1.20}
 

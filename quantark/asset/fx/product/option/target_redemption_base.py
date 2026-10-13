@@ -686,11 +686,13 @@ class TargetRedemptionProduct(BaseFxProduct):
     def matured_before(self, fx_env) -> bool:
         """W1 rule at a run's registration (run-fixings recorder hook): not terminal, and the last fixing is strictly
         before ``fx_env``'s valuation by time (numeric: its listed time; dated: its resolved time, Ruling R16), so the
-        state has not banked it. A terminal booking is kept at PV(pending) (spec 5.3)."""
+        state has not banked it. A terminal booking is kept at PV(pending) (spec 5.3). A dated booking is validated
+        against ``fx_env`` first (``_check_as_of``), so a stale invalid booking is refused rather than dropped."""
         if self.is_terminal:
             return False
         if self.is_numeric:
             return is_history(self.fixing_times[-1])
+        self._check_as_of(fx_env)
         return is_history(signed_year_fraction(self.fixing_dates[-1], fx_env))
 
     def _is_listed_unbanked(self, index: int) -> bool:
