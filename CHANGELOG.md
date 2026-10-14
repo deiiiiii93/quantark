@@ -412,7 +412,9 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   is a dated `RealizedCashflow` (`dcn:<kind>:<date>`, quantity x signed) payable on `DCNOption.payment_dates()`. Any run
   calendar: every run day prices; a schedule date the run never visits is decided at the previous run instant's spot
   (`gap=True` on the event and the ledger flow, W6 rule); dates before the run start are history (signed rule 3); a
-  first run day after an unvisited in-run date refuses (`TODO(dcn-run-start)`). Pricing copies: pre-close
+  first run day after an unvisited in-run date refused (`TODO(dcn-run-start)`; superseded by ruling R31, T17 CP6: dates
+  before the FIRST RUN INSTANT are history -- the row observed, its coupon not owed, no KI / KO state assumed -- so a
+  run whose first market day is after the start completes; raise -> run, no moved values). Pricing copies: pre-close
   `product_for_pricing(d, env, initial=True)`, post-close `.without_observed_through(d)`; the runs value the contingent
   claim plus the ledger (MTM + pending PV + paid cash). `DCNLifecycleState` gains `pending_settlement_cashflow`,
   `settlement_date`, `settled`, `settle()`, `advance_to()`, `mark_matured_before_run()`; `ProductReplay` reads a DCN's
@@ -729,9 +731,12 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   record once, on its date at that day's close, against the record's own level and paying its payoff (W18c, times the
   contract multiplier where the product's hit cash carries it). A record date the run never visits is decided at the
   previous run instant's spot with `gap=True` on the event (A7'(c), the signed W6 rule, as `lifecycle/dcn.py`); a
-  record before the run start is history (signed rule 3); a record on or after the start but before the first run
-  instant is refused (`ValidationError`, `TODO(barrier-run-start)`); a numeric record falls on `start + round(t *
-  365)` days (the trackers' run clock). Between records nothing is decided, and at expiry only a record on the expiry
+  record before the run is history (signed rule 3: no state assumed, not hit), "before the run" being before the FIRST
+  RUN INSTANT (ruling R31, T17 CP6; it first refused a record between the start and the first run instant,
+  `TODO(barrier-run-start)`, which broke the intraday provisional replay from a checkpoint: that replay restores the
+  checkpoint state and observes only the due instants after it, so the records the checkpoint covers are history --
+  restored to the pre-T17 outcome on the CP6 probe, KO paying 1.0 on a supplied 111 and alive on the assumed spot); a
+  numeric record falls on `start + round(t * 365)` days (the trackers' run clock). Between records nothing is decided, and at expiry only a record on the expiry
   date hits (no record there: the no-hit payoff). Events carry `metadata` `monitoring="discrete"`, `gap`, `decided_on`,
   `observation_date`. CONTINUOUS and EXPIRY monitoring unchanged. New
   `test/test_barrier_lifecycle_discrete_observation.py`. Moved values (200 daily GBM paths, 20% vol, one year, monthly
@@ -739,7 +744,11 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   523.684 -> 595.051; down-and-in put 85: 88 -> 74 knock-ins (cash 1498.738 -> 1444.917); single sharkfin 120
   (knock-out 3): 66 -> 51 knock-outs (cash 391.684 -> 493.051); one-touch 120 (5): 66 -> 51 touches (cash 330.0 ->
   255.0). No existing backtest, dynamic-scenario, pnl-explain or intraday test moved (none books a DISCRETE barrier
-  product off its record dates).
+  product off its record dates). A one-touch / double one-touch touched on a record books the record's payoff (unset:
+  the rebate), no contract multiplier, as `get_payoff(touched=True)` scales it (CP6: a product rebate of 0 with records
+  paying 4.5 booked 0 -> 4.5). The intraday refusal of a discrete barrier with no record at expiry keeps its
+  `CapabilityError`, reworded for A15 (the expiry fixing settles the no-hit payoff, a path not yet validated there).
+  `QuadInputAdapter.build_inputs` may return a sequence of legs (annotation and abstract contract, R30).
   The single and double sharkfin MC price a DISCRETE schedule with a record on the valuation instant that the spot has
   NOT crossed (they raised "dt_array must have strictly positive entries"): the record is decided "not hit" there and
   leaves the simulated grid (I5 / A14, as the BS barrier MC), bitwise the contract aged past it; a sole such record

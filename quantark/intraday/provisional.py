@@ -396,9 +396,9 @@ def _reconstruct_barrier(product, timeline, checkpoint, plan: _ReplayPlan, sched
         group = plan.group(key)
         kinds = {e.kind for e in group}
         if discrete and kinds == {EventKind.TERMINAL}:
-            raise CapabilityError("discrete barrier whose schedule does not observe at expiry: the daily barrier "
-                                  "tracker tests the barrier on every observation, including expiry; not in the "
-                                  "intraday inventory")
+            raise CapabilityError("discrete barrier whose schedule does not observe at expiry: its expiry fixing "
+                                  "settles the no-hit payoff (no record there, no barrier decision: A15), a terminal "
+                                  "path the intraday replay has not been validated for; not in the intraday inventory")
         if EventKind.KI in kinds and state.knocked_in and kinds <= {EventKind.KI}:
             plan.value(key, group)             # already knocked in: the fixing changes nothing
             plan.applied.extend(e.event_id for e in group)

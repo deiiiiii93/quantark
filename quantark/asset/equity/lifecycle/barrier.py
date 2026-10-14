@@ -12,9 +12,12 @@ date, otherwise price it"): each record once, on its date at that day's close,
 against the record's own level and paying the record's payoff (W18c). A record
 date the run never visits is decided at the spot of the run instant before it,
 flagged ``gap=True`` (A7'(c), the signed W6 rule, as ``lifecycle/dcn.py``); a
-record before the run start is history (signed rule 3: no barrier state is
-assumed); a numeric record falls on ``start_date + round(t * 365)`` days, the
-run clock of every tracker. At expiry only a record on the expiry date hits.
+record before the run is history (signed rule 3: no barrier state is assumed,
+not hit), "before the run" being before the FIRST RUN INSTANT (ruling R31) --
+the first ``observe``, which for a restored checkpoint (the intraday replay) is
+the first instant after it; a numeric record falls on
+``start_date + round(t * 365)`` days, the run clock of every tracker. At expiry
+only a record on the expiry date hits.
 
 Knock-in semantics: a knocked-in single/double barrier option *is* a European
 option, so after KI ``product_for_pricing`` returns the exact European
@@ -60,7 +63,6 @@ from quantark.asset.equity.settlement import (
     SettlementResolver,
 )
 from quantark.util.enum import ObservationType
-from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
 
 from .events import LifecycleEvent, LifecycleEventType
@@ -337,11 +339,9 @@ class BarrierLifecycleTracker:
                 continue                                # before the run (signed rule 3): history, no state assumed
             if day < date:
                 if self._last is None:
-                    # TODO(barrier-run-start): a record on/after the run start but before the first run instant has
-                    # no earlier spot to decide it at; refused rather than invented
-                    raise ValidationError(
-                        f"barrier observation {day.date()} is on/after the run start but before the first run instant "
-                        f"{date.date()}: no spot to decide it at (TODO(barrier-run-start))")
+                    # before the first run instant (ruling R31; a restored checkpoint's covered records too): history,
+                    # no barrier state assumed, not hit (signed rule 3)
+                    continue
                 observed, gap = self._last[1], True
             else:
                 observed, gap = float(spot), False
@@ -383,9 +383,12 @@ class BarrierLifecycleTracker:
         contract multiplier where the product's own hit cash carries it."""
         product = self.product
         if isinstance(product, (OneTouchOption, DoubleOneTouchOption)):
-            if not product.get_payoff(0.0, touched=True):
+            pays_on_touch = product.is_one_touch if isinstance(product, OneTouchOption) else product.is_double_one_touch
+            if not pays_on_touch:
                 return 0.0                                  # a touched no-touch pays nothing
-            return float(rec.payoff) if rec.payoff is not None else float(product.get_payoff(0.0, touched=True))
+            # a one-touch pays the touching record's payoff (unset: its rebate), as ``get_payoff(touched=True)``
+            # scales it: no contract multiplier
+            return float(rec.payoff) if rec.payoff is not None else float(product.rebate)
         if isinstance(product, (SingleSharkfinOption, DoubleSharkfinOption)):
             cash = rec.payoff if rec.payoff is not None else product.knock_out_rebate
         else:

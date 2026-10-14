@@ -124,6 +124,25 @@ def test_discrete_barrier_replay_knocks_out_with_contractual_cash(sse_sessions, 
     assert assumed.provisional and len(assumed.reconstruction.assumptions) == 2 and not assumed.numerical.terminated
 
 
+def test_discrete_barrier_replay_from_a_checkpoint_treats_covered_records_as_history(sse_sessions, desk):
+    """A checkpoint stamped 07-20 covers the 07-15 record: the replay observes only the due records after it (08-17)
+    and the covered one is history (R31; T17 CP6: it raised TODO(barrier-run-start)). A supplied 111 on 08-17 knocks
+    out paying the contractual 1.0; the assumed spot 105 leaves the contract alive."""
+    dates = [datetime(2026, 7, 15), datetime(2026, 8, 17), datetime(2026, 12, 15)]
+    prod = _uo(ObservationType.DISCRETE, _schedule(dates, payoff=1.0))
+    kos = [e for e in resolve_timeline(prod, sse_sessions, flat_env(TS)).events if e.kind is EventKind.KO]
+
+    def checkpoint():
+        return BarrierLifecycleState(alive=True, valuation_point=ValuationPoint(date=datetime(2026, 7, 20)))
+
+    confirmed = _ctx(sse_sessions, desk, prod, spot=105.0, lifecycle_state=checkpoint(),
+                     fixings=(Fixing(kos[1].timestamp, 111.0),))
+    assert confirmed.numerical.terminated and not confirmed.provisional
+    assert confirmed.numerical.paid_cash == pytest.approx(1.0)
+    assumed = _ctx(sse_sessions, desk, prod, spot=105.0, lifecycle_state=checkpoint())
+    assert assumed.provisional and len(assumed.reconstruction.assumptions) == 1 and not assumed.numerical.terminated
+
+
 def test_multiplier_mismatch_between_tracker_and_contract_fails_closed(sse_sessions, desk):
     dates = [datetime(2026, 7, 15), datetime(2026, 8, 17), datetime(2026, 12, 15)]
     prod = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=110.0, barrier_type=BarrierType.UP_OUT,

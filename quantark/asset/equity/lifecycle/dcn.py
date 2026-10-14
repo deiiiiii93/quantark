@@ -14,9 +14,9 @@ the final row the loss leg of a knocked-in survivor -- the MC path kernel's orde
 Run calendars (A7'). Any run day prices (a closed day of the schedule calendar has no row and no KI test). A schedule
 date the run never visits -- a holiday of the run calendar, or a date between path instants -- is still decided, at
 the spot of the run instant before it, flagged ``gap=True`` (the signed W6 run-fixings rule). A schedule date before
-the run start is history (signed rule 3, 2026-10-09): no barrier state is assumed and a past coupon is not owed. A
-first run day after a run-start-or-later schedule date has no earlier instant to decide it at and is refused
-(``TODO(dcn-run-start)``).
+the run is history (signed rule 3, 2026-10-09): no barrier state is assumed and a past coupon is not owed, "before
+the run" being before the FIRST RUN INSTANT (ruling R31: a first run day after the tracker's start leaves the dates in
+between as history; it was refused, ``TODO(dcn-run-start)``).
 
 Pricing views (A1). Pre-close (``initial=True``): ``spec.build(valuation_date=d)``, row d kept and decided by the
 engine at t = 0. Post-close (after ``observe(d)``): the same ``.without_observed_through(d)``; day d's cash is in the
@@ -222,10 +222,12 @@ class DCNLifecycleTracker:
         """A pre-close copy at ``d`` needs every run-time schedule date before ``d`` decided (CP5)."""
         if not self.has_lifecycle:
             return
-        lower = self._last[0] if self._last is not None else None
+        if self._last is None:
+            return                      # every date before the first run instant is history (ruling R31)
+        lower = self._last[0]
         start = _day(self.start_date) if self.start_date is not None else None
         pending = [t for t in self._decision_dates
-                   if t < d and (lower is None or t > lower) and (start is None or t >= start)]
+                   if t < d and t > lower and (start is None or t >= start)]
         if pending:
             raise ValidationError(
                 f"DCN schedule date(s) {', '.join(f'{t:%Y-%m-%d}' for t in pending)} before {d.date()} are "
@@ -257,12 +259,10 @@ class DCNLifecycleTracker:
                 continue
             if t < d:
                 if self._last is None:
-                    # TODO(dcn-run-start): a run whose first instant is after a schedule date on or after its start
-                    # has no earlier spot to decide that date at; not decided rather than invented
-                    raise ValidationError(
-                        f"DCN observation {t.date()} is on/after the run start but before the first run instant "
-                        f"{d.date()}: no spot to decide it at (TODO(dcn-run-start))"
-                    )
+                    # before the first run instant (ruling R31): history as before the start (signed rule 3)
+                    if t in self._row_of:
+                        state.observed_row_indices.add(self._row_of[t])
+                    continue
                 s, gap = self._last[1], True
             else:
                 s, gap = float(spot), False

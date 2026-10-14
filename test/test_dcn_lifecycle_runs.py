@@ -156,10 +156,17 @@ def test_observations_before_the_run_start_are_history():
     assert t.lifecycle.observed_row_indices == {0} and not t.lifecycle.knocked_in
 
 
-def test_a_first_run_day_after_an_unvisited_observation_is_refused():
+def test_a_first_run_day_after_an_unvisited_observation_treats_it_as_history():
+    """Ruling R31: "before the run" is before the FIRST RUN INSTANT. A run whose first market day (04-04) is after the
+    tracker's start (the 04-03 coupon row) completes: that row is history -- observed, its coupon not owed, no KI or
+    KO state assumed (signed rule 3) -- where it raised TODO(dcn-run-start)."""
     t = tracker(start=COUPON_ROW)
-    with pytest.raises(ValidationError, match="dcn-run-start"):
-        t.observe(pd.Timestamp("2023-04-04"), t.product_for_lifecycle(), flat_env_on(datetime(2023, 4, 4)), 5500.0)
+    events = t.observe(pd.Timestamp("2023-04-04"), t.product_for_lifecycle(), flat_env_on(datetime(2023, 4, 4)), 5500.0)
+    assert events == []
+    assert 0 in t.lifecycle.observed_row_indices and t.lifecycle.ledger.cashflows == ()
+    assert t.lifecycle.alive and not t.lifecycle.knocked_in
+    pre = t.product_for_pricing(pd.Timestamp("2023-04-06"), flat_env_on(datetime(2023, 4, 6)), initial=True)
+    assert pre.schedule.monthly[0].observation_date > COUPON_ROW
 
 
 def test_a_skipped_observation_is_decided_at_the_previous_instant():

@@ -32,7 +32,6 @@ from quantark.asset.equity.product.option.observation_schedule import Observatio
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import BarrierDirection, BarrierType, DoubleBarrierType, ObservationType, OptionType, TouchType
-from quantark.util.exceptions import ValidationError
 
 START = pd.Timestamp("2026-01-05")
 #: monthly record dates (contract days 30, 60, ..., 360), the exercise date on the last one
@@ -128,11 +127,45 @@ def test_a_record_before_the_run_start_is_history():
     assert tracker.state.alive
 
 
-def test_a_record_after_the_start_but_before_the_first_run_instant_is_refused():
-    """No earlier spot to decide it at: refused, never invented (TODO(barrier-run-start))."""
+def test_a_record_after_the_start_but_before_the_first_run_instant_is_history():
+    """Ruling R31: "before the run" is before the FIRST RUN INSTANT. A run whose first market day (40) is after the
+    tracker's start, with a record (30) in between, completes: that record is history (no state assumed, not hit),
+    whatever the spot; the next record decides as usual."""
     tracker = _up_out()
-    with pytest.raises(ValidationError, match="before the first run instant"):
-        _run(tracker, [(40, 100.0)])
+    assert _run(tracker, [(40, 125.0), (45, 110.0)]) == []
+    assert tracker.state.alive
+    events = _run(tracker, [(60, 121.0)])
+    assert [e.event_type for e in events] == [LifecycleEventType.KNOCK_OUT] and events[0].date == _on(60)
+
+
+def test_a_record_skipped_after_the_first_run_instant_still_takes_the_previous_instants_spot():
+    """The gap rule holds strictly after the first run instant (R31)."""
+    tracker = _up_out()
+    events = _run(tracker, [(40, 121.0), (65, 100.0)])           # day 60 skipped, decided at day 40's 121
+    assert [e.event_type for e in events] == [LifecycleEventType.KNOCK_OUT]
+    assert events[0].date == _on(60) and events[0].metadata["gap"] is True
+
+
+@pytest.mark.parametrize("double", [False, True], ids=["one_touch", "double_one_touch"])
+def test_a_one_touch_with_a_zero_rebate_books_the_record_payoff(double):
+    """Product rebate 0, records paying 4.5: a touch on a record day books 4.5 (a one-touch's touch cash carries no
+    contract multiplier, as ``get_payoff(touched=True)``), not 0."""
+    if double:
+        product = DoubleOneTouchOption(upper_barrier=130.0, lower_barrier=75.0, rebate=0.0, exercise_date=EXERCISE,
+                                       payment_at_hit=False, touch_type=TouchType.DOUBLE_ONE_TOUCH,
+                                       observation_type=ObservationType.DISCRETE,
+                                       observation_schedule=_records(upper=130.0, lower=75.0, payoff=4.5))
+        spot = 131.0
+    else:
+        product = OneTouchOption(barrier=120.0, barrier_direction=BarrierDirection.UP, rebate=0.0,
+                                 exercise_date=EXERCISE, payment_at_hit=False, touch_type=TouchType.ONE_TOUCH,
+                                 observation_type=ObservationType.DISCRETE,
+                                 observation_schedule=_records(120.0, payoff=4.5))
+        spot = 121.0
+    tracker = BarrierLifecycleTracker(product=product, quantity=2.0, start_date=START)
+    events = _run(tracker, [(0, 100.0), (30, spot)])
+    assert [e.event_type for e in events] == [LifecycleEventType.KNOCK_OUT]
+    assert events[0].payoff == 4.5 and events[0].cashflow == 9.0
 
 
 def test_numeric_records_fall_on_the_run_clock():

@@ -186,8 +186,10 @@ class QuadInputAdapter(ABC):
         product: BaseEquityProduct,
         resolved: Sequence[ResolvedObservationRecord],
         context: QuadPricingContext,
-    ) -> QuadCoreInputs:
-        """Construct quad core inputs for the product."""
+    ) -> QuadCoreInputs | Sequence[QuadCoreInputs]:
+        """Construct quad core inputs for the product: one ``QuadCoreInputs``, or a sequence of legs on one
+        observation grid when the payoff needs more than the core's three regions per step -- the engine prices each
+        leg and sums them (the double knock-out's last-record rebate, T17 R30)."""
 
     @abstractmethod
     def finalize_price(
@@ -1042,7 +1044,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         product: DoubleBarrierOption,
         resolved: Sequence[ResolvedObservationRecord],
         context: QuadPricingContext,
-    ) -> QuadCoreInputs:
+    ) -> QuadCoreInputs | Sequence[QuadCoreInputs]:
         (
             obs_times,
             upper_barriers,
