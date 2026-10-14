@@ -7,6 +7,7 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from typing import Callable, Optional
+import dataclasses
 from dataclasses import dataclass
 from typing import Sequence, TYPE_CHECKING
 
@@ -1074,6 +1075,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             b_minus = rebate_values
             b_plus = rebate_values
 
+        barrier_lower, barrier_upper = k_minus.copy(), k_plus.copy()
         a_terminal, b_terminal = self._terminal_payoff_coefficients(
             product,
             k_minus,
@@ -1081,7 +1083,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             context.terminal_delay_df,
         )
 
-        return QuadCoreInputs(
+        inputs = QuadCoreInputs(
             observation_times=obs_times,
             k_minus=k_minus,
             k_plus=k_plus,
@@ -1092,6 +1094,38 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             a_terminal=a_terminal,
             b_terminal=b_terminal,
         )
+        # The vanilla is carved by moving the last record's lower bound to the strike (a call; a put: the upper),
+        # so that side's region no longer is the knock-out region: a rebate there would be paid on (0, K] (put:
+        # [K, inf)) to paths that never knocked out (T17 R30). That record's rebate on the carved side is its own
+        # leg instead, on the records' own corridor: paid only to paths that survive every earlier record and
+        # breach it at maturity.
+        carved_lower = k_minus[-1] != barrier_lower[-1]
+        carved_upper = k_plus[-1] != barrier_upper[-1]
+        last_rebate = float(b_minus[-1]) if carved_lower else float(b_plus[-1]) if carved_upper else 0.0
+        if last_rebate == 0.0:
+            return inputs
+        zeros = np.zeros_like(k_minus, dtype=float)
+        b_minus, b_plus = np.array(b_minus, dtype=float), np.array(b_plus, dtype=float)
+        rebate_lower, rebate_upper = zeros.copy(), zeros.copy()
+        if carved_lower:
+            b_minus[-1] = 0.0
+            rebate_lower[-1] = last_rebate
+        else:
+            b_plus[-1] = 0.0
+            rebate_upper[-1] = last_rebate
+        option_leg = dataclasses.replace(inputs, b_minus=b_minus, b_plus=b_plus)
+        rebate_leg = QuadCoreInputs(
+            observation_times=obs_times,
+            k_minus=barrier_lower,
+            k_plus=barrier_upper,
+            a_minus=zeros,
+            b_minus=rebate_lower,
+            a_plus=zeros,
+            b_plus=rebate_upper,
+            a_terminal=0.0,
+            b_terminal=0.0,
+        )
+        return [option_leg, rebate_leg]
 
     def finalize_price(
         self,

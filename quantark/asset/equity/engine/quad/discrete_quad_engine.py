@@ -103,6 +103,10 @@ class DiscreteQuadEngine(BaseEngine):
                 return remaining_replication(product).price(pricing_env)
             resolved = ahead
         inputs = adapter.build_inputs(product, resolved, context)
+        # an adapter may split a payoff the core's three regions per step cannot carry into legs on one observation
+        # grid (the double knock-out's last-record rebate, T17 R30): the core prices each, linearly summed
+        legs = tuple(inputs) if isinstance(inputs, (list, tuple)) else (inputs,)
+        inputs = legs[0]
         observation_times = np.asarray(inputs.observation_times, dtype=float)
 
         # Per-interval forward params on the RESOLVED observation grid.
@@ -125,15 +129,20 @@ class DiscreteQuadEngine(BaseEngine):
             observation_times, context.maturity, vol_in
         )
 
-        core = QuadratureCore(
-            grid_x=effective_grid_x,
-            spot=context.spot,
-            observation_times=inputs.observation_times,
-            rate=rate_in,
-            div=div_in,
-            vol=vol_in,
-        )
-        core_price = core.price(inputs)
+        def leg_price(leg) -> float:
+            core = QuadratureCore(
+                grid_x=effective_grid_x,
+                spot=context.spot,
+                observation_times=inputs.observation_times,
+                rate=rate_in,
+                div=div_in,
+                vol=vol_in,
+            )
+            return core.price(leg)
+
+        core_price = leg_price(inputs)
+        for leg in legs[1:]:
+            core_price += leg_price(leg)
         return adapter.finalize_price(product, pricing_env, context, core_price, self)
 
     def _select_grid_points(

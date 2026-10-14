@@ -469,14 +469,21 @@ class DoubleBarrierAdapter(_KnockInAdapter):
         return DoubleBarrierOption
 
     def _hit_price(self, product, env):
+        """A knock-out hit now: the rebate, paid at the terminal payment time as the forward leg and the discrete
+        records pay it (the product has no hit-paid option; T17 R30). It was paid at the hit."""
         if not product.is_knock_out:
             return None
         solver = self.solver
+        settlement_time = (
+            solver._event_payment_time(product, env, 0.0)
+            if getattr(product, "pay_at_hit", False)
+            else solver._terminal_payment_time(product, env)
+        )
         return solver._cashflow_value_at_time(
             env,
             product.rebate,
             0.0,
-            solver._event_payment_time(product, env, 0.0),
+            settlement_time,
         ) * solver._multiplier(product)
 
     def _continuous_hit_record(self, product, env) -> EventRecord:

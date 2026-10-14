@@ -528,7 +528,8 @@ class TestDoubleBarrierPDESolver:
         solver = DoubleBarrierPDESolver(pde_params)
         price = solver.price(double_ko, pricing_env)
 
-        assert np.isclose(price, 10.0)
+        # the rebate is paid at the terminal payment time, as the forward leg pays it (T17 R30: 10.0 before)
+        assert np.isclose(price, 10.0 * np.exp(-0.05 * 0.5))
 
 
 # ============================================================================

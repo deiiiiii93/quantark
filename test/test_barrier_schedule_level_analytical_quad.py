@@ -740,18 +740,18 @@ QUAD_BEFORE = {
     ('DISCRETE_expired', 'no_touch'): 5.0,
     ('DISCRETE_expired_hit', 'no_touch'): 0.0,
     ('EXPIRY', 'no_touch'): 3.4496348894447455,
-    ('DISCRETE', 'double_ko'): 5.1624911886851566,
-    ('DISCRETE_mid', 'double_ko'): 5.646571886050389,
+    ('DISCRETE', 'double_ko'): 4.411009655944174,       # R30: 5.16249 (rebate on (0, K]); PDE 4.41066
+    ('DISCRETE_mid', 'double_ko'): 4.782462548258053,   # R30: 5.64657
     ('DISCRETE_hit', 'double_ko'): 1.9555024743866727,
     ('DISCRETE_expired', 'double_ko'): 0.0,
     ('DISCRETE_expired_hit', 'double_ko'): 2.0,
-    ('EXPIRY', 'double_ko'): 6.00231331644959,
-    ('DISCRETE', 'double_ki'): 5.605721900746439,
-    ('DISCRETE_mid', 'double_ki'): 3.6003500096404997,
+    ('EXPIRY', 'double_ko'): 5.177742879048813,         # R30: 6.00231; analytical 5.17774
+    ('DISCRETE', 'double_ki'): 6.357203433487422,       # R30: 5.60572; PDE 6.35782
+    ('DISCRETE_mid', 'double_ki'): 4.464459347432836,   # R30: 3.60035
     ('DISCRETE_hit', 'double_ki'): 32.651873420278896,
     ('DISCRETE_expired', 'double_ki'): 2.0,
     ('DISCRETE_expired_hit', 'double_ki'): 31.0,
-    ('EXPIRY', 'double_ki'): 4.765899772982006,
+    ('EXPIRY', 'double_ki'): 5.590470210382783,         # R30: 4.76590
 }
 
 
@@ -800,7 +800,7 @@ def test_quad_plain_double_touch_is_unchanged(touch, hit_paid, cell):
 #: A15 (user decision 2026-10-14, T17): the plain schedules aged 0.30 (no record on the valuation instant, the next
 #: at 1/3) with the spot beyond the next record's level are priced FORWARD by the lattice. Before T17 they were decided
 #: at once on the next record (W18b / T6): name -> (pre-T17 value, A15 value). The Black-Scholes PDE agrees within
-#: 2e-4 except the double barrier with a rebate (0.05: a QUAD / PDE rebate gap its inside cells share, pre-existing).
+#: 2e-4 (the double barrier: 1.3e-4 since R30 paid its rebate only on knock-out).
 QUAD_A15_BEYOND = {
     "barrier_uoc": (4.896094822847298, 4.869282182116993),
     "barrier_uic": (23.202892679985446, 23.22970532071575),
@@ -808,8 +808,8 @@ QUAD_A15_BEYOND = {
     "barrier_dop": (4.896094822847298, 4.717181787602059),
     "one_touch": (4.896094822847298, 4.302710336340313),
     "no_touch": (0.0, 0.5319679607803076),
-    "double_ko": (1.9584379291389191, 3.0769000717546238),
-    "double_ki": (32.511223884158724, 31.39276174154302),
+    "double_ko": (1.9584379291389191, 3.0258045948159404),     # R30: A15 value 3.07690 -> 3.02580 (PDE 3.02591)
+    "double_ki": (32.511223884158724, 31.4438572184817),       # R30: A15 value 31.39276 -> 31.44386 (PDE 31.44373)
 }
 #: (touch type, hit-paid) -> (pre-T17 value, A15 value), spot 131
 DOUBLE_TOUCH_A15_BEYOND = {

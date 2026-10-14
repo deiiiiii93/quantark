@@ -751,7 +751,31 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   CONTINUOUS and on a record on the valuation instant (a record's payoff likewise), continuous at the barrier. Moved
   values (130/75, rebate 2, T 0.75, r 3%): spot 131 or 74, continuous or on a record: 2.0 -> 1.95550 (QUAD and PDE
   1.95550); records paying 2.5 on a record now: 2.5 -> 2.44438. Plain inside cells and every other analytical value
-  bit-identical; no anchor moved. decides the exercise date (user ruling 2026-10-10, "check knock in state first").
+  bit-identical; no anchor moved.
+- Double knock-out rebate timing (T17 R30, user authority for bug-fix moves): a `DoubleBarrierOption`'s rebate is
+  paid only to knocked-out paths, at the terminal payment time (the product has no hit-paid option). Two routes broke
+  it. (a) QUAD: `DoubleBarrierQuadInputAdapter._terminal_payoff_coefficients` carves the vanilla by moving the last
+  record's lower bound to the strike (a call; a put: the upper), so a rebate on a record at maturity was paid on
+  (0, K] (put: [K, inf)) to paths that never knocked out. That record's rebate on the carved side is now its own leg
+  on the records' corridor (`build_inputs` returns two `QuadCoreInputs`; `DiscreteQuadEngine` sums the core over an
+  adapter's legs, one leg unchanged); the knock-in parity `vanilla + R DF - core` inherits the fix. Oracle: the rebate
+  leg `V(R) - V(0)` equals `R DF(T) P(knock-out)` (knock-in: `P(survive)`, from QUAD's double no-touch) to 1.6e-15,
+  and QUAD equals the Black-Scholes PDE within 6.2e-4 (0.75 before). (b) PDE: `DoubleBarrierAdapter._hit_price`
+  paid a continuous hit-now at the hit instant (undiscounted) while its forward leg and discrete records pay at the
+  terminal payment time; it now reads the terminal payment time (a product with `pay_at_hit` would keep the hit;
+  the single-barrier and one-touch adapters already follow `pay_at_hit` / `payment_at_hit` and are unchanged). New
+  `test/test_double_knock_out_rebate_timing.py`. Moved values (130/75, rebate 2, K 100, T 1, monthly records, flat 20%
+  vol, r 3%, q 1%; QUAD 401 points): knock-out call at inception, spot 100: 5.16249 -> 4.41101 (PDE 4.41066);
+  aged 0.30 spot 100: 5.64657 -> 4.78246; EXPIRY monitoring 6.00231 -> 5.17774 (analytical 5.17774); knock-in call
+  5.60572 -> 6.35720 (PDE 6.35782), aged 4.46446 from 3.60035, EXPIRY 4.76590 -> 5.59047; knock-out put at inception
+  5.11362 -> 4.41915 (PDE 4.41904); aged 0.30 spot 129: call 3.62377 -> 3.54538, put 2.15674 -> 1.87254; spot 80: call
+  2.43157 -> 1.74220, put 5.67308 -> 5.51107; the A15 "beyond" cells (aged 0.30, spot 131): knock-out 3.07690 ->
+  3.02580, knock-in 31.39276 -> 31.44386. Unmoved: record-day and expired cells (decided before the lattice), every
+  contract whose last record is before maturity or pays no rebate, and the strike outside the corridor. PDE
+  continuous knock-out hit now (aged 0.30, spot 131 or 74): 2.0 -> 1.95844 (= 2 DF(0.70); just inside, 1.95867);
+  rebate 10, T 0.5, r 5%, spot 130 outside 80/120: 10.0 -> 9.75310.
+  No modelvalidation anchor or replay golden moved.
+- A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
   (`lifecycle_state.knocked_in` or the product's `_otc_lifecycle_knocked_in`), while the day before the same state
