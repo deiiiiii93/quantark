@@ -154,13 +154,15 @@ class DCNLifecycleTracker:
 
     def remaining_maturity(self, date) -> float:
         """ACT/365F years from ``date`` to the final observation, for maturity-sampling consumers (the replay's
-        surface / term-carry probe). Never refuses and builds no copy: 0.0 for a dead note or past the final
-        observation; the booked contract's own maturity before its valuation date (as ``product_for_pricing``)."""
+        surface / term-carry probe). Never refuses and builds no copy: 0.0 on or after the final observation; the
+        booked contract's own maturity before its valuation date (as ``product_for_pricing``). A dead (knocked-out)
+        note keeps the real time to its final observation, the sample it gave before (R28): the probe drives a
+        book-wide column and must not move with one product's state."""
         _require_date_instant(date)
         d = _day(date)
         if d < self._booked.valuation_date:
             return float(self.product.get_maturity())
-        if not self.lifecycle.alive or d >= self.final_observation_date:
+        if d >= self.final_observation_date:
             return 0.0
         return (self.final_observation_date - d).days / 365.0
 

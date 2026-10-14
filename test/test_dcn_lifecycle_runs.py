@@ -562,7 +562,11 @@ def test_remaining_maturity_never_refuses():
     assert t.remaining_maturity(pd.Timestamp("2023-03-20")) == t.product.get_maturity()
     run_tracker(t, [datetime(2023, 4, 4)])
     t.lifecycle.knocked_out = True
-    assert t.remaining_maturity(pd.Timestamp("2023-04-05")) == 0.0
+    # a dead note keeps sampling the real time to its final observation (the replay's term-carry column is the
+    # first product's: a knocked-out first DCN must not move it, R28); 0.0 only on/after the final observation
+    d = pd.Timestamp("2023-04-05")
+    assert t.remaining_maturity(d) == (final - d.to_pydatetime()).days / 365.0
+    assert t.remaining_maturity(pd.Timestamp(final)) == 0.0
 
 
 def test_alive_note_past_its_final_observation_is_not_priced_before_observe():
