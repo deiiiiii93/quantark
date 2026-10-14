@@ -23,6 +23,7 @@ from datetime import datetime
 
 import pytest
 
+from golden_compare import GOLDEN_ABS_TOL, GOLDEN_REL_TOL
 from quantark.asset.equity.engine import barrier_schedule_rules
 from quantark.asset.equity.engine.analytical.barrier_analytical_engine import BarrierAnalyticalEngine
 from quantark.asset.equity.engine.analytical.double_barrier_option_engine import DoubleBarrierOptionAnalyticalEngine
@@ -58,6 +59,8 @@ VALUATION = datetime(2025, 1, 6)
 #: twelve monthly observations on a regular grid (the analytical barrier shift needs one)
 TIMES = [k / 12 for k in range(1, 13)]
 TOL = dict(rel=1e-12, abs=1e-12)
+#: frozen literals cross architectures (test/golden_compare.py); TOL stays for same-run comparisons
+GOLDEN = dict(rel=GOLDEN_REL_TOL, abs=GOLDEN_ABS_TOL)
 MIXED = "differ across the remaining observation records"
 
 
@@ -421,12 +424,12 @@ BEFORE = {
 
 @pytest.mark.parametrize("observation,name", list(BEFORE))
 def test_continuous_expiry_and_plain_schedules_are_unchanged(observation, name):
-    """The pre-W18c values (bitwise on the machine that took them; ``TOL`` here for other architectures)."""
+    """The pre-W18c values (bitwise on the machine that took them; ``GOLDEN`` tolerance here for other architectures)."""
     engine, build, spot = PLAIN[name]
     product = build()
     if observation != "DISCRETE":
         product = _monitored(product, ObservationType[observation])
-    assert _quiet(lambda: engine().price(product, env(spot))) == pytest.approx(BEFORE[observation, name], **TOL)
+    assert _quiet(lambda: engine().price(product, env(spot))) == pytest.approx(BEFORE[observation, name], **GOLDEN)
 
 
 #: plain schedules decided now: (label, aged years, keep the landing record, spot) -> pre-W18c value
@@ -450,7 +453,7 @@ def test_plain_schedules_decided_at_the_valuation_instant_are_unchanged(case):
     name = label.rsplit("_hit", 1)[0] if label.endswith("_hit") else label.split("_between")[0]
     engine, build, _ = PLAIN[name]
     product = _aged(build(), years, keep_landing=keep)
-    assert _quiet(lambda: engine().price(product, env(spot))) == pytest.approx(PLAIN_DECIDED_NOW[case], **TOL)
+    assert _quiet(lambda: engine().price(product, env(spot))) == pytest.approx(PLAIN_DECIDED_NOW[case], **GOLDEN)
 
 
 # ======================================================================================================================
@@ -766,7 +769,7 @@ def test_quad_plain_schedules_and_expiry_monitoring_are_unchanged(cell, name):
     elif years:
         _aged(product, years, keep_landing=keep)
     spot = hit if which == "hit" else inside
-    assert _quiet(lambda: _quad().price(product, env(spot))) == pytest.approx(QUAD_BEFORE[cell, name], **TOL)
+    assert _quiet(lambda: _quad().price(product, env(spot))) == pytest.approx(QUAD_BEFORE[cell, name], **GOLDEN)
 
 
 #: plain double one-touch / no-touch on QUAD (records at 130/75), pre-T6-follow-up values (179da8b6):
@@ -795,4 +798,4 @@ def test_quad_plain_double_touch_is_unchanged(touch, hit_paid, cell):
         _aged(product, years, keep_landing=keep)
     spot = 131.0 if which == "hit" else 100.0
     assert _quiet(lambda: _quad().price(product, env(spot))) == pytest.approx(
-        DOUBLE_TOUCH_BEFORE[touch, hit_paid][cell], **TOL)
+        DOUBLE_TOUCH_BEFORE[touch, hit_paid][cell], **GOLDEN)

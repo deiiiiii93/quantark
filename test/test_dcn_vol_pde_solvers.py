@@ -18,6 +18,7 @@ from quantark.util.enum.engine_enums import EventProjectionMode, HestonMCScheme
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 
+from golden_compare import GOLDEN_REL_TOL
 from dcn_fixtures import DCN_A, FLAT, flat_env, make_dcn
 
 PATHS = 2 ** 14
@@ -160,7 +161,8 @@ def test_heston_pde_nodal_mode_keeps_the_legacy_discretization():
     nodal = HestonDCNPDESolver(
         FELLER_VIOLATING, n_x=151, n_v=41, event_projection="nodal"
     ).price(p, env)
-    assert nodal == -90111.4177797157
+    # frozen on ARM64 -> golden tolerance (test/golden_compare.py)
+    assert nodal == pytest.approx(-90111.4177797157, rel=GOLDEN_REL_TOL)
     default = HestonDCNPDESolver(FELLER_VIOLATING, n_x=151, n_v=41).price(p, env)
     explicit = HestonDCNPDESolver(
         FELLER_VIOLATING, n_x=151, n_v=41,

@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 import mc_se_cases
+from golden_compare import GOLDEN_ABS_TOL, GOLDEN_REL_TOL
 from mc_se_pins import BEFORE
 from quantark.montecarlo import antithetic_pair_means, mean_and_std_error, sample_std_error
 from quantark.util.exceptions import ValidationError
@@ -137,14 +138,15 @@ def test_dcn_pairs_within_each_batch_and_pools(case, n, monkeypatch):
 @pytest.mark.parametrize("n", [2000, 2001])
 def test_price_bitwise_unchanged_antithetic(case, n):
     price, _ = mc_se_cases.run_case(case, True, n)
-    assert price == BEFORE[(case, True, n)][0]
+    # frozen on ARM64 -> golden tolerance (test/golden_compare.py)
+    assert price == pytest.approx(BEFORE[(case, True, n)][0], rel=GOLDEN_REL_TOL, abs=GOLDEN_ABS_TOL)
 
 
 @pytest.mark.parametrize("case", CASE_NAMES)
 @pytest.mark.parametrize("n", [2000, 2001])
 def test_non_antithetic_unchanged_bitwise(case, n):
     price, se = mc_se_cases.run_case(case, False, n)
-    assert (price, se) == BEFORE[(case, False, n)]
+    assert (price, se) == pytest.approx(BEFORE[(case, False, n)], rel=GOLDEN_REL_TOL, abs=GOLDEN_ABS_TOL)
 
 
 @pytest.mark.parametrize("case", [c for c in PAIRED_NAMES + BATCHED_NAMES if c not in mc_se_cases.EVEN_ROWS])

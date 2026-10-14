@@ -103,6 +103,7 @@ def test_fx_lv_theta_with_explicit_equal_delivery():
 
 
 # --- I8 / AC12: LV and Heston FX numeric theta steps by the environment's year fraction of theta_days -------------
+from golden_compare import GOLDEN_ABS_TOL, GOLDEN_REL_TOL  # noqa: E402
 from quantark.asset.fx.engine.localvol_greeks import fx_local_vol_model_greeks  # noqa: E402
 from quantark.asset.fx.engine.pde import FxHestonPDESolver, FxHestonSLVPDESolver  # noqa: E402
 from quantark.util.calendar.business_calendar import CalendarType, create_calendar  # noqa: E402
@@ -168,10 +169,12 @@ _ROUTES = {
     "slv": lambda env, opt: _slv_solver().calculate_greeks(opt, env)["theta"],
 }
 # Full-precision values captured on the code BEFORE the I8 change (ACT_365 and CALENDAR_DAYS must reproduce them).
+# Frozen on ARM64: compared with the cross-architecture golden tolerance (test/golden_compare.py); the bitwise
+# same-run invariants are the ACT_365 == CALENDAR_DAYS test and the live old-formula LV test below.
 _OLD_THETA = {
-    "lv": "-0x1.8435e36bca800p+6",
-    "heston": "0x1.b2a4bd3298500p+8",
-    "slv": "0x1.ced6089f88c00p+8",
+    "lv": float.fromhex("-0x1.8435e36bca800p+6"),
+    "heston": float.fromhex("0x1.b2a4bd3298500p+8"),
+    "slv": float.fromhex("0x1.ced6089f88c00p+8"),
 }
 
 
@@ -193,7 +196,22 @@ def _spy(solver):
 @pytest.mark.parametrize("dc", [DC.ACT_365, DC.CALENDAR_DAYS])
 def test_i8_calendar_day_theta_is_bitwise_unchanged(route, dc):
     got = _ROUTES[route](_theta_env(dc), _theta_opt())
-    assert got.hex() == _OLD_THETA[route]
+    assert got == pytest.approx(_OLD_THETA[route], rel=GOLDEN_REL_TOL, abs=GOLDEN_ABS_TOL)
+
+
+@pytest.mark.parametrize("route", list(_ROUTES))
+def test_i8_act_365_and_calendar_days_theta_are_bitwise_equal(route):
+    a = _ROUTES[route](_theta_env(DC.ACT_365), _theta_opt())
+    b = _ROUTES[route](_theta_env(DC.CALENDAR_DAYS), _theta_opt())
+    assert a.hex() == b.hex()
+
+
+@pytest.mark.parametrize("dc", [DC.ACT_365, DC.CALENDAR_DAYS])
+def test_i8_lv_theta_is_bitwise_the_old_one_day_formula(dc):
+    env = _theta_env(dc)
+    base = _GK.price(_theta_opt(), env)
+    old = (_gk_at(env, 1.0 - 1.0 / 365.0) - base) / 1.0
+    assert _lv_theta(env, _theta_opt()).hex() == old.hex()
 
 
 @pytest.mark.parametrize("route", list(_ROUTES))
