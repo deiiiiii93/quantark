@@ -25,7 +25,6 @@ the legacy whole-node masks on a level-pinned grid under
 from __future__ import annotations
 
 import dataclasses
-import math
 from typing import Optional
 
 import numpy as np
@@ -52,6 +51,7 @@ from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.priceenv import TermMarketContext
 from quantark.priceenv.term_sampling import make_df_fn
+from quantark.util.numerical import safe_log
 from quantark.util.enum.engine_enums import ADIScheme, EngineType, EventProjectionMode
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.adi_core import HestonSLVADICore
@@ -223,7 +223,7 @@ class HestonDCNPDESolver(BaseEngine):
             return apply_dcn_events(v0, v1, cpn_mask, ko_mask, ki_mask, cpn, ko)
         if ko is not None:
             v1 = project_event_values(
-                x_grid, math.log(product.ko_barrier), v1,
+                x_grid, safe_log(product.ko_barrier), v1,
                 np.full_like(v1, ko), True,
             )
         thresholds = sorted(
@@ -243,7 +243,7 @@ class HestonDCNPDESolver(BaseEngine):
             else:
                 branches.append(v0)
         v0 = project_piecewise_event(
-            x_grid, [math.log(b) for b in thresholds], branches
+            x_grid, [safe_log(b) for b in thresholds], branches
         )
         return v0, v1
 
