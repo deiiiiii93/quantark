@@ -77,7 +77,7 @@ code exists anywhere (`grep error_code|ErrorCode|reason_code` finds nothing).
 ### 2.3 How runs branch on edge cases today
 
 - `ProductReplay`: `except ValidationError` around `get_maturity` means "on/after a date-based maturity"
-  (`backtest/replay/product_replay.py:533-538`; the comment notes it no longer raises ON the date).
+  (`backtest/replay/product_replay.py:541-551`; the comment notes it no longer raises ON the date).
 - `except ValidationError` on a term-dividend build re-raises unless the caller allowed flat carry (`:294-301`).
 - A failed surface node is logged and written as a NaN row (`:662-692`).
 - Event stats fall back to MC on `except Exception` only in `mode == "mc"`, and `StatisticsRefused` always re-raises

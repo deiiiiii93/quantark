@@ -64,15 +64,18 @@ So a time-of-day instant does three wrong things:
   `range_accrual_config.py:27`, `FxRangeAccrualObservationRecord` `fx_range_accrual_config.py:26`, TARN
   `fixing_dates`) have no time-of-day field.
 
-### 2.2 Trackers normalise silently
+### 2.2 Trackers: the DCN refuses, the autocallable normalises
 
-- DCN: `_day = pd.Timestamp(value).normalize()` (`asset/equity/lifecycle/dcn.py:47-48`). In `observe`
-  (`:162-199`), an instant on day D decides row D at THAT instant's spot (`:192-193`) and stores `_last = (D, spot)`.
-  A later instant on the same day skips row D (`t <= lower`, `:176`).
-- In an hourly run, the DCN therefore decides its coupon / KO / KI at the FIRST hourly spot of the day, not at the
-  close.
+- DCN: since commit 7577d5cf the tracker REFUSES a run instant that carries a time of day
+  (`_require_date_instant`, `asset/equity/lifecycle/dcn.py:51-59`, called from `observe` `:238`,
+  `product_for_pricing` `:190` and `remaining_maturity` `:161`; test `test_time_of_day_run_instants_are_refused`).
+  `_day` (`:47-48`, `pd.Timestamp(value).normalize()`) is applied only after that check, so it normalises
+  midnight-valued instants. `observe` (`:236-274`) decides the close of day D at that day's spot (`:268`, `_decide`
+  with `gap=False`) and stores `_last = (D, spot)`; a later instant on the same day is skipped (`t <= lower`, `:251`).
+- An hourly run holding a DCN therefore fails loudly (`ValidationError`, `TODO(run-fixings)`) instead of deciding at
+  the first hourly spot of the day.
 - The autocallable tracker's default date resolver is also `normalize()`
-  (`asset/equity/lifecycle/autocallable.py:75-76`). Its per-instant decision order was not traced for this proposal.
+  (`asset/equity/lifecycle/autocallable.py:76-77`). Its per-instant decision order was not traced for this proposal.
 
 ### 2.3 Valuation side (W11, W8 Q4)
 
@@ -98,7 +101,7 @@ So a time-of-day instant does three wrong things:
   request.
 - **Gap rule.** W6 R4 / D5: a fixing no instant fell on takes the previous instant's spot, `gap=True`
   (`run_fixings.py:9-14`; design `:514-516`). This run's A7'(c) applies the same rule to DCN schedule dates the run
-  calendar never visits (`dcn.py:12-18, 186-193`).
+  calendar never visits (`dcn.py:14-19, 260-268`).
 - **First live instant.** W6 R3 / Ruling 4: a record live (t = 0) at an instant is recorded at the spot of the FIRST
   instant at which it was live (`run_fixings.py:8-13`).
 

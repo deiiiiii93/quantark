@@ -69,12 +69,17 @@ backtest and FX dynamic scenario.
   matching the dated product. Values that move are listed in
   `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`.
   **Breaking:** under a `BUSINESS_DAYS` environment with no calendar, a numeric FX product's theta now raises
-  `ValidationError` on every route whose theta is a finite-difference time step (it used to step `theta_days / 365`;
-  a business-day count needs the calendar): `BaseFxEngine._fdm_theta` and the engines whose `calculate_greeks` inherit
-  it (the FX MC engines, the FX range-accrual analytical engine), and, since the local-vol / Heston theta change
-  below, the FX local-vol, Heston and Heston-SLV MC / PDE routes and the FX Heston analytical engine. The closed-form
-  Garman-Kohlhagen vanilla and digital thetas (`-dV/dtau / 365`) do not step time and are unchanged (measured
-  2026-10-14).
+  `ValidationError` on every route that steps time (it used to step `theta_days / 365`; a business-day count needs the
+  calendar). The raising routes are exactly: every engine whose `calculate_greeks` reaches
+  `BaseFxEngine._fdm_theta` (`GarmanKohlhagenQuantoEngine`, `FxQuantoDigitalAnalyticalEngine`, `FxDeltaOneEngine`,
+  `VannaVolgaBarrierEngine`, the FX range-accrual analytical engines, and the FX barrier / sharkfin, TARF, TARN and
+  range-accrual MC engines); the finite-difference fallbacks of `GarmanKohlhagenEngine` (Vanna-Volga smile, delivery
+  differing from expiry, or a market forward set) and of `FxDigitalOptionAnalyticalEngine` (the same three, plus any
+  payout not in the domestic currency, i.e. asset-or-nothing); and, through the local-vol / Heston theta change below,
+  the FX local-vol, Heston and Heston-SLV MC / PDE routes and the FX Heston analytical engine. The only non-raising
+  path is the closed-form branch (`-dV/dtau / 365`, no time step) of `GarmanKohlhagenEngine` and of
+  `FxDigitalOptionAnalyticalEngine`, taken only on a flat or term vol surface with delivery equal to expiry, no market
+  forward and, for the digital, a domestic-currency payout (cash-or-nothing). Measured 2026-10-14.
 - FX local-vol and Heston theta (`fx_local_vol_model_greeks`, `FxHestonPDESolver`, `FxHestonSLVPDESolver`, and the LV/Heston
   analytical and MC engines that share the first) step a numeric (`maturity=`) product by the environment's year
   fraction of `theta_days` calendar days, as `BaseFxEngine._fdm_theta` does, instead of `theta_days / 365`. The
@@ -435,7 +440,7 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   for bit) and `HestonSLVADICore(pin_critical_levels=True)` (False skips the level pinning; the default path is
   unchanged for every other route). After: the nested ladder 301 / 601 / 1201 / 2401 / 4801 is monotone (-56, -87,
   -53, -18), non-nested levels wiggle within ±75; Heston QE-M MC (2^21 paths) -92,980 ± 100 vs the time-converged
-  PDE ~ -93,030. Evidence: `docs/superpowers/specs/2026-10-13-dcn-nx-ladder-evidence/`. Moved values: Heston DCN
+  PDE ~ -92,910 (Aitken extrapolation of the e09 time ladder; 0.7 s.e. from the MC). Evidence: `docs/superpowers/specs/2026-10-13-dcn-nx-ladder-evidence/`. Moved values: Heston DCN
   PDE prices only (no anchor or golden prices one): DCN_A Feller at the default (301, 101) -97,286.0115 ->
   -92,971.8705, at (151, 41) -90,111.4178 -> -92,001.9490 per 1M notional.
 - The autocallable MC time grid holds one node per instant (W17a, approved 2026-10-10). The snowball, KO-reset and

@@ -101,8 +101,8 @@ All rows are in `outputs/e05.txt`. Across the ladder the cell-average steps stay
 ### Other axes and the MC reference
 
 - **n_v (e07b):** cell-average, unpinned, n_x 1201: n_v 41 / 101 / 201 give -93,111.19 / -93,114.74 / -93,115.33. The axis is flat, so the test's n_v 41 is harmless.
-- **Time (e09):** new default, n_x 2401, n_v 41: substeps 1 / 2 / 4 give -93,164.56 / -92,813.19 / -92,946.47 (steps +351, -133). This is d04's damped-restart pattern; a geometric tail puts the limit near -93,030.
-- **MC (e06):** Heston QE-M, Sobol, 2^21 paths in 64 batches: -93,000.2 ± 106 at 2 substeps, -92,980.3 ± 100 at 4 substeps. This matches the fixed PDE's time-converged value. The MC cannot separate the old and new results at fine grids, where they differ by 100-300. At the default grid the old value is about 40 s.e. away. (`outputs/e06_2pow18.txt` is from an earlier 2^18-path / 8-batch version of the script; the committed `e06` runs 2^21 / 64.)
+- **Time (e09):** new default, n_x 2401, n_v 41: substeps 1 / 2 / 4 give -93,164.56 / -92,813.19 / -92,946.47 (steps +351, -133). This is d04's damped-restart pattern; an Aitken extrapolation of the three values (ratio -133.28 / +351.37 = -0.379) puts the limit at about -92,910 (-92,909.8). Three points with a sign-alternating step do not bound the limit; the extrapolation is indicative only.
+- **MC (e06):** Heston QE-M, Sobol, 2^21 paths in 64 batches: -93,000.2 ± 106 at 2 substeps, -92,980.3 ± 100 at 4 substeps. Against the Aitken limit of about -92,910, the MC values lie 0.85 s.e. (substeps 2) and 0.70 s.e. (substeps 4) below it, so they are consistent with the fixed PDE's time-converged value. The MC cannot separate the old and new results at fine grids, where they differ by 100-300. At the default grid the old value is about 40 s.e. away. (`outputs/e06_2pow18.txt` is from an earlier 2^18-path / 8-batch version of the script; the committed `e06` runs 2^21 / 64.)
 - e03 wall times are inflated because the machine slept during that run; the values are unaffected.
 
 ## Decision: fixed (contained)
