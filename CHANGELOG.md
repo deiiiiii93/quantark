@@ -420,6 +420,19 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   terminal (`get_maturity` 0.0), never a refusal.
 
 ### Fixed
+- `HestonDCNPDESolver` events are the 1D DCN route's dual-cell projection on an unpinned grid (T14 / I10). The 2D
+  DCN applied coupon / KO / KI as whole-node masks on a grid with a node pinned onto each level, so each trigger sat
+  up to half a cell off its level (an O(h) shift whose coefficient follows the level's position in its cell; the
+  KI and KO nodes were also left out of their inclusive masks by 1-ULP `exp(log b)` noise), and the price was
+  erratic in `n_x`: DCN_A Feller Heston, n_v 101, 301 -> 401 -> 501 moved +4,476 / -940 per 1M, d04's 601 -> 1201
+  -> 2401 +2.4 / +414. The 1D DCN route shows the same ladder under its `"nodal"` masks and a ±10 one under its
+  default. New `event_projection` (None = CELL_AVERAGE; `"nodal"` is the old discretization bit
+  for bit) and `HestonSLVADICore(pin_critical_levels=True)` (False skips the level pinning; the default path is
+  unchanged for every other route). After: the nested ladder 301 / 601 / 1201 / 2401 / 4801 is monotone (-56, -87,
+  -53, -18), non-nested levels wiggle within ±75; Heston QE-M MC (2^21 paths) -92,980 ± 100 vs the time-converged
+  PDE ~ -93,030. Evidence: `docs/superpowers/specs/2026-10-13-dcn-nx-ladder-evidence/`. Moved values: Heston DCN
+  PDE prices only (no anchor or golden prices one): DCN_A Feller at the default (301, 101) -97,286.0115 ->
+  -92,971.8705, at (151, 41) -90,111.4178 -> -92,001.9490 per 1M notional.
 - The autocallable MC time grid holds one node per instant (W17a, approved 2026-10-10). The snowball, KO-reset and
   Phoenix MC grids (`SnowballMCEngine._build_time_grid` / `_build_time_grid_ko_reset`, `PhoenixMCEngine.
   _build_time_grid`, inherited by the local-vol / Heston / QE / SLV snowball and Phoenix MC) were the sorted Python

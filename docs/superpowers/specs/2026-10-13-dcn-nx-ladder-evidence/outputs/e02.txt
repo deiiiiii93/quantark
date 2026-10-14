@@ -1,0 +1,55 @@
+n_x 301: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.629 of cell 0.01257; pinned node 149 (ON), h_l 0.00790 h_r 0.01724 ratio  2.18; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00395 (-0.31 h)
+  CPN    b  4800.000: pre-pin offset 0.751 of cell 0.01265; pinned node 154 (ON), h_l 0.00950 h_r 0.01584 ratio  1.67; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00475 (-0.37 h)
+  KO     b  6000.000: pre-pin offset 0.542 of cell 0.01425; pinned node 171 (ON), h_l 0.00772 h_r 0.02094 ratio  2.71; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.01047 (+0.73 h)
+  K_loss b  6600.000: pre-pin offset 0.976 of cell 0.01534; pinned node 177 (ON), h_l 0.01496 h_r 0.01592 ratio  1.06; S_node - b = +0.0e+00 b
+n_x 401: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.172 of cell 0.00943; pinned node 198 (ON), h_l 0.01105 h_r 0.00781 ratio  0.71; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00552 (-0.59 h)
+  CPN    b  4800.000: pre-pin offset 0.001 of cell 0.00951; pinned node 205 (ON), h_l 0.00950 h_r 0.00950 ratio  1.00; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00475 (-0.50 h)
+  KO     b  6000.000: pre-pin offset 0.390 of cell 0.01070; pinned node 227 (ON), h_l 0.01479 h_r 0.00653 ratio  0.44; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00326 (+0.31 h)
+  K_loss b  6600.000: pre-pin offset 0.968 of cell 0.01152; pinned node 236 (ON), h_l 0.01115 h_r 0.01201 ratio  1.08; S_node - b = +0.0e+00 b
+n_x 501: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.715 of cell 0.00754; pinned node 248 (ON), h_l 0.00539 h_r 0.00969 ratio  1.80; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00270 (-0.36 h)
+  CPN    b  4800.000: pre-pin offset 0.251 of cell 0.00760; pinned node 256 (ON), h_l 0.00950 h_r 0.00569 ratio  0.60; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00475 (-0.63 h)
+  KO     b  6000.000: pre-pin offset 0.238 of cell 0.00857; pinned node 284 (ON), h_l 0.01056 h_r 0.00653 ratio  0.62; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00326 (+0.38 h)
+  K_loss b  6600.000: pre-pin offset 0.960 of cell 0.00923; pinned node 295 (ON), h_l 0.00885 h_r 0.00967 ratio  1.09; S_node - b = +0.0e+00 b
+n_x 601: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.258 of cell 0.00629; pinned node 297 (ON), h_l 0.00790 h_r 0.00467 ratio  0.59; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00395 (-0.63 h)
+  CPN    b  4800.000: pre-pin offset 0.501 of cell 0.00633; pinned node 308 (ON), h_l 0.00317 h_r 0.00950 ratio  2.99; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00159 (-0.25 h)
+  KO     b  6000.000: pre-pin offset 0.087 of cell 0.00714; pinned node 341 (ON), h_l 0.00772 h_r 0.00653 ratio  0.84; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00326 (+0.46 h)
+  K_loss b  6600.000: pre-pin offset 0.952 of cell 0.00769; pinned node 354 (ON), h_l 0.00732 h_r 0.00812 ratio  1.11; S_node - b = +0.0e+00 b
+n_x 801: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.344 of cell 0.00471; pinned node 396 (ON), h_l 0.00633 h_r 0.00309 ratio  0.49; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00317 (-0.67 h)
+  CPN    b  4800.000: pre-pin offset 0.002 of cell 0.00475; pinned node 410 (ON), h_l 0.00476 h_r 0.00474 ratio  1.00; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00238 (-0.50 h)
+  KO     b  6000.000: pre-pin offset 0.782 of cell 0.00534; pinned node 455 (ON), h_l 0.00418 h_r 0.00653 ratio  1.56; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00326 (+0.61 h)
+  K_loss b  6600.000: pre-pin offset 0.936 of cell 0.00577; pinned node 472 (ON), h_l 0.00540 h_r 0.00618 ratio  1.14; S_node - b = +0.0e+00 b
+n_x 1001: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.429 of cell 0.00377; pinned node 495 (ON), h_l 0.00539 h_r 0.00215 ratio  0.40; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00270 (-0.71 h)
+  CPN    b  4800.000: pre-pin offset 0.503 of cell 0.00380; pinned node 513 (ON), h_l 0.00191 h_r 0.00569 ratio  2.98; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00095 (-0.25 h)
+  KO     b  6000.000: pre-pin offset 0.478 of cell 0.00428; pinned node 568 (ON), h_l 0.00631 h_r 0.00223 ratio  0.35; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00112 (+0.26 h)
+  K_loss b  6600.000: pre-pin offset 0.920 of cell 0.00462; pinned node 590 (ON), h_l 0.00425 h_r 0.00501 ratio  1.18; S_node - b = +0.0e+00 b
+n_x 1201: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.515 of cell 0.00314; pinned node 595 (ON), h_l 0.00162 h_r 0.00467 ratio  2.88; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00081 (-0.26 h)
+  CPN    b  4800.000: pre-pin offset 0.003 of cell 0.00317; pinned node 615 (ON), h_l 0.00317 h_r 0.00316 ratio  0.99; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00159 (-0.50 h)
+  KO     b  6000.000: pre-pin offset 0.174 of cell 0.00357; pinned node 682 (ON), h_l 0.00418 h_r 0.00295 ratio  0.71; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00147 (+0.41 h)
+  K_loss b  6600.000: pre-pin offset 0.904 of cell 0.00385; pinned node 708 (ON), h_l 0.00348 h_r 0.00424 ratio  1.22; S_node - b = +0.0e+00 b
+n_x 1601: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.687 of cell 0.00236; pinned node 793 (ON), h_l 0.00162 h_r 0.00309 ratio  1.91; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00081 (-0.34 h)
+  CPN    b  4800.000: pre-pin offset 0.004 of cell 0.00237; pinned node 820 (ON), h_l 0.00238 h_r 0.00236 ratio  0.99; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00119 (-0.50 h)
+  KO     b  6000.000: pre-pin offset 0.565 of cell 0.00267; pinned node 910 (ON), h_l 0.00151 h_r 0.00384 ratio  2.55; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00192 (+0.72 h)
+  K_loss b  6600.000: pre-pin offset 0.871 of cell 0.00289; pinned node 944 (ON), h_l 0.00252 h_r 0.00327 ratio  1.30; S_node - b = +0.0e+00 b
+n_x 2401: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.031 of cell 0.00157; pinned node 1189 (ON), h_l 0.00162 h_r 0.00152 ratio  0.94; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00081 (-0.52 h)
+  CPN    b  4800.000: pre-pin offset 0.007 of cell 0.00158; pinned node 1230 (ON), h_l 0.00159 h_r 0.00157 ratio  0.99; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00080 (-0.50 h)
+  KO     b  6000.000: pre-pin offset 0.347 of cell 0.00178; pinned node 1364 (ON), h_l 0.00240 h_r 0.00116 ratio  0.48; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00058 (+0.33 h)
+  K_loss b  6600.000: pre-pin offset 0.807 of cell 0.00193; pinned node 1416 (ON), h_l 0.00156 h_r 0.00230 ratio  1.48; S_node - b = +0.0e+00 b
+n_x 3201: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.374 of cell 0.00118; pinned node 1585 (ON), h_l 0.00162 h_r 0.00074 ratio  0.46; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00081 (-0.69 h)
+  CPN    b  4800.000: pre-pin offset 0.009 of cell 0.00119; pinned node 1640 (ON), h_l 0.00120 h_r 0.00118 ratio  0.98; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00060 (-0.50 h)
+  KO     b  6000.000: pre-pin offset 0.130 of cell 0.00134; pinned node 1819 (ON), h_l 0.00151 h_r 0.00116 ratio  0.77; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00058 (+0.44 h)
+  K_loss b  6600.000: pre-pin offset 0.743 of cell 0.00145; pinned node 1888 (ON), h_l 0.00107 h_r 0.00182 ratio  1.69; S_node - b = +0.0e+00 b
+n_x 4801: x in [-0.2614, 17.6604], S in [0.77, 4.676e+07]
+  KI     b  4500.000: pre-pin offset 0.061 of cell 0.00079; pinned node 2378 (ON), h_l 0.00083 h_r 0.00074 ratio  0.88; S_node - b = +2.0e-16 b node NOT owned by its mask, effective step at ln b -0.00042 (-0.53 h)
+  CPN    b  4800.000: pre-pin offset 0.013 of cell 0.00079; pinned node 2460 (ON), h_l 0.00080 h_r 0.00078 ratio  0.97; S_node - b = +1.9e-16 b node OWNED by its mask, effective step at ln b -0.00040 (-0.51 h)
+  KO     b  6000.000: pre-pin offset 0.695 of cell 0.00089; pinned node 2729 (ON), h_l 0.00062 h_r 0.00116 ratio  1.88; S_node - b = -7.6e-16 b node NOT owned by its mask, effective step at ln b +0.00058 (+0.65 h)
+  K_loss b  6600.000: pre-pin offset 0.615 of cell 0.00096; pinned node 2832 (ON), h_l 0.00059 h_r 0.00134 ratio  2.26; S_node - b = +0.0e+00 b

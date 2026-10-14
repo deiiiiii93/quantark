@@ -1,0 +1,2 @@
+QE-M substeps 2, 2^21 paths x 64 batches: pv -93000.1795  s.e. 105.9871  (175 s)
+QE-M substeps 4, 2^21 paths x 64 batches: pv -92980.2648  s.e. 99.9555  (331 s)

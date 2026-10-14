@@ -1,0 +1,16 @@
+n_x 301: default -92971.8704756959 vs probe CA-unpinned -92971.8704756959: bit-identical; nodal -97286.01153979279 vs pre-fix -97286.01153979279: bit-identical
+n_x 601: default -93027.99686914583 vs probe CA-unpinned -93027.99686914583: bit-identical; nodal -93698.03627772542 vs pre-fix -93698.03627772542: bit-identical
+moved value at (n_x, n_v) (301, 101): -97286.0115 -> -92971.8705 (+4314.1411)
+moved value at (n_x, n_v) (151, 41): -90111.4178 -> -92001.9490 (-1890.5312)
+production default (cell-average, unpinned), n_v 101, substeps 1
+  n_x   301       -92971.8704756959     (0.35 GB rule, 3 s)
+  n_x   401      -93040.10184112791  d    -68.2314   (0.47 GB rule, 4 s)
+  n_x   501         -93002.76256892  d    +37.3393   (0.59 GB rule, 6 s)
+  n_x   601      -93027.99686914583  d    -25.2343   (0.71 GB rule, 7 s)
+  n_x   801      -93103.71112872896  d    -75.7143   (0.94 GB rule, 9 s)
+  n_x  1001      -93152.59773286644  d    -48.8866   (1.18 GB rule, 12 s)
+  n_x  1201      -93114.74164450448  d    +37.8561   (1.41 GB rule, 14 s)
+  n_x  1601      -93154.51623563853  d    -39.7746   (1.89 GB rule, 19 s)
+  n_x  2401      -93168.04328791815  d    -13.5271   (2.83 GB rule, 32 s)
+  n_x  3201      -93189.29551407983  d    -21.2522   (3.77 GB rule, 44 s)
+  n_x  4801      -93186.20738687812  d     +3.0881   (5.66 GB rule, 69 s)

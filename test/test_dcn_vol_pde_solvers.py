@@ -14,7 +14,7 @@ from quantark.asset.equity.engine.pde.dcn_vol_pde_solvers import (
 )
 from quantark.asset.equity.param import PDEParams
 from quantark.param import GridVolSurface
-from quantark.util.enum.engine_enums import HestonMCScheme
+from quantark.util.enum.engine_enums import EventProjectionMode, HestonMCScheme
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 
@@ -132,6 +132,46 @@ def test_heston_pde_deterministic_and_valuation_date_ki():
         FELLER_VIOLATING, n_x=151, n_v=41
     ).price(p, env_near)
     assert ki_pv < near_pv
+
+
+def test_heston_pde_nx_ladder_is_smooth_by_default():
+    # T14 (docs/superpowers/specs/2026-10-13-dcn-nx-ladder-evidence): the
+    # legacy whole-node masks on a level-pinned grid moved DCN_A by +4488 /
+    # -946 from n_x 301 to 401 to 501 (per 1,000,000 notional) - an O(h)
+    # trigger shift whose coefficient follows each level's position in its
+    # cell. The default dual-cell projection on the unpinned grid moves it
+    # by -69 / +37.
+    p = make_dcn(DCN_A)
+    env = flat_env(**FLAT)
+    values = [
+        HestonDCNPDESolver(FELLER_VIOLATING, n_x=n_x, n_v=41).price(p, env)
+        for n_x in (301, 401, 501)
+    ]
+    steps = np.abs(np.diff(values))
+    assert np.max(steps) < 2.5e-4 * p.notional
+
+
+def test_heston_pde_nodal_mode_keeps_the_legacy_discretization():
+    # event_projection="nodal" is the pre-T14 discretization bit for bit
+    # (whole-node masks, every level pinned to a node): d04's patched
+    # (151, 41) value, docs/superpowers/specs/2026-10-09-heston-2d-v0-evidence.
+    p = make_dcn(DCN_A)
+    env = flat_env(**FLAT)
+    nodal = HestonDCNPDESolver(
+        FELLER_VIOLATING, n_x=151, n_v=41, event_projection="nodal"
+    ).price(p, env)
+    assert nodal == -90111.4177797157
+    default = HestonDCNPDESolver(FELLER_VIOLATING, n_x=151, n_v=41).price(p, env)
+    explicit = HestonDCNPDESolver(
+        FELLER_VIOLATING, n_x=151, n_v=41,
+        event_projection=EventProjectionMode.CELL_AVERAGE,
+    ).price(p, env)
+    assert default == explicit != nodal
+
+
+def test_heston_pde_rejects_unknown_event_projection():
+    with pytest.raises(ValidationError):
+        HestonDCNPDESolver(FELLER_VIOLATING, event_projection="smoothed")
 
 
 def test_adi_core_power_graded_v_grid_vanilla_accuracy():

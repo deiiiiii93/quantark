@@ -222,6 +222,12 @@ class HestonSLVADICore:
             ``"path_focused"`` concentrates around the CIR state and pins
             theta/v0, and ``"auto"`` selects path-focused nodes for
             sigma-collapse regimes and power grading otherwise.
+        pin_critical_levels: on the concentrated grid, move the nearest node
+            exactly onto each ``barrier_concentrate`` / ``critical_spots``
+            level (default True, the historical grid). False keeps the plain
+            sinh grid: a caller whose events are dual-cell projections needs
+            no node on a level, and the moved node leaves its two cells
+            uneven (spacing ratios up to ~3, varying with ``n_x``).
     """
 
     def __init__(self, s0, strike, T, r, carry, params: HestonParams,
@@ -231,7 +237,7 @@ class HestonSLVADICore:
                  rebate=0.0, pay_at_hit=False, barrier_concentrate=0.0,
                  critical_spots=None, v_grid_power=0.0,
                  variance_grid_mode="legacy", v_drift_scheme="adaptive_upwind",
-                 x_nodes=None):
+                 x_nodes=None, pin_critical_levels=True):
         self.S0, self.K, self.T, self.r, self.q = s0, strike, T, r, carry
         self.kappa, self.theta, self.sigma, self.rho, self.v0 = (
             params.kappa, params.theta, params.sigma, params.rho, params.v0,
@@ -435,12 +441,13 @@ class HestonSLVADICore:
                     conc = max(0.25 * x_width, 1e-6)
                 xk = min(max(xk, self.x_min), self.x_max)
                 self.X_grid = concentrated_grid(self.x_min, self.x_max, xk, n_x, concentration=conc)
-                pin_targets = [
-                    float(np.log(level))
-                    for level in concentration_levels + critical_levels
-                    if level > 0.0 and self.x_min < float(np.log(level)) < self.x_max
-                ]
-                self.X_grid = _pin_grid_targets(self.X_grid, pin_targets)
+                if pin_critical_levels:
+                    pin_targets = [
+                        float(np.log(level))
+                        for level in concentration_levels + critical_levels
+                        if level > 0.0 and self.x_min < float(np.log(level)) < self.x_max
+                    ]
+                    self.X_grid = _pin_grid_targets(self.X_grid, pin_targets)
             if self.sig_eff > 0.0:
                 t_probe = np.array([0.25 * T, 0.5 * T, T])
                 try:

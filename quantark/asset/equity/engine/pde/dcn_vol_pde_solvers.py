@@ -16,11 +16,16 @@ models:
 
 Backward event order at each observation date matches ``dcn_pde_solver``:
 coupon injection -> KO overwrite -> KI projection; every daily grid node is
-a discrete KI monitoring date, consistent with the MC engines.
+a discrete KI monitoring date, consistent with the MC engines. The Heston
+events are the 1-D route's: dual-cell projections on an unpinned grid by
+default (T14, ``docs/superpowers/specs/2026-10-13-dcn-nx-ladder-evidence``),
+the legacy whole-node masks on a level-pinned grid under
+``event_projection="nodal"``.
 """
 from __future__ import annotations
 
 import dataclasses
+import math
 from typing import Optional
 
 import numpy as np
@@ -37,13 +42,17 @@ from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     DCNPDEResult,
     apply_dcn_events,
 )
+from quantark.asset.equity.engine.pde.grid.events import (
+    project_event_values,
+    project_piecewise_event,
+)
 from quantark.asset.equity.engine.pde.local_vol_surface import LocalVolSurfaceMixin
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.priceenv import TermMarketContext
 from quantark.priceenv.term_sampling import make_df_fn
-from quantark.util.enum.engine_enums import ADIScheme, EngineType
+from quantark.util.enum.engine_enums import ADIScheme, EngineType, EventProjectionMode
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.adi_core import HestonSLVADICore
 from quantark.volmodels.heston import HestonParams
@@ -93,6 +102,13 @@ class HestonDCNPDESolver(BaseEngine):
     dates land exactly on time nodes. ``substeps_per_interval`` refines
     time between daily nodes for discretization ladders; events and KI
     projection are applied only at the daily nodes.
+
+    ``event_projection``: ``None`` (default) or ``CELL_AVERAGE`` applies each
+    date's coupon / KO / KI as the dual-cell projection of the 1-D DCN route
+    (``core/adapters/dcn.py``), column by column, on the plain concentrated
+    grid; ``"nodal"`` keeps the pre-T14 discretization bit for bit (whole-node
+    masks, every level pinned to a node), whose trigger sits up to half a
+    cell off each level and makes the price erratic in ``n_x``.
     """
 
     engine_type = EngineType.PDE
@@ -110,6 +126,7 @@ class HestonDCNPDESolver(BaseEngine):
         rannacher_steps: int = 2,
         v0_boundary: str = "degenerate_pde",
         v_grid_power: float = 2.5,
+        event_projection: EventProjectionMode | str | None = None,
     ):
         super().__init__()
         if not isinstance(model_params, HestonParams):
@@ -137,7 +154,26 @@ class HestonDCNPDESolver(BaseEngine):
             raise ValidationError(
                 "v0_boundary must be 'neumann' or 'degenerate_pde'"
             )
+        if isinstance(event_projection, str):
+            try:
+                event_projection = EventProjectionMode(event_projection.lower())
+            except ValueError:
+                raise ValidationError(
+                    f"unknown event_projection: {event_projection!r}"
+                )
+        if event_projection is not None and not isinstance(
+            event_projection, EventProjectionMode
+        ):
+            raise ValidationError(
+                "event_projection must be None, an EventProjectionMode or its "
+                f"string value, got {type(event_projection).__name__}"
+            )
         self.model_params = model_params
+        self.event_projection = (
+            EventProjectionMode.CELL_AVERAGE
+            if event_projection is None
+            else event_projection
+        )
         self.n_x = int(n_x)
         self.n_v = int(n_v)
         self.substeps = int(substeps_per_interval)
@@ -172,6 +208,44 @@ class HestonDCNPDESolver(BaseEngine):
         if self.scheme == ADIScheme.DOUGLAS:
             return core._douglas_step(U, dt, tau_new, self.theta, t_mid)
         return core._cs_step(U, dt, tau_new, self.theta, t_mid)
+
+    @property
+    def _nodal(self) -> bool:
+        return self.event_projection is EventProjectionMode.NODAL
+
+    def _apply_events(self, v0, v1, cpn, ko, x_grid, masks, product):
+        """One date's events (backward order coupon, knock-out, knock-in);
+        ``cpn`` / ``ko`` None: that event is not active (both None: KI only).
+        Cell-average: ``DCNEvents.apply`` of the 1-D route, levels in log
+        space, acting on axis 0 of the (n_x, n_v) surfaces."""
+        if self._nodal:
+            ki_mask, ko_mask, cpn_mask = masks
+            return apply_dcn_events(v0, v1, cpn_mask, ko_mask, ki_mask, cpn, ko)
+        if ko is not None:
+            v1 = project_event_values(
+                x_grid, math.log(product.ko_barrier), v1,
+                np.full_like(v1, ko), True,
+            )
+        thresholds = sorted(
+            {product.ki_barrier}
+            | ({product.coupon_barrier} if cpn is not None else set())
+            | ({product.ko_barrier} if ko is not None else set())
+        )
+        branches = []
+        for r in range(len(thresholds) + 1):
+            lo = 0.0 if r == 0 else thresholds[r - 1]
+            if r == 0:
+                branches.append(v1)                    # below the knock-in level
+            elif ko is not None and lo >= product.ko_barrier:
+                branches.append(np.full_like(v0, ko))  # knock-out over coupon
+            elif cpn is not None and lo >= product.coupon_barrier:
+                branches.append(v0 + cpn)
+            else:
+                branches.append(v0)
+        v0 = project_piecewise_event(
+            x_grid, [math.log(b) for b in thresholds], branches
+        )
+        return v0, v1
 
     def price_detailed(self, product, pricing_env, *, lifecycle_state=None) -> DCNPDEResult:
         """Price ``product``; a ``DCNLifecycleState`` adds its pending
@@ -229,16 +303,20 @@ class HestonDCNPDESolver(BaseEngine):
                 float(product.ki_barrier),
                 float(product.k_loss),
             ],
+            pin_critical_levels=self._nodal,
         )
         core._boundary_hook = None
         s_grid = core.S_grid
+        x_grid = core.X_grid
         s0 = product.initial_price
         notional, part = product.notional, product.participation
 
         obs_at_col = {int(c): j for j, c in enumerate(ctx.obs_cols)}
-        ki_mask = (s_grid <= product.ki_barrier)[:, None]
-        ko_mask = (s_grid >= product.ko_barrier)[:, None]
-        cpn_mask = (s_grid >= product.coupon_barrier)[:, None]
+        masks = (
+            (s_grid <= product.ki_barrier)[:, None],
+            (s_grid >= product.ko_barrier)[:, None],
+            (s_grid >= product.coupon_barrier)[:, None],
+        ) if self._nodal else None
 
         def event_amounts(j: int, t_obs: float):
             cpn = None
@@ -287,8 +365,8 @@ class HestonDCNPDESolver(BaseEngine):
         )
         v0 = np.zeros_like(v1)
         cpn_amt, ko_amt = event_amounts(len(ctx.obs_cols) - 1, T)
-        v0, v1 = apply_dcn_events(
-            v0, v1, cpn_mask, ko_mask, ki_mask, cpn_amt, ko_amt
+        v0, v1 = self._apply_events(
+            v0, v1, cpn_amt, ko_amt, x_grid, masks, product
         )
 
         rann = self.rannacher_steps  # damp the terminal kink too
@@ -321,13 +399,17 @@ class HestonDCNPDESolver(BaseEngine):
                 j = obs_at_col.get(k)
                 if j is not None:
                     cpn_amt, ko_amt = event_amounts(j, t_lo)
-                    v0, v1 = apply_dcn_events(
-                        v0, v1, cpn_mask, ko_mask, ki_mask, cpn_amt, ko_amt
+                    v0, v1 = self._apply_events(
+                        v0, v1, cpn_amt, ko_amt, x_grid, masks, product
                     )
                     rann = self.rannacher_steps
-                else:
+                elif self._nodal:
                     # every daily node is a KI monitoring date
-                    v0 = np.where(ki_mask, v1, v0)
+                    v0 = np.where(masks[0], v1, v0)
+                else:
+                    v0 = self._apply_events(
+                        v0, v1, None, None, x_grid, masks, product
+                    )[0]
 
         # an unmonitored valuation instant (a closed day, or the post-close
         # view) is no knock-in test: only the carried flag reads V1
