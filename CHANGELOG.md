@@ -68,8 +68,13 @@ backtest and FX dynamic scenario.
   under `CALENDAR_DAYS` / `ACT_365`; under `BUSINESS_DAYS` a Friday or holiday theta is 0.0 and `ACT_360` steps 1/360,
   matching the dated product. Values that move are listed in
   `docs/superpowers/plans/2026-10-09-fx-tarn-lifecycle-evidence/moved_values.txt`.
-  **Breaking:** `calculate_greeks` on any numeric FX product under a `BUSINESS_DAYS` environment with no calendar now
-  raises `ValidationError` in theta (it used to step `theta_days / 365`); a business-day count needs the calendar.
+  **Breaking:** under a `BUSINESS_DAYS` environment with no calendar, a numeric FX product's theta now raises
+  `ValidationError` on every route whose theta is a finite-difference time step (it used to step `theta_days / 365`;
+  a business-day count needs the calendar): `BaseFxEngine._fdm_theta` and the engines whose `calculate_greeks` inherit
+  it (the FX MC engines, the FX range-accrual analytical engine), and, since the local-vol / Heston theta change
+  below, the FX local-vol, Heston and Heston-SLV MC / PDE routes and the FX Heston analytical engine. The closed-form
+  Garman-Kohlhagen vanilla and digital thetas (`-dV/dtau / 365`) do not step time and are unchanged (measured
+  2026-10-14).
 - FX local-vol and Heston theta (`fx_local_vol_model_greeks`, `FxHestonPDESolver`, `FxHestonSLVPDESolver`, and the LV/Heston
   analytical and MC engines that share the first) step a numeric (`maturity=`) product by the environment's year
   fraction of `theta_days` calendar days, as `BaseFxEngine._fdm_theta` does, instead of `theta_days / 365`. The
@@ -522,6 +527,10 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   0.1085 -> 0.0193, American put 0.1991 -> 0.1115, FX TARF 0.00722 -> 0.00052, DCN GBM 3220 -> 2680, Phoenix local-vol
   0.01441 -> 0.01022; range accrual rises 353 -> 497 because its payoff is even in z and the iid formula understated
   it); prices bit-identical. New `test/test_mc_std_error_antithetic.py`.
+- Proposals (docs only, no code; each ends with open questions for sign-off):
+  `docs/superpowers/specs/2026-10-13-last-day-theta-proposal.md`,
+  `docs/superpowers/specs/2026-10-13-standardized-pricing-result-proposal.md`,
+  `docs/superpowers/specs/2026-10-13-fixing-time-proposal.md`. Moved values: none.
 - RQMC seed spacing is documented (W16, signed W13 follow-up 3): batch `b` scrambles with `base_seed + b`, so
   replications whose base seeds sit closer than their batch count share scrambles. `SobolNormalGenerator._make_engine`
   and `docs/execution/policy-guide.md` ("RQMC seeds and replications") state the rule: space base seeds by at least
