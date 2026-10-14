@@ -153,6 +153,9 @@ class DCNStateValuation:
 def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Optional[DCNStateValuation]:
     """Validate a DCN lifecycle state against the product and environment (W14, C2 / A1); ``None`` for no state.
 
+    Contract: the state is as of the environment's valuation date d, so a run tracker must have run ``observe(d)``
+    before a copy is priced with it on day d (``DCNLifecycleTracker.product_for_pricing``).
+
     Raises:
         CapabilityError: a state that is not a ``DCNLifecycleState``.
         ValidationError: a time-based valuation point or ledger flow (a DCN is dated); a valuation point that is not
@@ -198,7 +201,8 @@ def resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state) -> Option
 def check_dcn_ledger(product, valuation_date, ledger, *, alive: bool) -> None:
     """The double-count guard of ``resolve_dcn_lifecycle_state`` (A1), also run by the run tracker on every pricing
     copy: every flow is dated, none is determined after ``valuation_date``, and -- while the contract is alive -- none
-    is determined on a date that still has a monthly row in ``product.schedule``."""
+    is determined on a date that still has a monthly row in ``product.schedule``. It assumes the ledger is complete
+    through ``valuation_date`` (``observe`` ran first); an undecided date is the tracker's own refusal."""
     rows = {m.observation_date for m in product.schedule.monthly}
     for cashflow in ledger.cashflows:
         determined = cashflow.determination_date

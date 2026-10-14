@@ -152,14 +152,31 @@ class DCNLifecycleTracker:
         """The booked contract (decisions read its own schedule)."""
         return self.product
 
+    def remaining_maturity(self, date) -> float:
+        """ACT/365F years from ``date`` to the final observation, for maturity-sampling consumers (the replay's
+        surface / term-carry probe). Never refuses and builds no copy: 0.0 for a dead note or past the final
+        observation; the booked contract's own maturity before its valuation date (as ``product_for_pricing``)."""
+        _require_date_instant(date)
+        d = _day(date)
+        if d < self._booked.valuation_date:
+            return float(self.product.get_maturity())
+        if not self.lifecycle.alive or d >= self.final_observation_date:
+            return 0.0
+        return (self.final_observation_date - d).days / 365.0
+
     def product_for_pricing(self, date, pricing_env=None, *, initial: bool = False) -> Any:
         """The DCN to price on ``date`` (A1); a pure accessor (the state is not touched).
 
+        Contract: a copy priced together with the state on day d needs ``observe(d)`` first (post-close view). The
+        only pre-close use is the run's first valuation (``initial=True``) before its first close, or a run instant
+        right after the last observed one. Maturity sampling goes through ``remaining_maturity``, never here.
+
         * before the booking's valuation date: the booked contract, untouched (I1);
-        * a dead note (knocked out / matured) or a date past the final observation: a terminal copy, never a refusal
-          (run consumers sample a dead product's remaining maturity; it is never priced): the post-close view of
-          ``date`` while a row remains after it, else the contract on its final observation date (``get_maturity``
-          0.0);
+        * a dead note (knocked out / matured): a terminal copy, never a refusal (it is never priced): the post-close
+          view of ``date`` while a row remains after it, else the contract on its final observation date
+          (``get_maturity`` 0.0);
+        * a live note past its final observation before ``observe(date)``: refused (that copy would still carry the
+          undecided final row);
         * pre-close (``initial``, or ``date`` not yet observed): ``spec.build(valuation_date=date)``; refused while a
           run-time schedule date before ``date`` is still undecided (it would be in neither the copy nor the ledger);
         * post-close (after ``observe(date)``): the same ``.without_observed_through(date)``.
@@ -174,7 +191,12 @@ class DCNLifecycleTracker:
             return self.product
         state = self.lifecycle
         final = self.final_observation_date
-        if not state.alive or d > final:
+        if state.alive and d > final:
+            raise ValidationError(
+                f"the DCN's final observation {final.date()} is before {d.date()} and not yet decided: "
+                "observe the run instant first (a copy now would carry the undecided final row)"
+            )
+        if not state.alive:
             if d < final and any(t > d for t in self._row_of):
                 schedule = dataclasses.replace(self._booked.spec, valuation_date=d).build(self._booked.calendar)
                 schedule = schedule.without_observed_through(d)

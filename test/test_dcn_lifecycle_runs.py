@@ -528,3 +528,52 @@ def test_pnl_explain_of_a_dcn_run_is_refused(consumer):
             replay_run(AutocallableEngineConfig(pricing_engine_type=EngineType.PDE,
                                                 pde_params=PDEParams(accuracy="fast")),
                        pnl_explain=PnLExplainConfig())
+
+
+# --- CP5 round 2 -----------------------------------------------------------------------------------------------
+
+def test_gap_calendar_replay_with_a_term_dividend_source():
+    """A7': the replay samples the remaining maturity BEFORE the day's observation; on the day after an unvisited
+    schedule date that sample must not refuse."""
+    sse = replay_run(_term_dividend_config(), fixed_dividend_yield=None)
+    gap = replay_run(_term_dividend_config(), days=nyse_like_days(), fixed_dividend_yield=None)
+
+    def actions(results):
+        frame = results.actions_df() if callable(results.actions_df) else results.actions_df
+        return frame
+
+    a_sse, a_gap = actions(sse), actions(gap)
+    assert list(a_gap["action_type"]) == list(a_sse["action_type"]) == ["COUPON", "KI", "KO"]
+    assert list(a_gap["cashflow"]) == pytest.approx(list(a_sse["cashflow"]), rel=1e-15)
+    assert list(a_gap["gap"]) == [True, False, False]
+    assert _replay_frame(gap).loc["2023-05-12", "paid"] == pytest.approx(2.0 * CASH, rel=1e-14)
+
+
+def test_remaining_maturity_never_refuses():
+    t = tracker()
+    run_tracker(t, through(datetime(2023, 3, 31)))
+    final = t.final_observation_date
+    # 2023-04-03 skipped: undecided, yet the probe answers
+    d = pd.Timestamp("2023-04-04")
+    assert t.remaining_maturity(d) == (final - d.to_pydatetime()).days / 365.0
+    with pytest.raises(ValidationError, match="undecided"):
+        t.product_for_pricing(d, flat_env_on(d.to_pydatetime()))          # a copy that would be priced: refused
+    assert t.remaining_maturity(pd.Timestamp(final) + pd.Timedelta(days=3)) == 0.0
+    assert t.remaining_maturity(pd.Timestamp("2023-03-20")) == t.product.get_maturity()
+    run_tracker(t, [datetime(2023, 4, 4)])
+    t.lifecycle.knocked_out = True
+    assert t.remaining_maturity(pd.Timestamp("2023-04-05")) == 0.0
+
+
+def test_alive_note_past_its_final_observation_is_not_priced_before_observe():
+    start = datetime(2024, 12, 27)
+    p = make_dcn(DCN_A, valuation_date=start)
+    t = tracker(p, start=start)
+    for d in sse_days(start, datetime(2025, 1, 2)):
+        t.observe(pd.Timestamp(d), p, flat_env_on(d, 5500.0), 5500.0)
+    after = pd.Timestamp("2025-01-06")
+    with pytest.raises(ValidationError, match="observe"):
+        t.product_for_pricing(after, flat_env_on(after.to_pydatetime()))
+    t.observe(after, p, flat_env_on(after.to_pydatetime(), 5500.0), 5500.0)   # decides 01-03 at 01-02's spot
+    assert t.lifecycle.matured
+    assert t.product_for_pricing(after, flat_env_on(after.to_pydatetime())).get_maturity() == 0.0
