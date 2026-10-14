@@ -322,7 +322,8 @@ class PortfolioLifecycleManager:
         processed = [
             self._processed(position_id, position, event) for event in events
         ]
-        if terminated:
+        if terminated or not tracker.state.alive:
+            # a terminal event, or retired as matured before the run (no event, no cash; ruling R31)
             portfolio.remove_position(position_id)
             del self._barrier[position_id]
         else:

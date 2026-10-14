@@ -414,7 +414,10 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   (`gap=True` on the event and the ledger flow, W6 rule); dates before the run start are history (signed rule 3); a
   first run day after an unvisited in-run date refused (`TODO(dcn-run-start)`; superseded by ruling R31, T17 CP6: dates
   before the FIRST RUN INSTANT are history -- the row observed, its coupon not owed, no KI / KO state assumed -- so a
-  run whose first market day is after the start completes; raise -> run, no moved values). Pricing copies: pre-close
+  run whose first market day is after the start completes; raise -> run, no moved values; and a first run instant
+  after the final observation retires the note as matured before the run, as W1 -- the warning, matured and settled,
+  no cash, valued at zero -- where it stayed alive and its pricing copy refused; ruling R32: before any observation,
+  rows before the requested day are history for the pre-close copy). Pricing copies: pre-close
   `product_for_pricing(d, env, initial=True)`, post-close `.without_observed_through(d)`; the runs value the contingent
   claim plus the ledger (MTM + pending PV + paid cash). `DCNLifecycleState` gains `pending_settlement_cashflow`,
   `settlement_date`, `settled`, `settle()`, `advance_to()`, `mark_matured_before_run()`; `ProductReplay` reads a DCN's
@@ -736,7 +739,10 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   `TODO(barrier-run-start)`, which broke the intraday provisional replay from a checkpoint: that replay restores the
   checkpoint state and observes only the due instants after it, so the records the checkpoint covers are history --
   restored to the pre-T17 outcome on the CP6 probe, KO paying 1.0 on a supplied 111 and alive on the assumed spot); a
-  numeric record falls on `start + round(t * 365)` days (the trackers' run clock). Between records nothing is decided, and at expiry only a record on the expiry
+  numeric record falls on `start + round(t * 365)` days (the trackers' run clock); a first run instant after the expiry
+  retires the contract as matured before the run (CP6 round 2, every monitoring type: the `MaturedBeforeRunWarning`,
+  expired, no cash, and `PortfolioLifecycleManager` drops the position; it booked the expiry payoff at that instant's
+  spot after expiry). Between records nothing is decided, and at expiry only a record on the expiry
   date hits (no record there: the no-hit payoff). Events carry `metadata` `monitoring="discrete"`, `gap`, `decided_on`,
   `observation_date`. CONTINUOUS and EXPIRY monitoring unchanged. New
   `test/test_barrier_lifecycle_discrete_observation.py`. Moved values (200 daily GBM paths, 20% vol, one year, monthly

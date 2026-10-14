@@ -242,3 +242,25 @@ def test_every_family_member_is_decided_only_on_its_records(name):
     assert tracker.state.alive
     events = _run(tracker, [(89, 100.0), (90, 135.0)])
     assert [e.event_type for e in events] == [LifecycleEventType.KNOCK_OUT] and events[0].date == _on(90)
+
+
+@pytest.mark.parametrize("observation_type", [ObservationType.DISCRETE, ObservationType.CONTINUOUS],
+                         ids=["discrete", "continuous"])
+def test_a_first_run_instant_after_expiry_retires_the_contract(observation_type):
+    """R31 applied to matured-before-run (T17 CP6 round 2): the first run instant (day 361) is after the last record and
+    the expiry (day 360). Every date is history: the contract matured before the run -- the matured-before-run warning,
+    expired, no cash booked -- where it booked the expiry payoff at the first instant's spot after expiry."""
+    from quantark.asset.equity.lifecycle.autocallable import MaturedBeforeRunWarning
+
+    tracker = _up_out(observation_type=observation_type)
+    with pytest.warns(MaturedBeforeRunWarning, match="first run instant"):
+        assert _run(tracker, [(361, 110.0)]) == []
+    s = tracker.state
+    assert not s.alive and s.expired and not s.knocked_out and s.ledger.cashflows == ()
+    assert _run(tracker, [(362, 110.0)]) == []
+
+
+def test_a_first_run_instant_on_the_expiry_date_still_settles():
+    tracker = _up_out()
+    events = _run(tracker, [(360, 110.0)])
+    assert [e.event_type for e in events] == [LifecycleEventType.EXPIRY]

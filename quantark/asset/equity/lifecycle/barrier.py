@@ -15,7 +15,8 @@ flagged ``gap=True`` (A7'(c), the signed W6 rule, as ``lifecycle/dcn.py``); a
 record before the run is history (signed rule 3: no barrier state is assumed,
 not hit), "before the run" being before the FIRST RUN INSTANT (ruling R31) --
 the first ``observe``, which for a restored checkpoint (the intraday replay) is
-the first instant after it; a numeric record falls on
+the first instant after it; a first run instant after the expiry retires the
+contract as matured before the run (W1: the warning, no cash, valued at zero); a numeric record falls on
 ``start_date + round(t * 365)`` days, the run clock of every tracker. At expiry
 only a record on the expiry date hits.
 
@@ -29,6 +30,7 @@ ledger handles discounting from determination to payment.
 
 from __future__ import annotations
 
+import warnings
 from copy import deepcopy
 from typing import Dict, List, Optional
 
@@ -282,6 +284,12 @@ class BarrierLifecycleTracker:
         if not self.state.alive:
             return []
 
+        if self._last is None and self._expired_before(date):
+            # R31 applied to matured-before-run: the first run instant is after the expiry, so every date is history
+            # and the contract matured before the run (W1: no cash booked, valued at zero)
+            self._retire_matured(date)
+            self._last = (date, float(spot))
+            return []
         if self._discretely_monitored():
             events = self._observe_records(date, spot)
             self._last = (date, float(spot))
@@ -290,6 +298,24 @@ class BarrierLifecycleTracker:
             # nothing is decided between records: at expiry only a record on that date could hit (decided above)
             return events + self._observe_family(date, env, spot, hit=False)
         return self._observe_family(date, env, spot)
+
+    def _expired_before(self, date: pd.Timestamp) -> bool:
+        """The expiry is strictly before ``date``."""
+        remaining = self._remaining_maturity(date)
+        return remaining < 0.0 and not is_zero(remaining)
+
+    def _retire_matured(self, date: pd.Timestamp) -> None:
+        """Matured before the run (W1 rule, ruling R31): warn, mark expired and dead, book nothing."""
+        from .autocallable import MaturedBeforeRunWarning
+
+        warnings.warn(
+            MaturedBeforeRunWarning(
+                f"{type(self.product).__name__} expired before the first run instant {date.date()}: it is not settled "
+                "in the run, books no cash and is valued at zero"),
+            stacklevel=3,
+        )
+        self.state.expired = True
+        self.state.alive = False
 
     def _observe_family(self, date, env, spot, hit: Optional[bool] = None) -> List[LifecycleEvent]:
         """The family's daily-close observation; ``hit`` overrides the spot's barrier test (False: DISCRETE between

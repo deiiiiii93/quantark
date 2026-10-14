@@ -132,16 +132,24 @@ class DCNLifecycleTracker:
             return True
         if not self.lifecycle.alive or not self.matured_before_run(env):
             return False
+        self._retire_matured(f"the run start {_day(self.start_date).date()}")
+        return True
+
+    def _matured_before_first_instant(self, d: datetime) -> bool:
+        """The first run instant ``d`` is after the final observation (ruling R31: every row is history)."""
+        return self._last is None and self.final_observation_date < d
+
+    def _retire_matured(self, bound: str) -> None:
+        """Warn once and mark the note matured with no cash (valued at zero, W1)."""
         warnings.warn(
             MaturedBeforeRunWarning(
-                f"DCNOption's final observation {self.final_observation_date.date()} is before the run start "
-                f"{_day(self.start_date).date()}: it is not settled in the run, books no cash and is valued at zero"
+                f"DCNOption's final observation {self.final_observation_date.date()} is before {bound}: it is not "
+                "settled in the run, books no cash and is valued at zero"
             ),
-            stacklevel=2,
+            stacklevel=3,
         )
         self.lifecycle.mark_matured_before_run(self.final_observation_date)
         self._matured_before_run = True
-        return True
 
     # -- pricing copies --------------------------------------------------------------------------------------------
     @property
@@ -178,7 +186,8 @@ class DCNLifecycleTracker:
           view of ``date`` while a row remains after it, else the contract on its final observation date
           (``get_maturity`` 0.0);
         * a live note past its final observation before ``observe(date)``: refused (that copy would still carry the
-          undecided final row);
+          undecided final row) -- except before the first run instant, where every row is history and the note matured
+          before the run (ruling R31): the terminal copy, as ``observe`` then retires it;
         * pre-close (``initial``, or ``date`` not yet observed): ``spec.build(valuation_date=date)``; refused while a
           run-time schedule date before ``date`` is still undecided (it would be in neither the copy nor the ledger);
         * post-close (after ``observe(date)``): the same ``.without_observed_through(date)``.
@@ -193,12 +202,13 @@ class DCNLifecycleTracker:
             return self.product
         state = self.lifecycle
         final = self.final_observation_date
-        if state.alive and d > final:
+        matured_before_run = state.alive and self.has_lifecycle and self._matured_before_first_instant(d)
+        if state.alive and d > final and not matured_before_run:
             raise ValidationError(
                 f"the DCN's final observation {final.date()} is before {d.date()} and not yet decided: "
                 "observe the run instant first (a copy now would carry the undecided final row)"
             )
-        if not state.alive:
+        if not state.alive or matured_before_run:
             if d < final and any(t > d for t in self._row_of):
                 schedule = dataclasses.replace(self._booked.spec, valuation_date=d).build(self._booked.calendar)
                 schedule = schedule.without_observed_through(d)
@@ -219,7 +229,12 @@ class DCNLifecycleTracker:
         return product
 
     def _require_decided_before(self, d: datetime) -> None:
-        """A pre-close copy at ``d`` needs every run-time schedule date before ``d`` decided (CP5)."""
+        """A pre-close copy at ``d`` needs every run-time schedule date before ``d`` decided (CP5).
+
+        Contract (ruling R32): before any ``observe`` -- no run instant yet -- every row and daily-KI date before ``d``
+        is history (R31: "before the run" is before the first run instant), so nothing is pending and nothing is
+        refused; once the run has observed an instant, the dates after it and before ``d`` must have been observed.
+        """
         if not self.has_lifecycle:
             return
         if self._last is None:
@@ -242,6 +257,12 @@ class DCNLifecycleTracker:
         state = self.lifecycle
         state.advance_to(d)
         if self.retire_if_matured_before_run(env):
+            return []
+        if state.alive and self.has_lifecycle and self._matured_before_first_instant(d):
+            # R31 applied to matured-before-run: the first run instant is after the final observation, so every row
+            # is history and the note matured before the run (W1: no cash, valued at zero)
+            self._retire_matured(f"the first run instant {d.date()}")
+            self._last = (d, float(spot))
             return []
         if not state.alive or not self.has_lifecycle:
             self._last = (d, float(spot))

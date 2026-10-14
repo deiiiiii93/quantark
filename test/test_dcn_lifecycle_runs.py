@@ -576,6 +576,25 @@ def test_remaining_maturity_never_refuses():
     assert t.remaining_maturity(pd.Timestamp(final)) == 0.0
 
 
+def test_a_first_run_instant_after_the_final_observation_retires_the_note():
+    """R31 applied to matured-before-run (T17 CP6 round 2): the tracker starts 12-27 (before the 01-03 final
+    observation) but the first run instant is 01-06. Every row is history, so the note matured before the run: retired
+    as W1 does -- the warning, matured and settled, no cash booked, valued at zero -- where it stayed alive and its
+    pricing copy refused."""
+    start = datetime(2024, 12, 27)
+    p = make_dcn(DCN_A, valuation_date=start)
+    t = tracker(p, start=start)
+    first = pd.Timestamp("2025-01-06")
+    pre = t.product_for_pricing(first, flat_env_on(first.to_pydatetime()), initial=True)   # before any observe
+    assert pre.get_maturity() == 0.0
+    with pytest.warns(MaturedBeforeRunWarning, match="first run instant"):
+        events = t.observe(first, p, flat_env_on(first.to_pydatetime(), 5500.0), 5500.0)
+    assert events == []
+    s = t.lifecycle
+    assert s.matured and not s.alive and s.settled and s.ledger.cashflows == ()
+    assert t.product_for_pricing(first, flat_env_on(first.to_pydatetime())).get_maturity() == 0.0
+
+
 def test_alive_note_past_its_final_observation_is_not_priced_before_observe():
     start = datetime(2024, 12, 27)
     p = make_dcn(DCN_A, valuation_date=start)
