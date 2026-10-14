@@ -723,7 +723,35 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   quarterly records at 110 paying 5, spot 120: hit-paid 5.0 -> 4.60396, terminal-paid 4.85223 -> 4.50945; K 95, records
   at 100 paying 2, spot 100 (on the level): 2.0 -> 1.50672 (BS PDE within 6.4e-5 of each). No modelvalidation anchor
   or replay golden moved.
-- A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
+  The run lifecycle tracker (`lifecycle/barrier.BarrierLifecycleTracker`: the equity backtest and the dynamic
+  scenario via `PortfolioLifecycleManager`, and the intraday provisional replay) tested `product.is_barrier_hit` on
+  every daily close whatever the monitoring. A DISCRETE product is now decided only on its schedule's records: each
+  record once, on its date at that day's close, against the record's own level and paying its payoff (W18c, times the
+  contract multiplier where the product's hit cash carries it). A record date the run never visits is decided at the
+  previous run instant's spot with `gap=True` on the event (A7'(c), the signed W6 rule, as `lifecycle/dcn.py`); a
+  record before the run start is history (signed rule 3); a record on or after the start but before the first run
+  instant is refused (`ValidationError`, `TODO(barrier-run-start)`); a numeric record falls on `start + round(t *
+  365)` days (the trackers' run clock). Between records nothing is decided, and at expiry only a record on the expiry
+  date hits (no record there: the no-hit payoff). Events carry `metadata` `monitoring="discrete"`, `gap`, `decided_on`,
+  `observation_date`. CONTINUOUS and EXPIRY monitoring unchanged. New
+  `test/test_barrier_lifecycle_discrete_observation.py`. Moved values (200 daily GBM paths, 20% vol, one year, monthly
+  dated records, per-path tracker from 100): up-and-out call 120 / rebate 5: 66 -> 51 knock-outs, total booked cash
+  523.684 -> 595.051; down-and-in put 85: 88 -> 74 knock-ins (cash 1498.738 -> 1444.917); single sharkfin 120
+  (knock-out 3): 66 -> 51 knock-outs (cash 391.684 -> 493.051); one-touch 120 (5): 66 -> 51 touches (cash 330.0 ->
+  255.0). No existing backtest, dynamic-scenario, pnl-explain or intraday test moved (none books a DISCRETE barrier
+  product off its record dates).
+  The single and double sharkfin MC price a DISCRETE schedule with a record on the valuation instant that the spot has
+  NOT crossed (they raised "dt_array must have strictly positive entries"): the record is decided "not hit" there and
+  leaves the simulated grid (I5 / A14, as the BS barrier MC), bitwise the contract aged past it; a sole such record
+  leaves the never-hit value; two records on that instant are refused. Moved values: raise -> price only (e.g. single
+  sharkfin 120, knock-out 0.5, aged onto its 3-month record at spot 119: 1.32888; double 130/75 at 129: 2.56138).
+  The double-barrier analytical engine paid a knock-out decided now undiscounted (`rebate x multiplier`, then only the
+  delay to the payment date), while its forward formula, QUAD and the PDE's discrete records pay a double knock-out's
+  rebate at the terminal payment time (the product has no hit-paid option): it now pays `rebate x DF(T)` there too,
+  CONTINUOUS and on a record on the valuation instant (a record's payoff likewise), continuous at the barrier. Moved
+  values (130/75, rebate 2, T 0.75, r 3%): spot 131 or 74, continuous or on a record: 2.0 -> 1.95550 (QUAD and PDE
+  1.95550); records paying 2.5 on a record now: 2.5 -> 2.44438. Plain inside cells and every other analytical value
+  bit-identical; no anchor moved. decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
   (`lifecycle_state.knocked_in` or the product's `_otc_lifecycle_knocked_in`), while the day before the same state

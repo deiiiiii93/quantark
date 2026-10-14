@@ -2,9 +2,19 @@
 Lifecycle tracking for the vanilla barrier product family.
 
 Covers single/double barrier options, single/double sharkfins, and one-touch /
-double one-touch products. Monitoring is daily-close: each ``observe`` call
-checks the day's closing spot. Products whose ``observation_type`` is EXPIRY
-are only settled at expiry, never intra-path.
+double one-touch products. CONTINUOUS monitoring is daily-close: each
+``observe`` call checks the day's closing spot. Products whose
+``observation_type`` is EXPIRY are only settled at expiry, never intra-path.
+
+DISCRETE monitoring is decided only on the schedule's observation dates (A15,
+user decision 2026-10-14: "knock out should only happen at the observation
+date, otherwise price it"): each record once, on its date at that day's close,
+against the record's own level and paying the record's payoff (W18c). A record
+date the run never visits is decided at the spot of the run instant before it,
+flagged ``gap=True`` (A7'(c), the signed W6 rule, as ``lifecycle/dcn.py``); a
+record before the run start is history (signed rule 3: no barrier state is
+assumed); a numeric record falls on ``start_date + round(t * 365)`` days, the
+run clock of every tracker. At expiry only a record on the expiry date hits.
 
 Knock-in semantics: a knocked-in single/double barrier option *is* a European
 option, so after KI ``product_for_pricing`` returns the exact European
@@ -49,6 +59,8 @@ from quantark.asset.equity.settlement import (
     SettlementRequest,
     SettlementResolver,
 )
+from quantark.util.enum import ObservationType
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
 
 from .events import LifecycleEvent, LifecycleEventType
@@ -71,10 +83,11 @@ class BarrierLifecycleTracker:
     Supports ``BarrierOption``, ``DoubleBarrierOption``, ``SingleSharkfinOption``,
     ``DoubleSharkfinOption``, ``OneTouchOption``, and ``DoubleOneTouchOption``.
 
-    Monitoring is daily-close: call ``observe(date, env, spot)`` once per
-    business day with the closing spot. Products with ``observation_type ==
-    ObservationType.EXPIRY`` are never checked intra-path; they are settled only
-    when expiry is detected.
+    Call ``observe(date, env, spot)`` once per run day with the closing spot.
+    CONTINUOUS monitoring checks every close; DISCRETE monitoring decides only
+    the schedule's records (module docstring, A15); products with
+    ``observation_type == ObservationType.EXPIRY`` are never checked
+    intra-path; they are settled only when expiry is detected.
 
     After a knock-in event on a ``BarrierOption`` or ``DoubleBarrierOption``,
     ``product_for_pricing`` returns the exact European vanilla equivalent (with
@@ -96,6 +109,7 @@ class BarrierLifecycleTracker:
         self.state = BarrierLifecycleState()
         self._bs_engine: Optional[BlackScholesEngine] = None
         self._observation_env: Optional[PricingEnvironment] = None
+        self._last: Optional[tuple] = None      # (day, spot) of the last observed run instant (DISCRETE gap rule)
 
     # ------------------------------------------------------------------
     # Time helpers
@@ -266,27 +280,128 @@ class BarrierLifecycleTracker:
         if not self.state.alive:
             return []
 
+        if self._discretely_monitored():
+            events = self._observe_records(date, spot)
+            self._last = (date, float(spot))
+            if not self.state.alive:
+                return events
+            # nothing is decided between records: at expiry only a record on that date could hit (decided above)
+            return events + self._observe_family(date, env, spot, hit=False)
+        return self._observe_family(date, env, spot)
+
+    def _observe_family(self, date, env, spot, hit: Optional[bool] = None) -> List[LifecycleEvent]:
+        """The family's daily-close observation; ``hit`` overrides the spot's barrier test (False: DISCRETE between
+        records, which only settles expiry)."""
         if isinstance(self.product, (BarrierOption,)):
-            return self._observe_single_barrier(date, env, spot)
+            return self._observe_single_barrier(date, env, spot, hit)
         elif isinstance(self.product, DoubleBarrierOption):
-            return self._observe_double_barrier(date, env, spot)
+            return self._observe_double_barrier(date, env, spot, hit)
         elif isinstance(self.product, (SingleSharkfinOption, DoubleSharkfinOption)):
-            return self._observe_sharkfin(date, env, spot)
+            return self._observe_sharkfin(date, env, spot, hit)
         elif isinstance(self.product, (OneTouchOption, DoubleOneTouchOption)):
-            return self._observe_one_touch(date, env, spot)
+            return self._observe_one_touch(date, env, spot, hit)
 
         return []
+
+    # ------------------------------------------------------------------
+    # DISCRETE monitoring: the schedule's records (A15)
+    # ------------------------------------------------------------------
+
+    def _discretely_monitored(self) -> bool:
+        product = self.product
+        return (getattr(product, "observation_type", None) == ObservationType.DISCRETE
+                and getattr(product, "observation_schedule", None) is not None)
+
+    def _record_days(self) -> List[tuple]:
+        """(day, record) of every schedule record in date order: a dated record on its date, a numeric one on
+        ``start_date + round(t * 365)`` days (the run clock every tracker uses)."""
+        out = []
+        for position, rec in enumerate(self.product.observation_schedule.records):
+            if rec.observation_date is not None:
+                day = pd.Timestamp(rec.observation_date).normalize()
+            else:
+                day = self.start_date + pd.Timedelta(days=int(round(float(rec.observation_time) * 365.0)))
+            out.append((day, position, rec))
+        return [(day, rec) for day, _, rec in sorted(out, key=lambda item: (item[0], item[1]))]
+
+    def _observe_records(self, date: pd.Timestamp, spot: float) -> List[LifecycleEvent]:
+        """Decide every record dated after the last run instant and on or before ``date``: on ``date`` at its close,
+        a record the run skipped at the previous instant's spot (``gap=True``)."""
+        lower = self._last[0] if self._last is not None else None
+        events: List[LifecycleEvent] = []
+        gap_decided = False
+        for day, rec in self._record_days():
+            if day > date or (lower is not None and day <= lower):
+                continue
+            if day < self.start_date:
+                continue                                # before the run (signed rule 3): history, no state assumed
+            if day < date:
+                if self._last is None:
+                    # TODO(barrier-run-start): a record on/after the run start but before the first run instant has
+                    # no earlier spot to decide it at; refused rather than invented
+                    raise ValidationError(
+                        f"barrier observation {day.date()} is on/after the run start but before the first run instant "
+                        f"{date.date()}: no spot to decide it at (TODO(barrier-run-start))")
+                observed, gap = self._last[1], True
+            else:
+                observed, gap = float(spot), False
+            event = self._decide_record(day, rec, observed, gap=gap, decided_on=date)
+            if event is not None:
+                events.append(event)
+                gap_decided = gap_decided or gap
+            if not self.state.alive:
+                break
+        if gap_decided:
+            self.state.valuation_point = self._valuation_point(date)
+        return events
+
+    def _decide_record(self, day, rec, spot: float, *, gap: bool, decided_on) -> Optional[LifecycleEvent]:
+        """One record at ``spot``: its own level(s) and payoff (W18c)."""
+        product = self.product
+        metadata = {"monitoring": "discrete", "gap": gap, "decided_on": pd.Timestamp(decided_on),
+                    "observation_date": pd.Timestamp(day)}
+        if isinstance(product, (DoubleBarrierOption, DoubleSharkfinOption, DoubleOneTouchOption)):
+            upper = float(rec.upper_barrier if rec.upper_barrier is not None else product.upper_barrier)
+            lower = float(rec.lower_barrier if rec.lower_barrier is not None else product.lower_barrier)
+            if not (spot >= upper or spot <= lower):
+                return None
+            level = upper if spot >= upper else lower
+        else:
+            level = float(rec.barrier if rec.barrier is not None else product.barrier)
+            is_up = product.is_call() if isinstance(product, SingleSharkfinOption) else product.is_up_barrier
+            if not (spot >= level if is_up else spot <= level):
+                return None
+        if isinstance(product, (BarrierOption, DoubleBarrierOption)) and product.is_knock_in:
+            if self.state.knocked_in:
+                return None
+            return self._knock_in_event(day, spot, barrier=level, metadata=metadata)
+        return self._terminal_event(LifecycleEventType.KNOCK_OUT, day, spot, barrier=level,
+                                    payoff=self._record_hit_payoff(rec), metadata=metadata)
+
+    def _record_hit_payoff(self, rec) -> float:
+        """The per-contract cash a hit of ``rec`` fixes: its payoff (unset: the product's knock-out cash), with the
+        contract multiplier where the product's own hit cash carries it."""
+        product = self.product
+        if isinstance(product, (OneTouchOption, DoubleOneTouchOption)):
+            if not product.get_payoff(0.0, touched=True):
+                return 0.0                                  # a touched no-touch pays nothing
+            return float(rec.payoff) if rec.payoff is not None else float(product.get_payoff(0.0, touched=True))
+        if isinstance(product, (SingleSharkfinOption, DoubleSharkfinOption)):
+            cash = rec.payoff if rec.payoff is not None else product.knock_out_rebate
+        else:
+            cash = rec.payoff if rec.payoff is not None else product.rebate
+        return float(cash) * product.contract_multiplier
 
     # ------------------------------------------------------------------
     # Per-product-family observation helpers
     # ------------------------------------------------------------------
 
     def _observe_single_barrier(
-        self, date: pd.Timestamp, env: PricingEnvironment, spot: float
+        self, date: pd.Timestamp, env: PricingEnvironment, spot: float, hit: Optional[bool] = None
     ) -> List[LifecycleEvent]:
         """Lifecycle observation for ``BarrierOption``."""
         product: BarrierOption = self.product
-        barrier_hit = product.is_barrier_hit(spot)
+        barrier_hit = product.is_barrier_hit(spot) if hit is None else hit
 
         if product.is_knock_out:
             # Intra-path KO check
@@ -353,11 +468,11 @@ class BarrierLifecycleTracker:
         return []
 
     def _observe_double_barrier(
-        self, date: pd.Timestamp, env: PricingEnvironment, spot: float
+        self, date: pd.Timestamp, env: PricingEnvironment, spot: float, hit: Optional[bool] = None
     ) -> List[LifecycleEvent]:
         """Lifecycle observation for ``DoubleBarrierOption``."""
         product: DoubleBarrierOption = self.product
-        barrier_hit = product.is_barrier_hit(spot)
+        barrier_hit = product.is_barrier_hit(spot) if hit is None else hit
 
         if product.is_knock_out:
             if barrier_hit and self._monitored_intra_path():
@@ -424,7 +539,7 @@ class BarrierLifecycleTracker:
         return []
 
     def _observe_sharkfin(
-        self, date: pd.Timestamp, env: PricingEnvironment, spot: float
+        self, date: pd.Timestamp, env: PricingEnvironment, spot: float, hit: Optional[bool] = None
     ) -> List[LifecycleEvent]:
         """Lifecycle observation for ``SingleSharkfinOption`` and ``DoubleSharkfinOption``.
 
@@ -433,7 +548,7 @@ class BarrierLifecycleTracker:
         Expiry without a hit fixes the no-hit payoff.
         """
         product = self.product
-        barrier_hit = product.is_barrier_hit(spot)
+        barrier_hit = product.is_barrier_hit(spot) if hit is None else hit
 
         if barrier_hit and self._monitored_intra_path():
             raw_payoff = product.get_barrier_payoff()
@@ -469,7 +584,7 @@ class BarrierLifecycleTracker:
         return []
 
     def _observe_one_touch(
-        self, date: pd.Timestamp, env: PricingEnvironment, spot: float
+        self, date: pd.Timestamp, env: PricingEnvironment, spot: float, hit: Optional[bool] = None
     ) -> List[LifecycleEvent]:
         """Lifecycle observation for ``OneTouchOption`` and ``DoubleOneTouchOption``.
 
@@ -479,7 +594,7 @@ class BarrierLifecycleTracker:
         For double variants the same logic applies with two barriers.
         """
         product = self.product
-        barrier_hit = product.is_barrier_hit(spot)
+        barrier_hit = product.is_barrier_hit(spot) if hit is None else hit
 
         if barrier_hit and self._monitored_intra_path():
             raw_payoff = product.get_payoff(spot, touched=True)
@@ -535,6 +650,7 @@ class BarrierLifecycleTracker:
         spot: float,
         *,
         barrier: Optional[float],
+        metadata: Optional[Dict] = None,
     ) -> LifecycleEvent:
         """Record a knock-in and return the corresponding event.
 
@@ -563,7 +679,7 @@ class BarrierLifecycleTracker:
             terminates_position=False,
             state_before=before,
             state_after=after,
-            metadata={"monitoring": "daily_close"},
+            metadata=metadata if metadata is not None else {"monitoring": "daily_close"},
         )
 
     def _terminal_event(
@@ -575,6 +691,7 @@ class BarrierLifecycleTracker:
         barrier: Optional[float],
         payoff: float,
         expired: bool = False,
+        metadata: Optional[Dict] = None,
     ) -> LifecycleEvent:
         """Record a terminal event (KO or expiry) and update state.
 
@@ -631,7 +748,7 @@ class BarrierLifecycleTracker:
             terminates_position=True,
             state_before=before,
             state_after=after,
-            metadata={"monitoring": "daily_close"},
+            metadata=metadata if metadata is not None else {"monitoring": "daily_close"},
         )
 
     def _valuation_point(self, date: pd.Timestamp) -> ValuationPoint:

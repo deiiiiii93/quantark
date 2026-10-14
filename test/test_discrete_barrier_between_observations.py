@@ -419,3 +419,53 @@ def test_vol_model_routes_price_forward_between_observations(route, kind):
 def test_vol_model_routes_knock_out_at_once_on_a_record_day(route):
     """Day 91 holds a record: a spot beyond it knocks out at once (cash 0)."""
     assert _vol_case(route, "up_out_call", 91, 121.0, keep_landing=True) == pytest.approx(0.0, abs=1e-12)
+
+
+# ======================================================================================================================
+# the sharkfin MC: an uncrossed record on the valuation instant (I5 / A14, as the Black-Scholes barrier MC; T17)
+# ======================================================================================================================
+
+SHARKFIN_MC = {"single_sharkfin": "single_sharkfin_mc", "double_sharkfin": "double_sharkfin_mc"}
+
+
+@pytest.mark.parametrize("name", list(SHARKFIN_MC))
+def test_sharkfin_mc_an_uncrossed_record_at_the_valuation_instant_leaves_the_grid(name):
+    """The record on the valuation instant, not crossed by the spot, is decided "not hit" there and leaves the
+    simulated grid: bitwise the contract aged past it (it raised "dt_array must have strictly positive entries")."""
+    kind, route = KINDS[name], SHARKFIN_MC[name]
+    spot = kind.level - kind.side * 1.0
+    on_record, _ = _price(route, _aged(kind.build(), RECORD_DAY, keep_landing=True), spot)
+    aged_past, _ = _price(route, _aged(kind.build(), RECORD_DAY, keep_landing=False), spot)
+    assert on_record == aged_past
+
+
+@pytest.mark.parametrize("name", list(SHARKFIN_MC))
+def test_sharkfin_mc_a_sole_uncrossed_record_at_the_valuation_instant_leaves_the_never_hit_value(name):
+    """The only record sits on the valuation instant, uncrossed: nothing is left to observe. The never-hit value,
+    within 4 s.e. of the contract whose monitoring has ended (its remaining-contract replication)."""
+    kind, route = KINDS[name], SHARKFIN_MC[name]
+    spot = kind.level - kind.side * 1.0
+
+    def sole(keep_landing):
+        product = kind.build()
+        product.observation_schedule.records = [product.observation_schedule.records[2]]
+        return _aged(product, RECORD_DAY, keep_landing=keep_landing)
+
+    value, se = _price(route, sole(True), spot)
+    ended, _ = _price(route, sole(False), spot)
+    assert se > 0.0
+    assert abs(value - ended) <= 4.0 * se
+
+
+@pytest.mark.parametrize("name", list(SHARKFIN_MC))
+def test_sharkfin_mc_two_records_on_the_valuation_instant_are_refused(name):
+    from copy import deepcopy
+
+    from quantark.util.exceptions import ValidationError
+
+    kind, route = KINDS[name], SHARKFIN_MC[name]
+    product = _aged(kind.build(), RECORD_DAY, keep_landing=True)
+    records = product.observation_schedule.records
+    records.insert(0, deepcopy(records[0]))
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        _price(route, product, kind.level - kind.side * 1.0)

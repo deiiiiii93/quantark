@@ -5,6 +5,8 @@ Validation baselines from Haug, Table 4-15 (Ikeda & Kuintomo 1992).
 S = 100, X = 100, r = 0.1, b = 0.1 (cost of carry = risk-free, so q = 0).
 """
 
+import math
+
 import pytest
 from datetime import datetime
 
@@ -436,3 +438,54 @@ class TestEdgeCases:
         p1 = engine.price(option1, env)
         p2 = engine.price(option2, env)
         assert p2 == pytest.approx(p1 * 10_000.0, rel=1e-10)
+
+
+class TestKnockOutRebatePaymentTiming:
+    """A double knock-out's rebate is paid at the terminal payment time: the product has no hit-paid option, and the
+    forward formula, QUAD and the PDE's discrete records all discount it to there. A knock-out decided now pays
+    ``rebate x DF(T_pay)``, not the undiscounted rebate (T17 concern 3)."""
+
+    REBATE, T, RATE = 2.0, 0.75, 0.03
+
+    def _option(self, observation_type, barrier_type=DoubleBarrierType.KNOCK_OUT, schedule=None, maturity=None):
+        return DoubleBarrierOption(strike=100.0, option_type=OptionType.CALL, upper_barrier=130.0,
+                                   lower_barrier=75.0, barrier_type=barrier_type, rebate=self.REBATE,
+                                   maturity=maturity or self.T, observation_type=observation_type,
+                                   observation_schedule=schedule)
+
+    def _terminal_df(self):
+        return math.exp(-self.RATE * self.T)
+
+    def test_continuous_hit_now_pays_the_discounted_rebate(self):
+        env = make_env(spot=131.0, vol=0.2, rate=self.RATE)
+        price = DoubleBarrierOptionAnalyticalEngine().price(self._option(ObservationType.CONTINUOUS), env)
+        assert price == pytest.approx(self.REBATE * self._terminal_df(), rel=1e-12)
+
+    def test_continuous_price_is_continuous_at_the_barrier(self):
+        """Just inside the corridor the forward formula tends to rebate x DF(T): no step at the barrier."""
+        engine = DoubleBarrierOptionAnalyticalEngine()
+        inside = engine.price(self._option(ObservationType.CONTINUOUS), make_env(129.999, 0.2, self.RATE))
+        hit = engine.price(self._option(ObservationType.CONTINUOUS), make_env(130.0, 0.2, self.RATE))
+        assert abs(inside - hit) < 5e-3
+
+    def test_discrete_record_now_pays_the_discounted_rebate_as_quad_and_pde(self):
+        from quantark.asset.equity.engine.pde.double_barrier_pde_solver import DoubleBarrierPDESolver
+        from quantark.asset.equity.engine.quad import DiscreteQuadEngine
+        from quantark.asset.equity.param import PDEParams, QuadParams
+        from quantark.asset.equity.product.option.observation_schedule import (
+            ObservationRecord, ObservationSchedule)
+
+        def aged():
+            schedule = ObservationSchedule(records=[
+                ObservationRecord(observation_time=k / 12, upper_barrier=130.0, lower_barrier=75.0)
+                for k in range(1, 13)])
+            option = self._option(ObservationType.DISCRETE, schedule=schedule, maturity=1.0)
+            option.time_shift(0.25, datetime(2024, 1, 1), make_env(100.0, 0.2, self.RATE), keep_landing=True)
+            return option
+
+        env = make_env(spot=131.0, vol=0.2, rate=self.RATE)
+        price = DoubleBarrierOptionAnalyticalEngine().price(aged(), env)
+        assert price == pytest.approx(self.REBATE * self._terminal_df(), rel=1e-12)
+        assert price == pytest.approx(DiscreteQuadEngine(params=QuadParams(grid_points=401)).price(aged(), env),
+                                      rel=1e-12)
+        assert price == pytest.approx(DoubleBarrierPDESolver(PDEParams()).price(aged(), env), rel=1e-12)

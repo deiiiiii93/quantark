@@ -201,10 +201,11 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         # Spot already outside barriers: continuously, or at an observation at the valuation instant
         if hit_now:
             if product.is_knock_out:
-                # the deciding record's payoff on a DISCRETE schedule (W18c), the rebate otherwise
-                if discrete:
-                    return valuation_double_barrier_terms(product, pricing_env)[2] * multiplier
-                return product.rebate * multiplier
+                # the deciding record's payoff on a DISCRETE schedule (W18c), the rebate otherwise -- paid at the
+                # terminal payment time as every forward leg pays it (T17 concern 3): DF(T) here, the delay to the
+                # payment date in ``price``
+                cash = valuation_double_barrier_terms(product, pricing_env)[2] if discrete else product.rebate
+                return cash * float(safe_exp(-r * T)) * multiplier
             # Knock-in: already activated, price as vanilla
             vanilla = self._create_vanilla(product)
             return self._bs_engine.price(vanilla, pricing_env) * multiplier

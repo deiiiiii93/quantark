@@ -303,10 +303,11 @@ def test_a_zero_cash_single_sharkfin_knocked_out_now_pays_the_record_payoff():
 @pytest.mark.parametrize("name", [n for n, k in KINDS.items() if k.knocks_out and "pay_at_hit" not in n])
 def test_an_immediate_knock_out_pays_the_record_payoff(name):
     """A record on the valuation instant breached at its level L (short of ``product.barrier``) and paying 2.5:
-    the contract pays 2.5 -- at the terminal payment time (the double barrier: undiscounted, as its rebate)."""
+    the contract pays 2.5 at the terminal payment time (the double barrier too since T17 concern 3: it paid 2.5
+    undiscounted)."""
     kind = KINDS[name]
     priced = _price(kind, kind.product_level, kind.record_level, "record_now_between", payoff=2.5)
-    expected = 2.5 if name == "double_knock_out" else 2.5 * env(100.0).get_discount_factor(0.75)
+    expected = 2.5 * env(100.0).get_discount_factor(0.75)
     assert priced == pytest.approx(expected, **TOL)
 
 
@@ -440,7 +441,7 @@ PLAIN_DECIDED_NOW = {
     ("barrier_uoc_pah_hit", 0.25, True, 121.0): 5.0,
     ("one_touch_hit", 0.25, True, 121.0): 4.888756185966682,
     ("one_touch_between_observations", 0.30, False, 121.0): 4.325607738235779,
-    ("double_ko_hit", 0.25, True, 131.0): 2.0,
+    ("double_ko_hit", 0.25, True, 131.0): 1.9555024743866727,    # 2.0 (undiscounted) before T17 concern 3
     ("double_ko_between_observations", 0.30, False, 131.0): 3.014316895136673,
     ("single_sharkfin_hit", 0.25, True, 121.0): 2.933253711580009,
     ("double_sharkfin_hit", 0.25, True, 131.0): 2.933253711580009,

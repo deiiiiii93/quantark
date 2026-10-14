@@ -377,6 +377,13 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
             require_double=True,
             product=product,
         )
+        # A record at the valuation instant is decided before any path is simulated (``price``: a crossed record
+        # short-circuits, A15), so one that reaches the grid was not crossed: decided "not hit", it leaves the grid
+        # (a zero first step is not a simulation step; I5 / A14, as the Black-Scholes barrier MC). Two records on
+        # that instant are refused, as any repeated time.
+        if sum(1 for rec in resolved if is_zero(rec.observation_time)) > 1:
+            raise ValidationError("Observation times must be strictly increasing.")
+        resolved = [rec for rec in resolved if not is_zero(rec.observation_time)]
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
         if np.any(obs_times < 0.0) or np.any(obs_times > maturity):
             raise ValidationError("Observation times must be within [0, maturity].")
@@ -385,7 +392,7 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         if np.any(np.diff(sorted_obs) <= 0.0):
             raise ValidationError("Observation times must be strictly increasing.")
 
-        if is_close(sorted_obs[-1], maturity):
+        if sorted_obs.size and is_close(sorted_obs[-1], maturity):
             all_times = sorted_obs
         else:
             all_times = np.concatenate([sorted_obs, [maturity]])

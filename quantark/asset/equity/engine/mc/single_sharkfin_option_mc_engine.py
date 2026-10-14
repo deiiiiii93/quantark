@@ -362,6 +362,13 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
             require_single=True,
             product=product,
         )
+        # A record at the valuation instant is decided before any path is simulated (``price``: a crossed record
+        # short-circuits, A15), so one that reaches the grid was not crossed: decided "not hit", it leaves the grid
+        # (a zero first step is not a simulation step; I5 / A14, as the Black-Scholes barrier MC). Two records on
+        # that instant are refused, as any repeated time.
+        if sum(1 for rec in resolved if is_zero(rec.observation_time)) > 1:
+            raise ValidationError("Observation times must be strictly increasing.")
+        resolved = [rec for rec in resolved if not is_zero(rec.observation_time)]
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
         if np.any(obs_times < 0.0) or np.any(obs_times > maturity):
             raise ValidationError("Observation times must be within [0, maturity].")
@@ -370,7 +377,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         if np.any(np.diff(sorted_obs) <= 0.0):
             raise ValidationError("Observation times must be strictly increasing.")
 
-        if is_close(sorted_obs[-1], maturity):
+        if sorted_obs.size and is_close(sorted_obs[-1], maturity):
             all_times = sorted_obs
         else:
             all_times = np.concatenate([sorted_obs, [maturity]])
@@ -447,6 +454,12 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         maturity: float,
     ) -> np.ndarray:
         terminal_prices = paths[:, -1]
+        discounted_no_hit = (
+            self._no_hit_payoff(product, terminal_prices) * self._terminal_df
+        )
+        if obs_indices.size == 0:
+            # no observation left on the grid (a sole record decided "not hit" at the valuation instant)
+            return discounted_no_hit
         obs_prices = paths[:, obs_indices + 1]
         hit_matrix = (
             obs_prices >= barriers if product.is_call() else obs_prices <= barriers
@@ -461,10 +474,6 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
             hit_discount = self._terminal_df
         discounted_hit = hit_payoff * hit_discount
         discounted_hit[~hit_any] = 0.0
-
-        discounted_no_hit = (
-            self._no_hit_payoff(product, terminal_prices) * self._terminal_df
-        )
         return np.where(hit_any, discounted_hit, discounted_no_hit)
 
     def _discounted_payoffs_continuous(
