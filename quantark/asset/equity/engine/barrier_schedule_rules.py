@@ -3,8 +3,10 @@ analytical).
 
 Neutral module: no engine of any kind is imported here, so the PDE core, the MC engines, the QUAD adapters and the
 analytical engines read one rule and raise one message: the knock-in record payoff refusal, the record deciding at
-the valuation instant (``valuation_barrier_terms`` / ``valuation_double_barrier_terms``, W18b / W18c) and the level
-a closed form monitors forward (``forward_barrier_level`` / ``forward_double_barrier_levels``, W18c).
+the valuation instant before maturity -- only a record ON it, nothing between observations
+(``valuation_instant_barrier_terms`` / ``valuation_instant_double_barrier_terms``, A15) -- and at the exercise instant
+(``valuation_barrier_terms`` / ``valuation_double_barrier_terms``, W18b / W18c), and the level a closed form monitors
+forward (``forward_barrier_level`` / ``forward_double_barrier_levels``, W18c).
 """
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ from typing import Optional, Tuple
 
 from quantark.util.enum import ObservationType
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_close, is_greater_than_or_close
+from quantark.util.numerical import is_close, is_greater_than_or_close, is_zero
 
 
 def refuse_knock_in_record_payoff(product) -> None:
@@ -36,7 +38,7 @@ def refuse_knock_in_record_payoff(product) -> None:
 
 
 # ======================================================================================================================
-# The deciding record at the valuation instant (W18b, user approval 2026-10-10) and the forward level (W18c)
+# The deciding record at the valuation instant (W18b, user approval 2026-10-10; A15 2026-10-14) and the forward level
 # ======================================================================================================================
 
 def _beyond(product, spot: float, level: float) -> bool:
@@ -80,15 +82,17 @@ def _deciding_record(product, pricing_env):
 
 
 def valuation_barrier_terms(product, pricing_env) -> Tuple[float, float]:
-    """(level, knock-out cash) deciding a DISCRETE barrier at the valuation instant (W18b, user approval 2026-10-10).
+    """(level, knock-out cash) of the first record at or after the valuation instant of a DISCRETE barrier (W18b, user
+    approval 2026-10-10): its own level (a record without one takes ``product.barrier``, the product's
+    normalisation) and its payoff (unset: the product's knock-out cash, ``rebate`` / a sharkfin's
+    ``knock_out_rebate``), as the barrier MC's discrete path reads each resolved record (``_build_discrete_grid``,
+    ``payoffs[first_idx]``). CONTINUOUS / EXPIRY monitoring, or no record left: ``product.barrier`` and the product's
+    knock-out cash.
 
-    The first record at or after the valuation instant decides -- the record on the valuation date when there is
-    one, the next observation otherwise (the barrier PDE's ``_next_observation`` rule): its own level (a record
-    without one takes ``product.barrier``, the product's normalisation) and its payoff (unset: the product's
-    knock-out cash, ``rebate`` / a sharkfin's ``knock_out_rebate``), as the barrier MC's discrete path reads each
-    resolved record (``_build_discrete_grid``, ``payoffs[first_idx]``). CONTINUOUS / EXPIRY monitoring, or no record
-    left: ``product.barrier`` and the product's knock-out cash. Shared by the barrier MC and the analytical engines
-    (W18c).
+    It decides the EXERCISE instant (``barrier_expiry_value``, the QUAD expired branch) and reads the cash of a record
+    already known to lie on the valuation instant (the analytical engines' hit branch, W18c). Before maturity a
+    route decides only on a record ON the valuation instant: ``valuation_instant_barrier_terms`` (A15, user decision
+    2026-10-14, which superseded the W18b reading of the next record between observations).
     """
     record = _deciding_record(product, pricing_env)
     if record is None:
@@ -104,6 +108,56 @@ def valuation_double_barrier_terms(product, pricing_env) -> Tuple[float, float, 
     record = _deciding_record(product, pricing_env)
     if record is None:
         return float(product.upper_barrier), float(product.lower_barrier), _knock_out_cash(product)
+    upper = record.upper_barrier if record.upper_barrier is not None else product.upper_barrier
+    lower = record.lower_barrier if record.lower_barrier is not None else product.lower_barrier
+    cash = record.payoff if record.payoff is not None else _knock_out_cash(product)
+    return float(upper), float(lower), float(cash)
+
+
+def _record_on_valuation_instant(product, pricing_env):
+    """``(True, record)`` for the record of a DISCRETE schedule ON the valuation instant (dated: on the valuation
+    date; numeric: ``is_zero(observation_time)``), ``(True, None)`` when no record lies on it, ``(False, None)``
+    outside DISCRETE monitoring with a schedule (nothing to read: the product's own terms)."""
+    schedule = getattr(product, "observation_schedule", None)
+    if product.observation_type != ObservationType.DISCRETE or schedule is None:
+        return False, None
+    for record in schedule.records:
+        t = _record_time(record, pricing_env)
+        if t is not None and is_zero(t):
+            return True, record
+    return True, None
+
+
+def valuation_instant_barrier_terms(product, pricing_env) -> Optional[Tuple[float, float]]:
+    """(level, knock-out cash) of the decision a single barrier takes AT the valuation instant, or ``None`` when
+    nothing is decided now (A15, user decision 2026-10-14: "knock out should only happen at the observation date,
+    otherwise price it").
+
+    DISCRETE: the record on the valuation instant (dated: on the valuation date; numeric: ``is_zero`` time) decides
+    -- its level and payoff, as ``valuation_barrier_terms`` reads them; with NO record on the instant nothing is
+    decided now, whatever the spot (``None``): the route prices forward and observes each future record with its own
+    machinery. This supersedes the W18b pre-check on the next record. CONTINUOUS / EXPIRY monitoring:
+    ``product.barrier`` and the product's knock-out cash (the caller excludes EXPIRY, which observes only at
+    maturity). The exercise-instant value keeps ``valuation_barrier_terms``.
+    """
+    discrete, record = _record_on_valuation_instant(product, pricing_env)
+    if not discrete:
+        return float(product.barrier), _knock_out_cash(product)
+    if record is None:
+        return None
+    level = record.barrier if record.barrier is not None else product.barrier
+    cash = record.payoff if record.payoff is not None else _knock_out_cash(product)
+    return float(level), float(cash)
+
+
+def valuation_instant_double_barrier_terms(product, pricing_env) -> Optional[Tuple[float, float, float]]:
+    """``valuation_instant_barrier_terms`` for a two-barrier product: (upper, lower, knock-out cash) of the record on
+    the valuation instant, ``None`` when a DISCRETE schedule has no record on it (A15)."""
+    discrete, record = _record_on_valuation_instant(product, pricing_env)
+    if not discrete:
+        return float(product.upper_barrier), float(product.lower_barrier), _knock_out_cash(product)
+    if record is None:
+        return None
     upper = record.upper_barrier if record.upper_barrier is not None else product.upper_barrier
     lower = record.lower_barrier if record.lower_barrier is not None else product.lower_barrier
     cash = record.payoff if record.payoff is not None else _knock_out_cash(product)

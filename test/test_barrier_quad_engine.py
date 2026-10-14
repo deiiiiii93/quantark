@@ -118,39 +118,56 @@ def test_discrete_schedule_matches_legacy_dates():
     assert price_schedule == pytest.approx(price_legacy, rel=1e-10, abs=1e-10)
 
 
+def _up_out(barrier, payoff, strike, rebate, pay_at_hit, record_now=False) -> BarrierOption:
+    """Quarterly records, maturity 1. ``record_now``: the same contract aged onto a record (one quarter earlier
+    booked with a fifth record, then aged 0.25 keeping the record on the valuation instant)."""
+    times, maturity = ((0.25, 0.5, 0.75, 1.0, 1.25), 1.25) if record_now else ((0.25, 0.5, 0.75, 1.0), 1.0)
+    option = BarrierOption(
+        strike=strike,
+        option_type=OptionType.CALL,
+        barrier=barrier,
+        barrier_type=BarrierType.UP_OUT,
+        maturity=maturity,
+        rebate=rebate,
+        pay_at_hit=pay_at_hit,
+        observation_type=ObservationType.DISCRETE,
+        observation_schedule=build_schedule(times=times, barrier=barrier, payoff=payoff),
+    )
+    if record_now:
+        option.time_shift(0.25, datetime(2024, 1, 1), create_pricing_env(), keep_landing=True)
+    return option
+
+
+def _bs_pde(option, env) -> float:
+    from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver
+    from quantark.asset.equity.param import PDEParams
+
+    return BarrierPDESolver(PDEParams()).price(option, env)
+
+
+#: QUAD (601 points) vs the Black-Scholes barrier PDE on these forward cells (measured <= 6.4e-5)
+_PDE_ABS = 2e-4
+
+
 def test_rebate_timing_immediate_knock_out():
+    """Spot 120 beyond the records' 110. On a record day the knock-out is decided at once: the rebate at the hit
+    (pay-at-hit) or at the terminal. With no record on the valuation instant nothing is decided now (A15, user
+    decision 2026-10-14): the lattice prices it forward -- before T17 it paid the rebate at once (5.0 / 4.85223, now
+    4.60396 / 4.50945), equal to the Black-Scholes barrier PDE."""
     env = create_pricing_env(spot=120.0)
-    schedule = build_schedule(barrier=110.0, payoff=5.0)
     engine = BarrierQuadEngine(params=QuadParams(grid_points=601))
 
-    option_hit = BarrierOption(
-        strike=100.0,
-        option_type=OptionType.CALL,
-        barrier=110.0,
-        barrier_type=BarrierType.UP_OUT,
-        maturity=1.0,
-        rebate=5.0,
-        pay_at_hit=True,
-        observation_type=ObservationType.DISCRETE,
-        observation_schedule=schedule,
-    )
-    price_hit = engine.price(option_hit, env)
-    assert price_hit == pytest.approx(option_hit.rebate, rel=1e-10, abs=1e-10)
-
-    option_expiry = BarrierOption(
-        strike=100.0,
-        option_type=OptionType.CALL,
-        barrier=110.0,
-        barrier_type=BarrierType.UP_OUT,
-        maturity=1.0,
-        rebate=5.0,
-        pay_at_hit=False,
-        observation_type=ObservationType.DISCRETE,
-        observation_schedule=schedule,
-    )
-    price_expiry = engine.price(option_expiry, env)
+    option_hit = _up_out(110.0, 5.0, 100.0, 5.0, pay_at_hit=True, record_now=True)
+    assert engine.price(option_hit, env) == pytest.approx(option_hit.rebate, rel=1e-10, abs=1e-10)
+    option_expiry = _up_out(110.0, 5.0, 100.0, 5.0, pay_at_hit=False, record_now=True)
     expected = option_expiry.rebate * math.exp(-env.get_rate(1.0) * 1.0)
-    assert price_expiry == pytest.approx(expected, rel=1e-10, abs=1e-10)
+    assert engine.price(option_expiry, env) == pytest.approx(expected, rel=1e-10, abs=1e-10)
+
+    for pay_at_hit in (True, False):
+        forward = _up_out(110.0, 5.0, 100.0, 5.0, pay_at_hit=pay_at_hit)
+        value = engine.price(forward, env)
+        assert value < 5.0 * math.exp(-env.get_rate(1.0) * 1.0) - 0.1
+        assert value == pytest.approx(_bs_pde(forward, env), abs=_PDE_ABS)
 
 
 def test_convergence_with_grid_size():
@@ -182,23 +199,18 @@ def test_convergence_with_grid_size():
 
 
 def test_barrier_at_spot_knock_out_rebate():
+    """Spot on the barrier (100). On a record day it knocks out at once, paying the rebate at the hit. With no
+    record on the valuation instant nothing is decided now (A15): priced forward (before T17 2.0, now 1.50672), equal
+    to the Black-Scholes barrier PDE."""
     env = create_pricing_env(spot=100.0)
-    schedule = build_schedule(barrier=100.0, payoff=2.0)
-    option = BarrierOption(
-        strike=95.0,
-        option_type=OptionType.CALL,
-        barrier=100.0,
-        barrier_type=BarrierType.UP_OUT,
-        maturity=1.0,
-        rebate=2.0,
-        pay_at_hit=True,
-        observation_type=ObservationType.DISCRETE,
-        observation_schedule=schedule,
-    )
     engine = BarrierQuadEngine(params=QuadParams(grid_points=601))
-    price = engine.price(option, env)
+    on_record = _up_out(100.0, 2.0, 95.0, 2.0, pay_at_hit=True, record_now=True)
+    assert engine.price(on_record, env) == pytest.approx(on_record.rebate, rel=1e-10, abs=1e-10)
 
-    assert price == pytest.approx(option.rebate, rel=1e-10, abs=1e-10)
+    forward = _up_out(100.0, 2.0, 95.0, 2.0, pay_at_hit=True)
+    value = engine.price(forward, env)
+    assert value < 2.0 - 0.1
+    assert value == pytest.approx(_bs_pde(forward, env), abs=_PDE_ABS)
 
 
 def test_near_expiry_returns_intrinsic():

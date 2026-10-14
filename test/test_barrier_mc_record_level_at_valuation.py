@@ -9,10 +9,11 @@ resolved record at its own level and pays a knock-out the hit record's payoff (`
     T = 0 since W9;
 (b) the "hit at valuation" decision before any path is simulated.
 
-Both now read the first record at or after the valuation instant (the record on the valuation date when there is
-one; the PDE's ``_next_observation`` rule otherwise): its level, and on a knock-out its payoff. This is the barrier
-PDE's existing rule on the same contracts. CONTINUOUS / EXPIRY monitoring keep ``product.barrier``; a record without
-a level takes ``product.barrier`` (the product's normalisation).
+Both now read the record on the valuation instant: its level, and on a knock-out its payoff. This is the barrier
+PDE's existing rule on the same contracts. With no record on the valuation instant nothing is decided now, whatever
+the spot: the paths price the contract forward (A15, user decision 2026-10-14, which superseded the W18b reading of
+the next record between observations). CONTINUOUS / EXPIRY monitoring keep ``product.barrier``; a record without a
+level takes ``product.barrier`` (the product's normalisation).
 """
 from __future__ import annotations
 
@@ -198,14 +199,20 @@ def test_a_valuation_date_observation_decides_on_its_level_as_the_pde_does(kind,
 
 @pytest.mark.parametrize("kind", list(KINDS))
 @pytest.mark.parametrize("form", ["dated", "numeric"])
-def test_hit_at_valuation_between_observations_reads_the_next_record(kind, form):
-    """Day 92, no observation today: the decision reads the next record (day 121), as the PDE's ``_next_observation``
-    does -- bitwise the contract booked at its level."""
+def test_between_observations_nothing_is_decided_now(kind, form):
+    """Day 92, no observation today, the spot beyond the records' level L (short of ``product.barrier``): nothing is
+    decided now (A15, user decision 2026-10-14; it superseded the W18b pre-check on the next record). The paths
+    price it forward, observing each future record at its level: bitwise the contract booked at L, and within 4 s.e.
+    of the Black-Scholes barrier PDE (whose valuation decision reads only a record on the valuation instant)."""
     _, _, barrier, level, spots = KINDS[kind]
     e = env(spots[0], _on(92))
-    priced = _quiet(lambda: _engine().price(_mid(kind, form, barrier, level, 92, False), e))
+    engine = _engine()
+    priced = _quiet(lambda: engine.price(_mid(kind, form, barrier, level, 92, False), e))
     booked = _quiet(lambda: _engine().price(_mid(kind, form, level, level, 92, False), e))
+    pde = _quiet(lambda: BarrierPDESolver(PDEParams()).price(_mid(kind, form, barrier, level, 92, False), e))
     assert priced == booked
+    assert engine.get_last_std_error() > 0.0                    # simulated, not decided
+    assert abs(priced - pde) <= 4.0 * engine.get_last_std_error()
 
 
 def test_continuous_monitoring_keeps_the_product_barrier():

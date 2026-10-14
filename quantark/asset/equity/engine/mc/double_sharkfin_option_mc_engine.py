@@ -8,6 +8,7 @@ from typing import Optional, Tuple, Union
 import numpy as np
 
 from quantark.montecarlo.std_error import sample_std_error
+from quantark.asset.equity.engine.barrier_schedule_rules import valuation_instant_double_barrier_terms
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -163,9 +164,13 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
                 + pending_pv
             )
 
-        if product.observation_type != ObservationType.EXPIRY and product.is_barrier_hit(spot):
+        # A DISCRETE schedule decides only on a record ON the valuation instant, at its levels and payoff (A15, user
+        # decision 2026-10-14); with no record now the paths price it forward, whatever the spot. Continuous
+        # monitoring on the product's levels / knock_out_rebate.
+        hit_now, knock_out_cash = self._decided_now(product, pricing_env, spot)
+        if product.observation_type != ObservationType.EXPIRY and hit_now:
             self._last_std_error = 0.0
-            return self._price_already_hit(product, pricing_env) + pending_pv
+            return self._price_already_hit(product, pricing_env, knock_out_cash) + pending_pv
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             price, std_error = self._price_rqmc(
@@ -247,12 +252,27 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         if abs(rate) > 1.0:
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
 
+    @staticmethod
+    def _decided_now(product: DoubleSharkfinOption, pricing_env: PricingEnvironment, spot: float):
+        """(hit, knock-out cash) decided at the valuation instant (A15): a DISCRETE schedule's record ON the instant,
+        at its levels and payoff (``valuation_instant_double_barrier_terms``), or nothing (no record now);
+        CONTINUOUS / EXPIRY monitoring on the product's levels and ``knock_out_rebate``."""
+        if product.observation_type != ObservationType.DISCRETE:
+            return product.is_barrier_hit(spot), None
+        terms = valuation_instant_double_barrier_terms(product, pricing_env)
+        if terms is None:
+            return False, None
+        upper, lower, cash = terms
+        return (spot >= upper or spot <= lower), cash
+
     def _price_already_hit(
         self,
         product: DoubleSharkfinOption,
         pricing_env: PricingEnvironment,
+        cash: Optional[float] = None,
     ) -> float:
-        """Value a continuously monitored product whose spot has already hit."""
+        """Value a product whose barrier is hit at the valuation instant: ``cash`` per contract (the deciding record's
+        payoff), else the product's ``get_barrier_payoff()``."""
         if product.pay_at_hit:
             payment_df = SettlementResolver.resolve_contingent(
                 product,
@@ -266,7 +286,9 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
             ).payment_df
         else:
             payment_df = self._terminal_df
-        return product.get_barrier_payoff() * payment_df
+        if cash is None:
+            return product.get_barrier_payoff() * payment_df
+        return cash * product.contract_multiplier * payment_df
 
     def _create_path_generator(
         self,

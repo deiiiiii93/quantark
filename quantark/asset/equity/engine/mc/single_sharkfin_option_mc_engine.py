@@ -8,6 +8,7 @@ from typing import Optional, Tuple, Union
 import numpy as np
 
 from quantark.montecarlo.std_error import sample_std_error
+from quantark.asset.equity.engine.barrier_schedule_rules import valuation_instant_barrier_terms
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -145,13 +146,14 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
                 + pending_pv
             )
 
-        if (
-            product.observation_type != ObservationType.EXPIRY
-            and product.is_barrier_hit(spot)
-        ):
+        # A DISCRETE schedule decides only on a record ON the valuation instant, at its level and payoff (A15, user
+        # decision 2026-10-14); with no record now the paths price it forward, whatever the spot. Continuous
+        # monitoring on product.barrier / knock_out_rebate.
+        hit_now, knock_out_cash = self._decided_now(product, pricing_env, spot)
+        if product.observation_type != ObservationType.EXPIRY and hit_now:
             self._last_std_error = 0.0
             return (
-                self._price_immediate_knock_out(product, pricing_env)
+                self._price_immediate_knock_out(product, pricing_env, knock_out_cash)
                 + pending_pv
             )
 
@@ -233,11 +235,29 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         if abs(rate) > 1.0:
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
 
+    @staticmethod
+    def _decided_now(product: SingleSharkfinOption, pricing_env: PricingEnvironment, spot: float):
+        """(hit, knock-out cash) decided at the valuation instant (A15): a DISCRETE schedule's record ON the instant,
+        at its level and payoff (``valuation_instant_barrier_terms``), or nothing (no record now); CONTINUOUS / EXPIRY
+        monitoring on ``product.barrier`` and ``knock_out_rebate``."""
+        if product.observation_type != ObservationType.DISCRETE:
+            return product.is_barrier_hit(spot), float(product.knock_out_rebate)
+        terms = valuation_instant_barrier_terms(product, pricing_env)
+        if terms is None:
+            return False, float(product.knock_out_rebate)
+        level, cash = terms
+        return (spot >= level if product.is_call() else spot <= level), cash
+
     def _price_immediate_knock_out(
         self,
         product: SingleSharkfinOption,
         pricing_env: PricingEnvironment,
+        cash: Optional[float] = None,
     ) -> float:
+        """A knock-out decided at the valuation instant pays ``cash`` (the deciding record's payoff; default the
+        product's ``knock_out_rebate``), per contract."""
+        if cash is None:
+            cash = product.knock_out_rebate
         if product.pay_at_hit:
             payment_df = SettlementResolver.resolve_contingent(
                 product,
@@ -252,7 +272,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         else:
             payment_df = self._terminal_df
         return (
-            product.knock_out_rebate
+            cash
             * payment_df
             * product.contract_multiplier
         )

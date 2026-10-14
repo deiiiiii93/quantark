@@ -7,7 +7,8 @@ double barrier, single and double sharkfin -- still read ``product.barrier`` (``
 in their hit pre-checks, immediate knock-out cash and forward closed form. Now:
 
 * every decision at the valuation instant (hit, expired branch, immediate knock-out cash) reads the deciding record:
-  its level(s) and its payoff;
+  its level(s) and its payoff -- the record ON the valuation instant; with no record now nothing is decided and the
+  contract is priced forward (A15, user decision 2026-10-14);
 * forward pricing uses the level(s) every REMAINING record (t > 0) shares -- it may differ from ``product.barrier``;
 * remaining records with different levels have no closed form: ``ObservationSchedule.assert_analytical_ready``
   raises ``ValidationError``, as it does for mixed payoffs (A8);
@@ -460,10 +461,10 @@ def test_plain_schedules_decided_at_the_valuation_instant_are_unchanged(case):
 # the QUAD adapters (AC8 QUAD half, T6): barrier, one-touch, double barrier
 # ======================================================================================================================
 #
-# QUAD decides at the valuation instant as the Black-Scholes barrier MC does (W18b): the first record at or after the
-# valuation instant decides (the record on the valuation date, else the next observation), on its level(s), and a
-# knock-out pays its payoff. The forward lattice already reads each record (``resolve_schedule``); mixed levels price
-# natively (no refusal).
+# QUAD decides at the valuation instant as the Black-Scholes barrier MC does (W18b): a record ON the valuation instant
+# decides, on its level(s), and a knock-out pays its payoff. With no record now nothing is decided, whatever the spot:
+# the lattice prices it forward (A15, user decision 2026-10-14; it superseded the W18b "next observation" pre-check).
+# The forward lattice reads each record (``resolve_schedule``); mixed levels price natively (no refusal).
 
 def _quad():
     from quantark.asset.equity.engine.quad import DiscreteQuadEngine
@@ -539,9 +540,10 @@ def test_quad_records_at_another_level_price_as_the_contract_booked_at_that_leve
                                   "record_now_between", "expired_between"])
 @pytest.mark.parametrize("name", [n for n in QUAD_KINDS if n.startswith("barrier_")])
 def test_quad_decision_at_the_valuation_instant_matches_the_black_scholes_barrier_mc(name, cell):
-    """The W18b reference, spot beyond the deciding record's level L but short of ``product.barrier``: a knock-out
-    pays the record payoff (2.5) as the MC does; a knock-in is the vanilla (QUAD's quadrature vanilla vs the MC's,
-    within 4 s.e.) or, on the exercise date, the payoff."""
+    """The W18b reference, spot beyond the records' level L but short of ``product.barrier``. On a record (now, or
+    the exercise date) a knock-out pays the record payoff (2.5) as the MC does, and a knock-in is the vanilla (QUAD's
+    quadrature vanilla vs the MC's, within 4 s.e.) or, on the exercise date, the payoff. Beyond the next record with
+    no record now nothing is decided (A15): QUAD's lattice and the MC's paths price forward, within 4 s.e."""
     from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
     from quantark.asset.equity.param import MCParams
 
@@ -552,7 +554,8 @@ def test_quad_decision_at_the_valuation_instant_matches_the_black_scholes_barrie
     product, spot = _quad_product(kind, kind.product_level, kind.record_level, cell, payoff=payoff)
     mc = BarrierOptionMCEngine(params=MCParams(seed=11, num_paths=20000, time_steps=73))
     mc_value = _quiet(lambda: mc.price(product, env(spot)))
-    if kind.knocks_out or cell == "expired_between":
+    decided_now = cell in ("record_now_between", "expired_between")
+    if (kind.knocks_out and decided_now) or cell == "expired_between":
         assert quad_value == pytest.approx(mc_value, **TOL)
     else:
         assert abs(quad_value - mc_value) <= 4.0 * mc.get_last_std_error()
@@ -560,9 +563,10 @@ def test_quad_decision_at_the_valuation_instant_matches_the_black_scholes_barrie
 
 @pytest.mark.parametrize("cell", ["beyond_the_next_record_at_inception", "record_now_between", "expired_between"])
 @pytest.mark.parametrize("name", [n for n in QUAD_KINDS if QK[n].knocks_out])
-def test_quad_knock_out_decided_now_pays_the_record_payoff(name, cell):
-    """Records paying 2.5: a knock-out (one-touch) decided at the valuation instant pays 2.5, bitwise the contract
-    booked with cash 2.5."""
+def test_quad_knock_out_pays_the_record_payoff(name, cell):
+    """Records paying 2.5: a knock-out (one-touch) decided at the valuation instant (a record now, the exercise
+    date) pays 2.5, and one priced forward beyond the next record (no record now, A15) pays 2.5 on a future hit --
+    bitwise the contract booked with cash 2.5."""
     kind = QK[name]
     priced = _quad_price(kind, kind.product_level, kind.record_level, cell, payoff=2.5)
     booked = _quad_price(kind, kind.record_level, kind.record_level, cell, payoff=2.5, product_cash=2.5)
@@ -694,7 +698,6 @@ _QUAD_PLAIN_CELLS = {
     "DISCRETE": (0.0, False, "inside"),
     "DISCRETE_mid": (0.30, False, "inside"),
     "DISCRETE_hit": (0.25, True, "hit"),
-    "DISCRETE_beyond": (0.30, False, "hit"),
     "DISCRETE_expired": (1.0, True, "inside"),
     "DISCRETE_expired_hit": (1.0, True, "hit"),
     "EXPIRY": (0.0, False, "inside"),
@@ -703,56 +706,48 @@ QUAD_BEFORE = {
     ('DISCRETE', 'barrier_uoc'): 4.077778296932585,
     ('DISCRETE_mid', 'barrier_uoc'): 4.470149971687532,
     ('DISCRETE_hit', 'barrier_uoc'): 4.888756185966682,
-    ('DISCRETE_beyond', 'barrier_uoc'): 4.896094822847298,
     ('DISCRETE_expired', 'barrier_uoc'): 10.0,
     ('DISCRETE_expired_hit', 'barrier_uoc'): 5.0,
     ('EXPIRY', 'barrier_uoc'): 4.925371919411028,
     ('DISCRETE', 'barrier_uic'): 16.228761998030937,
     ('DISCRETE_mid', 'barrier_uic'): 14.406170434218108,
     ('DISCRETE_hit', 'barrier_uic'): 23.399122925181604,
-    ('DISCRETE_beyond', 'barrier_uic'): 23.202892679985446,
     ('DISCRETE_expired', 'barrier_uic'): 5.0,
     ('DISCRETE_expired_hit', 'barrier_uic'): 21.0,
     ('EXPIRY', 'barrier_uic'): 15.381168375552495,
     ('DISCRETE', 'barrier_uoc_pah'): 4.1268494885139235,
     ('DISCRETE_mid', 'barrier_uoc_pah'): 4.4968220699763854,
     ('DISCRETE_hit', 'barrier_uoc_pah'): 5.0,
-    ('DISCRETE_beyond', 'barrier_uoc_pah'): 5.0,
     ('DISCRETE_expired', 'barrier_uoc_pah'): 10.0,
     ('DISCRETE_expired_hit', 'barrier_uoc_pah'): 5.0,
     ('EXPIRY', 'barrier_uoc_pah'): 4.925371919411028,
     ('DISCRETE', 'barrier_dop'): 3.374765744809814,
     ('DISCRETE_mid', 'barrier_dop'): 3.526535496399273,
     ('DISCRETE_hit', 'barrier_dop'): 4.888756185966682,
-    ('DISCRETE_beyond', 'barrier_dop'): 4.896094822847298,
     ('DISCRETE_expired', 'barrier_dop'): 5.0,
     ('DISCRETE_expired_hit', 'barrier_dop'): 5.0,
     ('EXPIRY', 'barrier_dop'): 3.6915797140083377,
     ('DISCRETE', 'one_touch'): 2.6718663389898367,
     ('DISCRETE_mid', 'one_touch'): 2.3343845560290353,
     ('DISCRETE_hit', 'one_touch'): 4.888756185966682,
-    ('DISCRETE_beyond', 'one_touch'): 4.896094822847298,
     ('DISCRETE_expired', 'one_touch'): 0.0,
     ('DISCRETE_expired_hit', 'one_touch'): 5.0,
     ('EXPIRY', 'one_touch'): 1.6097778111845367,
     ('DISCRETE', 'no_touch'): 2.554375009991321,
     ('DISCRETE_mid', 'no_touch'): 2.9699390061977775,
     ('DISCRETE_hit', 'no_touch'): 0.0,
-    ('DISCRETE_beyond', 'no_touch'): 0.0,
     ('DISCRETE_expired', 'no_touch'): 5.0,
     ('DISCRETE_expired_hit', 'no_touch'): 0.0,
     ('EXPIRY', 'no_touch'): 3.4496348894447455,
     ('DISCRETE', 'double_ko'): 5.1624911886851566,
     ('DISCRETE_mid', 'double_ko'): 5.646571886050389,
     ('DISCRETE_hit', 'double_ko'): 1.9555024743866727,
-    ('DISCRETE_beyond', 'double_ko'): 1.9584379291389191,
     ('DISCRETE_expired', 'double_ko'): 0.0,
     ('DISCRETE_expired_hit', 'double_ko'): 2.0,
     ('EXPIRY', 'double_ko'): 6.00231331644959,
     ('DISCRETE', 'double_ki'): 5.605721900746439,
     ('DISCRETE_mid', 'double_ki'): 3.6003500096404997,
     ('DISCRETE_hit', 'double_ki'): 32.651873420278896,
-    ('DISCRETE_beyond', 'double_ki'): 32.511223884158724,
     ('DISCRETE_expired', 'double_ki'): 2.0,
     ('DISCRETE_expired_hit', 'double_ki'): 31.0,
     ('EXPIRY', 'double_ki'): 4.765899772982006,
@@ -776,13 +771,13 @@ def test_quad_plain_schedules_and_expiry_monitoring_are_unchanged(cell, name):
 #: (touch type, hit-paid) -> {cell: value}; cells as ``_QUAD_PLAIN_CELLS`` (spot 100 inside, 131 hit)
 DOUBLE_TOUCH_BEFORE = {
     ("DOUBLE_ONE_TOUCH", False): {"DISCRETE": 1.237339494728514, "DISCRETE_mid": 0.686059220544024,
-                                  "DISCRETE_hit": 4.888756185966682, "DISCRETE_beyond": 4.896094822847298,
+                                  "DISCRETE_hit": 4.888756185966682,
                                   "DISCRETE_expired": 0.0, "DISCRETE_expired_hit": 5.0, "EXPIRY": 0.8246314413957159},
     ("DOUBLE_ONE_TOUCH", True): {"DISCRETE": 1.2487415733305751, "DISCRETE_mid": 0.689481565224967,
-                                 "DISCRETE_hit": 5.0, "DISCRETE_beyond": 5.0, "DISCRETE_expired": 0.0,
+                                 "DISCRETE_hit": 5.0, "DISCRETE_expired": 0.0,
                                  "DISCRETE_expired_hit": 5.0, "EXPIRY": 0.8246314413957159},
     ("DOUBLE_NO_TOUCH", False): {"DISCRETE": 3.6148881730140268, "DISCRETE_mid": 4.2100356023032734,
-                                 "DISCRETE_hit": 0.0, "DISCRETE_beyond": 0.0, "DISCRETE_expired": 5.0,
+                                 "DISCRETE_hit": 0.0, "DISCRETE_expired": 5.0,
                                  "DISCRETE_expired_hit": 0.0, "EXPIRY": 4.027596226346825},
 }
 
@@ -799,3 +794,45 @@ def test_quad_plain_double_touch_is_unchanged(touch, hit_paid, cell):
     spot = 131.0 if which == "hit" else 100.0
     assert _quiet(lambda: _quad().price(product, env(spot))) == pytest.approx(
         DOUBLE_TOUCH_BEFORE[touch, hit_paid][cell], **GOLDEN)
+
+
+#: A15 (user decision 2026-10-14, T17): the plain schedules aged 0.30 (no record on the valuation instant, the next
+#: at 1/3) with the spot beyond the next record's level are priced FORWARD by the lattice. Before T17 they were decided
+#: at once on the next record (W18b / T6): name -> (pre-T17 value, A15 value). The Black-Scholes PDE agrees within
+#: 2e-4 except the double barrier with a rebate (0.05: a QUAD / PDE rebate gap its inside cells share, pre-existing).
+QUAD_A15_BEYOND = {
+    "barrier_uoc": (4.896094822847298, 4.869282182116993),
+    "barrier_uic": (23.202892679985446, 23.22970532071575),
+    "barrier_uoc_pah": (5.0, 4.947535814554486),
+    "barrier_dop": (4.896094822847298, 4.717181787602059),
+    "one_touch": (4.896094822847298, 4.302710336340313),
+    "no_touch": (0.0, 0.5319679607803076),
+    "double_ko": (1.9584379291389191, 3.0769000717546238),
+    "double_ki": (32.511223884158724, 31.39276174154302),
+}
+#: (touch type, hit-paid) -> (pre-T17 value, A15 value), spot 131
+DOUBLE_TOUCH_A15_BEYOND = {
+    ("DOUBLE_ONE_TOUCH", False): (4.896094822847298, 4.2930175553665935),
+    ("DOUBLE_ONE_TOUCH", True): (5.0, 4.370896899871662),
+    ("DOUBLE_NO_TOUCH", False): (0.0, 0.6030772674807041),
+}
+
+
+@pytest.mark.parametrize("name", list(QUAD_A15_BEYOND))
+def test_quad_plain_schedules_beyond_the_next_record_price_forward(name):
+    build, _, hit = _QUAD_PLAIN[name]
+    product = _aged(build(), 0.30, keep_landing=False)
+    before, after = QUAD_A15_BEYOND[name]
+    value = _quiet(lambda: _quad().price(product, env(hit)))
+    assert value == pytest.approx(after, **GOLDEN)
+    assert abs(value - before) > 1e-3
+
+
+@pytest.mark.parametrize("touch,hit_paid", list(DOUBLE_TOUCH_A15_BEYOND))
+def test_quad_plain_double_touch_beyond_the_next_record_prices_forward(touch, hit_paid):
+    product = _double_touch([(130.0, 75.0)] * 12, 130.0, 75.0, touch_type=TouchType[touch], pay_at_hit=hit_paid)
+    _aged(product, 0.30, keep_landing=False)
+    before, after = DOUBLE_TOUCH_A15_BEYOND[touch, hit_paid]
+    value = _quiet(lambda: _quad().price(product, env(131.0)))
+    assert value == pytest.approx(after, **GOLDEN)
+    assert abs(value - before) > 1e-3

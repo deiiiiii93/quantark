@@ -13,6 +13,7 @@ from quantark.asset.equity.engine.barrier_schedule_rules import (  # noqa: F401 
     _record_time,
     refuse_knock_in_record_payoff,
     valuation_barrier_terms,
+    valuation_instant_barrier_terms,
 )
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
@@ -216,19 +217,21 @@ class BarrierOptionMCEngine(BaseEngine):
                 + pending_receivable_pv(lifecycle_state, pricing_env)
             )
 
-        # Hit at valuation, or a knock-in carried as triggered (spec 2026-10-07 R4): the engine's own triggered path
-        # A DISCRETE schedule decides on its first record at or after now: that record's level and knock-out cash
-        # (W18b); continuous monitoring on product.barrier / product.rebate.
-        level, knock_out_cash = valuation_barrier_terms(product, pricing_env)
+        # Hit at valuation, or a knock-in carried as triggered (spec 2026-10-07 R4): the engine's own triggered path.
+        # A DISCRETE schedule decides only on a record ON the valuation instant, at its level and knock-out cash
+        # (A15, user decision 2026-10-14; W18b); with no record now the paths price it forward, whatever the spot.
+        # Continuous monitoring on product.barrier / product.rebate.
+        terms = valuation_instant_barrier_terms(product, pricing_env)
+        hit_now = terms is not None and _beyond(product, S, terms[0])
         if product.observation_type != ObservationType.EXPIRY and (
-            _beyond(product, S, level) or knock_in_carried(product, lifecycle_state)
+            hit_now or knock_in_carried(product, lifecycle_state)
         ):
             if product.is_knock_out:
                 return (
                     self._price_immediate_knock_out(
                         product,
                         pricing_env,
-                        knock_out_cash,
+                        terms[1],
                     )
                     + pending_receivable_pv(lifecycle_state, pricing_env)
                 )

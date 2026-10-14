@@ -15,6 +15,8 @@ import numpy as np
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     valuation_barrier_terms,
     valuation_double_barrier_terms,
+    valuation_instant_barrier_terms,
+    valuation_instant_double_barrier_terms,
 )
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
@@ -320,11 +322,11 @@ class BaseDiscreteQuadAdapter(QuadInputAdapter):
 
 
 def _single_terms_now(product, pricing_env: PricingEnvironment, spot: float) -> tuple[bool, float]:
-    """(hit, knock-out cash) decided at the valuation instant on a single barrier (W18c, spec 2026-10-13 I4).
+    """(hit, knock-out cash) at the EXERCISE instant on a single barrier (W18c, spec 2026-10-13 I4).
 
-    A DISCRETE schedule decides as the Black-Scholes barrier MC does (W18b): on the first record at or after the
-    valuation instant -- its level and payoff (``valuation_barrier_terms``); CONTINUOUS / EXPIRY monitoring on
-    ``product.barrier`` and ``product.rebate``.
+    A DISCRETE schedule decides on its record at the exercise instant -- its level and payoff
+    (``valuation_barrier_terms``); CONTINUOUS / EXPIRY monitoring on ``product.barrier`` and ``product.rebate``.
+    Before maturity ``early_price`` reads ``_single_decided_now`` instead (A15).
     """
     if product.observation_type == ObservationType.DISCRETE:
         level, cash = valuation_barrier_terms(product, pricing_env)
@@ -336,6 +338,31 @@ def _double_terms_now(product, pricing_env: PricingEnvironment, spot: float) -> 
     """``_single_terms_now`` for a double barrier (``valuation_double_barrier_terms``)."""
     if product.observation_type == ObservationType.DISCRETE:
         upper, lower, cash = valuation_double_barrier_terms(product, pricing_env)
+        return (spot >= upper or spot <= lower), cash
+    return product.is_barrier_hit(spot), product.rebate
+
+
+def _single_decided_now(product, pricing_env: PricingEnvironment, spot: float) -> tuple[bool, float]:
+    """(hit, knock-out cash) decided at the valuation instant BEFORE maturity on a single barrier (A15, user decision
+    2026-10-14). A DISCRETE schedule decides only on a record ON the valuation instant, at its level and payoff
+    (``valuation_instant_barrier_terms``); with no record now nothing is decided -- the lattice prices it forward,
+    whatever the spot. CONTINUOUS / EXPIRY monitoring on ``product.barrier`` and ``product.rebate``."""
+    if product.observation_type == ObservationType.DISCRETE:
+        terms = valuation_instant_barrier_terms(product, pricing_env)
+        if terms is None:
+            return False, product.rebate
+        level, cash = terms
+        return (spot >= level if product.is_up_barrier else spot <= level), cash
+    return product.is_barrier_hit(spot), product.rebate
+
+
+def _double_decided_now(product, pricing_env: PricingEnvironment, spot: float) -> tuple[bool, float]:
+    """``_single_decided_now`` for a double barrier (``valuation_instant_double_barrier_terms``)."""
+    if product.observation_type == ObservationType.DISCRETE:
+        terms = valuation_instant_double_barrier_terms(product, pricing_env)
+        if terms is None:
+            return False, product.rebate
+        upper, lower, cash = terms
         return (spot >= upper or spot <= lower), cash
     return product.is_barrier_hit(spot), product.rebate
 
@@ -404,7 +431,7 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             )
             return value * context.contract_multiplier
 
-        hit, cash = _single_terms_now(product, pricing_env, context.spot)
+        hit, cash = _single_decided_now(product, pricing_env, context.spot)
         if product.observation_type != ObservationType.EXPIRY and hit:
             if product.is_knock_out:
                 value = self._barrier_immediate_ko_price(
@@ -745,7 +772,7 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
             )
             return value * context.contract_multiplier
 
-        touched, cash = _single_terms_now(product, pricing_env, context.spot)
+        touched, cash = _single_decided_now(product, pricing_env, context.spot)
         if product.observation_type != ObservationType.EXPIRY and touched:
             if product.is_one_touch:
                 pay_at_hit = product.payment_at_hit
@@ -952,7 +979,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             )
             return value * context.contract_multiplier
 
-        hit, cash = _double_terms_now(product, pricing_env, context.spot)
+        hit, cash = _double_decided_now(product, pricing_env, context.spot)
         if product.observation_type != ObservationType.EXPIRY and hit:
             if product.is_knock_out:
                 rebate_discount = context.terminal_payment_df
@@ -1285,8 +1312,9 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
             )
             return value * context.contract_multiplier
 
-        # W18c: a DISCRETE schedule is touched now on its deciding record's levels, paying its payoff
-        touched, cash = _double_terms_now(product, pricing_env, context.spot)
+        # A15 / W18c: a DISCRETE schedule is touched now only by a record on the valuation instant, at its levels,
+        # paying its payoff
+        touched, cash = _double_decided_now(product, pricing_env, context.spot)
         if product.observation_type != ObservationType.EXPIRY and touched:
             if product.touch_type == TouchType.DOUBLE_ONE_TOUCH:
                 pay_at_hit = product.payment_at_hit

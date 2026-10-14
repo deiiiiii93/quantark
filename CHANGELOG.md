@@ -594,7 +594,8 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   its discrete path reads each resolved record: (a) the exercise-date value `barrier_expiry_value` (also the
   local-vol / Heston / SLV barrier MC routes' value at T = 0 since W9) and (b) the "hit at valuation" decision
   before simulating. For a DISCRETE schedule both now read the first record at or after the valuation instant (the
-  record on the valuation date, else the next observation, the barrier PDE's `_next_observation` rule): its level,
+  record on the valuation date, else the next observation, the barrier PDE's `_next_observation` rule -- the
+  next-observation reading of (b) is superseded by A15 below: between observations nothing is decided now): its level,
   and on a knock-out its payoff (new `valuation_barrier_terms`; `barrier_expiry_value` now takes the pricing
   environment). A record without a level takes `product.barrier`; CONTINUOUS / EXPIRY monitoring and a knock-in's
   no-hit rebate are unchanged. Example: up-and-out call, `barrier` 120, record at 115 on the exercise date, spot 117:
@@ -650,7 +651,8 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   The QUAD barrier, one-touch and double-barrier adapters (`quad_adapters.py`) decide at the valuation instant as
   the Black-Scholes barrier MC does (W18b): the immediate hit / touch and the expired branch read the first record at
   or after the valuation instant (`valuation_barrier_terms` / `valuation_double_barrier_terms`), its level(s), and a
-  knock-out (one-touch) pays its payoff; the forward lattice was already record-aware and prices mixed levels natively
+  knock-out (one-touch) pays its payoff (the immediate hit / touch reading the NEXT record when none is on the
+  valuation instant is superseded by A15 below, which restores the "beyond the next record" cells' pre-T6 values); the forward lattice was already record-aware and prices mixed levels natively
   (no refusal). The knock-out / one-touch rebate lattice is no longer skipped when the product's own cash is 0 but the
   records pay cash. Moved values (QUAD 401 points; up-and-out call `barrier` 120 / records 115, K 100): spot 117 beyond
   the next record 4.50422 -> 4.85223 (5 at the terminal), records paying 4.5 aged onto a record at 117: raised "t_grid
@@ -678,7 +680,49 @@ record's accrual is its quoted fraction (`k/12` accrues exactly 1/12 per period)
   Double one-touch 130/75, records 125/80: spot 127 (beyond the next record) 4.31809 -> 4.85223 (hit-paid, at 77:
   4.64745 -> 5.0), expired at 127 0.0 -> 5.0, records paying 2.5 aged onto a record: raised -> 2.44438; rebate 0 with
   records paying 4.5: 0.0 -> 1.77979; double no-touch at 127: 0.53413 -> 0.0, expired 5.0 -> 0.0. Plain double
-  one-touch / no-touch (28 cells) bit-identical.
+  one-touch / no-touch (28 cells) bit-identical. (The "beyond the next record" cells above are superseded by A15
+  below.)
+- User decision 2026-10-14 (A15): a DISCRETE barrier is decided only on an observation ("knock out should only
+  happen at the observation date, otherwise price it"). A record ON the valuation instant (dated: the valuation
+  date; numeric: `is_zero(observation_time)`) with the spot beyond its level knocks out / in at once, at its level
+  and payoff (unchanged); with NO record on the valuation instant nothing is decided now, whatever the spot -- the
+  route prices the contract forward and observes each future record with its own machinery. This supersedes the
+  W18b / T6 pre-check that read the next record between observations. One shared rule,
+  `engine/barrier_schedule_rules.valuation_instant_barrier_terms` / `valuation_instant_double_barrier_terms` (None
+  when no record is on the instant), now gates the immediate decision of the Black-Scholes barrier MC (`price`), the
+  QUAD barrier / one-touch / double-barrier / double one-touch adapters (`early_price`, new `_single_decided_now` /
+  `_double_decided_now`) and the single / double sharkfin MC, which read `product.is_barrier_hit(spot)` on every
+  monitoring type and now decide a DISCRETE schedule only on the record on the instant, at its level and payoff
+  (`_decided_now`). Already forward, verified and unchanged: the analytical barrier / one-touch / double-barrier /
+  sharkfin engines (hit now only by a record on the instant, `observed_at_valuation`), the 1D PDE core (BS and
+  local-vol barrier, double barrier, one-touch, double one-touch: `valuation_event` reads only records at t = 0;
+  `_next_observation` is the far-field boundary row, not a decision), the Heston / SLV 2D barrier PDE (knock-out
+  injected at observation steps only) and the local-vol / Heston / SLV barrier MC (no pre-check; paths start beyond
+  the level and are observed at the records). CONTINUOUS / EXPIRY monitoring, the exercise-instant value
+  (`barrier_expiry_value`, the QUAD expired branch), a record on the valuation instant and a carried knock-in are
+  bit-identical. The price is now continuous across the level between observations on QUAD, the PDE and the MC; the
+  analytical engines keep a pre-existing step at the level (their BGK-shifted closed form inside vs the
+  first-observation integral beyond: up to 0.15 on the test contracts). New
+  `test/test_discrete_barrier_between_observations.py`. Moved values (flat 20% vol, r 3%, q 1%, K 100, T 1, monthly
+  records, no record on the valuation instant, spot beyond the next record; QUAD 401 points, BS MC 20000 paths):
+  up-and-out call 120 / rebate 5 at inception, spot 121: QUAD 4.85223 -> 4.66393, BS MC 4.85223 -> 4.66792 (s.e.
+  0.0144; analytical 4.69051 and BS PDE 4.66385 unmoved); aged 0.30, spot 121: QUAD 4.89609 -> 4.86928, BS MC
+  4.89609 -> 4.89024; up-and-in 23.20289 -> 23.22971 (BS MC 23.29391 -> 23.06761); down-and-out put 85, spot 84:
+  4.89609 -> 4.71718 (BS MC -> 4.73075); down-and-in 15.86746 -> 16.04638 (BS MC 15.81282 -> 16.08246); hit-paid
+  up-and-out 5.0 -> 4.94754; one-touch 120: 4.89609 -> 4.30271; no-touch 0.0 -> 0.59338 (85 down at 84: 0.0 ->
+  0.53197); double knock-out 130/75, rebate 2, spot 131: 1.95844 -> 3.07690; double knock-in 32.51122 -> 31.39276;
+  double one-touch 4.89609 -> 4.29302 (hit-paid 5.0 -> 4.37090); double no-touch 0.0 -> 0.60308; single sharkfin MC
+  120 (knock-out 3, no-hit 1), spot 121: 2.93766 -> 3.28873 (analytical 3.27908); double sharkfin MC 130/75, spot
+  131: 2.93766 -> 4.04035 (analytical 3.99354). The W18c QUAD "beyond the next record" cells (records 115 / 125-80,
+  `product.barrier` 120 / 130-75, spot 117 / 127 / 77) return to their pre-T6 values: up-and-out 4.85223 ->
+  4.50422, up-and-in 20.97413 -> 21.32214, one-touch 4.85223 -> 4.28985, double knock-out 1.94089 -> 2.48798,
+  double one-touch 4.85223 -> 4.31809 (hit-paid 5.0 -> 4.64745), double no-touch 0.0 -> 0.53413. BS MC, mid-life
+  day 92 (no record), spot 117 between the records' 115 and `product.barrier` 120: up-and-out 4.88906 -> 4.57322,
+  up-and-in 19.98757 -> 20.02752, down-and-out (87, records 90 / barrier 85) 4.88906 -> 4.56438, down-and-in
+  13.57646 -> 14.00622 (BS PDE 4.56015 / 20.22481 / 4.54902 / 13.96480). QUAD (601 points) up-and-out call K 100,
+  quarterly records at 110 paying 5, spot 120: hit-paid 5.0 -> 4.60396, terminal-paid 4.85223 -> 4.50945; K 95, records
+  at 100 paying 2, spot 100 (on the level): 2.0 -> 1.50672 (BS PDE within 6.4e-5 of each). No modelvalidation anchor
+  or replay golden moved.
 - A knock-in carried as triggered decides the exercise date (user ruling 2026-10-10, "check knock in state first").
   At T = 0 (a dated contract on its exercise instant, or the numeric twin at `maturity == 0.0`) the barrier engines
   decided a knock-in from today's spot / records only and paid the rebate to a contract carried as knocked in
