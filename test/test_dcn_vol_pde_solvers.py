@@ -153,7 +153,8 @@ def test_heston_pde_nx_ladder_is_smooth_by_default():
 
 
 def test_heston_pde_nodal_mode_keeps_the_legacy_discretization():
-    # event_projection="nodal" is the pre-T14 discretization bit for bit
+    # event_projection="nodal" is the pre-T14 discretization (bit for bit on one machine; the literal is compared
+    # at the golden tolerance across architectures)
     # (whole-node masks, every level pinned to a node): d04's patched
     # (151, 41) value, docs/superpowers/specs/2026-10-09-heston-2d-v0-evidence.
     p = make_dcn(DCN_A)

@@ -136,7 +136,7 @@ def test_dcn_pairs_within_each_batch_and_pools(case, n, monkeypatch):
 
 @pytest.mark.parametrize("case", CASE_NAMES)
 @pytest.mark.parametrize("n", [2000, 2001])
-def test_price_bitwise_unchanged_antithetic(case, n):
+def test_price_unchanged_antithetic(case, n):
     price, _ = mc_se_cases.run_case(case, True, n)
     # frozen on ARM64 -> golden tolerance (test/golden_compare.py)
     assert price == pytest.approx(BEFORE[(case, True, n)][0], rel=GOLDEN_REL_TOL, abs=GOLDEN_ABS_TOL)
