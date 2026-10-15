@@ -190,7 +190,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             if spot >= upper or spot <= lower or has_future_observation(resolved):
                 # No observation deciding now, inside or outside the corridor: the next observation decides
                 return (
-                    self._price_beyond_discrete(
+                    self._price_through_first_observation(
                         product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, upper, lower, resolved
                     )
                     + pending_pv
@@ -302,7 +302,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             return product.get_barrier_payoff() * terminal_payment_df
         return self._price_already_hit(product, pricing_env, terminal_payment_df)
 
-    def _price_beyond_discrete(
+    def _price_through_first_observation(
         self,
         product: DoubleSharkfinOption,
         pricing_env: PricingEnvironment,

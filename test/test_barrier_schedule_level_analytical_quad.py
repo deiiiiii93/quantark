@@ -433,8 +433,10 @@ BEFORE = {
 
 
 @pytest.mark.parametrize("observation,name", list(BEFORE))
-def test_continuous_expiry_and_plain_schedules_are_unchanged(observation, name):
-    """The pre-W18c values (bitwise on the machine that took them; ``GOLDEN`` tolerance here for other architectures)."""
+def test_continuous_expiry_and_plain_schedules_hold_their_pins(observation, name):
+    """CONTINUOUS and EXPIRY: the pre-W18c values. DISCRETE: re-pinned when the engines moved to the projection
+    through the first observation (2026-10-15; each cell notes its pre-W18c value and QUAD / PDE). Bitwise on the
+    machine that took them; ``GOLDEN`` tolerance here for other architectures."""
     engine, build, spot = PLAIN[name]
     product = build()
     if observation != "DISCRETE":

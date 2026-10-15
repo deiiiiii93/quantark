@@ -164,7 +164,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
             if beyond_forward or has_future_observation(resolved):
                 # No observation deciding now: the next observation decides, the shifted formula only after it
                 return (
-                    self._price_beyond_discrete(
+                    self._price_through_first_observation(
                         product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level,
                         forward_cash, resolved,
                     )
@@ -271,7 +271,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
             resolved = self._resolved_records(product, pricing_env)
         return any(self._beyond(product, spot, rec.barrier) for rec in observed_at_valuation(resolved))
 
-    def _price_beyond_discrete(
+    def _price_through_first_observation(
         self,
         product: OneTouchOption,
         pricing_env: PricingEnvironment,

@@ -90,19 +90,26 @@ def observed_at_valuation(resolved_records: Sequence) -> List:
     return [rec for rec in resolved_records if is_zero(rec.observation_time)]
 
 
+def _future(resolved_records: Sequence) -> List:
+    """The resolved records strictly after the valuation instant: positive times not observed at it (the
+    complement of ``observed_at_valuation`` among the current records)."""
+    return [rec for rec in resolved_records if rec.observation_time > 0.0 and not is_zero(rec.observation_time)]
+
+
 def has_future_observation(resolved_records: Sequence) -> bool:
     """Whether a resolved record lies strictly after the valuation instant (the projection needs one)."""
-    return any(rec.observation_time > 0.0 and not is_zero(rec.observation_time) for rec in resolved_records)
+    return bool(_future(resolved_records))
 
 
 def first_future_observation(resolved_records: Sequence, schedule, *, single: bool, is_up: bool = True) -> FirstObservation:
     """The first record strictly after the valuation instant (``single``: one barrier on the side ``is_up``)."""
     if schedule.aggregation_mode != ObservationAggregation.STOP_FIRST_HIT:
         raise PricingError(
-            "A spot beyond a discretely monitored barrier is priced through the first observation only for "
-            f"STOP_FIRST_HIT schedules, got {schedule.aggregation_mode.value}"
+            "A discretely monitored barrier with no observation deciding now is priced through its first future "
+            "observation, which decides only on a first-hit schedule: STOP_FIRST_HIT is required, got "
+            f"{schedule.aggregation_mode.value}"
         )
-    future = [rec for rec in resolved_records if rec.observation_time > 0.0 and not is_zero(rec.observation_time)]
+    future = _future(resolved_records)
     if not future:
         raise PricingError("No observation remains after the valuation instant.")
     rec = future[0]

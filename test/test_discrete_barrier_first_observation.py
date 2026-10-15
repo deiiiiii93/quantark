@@ -57,11 +57,13 @@ from quantark.util.enum import (
     BarrierDirection,
     BarrierType,
     DoubleBarrierType,
+    ObservationAggregation,
     ObservationType,
     OptionType,
     TouchType,
 )
-from quantark.util.enum import engine_enums
+from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
+from quantark.util.exceptions import PricingError
 
 ENGINES = {
     "barrier": BarrierAnalyticalEngine,
@@ -344,17 +346,12 @@ class _Spy:
 
 
 # ======================================================================================================================
-# one method, no switch
+# the engines' identity, and what the projection needs
 # ======================================================================================================================
 
-def test_there_is_no_approximation_switch():
-    assert not hasattr(engine_enums, "DiscreteBarrierApproximation")
-    for engine_cls in ENGINES.values():
-        with pytest.raises(TypeError):
-            engine_cls(discrete_barrier_approximation=None)
-
-
-def test_the_fingerprints_are_those_of_main():
+def test_the_model_fingerprints_are_those_of_main():
+    """The method carries no engine state: ``engines_equivalent`` and the pricing caches key on these attributes,
+    so an engine compares equal to main's."""
     assert BarrierAnalyticalEngine.MODEL_FINGERPRINT_ATTRS == ('params', '_bs_engine', '_one_touch_engine')
     assert OneTouchAnalyticalEngine.MODEL_FINGERPRINT_ATTRS == ('params', '_digital_engine')
     assert DoubleBarrierOptionAnalyticalEngine.MODEL_FINGERPRINT_ATTRS == ('params', '_bs_engine')
@@ -363,6 +360,23 @@ def test_the_fingerprints_are_those_of_main():
     assert DoubleSharkfinOptionAnalyticalEngine.MODEL_FINGERPRINT_ATTRS == ('params', '_double_barrier_engine')
     assert AccumulatorAnalyticalEngine.MODEL_FINGERPRINT_ATTRS == (
         'params', '_barrier_engine', '_bs_engine', '_one_touch_engine')
+
+
+@pytest.mark.parametrize("spot", [100.0, 121.0])
+def test_a_schedule_that_is_not_first_hit_is_refused_inside_the_level_too(spot):
+    """The projection lets the first future observation decide: an ACCUMULATE schedule has no such meaning. It is
+    refused on both sides of the level (main priced the aged up-and-out call inside it, spot 100, at 2.4865 with
+    the BGK closed form)."""
+    schedule = ObservationSchedule(records=[ObservationRecord(observation_time=t, barrier=120.0) for t in T.TIMES],
+                                   aggregation_mode=ObservationAggregation.ACCUMULATE)
+    product = BarrierOption(strike=100.0, option_type=OptionType.CALL, barrier=120.0, barrier_type=BarrierType.UP_OUT,
+                            rebate=0.0, observation_schedule=schedule, maturity=1.0,
+                            observation_type=ObservationType.DISCRETE)
+    product.time_shift(T.BETWEEN, T.VALUATION, T.env(100.0), keep_landing=False)
+    with pytest.raises(PricingError, match="STOP_FIRST_HIT") as refused:
+        BarrierAnalyticalEngine().price(product, T.env(spot))
+    assert "beyond" not in str(refused.value)        # whichever side of the level the spot is on
+    assert "accumulate" in str(refused.value)
 
 
 # ======================================================================================================================

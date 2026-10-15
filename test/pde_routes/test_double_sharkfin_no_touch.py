@@ -17,7 +17,10 @@ HERE = Path(__file__).parent
 CAPTURE = json.loads((HERE / "analytic_capture.json").read_text())
 #: the monthly (DISCRETE, from inception) cells of the capture moved on 2026-10-15: with no record today the
 #: engine prices through the first observation, the BGK-shifted formula only from it on (the capture holds
-#: the BGK formula at today's spot); before -> after, QUAD (401 points) and the BS PDE for reference
+#: the BGK formula at today's spot); before -> after. The references are the sharkfin's decomposition, each leg
+#: on QUAD (401 points) and on the BS PDE: a double knock-out call with no rebate, plus the knock-out cash 5 as a
+#: double one-touch (paid at the hit for "hit", at maturity for "maturity"), plus the no-hit cash 5 as a double
+#: no-touch. For "maturity" the two cash legs sum to 5 DF(T): QUAD double knock-out call + 5 DF(T).
 MOVED = {
     # 9.021712544545743 -> (QUAD 9.0167, PDE 9.0168)
     "shf|monthly|hit|0.08|100.0": 9.021712544545803,

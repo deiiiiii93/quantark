@@ -1,8 +1,9 @@
 """The analytic barrier engines' observation rules (3C handoff, section 12).
 
-1. A spot beyond a DISCRETELY monitored barrier with no observation due is not a hit: the engines value the
-   contract through the next observation (``first_observation``) - exact to that observation, the engine's own
-   barrier-shifted formula after it - against the exact recursion of ``test/pde_routes/barrier_reference``.
+1. With no observation due, a DISCRETELY monitored barrier is valued through the next observation
+   (``first_observation``) whichever side of the level the spot is on - exact to that observation, the engine's
+   own barrier-shifted formula after it; a spot beyond the level is not a hit. Checked beyond the level against
+   the exact recursion of ``test/pde_routes/barrier_reference``.
 2. At maturity only what is observed now decides: a discrete schedule's records at the valuation instant, each at
    its own level and cash; an untouched knock-in pays its rebate.
 """
@@ -55,7 +56,8 @@ def test_beyond_a_discrete_barrier_is_valued_through_the_next_observation(kind, 
 
 
 def test_the_value_is_continuous_across_the_barrier_within_the_shift_error():
-    """Just inside, the shifted formula; just beyond, the expectation through the next observation."""
+    """Both sides are the expectation through the next observation (since 2026-10-15; before, the shifted formula
+    just inside): no step at the level beyond the bound kept from that switch."""
     product = barrier("UO", True, 120.0, MONTHLY, 5.0)
     inside, beyond = price(product, 119.999), price(product, 120.001)
     assert abs(beyond - inside) < 0.1

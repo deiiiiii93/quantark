@@ -208,8 +208,9 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         if discrete and not hit_now and (
             S >= U or S <= L or has_future_observation(resolved)
         ):
-            return self._price_beyond_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier, rebate,
-                                               resolved)
+            return self._price_through_first_observation(
+                product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier, rebate, resolved
+            )
 
         # Spot already outside barriers: continuously, or at an observation at the valuation instant
         if hit_now:
@@ -281,7 +282,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             return product.get_payoff(spot)
         return product.rebate * multiplier
 
-    def _price_beyond_discrete(
+    def _price_through_first_observation(
         self,
         product: DoubleBarrierOption,
         pricing_env: PricingEnvironment,

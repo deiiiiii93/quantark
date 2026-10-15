@@ -173,7 +173,7 @@ class BarrierAnalyticalEngine(BaseEngine):
             if beyond_forward or has_future_observation(resolved):
                 # No observation deciding now: the next observation decides, the shifted formula only after it
                 return (
-                    self._price_beyond_discrete(
+                    self._price_through_first_observation(
                         product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level,
                         forward_cash, resolved,
                     )
@@ -327,7 +327,7 @@ class BarrierAnalyticalEngine(BaseEngine):
             return self._price_rebate_leg(product, pricing_env) * multiplier
         return product.rebate * terminal_timing.payment_df * multiplier
 
-    def _price_beyond_discrete(
+    def _price_through_first_observation(
         self,
         product: BarrierOption,
         pricing_env: PricingEnvironment,

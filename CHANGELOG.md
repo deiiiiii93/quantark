@@ -63,14 +63,26 @@ backtest and FX dynamic scenario.
   it on -- inside the level as well as beyond it. Before, inside the level the shifted closed form was evaluated at
   today's spot (a hybrid that stepped by up to 0.161 at the level on monthly contracts). No observation left: the
   closed form, as before. Unchanged: a record on the valuation instant that the spot breaches decides at once
-  (W18c / A15), CONTINUOUS and EXPIRY monitoring, T = 0, a carried knock-in and the refusals. The first-observation
-  projection is defined for STOP_FIRST_HIT schedules only, so an ACCUMULATE schedule is now refused (`PricingError`)
-  inside the level too. Moved values: every DISCRETE cell with no breached record now and the spot inside the level
-  (fresh contracts included, and a record day whose record the spot does not cross); beyond the level the values
-  are bitwise unchanged. Next to the level the error vs QUAD (401 points) drops, e.g. the up-and-out call (K 100,
-  L 120, monthly, 0.7 y left) at 119.99: 0.7801 -> 0.7227 (QUAD 0.7140), the double knock-in call (75 / 130) at
-  129.5: 29.1647 -> 29.3132 (QUAD 29.3007); max |error| within 0.5 of the level 0.004-0.04 (was 0.01-0.16). Far from
-  the level the value barely moves (fresh up-and-out call, monthly: 4.1453 -> 4.1474, QUAD 4.0778).
+  (W18c / A15), CONTINUOUS and EXPIRY monitoring, T = 0, a carried knock-in.
+  - A schedule that starts late is a large correction toward QUAD (401 points): the up-and-out put (K 110, L 120,
+    vol 0.6, rebate 2 at the hit, five daily records ending at T = 1) at 105: 14.79 -> 26.907 (QUAD 26.908).
+  - Far from the level fresh monthly contracts move slightly, sometimes away from QUAD: the up-and-out call
+    (K 100, L 120) 4.1453 -> 4.1474 (QUAD 4.0778).
+  - The projection needs a first-hit schedule: an ACCUMULATE (or other non-STOP_FIRST_HIT) schedule is refused
+    (`PricingError`) inside the level too (main priced the aged up-and-out call at 100 at 2.4865).
+  - With no time left after the first observation (it is the maturity: valued on the penultimate record, not
+    crossed) the payoff's kinks are the expectation's panel edges; such a contract was refused (`NumericalError`,
+    the strike inside a panel) and is now the European payoff decided at T, e.g. the up-and-out call 5.562826
+    (closed form 5.562826, main's shifted formula 5.6967), the double knock-out call 5.780781 (main 5.7835).
+  - Performance: the projection evaluates its integrand once on every quadrature node (vectorised closed forms,
+    records resolved once per price), bit-exact; inside the level the barrier-family prices now take 0.5-2.4x the
+    time of the old closed-form path (double knock-out daily 3.1 ms, accumulator daily 0.38 s).
+  - Moved values: every DISCRETE cell with no breached record now and the spot inside the level (fresh contracts
+    included, and a record day whose record the spot does not cross); beyond the level the values are bitwise
+    unchanged. Next to the level the error vs QUAD drops, e.g. the up-and-out call (K 100, L 120, monthly, 0.7 y
+    left) at 119.99: 0.7801 -> 0.7227 (QUAD 0.7140), the double knock-in call (75 / 130) at 129.5: 29.1647 ->
+    29.3132 (QUAD 29.3007); max |error| within 0.5 of the level 0.004-0.04 (was 0.01-0.16). On a record day (aged
+    onto a record the spot does not cross) the max |error| vs QUAD is 0.048 (was 0.24).
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
   (`TargetRedemptionState(0.0)` for a contract booked at inception); omitting it raises `ValidationError`.
 - **Breaking:** a numeric `FxTargetRedemptionNote` states when its first listed period began: `accrual_start` (years

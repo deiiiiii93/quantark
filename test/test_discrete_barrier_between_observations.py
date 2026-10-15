@@ -23,7 +23,7 @@ Reference and tolerances (measured 2026-10-14, see the T17 report):
   adapter, so their MC is checked against the analytical value within 4 s.e. + ``ANALYTICAL_ABS``.
 * Continuity across the level (spot ``level -/+ STEP``): QUAD, the PDE and the MC (common random numbers) move by
   delta x 2 STEP (measured <= 0.026, ``CONTINUITY_ABS``). The analytical engines integrate the first observation
-  on both sides of the level since 2026-10-15 (``test_discrete_barrier_approximation_mode``: their step is QUAD's
+  on both sides of the level since 2026-10-15 (``test_discrete_barrier_first_observation``: their step is QUAD's
   within 0.0015); before, they switched at the level from the BGK-shifted closed form (inside) to the
   first-observation integral (beyond), a step of up to 0.152 here (``ANALYTICAL_STEP_ABS`` kept as the bound).
   Every route's step stays far below the step a decision taken now would make (``kind.now``: >= 0.5 on these
