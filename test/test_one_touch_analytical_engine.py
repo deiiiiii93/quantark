@@ -9,6 +9,7 @@ import pytest
 from scipy import stats
 
 from quantark.asset.equity.engine.analytical import DigitalOptionAnalyticalEngine, OneTouchAnalyticalEngine
+from quantark.asset.equity.engine.analytical.first_observation import FirstObservation, through_first_observation
 from quantark.asset.equity.product.option import CashOrNothingDigitalOption, OneTouchOption
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
@@ -167,15 +168,20 @@ def test_discrete_monitoring_applies_barrier_shift():
     shifted_barrier = apply_barrier_shift(
         barrier=option.barrier, is_up_barrier=True, volatility=sigma, observation_interval=freq
     )
-    expected = _expiry_touch_price(
-        spot=env.spot,
-        barrier=shifted_barrier,
-        maturity=T,
-        rate=r,
-        div=q,
-        vol=sigma,
-        is_up=True,
-        rebate=option.rebate,
+    # No observation today: exact through the first observation (t1 = 0.25), the shifted formula from it on
+    # (single method since 2026-10-15; the BGK formula at today's spot was 2.5769789990679413, now
+    # 2.600932003585334, QUAD 401 points 2.6433, BS PDE 2.6432)
+    t1 = obs_dates[0]
+    tau = T - t1
+    first = FirstObservation(time=t1, lower=None, upper=option.barrier, settlement_time=t1, payoff=option.rebate,
+                             remaining=len(obs_dates) - 1)
+    expected = through_first_observation(
+        spot=env.spot, first=first, rate=r, div=q, vol=sigma,
+        hit_value=lambda s: option.rebate * math.exp(-r * tau),
+        continuation=lambda s: _expiry_touch_price(
+            spot=s, barrier=shifted_barrier, maturity=tau, rate=r, div=q, vol=sigma, is_up=True,
+            rebate=option.rebate),
+        remaining_time=tau, hit_is_constant=True,
     )
     assert price == pytest.approx(expected, rel=1e-10, abs=1e-10)
 

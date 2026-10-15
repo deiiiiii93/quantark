@@ -163,37 +163,6 @@ class KnockInMonitoringMode(Enum):
         return self.value
 
 
-class DiscreteBarrierApproximation(Enum):
-    """How the analytical barrier-family engines value a DISCRETE schedule between observations.
-
-    Applies to ``BarrierAnalyticalEngine``, ``OneTouchAnalyticalEngine``, ``DoubleBarrierOptionAnalyticalEngine``,
-    ``SingleSharkfinOptionAnalyticalEngine``, ``DoubleSharkfinOptionAnalyticalEngine`` and the barrier legs of
-    ``AccumulatorAnalyticalEngine``, and only when no record lies on the valuation instant. In both modes a
-    DISCRETE barrier is decided only on an observation (A15): a record ON the valuation instant decides at once
-    (W18c), and nothing is knocked out or in between observations. CONTINUOUS and EXPIRY monitoring, T = 0
-    settlement, a carried knock-in state and the refusals (mixed remaining levels, knock-in record payoffs) do not
-    depend on the mode.
-
-    Attributes:
-        BGK: "BGK all through" (the default). The Broadie-Glasserman-Kou (1997) shifted closed form evaluated at
-            today's spot, whatever side of the contractual level -- or of the shifted level -- the spot lies on.
-            Beyond the level this is the formula's own continuation (with the engines' existing clamps); where a
-            formula cannot be evaluated beyond its barrier the engine raises ``ValidationError``
-            (``TODO(bgk-beyond)``: the double no-touch probability outside its corridor).
-        FIRST_OBSERVATION_BGK: "first projection plus BGK". The value is taken exactly through the first future
-            observation -- the Gaussian step to it and the barrier test there (``first_observation``) -- and the
-            shifted closed form is used only from that observation on, whatever side of the level the spot lies on
-            (inside too). Defined for STOP_FIRST_HIT schedules; with no future observation left the engines keep
-            the closed form.
-    """
-
-    BGK = "bgk"
-    FIRST_OBSERVATION_BGK = "first_observation_bgk"
-
-    def __str__(self):
-        return self.value
-
-
 class EventProjectionMode(Enum):
     """Spatial representation of discrete autocallable event operators.
 

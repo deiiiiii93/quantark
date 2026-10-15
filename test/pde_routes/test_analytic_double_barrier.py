@@ -17,6 +17,35 @@ HERE = Path(__file__).parent
 NT = {tuple(c["args"]): c["reference"] for g in ("engine", "reviewer")
       for c in json.loads((HERE / "no_touch_reference.json").read_text())["cells"][g]}
 CAPTURE = json.loads((HERE / "analytic_capture.json").read_text())
+#: the monthly (DISCRETE, from inception) cells of the capture moved on 2026-10-15: with no record today the
+#: engine prices through the first observation, the BGK-shifted formula only from it on (the capture holds
+#: the BGK formula at today's spot); before -> after, QUAD (401 points) and the BS PDE for reference
+MOVED = {
+    # 5.976168698863631 -> (QUAD 6.1165, PDE 6.1157)
+    "dbl|KI|call|0.0|monthly|100.0": 5.976253433879049,
+    # 21.20169885696715 -> (QUAD 21.3178, PDE 21.3171)
+    "dbl|KI|call|0.0|monthly|120.0": 21.223257708846234,
+    # 2.42257067267494 -> (QUAD 2.5088, PDE 2.5089)
+    "dbl|KI|call|0.0|monthly|90.0": 2.428538627067247,
+    # 5.321582431146439 -> (QUAD 5.4269, PDE 5.4260)
+    "dbl|KI|put|0.0|monthly|100.0": 5.321671865054488,
+    # 1.1916870485536144 -> (QUAD 1.2376, PDE 1.2370)
+    "dbl|KI|put|0.0|monthly|120.0": 1.1980049731971216,
+    # 10.683824195445997 -> (QUAD 10.7789, PDE 10.7788)
+    "dbl|KI|put|0.0|monthly|90.0": 10.69093882625982,
+    # 3.6254079367833754 -> (QUAD 3.4863, PDE 3.4861)
+    "dbl|KO|call|0.0|monthly|100.0": 3.625323201767981,
+    # 2.8394367314048807 -> (QUAD 2.7240, PDE 2.7242)
+    "dbl|KO|call|0.0|monthly|120.0": 2.817877879525789,
+    # 2.3630275291479954 -> (QUAD 2.2770, PDE 2.2769)
+    "dbl|KO|call|0.0|monthly|90.0": 2.3570595747556777,
+    # 2.319564184434576 -> (QUAD 2.2154, PDE 2.2152)
+    "dbl|KO|put|0.0|monthly|100.0": 2.319474750526517,
+    # 1.0880218447690702 -> (QUAD 1.0428, PDE 1.0427)
+    "dbl|KO|put|0.0|monthly|120.0": 1.0817039201255791,
+    # 2.041842323802623 -> (QUAD 1.9470, PDE 1.9470)
+    "dbl|KO|put|0.0|monthly|90.0": 2.0347276929888185,
+}
 VOL, R, Q = CONST["vol"], CONST["rate"], CONST["div"]
 KO, KI = DoubleBarrierType.KNOCK_OUT, DoubleBarrierType.KNOCK_IN
 
@@ -94,6 +123,9 @@ def test_rebate_free_and_expiry_inside_are_bit_identical():
             continue
         _, kind, call, rebate, obs, spot = tag.split("|")
         p = product(KO if kind == "KO" else KI, call == "call", float(rebate), obs)
+        if tag in MOVED:
+            assert price(p, env_const(float(spot))) == MOVED[tag], tag
+            continue
         assert price(p, env_const(float(spot))).hex() == value, tag
 
 

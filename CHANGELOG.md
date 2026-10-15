@@ -55,26 +55,22 @@ backtest and FX dynamic scenario.
   `RunFixingDay.product_events`.
 
 ### Changed
-- Discrete-barrier approximation mode on the equity analytical barrier family (`BarrierAnalyticalEngine`,
-  `OneTouchAnalyticalEngine`, `DoubleBarrierOptionAnalyticalEngine`, `SingleSharkfinOptionAnalyticalEngine`,
-  `DoubleSharkfinOptionAnalyticalEngine`, and the legs of `AccumulatorAnalyticalEngine`, which hand it to their
-  composed engines): keyword `discrete_barrier_approximation: DiscreteBarrierApproximation`
-  (`quantark.util.enum.engine_enums`; a non-member raises `ValidationError`; part of `model_fingerprint`). It
-  applies to a DISCRETE schedule with no record on the valuation instant; in both modes nothing is knocked out or in
-  between observations (A15), and a record on the valuation instant, CONTINUOUS / EXPIRY monitoring, T = 0
-  settlement, a carried knock-in and the refusals are unchanged. `BGK` (default, "BGK all through"): the
-  Broadie-Glasserman-Kou shifted closed form at today's spot whatever side of the level or of the shifted level the
-  spot lies on (the formulas' own continuation with the existing clamps: beyond the shifted level a knock-out and a
-  no-touch are 0, a knock-in its vanilla, a one-touch's touch probability is unclamped above 1; a double barrier with
-  a rebate and a double sharkfin with cash outside the shifted corridor raise `ValidationError` `TODO(bgk-beyond)`,
-  the double no-touch probability being undefined there). `FIRST_OBSERVATION_BGK` (opt-in, "first projection plus
-  BGK"): always the exact step through the first future observation, the shifted formula only from it on -- inside
-  the level too (the hybrid's beyond-level values bitwise). Inside the level the default is bitwise the previous
-  value (the hybrid already used BGK there). Moved values: under the default, every DISCRETE cell with no record
-  today and the spot at or beyond the remaining records' level (it was the first-observation projection), e.g. the
-  up-and-out call (K 100, L 120, monthly, 0.7 y left) at 121: 0.5696 -> 0.5906 (QUAD 0.5666), at 124.6: 0.1881 -> 0
-  (QUAD 0.1913); a one-touch (rebate 5) at 134: 4.8948 -> 6.6314 (QUAD 4.8947); the accumulator's barrier legs
-  likewise. The hybrid's step at the level (up to 0.161 on these contracts) is gone in both modes.
+- The equity analytical barrier family (`BarrierAnalyticalEngine`, `OneTouchAnalyticalEngine`,
+  `DoubleBarrierOptionAnalyticalEngine`, `SingleSharkfinOptionAnalyticalEngine`, `DoubleSharkfinOptionAnalyticalEngine`
+  and the barrier legs of `AccumulatorAnalyticalEngine`) values a DISCRETE schedule by one method: with no record
+  deciding at the valuation instant and a future observation left, always through the first future observation (the
+  exact Gaussian step to it and the barrier test there, `first_observation`), the BGK-shifted closed form only from
+  it on -- inside the level as well as beyond it. Before, inside the level the shifted closed form was evaluated at
+  today's spot (a hybrid that stepped by up to 0.161 at the level on monthly contracts). No observation left: the
+  closed form, as before. Unchanged: a record on the valuation instant that the spot breaches decides at once
+  (W18c / A15), CONTINUOUS and EXPIRY monitoring, T = 0, a carried knock-in and the refusals. The first-observation
+  projection is defined for STOP_FIRST_HIT schedules only, so an ACCUMULATE schedule is now refused (`PricingError`)
+  inside the level too. Moved values: every DISCRETE cell with no breached record now and the spot inside the level
+  (fresh contracts included, and a record day whose record the spot does not cross); beyond the level the values
+  are bitwise unchanged. Next to the level the error vs QUAD (401 points) drops, e.g. the up-and-out call (K 100,
+  L 120, monthly, 0.7 y left) at 119.99: 0.7801 -> 0.7227 (QUAD 0.7140), the double knock-in call (75 / 130) at
+  129.5: 29.1647 -> 29.3132 (QUAD 29.3007); max |error| within 0.5 of the level 0.004-0.04 (was 0.01-0.16). Far from
+  the level the value barely moves (fresh up-and-out call, monthly: 4.1453 -> 4.1474, QUAD 4.0778).
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
   (`TargetRedemptionState(0.0)` for a contract booked at inception); omitting it raises `ValidationError`.
 - **Breaking:** a numeric `FxTargetRedemptionNote` states when its first listed period began: `accrual_start` (years

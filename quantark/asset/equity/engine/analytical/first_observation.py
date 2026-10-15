@@ -2,11 +2,12 @@
 The value of a discretely monitored barrier contract through its first future observation.
 
 The analytic barrier engines price a discrete schedule with the Broadie-Glasserman-Kou shift: the continuous
-formula on a barrier moved away from the spot. That formula has no meaning for a spot beyond the CONTRACTUAL
-barrier when no observation is due now: the contract is still alive and the next observation decides it. The
-value is then taken through that observation exactly - the Gaussian step from the valuation instant to the first
-future observation ``t1``, the barrier test at ``t1`` - and the engine's own shifted formula is used only from
-``t1`` on, where it applies (the alive side of the barrier)::
+formula on a barrier moved away from the spot. With no observation deciding now the contract is alive and the next
+observation decides it, whichever side of the CONTRACTUAL barrier the spot is on (beyond it the shifted formula has
+no meaning; inside it the formula's error is largest next to the barrier). The value is therefore always taken
+through that observation exactly - the Gaussian step from the valuation instant to the first future observation
+``t1``, the barrier test at ``t1`` - and the engine's own shifted formula is used only from ``t1`` on, where it
+applies (the alive side of the barrier); with no future observation left the engines keep the closed form::
 
     V(S0) = exp(-r t1) * E[ hit(S_t1) ? H(S_t1) : C(S_t1) ]
 
@@ -28,9 +29,8 @@ import numpy as np
 from scipy.special import ndtr
 
 from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
-from quantark.util.exceptions import NumericalError, PricingError, ValidationError
+from quantark.util.exceptions import NumericalError, PricingError
 from quantark.util.enum import ObservationAggregation
-from quantark.util.enum.engine_enums import DiscreteBarrierApproximation
 from quantark.util.numerical import Tolerance, is_zero, safe_exp, safe_log, safe_sqrt
 
 TRUNCATION_SD = 10.0
@@ -78,35 +78,14 @@ def resolve_current_records(schedule, pricing_env, **resolve_kwargs) -> List:
     ).resolve(pricing_env, **resolve_kwargs)
 
 
-def validate_discrete_barrier_approximation(value) -> DiscreteBarrierApproximation:
-    """``value`` when it is a ``DiscreteBarrierApproximation`` member; anything else raises ``ValidationError``."""
-    if not isinstance(value, DiscreteBarrierApproximation):
-        raise ValidationError(
-            "discrete_barrier_approximation must be a DiscreteBarrierApproximation member "
-            f"({', '.join(m.name for m in DiscreteBarrierApproximation)}), got {value!r}"
-        )
-    return value
-
-
-def projects_through_first_observation(
-    mode: DiscreteBarrierApproximation, beyond: bool, resolved_records: Callable[[], Sequence]
-) -> bool:
-    """Whether a DISCRETE schedule with no record deciding now is valued through its first future observation.
-
-    ``BGK`` never projects (the shifted closed form at today's spot). ``FIRST_OBSERVATION_BGK`` projects beyond the
-    level (as before the switch) and, inside it, whenever an observation remains after the valuation instant
-    (``resolved_records()``, read only then; none left: the closed form, as before).
-    """
-    if mode is DiscreteBarrierApproximation.BGK:
-        return False
-    return beyond or any(
-        rec.observation_time > 0.0 and not is_zero(rec.observation_time) for rec in resolved_records()
-    )
-
-
 def observed_at_valuation(resolved_records: Sequence) -> List:
     """The resolved records observed at the valuation instant."""
     return [rec for rec in resolved_records if is_zero(rec.observation_time)]
+
+
+def has_future_observation(resolved_records: Sequence) -> bool:
+    """Whether a resolved record lies strictly after the valuation instant (the projection needs one)."""
+    return any(rec.observation_time > 0.0 and not is_zero(rec.observation_time) for rec in resolved_records)
 
 
 def first_future_observation(resolved_records: Sequence, schedule, *, single: bool, is_up: bool = True) -> FirstObservation:

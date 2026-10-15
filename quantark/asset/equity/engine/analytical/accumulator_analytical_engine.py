@@ -56,7 +56,7 @@ from quantark.util.enum import (
     OptionType,
     TouchType,
 )
-from quantark.util.enum.engine_enums import DiscreteBarrierApproximation, EngineType
+from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     validate_non_negative,
@@ -64,7 +64,6 @@ from quantark.util.numerical import (
 )
 
 from .barrier_analytical_engine import BarrierAnalyticalEngine
-from .first_observation import validate_discrete_barrier_approximation
 from .black_scholes_engine import BlackScholesEngine
 from .one_touch_analytical_engine import OneTouchAnalyticalEngine
 
@@ -75,17 +74,13 @@ class AccumulatorAnalyticalEngine(BaseEngine):
 
     Composes :class:`BarrierAnalyticalEngine`, :class:`BlackScholesEngine`, and
     :class:`OneTouchAnalyticalEngine` to value each daily leg, the knock-out
-    rebate, and the optional extra-shares-at-expiry leg. The DISCRETE legs follow
-    ``discrete_barrier_approximation`` between observations (the leg engines are
-    built with it; default ``BGK``).
+    rebate, and the optional extra-shares-at-expiry leg.
     """
 
     engine_type = EngineType.ANALYTICAL
     # params-only engine: instance state == construction arguments plus sub-engines that
     # are themselves fingerprinted (patch spec 2026-09-03 §7)
-    MODEL_FINGERPRINT_ATTRS = (
-        'params', 'discrete_barrier_approximation', '_barrier_engine', '_bs_engine', '_one_touch_engine'
-    )
+    MODEL_FINGERPRINT_ATTRS = ('params', '_barrier_engine', '_bs_engine', '_one_touch_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
@@ -94,27 +89,11 @@ class AccumulatorAnalyticalEngine(BaseEngine):
     MIN_MATURITY = 1e-10
     MAX_MATURITY = 50.0
 
-    def __init__(
-        self,
-        params: Optional[EngineParams] = None,
-        *,
-        discrete_barrier_approximation: DiscreteBarrierApproximation = DiscreteBarrierApproximation.BGK,
-    ):
-        """
-        Args:
-            params: Engine configuration parameters.
-            discrete_barrier_approximation: The value of a DISCRETE leg between observations (see
-                ``DiscreteBarrierApproximation``), handed to the barrier and one-touch leg engines.
-        """
+    def __init__(self, params: Optional[EngineParams] = None):
         super().__init__(params)
-        self.discrete_barrier_approximation = validate_discrete_barrier_approximation(discrete_barrier_approximation)
-        self._barrier_engine = BarrierAnalyticalEngine(
-            params, discrete_barrier_approximation=self.discrete_barrier_approximation
-        )
+        self._barrier_engine = BarrierAnalyticalEngine(params)
         self._bs_engine = BlackScholesEngine(params)
-        self._one_touch_engine = OneTouchAnalyticalEngine(
-            params, discrete_barrier_approximation=self.discrete_barrier_approximation
-        )
+        self._one_touch_engine = OneTouchAnalyticalEngine(params)
 
     def price(
         self,
@@ -507,6 +486,4 @@ class AccumulatorAnalyticalEngine(BaseEngine):
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
 
     def __repr__(self) -> str:
-        if self.discrete_barrier_approximation is DiscreteBarrierApproximation.BGK:
-            return "AccumulatorAnalyticalEngine()"
-        return f"AccumulatorAnalyticalEngine(discrete_barrier_approximation={self.discrete_barrier_approximation.name})"
+        return "AccumulatorAnalyticalEngine()"

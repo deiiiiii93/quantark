@@ -15,6 +15,35 @@ from quantark.util.enum import ObservationType, OptionType
 
 HERE = Path(__file__).parent
 CAPTURE = json.loads((HERE / "analytic_capture.json").read_text())
+#: the monthly (DISCRETE, from inception) cells of the capture moved on 2026-10-15: with no record today the
+#: engine prices through the first observation, the BGK-shifted formula only from it on (the capture holds
+#: the BGK formula at today's spot); before -> after, QUAD (401 points) and the BS PDE for reference
+MOVED = {
+    # 9.021712544545743 -> (QUAD 9.0167, PDE 9.0168)
+    "shf|monthly|hit|0.08|100.0": 9.021712544545803,
+    # 7.1267347766670435 -> (QUAD 7.4988, PDE 7.5014)
+    "shf|monthly|hit|0.08|129.9": 7.480849942388168,
+    # 4.945519293223049 -> (QUAD 4.9458, PDE 4.9458)
+    "shf|monthly|hit|0.08|81.0": 4.945482150717244,
+    # 8.499348484963795 -> (QUAD 8.3615, PDE 8.3613)
+    "shf|monthly|hit|0.22|100.0": 8.499270106352515,
+    # 5.9847723713166125 -> (QUAD 6.1511, PDE 6.1510)
+    "shf|monthly|hit|0.22|129.9": 6.167719507200834,
+    # 5.707976003741938 -> (QUAD 5.7543, PDE 5.7543)
+    "shf|monthly|hit|0.22|81.0": 5.766260894233837,
+    # 9.021670796433433 -> (QUAD 9.0167, PDE 9.0167)
+    "shf|monthly|maturity|0.08|100.0": 9.021670796433494,
+    # 7.019219637714621 -> (QUAD 7.3955, PDE 7.3982)
+    "shf|monthly|maturity|0.08|129.9": 7.377696074592943,
+    # 4.870304530635556 -> (QUAD 4.8706, PDE 4.8707)
+    "shf|monthly|maturity|0.08|81.0": 4.87051945515878,
+    # 8.477635604525915 -> (QUAD 8.3385, PDE 8.3384)
+    "shf|monthly|maturity|0.22|100.0": 8.477550869510516,
+    # 5.8799864647984785 -> (QUAD 6.0515, PDE 6.0515)
+    "shf|monthly|maturity|0.22|129.9": 6.06823048919779,
+    # 5.611165576637623 -> (QUAD 5.6602, PDE 5.6601)
+    "shf|monthly|maturity|0.22|81.0": 5.672278194067586,
+}
 
 
 def test_captured_legs_do_not_move():
@@ -30,7 +59,7 @@ def test_captured_legs_do_not_move():
                                  maturity=1.0, knock_out_rebate=5.0, no_hit_rebate=5.0, pay_at_hit=at_hit == "hit",
                                  **kw)
         got = float(DoubleSharkfinOptionAnalyticalEngine().price(p, env_const(float(spot), vol=float(vol))))
-        assert abs(got - float.fromhex(value)) <= 1e-12, tag                       # measured 3.6e-15
+        assert abs(got - MOVED.get(tag, float.fromhex(value))) <= 1e-12, tag      # measured 3.6e-15
 
 
 def _converged_hit_factor(spot, T, r, q, vol):

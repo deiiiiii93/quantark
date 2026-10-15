@@ -34,17 +34,16 @@ from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
 from quantark.util.enum import ObservationType, OptionType, TouchType
-from quantark.util.enum.engine_enums import DiscreteBarrierApproximation, EngineType
+from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 
 from .digital_option_engine import DigitalOptionAnalyticalEngine
 from .first_observation import (
     first_future_observation,
+    has_future_observation,
     observed_at_valuation,
-    projects_through_first_observation,
     resolve_current_records,
     through_first_observation,
-    validate_discrete_barrier_approximation,
 )
 
 
@@ -54,10 +53,8 @@ class OneTouchAnalyticalEngine(BaseEngine):
 
     Supports:
         - Continuous monitoring
-        - Discrete monitoring via Broadie-Glasserman-Kou barrier shift (regular grids); only a record at the
-          valuation instant touches now, and between observations ``discrete_barrier_approximation`` decides the
-          value (``BGK``: the shifted closed form at today's spot on either side of the barrier;
-          ``FIRST_OBSERVATION_BGK``: through the next observation on either side)
+        - Discrete monitoring via Broadie-Glasserman-Kou barrier shift (regular grids), valued through the next
+          observation when none decides now (inside or beyond the barrier), the shifted formula only after it
         - Expiry-only monitoring via digital-option fallback
 
     Note:
@@ -66,7 +63,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
 
     engine_type = EngineType.ANALYTICAL
     # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
-    MODEL_FINGERPRINT_ATTRS = ('params', 'discrete_barrier_approximation', '_digital_engine')
+    MODEL_FINGERPRINT_ATTRS = ('params', '_digital_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
@@ -75,20 +72,8 @@ class OneTouchAnalyticalEngine(BaseEngine):
     MIN_MATURITY = 1e-10
     MAX_MATURITY = 50.0
 
-    def __init__(
-        self,
-        params: Optional[EngineParams] = None,
-        *,
-        discrete_barrier_approximation: DiscreteBarrierApproximation = DiscreteBarrierApproximation.BGK,
-    ):
-        """
-        Args:
-            params: Engine configuration parameters.
-            discrete_barrier_approximation: The value of a DISCRETE schedule between observations (see
-                ``DiscreteBarrierApproximation``).
-        """
+    def __init__(self, params: Optional[EngineParams] = None):
         super().__init__(params)
-        self.discrete_barrier_approximation = validate_discrete_barrier_approximation(discrete_barrier_approximation)
         self._digital_engine = DigitalOptionAnalyticalEngine(params)
 
     def price(
@@ -126,19 +111,10 @@ class OneTouchAnalyticalEngine(BaseEngine):
             hit_now = self._breached_at_valuation(product, pricing_env, spot)
             forward_level = forward_barrier_level(product, pricing_env)
             beyond_forward = forward_level is not None and self._beyond(product, spot, forward_level)
-            # nothing is decided between observations (A15): the mode values the contract forward
-            project = (
-                not hit_now
-                and forward_level is not None
-                and projects_through_first_observation(
-                    self.discrete_barrier_approximation, beyond_forward,
-                    lambda: self._resolved_records(product, pricing_env),
-                )
-            )
         else:
             hit_now = obs_type != ObservationType.EXPIRY and product.is_barrier_hit(spot)
             forward_level = product.barrier
-            project = False
+            beyond_forward = hit_now
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
         # the volatility at the monitored level (mixed remaining levels price no forward value: product.barrier then
@@ -161,7 +137,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
         if (
             pay_at_hit
             and obs_type != ObservationType.EXPIRY
-            and not (hit_now or project)
+            and not (hit_now or beyond_forward)
         ):
             hit_lag = constant_hit_lag_year_fraction(product, pricing_env, maturity)
 
@@ -181,8 +157,8 @@ class OneTouchAnalyticalEngine(BaseEngine):
         if discrete and not hit_now:
             if forward_level is None:
                 refuse_mixed_forward_levels(product.observation_schedule, pricing_env, default_payoff=rebate)
-            if project:
-                # FIRST_OBSERVATION_BGK: the next observation decides, the shifted formula only after it
+            if beyond_forward or has_future_observation(self._resolved_records(product, pricing_env)):
+                # No observation deciding now: the next observation decides, the shifted formula only after it
                 return (
                     self._price_beyond_discrete(
                         product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level,
@@ -304,8 +280,8 @@ class OneTouchAnalyticalEngine(BaseEngine):
         forward_level: float,
         forward_cash: float,
     ) -> float:
-        """The value through the first future observation (``first_observation``), no observation due now: a spot
-        beyond the barrier, or -- ``FIRST_OBSERVATION_BGK`` -- on either side of it.
+        """The value through the first future observation (``first_observation``), no observation deciding now,
+        the spot inside or beyond the barrier.
 
         A touch at the first future observation ``t1`` pays the one-touch's rebate (at the hit, after the constant
         hit lag, or at the terminal payment time) and ends the no-touch; otherwise the continuation is this
@@ -583,6 +559,4 @@ class OneTouchAnalyticalEngine(BaseEngine):
         return super().static_replication(product, pricing_env)
 
     def __repr__(self):
-        if self.discrete_barrier_approximation is DiscreteBarrierApproximation.BGK:
-            return "OneTouchAnalyticalEngine()"
-        return f"OneTouchAnalyticalEngine(discrete_barrier_approximation={self.discrete_barrier_approximation.name})"
+        return "OneTouchAnalyticalEngine()"
