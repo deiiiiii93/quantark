@@ -4,7 +4,7 @@ Analytical Black-Scholes pricing engine for European options.
 
 import math
 from typing import Optional
-from scipy import stats
+from scipy.special import ndtr
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.settlement_support import (
@@ -290,8 +290,8 @@ class BlackScholesEngine(BaseEngine):
             discount_rf = math.exp(-r * T)
 
             # Calculate normal CDFs
-            N_d1 = stats.norm.cdf(d1)
-            N_d2 = stats.norm.cdf(d2)
+            N_d1 = ndtr(d1)
+            N_d2 = ndtr(d2)
 
             # Calculate price components
             forward_component = S * discount_div * N_d1
@@ -333,8 +333,8 @@ class BlackScholesEngine(BaseEngine):
             discount_rf = math.exp(-r * T)
 
             # Calculate normal CDFs for put
-            N_minus_d1 = stats.norm.cdf(-d1)
-            N_minus_d2 = stats.norm.cdf(-d2)
+            N_minus_d1 = ndtr(-d1)
+            N_minus_d2 = ndtr(-d2)
 
             # Calculate price components
             strike_component = K * discount_rf * N_minus_d2

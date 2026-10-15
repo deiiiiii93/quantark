@@ -19,10 +19,11 @@ from __future__ import annotations
 import math
 import sys
 
+import numpy as np
 from scipy.special import erfcx
 
 from quantark.util.exceptions import NumericalError, ValidationError
-from quantark.util.numerical import Tolerance
+from quantark.util.numerical import Tolerance, pow_elementwise
 
 __all__ = ["double_no_touch", "double_no_touch_with_bound"]
 
@@ -105,6 +106,105 @@ def _evaluate(spot, maturity, rate, div, vol, lower, upper):
     return total, bound, k
 
 
+def _evaluate_array(spot, maturity, rate, div, vol, lower, upper):
+    """``_evaluate`` elementwise on broadcast arrays of spots and maturities: (probabilities, bounds).
+
+    The same operations in the same order per element; each element sums the images up to its own last index (the
+    stopping test reads that element's tau), the others are masked.
+    """
+    spot, maturity = np.broadcast_arrays(np.asarray(spot, dtype=float), np.asarray(maturity, dtype=float))
+    rate, div, vol, lower, upper = (float(v) for v in (rate, div, vol, lower, upper))
+    total = np.zeros(spot.shape)
+    bound = np.zeros(spot.shape)
+    inside = (lower < spot) & (spot < upper)
+    total[inside & (maturity <= 0.0)] = 1.0
+    live = inside & (maturity > 0.0)
+    if not live.any():
+        return total, bound
+    sp, mt = spot[live], maturity[live]
+    d_up, d_lo = np.log1p((upper - sp) / sp), -np.log1p((lower - sp) / sp)
+    a = d_up + d_lo
+    s = vol * np.sqrt(mt)
+    s2 = s * s
+    degenerate = ~(s2 > 0.0)
+    proven_zero = ~degenerate & (s2 >= _TAU_ZERO * a * a)
+    summed = ~degenerate & ~proven_zero
+    m = (rate - div - 0.5 * vol * vol) * mt
+    m_scale = (abs(rate - div) + 0.5 * vol * vol) * mt
+    two_s2 = 2.0 * s2
+    base_up, base_lo = pow_elementwise(d_up - m, 2), pow_elementwise(d_lo + m, 2)
+    acc = np.zeros(sp.shape)
+    mass = np.zeros(sp.shape)
+    cond = np.zeros(sp.shape)
+    active = summed.copy()
+    k = 0
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        u0_up, u0_lo = np.abs(d_up - m) / s, np.abs(d_lo + m) / s
+        ratio = 2.0 * a * a / s2
+        while active.any():
+            for p in ((k, -k) if k else (0,)):
+                for q, sign in ((p, 1.0), (p - 1, -1.0)):
+                    src = p * d_up + q * d_lo
+                    g_up = (1 - 2 * p) * d_up - 2 * q * d_lo
+                    g_lo = -2 * p * d_up - (1 + 2 * q) * d_lo
+                    q_up = 4.0 * src * ((p - 1) * d_up + q * d_lo)
+                    q_lo = 4.0 * (p * d_up + (q + 1) * d_lo) * src
+                    u_up, u_lo = (g_up - m) / s, (g_lo - m) / s
+                    e_up, e_lo = -(base_up + q_up) / two_s2, -(base_lo + q_lo) / two_s2
+                    piece_up = 0.5 * np.exp(e_up) * erfcx(np.abs(u_up) / _SQRT2)
+                    piece_lo = 0.5 * np.exp(e_lo) * erfcx(np.abs(u_lo) / _SQRT2)
+                    below = u_lo >= 0.0                              # the source lies below the corridor
+                    above = ~below & (u_up <= 0.0)                   # above it
+                    middle = ~below & ~above                         # its mean is inside
+                    e_full = np.where(middle, 2.0 * src * m / s2, 0.0)
+                    full = np.where(middle, np.exp(e_full), 0.0)
+                    term = np.where(below, piece_lo - piece_up,
+                                    np.where(above, piece_up - piece_lo, full - piece_lo - piece_up))
+                    acc = np.where(active, acc + sign * term, acc)
+                    mass = np.where(active, mass + (piece_up * (1.0 + np.abs(e_up)) + piece_lo * (1.0 + np.abs(e_lo))
+                                                    + full * (1.0 + np.abs(e_full))), mass)
+                    cond = np.where(active, cond + (piece_up * (u0_up + 1.0) * (np.abs(g_up) + m_scale)
+                                                    + piece_lo * (u0_lo + 1.0) * (np.abs(g_lo) + m_scale)), cond)
+            if k >= 1:
+                lead = np.exp(-ratio * k * k)
+                active &= ~(4.0 * lead / -np.expm1(-ratio * (2 * k + 1)) <= _TAIL)
+            k += 1
+        summed_bound = _TAIL + _C_ROUND * _EPS * mass + _C_INPUT * _EPS * cond / s
+    total[live] = np.where(summed, acc, np.where(proven_zero, 0.0, math.nan))
+    bound[live] = np.where(summed, summed_bound, np.where(proven_zero, _LONG_TIME_BOUND, math.inf))
+    return total, bound
+
+
+def _validate_array(spot, maturity, rate, div, vol, lower, upper) -> None:
+    """``_validate`` on arrays of spots and maturities."""
+    for name, value in (("spot", spot), ("maturity", maturity)):
+        if not np.all(np.isfinite(value)):
+            raise ValidationError(f"double_no_touch: {name} must be finite, got {value!r}")
+    if not np.all(np.asarray(spot) > 0.0):
+        raise ValidationError(f"double_no_touch: spot must be positive, got {spot!r}")
+    _validate(1.0, 0.0, rate, div, vol, lower, upper)    # the scalar inputs (a valid spot and maturity stand in)
+
+
+def _double_no_touch_array(spot, maturity, rate, div, vol, lower, upper) -> np.ndarray:
+    """``double_no_touch`` elementwise; any element refused refuses the call."""
+    _validate_array(spot, maturity, rate, div, vol, lower, upper)
+    value, bound = _evaluate_array(spot, maturity, rate, div, vol, lower, upper)
+    unresolved = ~(bound <= Tolerance.ZERO)
+    if unresolved.any():
+        i = int(np.flatnonzero(unresolved)[0])
+        raise NumericalError(
+            f"double_no_touch: error bound {bound.flat[i]:.2e} exceeds Tolerance.ZERO ({Tolerance.ZERO:.0e}): the "
+            f"inputs do not determine the probability (spot {np.broadcast_to(spot, bound.shape).flat[i]!r}, "
+            f"T {np.broadcast_to(maturity, bound.shape).flat[i]!r}, r {rate!r}, q {div!r}, vol {vol!r}, "
+            f"corridor ({lower!r}, {upper!r}))")
+    outside = (value < -bound) | (value > 1.0 + bound)
+    if outside.any():
+        i = int(np.flatnonzero(outside)[0])
+        raise NumericalError(
+            f"double_no_touch: {value.flat[i]!r} lies outside [0, 1] by more than its error bound {bound.flat[i]:.2e}")
+    return np.minimum(np.maximum(value, 0.0), 1.0)
+
+
 def double_no_touch_with_bound(spot, maturity, rate, div, vol, lower, upper):
     """``(probability, bound on its absolute error)``; refuses only invalid input."""
     _validate(spot, maturity, rate, div, vol, lower, upper)
@@ -117,7 +217,12 @@ def double_no_touch(spot, maturity, rate, div, vol, lower, upper) -> float:
 
     Raises ``NumericalError`` when the inputs do not determine the probability to that tolerance (the bound
     exceeds it, spec 3C decision 28) or when the sum lies outside [0, 1] by more than its bound.
+
+    ``spot`` and ``maturity`` may be arrays (broadcast together): the probabilities elementwise, each as the scalar
+    call computes it; any element refused refuses the call.
     """
+    if isinstance(spot, np.ndarray) or isinstance(maturity, np.ndarray):
+        return _double_no_touch_array(spot, maturity, rate, div, vol, lower, upper)
     _validate(spot, maturity, rate, div, vol, lower, upper)
     value, bound, _ = _evaluate(spot, maturity, rate, div, vol, lower, upper)
     if not bound <= Tolerance.ZERO:

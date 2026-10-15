@@ -13,7 +13,9 @@ Knock-in options are priced via parity: knock-in = vanilla - knock-out.
 import math
 from typing import Optional
 
+import numpy as np
 from scipy import stats
+from scipy.special import ndtr
 
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_double_barrier_levels,
@@ -49,6 +51,7 @@ from quantark.util.numerical import (
     safe_exp,
     safe_sqrt,
     safe_power,
+    pow_elementwise,
     validate_positive,
     validate_non_negative,
 )
@@ -62,6 +65,9 @@ from .first_observation import (
     resolve_current_records,
     through_first_observation,
 )
+
+#: ``safe_power``'s default cap on the magnitude of a power
+_POWER_CAP = 1e308
 
 
 class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
@@ -162,11 +168,13 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         multiplier = product.contract_multiplier
         obs_type = product.observation_type
         discrete = obs_type == ObservationType.DISCRETE
+        resolved = None
         if discrete:
             # W18c (spec 2026-10-13 I4, A8): a DISCRETE schedule is breached now only by a record at the valuation
             # instant, at its own levels; forward, the closed form monitors the corridor every remaining record
             # shares (None: the levels differ -- no closed form, refused before any forward value)
-            hit_now = self._breached_at_valuation(product, pricing_env, S)
+            resolved = self._resolved_records(product, pricing_env)    # once per price
+            hit_now = self._breached_at_valuation(product, pricing_env, S, resolved)
             forward = forward_double_barrier_levels(product, pricing_env)
         else:
             hit_now = product.is_barrier_hit(S)
@@ -181,7 +189,8 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
 
         # Edge case: zero maturity
         if is_zero(T):
-            return self._price_zero_maturity(product, pricing_env, S, multiplier, knocked_in=knocked_in)
+            return self._price_zero_maturity(product, pricing_env, S, multiplier, knocked_in=knocked_in,
+                                             resolved=resolved)
 
         if discrete and forward is None and (not hit_now or is_zero(sigma)):
             # a forward value needs one corridor; so does the zero-volatility shortcut, which reads none of the records
@@ -197,9 +206,10 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
 
         # No observation deciding now, inside or outside the corridor: the next observation decides
         if discrete and not hit_now and (
-            S >= U or S <= L or has_future_observation(self._resolved_records(product, pricing_env))
+            S >= U or S <= L or has_future_observation(resolved)
         ):
-            return self._price_beyond_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier, rebate)
+            return self._price_beyond_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier, rebate,
+                                               resolved)
 
         # Spot already outside barriers: continuously, or at an observation at the valuation instant
         if hit_now:
@@ -233,12 +243,14 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         )
 
     def _breached_at_valuation(
-        self, product: DoubleBarrierOption, pricing_env: PricingEnvironment, spot: float
+        self, product: DoubleBarrierOption, pricing_env: PricingEnvironment, spot: float, resolved=None
     ) -> bool:
-        """Whether an observation at the valuation instant is breached by the spot, at its own levels."""
+        """Whether an observation at the valuation instant is breached by the spot, at its own levels (``resolved``:
+        the records already resolved for this price)."""
+        if resolved is None:
+            resolved = self._resolved_records(product, pricing_env)
         return any(
-            spot <= rec.lower_barrier or spot >= rec.upper_barrier
-            for rec in observed_at_valuation(self._resolved_records(product, pricing_env))
+            spot <= rec.lower_barrier or spot >= rec.upper_barrier for rec in observed_at_valuation(resolved)
         )
 
     def _price_zero_maturity(
@@ -248,13 +260,14 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         spot: float,
         multiplier: float,
         knocked_in: bool = False,
+        resolved=None,
     ) -> float:
         """Return price at maturity: a knock-in carried as triggered (``knocked_in``, ruling 2026-10-10) pays the
         payoff; otherwise a discrete schedule is breached only by its records at the valuation instant, each at its
         own levels (a knock-out hit there pays that record's payoff, W18c), and continuous and expiry monitoring
-        observe the spot."""
+        observe the spot. ``resolved``: the records already resolved for this price."""
         if product.observation_type == ObservationType.DISCRETE:
-            hit = self._breached_at_valuation(product, pricing_env, spot)
+            hit = self._breached_at_valuation(product, pricing_env, spot, resolved)
         else:
             hit = product.is_barrier_hit(spot)
         if product.is_knock_out:
@@ -282,6 +295,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         U: float,
         multiplier: float,
         rebate: float,
+        resolved=None,
     ) -> float:
         """The value through the first future observation (``first_observation``), no observation deciding now,
         the spot inside or outside the corridor.
@@ -289,37 +303,40 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         A breach at the first future observation ``t1`` pays the knock-out's rebate at maturity or knocks the
         option in (Black-Scholes from ``t1``); otherwise the continuation is this engine's shifted formula from
         ``t1`` (no observation left: no barrier). Values exclude the terminal payment delay ``price`` applies.
+        ``resolved``: the records already resolved for this price. The closures take an array of spots at ``t1``.
         """
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
             raise PricingError("Discrete barrier monitoring requires ObservationSchedule.")
         schedule.assert_analytical_ready(default_payoff=product.rebate, pricing_env=pricing_env)
         freq = schedule.ensure_regular_frequency(schedule.times)
-        first = first_future_observation(self._resolved_records(product, pricing_env), schedule, single=False)
+        if resolved is None:
+            resolved = self._resolved_records(product, pricing_env)
+        first = first_future_observation(resolved, schedule, single=False)
         tau = T - first.time
         lower_shifted = apply_barrier_shift(barrier=L, is_up_barrier=False, volatility=sigma, observation_interval=freq)
         upper_shifted = apply_barrier_shift(barrier=U, is_up_barrier=True, volatility=sigma, observation_interval=freq)
         is_call = product.is_call()
         rebate_df = float(safe_exp(-r * tau))
 
-        def vanilla(s: float) -> float:
+        def vanilla(s: np.ndarray) -> np.ndarray:
             if is_zero(tau):
-                return max(s - K, 0.0) if is_call else max(K - s, 0.0)
+                return np.maximum(s - K, 0.0) if is_call else np.maximum(K - s, 0.0)
             sqrt_tau = math.sqrt(tau)
-            d1 = (math.log(s / K) + (r - q + 0.5 * sigma * sigma) * tau) / (sigma * sqrt_tau)
+            d1 = (np.log(s / K) + (r - q + 0.5 * sigma * sigma) * tau) / (sigma * sqrt_tau)
             d2 = d1 - sigma * sqrt_tau
             if is_call:
                 return self._bs_engine._price_call(s, K, tau, r, q, d1, d2)
             return self._bs_engine._price_put(s, K, tau, r, q, d1, d2)
 
         if product.is_knock_out:
-            def hit_value(s: float) -> float:
+            def hit_value(s: np.ndarray) -> float:
                 return rebate * rebate_df * multiplier
         else:
-            def hit_value(s: float) -> float:
+            def hit_value(s: np.ndarray) -> np.ndarray:
                 return vanilla(s) * multiplier
 
-        def continuation(s: float) -> float:
+        def continuation(s: np.ndarray) -> np.ndarray:
             if first.remaining == 0:
                 return (vanilla(s) if product.is_knock_out else rebate * rebate_df) * multiplier
             return self._price_continuous(
@@ -383,7 +400,10 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
     ) -> float:
         """Price using Ikeda & Kuintomo continuous formula (``vanilla_price``: the knock-in parity's vanilla,
         read from ``pricing_env`` when not given; ``rebate``: default ``product.rebate``, a DISCRETE knock-out's
-        remaining records' payoff, W18c)."""
+        remaining records' payoff, W18c). ``S`` a float, or an array of spots with ``vanilla_price`` given (the same
+        operations elementwise)."""
+        array = isinstance(S, np.ndarray)
+        floor = (lambda x: np.maximum(x, 0.0)) if array else (lambda x: max(x, 0.0))
         if rebate is None:
             rebate = product.rebate
         b = r - q
@@ -402,7 +422,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         )
 
         if product.is_knock_out:
-            price = max(ko_price, 0.0)
+            price = floor(ko_price)
             if not is_zero(rebate):
                 # the rebate is paid only if a barrier is hit (spec 3C decision 28)
                 p_inside = double_no_touch(S, T, r, q, sigma, L, U)
@@ -412,11 +432,11 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         # Knock-in via parity
         if vanilla_price is None:
             vanilla_price = self._bs_engine.price(self._create_vanilla(product), pricing_env)
-        price = max(vanilla_price - max(ko_price, 0.0), 0.0)
+        price = floor(vanilla_price - floor(ko_price))
         if not is_zero(rebate):
             # a knock-in's rebate is paid if the corridor is never left
             price += rebate * float(safe_exp(-r * T)) * double_no_touch(S, T, r, q, sigma, L, U)
-        return float(price * multiplier)
+        return price * multiplier if array else float(price * multiplier)
 
     def _price_discrete(
         self,
@@ -533,8 +553,11 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         """
         Ikeda & Kuintomo (1992) infinite-series formula for double knock-out.
 
-        Returns the unadjusted theoretical price (per unit, no multiplier).
+        Returns the unadjusted theoretical price (per unit, no multiplier). ``S`` a float, or an array of spots
+        (``_ikeda_kunitomo_array``: the same operations elementwise).
         """
+        if isinstance(S, np.ndarray):
+            return self._ikeda_kunitomo_array(S, K, L, U, T, r, b, sigma, is_call, delta1, delta2, max_terms)
         F = float(U * float(safe_exp(delta1 * T)))
         E = float(L * float(safe_exp(delta2 * T)))
 
@@ -572,8 +595,8 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             d_c = float((float(safe_log(L2n2 / (arg1 * S * U2n))) + drift) / denom)
             d_d = float((float(safe_log(L2n2 / (arg2 * S * U2n))) + drift) / denom)
 
-            cdf_ab = stats.norm.cdf(d_a) - stats.norm.cdf(d_b)
-            cdf_cd = stats.norm.cdf(d_c) - stats.norm.cdf(d_d)
+            cdf_ab = ndtr(d_a) - ndtr(d_b)
+            cdf_cd = ndtr(d_c) - ndtr(d_d)
 
             term_asset = 0.0
             if math.isfinite(w1) and math.isfinite(w2):
@@ -587,8 +610,8 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             w1_strike = float(safe_power((U_pow / L_pow), mu1 - 2.0) * safe_power((L / S), mu2))
             w2_strike = float(safe_power((math.pow(L, n + 1) / (U_pow * S)), mu3 - 2.0))
 
-            cdf_ab_strike = stats.norm.cdf(d_a - denom) - stats.norm.cdf(d_b - denom)
-            cdf_cd_strike = stats.norm.cdf(d_c - denom) - stats.norm.cdf(d_d - denom)
+            cdf_ab_strike = ndtr(d_a - denom) - ndtr(d_b - denom)
+            cdf_cd_strike = ndtr(d_c - denom) - ndtr(d_d - denom)
 
             term_strike = 0.0
             if math.isfinite(w1_strike) and math.isfinite(w2_strike):
@@ -608,6 +631,83 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             price = K * df_riskfree * strike_sum - S * df_carry * asset_sum
 
         return float(price)
+
+    def _ikeda_kunitomo_array(
+        self,
+        S: np.ndarray,
+        K: float,
+        L: float,
+        U: float,
+        T: float,
+        r: float,
+        b: float,
+        sigma: float,
+        is_call: bool,
+        delta1: float,
+        delta2: float,
+        max_terms: int,
+    ) -> np.ndarray:
+        """``_price_knock_out_ikeda_kuintomo`` on an array of spots: the same operations in the same order per spot
+        (a weight that overflowed drops its term, as the scalar series drops it)."""
+        F = float(U * float(safe_exp(delta1 * T)))
+        E = float(L * float(safe_exp(delta2 * T)))
+        arg1, arg2 = (K, F) if is_call else (E, K)
+        sqrt_t = float(safe_sqrt(T))
+        denom = sigma * sqrt_t
+        drift = float((b + 0.5 * sigma * sigma) * T)
+        sig2 = sigma * sigma
+
+        def spot_power(base: np.ndarray, exponent: float) -> np.ndarray:
+            # ``safe_power``'s scalar semantics on a positive base: an overflow is the cap for a positive exponent,
+            # 0 for a negative one; the result clipped to the cap
+            with np.errstate(over="ignore"):
+                result = pow_elementwise(base, exponent)
+            overflow = np.isinf(result) & np.isfinite(base)
+            result = np.where(overflow, _POWER_CAP if exponent > 0 else 0.0, result)
+            return np.clip(result, -_POWER_CAP, _POWER_CAP)
+
+        def term(w_first: np.ndarray, cdf_first: np.ndarray, w_second: np.ndarray, cdf_second: np.ndarray):
+            finite_first, finite_second = np.isfinite(w_first), np.isfinite(w_second)
+            with np.errstate(over="ignore", invalid="ignore"):
+                both = w_first * cdf_first - w_second * cdf_second
+                first_only = w_first * cdf_first
+                second_only = -w_second * cdf_second
+            return np.where(finite_first & finite_second, both,
+                            np.where(finite_first, first_only, np.where(finite_second, second_only, 0.0)))
+
+        asset_sum = np.zeros(S.shape)
+        strike_sum = np.zeros(S.shape)
+        for n in range(-max_terms, max_terms + 1):
+            U_pow = math.pow(U, n)
+            L_pow = math.pow(L, n)
+            U2n = U_pow * U_pow
+            L2n = L_pow * L_pow
+            L2n2 = L2n * L * L
+
+            mu1 = 2.0 * (b - delta2 - n * (delta1 - delta2)) / sig2 + 1.0
+            mu2 = 2.0 * n * (delta1 - delta2) / sig2
+            mu3 = 2.0 * (b - delta2 + n * (delta1 - delta2)) / sig2 + 1.0
+
+            with np.errstate(over="ignore"):
+                w1 = safe_power((U_pow / L_pow), mu1) * spot_power(L / S, mu2)
+                w2 = spot_power(math.pow(L, n + 1) / (U_pow * S), mu3)
+                w1_strike = safe_power((U_pow / L_pow), mu1 - 2.0) * spot_power(L / S, mu2)
+                w2_strike = spot_power(math.pow(L, n + 1) / (U_pow * S), mu3 - 2.0)
+
+            d_a = (safe_log(S * U2n / (arg1 * L2n)) + drift) / denom
+            d_b = (safe_log(S * U2n / (arg2 * L2n)) + drift) / denom
+            d_c = (safe_log(L2n2 / (arg1 * S * U2n)) + drift) / denom
+            d_d = (safe_log(L2n2 / (arg2 * S * U2n)) + drift) / denom
+
+            asset_sum = asset_sum + term(w1, ndtr(d_a) - ndtr(d_b), w2, ndtr(d_c) - ndtr(d_d))
+            strike_sum = strike_sum + term(w1_strike, ndtr(d_a - denom) - ndtr(d_b - denom),
+                                           w2_strike, ndtr(d_c - denom) - ndtr(d_d - denom))
+
+        df_carry = float(safe_exp((b - r) * T))
+        df_riskfree = float(safe_exp(-r * T))
+        if is_call:
+            return S * df_carry * asset_sum - K * df_riskfree * strike_sum
+        return K * df_riskfree * strike_sum - S * df_carry * asset_sum
 
     def _create_vanilla(self, product: DoubleBarrierOption) -> EuropeanVanillaOption:
         """Create a vanilla option with same terms as the double barrier."""

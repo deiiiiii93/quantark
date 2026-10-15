@@ -178,9 +178,9 @@ def test_discrete_monitoring_applies_barrier_shift():
     expected = through_first_observation(
         spot=env.spot, first=first, rate=r, div=q, vol=sigma,
         hit_value=lambda s: option.rebate * math.exp(-r * tau),
-        continuation=lambda s: _expiry_touch_price(
+        continuation=lambda spots: [_expiry_touch_price(      # the projection passes every node spot at once
             spot=s, barrier=shifted_barrier, maturity=tau, rate=r, div=q, vol=sigma, is_up=True,
-            rebate=option.rebate),
+            rebate=option.rebate) for s in spots.tolist()],
         remaining_time=tau, hit_is_constant=True,
     )
     assert price == pytest.approx(expected, rel=1e-10, abs=1e-10)

@@ -5,7 +5,8 @@ Analytical pricing engine for one-touch and no-touch options.
 import math
 from typing import Optional
 
-from scipy import stats
+import numpy as np
+from scipy.special import ndtr
 
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_barrier_level,
@@ -36,6 +37,7 @@ from quantark.util.barrier_shift import apply_barrier_shift
 from quantark.util.enum import ObservationType, OptionType, TouchType
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import pow_elementwise
 
 from .digital_option_engine import DigitalOptionAnalyticalEngine
 from .first_observation import (
@@ -104,11 +106,13 @@ class OneTouchAnalyticalEngine(BaseEngine):
         maturity = product.get_maturity(pricing_env)
         obs_type = product.observation_type
         discrete = obs_type == ObservationType.DISCRETE
+        resolved = None
         if discrete:
             # W18c (spec 2026-10-13 I4): a DISCRETE schedule is touched now only by a record at the valuation instant,
             # at its own level; forward, the closed form monitors the level every remaining record shares (None:
             # they differ -- no closed form, refused before any forward value)
-            hit_now = self._breached_at_valuation(product, pricing_env, spot)
+            resolved = self._resolved_records(product, pricing_env)    # once per price
+            hit_now = self._breached_at_valuation(product, pricing_env, spot, resolved)
             forward_level = forward_barrier_level(product, pricing_env)
             beyond_forward = forward_level is not None and self._beyond(product, spot, forward_level)
         else:
@@ -157,12 +161,12 @@ class OneTouchAnalyticalEngine(BaseEngine):
         if discrete and not hit_now:
             if forward_level is None:
                 refuse_mixed_forward_levels(product.observation_schedule, pricing_env, default_payoff=rebate)
-            if beyond_forward or has_future_observation(self._resolved_records(product, pricing_env)):
+            if beyond_forward or has_future_observation(resolved):
                 # No observation deciding now: the next observation decides, the shifted formula only after it
                 return (
                     self._price_beyond_discrete(
                         product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level,
-                        forward_cash,
+                        forward_cash, resolved,
                     )
                     + pending_pv
                 )
@@ -259,13 +263,13 @@ class OneTouchAnalyticalEngine(BaseEngine):
         return (spot >= level) if product.is_up_barrier else (spot <= level)
 
     def _breached_at_valuation(
-        self, product: OneTouchOption, pricing_env: PricingEnvironment, spot: float
+        self, product: OneTouchOption, pricing_env: PricingEnvironment, spot: float, resolved=None
     ) -> bool:
-        """Whether an observation at the valuation instant is breached by the spot, at its own level."""
-        return any(
-            self._beyond(product, spot, rec.barrier)
-            for rec in observed_at_valuation(self._resolved_records(product, pricing_env))
-        )
+        """Whether an observation at the valuation instant is breached by the spot, at its own level (``resolved``:
+        the records already resolved for this price)."""
+        if resolved is None:
+            resolved = self._resolved_records(product, pricing_env)
+        return any(self._beyond(product, spot, rec.barrier) for rec in observed_at_valuation(resolved))
 
     def _price_beyond_discrete(
         self,
@@ -279,6 +283,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
         terminal_timing,
         forward_level: float,
         forward_cash: float,
+        resolved=None,
     ) -> float:
         """The value through the first future observation (``first_observation``), no observation deciding now,
         the spot inside or beyond the barrier.
@@ -286,7 +291,8 @@ class OneTouchAnalyticalEngine(BaseEngine):
         A touch at the first future observation ``t1`` pays the one-touch's rebate (at the hit, after the constant
         hit lag, or at the terminal payment time) and ends the no-touch; otherwise the continuation is this
         engine's shifted formula from ``t1`` (no observation left: no touch), on ``forward_level``, the level the
-        remaining records share; a one-touch pays ``forward_cash``, their payoff (W18c).
+        remaining records share; a one-touch pays ``forward_cash``, their payoff (W18c). ``resolved``: the records
+        already resolved for this price. The closures take an array of spots at ``t1``.
         """
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
@@ -295,7 +301,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
         rebate = forward_cash
         frequency = schedule.ensure_regular_frequency(schedule.times)
         first = first_future_observation(
-            self._resolved_records(product, pricing_env),
+            resolved if resolved is not None else self._resolved_records(product, pricing_env),
             schedule,
             single=True,
             is_up=product.is_up_barrier,
@@ -313,17 +319,17 @@ class OneTouchAnalyticalEngine(BaseEngine):
         if pay_at_hit:
             hit_lag = constant_hit_lag_year_fraction(product, pricing_env, maturity)
 
-        def touch_probability(s: float) -> float:
-            return min(max(self._touch_probability(
+        def touch_probability(s: np.ndarray) -> np.ndarray:
+            return np.minimum(np.maximum(self._touch_probability(
                 spot=s, barrier=shifted, maturity=tau, rate=rate, div=div, vol=vol,
                 is_up=product.is_up_barrier,
             ), 0.0), 1.0)
 
         if product.is_one_touch:
-            def hit_value(s: float) -> float:
+            def hit_value(s: np.ndarray) -> float:
                 return rebate * math.exp(-rate * hit_lag) if pay_at_hit else rebate * terminal_df
 
-            def continuation(s: float) -> float:
+            def continuation(s: np.ndarray) -> np.ndarray:
                 if first.remaining == 0:
                     return 0.0
                 value = self._one_touch_price(
@@ -332,13 +338,13 @@ class OneTouchAnalyticalEngine(BaseEngine):
                 )
                 return value if pay_at_hit else value * terminal_timing.delay_df
         else:
-            def hit_value(s: float) -> float:
+            def hit_value(s: np.ndarray) -> float:
                 return 0.0
 
-            def continuation(s: float) -> float:
+            def continuation(s: np.ndarray) -> np.ndarray:
                 if first.remaining == 0:
                     return rebate * terminal_df
-                return rebate * terminal_df * max(0.0, 1.0 - touch_probability(s))
+                return rebate * terminal_df * np.maximum(0.0, 1.0 - touch_probability(s))
 
         return through_first_observation(
             spot=spot,
@@ -451,15 +457,18 @@ class OneTouchAnalyticalEngine(BaseEngine):
         vol: float,
         is_up: bool,
     ) -> float:
+        """``spot`` a float or an array of spots (the same operations elementwise)."""
+        array = isinstance(spot, np.ndarray)
+        log, power = (np.log, pow_elementwise) if array else (math.log, math.pow)
         b = rate - div
         mu = (b - 0.5 * vol * vol) / (vol * vol)
         lam = math.sqrt(mu * mu + 2.0 * rate / (vol * vol))
         sqrt_t = math.sqrt(maturity)
-        z = math.log(barrier / spot) / (vol * sqrt_t) + lam * vol * sqrt_t
+        z = log(barrier / spot) / (vol * sqrt_t) + lam * vol * sqrt_t
         eta = -1.0 if is_up else 1.0
 
-        term1 = math.pow(barrier / spot, mu + lam) * stats.norm.cdf(eta * z)
-        term2 = math.pow(barrier / spot, mu - lam) * stats.norm.cdf(
+        term1 = power(barrier / spot, mu + lam) * ndtr(eta * z)
+        term2 = power(barrier / spot, mu - lam) * ndtr(
             eta * z - 2 * eta * lam * vol * sqrt_t
         )
         return term1 + term2
@@ -474,16 +483,19 @@ class OneTouchAnalyticalEngine(BaseEngine):
         vol: float,
         is_up: bool,
     ) -> float:
+        """``spot`` a float or an array of spots (the same operations elementwise)."""
+        array = isinstance(spot, np.ndarray)
+        log, power = (np.log, pow_elementwise) if array else (math.log, math.pow)
         b = rate - div
         mu = (b - 0.5 * vol * vol) / (vol * vol)
         sqrt_t = math.sqrt(maturity)
-        log_s_b = math.log(spot / barrier)
+        log_s_b = log(spot / barrier)
         x2 = log_s_b / (vol * sqrt_t) + (1 + mu) * vol * sqrt_t
         y2 = -log_s_b / (vol * sqrt_t) + (1 + mu) * vol * sqrt_t
         phi = 1.0 if is_up else -1.0
         eta = -1.0 if is_up else 1.0
-        pow_term = math.pow(barrier / spot, 2 * mu)
-        return stats.norm.cdf(phi * x2 - phi * vol * sqrt_t) + pow_term * stats.norm.cdf(
+        pow_term = power(barrier / spot, 2 * mu)
+        return ndtr(phi * x2 - phi * vol * sqrt_t) + pow_term * ndtr(
             eta * y2 - eta * vol * sqrt_t
         )
 

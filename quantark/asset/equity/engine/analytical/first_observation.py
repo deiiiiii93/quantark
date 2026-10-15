@@ -17,13 +17,17 @@ the standard-normal variable with the barrier(s) as panel edges, so each panel's
 ``TRUNCATION_SD`` standard deviations (normal tail below 1e-22). Each panel set is integrated at two orders and the
 difference is the error check: beyond ``Tolerance.RELATIVE`` (relative to the value, floor 1) it raises
 ``NumericalError`` rather than return an unresolved number.
+
+``H`` and ``C`` are evaluated once each, on a 1-D array of every node spot of both orders (they return an array of
+that shape, or a scalar for a constant), and the terms are summed in the rule's own order, node after node. Each
+node's value depends on that node only, so this is the value a node-by-node evaluation gives.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence, Union
 
 import numpy as np
 from scipy.special import ndtr
@@ -36,6 +40,9 @@ from quantark.util.numerical import Tolerance, is_zero, safe_exp, safe_log, safe
 TRUNCATION_SD = 10.0
 LOW_ORDER = 8
 HIGH_ORDER = 12
+#: (nodes, weights) on [-1, 1] at the two orders
+_RULES = tuple(np.polynomial.legendre.leggauss(order) for order in (LOW_ORDER, HIGH_ORDER))
+_SQRT_2PI = math.sqrt(2.0 * math.pi)
 
 
 @dataclass(frozen=True)
@@ -113,6 +120,11 @@ def first_future_observation(resolved_records: Sequence, schedule, *, single: bo
     )
 
 
+def _evaluate(fn: Callable[[np.ndarray], Union[np.ndarray, float]], spots: np.ndarray) -> np.ndarray:
+    """``fn`` on the spot array, a scalar (a value not depending on the spot) broadcast to its shape."""
+    return np.broadcast_to(np.asarray(fn(spots), dtype=float), spots.shape)
+
+
 def through_first_observation(
     *,
     spot: float,
@@ -120,13 +132,15 @@ def through_first_observation(
     rate: float,
     div: float,
     vol: float,
-    hit_value: Callable[[float], float],
-    continuation: Callable[[float], float],
+    hit_value: Callable[[np.ndarray], Union[np.ndarray, float]],
+    continuation: Callable[[np.ndarray], Union[np.ndarray, float]],
     remaining_time: float,
     hit_is_constant: bool = False,
 ) -> float:
     """``exp(-r t1) E[hit ? hit_value(S_t1) : continuation(S_t1)]`` under GBM with flat ``rate``, ``div``, ``vol``.
 
+    ``hit_value`` and ``continuation`` map a 1-D array of spots at ``t1`` to their values there (an array of the same
+    shape, or a scalar when the value does not depend on the spot); each is called once, on all its nodes.
     ``remaining_time`` (maturity minus ``t1``) sets the panel width: the continuation varies on the scale of its own
     remaining standard deviation, so panels are ``min(1, sqrt(remaining_time / t1))`` wide in the normal variable.
     ``hit_is_constant``: the breach value does not depend on the spot (cash), so its region is that value times the
@@ -157,28 +171,46 @@ def through_first_observation(
 
     exact_part = 0.0
     if hit_is_constant:
-        cash = hit_value(spot)
+        cash = float(_evaluate(hit_value, np.array([spot], dtype=float))[0])
         breach_mass = (float(ndtr(z_low)) if z_low is not None else 0.0) + (
             float(ndtr(-z_up)) if z_up is not None else 0.0
         )
         exact_part = cash * breach_mass
         regions = [region for region in regions if region[2] is not hit_value]
 
-    values = []
-    for order in (LOW_ORDER, HIGH_ORDER):
-        gx, gw = np.polynomial.legendre.leggauss(order)
-        total = exact_part
+    # every panel's nodes and weights, order by order, region by region: the summation order
+    blocks = []
+    for order_index, (gx, gw) in enumerate(_RULES):
         for a, b, fn in regions:
             if b <= a:
                 continue
             panels = max(1, int(math.ceil((b - a) / width)))
             cuts = np.linspace(a, b, panels + 1)
-            for left, right in zip(cuts[:-1], cuts[1:]):
-                half, mid = 0.5 * (right - left), 0.5 * (right + left)
-                for x, w in zip(mid + half * gx, half * gw):
-                    density = math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
-                    total += w * density * fn(float(safe_exp(mean + sd * x)))
-        values.append(total)
+            left, right = cuts[:-1, None], cuts[1:, None]
+            half, mid = 0.5 * (right - left), 0.5 * (right + left)
+            blocks.append((order_index, fn, (mid + half * gx).ravel(), (half * gw).ravel()))
+
+    # each function once, on all its nodes
+    node_values = [None] * len(blocks)
+    for fn in {id(block[1]): block[1] for block in blocks}.values():
+        mine = [i for i, block in enumerate(blocks) if block[1] is fn]
+        x = np.concatenate([blocks[i][2] for i in mine])
+        fx = _evaluate(fn, safe_exp(mean + sd * x))
+        if not np.all(np.isfinite(fx)):
+            raise NumericalError("The expectation through the first observation met a non-finite value at a node.")
+        start = 0
+        for i in mine:
+            stop = start + blocks[i][2].size
+            node_values[i] = fx[start:stop]
+            start = stop
+
+    values = [exact_part, exact_part]
+    for (order_index, _, x, w), fx in zip(blocks, node_values):
+        density = safe_exp(-0.5 * x * x) / _SQRT_2PI
+        total = values[order_index]
+        for term in (w * density * fx).tolist():
+            total += term
+        values[order_index] = total
 
     low, high = values
     if abs(high - low) > Tolerance.RELATIVE * max(1.0, abs(high)):

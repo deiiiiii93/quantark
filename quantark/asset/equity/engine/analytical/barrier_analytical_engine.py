@@ -10,7 +10,9 @@ Supports:
 import math
 from typing import Optional
 
+import numpy as np
 from scipy import stats
+from scipy.special import ndtr
 
 from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_barrier_level,
@@ -45,7 +47,7 @@ from quantark.util.barrier_shift import apply_barrier_shift
 from quantark.util.enum import ObservationType, BarrierDirection, TouchType
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError, PricingError
-from quantark.util.numerical import is_zero
+from quantark.util.numerical import is_zero, pow_elementwise
 
 from .black_scholes_engine import BlackScholesEngine
 from .first_observation import (
@@ -127,11 +129,13 @@ class BarrierAnalyticalEngine(BaseEngine):
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product.barrier)
         obs_type = product.observation_type
         discrete = obs_type == ObservationType.DISCRETE
+        resolved = None
         if discrete:
             # W18c (spec 2026-10-13 I4): a DISCRETE schedule is hit now only by a record at the valuation instant, at
             # its own level; forward, the closed form monitors the level every remaining record shares (None: they
             # differ -- no closed form, refused before any forward value)
-            hit_now = self._breached_at_valuation(product, pricing_env, spot)
+            resolved = self._resolved_records(product, pricing_env)    # once per price
+            hit_now = self._breached_at_valuation(product, pricing_env, spot, resolved)
             forward_level = forward_barrier_level(product, pricing_env)
             beyond_forward = forward_level is not None and self._breached(product, spot, forward_level)
         else:
@@ -159,19 +163,19 @@ class BarrierAnalyticalEngine(BaseEngine):
         if maturity < self.MIN_MATURITY:
             return (
                 self._price_at_maturity(product, pricing_env, spot, terminal_timing,
-                                        knocked_in=knock_in_carried(product, lifecycle_state))
+                                        knocked_in=knock_in_carried(product, lifecycle_state), resolved=resolved)
                 + pending_pv
             )
 
         if discrete and not hit_now:
             if forward_level is None:
                 refuse_mixed_forward_levels(product.observation_schedule, pricing_env, default_payoff=product.rebate)
-            if beyond_forward or has_future_observation(self._resolved_records(product, pricing_env)):
+            if beyond_forward or has_future_observation(resolved):
                 # No observation deciding now: the next observation decides, the shifted formula only after it
                 return (
                     self._price_beyond_discrete(
                         product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level,
-                        forward_cash,
+                        forward_cash, resolved,
                     )
                     + pending_pv
                 )
@@ -269,13 +273,13 @@ class BarrierAnalyticalEngine(BaseEngine):
         return spot >= level if product.is_up_barrier else spot <= level
 
     def _breached_at_valuation(
-        self, product: BarrierOption, pricing_env: PricingEnvironment, spot: float
+        self, product: BarrierOption, pricing_env: PricingEnvironment, spot: float, resolved=None
     ) -> bool:
-        """Whether an observation at the valuation instant is breached by the spot, at its own level."""
-        return any(
-            self._breached(product, spot, rec.barrier)
-            for rec in observed_at_valuation(self._resolved_records(product, pricing_env))
-        )
+        """Whether an observation at the valuation instant is breached by the spot, at its own level (``resolved``:
+        the records already resolved for this price)."""
+        if resolved is None:
+            resolved = self._resolved_records(product, pricing_env)
+        return any(self._breached(product, spot, rec.barrier) for rec in observed_at_valuation(resolved))
 
     def _price_at_maturity(
         self,
@@ -284,6 +288,7 @@ class BarrierAnalyticalEngine(BaseEngine):
         spot: float,
         terminal_timing,
         knocked_in: bool = False,
+        resolved=None,
     ) -> float:
         """The value at maturity: the carried knock-in state first, then what is observed now.
 
@@ -292,16 +297,14 @@ class BarrierAnalyticalEngine(BaseEngine):
         expiry monitoring observe the spot at the product's barrier; a discrete schedule observes only its records at
         the valuation instant, each at its own level and paying its own cash (none observed: no hit). A knock-out hit
         pays its cash, a knock-in never knocked in its rebate, at the terminal payment time (hit-paid knock-out cash at
-        the record's own payment time).
+        the record's own payment time). ``resolved``: the records already resolved for this price.
         """
         multiplier = product.contract_multiplier
         payoff = product.get_payoff(spot) * product.participation_rate * terminal_timing.payment_df
         if product.observation_type == ObservationType.DISCRETE:
-            hits = [
-                rec
-                for rec in observed_at_valuation(self._resolved_records(product, pricing_env))
-                if self._breached(product, spot, rec.barrier)
-            ]
+            if resolved is None:
+                resolved = self._resolved_records(product, pricing_env)
+            hits = [rec for rec in observed_at_valuation(resolved) if self._breached(product, spot, rec.barrier)]
             hit = hits[0] if hits else None
             if product.is_knock_in:
                 return (payoff if (knocked_in or hit is not None)
@@ -336,6 +339,7 @@ class BarrierAnalyticalEngine(BaseEngine):
         terminal_timing,
         forward_level: float,
         rebate: float,
+        resolved=None,
     ) -> float:
         """The value through the first future observation (``first_observation``), no observation deciding now,
         the spot inside or beyond the barrier.
@@ -344,7 +348,8 @@ class BarrierAnalyticalEngine(BaseEngine):
         constant hit lag, or at the terminal payment time) or knocks the option in (Black-Scholes from ``t1``);
         otherwise the continuation is this engine's shifted formula from ``t1`` (no observation left: no barrier),
         on ``forward_level``, the level the remaining records share, a knock-out hit paying ``rebate``, their payoff
-        (W18c).
+        (W18c). ``resolved``: the records already resolved for this price. The closures take an array of spots at
+        ``t1``.
         """
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
@@ -352,7 +357,7 @@ class BarrierAnalyticalEngine(BaseEngine):
         schedule.assert_analytical_ready(default_payoff=product.rebate, pricing_env=pricing_env)
         freq = schedule.ensure_regular_frequency(schedule.times)
         first = first_future_observation(
-            self._resolved_records(product, pricing_env),
+            resolved if resolved is not None else self._resolved_records(product, pricing_env),
             schedule,
             single=True,
             is_up=product.is_up_barrier,
@@ -374,16 +379,16 @@ class BarrierAnalyticalEngine(BaseEngine):
             hit_lag = constant_hit_lag_year_fraction(product, pricing_env, maturity)
         touch = self._one_touch_engine
 
-        def vanilla(s: float) -> float:
+        def vanilla(s: np.ndarray) -> np.ndarray:
             if is_zero(tau):
-                return max(s - product.strike, 0.0) if is_call else max(product.strike - s, 0.0)
+                return np.maximum(s - product.strike, 0.0) if is_call else np.maximum(product.strike - s, 0.0)
             d1, d2 = self._d1_d2(s, product.strike, tau, rate, div, vol)
             if is_call:
                 return self._bs_engine._price_call(s, product.strike, tau, rate, div, d1, d2)
             return self._bs_engine._price_put(s, product.strike, tau, rate, div, d1, d2)
 
-        def knock_out(s: float) -> float:
-            return max(
+        def knock_out(s: np.ndarray) -> np.ndarray:
+            return np.maximum(
                 self._price_knock_out_closed_form(
                     spot=s,
                     strike=product.strike,
@@ -398,9 +403,9 @@ class BarrierAnalyticalEngine(BaseEngine):
                 0.0,
             )
 
-        def touch_probability(s: float) -> float:
-            return min(
-                max(
+        def touch_probability(s: np.ndarray) -> np.ndarray:
+            return np.minimum(
+                np.maximum(
                     touch._expiry_touch_term(
                         spot=s, barrier=shifted, maturity=tau, rate=rate, div=div, vol=vol,
                         is_up=product.is_up_barrier,
@@ -411,12 +416,12 @@ class BarrierAnalyticalEngine(BaseEngine):
             )
 
         if product.is_knock_out:
-            def hit_value(s: float) -> float:
+            def hit_value(s: np.ndarray) -> float:
                 if product.pay_at_hit:
                     return rebate * math.exp(-rate * hit_lag)
                 return rebate * terminal_df
 
-            def continuation(s: float) -> float:
+            def continuation(s: np.ndarray) -> np.ndarray:
                 if first.remaining == 0:
                     return participation * vanilla(s) * delay
                 value = participation * knock_out(s) * delay
@@ -433,15 +438,15 @@ class BarrierAnalyticalEngine(BaseEngine):
                         )
                 return value
         else:
-            def hit_value(s: float) -> float:
+            def hit_value(s: np.ndarray) -> np.ndarray:
                 return participation * vanilla(s) * delay
 
-            def continuation(s: float) -> float:
+            def continuation(s: np.ndarray) -> np.ndarray:
                 if first.remaining == 0:
                     return rebate * terminal_df
-                value = participation * max(vanilla(s) - knock_out(s), 0.0) * delay
+                value = participation * np.maximum(vanilla(s) - knock_out(s), 0.0) * delay
                 if rebate > 0:
-                    value += rebate * terminal_df * max(0.0, 1.0 - touch_probability(s))
+                    value += rebate * terminal_df * np.maximum(0.0, 1.0 - touch_probability(s))
                 return value
 
         return through_first_observation(
@@ -519,60 +524,66 @@ class BarrierAnalyticalEngine(BaseEngine):
         is_call: bool,
         is_up: bool,
     ) -> float:
+        """The continuously monitored knock-out (no rebate); ``spot`` a float or an array of spots (the same
+        operations elementwise)."""
+        array = isinstance(spot, np.ndarray)
+        log = np.log if array else math.log
+        power = pow_elementwise if array else (lambda base, exponent: base ** exponent)
         sqrt_t = math.sqrt(maturity)
         mu = (carry - 0.5 * vol * vol) / (vol * vol)
 
-        log_s_k = math.log(spot / strike)
-        log_s_b = math.log(spot / barrier)
-        pow_term = (barrier / spot) ** (2 * mu)
-        pow_term_mu = (barrier / spot) ** (2 * (mu + 1))
+        log_s_k = log(spot / strike)
+        log_s_b = log(spot / barrier)
+        pow_term = power(barrier / spot, 2 * mu)
+        pow_term_mu = power(barrier / spot, 2 * (mu + 1))
 
         x1 = log_s_k / (vol * sqrt_t) + (1 + mu) * vol * sqrt_t
         x2 = log_s_b / (vol * sqrt_t) + (1 + mu) * vol * sqrt_t
         y1 = (
-            math.log((barrier * barrier) / (spot * strike)) / (vol * sqrt_t)
+            log((barrier * barrier) / (spot * strike)) / (vol * sqrt_t)
             + (1 + mu) * vol * sqrt_t
         )
-        y2 = math.log(barrier / spot) / (vol * sqrt_t) + (1 + mu) * vol * sqrt_t
+        y2 = log(barrier / spot) / (vol * sqrt_t) + (1 + mu) * vol * sqrt_t
+        no_value = np.zeros_like(spot) if array else 0.0
 
         eta = -1.0 if is_up else 1.0
 
         def A(phi: float) -> float:
-            return phi * spot * math.exp((carry - rate) * maturity) * stats.norm.cdf(
+            return phi * spot * math.exp((carry - rate) * maturity) * ndtr(
                 phi * x1
-            ) - phi * strike * math.exp(-rate * maturity) * stats.norm.cdf(
+            ) - phi * strike * math.exp(-rate * maturity) * ndtr(
                 phi * x1 - phi * vol * sqrt_t
             )
 
         def B(phi: float) -> float:
-            return phi * spot * math.exp((carry - rate) * maturity) * stats.norm.cdf(
+            return phi * spot * math.exp((carry - rate) * maturity) * ndtr(
                 phi * x2
-            ) - phi * strike * math.exp(-rate * maturity) * stats.norm.cdf(
+            ) - phi * strike * math.exp(-rate * maturity) * ndtr(
                 phi * x2 - phi * vol * sqrt_t
             )
 
         def C(phi: float) -> float:
             return phi * spot * math.exp(
                 (carry - rate) * maturity
-            ) * pow_term_mu * stats.norm.cdf(eta * y1) - phi * strike * math.exp(
+            ) * pow_term_mu * ndtr(eta * y1) - phi * strike * math.exp(
                 -rate * maturity
-            ) * pow_term * stats.norm.cdf(
+            ) * pow_term * ndtr(
                 eta * y1 - eta * vol * sqrt_t
             )
 
         def D(phi: float) -> float:
             return phi * spot * math.exp(
                 (carry - rate) * maturity
-            ) * pow_term_mu * stats.norm.cdf(eta * y2) - phi * strike * math.exp(
+            ) * pow_term_mu * ndtr(eta * y2) - phi * strike * math.exp(
                 -rate * maturity
-            ) * pow_term * stats.norm.cdf(
+            ) * pow_term * ndtr(
                 eta * y2 - eta * vol * sqrt_t
             )
 
         if is_call:
             if is_up:
                 if barrier <= strike:
-                    return 0.0
+                    return no_value
                 return A(1.0) - B(1.0) + C(1.0) - D(1.0)
             if barrier < strike:
                 return A(1.0) - C(1.0)
@@ -586,7 +597,7 @@ class BarrierAnalyticalEngine(BaseEngine):
 
         if barrier < strike:
             return A(-1.0) - B(-1.0) + C(-1.0) - D(-1.0)
-        return 0.0
+        return no_value
 
     def _price_expiry(
         self,
@@ -704,10 +715,14 @@ class BarrierAnalyticalEngine(BaseEngine):
         div: float,
         vol: float,
     ) -> tuple:
+        """``(d1, d2)``; ``spot`` a float or an array of spots."""
+        array = isinstance(spot, np.ndarray)
         sqrt_t = math.sqrt(maturity)
-        if spot <= 0 or strike <= 0 or vol <= 0 or maturity <= 0:
+        spot_invalid = bool(np.any(spot <= 0)) if array else spot <= 0
+        if spot_invalid or strike <= 0 or vol <= 0 or maturity <= 0:
             raise ValidationError("Invalid inputs for d1/d2 calculation.")
-        d1 = (math.log(spot / strike) + (rate - div + 0.5 * vol * vol) * maturity) / (
+        log = np.log if array else math.log
+        d1 = (log(spot / strike) + (rate - div + 0.5 * vol * vol) * maturity) / (
             vol * sqrt_t
         )
         d2 = d1 - vol * sqrt_t

@@ -138,11 +138,13 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(product.strike, maturity)
         discrete = product.observation_type == ObservationType.DISCRETE
+        resolved = None
         if discrete:
             # W18c (spec 2026-10-13 I4, A8): breached now only by a record at the valuation instant, at its own
             # levels; forward, the corridor every remaining record shares (None: the levels differ -- no closed
             # form, refused before any forward value)
-            hit_record = self._breached_at_valuation(product, pricing_env, spot)
+            resolved = self._resolved_records(product, pricing_env)    # once per price
+            hit_record = self._breached_at_valuation(product, pricing_env, spot, resolved)
             forward = forward_double_barrier_levels(product, pricing_env)
         else:
             hit_record = None
@@ -167,7 +169,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
 
         if maturity < self.MIN_MATURITY:
             return (
-                self._price_at_maturity(product, pricing_env, spot, terminal_timing.payment_df)
+                self._price_at_maturity(product, pricing_env, spot, terminal_timing.payment_df, resolved)
                 + pending_pv
             )
 
@@ -185,11 +187,11 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 refuse_mixed_forward_levels(
                     product.observation_schedule, pricing_env, default_payoff=product.knock_out_rebate,
                     business_days_in_year=product.business_days_in_year)
-            if spot >= upper or spot <= lower or has_future_observation(self._resolved_records(product, pricing_env)):
+            if spot >= upper or spot <= lower or has_future_observation(resolved):
                 # No observation deciding now, inside or outside the corridor: the next observation decides
                 return (
                     self._price_beyond_discrete(
-                        product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, upper, lower
+                        product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, upper, lower, resolved
                     )
                     + pending_pv
                 )
@@ -262,10 +264,13 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         )
 
     def _breached_at_valuation(
-        self, product: DoubleSharkfinOption, pricing_env: PricingEnvironment, spot: float
+        self, product: DoubleSharkfinOption, pricing_env: PricingEnvironment, spot: float, resolved=None
     ):
-        """The first observation at the valuation instant the spot breaches at its own levels, or None."""
-        for rec in observed_at_valuation(self._resolved_records(product, pricing_env)):
+        """The first observation at the valuation instant the spot breaches at its own levels, or None
+        (``resolved``: the records already resolved for this price)."""
+        if resolved is None:
+            resolved = self._resolved_records(product, pricing_env)
+        for rec in observed_at_valuation(resolved):
             if spot <= rec.lower_barrier or spot >= rec.upper_barrier:
                 return rec
         return None
@@ -276,12 +281,13 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         pricing_env: PricingEnvironment,
         spot: float,
         terminal_payment_df: float,
+        resolved=None,
     ) -> float:
         """The value at maturity: a discrete schedule is breached only by its records at the valuation instant,
         each at its own levels and paying its own cash (hit-paid: at the record's payment time); continuous and
-        expiry monitoring observe the spot."""
+        expiry monitoring observe the spot. ``resolved``: the records already resolved for this price."""
         if product.observation_type == ObservationType.DISCRETE:
-            record = self._breached_at_valuation(product, pricing_env, spot)
+            record = self._breached_at_valuation(product, pricing_env, spot, resolved)
             if record is None:
                 return product.get_no_hit_payoff(spot) * terminal_payment_df
             cash_df = (
@@ -308,6 +314,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         terminal_timing,
         upper: float,
         lower: float,
+        resolved=None,
     ) -> float:
         """The value through the first future observation (``first_observation``), no observation deciding now,
         the spot inside or outside the corridor.
@@ -316,11 +323,13 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         hit-paid, else at the terminal payment time); otherwise the continuation is this engine's shifted value
         from ``t1``: the participation leg (Ikeda-Kunitomo on the shifted corridor), the knock-out cash on the
         remaining observations and the no-hit cash. Under the engine's flat rate throughout. ``upper`` / ``lower``:
-        the corridor the remaining records share (W18c).
+        the corridor the remaining records share (W18c). ``resolved``: the records already resolved for this price.
+        The closures take an array of spots at ``t1``; the survivals to the later observations are one array call.
         """
         schedule = product.observation_schedule
         lower_shifted, upper_shifted = self._shift_discrete_barriers(product, vol, pricing_env, upper, lower)
-        resolved = self._resolved_records(product, pricing_env)
+        if resolved is None:
+            resolved = self._resolved_records(product, pricing_env)
         first = first_future_observation(resolved, schedule, single=False)
         t1 = first.time
         tau = maturity - t1
@@ -336,17 +345,19 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         def cash_df(settlement_time: float) -> float:
             return float(safe_exp(-rate * (settlement_time - t1)))
 
-        def hit_value(s: float) -> float:
+        def hit_value(s: np.ndarray) -> float:
             paid = cash_df(first.settlement_time) if product.pay_at_hit else terminal_df
             return first.payoff * paid * multiplier
 
-        def survival(s: float, horizon: float) -> float:
+        def survival(s: np.ndarray, horizon) -> np.ndarray:
             return double_no_touch(s, horizon, rate, div, vol, lower_shifted, upper_shifted)
 
-        def continuation(s: float) -> float:
+        horizons = np.array([min(rec.observation_time, maturity) - t1 for rec in later])
+
+        def continuation(s: np.ndarray) -> np.ndarray:
             if not later:
                 return self._unmonitored_value(product, s, tau, rate, div, vol, terminal_timing.delay_df)
-            option_leg = max(
+            option_leg = np.maximum(
                 db._price_knock_out_ikeda_kuintomo(
                     S=s, K=product.strike, L=lower_shifted, U=upper_shifted, T=tau,
                     r=rate, b=rate - div, sigma=vol, is_call=is_call,
@@ -357,14 +368,15 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             value = participation * option_leg + no_hit_cash * terminal_df * survive
             if ko_cash > 0.0:
                 if product.pay_at_hit:
+                    survivals = survival(s[:, None], horizons[None, :])    # spot x later observation
                     previous = 1.0
-                    for rec in later:
-                        current = survival(s, min(rec.observation_time, maturity) - t1)
-                        value += ko_cash * max(previous - current, 0.0) * cash_df(rec.settlement_time)
-                        previous = min(max(current, 0.0), previous)
+                    for j, rec in enumerate(later):
+                        current = survivals[:, j]
+                        value += ko_cash * np.maximum(previous - current, 0.0) * cash_df(rec.settlement_time)
+                        previous = np.minimum(np.maximum(current, 0.0), previous)
                 else:
                     value += ko_cash * terminal_df * (1.0 - survive)
-            return max(value, 0.0) * multiplier
+            return np.maximum(value, 0.0) * multiplier
 
         return through_first_observation(
             spot=spot, first=first, rate=rate, div=div, vol=vol,
@@ -382,14 +394,19 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         vol: float,
         delay_df: float,
     ) -> float:
-        """The no-hit payoff with no observation left: a call spread K..U (put spread L..K) plus the no-hit cash."""
+        """The no-hit payoff with no observation left: a call spread K..U (put spread L..K) plus the no-hit cash.
+        ``spot`` a float or an array of spots."""
+        array = isinstance(spot, np.ndarray)
         if is_zero(tau):
+            if array:
+                return np.array([product.get_no_hit_payoff(s) for s in spot.tolist()]) * delay_df
             return product.get_no_hit_payoff(spot) * delay_df
         bs = self._double_barrier_engine._bs_engine
         sqrt_tau = float(safe_sqrt(tau))
 
         def vanilla(strike: float, call: bool) -> float:
-            d1 = (float(safe_log(spot / strike)) + (rate - div + 0.5 * vol * vol) * tau) / (vol * sqrt_tau)
+            log_moneyness = safe_log(spot / strike) if array else float(safe_log(spot / strike))
+            d1 = (log_moneyness + (rate - div + 0.5 * vol * vol) * tau) / (vol * sqrt_tau)
             d2 = d1 - vol * sqrt_tau
             return bs._price_call(spot, strike, tau, rate, div, d1, d2) if call else bs._price_put(
                 spot, strike, tau, rate, div, d1, d2)

@@ -201,6 +201,17 @@ def safe_power(
         return max_result if exponent > 0 else 0.0
 
 
+def pow_elementwise(base: np.ndarray, exponent: float) -> np.ndarray:
+    """``base ** exponent`` elementwise through the platform ``pow``, as the scalar ``x ** exponent`` computes it.
+
+    ``np.power`` with a scalar exponent of 2, 0.5 or -1 takes a shortcut (square, square root, reciprocal) that
+    differs from ``pow`` in the last bit; a full exponent array keeps ``pow``. No clipping, no overflow handling:
+    an overflow is ``inf`` as in ``np.power``.
+    """
+    base = np.asarray(base, dtype=float)
+    return np.power(base, np.full(base.shape, exponent, dtype=float))
+
+
 def clip_to_range(
     x: Union[float, np.ndarray],
     min_val: Optional[float] = None,

@@ -31,6 +31,7 @@ from .safe_math import (
     safe_sqrt,
     safe_divide,
     safe_power,
+    pow_elementwise,
     clip_to_range,
 )
 from .formatting import (
@@ -91,6 +92,7 @@ __all__ = [
     'safe_sqrt',
     'safe_divide',
     'safe_power',
+    'pow_elementwise',
     'clip_to_range',
     # Formatting
     'format_currency',
