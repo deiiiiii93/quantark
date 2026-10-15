@@ -284,14 +284,17 @@ def test_records_are_resolved_once_per_price(monkeypatch, name, engine_cls, buil
 # the closed forms' array paths are their scalar paths, elementwise
 # ======================================================================================================================
 
-def _assert_twin(array_values, scalar_values):
+def _assert_twin(array_values, scalar_values, scale=1.0):
+    """Bitwise where NumPy's ufuncs are libm's; elsewhere within 1e-12 relative plus 1e-13 of ``scale`` (the size of
+    the terms: a value near 0 is a difference of terms of the spot's size, whose last bits SIMD moves)."""
     array_values = np.asarray(array_values, dtype=float)
     scalar_values = np.asarray(scalar_values, dtype=float)
     assert array_values.shape == scalar_values.shape
     if LIBM_UFUNCS:
         assert np.array_equal(array_values, scalar_values, equal_nan=True)
     else:
-        np.testing.assert_allclose(array_values, scalar_values, rtol=1e-12, atol=1e-15)
+        bound = 1e-12 * np.abs(scalar_values) + 1e-13 * np.asarray(scale, dtype=float)
+        assert np.all(np.abs(array_values - scalar_values) <= bound), np.max(np.abs(array_values - scalar_values))
 
 
 SPOT_GRID = np.array([40.0, 74.9, 75.0, 75.1, 90.0, 100.0, 104.9, 119.99, 120.0, 120.01, 129.9, 135.0, 300.0])
@@ -316,7 +319,7 @@ def test_single_barrier_knock_out_array_path(is_call, is_up, barrier, vol):
     kw = dict(strike=100.0, barrier=barrier, maturity=0.7, rate=0.03, carry=0.02, vol=vol, is_call=is_call,
               is_up=is_up)
     _assert_twin(engine._price_knock_out_closed_form(spot=SPOT_GRID, **kw),
-                 [engine._price_knock_out_closed_form(spot=s, **kw) for s in SPOT_GRID.tolist()])
+                 [engine._price_knock_out_closed_form(spot=s, **kw) for s in SPOT_GRID.tolist()], scale=SPOT_GRID)
 
 
 @pytest.mark.parametrize("term", ["_instant_touch_term", "_expiry_touch_term"])
@@ -335,7 +338,7 @@ def test_ikeda_kunitomo_array_path(is_call, vol, maturity):
     spots = SPOT_GRID[(SPOT_GRID > 75.0) & (SPOT_GRID < 130.0)]
     kw = dict(K=100.0, L=78.0, U=126.0, T=maturity, r=0.03, b=0.02, sigma=vol, is_call=is_call)
     _assert_twin(engine._price_knock_out_ikeda_kuintomo(S=spots, **kw),
-                 [engine._price_knock_out_ikeda_kuintomo(S=s, **kw) for s in spots.tolist()])
+                 [engine._price_knock_out_ikeda_kuintomo(S=s, **kw) for s in spots.tolist()], scale=spots)
 
 
 def test_double_no_touch_array_path():

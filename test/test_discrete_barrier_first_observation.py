@@ -26,6 +26,7 @@ import warnings
 import pytest
 
 import test_discrete_barrier_between_observations as T
+from golden_compare import assert_close
 from quantark.asset.equity.engine.analytical import (
     barrier_analytical_engine,
     double_barrier_option_engine,
@@ -416,13 +417,15 @@ def test_composite_legs_project_inside_the_level(name, monkeypatch):
 
 
 # ======================================================================================================================
-# beyond the level: main's projection, bitwise
+# beyond the level: main's projection
 # ======================================================================================================================
 
 @pytest.mark.parametrize("name,spot", list(BEYOND_PINS), ids=[f"{n}-{s:.4f}" for n, s in BEYOND_PINS])
-def test_beyond_the_level_the_value_is_bitwise_main(name, spot):
+def test_beyond_the_level_the_value_is_mains(name, spot):
+    """Main's values (bitwise on the ARM64 machine that took them; NumPy's SIMD exp / log / pow on x86 moves the
+    last bits of the vectorised projection, so the frozen literals compare at the golden tolerance)."""
     engine, product = _between(name)
-    assert _price(engine, product, spot) == BEYOND_PINS[(name, spot)]
+    assert_close(_price(engine, product, spot), BEYOND_PINS[(name, spot)], msg=f"{name} {spot}")
 
 
 # ======================================================================================================================

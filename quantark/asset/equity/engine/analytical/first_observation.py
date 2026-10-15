@@ -241,8 +241,11 @@ def through_first_observation(
         edges = [a] + [z for z in kink_z if a < z < b] + [b]
         for left, right in zip(edges[:-1], edges[1:]):
             if graded:
-                at_left = any(math.isclose(left, z) for z in kink_z)
-                at_right = any(math.isclose(right, z) for z in kink_z)
+                # an end with a kink on it, or one whose smoothing layer reaches it from beyond (a strike just past
+                # the level): within TRUNCATION_SD of the layer's own scale
+                reach = TRUNCATION_SD * natural
+                at_left = any(abs(left - z) <= reach for z in kink_z)
+                at_right = any(abs(right - z) <= reach for z in kink_z)
                 region_cuts.append((fn, _graded_cuts(left, right, at_left, at_right, natural, width)))
             else:
                 panels = max(1, int(math.ceil((right - left) / width)))

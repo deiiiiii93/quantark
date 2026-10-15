@@ -10,6 +10,7 @@ knock-out options with continuous monitoring. Supports:
 Knock-in options are priced via parity: knock-in = vanilla - knock-out.
 """
 
+import inspect
 import math
 from typing import Optional
 
@@ -67,7 +68,7 @@ from .first_observation import (
 )
 
 #: ``safe_power``'s default cap on the magnitude of a power
-_POWER_CAP = 1e308
+_POWER_CAP = inspect.signature(safe_power).parameters["max_result"].default
 
 
 class DoubleBarrierOptionAnalyticalEngine(BaseEngine):

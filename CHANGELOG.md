@@ -75,11 +75,13 @@ backtest and FX dynamic scenario.
     the strike inside a panel) and is now the European payoff decided at T, e.g. the up-and-out call 5.562826
     (closed form 5.562826, main's shifted formula 5.6967), the double knock-out call 5.780781 (main 5.7835). A tiny
     time left (the payoff smoothed over less than the 0.05 panel floor, e.g. 2e-10 <= tau <= 1e-6 after a monthly
-    record) grades the panels away from each kink from that scale; such contracts were refused too and now match
-    the European value over tau within 1e-13.
+    record) grades the panels away from each kink from that scale, and from a region edge that kink's layer reaches
+    (a strike just beyond the level); such contracts were refused too and now match the European value over tau
+    (within 1e-11, measured <= 1e-13).
   - Performance: the projection evaluates its integrand once on every quadrature node (vectorised closed forms,
-    records resolved once per price), bit-exact; inside the level the barrier-family prices now take 0.5-2.4x the
-    time of the old closed-form path (double knock-out daily 3.1 ms, accumulator daily 0.38 s).
+    records resolved once per price), bit-exact on ARM64 (last-bit differences possible where NumPy uses its own
+    SIMD exp / log / pow, x86 with AVX-512); inside the level the barrier-family prices now take 0.5-2.5x the time of
+    the old closed-form path (double sharkfin weekly 2.47x, double knock-out daily 3.1 ms, accumulator daily 0.38 s).
   - Moved values: every DISCRETE cell with no breached record now and the spot inside the level (fresh contracts
     included, and a record day whose record the spot does not cross); beyond the level the values are bitwise
     unchanged. Next to the level the error vs QUAD drops, e.g. the up-and-out call (K 100, L 120, monthly, 0.7 y
@@ -89,11 +91,12 @@ backtest and FX dynamic scenario.
 - A no-touch has one rebate on every route (user decision 2026-10-15, as a knock-in's since 2026-10-10): it is paid
   only when nothing touches, so a schedule record of a `OneTouchOption` NO_TOUCH or `DoubleOneTouchOption`
   DOUBLE_NO_TOUCH paying anything other than `rebate` is refused (`ValidationError`,
-  `barrier_schedule_rules.refuse_no_touch_record_payoff`) by the analytical one-touch engine, `DiscreteQuadEngine`
-  and the PDE touch solvers / `PDEEngine`. Before, QUAD subtracted a one-touch paying each record's payoff: records
-  paying 3 on a rebate of 1 gave 0.14 where the analytical engine and the PDE gave 0.69. A record without a payoff,
-  or one paying the rebate, prices as before; the single sharkfin's no-hit leg carries records paying its cash, so
-  sharkfin values are bitwise unchanged.
+  `barrier_schedule_rules.refuse_no_touch_record_payoff`) by the analytical one-touch engine, `DiscreteQuadEngine`,
+  the PDE touch solvers / `PDEEngine`, and a run's `BarrierLifecycleTracker` (the equity backtest and the dynamic
+  scenario take the contract there; the cash it books was already right). Before, QUAD subtracted a one-touch
+  paying each record's payoff: records paying 3 on a rebate of 1 gave 0.14 where the analytical engine and the PDE
+  gave 0.69. A record without a payoff, or one paying the rebate, prices as before; the single sharkfin's no-hit
+  leg carries records paying its cash, so sharkfin values are bitwise unchanged.
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
   (`TargetRedemptionState(0.0)` for a contract booked at inception); omitting it raises `ValidationError`.
 - **Breaking:** a numeric `FxTargetRedemptionNote` states when its first listed period began: `accrual_start` (years

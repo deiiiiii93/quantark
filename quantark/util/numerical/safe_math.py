@@ -202,11 +202,13 @@ def safe_power(
 
 
 def pow_elementwise(base: np.ndarray, exponent: float) -> np.ndarray:
-    """``base ** exponent`` elementwise through the platform ``pow``, as the scalar ``x ** exponent`` computes it.
+    """``base ** exponent`` elementwise through NumPy's general power loop.
 
     ``np.power`` with a scalar exponent of 2, 0.5 or -1 takes a shortcut (square, square root, reciprocal) that
-    differs from ``pow`` in the last bit; a full exponent array keeps ``pow``. No clipping, no overflow handling:
-    an overflow is ``inf`` as in ``np.power``.
+    differs from ``pow`` in the last bit; a full exponent array keeps the general loop. That loop is the platform
+    ``pow`` where NumPy has no kernel of its own (ARM64: bitwise the scalar ``x ** exponent``); on x86 with AVX-512
+    NumPy may use its own SIMD kernel (SVML), which can differ from the scalar ``pow`` in the last bit. No clipping,
+    no overflow handling: an overflow is ``inf`` as in ``np.power``.
     """
     base = np.asarray(base, dtype=float)
     return np.power(base, np.full(base.shape, exponent, dtype=float))

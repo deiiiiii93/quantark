@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from golden_compare import assert_close
 from pde_routes.barrier_reference import knock_out
 from pde_routes.cases import CONST, black_scholes, env_const, obs_dates
 from quantark.asset.equity.engine.analytical.double_barrier_option_engine import DoubleBarrierOptionAnalyticalEngine
@@ -124,7 +125,9 @@ def test_rebate_free_and_expiry_inside_are_bit_identical():
         _, kind, call, rebate, obs, spot = tag.split("|")
         p = product(KO if kind == "KO" else KI, call == "call", float(rebate), obs)
         if tag in MOVED:
-            assert price(p, env_const(float(spot))) == MOVED[tag], tag
+            # the vectorised projection: bitwise on the ARM64 machine that took them, the golden tolerance across
+            # architectures (NumPy's SIMD exp / log / pow on x86)
+            assert_close(price(p, env_const(float(spot))), MOVED[tag], msg=tag)
             continue
         assert price(p, env_const(float(spot))).hex() == value, tag
 

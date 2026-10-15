@@ -262,15 +262,22 @@ _AT_T1 = {
 
 
 def _reference(name, spot, tau):
-    """DF(t1) E[value at t1 of S_t1] by adaptive quadrature (scipy), broken at the levels and across each level's
+    return _reference_of(*_AT_T1[name], spot, tau)
+
+
+def _reference_of(value, levels, spot, tau):
+    """DF(t1) E[value(S_t1, tau)] by adaptive quadrature (scipy), broken at the levels and across each level's
     smoothing layer: independent of the engines' rule and closed forms."""
-    value, levels = _AT_T1[name]
     sd = VOL * math.sqrt(TAU)
     mean = math.log(spot) + (R - Q - 0.5 * VOL * VOL) * TAU
     h = math.sqrt(tau / TAU)
     points = sorted({(math.log(lv) - mean) / sd + sign * m * h for lv in levels for sign in (-1, 1)
                      for m in (0.0, 0.5, 1, 2, 4, 8, 16, 32, 64)})
-    edges = [-12.0] + [p for p in points if -12.0 < p < 12.0] + [12.0]
+    edges = [-12.0]
+    for p in points:
+        if -12.0 < p < 12.0 and p - edges[-1] > 1e-9 * max(h, 1e-6):     # merge breakpoints closer than that
+            edges.append(p)
+    edges.append(12.0)
     total = sum(integrate.quad(lambda z: norm.pdf(z) * value(math.exp(mean + sd * z), tau), a, b,
                                epsabs=1e-14, epsrel=1e-12, limit=500)[0] for a, b in zip(edges[:-1], edges[1:]))
     return math.exp(-R * TAU) * total
@@ -290,3 +297,50 @@ def test_a_tiny_remaining_time_matches_the_european_payoff_over_it(name, tau, sp
 def test_every_kind_prices_with_a_tiny_remaining_time(name, engine_cls, build, tau):
     for spot in (90.0, 100.0, 105.0):
         assert math.isfinite(_price(engine_cls, build(1.0 + tau), spot))
+
+
+# --- a strike just beyond the level: its smoothing layer reaches into the region --------------------------------
+#
+# The strike c natural scales beyond the level, on the breached side: no kink inside the alive region, but the
+# continuation's layer around the strike reaches into it from its edge, so that edge is graded too (final review
+# I2: a down-and-out call K 84.999 on L 85 refused, orders apart by 6.6e-9; main 5.51545).
+
+#: name -> (barrier type, option type, level, side of the breach, spot)
+EDGE = {
+    "DOC": (BarrierType.DOWN_OUT, OptionType.CALL, 85.0, -1, 90.0),
+    "UOP": (BarrierType.UP_OUT, OptionType.PUT, 120.0, +1, 110.0),
+    "DIP": (BarrierType.DOWN_IN, OptionType.PUT, 85.0, -1, 90.0),
+}
+
+
+def _edge_value(name, strike):
+    barrier_type, option_type, level, _, _ = EDGE[name]
+    call = option_type == OptionType.CALL
+    if barrier_type == BarrierType.DOWN_IN:
+        return lambda s, tau: _bs(s, strike, tau, call) if s <= level else 0.0
+    breached = (lambda s: s <= level) if barrier_type == BarrierType.DOWN_OUT else (lambda s: s >= level)
+    return lambda s, tau: 0.0 if breached(s) else _bs(s, strike, tau, call)
+
+
+def _edge_product(name, strike, tau):
+    barrier_type, option_type, level, _, _ = EDGE[name]
+    return BarrierOption(strike=strike, option_type=option_type, barrier=level, barrier_type=barrier_type, rebate=0.0,
+                         observation_schedule=T._single_schedule(level), **_disc(1.0 + tau))
+
+
+def test_a_strike_a_hair_below_a_down_and_out_level():
+    """5.543136 (main's shifted closed form: 5.51545)."""
+    value = _price(BarrierAnalyticalEngine, _edge_product("DOC", 84.999, 1e-6), 90.0)
+    reference = _reference_of(_edge_value("DOC", 84.999), (85.0, 84.999), 90.0, 1e-6)
+    assert value == pytest.approx(reference, abs=1e-11, rel=0.0)
+
+
+@pytest.mark.parametrize("scales", [0.05, 0.5, 1.0, 4.0])
+@pytest.mark.parametrize("tau", [2e-8, 1e-7, 1e-6])
+@pytest.mark.parametrize("name", list(EDGE))
+def test_a_strike_just_beyond_the_level_matches_the_european_payoff(name, tau, scales):
+    _, _, level, side, spot = EDGE[name]
+    strike = level * math.exp(side * scales * math.sqrt(tau / TAU) * VOL * math.sqrt(TAU))
+    value = _price(BarrierAnalyticalEngine, _edge_product(name, strike, tau), spot)
+    reference = _reference_of(_edge_value(name, strike), (level, strike), spot, tau)
+    assert value == pytest.approx(reference, abs=1e-11, rel=0.0)
