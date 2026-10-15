@@ -12,6 +12,7 @@ from quantark.asset.equity.engine.barrier_schedule_rules import (
     forward_barrier_level,
     forward_knock_out_cash,
     refuse_mixed_forward_levels,
+    refuse_no_touch_record_payoff,
     valuation_barrier_terms,
 )
 from quantark.asset.equity.engine.base_engine import BaseEngine
@@ -91,6 +92,7 @@ class OneTouchAnalyticalEngine(BaseEngine):
                 f"got {type(product).__name__}"
             )
         validate_settlement_capability(self, product, lifecycle_state)
+        refuse_no_touch_record_payoff(product)      # one rebate per no-touch, as on every route (2026-10-15)
         fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
         if fixed_pv is not None:
             return fixed_pv

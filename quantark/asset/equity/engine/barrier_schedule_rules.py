@@ -37,6 +37,25 @@ def refuse_knock_in_record_payoff(product) -> None:
                 "(spec 3C §5.2 (a))")
 
 
+def refuse_no_touch_record_payoff(product) -> None:
+    """A no-touch has one rebate (user decision 2026-10-15): like a knock-in's, it is paid only when NO observation
+    touches, so no record's payoff can apply. A schedule record of a no-touch (``OneTouchOption`` NO_TOUCH,
+    ``DoubleOneTouchOption`` DOUBLE_NO_TOUCH) paying anything other than ``product.rebate`` is refused; a record
+    without a payoff, or one paying the rebate, is the same contract. One-touches (a record's payoff is the touch
+    cash) are not concerned. Every route that prices a no-touch reads it.
+    """
+    if not (getattr(product, "is_no_touch", False) or getattr(product, "is_double_no_touch", False)):
+        return
+    schedule = getattr(product, "observation_schedule", None)
+    if schedule is None:
+        return
+    for rec in schedule.records:
+        if rec.payoff is not None and not is_close(rec.payoff, product.rebate):
+            raise ValidationError(
+                f"a no-touch has one rebate ({product.rebate}); a schedule record pays {rec.payoff} "
+                "(user decision 2026-10-15)")
+
+
 # ======================================================================================================================
 # The deciding record at the valuation instant (W18b, user approval 2026-10-10; A15 2026-10-14) and the forward level
 # ======================================================================================================================

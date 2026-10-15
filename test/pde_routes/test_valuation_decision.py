@@ -233,12 +233,15 @@ def curves(env):
     return df, growth
 
 
-def records(double, with_valuation_record):
+def records(double, with_valuation_record, paying=True):
+    """``paying`` False: no record pays (a no-touch has one rebate, user decision 2026-10-15)."""
     own = dict(upper_barrier=120.0, lower_barrier=85.0) if double else dict(barrier=120.0)
     std = dict(upper_barrier=130.0, lower_barrier=80.0) if double else dict(barrier=130.0)
-    recs = [ObservationRecord(observation_time=0.5, payoff=5.0, **std), ObservationRecord(observation_time=1.0, payoff=5.0, **std)]
+    later, valuation = (5.0, 7.0) if paying else (None, None)
+    recs = [ObservationRecord(observation_time=0.5, payoff=later, **std),
+            ObservationRecord(observation_time=1.0, payoff=later, **std)]
     if with_valuation_record:
-        recs.insert(0, ObservationRecord(observation_time=0.0, payoff=7.0, **own))
+        recs.insert(0, ObservationRecord(observation_time=0.0, payoff=valuation, **own))
     return ObservationSchedule(records=recs)
 
 
@@ -281,7 +284,7 @@ def test_record_levels_lags_and_curves(market, lag, name):
         env = MARKETS[market](spot)
         df, growth = curves(env)
         fired = spot >= 120.0 or (double and spot <= 85.0)
-        price = float(solver().price(make(records(double, True), lag), env))
+        price = float(solver().price(make(records(double, True, paying=payoff != "one"), lag), env))
         if fired:
             assert abs(price - record_cash * df(1.0 + lag)) <= FIRES, (spot, price)
         else:

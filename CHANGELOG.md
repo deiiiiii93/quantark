@@ -83,6 +83,14 @@ backtest and FX dynamic scenario.
     left) at 119.99: 0.7801 -> 0.7227 (QUAD 0.7140), the double knock-in call (75 / 130) at 129.5: 29.1647 ->
     29.3132 (QUAD 29.3007); max |error| within 0.5 of the level 0.004-0.04 (was 0.01-0.16). On a record day (aged
     onto a record the spot does not cross) the max |error| vs QUAD is 0.048 (was 0.24).
+- A no-touch has one rebate on every route (user decision 2026-10-15, as a knock-in's since 2026-10-10): it is paid
+  only when nothing touches, so a schedule record of a `OneTouchOption` NO_TOUCH or `DoubleOneTouchOption`
+  DOUBLE_NO_TOUCH paying anything other than `rebate` is refused (`ValidationError`,
+  `barrier_schedule_rules.refuse_no_touch_record_payoff`) by the analytical one-touch engine, `DiscreteQuadEngine`
+  and the PDE touch solvers / `PDEEngine`. Before, QUAD subtracted a one-touch paying each record's payoff: records
+  paying 3 on a rebate of 1 gave 0.14 where the analytical engine and the PDE gave 0.69. A record without a payoff,
+  or one paying the rebate, prices as before; the single sharkfin's no-hit leg carries records paying its cash, so
+  sharkfin values are bitwise unchanged.
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
   (`TargetRedemptionState(0.0)` for a contract booked at inception); omitting it raises `ValidationError`.
 - **Breaking:** a numeric `FxTargetRedemptionNote` states when its first listed period began: `accrual_start` (years

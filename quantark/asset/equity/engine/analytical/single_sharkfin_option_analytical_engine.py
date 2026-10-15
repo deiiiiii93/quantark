@@ -266,13 +266,23 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
     ) -> float:
         """Value a fixed cash leg conditional on touch or no-touch. A DISCRETE touch pays the touching record's
         payoff (the one-touch engine reads it, W18c): the knock-out cash leg is skipped only when neither the product
-        nor any record pays cash."""
+        nor any record pays cash. The no-touch leg (the no-hit cash) has one rebate, so its records pay that cash, as
+        the knock-out leg's pay nothing (``refuse_no_touch_record_payoff``; the sharkfin's records pay the knock-out
+        cash)."""
         if rebate <= 0.0 and not (
             touch_type == TouchType.ONE_TOUCH
             and product.observation_type == ObservationType.DISCRETE
             and any(rec.payoff is not None and rec.payoff > 0.0 for rec in product.observation_schedule.records)
         ):
             return 0.0
+        schedule = product.observation_schedule
+        if touch_type == TouchType.NO_TOUCH and schedule is not None:
+            schedule = ObservationSchedule(
+                records=[replace(rec, payoff=rebate) for rec in schedule.records],
+                aggregation_mode=schedule.aggregation_mode,
+                frequency=schedule.frequency,
+                monitoring_ended=schedule.monitoring_ended,
+            )
 
         touch_option = OneTouchOption(
             barrier=product.barrier,
@@ -288,7 +298,7 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             touch_type=touch_type,
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
-            observation_schedule=product.observation_schedule,
+            observation_schedule=schedule,
         )
         return self._one_touch_engine.price(touch_option, pricing_env)
 

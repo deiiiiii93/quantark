@@ -135,6 +135,12 @@ def test_nodal_keeps_each_solvers_semantics(name, monkeypatch):
         with pytest.raises(ValidationError):
             solver.calculate_greeks(factory(), env)
         return
+    if name == "no_touch|stop":
+        # user decision 2026-10-15: a no-touch has one rebate; this 0.7.0 no-touch's records pay 2 and 3 on a rebate
+        # of 1, so it is refused rather than priced
+        with pytest.raises(ValidationError, match="no-touch has one rebate"):
+            solver.calculate_greeks(factory(), env)
+        return
     g = solver.calculate_greeks(factory(), env)
     banked = V070[name]
     # flip (g) moves every put's far-field row (forward over [t, T], spec 3A §5.10): a put keeps its

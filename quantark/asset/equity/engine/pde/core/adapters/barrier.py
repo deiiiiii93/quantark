@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from quantark.asset.equity.engine.barrier_schedule_rules import refuse_knock_in_record_payoff
+from quantark.asset.equity.engine.barrier_schedule_rules import (
+    refuse_knock_in_record_payoff,
+    refuse_no_touch_record_payoff,
+)
 from quantark.asset.equity.engine.pde.grid.events import DiscreteEvent, EventOp, EventRecord, fold_decision
 from quantark.util.enum import ObservationAggregation, ObservationType
 from quantark.util.exceptions import PricingError, ValidationError
@@ -524,6 +527,11 @@ class DoubleBarrierAdapter(_KnockInAdapter):
 
 class _TouchAdapter(_BarrierFamilyAdapter):
     """One-touch and double one-touch: a touched one-touch pays the rebate, a touched no-touch nothing."""
+
+    def validate(self, product, env, request, lifecycle_state) -> None:
+        super().validate(product, env, request, lifecycle_state)
+        if request.operation in _FACADE:
+            refuse_no_touch_record_payoff(product)      # one rule for every route (2026-10-15)
 
     def _is_touch_paying(self, product) -> bool:
         raise NotImplementedError
