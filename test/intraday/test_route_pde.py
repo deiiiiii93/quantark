@@ -106,7 +106,7 @@ def test_refinement_respects_the_grid_memory_budget_and_says_so(sse_calendar, ss
     assert n["resolution"] == "under_resolved" and "grid memory budget" in n["resolution_reason"]
 
 
-def test_a_memory_phoenix_budget_counts_every_coupon_state_surface(sse_calendar, sse_sessions, desk, monkeypatch):
+def test_a_memory_phoenix_budget_counts_the_two_memory_state_surfaces(sse_calendar, sse_sessions, desk, monkeypatch):
     # a memory Phoenix keeps two memory states whatever its coupon count (state 0 and state 0 plus one unit of
     # arrears), 2(1+1)+2 surfaces with the termination pair; the budget divides by what the solve really keeps
     from quantark.asset.equity.engine.pde import PhoenixPDESolver

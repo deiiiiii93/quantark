@@ -82,7 +82,7 @@ the bumped market.
 | Knock-in barriers | two prepared problems (vanilla, knock-out); knocked in: the vanilla alone | each part its own family's |
 | DCN, LV DCN | `alive` (never knocked in) and `ki` as one two-column group | banded |
 | Snowball, KO-reset, LV snowball | alive and knocked-in as one two-column group | banded, one `solve_banded` per step; LU with two one-column groups when the interior has two nodes or fewer |
-| Phoenix, LV phoenix | one group per (memory state, surface), plus the two termination surfaces under EXPIRY coupons, each one column | banded or LU per column |
+| Phoenix, LV phoenix | memory coupons: `v0[0..1]`, `v1[0..1]` (state 0 and state 0 plus one unit of arrears), plus `w0`, `w1` under EXPIRY coupons, as one multi-column group; no memory: one group per surface, each one column | memory: banded, one `solve_banded` per step; no memory, and the LU path when the interior has two nodes or fewer: one column per group |
 | Event statistics | one rolling group of `2·n_cols` columns (both surfaces hstacked) | banded only; all-zero columns skipped |
 
 | Policy | Boundary | θ | After events |

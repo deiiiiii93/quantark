@@ -47,7 +47,6 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._coupon_observation_indices: Dict[int, int] = {}
         self._coupon_barriers: np.ndarray = np.array([])
         self._coupon_amounts: np.ndarray = np.array([])
-        self._coupon_cumulative: np.ndarray = np.array([])
         self._initial_coupon_arrears: float = 0.0
         # Termination-value surfaces; None whenever coupons pay INSTANT, and on
         # any solve path that never prepared them.
@@ -246,7 +245,7 @@ class PhoenixPDESolver(SnowballPDESolver):
             return
 
         ko_times = [rec.observation_time for rec in ko_records]
-        (self._coupon_barriers, self._coupon_amounts, self._coupon_cumulative,
+        (self._coupon_barriers, self._coupon_amounts,
          self._initial_coupon_arrears) = self._coupon_schedule(product, pricing_env)
         for obs_idx, obs_time in enumerate(ko_times):
             if is_close(obs_time, 0.0):
@@ -263,8 +262,8 @@ class PhoenixPDESolver(SnowballPDESolver):
                 self._coupon_observation_indices[idx] = obs_idx
 
     def _coupon_schedule(self, product: PhoenixOption, pricing_env: PricingEnvironment):
-        """The coupon barriers, amounts, their running sum and the carried arrears, one per resolved
-        knock-out record (the arrays ``_register_coupon_observations`` installs; spec 3B §10 step 3)."""
+        """The coupon barriers and amounts, one per resolved knock-out record, and the carried arrears (the
+        arrays ``_register_coupon_observations`` installs; spec 3B §10 step 3)."""
         ko_records = self._get_cached_ko_records(pricing_env, product)
         ko_times = [rec.observation_time for rec in ko_records]
         num_obs = len(ko_times)
@@ -290,15 +289,12 @@ class PhoenixPDESolver(SnowballPDESolver):
             ],
             dtype=float,
         )
-        coupon_cumulative = np.concatenate(
-            ([0.0], np.cumsum(coupon_amounts))
-        )
         initial_coupon_arrears = (
             float(product.coupon_config.initial_coupon_arrears)
             if product.has_memory_coupon
             else 0.0
         )
-        return coupon_barriers, coupon_amounts, coupon_cumulative, initial_coupon_arrears
+        return coupon_barriers, coupon_amounts, initial_coupon_arrears
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -605,11 +601,10 @@ class PhoenixPDESolver(SnowballPDESolver):
         return pay_mask, ko_mask
 
     @staticmethod
-    def _joint_branches(lows, his, b_c_x, b_ko_x, trig_up, ko_here, in_coupon_fan, ko_value, pay_value,
-                        miss_value, keep_value):
+    def _joint_branches(lows, his, b_c_x, b_ko_x, trig_up, ko_here, ko_value, pay_value, miss_value):
         """The joint coupon + knock-out partition's per-region arrays (``_apply_joint_coupon_ko_projection``):
-        ``ko_value(m_pay)`` in the knock-out region, then survive-and-pay, survive-and-miss, and the
-        out-of-fan array. Arrays are columns (the value) or blocks (the statistics)."""
+        ``ko_value(m_pay)`` in the knock-out region, then survive-and-pay and survive-and-miss. Arrays are
+        columns (the value) or blocks (the statistics)."""
         branches = []
         for j in range(len(lows)):
             if trig_up:
@@ -621,12 +616,10 @@ class PhoenixPDESolver(SnowballPDESolver):
             m_ko = m_ko and ko_here
             if m_ko:
                 branches.append(ko_value(m_pay))
-            elif in_coupon_fan and m_pay:
+            elif m_pay:
                 branches.append(pay_value)
-            elif in_coupon_fan:
-                branches.append(miss_value)
             else:
-                branches.append(keep_value)
+                branches.append(miss_value)
         return branches
 
     def _coupon_record_settlement_time(
@@ -866,7 +859,7 @@ class PhoenixPDESolver(SnowballPDESolver):
                 (grid_v1_list, diffused_cols[1], units[1], self._ko_survives_ki(product), disc_v1),
             ):
                 branches = self._joint_branches(
-                    lows, his, b_c_x, b_ko_x, trig_up, ko_here, True,
+                    lows, his, b_c_x, b_ko_x, trig_up, ko_here,
                     ko_value=lambda m_pay, _c=earned_k, _a=arrears: np.full(
                         n, (base_payoff + (_c if m_pay else _a)) * df    # the release rule (decision 4)
                     ),
@@ -874,7 +867,6 @@ class PhoenixPDESolver(SnowballPDESolver):
                     # EXPIRY, a plain discount factor otherwise.
                     pay_value=diffused0 + earned_k * disc,
                     miss_value=diffused0 + earned_k * unit if use_memory else diffused0,
-                    keep_value=grids[k][:, t_idx],
                 )
                 grids[k][:, t_idx] = project_piecewise_event(
                     x_vec, breaks, branches

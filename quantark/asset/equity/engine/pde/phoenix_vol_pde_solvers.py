@@ -628,7 +628,6 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         if num_obs == 0:
             self._coupon_barriers = np.array([], dtype=float)
             self._coupon_amounts = np.array([], dtype=float)
-            self._coupon_cumulative = np.array([0.0], dtype=float)
             return
 
         coupon_barrier = product.coupon_config.coupon_barrier
@@ -652,9 +651,6 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
                 for i in range(num_obs)
             ],
             dtype=float,
-        )
-        self._coupon_cumulative = np.concatenate(
-            ([0.0], np.cumsum(self._coupon_amounts))
         )
 
     @staticmethod

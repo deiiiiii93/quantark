@@ -310,7 +310,7 @@ class PhoenixStatistics(SnowballStatistics):
                 return v
 
             X[:, F] = project_piecewise_event(x_vec, breaks, solver._joint_branches(
-                lows, his, b_c_x, b_ko_x, trig_up, ko_here, True, f_ko_value, f_pay, f0, f0))
+                lows, his, b_c_x, b_ko_x, trig_up, ko_here, f_ko_value, f_pay, f0))
             for m in range(self.n_states):
                 arrears = solver._state_arrears(obs_idx, m) if memory else 0.0
                 coupon_at_ko = amt + arrears
@@ -326,8 +326,7 @@ class PhoenixStatistics(SnowballStatistics):
                 pay = X0[:, S[0]]
                 self._credit(pay, X0, k, earned, disc, j == len(self.t) - 1)
                 X[:, S[m]] = project_piecewise_event(x_vec, breaks, solver._joint_branches(
-                    lows, his, b_c_x, b_ko_x, trig_up, ko_here, True, s_ko_value, pay, self._missed(X0, earned),
-                    X0[:, S[m]]))
+                    lows, his, b_c_x, b_ko_x, trig_up, ko_here, s_ko_value, pay, self._missed(X0, earned)))
 
     def _column_of_term(self, term, surface):
         if term.column == "U":
