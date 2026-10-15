@@ -136,6 +136,7 @@ def through_first_observation(
     continuation: Callable[[np.ndarray], Union[np.ndarray, float]],
     remaining_time: float,
     hit_is_constant: bool = False,
+    kinks: Sequence[float] = (),
 ) -> float:
     """``exp(-r t1) E[hit ? hit_value(S_t1) : continuation(S_t1)]`` under GBM with flat ``rate``, ``div``, ``vol``.
 
@@ -145,6 +146,10 @@ def through_first_observation(
     remaining standard deviation, so panels are ``min(1, sqrt(remaining_time / t1))`` wide in the normal variable.
     ``hit_is_constant``: the breach value does not depend on the spot (cash), so its region is that value times the
     breach probability in closed form.
+
+    No time left (``remaining_time`` zero, ``t1`` is the maturity): both functions are the terminal payoff, smooth
+    except at its ``kinks`` (spot levels: a strike, a cap). The kinks inside a region are panel edges, and each
+    smooth piece is cut into panels 1 wide. With time left the kinks are not used (the continuation is smooth).
     """
     t1 = first.time
     sd = vol * float(safe_sqrt(t1))
@@ -166,8 +171,11 @@ def through_first_observation(
     if z_up is not None and z_up < hi:
         regions.append((max(z_up, lo), hi, hit_value))
 
-    width = min(1.0, math.sqrt(max(remaining_time, 0.0) / t1)) if remaining_time > 0.0 else 1.0
-    width = max(width, 0.05)
+    no_time_left = is_zero(remaining_time)
+    if no_time_left or remaining_time < 0.0:
+        width = 1.0          # the terminal payoff: smooth between its kinks (panel edges below)
+    else:
+        width = max(min(1.0, math.sqrt(remaining_time / t1)), 0.05)
 
     exact_part = 0.0
     if hit_is_constant:
@@ -177,6 +185,15 @@ def through_first_observation(
         )
         exact_part = cash * breach_mass
         regions = [region for region in regions if region[2] is not hit_value]
+
+    if no_time_left and kinks:
+        # the payoff's kinks inside a region split it into smooth pieces
+        kink_z = sorted({z_of(level) for level in kinks})
+        pieces = []
+        for a, b, fn in regions:
+            edges = [a] + [z for z in kink_z if a < z < b] + [b]
+            pieces.extend((left, right, fn) for left, right in zip(edges[:-1], edges[1:]))
+        regions = pieces
 
     # every panel's nodes and weights, order by order, region by region: the summation order
     blocks = []

@@ -459,6 +459,7 @@ class BarrierAnalyticalEngine(BaseEngine):
             continuation=continuation,
             remaining_time=tau,
             hit_is_constant=product.is_knock_out,
+            kinks=(product.strike,),      # the payoff's, with no time left after t1
         ) * product.contract_multiplier
 
     def _price_continuous(

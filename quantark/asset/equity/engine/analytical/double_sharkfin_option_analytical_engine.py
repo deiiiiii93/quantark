@@ -382,6 +382,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             spot=spot, first=first, rate=rate, div=div, vol=vol,
             hit_value=hit_value, continuation=continuation, remaining_time=tau,
             hit_is_constant=True,
+            kinks=(product.strike, product.lower_barrier, product.upper_barrier),    # the no-hit payoff's
         )
 
     def _unmonitored_value(

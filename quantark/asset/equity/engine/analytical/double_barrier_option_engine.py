@@ -347,7 +347,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         return through_first_observation(
             spot=S, first=first, rate=r, div=q, vol=sigma,
             hit_value=hit_value, continuation=continuation, remaining_time=tau,
-            hit_is_constant=product.is_knock_out,
+            hit_is_constant=product.is_knock_out, kinks=(K,),      # the payoff's, with no time left after t1
         )
 
     def _price_zero_vol(
