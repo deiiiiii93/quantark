@@ -291,7 +291,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         # Memory coupons already owed at the pricing date. ``missed == obs_idx`` is the state in which
         # EVERY period since the pricing date has missed, so nothing has paid yet and those arrears are
         # still outstanding; in any other state a coupon has paid and released them. No extra memory
-        # dimension is needed (the PDE solver's ``_accumulated_coupon_amount`` reads the same state).
+        # dimension is needed. (The PDE solver keeps two memory states instead -- state 0 and one unit of
+        # arrears more -- and carries these arrears at the first observation: ``_state_arrears``.)
         # The engine used to price from zero arrears whatever the contract carried.
         initial_arrears = (
             float(product.coupon_config.initial_coupon_arrears) if use_memory else 0.0

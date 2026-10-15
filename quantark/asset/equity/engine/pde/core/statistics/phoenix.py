@@ -108,10 +108,26 @@ class PhoenixStatistics(SnowballStatistics):
             pricing_env=self.env, cashflow=1.0, current_time=float(self.t[j]),
             settlement_time=solver._coupon_payment_time(self.product, self.env, obs_idx))
 
+    def _missed_arrears(self, obs_idx, missed_count):
+        """Arrears released by a trigger at ``obs_idx`` from the statistics' memory state ``missed_count``.
+
+        The statistics still march one state per missed coupon (``n_states = K + 1``); the value's fan
+        has two states since spec 2026-10-15 and its ``_state_arrears`` no longer reads this state. The
+        statistics keep the miss-count arithmetic here until they move to two states too.
+        ``missed_count == obs_idx`` is the state in which every period has missed, so arrears carried
+        in from before the pricing date are still outstanding; in every other state a coupon has paid.
+        """
+        solver = self.solver
+        carried = solver._initial_coupon_arrears if missed_count == obs_idx else 0.0
+        if missed_count <= 0 or obs_idx <= 0:
+            return float(carried)
+        start = max(obs_idx - missed_count, 0)
+        return float(solver._coupon_cumulative[obs_idx] - solver._coupon_cumulative[start] + carried)
+
     def _earned(self, obs_idx, m):
         solver = self.solver
         memory = self.product.has_memory_coupon
-        return float(solver._coupon_amounts[obs_idx]) + (solver._accumulated_coupon_amount(obs_idx, m)
+        return float(solver._coupon_amounts[obs_idx]) + (self._missed_arrears(obs_idx, m)
                                                           if memory else 0.0)
 
     # --- the march hooks ------------------------------------------------------------
@@ -261,7 +277,7 @@ class PhoenixStatistics(SnowballStatistics):
             if obs_idx is not None:
                 target[:, L.trigger_cols[k]] = paid(df_pay)     # a coupon triggered on the knock-out date counts
                 for m in range(self.n_states):
-                    arrears = solver._accumulated_coupon_amount(obs_idx, min(m, max_m)) if memory else 0.0
+                    arrears = self._missed_arrears(obs_idx, min(m, max_m)) if memory else 0.0
                     coupon_at_ko = float(solver._coupon_amounts[obs_idx]) + arrears
                     if coupon_at_ko > 0.0:
                         # the release rule (decision 4): the arrears whatever the spot, the coupon on its barrier
@@ -307,7 +323,7 @@ class PhoenixStatistics(SnowballStatistics):
                 lows, his, b_c_x, b_ko_x, trig_up, ko_here, True, f_ko_value, f_pay, f0, f0))
             for m in range(self.n_states):
                 in_fan = m <= max_m
-                arrears = solver._accumulated_coupon_amount(obs_idx, min(m, max_m)) if memory else 0.0
+                arrears = self._missed_arrears(obs_idx, min(m, max_m)) if memory else 0.0
                 coupon_at_ko = amt + arrears
 
                 def s_ko_value(m_pay, _c=coupon_at_ko, _a=arrears, _w=len(S[m])):

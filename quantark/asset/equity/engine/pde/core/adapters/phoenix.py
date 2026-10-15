@@ -1,16 +1,19 @@
 """Phoenix (``phoenix_pde_solver.py``): a value surface per memory state, plus termination surfaces.
 
-The legacy vector-surface march advanced every column separately, in a fixed
-order: ``v0[0..K]``, then ``v1[0..K]``, then the termination surfaces ``w0``,
-``w1`` for EXPIRY coupons -- each a one-column banded (or sparse-LU) solve on
-the step's one factorization. Each column is a group here, in that order.
+The surfaces are ``v0[k]`` (not knocked in) and ``v1[k]`` (knocked in) per memory state ``k``, then the
+termination surfaces ``w0``, ``w1`` for EXPIRY coupons. Without memory there is one state (``k = 0``).
+With memory there are two whatever the observation count (the arrears-linear fan, spec 2026-10-15 D3):
+state 0 and state 0 plus one unit of arrears -- every stage is linear in the arrears, so the value of
+any arrears is read off the pair (``PhoenixPDESolver._state_arrears``).
+
+Without memory, and on the sparse-LU small-grid path, each column is its own one-column group, in the
+legacy march's order ``v0[..]``, ``v1[..]``, ``w0``, ``w1`` -- each a one-column solve on the step's one
+factorization. Memory on the banded backend marches every column as ONE multi-column group (D5).
 θ = 1 on zero-diffusion steps, as every value group (spec 3A §5.7).
 """
 from __future__ import annotations
 
 import numpy as np
-
-from quantark.util.exceptions import ValidationError
 
 from ..groups import VALUE, Backend, ColumnGroup
 from .snowball import LocalVolAdapterMixin, SnowballAdapter
@@ -34,17 +37,6 @@ class PhoenixAdapter(SnowballAdapter):
         from ..statistics.phoenix import PhoenixStatistics
         return PhoenixStatistics.create(prepared, streams)
 
-    def observation_maps(self, product, env, layout, tau) -> None:
-        super().observation_maps(product, env, layout, tau)   # registers the coupons (single site)
-        solver = self.solver
-        # _solve: the memory-coupon limit, right after the grids and their maps
-        num_obs = len(solver._coupon_barriers)
-        if product.has_memory_coupon and num_obs > 50:
-            raise ValidationError(
-                f"Too many observations ({num_obs}) for Memory Phoenix PDE engine. "
-                "Limit is 50 to prevent performance degradation. Use MC engine instead."
-            )
-
     def prepare_events(self, product, env, layout, tau, request):
         # No event table: the vector surfaces take the inline path. The FIRST_PASSAGE
         # state and the termination surfaces are built in terminal(), after the
@@ -54,8 +46,8 @@ class PhoenixAdapter(SnowballAdapter):
         return None
 
     def _max_k(self, product) -> int:
-        # Determine number of memory states to track at maturity
-        return len(self.solver._coupon_barriers) if product.has_memory_coupon else 0
+        """The highest memory state: 1 with memory coupons (state 0 plus one unit of arrears), else 0."""
+        return 1 if product.has_memory_coupon else 0
 
     def groups(self, product, layout, request) -> tuple:
         use_banded = (len(layout.spatial.x) - 2) > 2
@@ -64,6 +56,9 @@ class PhoenixAdapter(SnowballAdapter):
         names += [f"v1[{k}]" for k in range(self._max_k(product) + 1)]
         if self.solver._termination_surface_active(product):
             names += ["w0", "w1"]
+        if use_banded and product.has_memory_coupon:
+            # one multi-column banded solve per step (spec 2026-10-15 D5)
+            return (ColumnGroup("value", tuple(names), backend, VALUE),)
         return tuple(ColumnGroup(n, (n,), backend, VALUE,
                                  one_dimensional_rhs=use_banded) for n in names)
 
@@ -78,8 +73,8 @@ class PhoenixAdapter(SnowballAdapter):
         return v0, v1
 
     def allocate(self, prepared) -> dict:
-        # grid_v0_list[k] is the V0 surface for k missed coupons; v1[k] is its knocked-in twin.
-        # solver._grid_v1 is exposed per V0 group in boundaries(), not here: there are K + 1 of them.
+        # grid_v0_list[k] is the V0 surface of memory state k (k units of arrears more than state 0);
+        # v1[k] is its knocked-in twin. solver._grid_v1 is exposed per V0 row in boundaries(), not here.
         layout = prepared.layout
         shape = (len(layout.spatial.x), len(layout.time.t))
         max_k = self._max_k(prepared.product)
@@ -125,6 +120,9 @@ class PhoenixAdapter(SnowballAdapter):
             states["w0"], states["w1"] = term
 
     def boundaries(self, prepared, group, states, j) -> None:
+        if len(group.surfaces) > 1:
+            self._group_boundaries(prepared, group, states, j)
+            return
         solver, product, env = self.solver, prepared.product, prepared.env
         name = group.surfaces[0]
         grid = states[name]
@@ -150,6 +148,34 @@ class PhoenixAdapter(SnowballAdapter):
                 solver._grid_v1 = saved
         else:
             solver._set_boundary_conditions_v0(grid, x_vec, s_vec, j, tau_remaining, product, env)
+
+    def _group_boundaries(self, prepared, group, states, j) -> None:
+        """The Dirichlet rows of every surface of the memory group at step ``j``.
+
+        The rows do not depend on the memory state (the per-column march wrote the same values on each),
+        so state 1 copies state 0's: a unit of arrears is worth nothing on the edges. The knocked-in rows
+        go first, so that under continuous KI the knock-in-side V0 row copies V1's row of this step.
+        """
+        solver, product, env = self.solver, prepared.product, prepared.env
+        x_vec, s_vec = prepared.layout.spatial.x, prepared.layout.spatial.s
+        tau_remaining = prepared.tau - prepared.layout.time.t[j]
+        v0, v1 = states["v0[0]"], states["v1[0]"]
+        solver._set_boundary_conditions_v1(v1, x_vec, s_vec, j, tau_remaining, product, env)
+        if solver._ki_continuous and product.has_ki_barrier:
+            saved, solver._grid_v1 = solver._grid_v1, v1
+            try:
+                solver._set_boundary_conditions_v0(v0, x_vec, s_vec, j, tau_remaining, product, env)
+            finally:
+                solver._grid_v1 = saved
+        else:
+            solver._set_boundary_conditions_v0(v0, x_vec, s_vec, j, tau_remaining, product, env)
+        for k in range(1, self._max_k(product) + 1):
+            for base, state in ((v0, states[f"v0[{k}]"]), (v1, states[f"v1[{k}]"])):
+                state[0, j] = base[0, j]
+                state[-1, j] = base[-1, j]
+        if "w0" in group.surfaces:
+            solver._set_termination_boundary(states["w0"], j)
+            solver._set_termination_boundary(states["w1"], j)
 
     def step_events(self, prepared, states, captures, j) -> None:
         # Apply modifications (Coupons, KO, KI). The valuation-date level-0 columns

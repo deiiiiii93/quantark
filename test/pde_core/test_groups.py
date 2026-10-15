@@ -88,10 +88,26 @@ def _phoenix_groups(max_k, termination, banded=True):
 
 
 def test_phoenix_memory_groups():
-    # max_k = num_obs with memory coupons (_solve): the book's PHOENIX has 12 observations
+    # the arrears-linear fan (spec 2026-10-15 D5): two memory states, whatever the observation count (the
+    # book's PHOENIX has 12), marched as ONE multi-column banded group
     p = prepare(PhoenixPDESolver(PDEParams()), make_phoenix(PHOENIX), env_flat(), OutputRequest(Operation.PRICE))
-    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == _phoenix_groups(12, False)
-    assert all(g.one_dimensional_rhs for g in p.groups)
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == [
+        ("value", ("v0[0]", "v0[1]", "v1[0]", "v1[1]"), Backend.BANDED, VALUE)]
+    assert not p.groups[0].one_dimensional_rhs
+
+
+def test_phoenix_memory_expiry_groups_carry_the_termination_surfaces():
+    p = prepare(PhoenixPDESolver(PDEParams()), make_phoenix(dict(PHOENIX, coupon_pay_type="expiry")),
+                env_flat(), OutputRequest(Operation.PRICE))
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == [
+        ("value", ("v0[0]", "v0[1]", "v1[0]", "v1[1]", "w0", "w1"), Backend.BANDED, VALUE)]
+
+
+def test_phoenix_memory_with_two_interior_nodes_keeps_per_column_lu_groups():
+    # the SPARSE_LU small-grid path keeps today's per-column groups (D5)
+    s = PhoenixPDESolver(PDEParams(grid=GridConfig(points=4, eps_crit=1.0)))
+    p = prepare(s, make_phoenix(PHOENIX), env_flat(), OutputRequest(Operation.PRICE))
+    assert [(g.name, g.surfaces, g.backend, g.policy) for g in p.groups] == _phoenix_groups(1, False, banded=False)
 
 
 def test_phoenix_non_memory_groups():

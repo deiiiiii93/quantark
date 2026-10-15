@@ -30,7 +30,10 @@ class PhoenixPDESolver(SnowballPDESolver):
     Two-Surface PDE solver for Phoenix options with coupon jumps.
 
     KO and KI behavior follows SnowballPDESolver. Coupon payoffs are added at
-    observation times based on the coupon barrier.
+    observation times based on the coupon barrier. Memory coupons march two
+    states per regime whatever the observation count -- state 0 and state 0
+    plus one unit of arrears (``_state_arrears``) -- since every stage is
+    linear in the arrears owed.
     """
 
     _adapter_class = PhoenixAdapter
@@ -308,22 +311,19 @@ class PhoenixPDESolver(SnowballPDESolver):
             product, pricing_env, layout.time.t, tau, step_of=layout.time.step_at
         )
 
-    def _accumulated_coupon_amount(self, obs_idx: int, missed_count: int) -> float:
-        """Arrears released by a trigger at ``obs_idx`` from memory state ``missed_count``.
+    def _state_arrears(self, obs_idx: int, state: int) -> float:
+        """Arrears a memory state carries into the coupon observation ``obs_idx``: ``A0(m) + state``.
 
-        ``missed_count == obs_idx`` is the state in which EVERY period of this
-        contract has missed, so nothing has paid since the pricing date and any
-        arrears carried in from before it are still outstanding. In every other
-        state a coupon has already paid and reset the memory, so those arrears
-        are gone. No extra memory dimension is needed to say that.
+        The memory fan keeps two states (spec 2026-10-15 D3). State 0 carries ``A0(m)``: the arrears
+        owed at the pricing date (``initial_coupon_arrears``) at the first observation, nothing at a
+        later one. State 1 is state 0 plus exactly one unit of arrears, so ``u = v[1] - v[0]`` is the
+        value of one unit owed. Every stage is linear in the arrears, so a path owing ``A`` more than
+        state 0 is worth ``v[0] + A·u``: a coupon missed at ``m`` reads ``v[0] + earned·u`` from the
+        states diffused back from ``m + 1``, which is how arrears carried from the pricing date reach a
+        later observation.
         """
-        carried = self._initial_coupon_arrears if missed_count == obs_idx else 0.0
-        if missed_count <= 0 or obs_idx <= 0:
-            return float(carried)
-        start = max(obs_idx - missed_count, 0)
-        return float(
-            self._coupon_cumulative[obs_idx] - self._coupon_cumulative[start] + carried
-        )
+        carried = self._initial_coupon_arrears if obs_idx == 0 else 0.0
+        return float(carried) + float(state)
 
     def _apply_step_modifications_vector_surface(
         self,
@@ -693,35 +693,48 @@ class PhoenixPDESolver(SnowballPDESolver):
         pricing_env: PricingEnvironment,
         obs_idx: int,
     ) -> None:
+        """The coupon fan-in at observation ``obs_idx`` on every memory state, in place (spec 2026-10-15 C2).
+
+        State ``s`` earns ``c_m + A0(m) + s`` (``_state_arrears``): paid, it is state 0's diffused value
+        plus that cash (discounted, or times the termination value ``W`` under EXPIRY); missed, it is
+        owed, worth ``v[0] + earned·u`` with ``u = v[1] - v[0]`` the diffused value of one unit of arrears
+        in the same regime. Without memory a miss keeps the diffused value.
+        """
         if obs_idx < 0 or obs_idx >= self._coupon_barriers.shape[0]:
             return
 
         barrier = float(self._coupon_barriers[obs_idx])
         coupon_amt = float(self._coupon_amounts[obs_idx])
         use_memory = product.has_memory_coupon
-        
+
         disc_v0, disc_v1 = self._coupon_discounts(
             t_idx, current_time, product, pricing_env, obs_idx=obs_idx
         )
 
-        max_k = obs_idx if use_memory else 0
         diffused_v0_0 = grid_v0_list[0][:, t_idx].copy()
         diffused_v1_0 = grid_v1_list[0][:, t_idx].copy()
+        if use_memory:
+            # one unit of arrears per regime, read after the diffusion and before the event
+            unit_v0 = grid_v0_list[1][:, t_idx] - diffused_v0_0
+            unit_v1 = grid_v1_list[1][:, t_idx] - diffused_v1_0
+        states = range(len(grid_v0_list)) if use_memory else range(1)
+
+        def earned_in(k):
+            return coupon_amt + (self._state_arrears(obs_idx, k) if use_memory else 0.0)
+
+        def missed(earned):
+            if use_memory:
+                return diffused_v0_0 + earned * unit_v0, diffused_v1_0 + earned * unit_v1
+            return diffused_v0_0, diffused_v1_0
 
         if self._event_uses_projection(t_idx):
-            for k in range(max_k + 1):
-                accumulated_pay = (
-                    self._accumulated_coupon_amount(obs_idx, k) if use_memory else 0.0
-                )
-                earned = coupon_amt + accumulated_pay
-                next_k = k + 1 if use_memory else 0
-
-                val_miss_0 = grid_v0_list[next_k][:, t_idx]
+            for k in states:
+                earned = earned_in(k)
+                val_miss_0, val_miss_1 = missed(earned)
                 grid_v0_list[k][:, t_idx] = self._coupon_update(
                     s_vec, barrier, product.is_reverse, t_idx,
                     val_miss_0, diffused_v0_0 + earned * disc_v0,
                 )
-                val_miss_1 = grid_v1_list[next_k][:, t_idx]
                 grid_v1_list[k][:, t_idx] = self._coupon_update(
                     s_vec, barrier, product.is_reverse, t_idx,
                     val_miss_1, diffused_v1_0 + earned * disc_v1,
@@ -734,6 +747,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         )
 
         if t_idx == 0 and self._use_cell_average_events():
+            earned_0 = earned_in(0)
             self._capture_t0_coupon_readout(
                 s_vec,
                 barrier,
@@ -741,33 +755,23 @@ class PhoenixPDESolver(SnowballPDESolver):
                 pricing_env,
                 diffused_v0_0,
                 diffused_v1_0,
-                grid_v0_list,
-                grid_v1_list,
-                use_memory,
-                obs_idx,
-                coupon_amt,
+                missed(earned_0),
+                earned_0,
                 (disc_v0, disc_v1),
             )
 
-        for k in range(max_k + 1):
-            accumulated_pay = (
-                self._accumulated_coupon_amount(obs_idx, k) if use_memory else 0.0
-            )
-            earned = coupon_amt + accumulated_pay
+        for k in states:
+            earned = earned_in(k)
+            val_miss_0, val_miss_1 = missed(earned)
 
             # V0
             val_pay_0 = diffused_v0_0 + earned * disc_v0
-            next_k = k + 1 if use_memory else 0
-            val_miss_0 = grid_v0_list[next_k][:, t_idx]
-
             grid_v0_list[k][:, t_idx] = self._coupon_update(
                 s_vec, barrier, product.is_reverse, t_idx, val_miss_0, val_pay_0, pay_mask=pay_mask,
             )
 
             # V1
             val_pay_1 = diffused_v1_0 + earned * disc_v1
-            val_miss_1 = grid_v1_list[next_k][:, t_idx]
-
             grid_v1_list[k][:, t_idx] = self._coupon_update(
                 s_vec, barrier, product.is_reverse, t_idx, val_miss_1, val_pay_1, pay_mask=pay_mask,
             )
@@ -812,16 +816,16 @@ class PhoenixPDESolver(SnowballPDESolver):
         df: float,
         coupon_amt: float,
         use_memory: bool,
-        max_k: int,
     ) -> None:
         """One-pass cell average of the coincident coupon + KO event.
 
         The contractual post-event value is piecewise in spot with thresholds
-        at the coupon and KO barriers:
+        at the coupon and KO barriers; for memory state ``s`` earning
+        ``earned_s = c_m + A0(m) + s`` (spec 2026-10-15 C2):
 
-            KO region:      (base + arrears + coupon * 1_pay) * df  (the release rule)
-            survive & pay:  level-0 diffused value + coupon
-            survive & miss: next memory level's value
+            KO region:      (base + earned_s * 1_pay + (A0(m) + s) * (1 - 1_pay)) * df  (the release rule)
+            survive & pay:  state 0's diffused value + earned_s (discounted, or times W)
+            survive & miss: state 0's diffused value + earned_s * u, u the diffused unit of arrears
 
         Sequential projection double-averages any dual cell the two
         thresholds share (equal/nearby barriers); for well-separated barriers
@@ -844,41 +848,32 @@ class PhoenixPDESolver(SnowballPDESolver):
             grid_v0_list[0][:, t_idx].copy(),
             grid_v1_list[0][:, t_idx].copy(),
         )
+        # one unit of arrears per regime, read after the diffusion and before the event
+        units = (
+            (grid_v0_list[1][:, t_idx] - diffused_cols[0], grid_v1_list[1][:, t_idx] - diffused_cols[1])
+            if use_memory else (None, None)
+        )
         for k in range(len(grid_v0_list)):
-            effective_k = k if k <= max_k else max_k
-            accumulated_ko = (
-                self._accumulated_coupon_amount(obs_idx, effective_k)
-                if use_memory
-                else 0.0
-            )
-            coupon_at_ko = coupon_amt + accumulated_ko
-            in_coupon_fan = k <= max_k
-            if in_coupon_fan:
-                accumulated_k = (
-                    self._accumulated_coupon_amount(obs_idx, k)
-                    if use_memory
-                    else 0.0
-                )
-                earned_k = coupon_amt + accumulated_k
-                next_k = k + 1 if use_memory else 0
+            arrears = self._state_arrears(obs_idx, k) if use_memory else 0.0
+            earned_k = coupon_amt + arrears
             # On the knocked-in surface a disabled KO simply never triggers, so
             # its branch collapses into the coupon treatment. The KO break stays
             # in the partition and is then redundant -- projecting a function
             # across a break it does not jump at is exact, so this costs
             # nothing but keeps one partition for both surfaces.
-            for grids, diffused0, ko_here, disc in (
-                (grid_v0_list, diffused_cols[0], True, disc_v0),
-                (grid_v1_list, diffused_cols[1], self._ko_survives_ki(product), disc_v1),
+            for grids, diffused0, unit, ko_here, disc in (
+                (grid_v0_list, diffused_cols[0], units[0], True, disc_v0),
+                (grid_v1_list, diffused_cols[1], units[1], self._ko_survives_ki(product), disc_v1),
             ):
                 branches = self._joint_branches(
-                    lows, his, b_c_x, b_ko_x, trig_up, ko_here, in_coupon_fan,
-                    ko_value=lambda m_pay, _c=coupon_at_ko, _a=accumulated_ko: np.full(
+                    lows, his, b_c_x, b_ko_x, trig_up, ko_here, True,
+                    ko_value=lambda m_pay, _c=earned_k, _a=arrears: np.full(
                         n, (base_payoff + (_c if m_pay else _a)) * df    # the release rule (decision 4)
                     ),
                     # `disc` is this regime's termination value under
                     # EXPIRY, a plain discount factor otherwise.
-                    pay_value=(diffused0 + earned_k * disc) if in_coupon_fan else None,
-                    miss_value=grids[next_k][:, t_idx] if in_coupon_fan else None,
+                    pay_value=diffused0 + earned_k * disc,
+                    miss_value=diffused0 + earned_k * unit if use_memory else diffused0,
                     keep_value=grids[k][:, t_idx],
                 )
                 grids[k][:, t_idx] = project_piecewise_event(
@@ -893,11 +888,8 @@ class PhoenixPDESolver(SnowballPDESolver):
         pricing_env: PricingEnvironment,
         diffused_v0_0: np.ndarray,
         diffused_v1_0: np.ndarray,
-        grid_v0_list: List[np.ndarray],
-        grid_v1_list: List[np.ndarray],
-        use_memory: bool,
-        obs_idx: int,
-        coupon_amt: float,
+        miss_cols,
+        earned: float,
         coupon_discounts,
     ) -> None:
         """Pointwise-exact valuation-date coupon readout at the actual spot.
@@ -908,6 +900,10 @@ class PhoenixPDESolver(SnowballPDESolver):
         today's trigger at the known spot with the same inclusive ownership
         the nodal mask uses, interpolate the smooth branch the spot actually
         follows, and add the coupon cash [2026-07-24 review, finding 1].
+
+        ``earned`` is state 0's coupon cash (``c_0 + A0(0)``) and ``miss_cols`` the (V0, V1) columns
+        of state 0 missing it: ``v[0] + earned·u`` with memory (spec 2026-10-15 C3), the diffused
+        columns without.
         """
         spot = float(pricing_env.spot)
         pay = bool(
@@ -922,10 +918,6 @@ class PhoenixPDESolver(SnowballPDESolver):
         x_vec = np.log(np.asarray(s_vec, dtype=float))
         spot_log = float(np.log(spot))
         if pay:
-            accumulated = (
-                self._accumulated_coupon_amount(obs_idx, 0) if use_memory else 0.0
-            )
-            earned = coupon_amt + accumulated
             # The readout is pointwise at the spot, so a termination-value
             # discount is interpolated there like any other surface.
             discounts = tuple(
@@ -940,11 +932,7 @@ class PhoenixPDESolver(SnowballPDESolver):
                 for col, disc in zip(cols, discounts)
             )
         else:
-            next_k = 1 if use_memory else 0
-            cols = (
-                grid_v0_list[next_k][:, 0].copy(),
-                grid_v1_list[next_k][:, 0].copy(),
-            )
+            cols = tuple(np.array(col, dtype=float, copy=True) for col in miss_cols)
             values = tuple(float(np.interp(spot_log, x_vec, col)) for col in cols)
         self._t0_readout_cols = cols
         self._t0_readout_values = values
@@ -969,7 +957,10 @@ class PhoenixPDESolver(SnowballPDESolver):
             coupon_amt = float(self._coupon_amounts[obs_idx])
 
         use_memory = product.has_memory_coupon
-        max_k = obs_idx if (obs_idx is not None and use_memory) else 0
+
+        def state_arrears(k):
+            # the arrears memory state k releases with a knock-out at this record (spec 2026-10-15 C2)
+            return self._state_arrears(obs_idx, k) if (use_memory and obs_idx is not None) else 0.0
 
         if not self._event_uses_projection(t_idx):
             pay_mask, ko_mask = self._coupon_masks(s_vec, t_idx, obs_idx, ko_record, product)
@@ -998,16 +989,10 @@ class PhoenixPDESolver(SnowballPDESolver):
                     df,
                     coupon_amt,
                     use_memory,
-                    max_k,
                 )
                 return
             for k in range(len(grid_v0_list)):
-                effective_k = k if k <= max_k else max_k
-                accumulated_pay = (
-                    self._accumulated_coupon_amount(obs_idx, effective_k)
-                    if (use_memory and obs_idx is not None)
-                    else 0.0
-                )
+                accumulated_pay = state_arrears(k)
                 # Degenerate fallback (no coupon obs, or non-positive
                 # barriers where the log-space breaks are undefined):
                 # sequential inner projection as before.
@@ -1037,12 +1022,7 @@ class PhoenixPDESolver(SnowballPDESolver):
             return
 
         for k in range(len(grid_v0_list)):
-            effective_k = k if k <= max_k else max_k
-            accumulated_pay = (
-                self._accumulated_coupon_amount(obs_idx, effective_k)
-                if (use_memory and obs_idx is not None)
-                else 0.0
-            )
+            accumulated_pay = state_arrears(k)
 
             # The release rule (spec 3B decision 4; QUAD V2, Monte Carlo and the lifecycle tracker
             # alike): a knock-out pays the accrued arrears whatever the spot, and the current coupon
