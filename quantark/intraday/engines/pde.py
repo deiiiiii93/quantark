@@ -87,13 +87,13 @@ def _barrier_placement(ctx, plan, solver) -> str:
 def bytes_per_grid_cell(solver, twin) -> int:
     """Bytes a solve of ``solver`` keeps per points x time-node cell: its stored value surfaces plus coefficients.
 
-    Read after a solve (a memory Phoenix learns its coupon count from the schedule it resolved).
+    A memory Phoenix keeps two memory states (state 0 and state 0 plus one unit of arrears) whatever its coupon
+    count; with the termination pair that is 2(1+1)+2 surfaces.
     """
     from quantark.asset.equity.engine.pde import PhoenixPDESolver, SnowballPDESolver
 
     if isinstance(solver, PhoenixPDESolver):
-        coupons = getattr(solver, "_coupon_barriers", None)
-        states = len(coupons) if coupons is not None and getattr(twin, "has_memory_coupon", False) else 0
+        states = 1 if getattr(twin, "has_memory_coupon", False) else 0
         surfaces = 2 * (states + 1) + 2
     elif isinstance(solver, SnowballPDESolver):
         surfaces = 2

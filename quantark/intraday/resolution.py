@@ -35,7 +35,7 @@ UNDER_RESOLVED = "under_resolved"
 INTRADAY_PDE_MAX_POINTS = 20_000
 INTRADAY_PDE_MAX_STEPS = 100_000
 #: Memory budget of one refined solve. The solvers keep value surfaces over the whole time grid — one for barrier /
-#: one-touch, two for snowballs, 2(k+1)+2 for a memory Phoenix with k coupon states — at 8 bytes per points x time
+#: one-touch, two for snowballs, 2(1+1)+2 for a memory Phoenix (two memory states plus the termination pair) — at 8 bytes per points x time
 #: node each, plus per-step coefficient sets (~9 bytes per cell measured). The route divides this budget by the
 #: solver's bytes per cell.
 INTRADAY_PDE_MAX_GRID_BYTES = 1_250_000_000
