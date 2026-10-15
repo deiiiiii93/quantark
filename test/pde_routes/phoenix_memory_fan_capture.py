@@ -127,10 +127,17 @@ def step_down():
     return p
 
 
-def dated_first_observation(spot, pay_type):
-    """The intraday fixture's dated memory Phoenix valued ON its first coupon date (coupon barrier 80)."""
+def dated_first_observation(spot, pay_type, coupon_rate=None, arrears=0.0):
+    """The intraday fixture's dated memory Phoenix valued ON its first coupon date (coupon barrier 80).
+
+    Its coupon is 0.12 * 100 / 12 = 1.0, so a miss at valuation owes exactly one unit; ``coupon_rate`` and
+    ``arrears`` (carried from before the pricing date) make it owe something else."""
     from pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
     p, _ = _dated("phoenix", fixed_fraction=1.0 / 12.0)
+    if coupon_rate is not None or arrears:
+        p.coupon_config = dataclasses.replace(
+            p.coupon_config, coupon_rate=p.coupon_config.coupon_rate if coupon_rate is None else coupon_rate,
+            initial_coupon_arrears=arrears)
     if pay_type == "expiry":
         p = _phoenix_expiry(p)
     return p, _dated_env(p, _first_obs(p), spot)
@@ -144,12 +151,13 @@ def _plain(build, env=env_flat, params=None, greeks=GREEKS, session=False, solve
     return {"make": make, "greeks": greeks, "session": session}
 
 
-def _dated_case(spot, pay_type):
+def _dated_case(spot, pay_type, coupon_rate=None, arrears=0.0, greeks=None):
     def make():
-        p, env = dated_first_observation(spot, pay_type)
+        p, env = dated_first_observation(spot, pay_type, coupon_rate, arrears)
         return p, env, PhoenixPDESolver, PDEParams(accuracy="standard")
     # theta refuses an EXPIRY coupon decided at the as-of date: no state carries it into the bumped contract
-    greeks = tuple(g for g in GREEKS if g != "theta") if pay_type == "expiry" else GREEKS
+    if greeks is None:
+        greeks = tuple(g for g in GREEKS if g != "theta") if pay_type == "expiry" else GREEKS
     return {"make": make, "greeks": greeks, "session": False}
 
 
@@ -174,6 +182,11 @@ CASES = {
     "dated_miss_instant": _dated_case(78.0, "instant"),
     "dated_pay_expiry": _dated_case(95.0, "expiry"),
     "dated_miss_expiry": _dated_case(78.0, "expiry"),
+    # a miss at valuation owing 1.5 (18% coupon) and 3.0 (2.0 carried): the old fan's state 1 held exactly that
+    "dated_miss_instant_coupon_1.5": _dated_case(78.0, "instant", coupon_rate=0.18, greeks=()),
+    "dated_miss_expiry_coupon_1.5": _dated_case(78.0, "expiry", coupon_rate=0.18, greeks=()),
+    "dated_miss_instant_arrears_2": _dated_case(78.0, "instant", arrears=2.0, greeks=()),
+    "dated_miss_expiry_arrears_2": _dated_case(78.0, "expiry", arrears=2.0, greeks=()),
     # AC2: local vol
     "lv_memory": _plain(phoenix, env=env_local_vol, session=True, solver=LocalVolPhoenixPDESolver),
     "lv_memory_continuous_ki": _plain(lambda: phoenix(ki_continuous=True), env=env_local_vol,

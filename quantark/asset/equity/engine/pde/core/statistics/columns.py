@@ -24,7 +24,7 @@ class ColumnLayout:
     leg: bool = False              # M (or M_pre, M_post, U_pre, U_post)
     two_maturities: bool = False   # KO-reset
     coupon_cash: bool = False      # C_k^(m)
-    n_states: int = 1              # memory states K + 1
+    n_states: int = 1              # memory states: 2 with memory (state 0, state 0 + one unit), else 1
     expiry: bool = False           # D^(j,m), T_j, U
     ko: np.ndarray = field(init=False, repr=False)
     post_ko: np.ndarray = field(init=False, repr=False)
