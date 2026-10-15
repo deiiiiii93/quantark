@@ -73,7 +73,10 @@ backtest and FX dynamic scenario.
   - With no time left after the first observation (it is the maturity: valued on the penultimate record, not
     crossed) the payoff's kinks are the expectation's panel edges; such a contract was refused (`NumericalError`,
     the strike inside a panel) and is now the European payoff decided at T, e.g. the up-and-out call 5.562826
-    (closed form 5.562826, main's shifted formula 5.6967), the double knock-out call 5.780781 (main 5.7835).
+    (closed form 5.562826, main's shifted formula 5.6967), the double knock-out call 5.780781 (main 5.7835). A tiny
+    time left (the payoff smoothed over less than the 0.05 panel floor, e.g. 2e-10 <= tau <= 1e-6 after a monthly
+    record) grades the panels away from each kink from that scale; such contracts were refused too and now match
+    the European value over tau within 1e-13.
   - Performance: the projection evaluates its integrand once on every quadrature node (vectorised closed forms,
     records resolved once per price), bit-exact; inside the level the barrier-family prices now take 0.5-2.4x the
     time of the old closed-form path (double knock-out daily 3.1 ms, accumulator daily 0.38 s).

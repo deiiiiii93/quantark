@@ -43,6 +43,32 @@ HIGH_ORDER = 12
 #: (nodes, weights) on [-1, 1] at the two orders
 _RULES = tuple(np.polynomial.legendre.leggauss(order) for order in (LOW_ORDER, HIGH_ORDER))
 _SQRT_2PI = math.sqrt(2.0 * math.pi)
+#: the narrowest panel, in the normal variable, of a continuation varying on its own scale
+WIDTH_FLOOR = 0.05
+#: the growth of the panels graded away from a kink
+GRADING_RATIO = 2.0
+
+
+def _graded_cuts(left: float, right: float, at_left: bool, at_right: bool, first: float, width: float) -> np.ndarray:
+    """Panel edges on ``[left, right]``: from an end that is a kink, panels ``first``, ``first * GRADING_RATIO``,
+    ... grown to ``width``; between the graded ends, panels at most ``width`` wide."""
+    lower, upper = [left], [right]
+    meet = 0.5 * (left + right) if (at_left and at_right) else (right if at_left else left)
+    if at_left:
+        x, step = left, first
+        while step < width and x + step < meet:
+            x += step
+            lower.append(x)
+            step *= GRADING_RATIO
+    if at_right:
+        x, step = right, first
+        while step < width and x - step > meet:
+            x -= step
+            upper.append(x)
+            step *= GRADING_RATIO
+    a, b = lower[-1], upper[-1]
+    panels = max(1, int(math.ceil((b - a) / width)))
+    return np.array(lower[:-1] + list(np.linspace(a, b, panels + 1)) + upper[-2::-1])
 
 
 @dataclass(frozen=True)
@@ -150,13 +176,17 @@ def through_first_observation(
     ``hit_value`` and ``continuation`` map a 1-D array of spots at ``t1`` to their values there (an array of the same
     shape, or a scalar when the value does not depend on the spot); each is called once, on all its nodes.
     ``remaining_time`` (maturity minus ``t1``) sets the panel width: the continuation varies on the scale of its own
-    remaining standard deviation, so panels are ``min(1, sqrt(remaining_time / t1))`` wide in the normal variable.
+    remaining standard deviation, so panels are ``min(1, sqrt(remaining_time / t1))`` wide in the normal variable,
+    at least ``WIDTH_FLOOR``.
     ``hit_is_constant``: the breach value does not depend on the spot (cash), so its region is that value times the
     breach probability in closed form.
 
-    No time left (``remaining_time`` zero, ``t1`` is the maturity): both functions are the terminal payoff, smooth
-    except at its ``kinks`` (spot levels: a strike, a cap). The kinks inside a region are panel edges, and each
-    smooth piece is cut into panels 1 wide. With time left the kinks are not used (the continuation is smooth).
+    ``kinks`` (spot levels: a strike, a cap) are where the terminal payoff is not smooth. No time left
+    (``remaining_time`` zero, ``t1`` is the maturity): both functions are that payoff; the kinks inside a region are
+    panel edges and each smooth piece is cut into panels 1 wide. A remaining time whose scale
+    ``sqrt(remaining_time / t1)`` is below ``WIDTH_FLOOR``: the payoff smoothed over that scale around each kink; the
+    kinks are panel edges and the panels grow from that scale by ``GRADING_RATIO`` away from each, up to the width.
+    Otherwise the kinks are not used (the continuation is smooth on the scale of the width).
     """
     t1 = first.time
     sd = vol * float(safe_sqrt(t1))
@@ -178,11 +208,15 @@ def through_first_observation(
     if z_up is not None and z_up < hi:
         regions.append((max(z_up, lo), hi, hit_value))
 
-    no_time_left = is_zero(remaining_time)
-    if no_time_left or remaining_time < 0.0:
+    no_time_left = is_zero(remaining_time) or remaining_time < 0.0
+    natural = 0.0 if no_time_left else math.sqrt(remaining_time / t1)
+    # a continuation varying on a scale below the floor: Black-Scholes over a tiny time, the payoff smoothed over
+    # ``natural`` around its kinks -- graded panels there
+    graded = bool(kinks) and natural < WIDTH_FLOOR and not no_time_left
+    if no_time_left:
         width = 1.0          # the terminal payoff: smooth between its kinks (panel edges below)
     else:
-        width = max(min(1.0, math.sqrt(remaining_time / t1)), 0.05)
+        width = max(min(1.0, natural), WIDTH_FLOOR)
 
     exact_part = 0.0
     if hit_is_constant:
@@ -193,23 +227,31 @@ def through_first_observation(
         exact_part = cash * breach_mass
         regions = [region for region in regions if region[2] is not hit_value]
 
-    if no_time_left and kinks:
-        # the payoff's kinks inside a region split it into smooth pieces
-        kink_z = sorted({z_of(level) for level in kinks})
-        pieces = []
-        for a, b, fn in regions:
-            edges = [a] + [z for z in kink_z if a < z < b] + [b]
-            pieces.extend((left, right, fn) for left, right in zip(edges[:-1], edges[1:]))
-        regions = pieces
+    # each region's panel edges: uniform, or with the payoff's kinks as edges (no time left: smooth pieces; a tiny
+    # time left: pieces graded away from each kink, from the continuation's own scale up to the width)
+    region_cuts = []
+    kink_z = sorted({z_of(level) for level in kinks}) if (no_time_left or graded) else []
+    for a, b, fn in regions:
+        if b <= a:
+            continue
+        if not kink_z:
+            panels = max(1, int(math.ceil((b - a) / width)))
+            region_cuts.append((fn, np.linspace(a, b, panels + 1)))
+            continue
+        edges = [a] + [z for z in kink_z if a < z < b] + [b]
+        for left, right in zip(edges[:-1], edges[1:]):
+            if graded:
+                at_left = any(math.isclose(left, z) for z in kink_z)
+                at_right = any(math.isclose(right, z) for z in kink_z)
+                region_cuts.append((fn, _graded_cuts(left, right, at_left, at_right, natural, width)))
+            else:
+                panels = max(1, int(math.ceil((right - left) / width)))
+                region_cuts.append((fn, np.linspace(left, right, panels + 1)))
 
     # every panel's nodes and weights, order by order, region by region: the summation order
     blocks = []
     for order_index, (gx, gw) in enumerate(_RULES):
-        for a, b, fn in regions:
-            if b <= a:
-                continue
-            panels = max(1, int(math.ceil((b - a) / width)))
-            cuts = np.linspace(a, b, panels + 1)
+        for fn, cuts in region_cuts:
             left, right = cuts[:-1, None], cuts[1:, None]
             half, mid = 0.5 * (right - left), 0.5 * (right + left)
             blocks.append((order_index, fn, (mid + half * gx).ravel(), (half * gw).ravel()))

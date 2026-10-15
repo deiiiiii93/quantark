@@ -14,6 +14,7 @@ import math
 import warnings
 
 import pytest
+from scipy import integrate
 from scipy.stats import norm
 
 import test_discrete_barrier_between_observations as T
@@ -48,7 +49,11 @@ from quantark.util.enum import (
 R, Q, VOL = 0.03, 0.01, 0.20
 TAU = 1.0 / 12.0        # the last record (the maturity) after aging onto the eleventh
 SPOT = 105.0
-D = dict(maturity=1.0, observation_type=ObservationType.DISCRETE)
+def _disc(maturity=1.0):
+    return dict(maturity=maturity, observation_type=ObservationType.DISCRETE)
+
+
+D = _disc()
 #: the expectation's own error check is Tolerance.RELATIVE (1e-9); the rule is far tighter on smooth pieces
 ABS = 1e-10
 
@@ -64,7 +69,7 @@ def _price(engine_cls, product, spot=SPOT):
         return float(engine_cls().price(_on_penultimate_record(product), T.env(spot)))
 
 
-# --- European closed forms at T = TAU (DF = exp(-r T)) -----------------------------------------------------------------
+# --- European closed forms at T = TAU (DF = exp(-r T)) ------------------------------------------------------------
 
 def _d2(level, spot=SPOT):
     return (math.log(spot / level) + (R - Q - 0.5 * VOL * VOL) * TAU) / (VOL * math.sqrt(TAU))
@@ -104,41 +109,41 @@ def _put_above(strike, floor, spot=SPOT):
 
 REFERENCES = {
     # up-and-out call K 100, L 120, rebate 1 at the terminal payment time
-    "UOC": (BarrierAnalyticalEngine, lambda: BarrierOption(
+    "UOC": (BarrierAnalyticalEngine, lambda m=1.0: BarrierOption(
         strike=100.0, option_type=OptionType.CALL, barrier=120.0, barrier_type=BarrierType.UP_OUT, rebate=1.0,
-        observation_schedule=T._single_schedule(120.0), **D),
+        observation_schedule=T._single_schedule(120.0), **_disc(m)),
         _call_below(100.0, 120.0) + 1.0 * _above(120.0)),
     # down-and-out call K 100, L 85: the strike inside the alive region
-    "DOC": (BarrierAnalyticalEngine, lambda: BarrierOption(
+    "DOC": (BarrierAnalyticalEngine, lambda m=1.0: BarrierOption(
         strike=100.0, option_type=OptionType.CALL, barrier=85.0, barrier_type=BarrierType.DOWN_OUT, rebate=0.0,
-        observation_schedule=T._single_schedule(85.0), **D),
+        observation_schedule=T._single_schedule(85.0), **_disc(m)),
         _call(100.0)),
     # up-and-in put K 130, L 120, rebate 2 if never knocked in: the strike inside the BREACHED region
-    "UIP_K130": (BarrierAnalyticalEngine, lambda: BarrierOption(
+    "UIP_K130": (BarrierAnalyticalEngine, lambda m=1.0: BarrierOption(
         strike=130.0, option_type=OptionType.PUT, barrier=120.0, barrier_type=BarrierType.UP_IN, rebate=2.0,
-        observation_schedule=T._single_schedule(120.0), **D),
+        observation_schedule=T._single_schedule(120.0), **_disc(m)),
         _put(130.0) - _put(120.0) - (130.0 - 120.0) * _below(120.0) + 2.0 * _below(120.0)),
     # double knock-out call K 100, corridor 75..130, rebate 1 at the terminal payment time
-    "DKO": (DoubleBarrierOptionAnalyticalEngine, lambda: DoubleBarrierOption(
+    "DKO": (DoubleBarrierOptionAnalyticalEngine, lambda m=1.0: DoubleBarrierOption(
         strike=100.0, option_type=OptionType.CALL, upper_barrier=130.0, lower_barrier=75.0,
         barrier_type=DoubleBarrierType.KNOCK_OUT, rebate=1.0, observation_schedule=T._double_schedule(130.0, 75.0),
-        **D),
+        **_disc(m)),
         _call_below(100.0, 130.0) + 1.0 * (_above(130.0) + _below(75.0))),
     # single sharkfin call K 100, L 120, knock-out cash 0.5 paid at the hit (the maturity record), no-hit cash 3
-    "SSF_hit": (SingleSharkfinOptionAnalyticalEngine, lambda: SingleSharkfinOption(
+    "SSF_hit": (SingleSharkfinOptionAnalyticalEngine, lambda m=1.0: SingleSharkfinOption(
         strike=100.0, option_type=OptionType.CALL, barrier=120.0, knock_out_rebate=0.5, no_hit_rebate=3.0,
-        pay_at_hit=True, observation_schedule=T._single_schedule(120.0), **D),
+        pay_at_hit=True, observation_schedule=T._single_schedule(120.0), **_disc(m)),
         _call_below(100.0, 120.0) + 3.0 * _below(120.0) + 0.5 * _above(120.0)),
     # double sharkfin call K 100, corridor 75..130, knock-out cash 0.5 at the hit, no-hit cash 3
-    "DSF_hit": (DoubleSharkfinOptionAnalyticalEngine, lambda: DoubleSharkfinOption(
+    "DSF_hit": (DoubleSharkfinOptionAnalyticalEngine, lambda m=1.0: DoubleSharkfinOption(
         strike=100.0, option_type=OptionType.CALL, upper_barrier=130.0, lower_barrier=75.0, knock_out_rebate=0.5,
-        no_hit_rebate=3.0, pay_at_hit=True, observation_schedule=T._double_schedule(130.0, 75.0), **D),
+        no_hit_rebate=3.0, pay_at_hit=True, observation_schedule=T._double_schedule(130.0, 75.0), **_disc(m)),
         _call_below(100.0, 130.0) + 3.0 * (math.exp(-R * TAU) - _above(130.0) - _below(75.0))
         + 0.5 * (_above(130.0) + _below(75.0))),
     # double sharkfin put K 100, corridor 75..130, knock-out cash 0.5 at the terminal payment time, no-hit cash 3
-    "DSF_put": (DoubleSharkfinOptionAnalyticalEngine, lambda: DoubleSharkfinOption(
+    "DSF_put": (DoubleSharkfinOptionAnalyticalEngine, lambda m=1.0: DoubleSharkfinOption(
         strike=100.0, option_type=OptionType.PUT, upper_barrier=130.0, lower_barrier=75.0, knock_out_rebate=0.5,
-        no_hit_rebate=3.0, observation_schedule=T._double_schedule(130.0, 75.0), **D),
+        no_hit_rebate=3.0, observation_schedule=T._double_schedule(130.0, 75.0), **_disc(m)),
         _put_above(100.0, 75.0) + 3.0 * (math.exp(-R * TAU) - _above(130.0) - _below(75.0))
         + 0.5 * (_above(130.0) + _below(75.0))),
 }
@@ -162,7 +167,7 @@ def test_double_knock_out_on_the_penultimate_record_at_any_spot(spot):
     assert _price(DoubleBarrierOptionAnalyticalEngine, product, spot) == pytest.approx(reference, abs=ABS, rel=0.0)
 
 
-# --- every kind prices on its penultimate record -----------------------------------------------------------------------
+# --- every kind prices on its penultimate record ------------------------------------------------------------------
 
 def _kinds():
     s, d = T._single_schedule, T._double_schedule
@@ -176,36 +181,37 @@ def _kinds():
                         continue
                     out.append((f"{bt.name}-{ot.name}-K{strike}-R{rebate}{'-hit' if at_hit else ''}",
                                 BarrierAnalyticalEngine,
-                                (lambda bt=bt, ot=ot, level=level, strike=strike, rebate=rebate, at_hit=at_hit:
+                                (lambda m=1.0, bt=bt, ot=ot, level=level, strike=strike, rebate=rebate, at_hit=at_hit:
                                  BarrierOption(strike=strike, option_type=ot, barrier=level, barrier_type=bt,
-                                               rebate=rebate, pay_at_hit=at_hit, observation_schedule=s(level), **D))))
+                                               rebate=rebate, pay_at_hit=at_hit, observation_schedule=s(level),
+                                               **_disc(m)))))
     for tt in (TouchType.ONE_TOUCH, TouchType.NO_TOUCH):
         for up, level in ((True, 120.0), (False, 85.0)):
             out.append((f"{tt.name}-{'up' if up else 'dn'}", OneTouchAnalyticalEngine,
-                        (lambda tt=tt, up=up, level=level: OneTouchOption(
+                        (lambda m=1.0, tt=tt, up=up, level=level: OneTouchOption(
                             barrier=level, barrier_direction=BarrierDirection.UP if up else BarrierDirection.DOWN,
-                            rebate=5.0, touch_type=tt, observation_schedule=s(level), **D))))
+                            rebate=5.0, touch_type=tt, observation_schedule=s(level), **_disc(m)))))
     for dbt in DoubleBarrierType:
         for ot in (OptionType.CALL, OptionType.PUT):
             out.append((f"{dbt.name}-{ot.name}", DoubleBarrierOptionAnalyticalEngine,
-                        (lambda dbt=dbt, ot=ot: DoubleBarrierOption(
+                        (lambda m=1.0, dbt=dbt, ot=ot: DoubleBarrierOption(
                             strike=100.0, option_type=ot, upper_barrier=130.0, lower_barrier=75.0, barrier_type=dbt,
-                            rebate=1.0, observation_schedule=d(130.0, 75.0), **D))))
+                            rebate=1.0, observation_schedule=d(130.0, 75.0), **_disc(m)))))
     for ot, level in ((OptionType.CALL, 120.0), (OptionType.PUT, 85.0)):
         for at_hit in (False, True):
             out.append((f"SSF-{ot.name}-{at_hit}", SingleSharkfinOptionAnalyticalEngine,
-                        (lambda ot=ot, level=level, at_hit=at_hit: SingleSharkfinOption(
+                        (lambda m=1.0, ot=ot, level=level, at_hit=at_hit: SingleSharkfinOption(
                             strike=100.0, option_type=ot, barrier=level, knock_out_rebate=0.5, no_hit_rebate=3.0,
-                            pay_at_hit=at_hit, observation_schedule=s(level), **D))))
+                            pay_at_hit=at_hit, observation_schedule=s(level), **_disc(m)))))
             out.append((f"DSF-{ot.name}-{at_hit}", DoubleSharkfinOptionAnalyticalEngine,
-                        (lambda ot=ot, at_hit=at_hit: DoubleSharkfinOption(
+                        (lambda m=1.0, ot=ot, at_hit=at_hit: DoubleSharkfinOption(
                             strike=100.0, option_type=ot, upper_barrier=130.0, lower_barrier=75.0,
                             knock_out_rebate=0.5, no_hit_rebate=3.0, pay_at_hit=at_hit,
-                            observation_schedule=d(130.0, 75.0), **D))))
+                            observation_schedule=d(130.0, 75.0), **_disc(m)))))
     for kot in AccumulatorKnockOutType:
         out.append((f"ACC-{kot.name}", AccumulatorAnalyticalEngine,
-                    (lambda kot=kot: AccumulatorOption(
-                        strike=95.0, knock_out_barrier=110.0, option_type=OptionType.CALL, maturity=1.0,
+                    (lambda m=1.0, kot=kot: AccumulatorOption(
+                        strike=95.0, knock_out_barrier=110.0, option_type=OptionType.CALL, maturity=m,
                         daily_share_accumulation=1.0, gearing=2.0, knock_out_type=kot,
                         observation_dates=[k / 12 for k in range(1, 13)]))))
     return out
@@ -219,3 +225,68 @@ KINDS = _kinds()
 def test_every_kind_prices_on_its_penultimate_record(name, engine_cls, build, spot):
     value = _price(engine_cls, build(), spot)
     assert math.isfinite(value)
+
+
+# --- a tiny remaining time after the first observation -----------------------------------------------------------
+#
+# The maturity a hair after the last record (1 + tau): the continuation after it is Black-Scholes over tau, the
+# payoff smoothed over h = sqrt(tau / t1) in the step's normal variable. Below the panel-width floor that layer is
+# graded around each kink (panels from h, doubling to the floor), so the two orders resolve it; before, such a
+# contract was refused (orders 8 and 12 apart by ~1e-6) for 2e-10 <= tau <= 1e-6, where main priced it.
+
+TINY_TAUS = [2e-10, 1e-8, 1e-6]
+
+
+def _bs(spot, strike, tau, call):
+    sq = VOL * math.sqrt(tau)
+    d1 = (math.log(spot / strike) + (R - Q + 0.5 * VOL * VOL) * tau) / sq
+    d2 = d1 - sq
+    if call:
+        return spot * math.exp(-Q * tau) * norm.cdf(d1) - strike * math.exp(-R * tau) * norm.cdf(d2)
+    return strike * math.exp(-R * tau) * norm.cdf(-d2) - spot * math.exp(-Q * tau) * norm.cdf(-d1)
+
+
+#: name -> (value at t1 of a spot there, the spot levels where it is not smooth)
+_AT_T1 = {
+    "UOC": (lambda s, tau: math.exp(-R * tau) if s >= 120.0 else _bs(s, 100.0, tau, True), (120.0, 100.0)),
+    "DOC": (lambda s, tau: 0.0 if s <= 85.0 else _bs(s, 100.0, tau, True), (85.0, 100.0)),
+    "UIP_K130": (lambda s, tau: _bs(s, 130.0, tau, False) if s >= 120.0 else 2.0 * math.exp(-R * tau),
+                 (120.0, 130.0)),
+    "DKO": (lambda s, tau: math.exp(-R * tau) if (s <= 75.0 or s >= 130.0) else _bs(s, 100.0, tau, True),
+            (75.0, 100.0, 130.0)),
+    "DSF_hit": (lambda s, tau: 0.5 if (s <= 75.0 or s >= 130.0) else (
+        _bs(s, 100.0, tau, True) - _bs(s, 130.0, tau, True) + 3.0 * math.exp(-R * tau)), (75.0, 100.0, 130.0)),
+    "DSF_put": (lambda s, tau: 0.5 * math.exp(-R * tau) if (s <= 75.0 or s >= 130.0) else (
+        _bs(s, 100.0, tau, False) - _bs(s, 75.0, tau, False) + 3.0 * math.exp(-R * tau)), (75.0, 100.0, 130.0)),
+}
+
+
+def _reference(name, spot, tau):
+    """DF(t1) E[value at t1 of S_t1] by adaptive quadrature (scipy), broken at the levels and across each level's
+    smoothing layer: independent of the engines' rule and closed forms."""
+    value, levels = _AT_T1[name]
+    sd = VOL * math.sqrt(TAU)
+    mean = math.log(spot) + (R - Q - 0.5 * VOL * VOL) * TAU
+    h = math.sqrt(tau / TAU)
+    points = sorted({(math.log(lv) - mean) / sd + sign * m * h for lv in levels for sign in (-1, 1)
+                     for m in (0.0, 0.5, 1, 2, 4, 8, 16, 32, 64)})
+    edges = [-12.0] + [p for p in points if -12.0 < p < 12.0] + [12.0]
+    total = sum(integrate.quad(lambda z: norm.pdf(z) * value(math.exp(mean + sd * z), tau), a, b,
+                               epsabs=1e-14, epsrel=1e-12, limit=500)[0] for a, b in zip(edges[:-1], edges[1:]))
+    return math.exp(-R * TAU) * total
+
+
+@pytest.mark.parametrize("tau", TINY_TAUS)
+@pytest.mark.parametrize("name", list(_AT_T1))
+@pytest.mark.parametrize("spot", [100.0, 105.0, 119.9])
+def test_a_tiny_remaining_time_matches_the_european_payoff_over_it(name, tau, spot):
+    engine_cls, build, _ = REFERENCES[name]
+    value = _price(engine_cls, build(1.0 + tau), spot)
+    assert value == pytest.approx(_reference(name, spot, tau), abs=1e-11, rel=0.0)
+
+
+@pytest.mark.parametrize("tau", TINY_TAUS)
+@pytest.mark.parametrize("name,engine_cls,build", KINDS, ids=[k[0] for k in KINDS])
+def test_every_kind_prices_with_a_tiny_remaining_time(name, engine_cls, build, tau):
+    for spot in (90.0, 100.0, 105.0):
+        assert math.isfinite(_price(engine_cls, build(1.0 + tau), spot))
