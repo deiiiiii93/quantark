@@ -27,7 +27,10 @@ from quantark.util.enum import CouponPayType
 
 REFERENCE = json.loads(Path(__file__).with_name("phoenix_memory_fan_reference.json").read_text())
 
-#: L1 stencil weights of the BUMP Greeks: price noise times this bounds the Greek's noise
+#: Generous noise weights of the BUMP Greeks (price noise times this bounds the Greek's): at least the L1
+#: stencil weight in each Greek's reported units at the matrix's spots -- delta 1/(0.01 S) and gamma
+#: 4/(0.01 S)^2 at S >= 100 (the dated rows at 78 sit within rel 1e-9 x 6.6 of a frozen value either way,
+#: a million times real cross-arch noise); vega, theta and the rhos are deliberately loose
 GREEK_WEIGHTS = {"delta": 1.0, "gamma": 4.0, "vega": 100.0, "theta": 365.0, "rho": 1e4, "dividend_rho": 1e4}
 
 #: rows too slow for the default loop: the M=36 note and every Greeks row

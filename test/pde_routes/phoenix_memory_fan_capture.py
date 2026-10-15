@@ -177,7 +177,7 @@ CASES = {
     "memory_term": _plain(phoenix, env=env_term),
     "memory_nodal": _plain(phoenix, params=PDEParams(accuracy="standard",
                                                      event_projection=EventProjectionMode.NODAL)),
-    "memory_m36": _plain(lambda: phoenix(num_obs=36), greeks=()),
+    "memory_m36": _plain(lambda: phoenix(num_obs=36)),
     "dated_pay_instant": _dated_case(95.0, "instant"),
     "dated_miss_instant": _dated_case(78.0, "instant"),
     "dated_pay_expiry": _dated_case(95.0, "expiry"),
@@ -189,7 +189,7 @@ CASES = {
     "dated_miss_expiry_arrears_2": _dated_case(78.0, "expiry", arrears=2.0, greeks=()),
     # AC2: local vol
     "lv_memory": _plain(phoenix, env=env_local_vol, session=True, solver=LocalVolPhoenixPDESolver),
-    "lv_memory_continuous_ki": _plain(lambda: phoenix(ki_continuous=True), env=env_local_vol,
+    "lv_memory_continuous_ki": _plain(lambda: phoenix(ki_continuous=True), env=env_local_vol, session=True,
                                       solver=LocalVolPhoenixPDESolver),
     # AC3: non-memory stays where it was
     "plain": _plain(lambda: phoenix(memory=False), session=True),
