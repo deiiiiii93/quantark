@@ -1,9 +1,9 @@
 """The arrears-linear memory fan reproduces the old 2(M+1)-surface fan (spec 2026-10-15, AC1-AC5).
 
 The old fan's numbers are frozen in ``phoenix_memory_fan_reference.json`` (captured at base 1e32c27c by
-``phoenix_memory_fan_capture.py``). Prices and session outputs compare with ``golden_compare.close``; the
-BUMP Greeks carry the prices' noise through their stencil (``anchor_tolerance`` with a conservative L1
-weight per Greek), so they are never held to the bare price tolerance.
+``phoenix_memory_fan_capture.py``). Prices, every event-statistics number and session outputs compare with
+``golden_compare.close``; the BUMP Greeks carry the prices' noise through their stencil (``anchor_tolerance``
+with a conservative L1 weight per Greek), so they are never held to the bare price tolerance.
 """
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ import numpy as np
 import pytest
 
 from golden_compare import GOLDEN_ABS_TOL, GOLDEN_REL_TOL, close
-from pde_routes.phoenix_memory_fan_capture import CASES, phoenix
+from pde_bitwise.capture_book import _dated, _dated_env, _first_obs, _phoenix_expiry
+from pde_routes.phoenix_memory_fan_capture import CASES, phoenix, stats_fields
 from quantark.asset.equity.engine.pde import PhoenixPDESolver
 from quantark.asset.equity.engine.pde.core.groups import VALUE, Backend
 from quantark.asset.equity.engine.pde.core.prepare import Operation, OutputRequest, prepare
@@ -46,6 +47,38 @@ def test_price_matches_the_frozen_fan(name):
     product, env, solver_cls, params = _build(name)
     live = float(solver_cls(params).price(product, env))
     assert close(live, REFERENCE[name]["price"]), (live, REFERENCE[name]["price"])
+
+
+@pytest.mark.parametrize("name", _cases(sorted(CASES)))
+def test_event_stats_match_the_frozen_fan(name):
+    product, env, solver_cls, params = _build(name)
+    live = stats_fields(solver_cls(params).calculate_event_stats(product, env))
+    want = REFERENCE[name]["stats"]
+    assert live.keys() == want.keys()
+    bad = {k: (live[k], want[k]) for k in want if not close(live[k], want[k])}
+    assert not bad, bad
+
+
+#: the dated fixture's coupon is 0.12 * 100 / 12 = 1.0, so on its own a coupon missed at valuation owes exactly
+#: one unit and reads the same from the unit carrier S(1) as from S(0) + earned·(S(1) - S(0)) (spec C3b);
+#: these rows owe 1.5 (an 18% coupon) and 3.0 (1.0 plus 2.0 carried from before the pricing date)
+@pytest.mark.parametrize("pay_type", ["instant", "expiry"])
+@pytest.mark.parametrize("coupon_rate,arrears", [(0.18, 0.0), (0.12, 2.0)], ids=["coupon_1.5", "arrears_2"])
+@pytest.mark.parametrize("spot", [78.0, 95.0], ids=["miss", "pay"])
+def test_a_coupon_decided_at_valuation_reconciles_whatever_it_owes(spot, coupon_rate, arrears, pay_type):
+    import dataclasses
+
+    p, _ = _dated("phoenix", fixed_fraction=1.0 / 12.0)
+    p.coupon_config = dataclasses.replace(p.coupon_config, coupon_rate=coupon_rate, initial_coupon_arrears=arrears)
+    if pay_type == "expiry":
+        p = _phoenix_expiry(p)
+    env = _dated_env(p, _first_obs(p), spot)
+    solver = PhoenixPDESolver(PDEParams(accuracy="standard"))
+    stats = solver.calculate_event_stats(p, env)
+    ledger = float(np.sum(stats.expected_discounted_cashflows))
+    # the value reads S(0) + earned·u at a miss (C3); the statistics must compose the same state (C3b)
+    assert abs(float(stats.pv) - ledger) <= 1e-10, (stats.pv, ledger)
+    assert close(float(stats.pv), float(PhoenixPDESolver(PDEParams(accuracy="standard")).price(p, env)))
 
 
 @pytest.mark.parametrize("name", _cases(sorted(n for n in CASES if CASES[n]["session"])))

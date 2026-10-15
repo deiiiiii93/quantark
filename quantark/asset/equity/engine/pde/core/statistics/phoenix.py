@@ -1,19 +1,21 @@
 """The Phoenix statistics in the value mode (spec 3B §5.3, §5.1): INSTANT coupons, with memory.
 
 Columns per surface (``ColumnLayout(n_ko, trigger=True, ki=want_ki, leg=True, coupon_cash=True,
-n_states=K + 1)``, ``K`` the coupon count with memory, else 0):
+n_states=2)`` with memory, ``n_states=1`` without -- the value's memory fan, spec 2026-10-15 C4):
 
 * the memory-free columns ``F``: KO_k, the triggers P_k, KIS, KIE, M -- a knock-out, a knock-in and the
-  maturity do not depend on how many coupons were missed;
+  maturity do not depend on the arrears owed;
 * per memory state ``m`` the slice ``S(m)`` of coupon cash ``C_k^(m)``: the coupon paid at observation
-  ``k`` on a path that is in state ``m`` now.
+  ``k`` on a path that is in state ``m`` now. State 0 owes ``A0`` (the arrears carried from before the
+  pricing date, at the first observation only), state 1 one unit more (``PhoenixPDESolver._state_arrears``).
 
 The value's state-``m`` surface is ``F`` + ``S(m)`` read with the knock-out payoffs: every value stage is
 linear, and each stage here applies it to ``F`` and to every slice with the cash split by the column
-that pays it -- the coupon fan-in (pay: state 0 plus the coupon, miss: state ``m + 1``), the knock-in
-copy, the knock-out (the 0.8.0 forfeit rule: arrears released only above the coupon barrier) and their
-joint projection on a shared date. A state the value leaves out of a stage (``m`` past the fan) is
-unreachable from then on, and no readout reads it.
+that pays it -- the coupon fan-in (pay: state 0 plus the coupon earned, miss: the coupon owed,
+``S(0) + earned·(S(1) - S(0))``), the knock-in copy, the knock-out (the release rule: the arrears whatever
+the spot, the coupon on its barrier) and their joint projection on a shared date. A coupon missed at the
+valuation instant is read the same way from the pre-event block (spec 2026-10-15 C3b); ``S(1)`` is the
+unit carrier and no readout reads it raw.
 """
 from __future__ import annotations
 
@@ -87,7 +89,7 @@ class PhoenixStatistics(SnowballStatistics):
 
     def _layout(self):
         product = self.product
-        self.n_states = (len(self.solver._coupon_barriers) if product.has_memory_coupon else 0) + 1
+        self.n_states = 2 if product.has_memory_coupon else 1     # the value's memory fan (spec 2026-10-15 C4)
         expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
         return ColumnLayout(len(self.ko_records), trigger=True, ki=self.want_ki, leg=True, coupon_cash=True,
                             n_states=self.n_states, expiry=expiry)
@@ -108,27 +110,10 @@ class PhoenixStatistics(SnowballStatistics):
             pricing_env=self.env, cashflow=1.0, current_time=float(self.t[j]),
             settlement_time=solver._coupon_payment_time(self.product, self.env, obs_idx))
 
-    def _missed_arrears(self, obs_idx, missed_count):
-        """Arrears released by a trigger at ``obs_idx`` from the statistics' memory state ``missed_count``.
-
-        The statistics still march one state per missed coupon (``n_states = K + 1``); the value's fan
-        has two states since spec 2026-10-15 and its ``_state_arrears`` no longer reads this state. The
-        statistics keep the miss-count arithmetic here until they move to two states too.
-        ``missed_count == obs_idx`` is the state in which every period has missed, so arrears carried
-        in from before the pricing date are still outstanding; in every other state a coupon has paid.
-        """
-        solver = self.solver
-        carried = solver._initial_coupon_arrears if missed_count == obs_idx else 0.0
-        if missed_count <= 0 or obs_idx <= 0:
-            return float(carried)
-        start = max(obs_idx - missed_count, 0)
-        return float(solver._coupon_cumulative[obs_idx] - solver._coupon_cumulative[start] + carried)
-
     def _earned(self, obs_idx, m):
         solver = self.solver
         memory = self.product.has_memory_coupon
-        return float(solver._coupon_amounts[obs_idx]) + (self._missed_arrears(obs_idx, m)
-                                                          if memory else 0.0)
+        return float(solver._coupon_amounts[obs_idx]) + (solver._state_arrears(obs_idx, m) if memory else 0.0)
 
     # --- the march hooks ------------------------------------------------------------
 
@@ -185,26 +170,32 @@ class PhoenixStatistics(SnowballStatistics):
             return
         k = self._k(obs_idx)
         barrier, rev = float(solver._coupon_barriers[obs_idx]), product.is_reverse
-        memory = product.has_memory_coupon
         disc = solver._coupon_discount_scalar(j, current_time, product, env, obs_idx)
         pay_mask = None
         if not solver._event_uses_projection(j):
             pay_mask = solver._event_nodal_mask(s, barrier, rev, True, at_valuation=(j == 0))
-        max_m = obs_idx if memory else 0
         S, F = self._S, self._F
         p_pos = self._pos_F[int(self.layout.trigger_cols[k])]
         df_pay = self._trigger_unit(j, obs_idx)
         at_terminal = j == len(self.t) - 1
         for X in blocks:
             X0 = X.copy()
-            for m in range(max_m + 1):
-                nxt = m + 1 if memory else 0
+            for m in range(self.n_states):
+                earned = self._earned(obs_idx, m)
                 pay = X0[:, S[0]]
-                self._credit(pay, X0, k, self._earned(obs_idx, m), disc, at_terminal)
-                X[:, S[m]] = solver._coupon_update(s, barrier, rev, j, X0[:, S[nxt]], pay, pay_mask)
+                self._credit(pay, X0, k, earned, disc, at_terminal)
+                X[:, S[m]] = solver._coupon_update(s, barrier, rev, j, self._missed(X0, earned), pay, pay_mask)
             free_pay = X0[:, F]
             free_pay[:, p_pos] = df_pay                              # today's trigger value
             X[:, F] = solver._coupon_update(s, barrier, rev, j, X0[:, F], free_pay, pay_mask)
+
+    def _missed(self, X0, earned):
+        """A coupon of ``earned`` missed from the block ``X0`` (before the event), shaped like ``S(0)``: owed
+        with memory, ``S(0) + earned·(S(1) - S(0))`` (spec 2026-10-15 C2); lost without, ``S(0)``."""
+        s0 = X0[:, self._S[0]]
+        if not self.product.has_memory_coupon:
+            return s0
+        return s0 + earned * (X0[:, self._S[1]] - s0)
 
     def _credit(self, pay, X0, k, earned, disc, at_terminal):
         """Add a coupon earned now to a pay branch shaped like ``S(0)``, at the state-0 positions.
@@ -246,12 +237,11 @@ class PhoenixStatistics(SnowballStatistics):
         solver, product, L, s = self.solver, self.product, self.layout, self.s
         rev, memory = product.is_reverse, product.has_memory_coupon
         obs_idx = solver._coupon_observation_indices.get(j)
-        max_m = obs_idx if (obs_idx is not None and memory) else 0
         self.breach.current_time = current_time
         df = self.breach.unit(rec)
         projection = solver._event_uses_projection(j)
         if projection and solver._joint_coupon_ko_projection_active(j):
-            self._joint_stage(blocks, j, current_time, rec, obs_idx, df, max_m)
+            self._joint_stage(blocks, j, current_time, rec, obs_idx, df)
             if L.expiry and not terminal:
                 self._termination_ko(blocks, j, current_time, rec)
             return
@@ -277,7 +267,7 @@ class PhoenixStatistics(SnowballStatistics):
             if obs_idx is not None:
                 target[:, L.trigger_cols[k]] = paid(df_pay)     # a coupon triggered on the knock-out date counts
                 for m in range(self.n_states):
-                    arrears = self._missed_arrears(obs_idx, min(m, max_m)) if memory else 0.0
+                    arrears = solver._state_arrears(obs_idx, m) if memory else 0.0
                     coupon_at_ko = float(solver._coupon_amounts[obs_idx]) + arrears
                     if coupon_at_ko > 0.0:
                         # the release rule (decision 4): the arrears whatever the spot, the coupon on its barrier
@@ -289,7 +279,7 @@ class PhoenixStatistics(SnowballStatistics):
         if L.expiry and not terminal:
             self._termination_ko(blocks, j, current_time, rec)
 
-    def _joint_stage(self, blocks, j, current_time, rec, obs_idx, df, max_m):
+    def _joint_stage(self, blocks, j, current_time, rec, obs_idx, df):
         """``_apply_joint_coupon_ko_projection`` on statistics blocks, in place: one piecewise cell
         average per slice, with the value's four region branches split by column."""
         solver, product, L, s = self.solver, self.product, self.layout, self.s
@@ -322,8 +312,7 @@ class PhoenixStatistics(SnowballStatistics):
             X[:, F] = project_piecewise_event(x_vec, breaks, solver._joint_branches(
                 lows, his, b_c_x, b_ko_x, trig_up, ko_here, True, f_ko_value, f_pay, f0, f0))
             for m in range(self.n_states):
-                in_fan = m <= max_m
-                arrears = self._missed_arrears(obs_idx, min(m, max_m)) if memory else 0.0
+                arrears = solver._state_arrears(obs_idx, m) if memory else 0.0
                 coupon_at_ko = amt + arrears
 
                 def s_ko_value(m_pay, _c=coupon_at_ko, _a=arrears, _w=len(S[m])):
@@ -333,13 +322,12 @@ class PhoenixStatistics(SnowballStatistics):
                         v[:, L.n_ko + k] = v[:, k]
                     return v
 
-                pay = miss = None
-                if in_fan:
-                    pay = X0[:, S[0]]
-                    self._credit(pay, X0, k, self._earned(obs_idx, m), disc, j == len(self.t) - 1)
-                    miss = X0[:, S[m + 1 if memory else 0]]
+                earned = self._earned(obs_idx, m)
+                pay = X0[:, S[0]]
+                self._credit(pay, X0, k, earned, disc, j == len(self.t) - 1)
                 X[:, S[m]] = project_piecewise_event(x_vec, breaks, solver._joint_branches(
-                    lows, his, b_c_x, b_ko_x, trig_up, ko_here, in_fan, s_ko_value, pay, miss, X0[:, S[m]]))
+                    lows, his, b_c_x, b_ko_x, trig_up, ko_here, True, s_ko_value, pay, self._missed(X0, earned),
+                    X0[:, S[m]]))
 
     def _column_of_term(self, term, surface):
         if term.column == "U":
@@ -391,13 +379,26 @@ class PhoenixStatistics(SnowballStatistics):
             return float(prepared.readout.price(grid[:, col], env.spot, prepared.layout))
 
         t0 = self._t0_coupon()
-        # a memory coupon missed at valuation reads the one-missed state, as the value does (F16)
-        s_state = 1 if (t0 is not None and not t0[0] and product.has_memory_coupon) else 0
+        owed = None
+        if t0 is not None and not t0[0] and product.has_memory_coupon:
+            # a memory coupon missed at valuation owes it (F16): the value reads S(0) + earned·u from its
+            # pre-event columns (C3), so the cash composes the same state from the pre-event block (C3b) --
+            # S(1) itself is the unit carrier, one unit owed, never read raw
+            owed = self._earned(t0[1], 0)
+
+        def at_state(table, i):
+            """The readout of row ``i`` of a per-state column table (``L.cash``, ``L.bucket``): state 0's, or
+            the owed state's at a valuation miss."""
+            if owed is None:
+                return at(table[i, 0])
+            s0, s1 = grid[:, table[i, 0]], grid[:, table[i, 1]]
+            return float(prepared.readout.price(s0 + owed * (s1 - s0), env.spot, prepared.layout))
+
         n_ko = L.n_ko
         ed_unit = np.array([at(c) for c in L.ko])
-        cash = np.array([at(L.cash[k, s_state]) for k in range(n_ko)], dtype=float)
+        cash = np.array([at_state(L.cash, k) for k in range(n_ko)], dtype=float)
         trigger = np.array([at(c) for c in L.trigger_cols], dtype=float)
-        buckets = (np.array([at(L.bucket[j, s_state]) for j in range(n_ko + 1)], dtype=float)
+        buckets = (np.array([at_state(L.bucket, j) for j in range(n_ko + 1)], dtype=float)
                    if L.expiry else None)
         if t0 is not None:
             pays, obs0 = t0
