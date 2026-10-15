@@ -34,12 +34,16 @@ from quantark.asset.equity.product.option.observation_schedule import Observatio
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import BarrierDirection, BarrierType, ObservationType, TouchType
-from quantark.util.enum.engine_enums import EngineType
+from quantark.util.enum.engine_enums import DiscreteBarrierApproximation, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import validate_non_negative, validate_positive
 
 from .barrier_analytical_engine import BarrierAnalyticalEngine
-from .first_observation import observed_at_valuation, resolve_current_records
+from .first_observation import (
+    observed_at_valuation,
+    resolve_current_records,
+    validate_discrete_barrier_approximation,
+)
 from .one_touch_analytical_engine import OneTouchAnalyticalEngine
 
 
@@ -51,11 +55,15 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
     assumptions. Discrete monitoring uses the standard BGK continuity correction
     implemented by the composed barrier and one-touch engines, so daily
     observation schedules are approximated by shifting the barrier away from spot.
+    Between observations the legs follow ``discrete_barrier_approximation``
+    (``BGK``: the shifted closed form at today's spot on either side of the
+    barrier; ``FIRST_OBSERVATION_BGK``: through the next observation); the
+    composed engines are built with the same mode.
     """
 
     engine_type = EngineType.ANALYTICAL
     # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
-    MODEL_FINGERPRINT_ATTRS = ('params', '_barrier_engine', '_one_touch_engine')
+    MODEL_FINGERPRINT_ATTRS = ('params', 'discrete_barrier_approximation', '_barrier_engine', '_one_touch_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
@@ -64,10 +72,26 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
     MIN_VOL = 0.001
     MAX_VOL = 5.0
 
-    def __init__(self, params: Optional[EngineParams] = None):
+    def __init__(
+        self,
+        params: Optional[EngineParams] = None,
+        *,
+        discrete_barrier_approximation: DiscreteBarrierApproximation = DiscreteBarrierApproximation.BGK,
+    ):
+        """
+        Args:
+            params: Engine configuration parameters.
+            discrete_barrier_approximation: The value of a DISCRETE schedule between observations (see
+                ``DiscreteBarrierApproximation``), handed to the knock-out and touch leg engines.
+        """
         super().__init__(params)
-        self._barrier_engine = BarrierAnalyticalEngine(params)
-        self._one_touch_engine = OneTouchAnalyticalEngine(params)
+        self.discrete_barrier_approximation = validate_discrete_barrier_approximation(discrete_barrier_approximation)
+        self._barrier_engine = BarrierAnalyticalEngine(
+            params, discrete_barrier_approximation=self.discrete_barrier_approximation
+        )
+        self._one_touch_engine = OneTouchAnalyticalEngine(
+            params, discrete_barrier_approximation=self.discrete_barrier_approximation
+        )
 
     def price(
         self,
@@ -131,8 +155,10 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             # forward, the level every remaining record shares (None: they differ -- the legs refuse)
             hit_now = self._record_hit_at_valuation(product, pricing_env, spot) is not None
             forward_level = forward_barrier_level(product, pricing_env)
+            # BGK: the legs price the closed form beyond the level too, so its hit lag is checked there as well
             hit_or_beyond = hit_now or (
-                forward_level is not None
+                self.discrete_barrier_approximation is DiscreteBarrierApproximation.FIRST_OBSERVATION_BGK
+                and forward_level is not None
                 and (spot >= forward_level if self._barrier_direction(product) == BarrierDirection.UP
                      else spot <= forward_level)
             )
@@ -344,4 +370,7 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
         return super().static_replication(product, pricing_env)
 
     def __repr__(self):
-        return "SingleSharkfinOptionAnalyticalEngine()"
+        if self.discrete_barrier_approximation is DiscreteBarrierApproximation.BGK:
+            return "SingleSharkfinOptionAnalyticalEngine()"
+        return ("SingleSharkfinOptionAnalyticalEngine("
+                f"discrete_barrier_approximation={self.discrete_barrier_approximation.name})")

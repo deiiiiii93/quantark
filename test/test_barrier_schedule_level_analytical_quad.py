@@ -54,6 +54,7 @@ from quantark.util.enum import (
     OptionType,
     TouchType,
 )
+from quantark.util.enum.engine_enums import DiscreteBarrierApproximation
 from quantark.util.exceptions import ValidationError
 
 VALUATION = datetime(2025, 1, 6)
@@ -252,7 +253,14 @@ def _set_cash(product, cash: float) -> None:
         product.rebate = cash
 
 
-def _price(kind: Kind, level, record_level, cell, payoff=None, product_cash=None):
+#: both discrete-barrier approximation modes (the default BGK all through, the first-observation projection)
+MODES = list(DiscreteBarrierApproximation)
+
+
+def _price(kind: Kind, level, record_level, cell, payoff=None, product_cash=None,
+           mode=DiscreteBarrierApproximation.BGK):
+    """The value, or ``(type, message)`` of what the engine raised (BGK beyond the shifted corridor of a double
+    contract with cash: ``TODO(bgk-beyond)``)."""
     years, keep, which = CELLS[cell]
     product = kind.build(level, record_level, payoff=payoff)
     if product_cash is not None:
@@ -260,17 +268,22 @@ def _price(kind: Kind, level, record_level, cell, payoff=None, product_cash=None
     if years:
         _aged(product, years, keep_landing=keep)
     spot = kind.between if which == "between" else kind.inside
-    return _quiet(lambda: kind.engine().price(product, env(spot)))
+    try:
+        return _quiet(lambda: kind.engine(discrete_barrier_approximation=mode).price(product, env(spot)))
+    except ValidationError as exc:
+        assert "TODO(bgk-beyond)" in str(exc)
+        return type(exc), str(exc)
 
 
+@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("cell", list(CELLS))
 @pytest.mark.parametrize("name", list(KINDS))
-def test_records_at_another_level_price_as_the_contract_booked_at_that_level(name, cell):
+def test_records_at_another_level_price_as_the_contract_booked_at_that_level(name, cell, mode):
     """``product.barrier`` B, every record at L: bitwise the contract booked at L -- hit, expired and pay-at-hit
-    decisions on L, the forward closed form on L."""
+    decisions on L, the forward closed form on L (or the same refusal)."""
     kind = KINDS[name]
-    priced = _price(kind, kind.product_level, kind.record_level, cell)
-    booked = _price(kind, kind.record_level, kind.record_level, cell)
+    priced = _price(kind, kind.product_level, kind.record_level, cell, mode=mode)
+    booked = _price(kind, kind.record_level, kind.record_level, cell, mode=mode)
     assert priced == booked
 
 
@@ -279,16 +292,18 @@ FORWARD_CELLS = ["forward_from_inception", "forward_mid_life", "record_now_insid
                  "between_observations_beyond_the_records", "record_now_between"]
 
 
+@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("product_cash", [None, 0.0], ids=["product_cash", "zero_product_cash"])
 @pytest.mark.parametrize("cell", FORWARD_CELLS)
 @pytest.mark.parametrize("name", [n for n, k in KINDS.items() if k.knocks_out])
-def test_a_future_hit_pays_the_record_payoff(name, cell, product_cash):
+def test_a_future_hit_pays_the_record_payoff(name, cell, product_cash, mode):
     """Every record at L paying 4.5, the product's own knock-out cash 5 (a sharkfin's 3), or 0: a future hit pays
     the hit record's payoff (the MC's ``payoffs[first_idx]``, the PDE) -- bitwise the contract booked at L with cash
     4.5. A zero product cash does not skip the knock-out cash leg (the single sharkfin's touch leg)."""
     kind = KINDS[name]
-    priced = _price(kind, kind.product_level, kind.record_level, cell, payoff=4.5, product_cash=product_cash)
-    booked = _price(kind, kind.record_level, kind.record_level, cell, payoff=4.5, product_cash=4.5)
+    priced = _price(kind, kind.product_level, kind.record_level, cell, payoff=4.5, product_cash=product_cash,
+                    mode=mode)
+    booked = _price(kind, kind.record_level, kind.record_level, cell, payoff=4.5, product_cash=4.5, mode=mode)
     assert priced == booked
 
 
@@ -434,7 +449,10 @@ def test_continuous_expiry_and_plain_schedules_are_unchanged(observation, name):
     assert _quiet(lambda: engine().price(product, env(spot))) == pytest.approx(BEFORE[observation, name], **GOLDEN)
 
 
-#: plain schedules decided now: (label, aged years, keep the landing record, spot) -> pre-W18c value
+#: plain schedules decided now: (label, aged years, keep the landing record, spot) -> pre-W18c value. The
+#: ``between_observations`` rows (no record today, spot beyond the level) are the first-observation projection, the
+#: value of ``FIRST_OBSERVATION_BGK`` (and of the hybrid before the mode switch); the default BGK all through prices
+#: the shifted closed form there (``PLAIN_BETWEEN_BGK``)
 PLAIN_DECIDED_NOW = {
     ("barrier_uoc_hit", 0.25, True, 121.0): 4.888756185966682,
     ("barrier_uoc_between_observations", 0.30, False, 121.0): 4.895228788316507,
@@ -449,13 +467,28 @@ PLAIN_DECIDED_NOW = {
 }
 
 
+#: the ``between_observations`` rows under the default BGK all through (mode switch 2026-10-15; the hybrid before it,
+#: in ``PLAIN_DECIDED_NOW``: 4.895228788316507, 4.325607738235779, 3.014316895136673, 3.9935358597061317)
+PLAIN_BETWEEN_BGK = {
+    "barrier_uoc_between_observations": 4.897454111528181,
+    "one_touch_between_observations": 4.306821362456925,
+    "double_ko_between_observations": 3.0588562836876276,
+    "double_sharkfin_between_observations": 4.038075248257088,
+}
+
+
+@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("case", list(PLAIN_DECIDED_NOW), ids=[c[0] for c in PLAIN_DECIDED_NOW])
-def test_plain_schedules_decided_at_the_valuation_instant_are_unchanged(case):
+def test_plain_schedules_decided_at_the_valuation_instant_are_unchanged(case, mode):
     label, years, keep, spot = case
     name = label.rsplit("_hit", 1)[0] if label.endswith("_hit") else label.split("_between")[0]
     engine, build, _ = PLAIN[name]
     product = _aged(build(), years, keep_landing=keep)
-    assert _quiet(lambda: engine().price(product, env(spot))) == pytest.approx(PLAIN_DECIDED_NOW[case], **GOLDEN)
+    expected = PLAIN_DECIDED_NOW[case]
+    if label in PLAIN_BETWEEN_BGK and mode is DiscreteBarrierApproximation.BGK:
+        expected = PLAIN_BETWEEN_BGK[label]
+    value = _quiet(lambda: engine(discrete_barrier_approximation=mode).price(product, env(spot)))
+    assert value == pytest.approx(expected, **GOLDEN)
 
 
 # ======================================================================================================================

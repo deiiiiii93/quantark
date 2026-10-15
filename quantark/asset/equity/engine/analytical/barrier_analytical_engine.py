@@ -43,7 +43,7 @@ from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
 from quantark.util.enum import ObservationType, BarrierDirection, TouchType
-from quantark.util.enum.engine_enums import EngineType
+from quantark.util.enum.engine_enums import DiscreteBarrierApproximation, EngineType
 from quantark.util.exceptions import ValidationError, PricingError
 from quantark.util.numerical import is_zero
 
@@ -51,8 +51,10 @@ from .black_scholes_engine import BlackScholesEngine
 from .first_observation import (
     first_future_observation,
     observed_at_valuation,
+    projects_through_first_observation,
     resolve_current_records,
     through_first_observation,
+    validate_discrete_barrier_approximation,
 )
 from .one_touch_analytical_engine import OneTouchAnalyticalEngine
 
@@ -63,10 +65,12 @@ class BarrierAnalyticalEngine(BaseEngine):
 
     Notes:
         - Discrete monitoring uses Broadie-Glasserman-Kou barrier shift assuming
-          a regular observation grid and fixed payoff across observations. A spot
-          beyond the barrier with no observation due is valued through the next
-          observation (``first_observation``); only an observation at the valuation
-          instant knocks the option out or in on the spot.
+          a regular observation grid and fixed payoff across observations. Only an
+          observation at the valuation instant knocks the option out or in on the
+          spot; between observations ``discrete_barrier_approximation`` decides the
+          value: ``BGK`` (default) the shifted closed form at today's spot on either
+          side of the barrier, ``FIRST_OBSERVATION_BGK`` the value through the next
+          observation (``first_observation``) on either side.
         - At maturity a knock-in carried as triggered pays the payoff; otherwise
           only what is observed now decides: a discrete schedule's records at the
           valuation instant, each at its own level and cash.
@@ -75,7 +79,7 @@ class BarrierAnalyticalEngine(BaseEngine):
 
     engine_type = EngineType.ANALYTICAL
     # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
-    MODEL_FINGERPRINT_ATTRS = ('params', '_bs_engine', '_one_touch_engine')
+    MODEL_FINGERPRINT_ATTRS = ('params', 'discrete_barrier_approximation', '_bs_engine', '_one_touch_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
@@ -84,10 +88,24 @@ class BarrierAnalyticalEngine(BaseEngine):
     MIN_MATURITY = 1e-10
     MAX_MATURITY = 50.0
 
-    def __init__(self, params: Optional[EngineParams] = None):
+    def __init__(
+        self,
+        params: Optional[EngineParams] = None,
+        *,
+        discrete_barrier_approximation: DiscreteBarrierApproximation = DiscreteBarrierApproximation.BGK,
+    ):
+        """
+        Args:
+            params: Engine configuration parameters.
+            discrete_barrier_approximation: The value of a DISCRETE schedule between observations (see
+                ``DiscreteBarrierApproximation``); the rebate leg's one-touch engine uses the same mode.
+        """
         super().__init__(params)
+        self.discrete_barrier_approximation = validate_discrete_barrier_approximation(discrete_barrier_approximation)
         self._bs_engine = BlackScholesEngine(params)
-        self._one_touch_engine = OneTouchAnalyticalEngine(params)
+        self._one_touch_engine = OneTouchAnalyticalEngine(
+            params, discrete_barrier_approximation=self.discrete_barrier_approximation
+        )
 
     def price(
         self,
@@ -132,10 +150,19 @@ class BarrierAnalyticalEngine(BaseEngine):
             hit_now = self._breached_at_valuation(product, pricing_env, spot)
             forward_level = forward_barrier_level(product, pricing_env)
             beyond_forward = forward_level is not None and self._breached(product, spot, forward_level)
+            # nothing is decided between observations (A15): the mode values the contract forward
+            project = (
+                not hit_now
+                and forward_level is not None
+                and projects_through_first_observation(
+                    self.discrete_barrier_approximation, beyond_forward,
+                    lambda: self._resolved_records(product, pricing_env),
+                )
+            )
         else:
             hit_now = obs_type != ObservationType.EXPIRY and product.is_barrier_hit(spot)
             forward_level = product.barrier
-            beyond_forward = hit_now
+            project = False
         # the cash of a future hit: a DISCRETE knock-out pays the hit record's payoff (W18c follow-up); a knock-in's
         # rebate is paid when nothing hits
         forward_cash = (
@@ -146,7 +173,7 @@ class BarrierAnalyticalEngine(BaseEngine):
             and product.pay_at_hit
             and forward_cash > 0
             and obs_type != ObservationType.EXPIRY
-            and not (hit_now or beyond_forward)
+            and not (hit_now or project)
         ):
             # Fail closed BEFORE pricing when the first-hit lag is not one constant;
             # the rebate leg (one-touch engine) applies the exp(-r L) factor itself
@@ -164,8 +191,8 @@ class BarrierAnalyticalEngine(BaseEngine):
         if discrete and not hit_now:
             if forward_level is None:
                 refuse_mixed_forward_levels(product.observation_schedule, pricing_env, default_payoff=product.rebate)
-            if beyond_forward:
-                # Beyond the barrier with no observation due: the next observation decides
+            if project:
+                # FIRST_OBSERVATION_BGK: the next observation decides, the shifted formula only after it
                 return (
                     self._price_beyond_discrete(
                         product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, forward_level,
@@ -335,7 +362,8 @@ class BarrierAnalyticalEngine(BaseEngine):
         forward_level: float,
         rebate: float,
     ) -> float:
-        """A spot beyond a discretely monitored barrier with no observation due (``first_observation``).
+        """The value through the first future observation (``first_observation``), no observation due now: a spot
+        beyond the barrier, or -- ``FIRST_OBSERVATION_BGK`` -- on either side of it.
 
         The breach at the first future observation ``t1`` pays the knock-out's rebate (at the hit, after the
         constant hit lag, or at the terminal payment time) or knocks the option in (Black-Scholes from ``t1``);
@@ -778,4 +806,6 @@ class BarrierAnalyticalEngine(BaseEngine):
         return super().static_replication(product, pricing_env)
 
     def __repr__(self):
-        return "BarrierAnalyticalEngine()"
+        if self.discrete_barrier_approximation is DiscreteBarrierApproximation.BGK:
+            return "BarrierAnalyticalEngine()"
+        return f"BarrierAnalyticalEngine(discrete_barrier_approximation={self.discrete_barrier_approximation.name})"

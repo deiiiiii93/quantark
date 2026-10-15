@@ -55,6 +55,26 @@ backtest and FX dynamic scenario.
   `RunFixingDay.product_events`.
 
 ### Changed
+- Discrete-barrier approximation mode on the equity analytical barrier family (`BarrierAnalyticalEngine`,
+  `OneTouchAnalyticalEngine`, `DoubleBarrierOptionAnalyticalEngine`, `SingleSharkfinOptionAnalyticalEngine`,
+  `DoubleSharkfinOptionAnalyticalEngine`, and the legs of `AccumulatorAnalyticalEngine`, which hand it to their
+  composed engines): keyword `discrete_barrier_approximation: DiscreteBarrierApproximation`
+  (`quantark.util.enum.engine_enums`; a non-member raises `ValidationError`; part of `model_fingerprint`). It
+  applies to a DISCRETE schedule with no record on the valuation instant; in both modes nothing is knocked out or in
+  between observations (A15), and a record on the valuation instant, CONTINUOUS / EXPIRY monitoring, T = 0
+  settlement, a carried knock-in and the refusals are unchanged. `BGK` (default, "BGK all through"): the
+  Broadie-Glasserman-Kou shifted closed form at today's spot whatever side of the level or of the shifted level the
+  spot lies on (the formulas' own continuation with the existing clamps: beyond the shifted level a knock-out and a
+  no-touch are 0, a knock-in its vanilla, a one-touch's touch probability is unclamped above 1; a double barrier with
+  a rebate and a double sharkfin with cash outside the shifted corridor raise `ValidationError` `TODO(bgk-beyond)`,
+  the double no-touch probability being undefined there). `FIRST_OBSERVATION_BGK` (opt-in, "first projection plus
+  BGK"): always the exact step through the first future observation, the shifted formula only from it on -- inside
+  the level too (the hybrid's beyond-level values bitwise). Inside the level the default is bitwise the previous
+  value (the hybrid already used BGK there). Moved values: under the default, every DISCRETE cell with no record
+  today and the spot at or beyond the remaining records' level (it was the first-observation projection), e.g. the
+  up-and-out call (K 100, L 120, monthly, 0.7 y left) at 121: 0.5696 -> 0.5906 (QUAD 0.5666), at 124.6: 0.1881 -> 0
+  (QUAD 0.1913); a one-touch (rebate 5) at 134: 4.8948 -> 6.6314 (QUAD 4.8947); the accumulator's barrier legs
+  likewise. The hybrid's step at the level (up to 0.161 on these contracts) is gone in both modes.
 - **Breaking:** `FxTargetRedemptionNote` and `FxTargetRedemptionForward` take a mandatory keyword `state`
   (`TargetRedemptionState(0.0)` for a contract booked at inception); omitting it raises `ValidationError`.
 - **Breaking:** a numeric `FxTargetRedemptionNote` states when its first listed period began: `accrual_start` (years

@@ -41,7 +41,7 @@ from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
 from quantark.util.enum import ObservationType
-from quantark.util.enum.engine_enums import EngineType
+from quantark.util.enum.engine_enums import DiscreteBarrierApproximation, EngineType
 from quantark.util.exceptions import ValidationError, PricingError
 from quantark.util.numerical import (
     is_zero,
@@ -58,8 +58,10 @@ from .double_no_touch import double_no_touch
 from .first_observation import (
     first_future_observation,
     observed_at_valuation,
+    projects_through_first_observation,
     resolve_current_records,
     through_first_observation,
+    validate_discrete_barrier_approximation,
 )
 
 
@@ -69,21 +71,28 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
 
     Uses the Ikeda & Kuintomo (1992) infinite-series solution for
     continuous monitoring. Discrete monitoring is approximated via
-    Broadie-Glasserman-Kou barrier shift. Expiry observation prices
-    the truncated-domain vanilla payoff.
+    Broadie-Glasserman-Kou barrier shift; only a record at the valuation
+    instant decides now, and between observations
+    ``discrete_barrier_approximation`` decides the value (``BGK``: the shifted
+    closed form at today's spot inside or outside the corridor;
+    ``FIRST_OBSERVATION_BGK``: through the next observation). Expiry
+    observation prices the truncated-domain vanilla payoff.
 
     Edge Cases Handled:
     -------------------
     1. T = 0: Returns intrinsic payoff or rebate immediately.
     2. sigma = 0: Returns discounted deterministic payoff.
-    3. Spot outside barriers (KO): Returns rebate immediately.
-    4. Spot outside barriers (KI): Returns vanilla price (already knocked in).
+    3. Spot outside barriers (KO), continuously or at a record on the valuation instant: Returns rebate
+       immediately.
+    4. Spot outside barriers (KI), likewise: Returns vanilla price (already knocked in).
+    4b. DISCRETE, ``BGK``, spot outside the SHIFTED corridor with a rebate: ``ValidationError``
+        (``TODO(bgk-beyond)``): the double no-touch probability is defined only inside its corridor.
     5. Strike outside [L, U]: Raises ValidationError (Ikeda-Kuintomo limitation).
     """
 
     engine_type = EngineType.ANALYTICAL
     # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
-    MODEL_FINGERPRINT_ATTRS = ('params', '_bs_engine')
+    MODEL_FINGERPRINT_ATTRS = ('params', 'discrete_barrier_approximation', '_bs_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
@@ -93,14 +102,22 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
     DEFAULT_MAX_TERMS = 10
     SERIES_TOLERANCE = 1e-15
 
-    def __init__(self, params: Optional[EngineParams] = None):
+    def __init__(
+        self,
+        params: Optional[EngineParams] = None,
+        *,
+        discrete_barrier_approximation: DiscreteBarrierApproximation = DiscreteBarrierApproximation.BGK,
+    ):
         """
         Initialize the double-barrier analytical engine.
 
         Args:
             params: Engine configuration parameters.
+            discrete_barrier_approximation: The value of a DISCRETE schedule between observations (see
+                ``DiscreteBarrierApproximation``).
         """
         super().__init__(params)
+        self.discrete_barrier_approximation = validate_discrete_barrier_approximation(discrete_barrier_approximation)
         self._bs_engine = BlackScholesEngine(params)
 
     def price(
@@ -194,8 +211,10 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         if obs_type == ObservationType.EXPIRY:
             return self._price_expiry(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier)
 
-        # Outside the corridor with no observation due: the next observation decides
-        if discrete and not hit_now and (S >= U or S <= L):
+        # No observation due now (A15): FIRST_OBSERVATION_BGK values the contract through the next observation
+        if discrete and not hit_now and projects_through_first_observation(
+            self.discrete_barrier_approximation, S >= U or S <= L, lambda: self._resolved_records(product, pricing_env)
+        ):
             return self._price_beyond_discrete(product, pricing_env, S, K, T, r, q, sigma, L, U, multiplier, rebate)
 
         # Spot already outside barriers: continuously, or at an observation at the valuation instant
@@ -280,7 +299,8 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         multiplier: float,
         rebate: float,
     ) -> float:
-        """A spot outside a discretely monitored corridor with no observation due (``first_observation``).
+        """The value through the first future observation (``first_observation``), no observation due now
+        (``FIRST_OBSERVATION_BGK``: the spot inside or outside the corridor).
 
         A breach at the first future observation ``t1`` pays the knock-out's rebate at maturity or knocks the
         option in (Black-Scholes from ``t1``); otherwise the continuation is this engine's shifted formula from
@@ -429,7 +449,13 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         multiplier: float,
         rebate: Optional[float] = None,
     ) -> float:
-        """Price discrete observation using barrier shift (``rebate``: a knock-out's remaining records' payoff)."""
+        """Price discrete observation using barrier shift (``rebate``: a knock-out's remaining records' payoff), at
+        today's spot ``S`` on either side of the corridor (``BGK``: nothing is decided between observations).
+
+        Outside the shifted corridor the Ikeda-Kunitomo series is evaluated as it stands (its continuation, clamped
+        at 0 as everywhere). The rebate needs the double no-touch probability, which is defined only inside its
+        corridor (its "outside: 0" branch would decide the hit now): refused there.
+        """
         schedule = product.observation_schedule
         if schedule is None or not schedule.records:
             raise PricingError(
@@ -450,6 +476,13 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             volatility=sigma,
             observation_interval=freq,
         )
+        if not lower_shifted < S < upper_shifted and not is_zero(rebate if rebate is not None else product.rebate):
+            # TODO(bgk-beyond): a no-touch probability from a spot outside the shifted corridor (the image series'
+            # continuation and its error bound) -- not implemented; price on QUAD / PDE / MC or FIRST_OBSERVATION_BGK
+            raise ValidationError(
+                f"TODO(bgk-beyond): spot {S} is outside the BGK-shifted corridor ({lower_shifted}, {upper_shifted}); "
+                "the double no-touch probability of the rebate is not defined there"
+            )
 
         return self._price_continuous(
             product=product,
@@ -666,4 +699,7 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         return super().static_replication(product, pricing_env)
 
     def __repr__(self):
-        return "DoubleBarrierOptionAnalyticalEngine()"
+        if self.discrete_barrier_approximation is DiscreteBarrierApproximation.BGK:
+            return "DoubleBarrierOptionAnalyticalEngine()"
+        return ("DoubleBarrierOptionAnalyticalEngine("
+                f"discrete_barrier_approximation={self.discrete_barrier_approximation.name})")

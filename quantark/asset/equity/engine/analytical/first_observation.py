@@ -28,8 +28,9 @@ import numpy as np
 from scipy.special import ndtr
 
 from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
-from quantark.util.exceptions import NumericalError, PricingError
+from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 from quantark.util.enum import ObservationAggregation
+from quantark.util.enum.engine_enums import DiscreteBarrierApproximation
 from quantark.util.numerical import Tolerance, is_zero, safe_exp, safe_log, safe_sqrt
 
 TRUNCATION_SD = 10.0
@@ -75,6 +76,32 @@ def resolve_current_records(schedule, pricing_env, **resolve_kwargs) -> List:
         aggregation_mode=schedule.aggregation_mode,
         frequency=schedule.frequency,
     ).resolve(pricing_env, **resolve_kwargs)
+
+
+def validate_discrete_barrier_approximation(value) -> DiscreteBarrierApproximation:
+    """``value`` when it is a ``DiscreteBarrierApproximation`` member; anything else raises ``ValidationError``."""
+    if not isinstance(value, DiscreteBarrierApproximation):
+        raise ValidationError(
+            "discrete_barrier_approximation must be a DiscreteBarrierApproximation member "
+            f"({', '.join(m.name for m in DiscreteBarrierApproximation)}), got {value!r}"
+        )
+    return value
+
+
+def projects_through_first_observation(
+    mode: DiscreteBarrierApproximation, beyond: bool, resolved_records: Callable[[], Sequence]
+) -> bool:
+    """Whether a DISCRETE schedule with no record deciding now is valued through its first future observation.
+
+    ``BGK`` never projects (the shifted closed form at today's spot). ``FIRST_OBSERVATION_BGK`` projects beyond the
+    level (as before the switch) and, inside it, whenever an observation remains after the valuation instant
+    (``resolved_records()``, read only then; none left: the closed form, as before).
+    """
+    if mode is DiscreteBarrierApproximation.BGK:
+        return False
+    return beyond or any(
+        rec.observation_time > 0.0 and not is_zero(rec.observation_time) for rec in resolved_records()
+    )
 
 
 def observed_at_valuation(resolved_records: Sequence) -> List:

@@ -1,8 +1,11 @@
 """The analytic barrier engines' observation rules (3C handoff, section 12).
 
-1. A spot beyond a DISCRETELY monitored barrier with no observation due is not a hit: the engines value the
-   contract through the next observation (``first_observation``) - exact to that observation, the engine's own
-   barrier-shifted formula after it - against the exact recursion of ``test/pde_routes/barrier_reference``.
+1. A spot beyond a DISCRETELY monitored barrier with no observation due is not a hit. Under
+   ``DiscreteBarrierApproximation.FIRST_OBSERVATION_BGK`` the engines value the contract through the next observation
+   (``first_observation``) - exact to that observation, the engine's own barrier-shifted formula after it - checked
+   here against the exact recursion of ``test/pde_routes/barrier_reference`` (before the mode switch of 2026-10-15
+   the engines did this beyond the barrier by default; the default is now BGK all through,
+   ``test/test_discrete_barrier_approximation_mode.py``).
 2. At maturity only what is observed now decides: a discrete schedule's records at the valuation instant, each at
    its own level and cash; an untouched knock-in pays its rebate.
 """
@@ -17,7 +20,11 @@ from quantark.asset.equity.engine.analytical.barrier_analytical_engine import Ba
 from quantark.asset.equity.product.option import BarrierOption
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord, ObservationSchedule
 from quantark.util.enum import BarrierType, ObservationAggregation, ObservationType, OptionType
+from quantark.util.enum.engine_enums import DiscreteBarrierApproximation
 from quantark.util.exceptions import PricingError
+
+#: the first-observation projection (opt-in since the mode switch; the default is BGK all through)
+FIRST = DiscreteBarrierApproximation.FIRST_OBSERVATION_BGK
 
 VOL, R, Q = CONST["vol"], CONST["rate"], CONST["div"]
 BT = {"UO": BarrierType.UP_OUT, "UI": BarrierType.UP_IN, "DO": BarrierType.DOWN_OUT, "DI": BarrierType.DOWN_IN}
@@ -32,8 +39,8 @@ def barrier(kind, call, level, obs, rebate=0.0, at_hit=False, multiplier=1.0):
                          contract_multiplier=multiplier)
 
 
-def price(product, spot):
-    return float(BarrierAnalyticalEngine().price(product, env_const(spot)))
+def price(product, spot, mode=DiscreteBarrierApproximation.BGK):
+    return float(BarrierAnalyticalEngine(discrete_barrier_approximation=mode).price(product, env_const(spot)))
 
 
 BEYOND = [
@@ -51,13 +58,14 @@ def test_beyond_a_discrete_barrier_is_valued_through_the_next_observation(kind, 
     exact = barrier_reference(kind=kind, call=call, strike=100.0, level=level, rebate=rebate, at_hit=at_hit,
                               obs=obs, spots=[spot], vol=VOL, r=R, q=Q)[spot][0]
     # measured 4.4e-2 at worst on 74 cells (today: up to 1.41); the shift's own error inside is up to 0.24
-    assert price(barrier(kind, call, level, obs, rebate, at_hit), spot) == pytest.approx(exact, abs=0.05)
+    assert price(barrier(kind, call, level, obs, rebate, at_hit), spot, FIRST) == pytest.approx(exact, abs=0.05)
 
 
-def test_the_value_is_continuous_across_the_barrier_within_the_shift_error():
-    """Just inside, the shifted formula; just beyond, the expectation through the next observation."""
+@pytest.mark.parametrize("mode", list(DiscreteBarrierApproximation))
+def test_the_value_is_continuous_across_the_barrier_within_the_shift_error(mode):
+    """One method on both sides: the shifted formula (BGK) or the expectation through the next observation."""
     product = barrier("UO", True, 120.0, MONTHLY, 5.0)
-    inside, beyond = price(product, 119.999), price(product, 120.001)
+    inside, beyond = price(product, 119.999, mode), price(product, 120.001, mode)
     assert abs(beyond - inside) < 0.1
 
 
@@ -78,7 +86,7 @@ def test_accumulate_beyond_the_barrier_is_refused():
                             maturity=1.0, rebate=5.0, observation_type=ObservationType.DISCRETE,
                             observation_schedule=sch)
     with pytest.raises(PricingError, match="STOP_FIRST_HIT"):
-        price(product, 125.0)
+        price(product, 125.0, FIRST)
 
 
 # --- at maturity (3C evidence z5 / z5b: strike 100, up barrier 130, rebate 5) -------------------------------
@@ -151,7 +159,8 @@ def test_touch_beyond_a_discrete_barrier_is_valued_through_the_next_observation(
     from quantark.asset.equity.engine.analytical.one_touch_analytical_engine import OneTouchAnalyticalEngine
 
     exact = touch_exact(one_touch, up, level, obs, spot, at_hit=at_hit)
-    value = float(OneTouchAnalyticalEngine().price(touch(one_touch, up, level, obs, at_hit=at_hit), env_const(spot)))
+    value = float(OneTouchAnalyticalEngine(discrete_barrier_approximation=FIRST).price(
+        touch(one_touch, up, level, obs, at_hit=at_hit), env_const(spot)))
     # measured 2.2e-2 at worst on these 18 cells (today: up to 0.74)
     assert value == pytest.approx(exact, abs=0.05)
 
@@ -181,10 +190,10 @@ def double_exact(knock_out, call, obs, spot, rebate=5.0, lower=80.0, upper=130.0
             + rebate * ko(payoff="one", cash=0.0, at_hit=False, **common)[0][spot][0])
 
 
-def double_price(product, spot):
+def double_price(product, spot, mode=DiscreteBarrierApproximation.BGK):
     from quantark.asset.equity.engine.analytical.double_barrier_option_engine import DoubleBarrierOptionAnalyticalEngine
 
-    return float(DoubleBarrierOptionAnalyticalEngine().price(product, env_const(spot)))
+    return float(DoubleBarrierOptionAnalyticalEngine(discrete_barrier_approximation=mode).price(product, env_const(spot)))
 
 
 @pytest.mark.parametrize("obs", [MONTHLY, AGED], ids=["monthly", "aged"])
@@ -194,7 +203,7 @@ def double_price(product, spot):
 def test_double_outside_a_discrete_corridor_is_valued_through_the_next_observation(spot, call, knock_out, obs):
     exact = double_exact(knock_out, call, obs, spot)
     # measured 2.0e-2 at worst on these 32 cells (today: up to 0.44); the shift's own error inside is up to 0.096
-    assert double_price(double(knock_out, call, obs), spot) == pytest.approx(exact, abs=0.05)
+    assert double_price(double(knock_out, call, obs), spot, FIRST) == pytest.approx(exact, abs=0.05)
 
 
 def double_at_maturity(knock_out, record=True, **per_record):
@@ -250,7 +259,8 @@ def test_sharkfin_outside_a_discrete_corridor_is_valued_through_the_next_observa
     )
 
     exact = sharkfin_exact(call, obs, at_hit, spot)
-    value = float(DoubleSharkfinOptionAnalyticalEngine().price(sharkfin(call, obs, at_hit), env_const(spot)))
+    value = float(DoubleSharkfinOptionAnalyticalEngine(discrete_barrier_approximation=FIRST).price(
+        sharkfin(call, obs, at_hit), env_const(spot)))
     assert value == pytest.approx(exact, abs=0.05)
 
 

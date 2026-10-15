@@ -40,7 +40,7 @@ from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
 from quantark.util.enum import DoubleBarrierType, ObservationType
-from quantark.util.enum.engine_enums import EngineType
+from quantark.util.enum.engine_enums import DiscreteBarrierApproximation, EngineType
 from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
@@ -57,8 +57,10 @@ from .double_no_touch import double_no_touch
 from .first_observation import (
     first_future_observation,
     observed_at_valuation,
+    projects_through_first_observation,
     resolve_current_records,
     through_first_observation,
+    validate_discrete_barrier_approximation,
 )
 
 
@@ -69,12 +71,16 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
     Expiry-only monitoring is priced from truncated lognormal probabilities.
     Continuous monitoring uses the Ikeda-Kunitomo double-barrier option engine
     for the participation leg and the error-controlled double no-touch
-    probability (``double_no_touch``) for the cash survival legs. Discrete monitoring applies a BGK barrier shift.
+    probability (``double_no_touch``) for the cash survival legs. Discrete monitoring applies a BGK barrier shift;
+    only a record at the valuation instant decides now, and between observations ``discrete_barrier_approximation``
+    decides the value (``BGK``: the shifted closed form at today's spot inside or outside the corridor, refused
+    with ``TODO(bgk-beyond)`` outside the shifted corridor when a cash leg needs the no-touch probability there;
+    ``FIRST_OBSERVATION_BGK``: through the next observation). The double-barrier leg engine uses the same mode.
     """
 
     engine_type = EngineType.ANALYTICAL
     # params-only engine: instance state == construction arguments (patch spec 2026-09-03 §7)
-    MODEL_FINGERPRINT_ATTRS = ('params', '_double_barrier_engine')
+    MODEL_FINGERPRINT_ATTRS = ('params', 'discrete_barrier_approximation', '_double_barrier_engine')
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
 
@@ -86,16 +92,26 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
     HIT_HIGH_ORDER = 12
     HIT_EDGE_SD = 9.0          # below t_min neither barrier is reached within 9 sd: survival 1 to 4.5e-19
 
-    def __init__(self, params: Optional[EngineParams] = None):
+    def __init__(
+        self,
+        params: Optional[EngineParams] = None,
+        *,
+        discrete_barrier_approximation: DiscreteBarrierApproximation = DiscreteBarrierApproximation.BGK,
+    ):
         """
         Initialize double sharkfin analytical engine.
 
         Args:
             params: Engine configuration parameters. (``max_terms`` was removed in 0.10.0 and ``quad_points``
                 after it: the paid-at-hit integral controls its own error.)
+            discrete_barrier_approximation: The value of a DISCRETE schedule between observations (see
+                ``DiscreteBarrierApproximation``); the double-barrier leg engine uses the same mode.
         """
         super().__init__(params)
-        self._double_barrier_engine = DoubleBarrierOptionAnalyticalEngine(params)
+        self.discrete_barrier_approximation = validate_discrete_barrier_approximation(discrete_barrier_approximation)
+        self._double_barrier_engine = DoubleBarrierOptionAnalyticalEngine(
+            params, discrete_barrier_approximation=self.discrete_barrier_approximation
+        )
 
     def price(
         self,
@@ -184,8 +200,11 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 refuse_mixed_forward_levels(
                     product.observation_schedule, pricing_env, default_payoff=product.knock_out_rebate,
                     business_days_in_year=product.business_days_in_year)
-            if spot >= upper or spot <= lower:
-                # Outside the corridor with no observation due: the next observation decides
+            if projects_through_first_observation(
+                self.discrete_barrier_approximation, spot >= upper or spot <= lower,
+                lambda: self._resolved_records(product, pricing_env),
+            ):
+                # FIRST_OBSERVATION_BGK: the next observation decides, the shifted formula only after it
                 return (
                     self._price_beyond_discrete(
                         product, pricing_env, spot, maturity, rate, div, vol, terminal_timing, upper, lower
@@ -221,6 +240,21 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             else 0.0
         )
 
+        if (
+            discrete
+            and (spot >= upper or spot <= lower)
+            and (product.no_hit_rebate > 0.0 or forward_knock_out_cash(product, pricing_env) > 0.0)
+        ):
+            # BGK beyond the contractual corridor (inside it the shifted corridor holds the spot)
+            lower_shifted, upper_shifted = self._shift_discrete_barriers(product, vol, pricing_env, upper, lower)
+            if not lower_shifted < spot < upper_shifted:
+                # TODO(bgk-beyond): the cash legs' no-touch probability from a spot outside the shifted corridor
+                # (the image series' continuation and its error bound) -- not implemented; its "outside: 0" branch
+                # would decide the hit now. Price on MC or FIRST_OBSERVATION_BGK.
+                raise ValidationError(
+                    f"TODO(bgk-beyond): spot {spot} is outside the BGK-shifted corridor ({lower_shifted}, "
+                    f"{upper_shifted}); the double no-touch probability of the cash legs is not defined there"
+                )
         option_leg = self._price_no_rebate_knock_out(product, pricing_env)
         survival_prob = self._survival_probability(
             product, maturity, rate, div, vol, pricing_env, upper, lower
@@ -308,7 +342,8 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         upper: float,
         lower: float,
     ) -> float:
-        """A spot outside a discretely monitored corridor with no observation due (``first_observation``).
+        """The value through the first future observation (``first_observation``), no observation due now
+        (``FIRST_OBSERVATION_BGK``: the spot inside or outside the corridor).
 
         A breach at the first future observation ``t1`` pays the knock-out cash (at the record's payment time when
         hit-paid, else at the terminal payment time); otherwise the continuation is this engine's shifted value
@@ -793,4 +828,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         return super().static_replication(product, pricing_env)
 
     def __repr__(self):
-        return "DoubleSharkfinOptionAnalyticalEngine()"
+        if self.discrete_barrier_approximation is DiscreteBarrierApproximation.BGK:
+            return "DoubleSharkfinOptionAnalyticalEngine()"
+        return ("DoubleSharkfinOptionAnalyticalEngine("
+                f"discrete_barrier_approximation={self.discrete_barrier_approximation.name})")

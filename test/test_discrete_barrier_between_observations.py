@@ -18,14 +18,17 @@ Reference and tolerances (measured 2026-10-14, see the T17 report):
 * QUAD (401 points) is exact discrete monitoring up to its quadrature error: it is the reference where it prices
   the product. The Black-Scholes PDE agrees within ``PDE_ABS`` (its grid; measured <= 8e-4), the Black-Scholes
   barrier MC within 4 s.e.
-* Beyond the level the analytical engines integrate the first observation exactly and continue with the
-  BGK-shifted continuous formula: within ``ANALYTICAL_ABS`` of QUAD (measured <= 0.023). The sharkfins have no QUAD
-  adapter, so their MC is checked against the analytical value within 4 s.e. + ``ANALYTICAL_ABS``.
+* Beyond the level the analytical engines (default ``DiscreteBarrierApproximation.BGK``, mode switch 2026-10-15)
+  evaluate the BGK-shifted closed form at today's spot: within ``ANALYTICAL_ABS`` of QUAD (measured <= 0.033 at
+  level + 1; the opt-in ``FIRST_OBSERVATION_BGK``, which integrates the first observation exactly and continues with
+  the shifted formula, measured <= 0.023). The sharkfins have no QUAD adapter, so their MC is checked against the
+  analytical value within 4 s.e. + ``ANALYTICAL_ABS``.
 * Continuity across the level (spot ``level -/+ STEP``): QUAD, the PDE and the MC (common random numbers) move by
-  delta x 2 STEP (measured <= 0.026, ``CONTINUITY_ABS``). The analytical engines switch at the level from the
-  BGK-shifted closed form (inside) to the first-observation integral (beyond); the BGK error next to the barrier
-  makes a step of up to 0.152 here (``ANALYTICAL_STEP_ABS``, pre-existing, unchanged by A15). Every route's step
-  stays far below the step a decision taken now would make (``kind.now``: >= 0.5 on these contracts).
+  delta x 2 STEP (measured <= 0.026, ``CONTINUITY_ABS``). Before the mode switch the analytical engines switched
+  at the level from the BGK-shifted closed form (inside) to the first-observation integral (beyond), a step of up
+  to 0.152 here (``ANALYTICAL_STEP_ABS``); either mode now uses one method on both sides (measured <= 0.032,
+  ``test_discrete_barrier_approximation_mode``). Every route's step stays far below the step a decision taken now
+  would make (``kind.now``: >= 0.5 on these contracts).
 """
 from __future__ import annotations
 
@@ -87,7 +90,8 @@ ANALYTICAL_ABS = 0.05
 #: continuity: spot level -/+ STEP; QUAD / PDE / MC move by delta x 2 STEP (measured <= 0.026)
 STEP = 0.01
 CONTINUITY_ABS = 0.04
-#: the analytical engines' step at the level: the BGK error next to the barrier (measured <= 0.152, pre-existing)
+#: the analytical engines' step at the level: the hybrid's BGK error next to the barrier was up to 0.152 before the
+#: mode switch; one method on both sides since (measured <= 0.032)
 ANALYTICAL_STEP_ABS = 0.25
 #: a decision taken now would step by at least this much on every contract here (measured >= 0.5)
 DECISION_STEP = 0.4
