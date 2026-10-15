@@ -17,7 +17,9 @@ import warnings
 
 import pytest
 
+import test_barrier_lifecycle_discrete_observation as LC
 import test_discrete_barrier_between_observations as T
+from quantark.asset.equity.lifecycle import BarrierLifecycleTracker, LifecycleEventType
 from quantark.asset.equity.engine.analytical.one_touch_analytical_engine import OneTouchAnalyticalEngine
 from quantark.asset.equity.engine.analytical.single_sharkfin_option_analytical_engine import (
     SingleSharkfinOptionAnalyticalEngine,
@@ -139,3 +141,44 @@ def test_a_sharkfin_whose_records_pay_the_knock_out_cash_prices_as_before(spot):
     explicit = _quiet(lambda: SingleSharkfinOptionAnalyticalEngine().price(_sharkfin(0.5), T.env(spot)))
     implicit = _quiet(lambda: SingleSharkfinOptionAnalyticalEngine().price(_sharkfin(None), T.env(spot)))
     assert explicit == implicit
+
+
+# ======================================================================================================================
+# the run lifecycle (BarrierLifecycleTracker: the equity backtest and the dynamic scenario)
+# ======================================================================================================================
+
+def _lifecycle_no_touch(payoff, double=False):
+    if double:
+        return DoubleOneTouchOption(upper_barrier=130.0, lower_barrier=75.0, rebate=1.0, exercise_date=LC.EXERCISE,
+                                    payment_at_hit=False, touch_type=TouchType.DOUBLE_NO_TOUCH,
+                                    observation_type=ObservationType.DISCRETE,
+                                    observation_schedule=LC._records(upper=130.0, lower=75.0, payoff=payoff))
+    return OneTouchOption(barrier=120.0, barrier_direction=BarrierDirection.UP, rebate=1.0, exercise_date=LC.EXERCISE,
+                          payment_at_hit=False, touch_type=TouchType.NO_TOUCH, observation_type=ObservationType.DISCRETE,
+                          observation_schedule=LC._records(120.0, payoff=payoff))
+
+
+@pytest.mark.parametrize("double", [False, True], ids=["no_touch", "double_no_touch"])
+def test_a_run_refuses_a_no_touch_whose_records_pay_other_cash(double):
+    """The tracker is where a run takes the contract (``PortfolioLifecycleManager.register_positions``): refused
+    there, whatever engine the position prices with."""
+    with pytest.raises(ValidationError, match="no-touch has one rebate"):
+        BarrierLifecycleTracker(product=_lifecycle_no_touch(3.0, double), quantity=2.0, start_date=LC.START)
+
+
+@pytest.mark.parametrize("payoff", [None, 1.0], ids=["records_unset", "records_pay_the_rebate"])
+@pytest.mark.parametrize("double", [False, True], ids=["no_touch", "double_no_touch"])
+def test_a_touched_no_touch_books_no_cash(double, payoff):
+    tracker = BarrierLifecycleTracker(product=_lifecycle_no_touch(payoff, double), quantity=2.0, start_date=LC.START)
+    events = LC._run(tracker, [(0, 100.0), (30, 131.0)])
+    assert [e.event_type for e in events] == [LifecycleEventType.KNOCK_OUT]
+    assert events[0].payoff == 0.0 and events[0].cashflow == 0.0
+
+
+@pytest.mark.parametrize("payoff", [None, 1.0], ids=["records_unset", "records_pay_the_rebate"])
+@pytest.mark.parametrize("double", [False, True], ids=["no_touch", "double_no_touch"])
+def test_a_no_touch_never_touched_books_its_rebate(double, payoff):
+    tracker = BarrierLifecycleTracker(product=_lifecycle_no_touch(payoff, double), quantity=2.0, start_date=LC.START)
+    events = LC._run(tracker, [(day, 100.0) for day in (0, 30, 60, 90, 180, 270, 359, 360)])
+    assert [e.event_type for e in events] == [LifecycleEventType.EXPIRY]
+    assert events[0].payoff == 1.0 and events[0].cashflow == 2.0

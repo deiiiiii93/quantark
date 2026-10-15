@@ -37,6 +37,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.engine.barrier_schedule_rules import refuse_no_touch_record_payoff
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
@@ -106,7 +107,11 @@ class BarrierLifecycleTracker:
             product: One of the ``TRACKED_BARRIER_PRODUCTS``.
             quantity: Number of contracts (may be fractional).
             start_date: Trade inception date (datetime or pandas Timestamp).
+
+        A no-touch whose schedule records pay anything other than its rebate is refused (``ValidationError``): it has
+        one rebate on every route (user decision 2026-10-15); a touched no-touch books nothing either way.
         """
+        refuse_no_touch_record_payoff(product)
         self.product = product
         self.quantity = float(quantity)
         self.start_date = pd.Timestamp(start_date).normalize()
