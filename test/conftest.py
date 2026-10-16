@@ -28,6 +28,48 @@ from typing import List, Optional
 
 import pytest
 
+# --- worker memory ---------------------------------------------------------
+# The numerics tests allocate multi-GB grids. Python frees them, but the C
+# allocator keeps the pages, so a long-lived xdist worker's RSS only ratchets up
+# (measured: one worker reached ~9 GB, 4 workers ~24 GB). A 16 GB CI runner is
+# then shut down mid-suite ("The runner has received a shutdown signal"). After
+# any test that ran at least this long, collect cycles and hand freed pages back.
+# Measured on the six heaviest files, serial: peak RSS 10.2 GB -> 4.3 GB, final
+# 10.1 GB -> 2.4 GB, same wall-clock. Short tests are skipped so the 17k tiny ones
+# pay nothing.
+_RELIEF_AFTER_SECONDS = 0.5
+
+
+def _build_allocator_relief():
+    import ctypes
+    import ctypes.util
+    import sys
+
+    try:
+        if sys.platform == "darwin":
+            lib = ctypes.CDLL(ctypes.util.find_library("System"))
+            return lambda: lib.malloc_zone_pressure_relief(None, 0)
+        if sys.platform.startswith("linux"):
+            lib = ctypes.CDLL("libc.so.6")
+            return lambda: lib.malloc_trim(0)
+    except (OSError, AttributeError, TypeError):
+        pass
+    return None
+
+
+_allocator_relief = _build_allocator_relief()
+
+
+def pytest_runtest_logreport(report):
+    if report.when != "call" or report.duration < _RELIEF_AFTER_SECONDS:
+        return
+    import gc
+
+    gc.collect()
+    if _allocator_relief is not None:
+        _allocator_relief()
+
+
 from quantark.asset.equity.engine.pde import SnowballPDESolver
 from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
     KOResetSnowballPDESolver,

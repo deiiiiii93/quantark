@@ -32,6 +32,11 @@ changed meaning and every banked anchor still reproduces exactly on the banking 
 - `quantark.backtest` imports plotly and matplotlib lazily; `StaticVisualizer`,
   `InteractiveDashboard`, `AutocallableBacktestDashboard` and `AutocallableDashboardConfig` still
   resolve from the same import paths.
+- `test/conftest.py` collects cycles and returns freed pages to the OS (`malloc_trim` /
+  `malloc_zone_pressure_relief`) after any test that ran 0.5 s or more. Workers kept the memory of
+  multi-GB grids, so one reached ~9 GB and four ~24 GB; on the six heaviest files, run serially, peak
+  RSS fell 10.2 GB to 4.3 GB at the same wall-clock. CI runs `-n 2` rather than `-n auto`: four
+  heavy tests at once exceeded the 16 GB hosted runner, which was shut down mid-suite.
 - Removed `test_bond_standalone.py` (no tests) and `test_benchmark_var.py` (module-skipped, vacuous
   assertions), two duplicate QUAD-rejection tests, and the stale "not implemented yet" skips in
   `test_simm_engines_factory.py` (now real assertions).
