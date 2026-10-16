@@ -411,9 +411,10 @@ def test_forward_matches_mc_event_stats():
         params=QuadParams(grid_points=2001, event_stats_mode="forward_density")
     ).calculate_event_stats(product, e)
     mc = SnowballMCEngine(
-        params=MCParams(num_paths=500_000, time_steps=479, use_qmc=True, seed=7)
+        params=MCParams(num_paths=131_072, time_steps=479, use_qmc=True, seed=7)
     ).calculate_event_stats(product, e)
-    # 3-sigma band on a 500k-path binomial proportion is ~0.002 absolute.
+    # 131072 Sobol paths (500k peaked at 6-9 GB and killed a 16 GB CI runner running two workers; this is
+    # 1.8 GB). Measured gaps 1.3e-3 (KO) and 1.6e-3 (KI) against the bands below.
     assert np.max(np.abs(forward.ko_probability - mc.ko_probability)) < 4e-3
     assert abs(forward.ki_ever_probability - mc.ki_ever_probability) < 6e-3
 
