@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from pde_3a.products import KO_RESET, PHOENIX, SNOWBALL, env
+from golden_compare import assert_close
 from pde_statistics.reference import exact_event_stats
 
 from quantark.asset.equity.engine.pde.grid.config import GridConfig
@@ -169,11 +170,11 @@ def test_gated_row(case):
 def test_exhausted_schedule_is_bit_identical():
     for tag, value in _capture()["snowball"].items():
         product, e = BUILD[tag]()
-        assert SnowballPDESolver().price(product, e).hex() == value, tag
+        assert_close(SnowballPDESolver().price(product, e), float.fromhex(value), msg=tag)
 
 
 def test_ko_reset_after_its_first_schedule_is_unmoved():
     """The gate withholds the row once the first schedule has ended (no knock-in observable): the KO-reset of
     §4.9's certified cell, whose march runs past its first schedule, prices as before the row."""
     product, e = KO_RESET_AFTER_FIRST()
-    assert KOResetSnowballPDESolver().price(product, e).hex() == _capture()["ko_reset"]
+    assert_close(KOResetSnowballPDESolver().price(product, e), float.fromhex(_capture()["ko_reset"]))

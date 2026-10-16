@@ -47,7 +47,8 @@ def test_participation_scales():
                           barrier_type=BarrierType.UP_OUT, observation_type=ObservationType.CONTINUOUS,
                           participation_rate=3.0)
     eng = LocalVolBarrierPDESolver(PDEParams(grid=GridConfig(points=300, time_steps=100)))
-    assert eng.price(prod2, _env()) == abs(3.0 * eng.price(_uo_call(), _env()))
+    # linear in participation up to the last ULP or two (x86 and ARM round the scaled payoff differently)
+    assert eng.price(prod2, _env()) == pytest.approx(abs(3.0 * eng.price(_uo_call(), _env())), rel=1e-12)
 
 
 def test_heston_slv_barrier_pde_run_and_reject():

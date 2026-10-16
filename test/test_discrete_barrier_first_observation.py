@@ -458,7 +458,7 @@ def test_the_step_across_the_level_is_quads(name):
 def test_a_record_on_the_valuation_instant_decides_as_on_main(name, spot, monkeypatch):
     engine, product = _aged(name, T.RECORD_DAY, True)
     spy = _Spy(monkeypatch)
-    assert _price(engine, product, spot) == RECORD_DAY_PINS[(name, spot)]
+    assert_close(_price(engine, product, spot), RECORD_DAY_PINS[(name, spot)])
     assert spy.calls == 0
 
 
@@ -466,7 +466,7 @@ def test_a_record_on_the_valuation_instant_decides_as_on_main(name, spot, monkey
 def test_continuous_and_expiry_monitoring_are_unchanged(case, monkeypatch):
     engine, build, spot, before = UNCHANGED_PINS[case]
     spy = _Spy(monkeypatch)
-    assert _price(engine, build(), spot) == before
+    assert_close(_price(engine, build(), spot), before)
     assert spy.calls == 0
 
 

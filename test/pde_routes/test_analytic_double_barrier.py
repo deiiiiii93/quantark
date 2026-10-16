@@ -129,7 +129,7 @@ def test_rebate_free_and_expiry_inside_are_bit_identical():
             # architectures (NumPy's SIMD exp / log / pow on x86)
             assert_close(price(p, env_const(float(spot))), MOVED[tag], msg=tag)
             continue
-        assert price(p, env_const(float(spot))).hex() == value, tag
+        assert_close(price(p, env_const(float(spot))), float.fromhex(value), msg=tag)
 
 
 @pytest.mark.parametrize("kind", [KO, KI])

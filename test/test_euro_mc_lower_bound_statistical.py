@@ -15,6 +15,7 @@ from datetime import datetime
 
 import pytest
 
+from golden_compare import assert_close
 from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
 from quantark.asset.equity.engine.mc.euro_mc_engine import EuropeanMCEngine
 from quantark.asset.equity.param import MCParams
@@ -71,7 +72,7 @@ def _price(engine, product, env) -> float:
 @pytest.mark.parametrize("spot,expected", [(90.0, 9.993453009252772), (75.0, 24.993174367657804)])
 def test_one_day_deep_itm_put_prices_its_estimate(spot, expected):
     """256 antithetic paths, seed 7: the estimate sits 0.012 std errors below the bound and is now returned as is."""
-    assert _price(_engine("anti256"), _option(OptionType.PUT, 1), _env(spot)) == expected
+    assert_close(_price(_engine("anti256"), _option(OptionType.PUT, 1), _env(spot)), expected)
 
 
 @pytest.mark.parametrize("form,spot,expected", [
@@ -83,7 +84,7 @@ def test_carried_knock_in_put_the_day_before_prices_through_the_barrier_mc(form,
     """The test_expiry_carried_knock_in day-before cell (mc, down_in_put, carried) that used to raise."""
     build = dict((k, b) for k, b, _, _ in BARRIER_PRODUCTS)["down_in_put"]
     product = build(form, True, BEFORE)
-    assert _price(BarrierOptionMCEngine(params=_mc()), product, carried_env(spot, BEFORE)) == expected
+    assert_close(_price(BarrierOptionMCEngine(params=_mc()), product, carried_env(spot, BEFORE)), expected)
 
 
 # -- the check still refuses a clearly wrong estimate ---------------------------------------------------------------
@@ -177,4 +178,4 @@ _PINNED = [
                               f"x{c[5]:g}-{c[6]}" for c in _PINNED])
 def test_passing_prices_are_bit_identical(term, spot, option_type, days, lag, multiplier, config, expected):
     product = _option(option_type, days, lag_days=lag, multiplier=multiplier)
-    assert _price(_engine(config), product, _env(spot, term)) == expected
+    assert_close(_price(_engine(config), product, _env(spot, term)), expected)

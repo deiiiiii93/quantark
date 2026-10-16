@@ -91,4 +91,5 @@ def test_capped_badge_renders(tmp_path):
     SACCRDashboard(result, netting_set=ns).generate(out)
     html = out.read_text(encoding="utf-8")
     assert "para 129" in html
-    assert "α (capped)" in html
+    # plotly >= 7 escapes non-ASCII inside the chart JSON (\u03b1), older versions do not
+    assert "α (capped)" in html or "\\u03b1 (capped)" in html
