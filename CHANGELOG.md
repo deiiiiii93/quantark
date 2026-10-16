@@ -7,6 +7,35 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-16
+
+> **Version numbering.** The `[0.6.0]` to `[0.10.0]` sections below were internal milestones and were
+> never published. They ship together with everything under this heading as **0.5.5**, the first
+> release after 0.5.0. The milestone labels are kept because code comments, tests and the README name
+> behaviour changes by them (for example "the 0.7.0 base-family mask").
+
+### Test suite
+
+Full-suite wall-clock 36m 29s to 20m 03s (14 xdist workers, `-n auto --dist worksteal`); no test
+changed meaning and every banked anchor still reproduces exactly on the banking machine.
+
+- `assert_anchors` no longer solves a convergence rung it discards: the Schema-1 candidates (ADI
+  snowball, snowball, KO-reset, Phoenix, local-vol snowball) gain `evaluate_target`, and
+  `assert_anchors(path, only=(candidate, case))` checks one cell. `test_banked_certificates.py` is
+  parametrized per cell, so the heavy ADI cells spread across workers (that file: 2,353 CPU-seconds
+  with a 1,687 s single-worker tail to 317 s wall-clock).
+- The QUAD V2 event-statistics references used by the Phoenix memory-fan, KO-reset native and
+  cashleg KO-reset tests are frozen under `test/pde_statistics/v2_reference/` (about 2,500
+  CPU-seconds to 4 s) with unchanged tolerances. `build_v2_reference.py` regenerates them;
+  `QUANTARK_LIVE_V2=1` recomputes live to confirm a frozen file still matches V2. V2's numerics
+  stay pinned by the banked quad certificates.
+- `quantark.backtest` imports plotly and matplotlib lazily; `StaticVisualizer`,
+  `InteractiveDashboard`, `AutocallableBacktestDashboard` and `AutocallableDashboardConfig` still
+  resolve from the same import paths.
+- Removed `test_bond_standalone.py` (no tests) and `test_benchmark_var.py` (module-skipped, vacuous
+  assertions), two duplicate QUAD-rejection tests, and the stale "not implemented yet" skips in
+  `test_simm_engines_factory.py` (now real assertions).
+
 FX TARN / TARF mid-life booking, dated form and ageing (spec:
 `docs/superpowers/specs/2026-10-09-fx-tarn-lifecycle-design.md`). A target-redemption contract carries its realized
 state, can be booked by dates, ages through `time_shift` / `record_passed_fixings`, and is aged day by day in the FX
