@@ -1,3 +1,3 @@
 """QuantArk: professional financial derivatives pricing library."""
 
-__version__ = "0.10.0"
+__version__ = "0.5.5"
