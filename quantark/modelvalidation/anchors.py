@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 import platform
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from quantark.util.exceptions import ValidationError
 from quantark.modelvalidation.candidate import CandidateEvaluator
@@ -250,10 +250,17 @@ def _assert_successor_covers(
         )
 
 
-def assert_anchors(anchor_path: str | Path) -> None:
+def assert_anchors(
+    anchor_path: str | Path, only: Optional[Tuple[str, str]] = None
+) -> None:
     """Re-run the anchored engines and compare against the banked values.
 
     Designed to be one line in a pytest case.
+
+    Args:
+        anchor_path: The banked ``anchors.json``.
+        only: Check just this ``(candidate, case)`` cell. Lets a test fan one
+            file's independent cells out across workers; the default checks all.
 
     Raises:
         ValidationError: the anchor file is malformed, or names a candidate or
@@ -283,6 +290,8 @@ def assert_anchors(anchor_path: str | Path) -> None:
     failures: List[str] = []
     for entry in anchors["anchors"]:
         name, case_name = entry["candidate"], entry["case"]
+        if only is not None and (name, case_name) != tuple(only):
+            continue
         if name not in candidates:
             raise ValidationError(
                 f"Anchor names candidate {name!r}, which the study no longer defines"

@@ -14,20 +14,14 @@ class TestCreateEngine:
     def test_create_ir_engine(self):
         """Test creating IR engine."""
         config = SIMMConfig()
-        try:
-            engine = create_engine(RiskClass.INTEREST_RATE, config)
-            assert engine.risk_class == RiskClass.INTEREST_RATE
-        except Exception as e:
-            pytest.skip(f"IR engine not implemented yet: {e}")
+        engine = create_engine(RiskClass.INTEREST_RATE, config)
+        assert engine.risk_class == RiskClass.INTEREST_RATE
 
     def test_create_equity_engine(self):
         """Test creating equity engine."""
         config = SIMMConfig()
-        try:
-            engine = create_engine(RiskClass.EQUITY, config)
-            assert engine.risk_class == RiskClass.EQUITY
-        except Exception as e:
-            pytest.skip(f"Equity engine not implemented yet: {e}")
+        engine = create_engine(RiskClass.EQUITY, config)
+        assert engine.risk_class == RiskClass.EQUITY
 
     def test_create_engine_invalid_risk_class(self):
         """Test creating engine with invalid risk class."""

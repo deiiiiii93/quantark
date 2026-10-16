@@ -6,6 +6,23 @@ They construct real products / solvers / pricing environments so the tests
 exercise production constructors, not mocks.
 """
 
+import os as _os
+import tempfile as _tempfile
+
+# Point matplotlib at a shared writable config dir before anything imports it.
+# The sandbox home (and therefore ~/.matplotlib) is not writable, so without
+# this every test worker rebuilds the font cache in a fresh temp dir on every
+# run. The shared dir lets the cache persist across workers and runs.
+_mplconfig = _os.environ.get(
+    "MPLCONFIGDIR", _os.path.join(_tempfile.gettempdir(), "quantark-mplconfig")
+)
+try:
+    _os.makedirs(_mplconfig, exist_ok=True)
+    _os.environ.setdefault("MPLCONFIGDIR", _mplconfig)
+except OSError:
+    pass
+del _os, _tempfile, _mplconfig
+
 from datetime import datetime
 from typing import List, Optional
 

@@ -15,7 +15,6 @@ from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
-from plotly.offline import get_plotlyjs
 
 from quantark.asset.equity.lifecycle.autocallable import lifecycle_clock_origin
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
@@ -389,6 +388,8 @@ class AutocallableBacktestDashboard:
             "</", "<\\/"
         )
         if self.config.include_plotlyjs:
+            from plotly.offline import get_plotlyjs
+
             plotly_loader = f"<script>{get_plotlyjs()}</script>"
         else:
             plotly_loader = (

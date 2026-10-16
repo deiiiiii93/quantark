@@ -13,6 +13,7 @@ from quantark.util.calendar import CalendarType, create_calendar
 from quantark.util.numerical import Tolerance
 from intraday.conftest import dated_ko_reset, flat_env
 from pde_3a.products import KO_RESET, env
+from pde_statistics.v2_frozen import v2_event_stats
 
 
 def test_both_schedules_and_both_maturities():
@@ -90,7 +91,9 @@ def test_mc_rebased_is_refused():
 
 def test_quad_v2_reports_both_maturity_outcomes():
     from quantark.asset.equity.engine.quad.v2.engine import KOResetSnowballQuadEngineV2
-    stats = KOResetSnowballQuadEngineV2().calculate_event_stats(make_ko_reset(KO_RESET), env())
+    stats = v2_event_stats(
+        "ko_reset_kr_cont",
+        lambda: KOResetSnowballQuadEngineV2().calculate_event_stats(make_ko_reset(KO_RESET), env()))
     d = EventDistribution.from_autocallable_stats(stats)
     assert d.event_times.size == stats.pre_ko_times.size + stats.post_ko_times.size
     assert d.determination_times == {EventType.MATURITY_NO_KO: stats.pre_maturity_time,

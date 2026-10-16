@@ -505,6 +505,14 @@ class SnowballPDECandidate(_SnowballArm):
             "gamma": result["gamma"],
         }
 
+    def evaluate_target(self, case) -> CandidateResult:
+        """The shipped target output without the convergence ladder.
+
+        An anchor pins the target values only, so ``assert_anchors`` calls this
+        and skips the coarse rung ``evaluate`` would solve and discard.
+        """
+        return CandidateResult(values=self._greeks(case, self._pde_params.accuracy))
+
     def evaluate(self, case) -> CandidateResult:
         accuracy = self._pde_params.accuracy
         values = self._greeks(case, accuracy)

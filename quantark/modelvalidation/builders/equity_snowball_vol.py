@@ -446,6 +446,18 @@ class _ADICandidate(_VolSnowballArm):
             engine, make_snowball(product_spec), make_environment(environment, model)
         )
 
+    def evaluate_target(self, case) -> CandidateResult:
+        """The certified-grid Greeks without the coarse time rung.
+
+        An anchor pins the target values only; ``assert_anchors`` calls this so
+        each cell costs one 2D ADI solve set instead of two.
+        """
+        dense = self._dense_ki_stencil(case)
+        product = dict(self.product_params)
+        product.update(case.product_params)
+        maturity = float(product["maturity"])
+        return CandidateResult(values=self._greeks(case, target_grid(maturity, dense)))
+
     def evaluate(self, case) -> CandidateResult:
         dense = self._dense_ki_stencil(case)
         product = dict(self.product_params)

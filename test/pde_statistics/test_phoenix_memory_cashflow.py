@@ -8,15 +8,15 @@ from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.quad.v2.engine import PhoenixQuadEngineV2
 from quantark.asset.equity.param import PDEParams
 from pde_statistics.cases import CASES
+from pde_statistics.v2_frozen import v2_event_stats
 
 PER_DATE, TOTAL = 2e-4, 5e-4
 
 
-@pytest.mark.slow
 def test_study_product_memory_coupon_cash_against_v2():
     product, env = CASES["ph_memory"][0](), CASES["ph_memory"][1]()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, env)
-    v2 = PhoenixQuadEngineV2().calculate_event_stats(product, env)
+    v2 = v2_event_stats("phoenix_ph_memory", lambda: PhoenixQuadEngineV2().calculate_event_stats(product, env))
     assert np.max(np.abs(pde.expected_discounted_coupon_cashflow - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
     assert abs(pde.expected_discounted_coupon_cashflow.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
     assert abs(pde.reconciliation_error) <= 1e-10
@@ -65,7 +65,6 @@ def test_nodal_termination_units_are_the_knock_out_columns():
     assert np.max(np.abs(alive[:, L.term_unit[interior]] - alive[:, L.ko[interior]])) <= 1e-15
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("memory", [False, True])
 def test_expiry_buckets_match_v2(memory):
     """V2's ledger (quad/v2/engine.py ``_event_stats_from_result``): n knock-out rows, n coupon rows at
@@ -77,7 +76,8 @@ def test_expiry_buckets_match_v2(memory):
     from pde_3a.products import env
     product, e = _expiry(memory), env()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, e)
-    v2 = PhoenixQuadEngineV2().calculate_event_stats(product, e)
+    v2 = v2_event_stats(f"phoenix_expiry_memory_{str(memory).lower()}",
+                        lambda: PhoenixQuadEngineV2().calculate_event_stats(product, e))
     n, n2 = pde.ko_times.size, v2.ko_times.size
     mine_t, mine = pde.payment_times[n:2 * n], pde.expected_discounted_cashflows[n:2 * n]
     theirs_t, theirs = v2.payment_times[n2:2 * n2], v2.expected_discounted_cashflows[n2:2 * n2]
@@ -100,11 +100,10 @@ def _c105_at_start():
     return product, flat_env(t0)
 
 
-@pytest.mark.slow
 def test_release_rule_product_against_v2():
     product, env = _c105_at_start()
     pde = PhoenixPDESolver(PDEParams()).calculate_event_stats(product, env)
-    v2 = PhoenixQuadEngineV2().calculate_event_stats(product, env)
+    v2 = v2_event_stats("phoenix_release_rule", lambda: PhoenixQuadEngineV2().calculate_event_stats(product, env))
     assert np.max(np.abs(pde.expected_discounted_coupon_cashflow - v2.expected_discounted_coupon_cashflow)) <= PER_DATE
     assert abs(pde.expected_discounted_coupon_cashflow.sum() - v2.expected_discounted_coupon_cashflow.sum()) <= TOTAL
     assert abs(pde.reconciliation_error) <= 1e-10

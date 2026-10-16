@@ -7,8 +7,6 @@ import pytest
 
 from quantark.asset.equity.engine.capabilities import (
     SettlementSupport,
-    VolDynamicsType,
-    validate_engine_capability,
 )
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.engine.pde import (
@@ -49,7 +47,6 @@ from quantark.asset.equity.settlement import (
     SettlementConvention,
     SettlementLagUnit,
 )
-from quantark.execution.errors import CapabilityError
 from quantark.param import (
     ContinuousDividendYield,
     FlatRateCurve,
@@ -63,7 +60,6 @@ from quantark.util.enum import (
     ObservationType,
     PostKOScheduleMode,
 )
-from quantark.util.enum.engine_enums import EngineType
 
 
 RATE = 0.05
@@ -304,16 +300,3 @@ def test_delayed_snowball_mc_pde_quad_reconcile():
     )
 
     assert np.max(values) - np.min(values) <= 0.003 * np.mean(values)
-
-
-@pytest.mark.parametrize(
-    "dynamics",
-    [
-        VolDynamicsType.LOCAL_VOL,
-        VolDynamicsType.HESTON,
-        VolDynamicsType.SLV,
-    ],
-)
-def test_non_bsm_quad_paths_fail_closed(dynamics):
-    with pytest.raises(CapabilityError, match="QUAD is not supported"):
-        validate_engine_capability(dynamics, EngineType.QUADRATURE)

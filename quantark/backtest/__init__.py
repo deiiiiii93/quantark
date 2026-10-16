@@ -86,8 +86,9 @@ from quantark.backtest.replay import (
 from quantark.backtest.logger import BacktestLogger
 
 # Visualization (shared)
-from quantark.backtest.visualizer import StaticVisualizer
-from quantark.backtest.dashboard import InteractiveDashboard
+# StaticVisualizer (matplotlib+seaborn) and InteractiveDashboard (plotly) are
+# imported lazily via the module __getattr__ below: both are expensive at
+# import time and are only needed by plotting call sites.
 from quantark.backtest.report_generator import ReportGenerator
 
 __all__ = [
@@ -177,4 +178,13 @@ def __getattr__(name):
         from quantark.backtest import credit
 
         return getattr(credit, name)
+
+    if name == "StaticVisualizer":
+        from quantark.backtest.visualizer import StaticVisualizer
+
+        return StaticVisualizer
+    if name == "InteractiveDashboard":
+        from quantark.backtest.dashboard import InteractiveDashboard
+
+        return InteractiveDashboard
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -13,6 +13,8 @@ which would silently relabel a numerics change as a no-op.
 
 from pathlib import Path
 
+import json
+
 import pytest
 
 from quantark.modelvalidation import assert_anchors, resolve_supersession
@@ -22,6 +24,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CERTIFICATES = REPO_ROOT / "docs" / "modelvalidation" / "certificates"
 
 BANKED = sorted(CERTIFICATES.glob("*/*/anchors.json"))
+
+
+def _cells():
+    """One (anchor file, candidate, case) per anchored cell, so xdist can spread them.
+
+    A file is a list of independent solves; parametrizing per file pinned all
+    of a heavy study's cells to one worker.
+    """
+    for anchor_path in BANKED:
+        label = f"{anchor_path.parent.parent.name}/{anchor_path.parent.name}"
+        entries = json.loads(anchor_path.read_text()).get("anchors", [])
+        seen = []
+        for entry in entries:
+            cell = (entry["candidate"], entry["case"])
+            if cell not in seen:
+                seen.append(cell)
+                yield pytest.param(anchor_path, cell, id=f"{label}::{cell[0]}::{cell[1]}")
 
 
 def test_at_least_one_certification_is_banked():
@@ -60,8 +79,8 @@ def test_supersession_cannot_retire_a_study_out_of_existence():
         )
 
 
-@pytest.mark.parametrize("anchor_path", BANKED, ids=lambda p: f"{p.parent.parent.name}/{p.parent.name}")
-def test_banked_certification_still_describes_its_engines(anchor_path):
+@pytest.mark.parametrize("anchor_path, cell", list(_cells()))
+def test_banked_certification_still_describes_its_engines(anchor_path, cell):
     """Exact on the banking machine; rel_tol elsewhere (see the release procedure)."""
     successor = resolve_supersession(anchor_path)
     if successor is not None:
@@ -74,7 +93,7 @@ def test_banked_certification_still_describes_its_engines(anchor_path):
             f"superseded by {successor.parent.parent.name}/{successor.parent.name}, "
             "which this suite checks in its own right"
         )
-    assert_anchors(anchor_path)
+    assert_anchors(anchor_path, only=cell)
 
 
 # --- the supersession rule itself, tested ----------------------------------

@@ -10,6 +10,7 @@ from quantark.asset.equity.engine.quad.v2.engine import KOResetSnowballQuadEngin
 from quantark.asset.equity.param import PDEParams
 from quantark.modelvalidation.builders.equity_ko_reset import make_ko_reset
 from pde_3a.products import KO_RESET, env
+from pde_statistics.v2_frozen import v2_event_stats
 
 REF = json.loads((Path(__file__).parent / "ko_reset_reference.json").read_text())["cases"]
 SPOTS = {"kr_cont": 100.0, "kr_cont_spot90": 90.0, "kr_cont_spot101": 101.0}
@@ -35,12 +36,12 @@ def test_against_the_converged_quad(name):
 V2_QUALIFIED, M_PRE, M_POST = 5e-4, 3e-2, 5e-3
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("name", sorted(SPOTS))
 def test_maturity_buckets_against_v2(name):
     product, e = make_ko_reset(KO_RESET), env(spot=SPOTS[name])
     s = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, e)
-    v2 = KOResetSnowballQuadEngineV2().calculate_event_stats(product, e)
+    v2 = v2_event_stats(f"ko_reset_{name}",
+                        lambda: KOResetSnowballQuadEngineV2().calculate_event_stats(product, e))
     assert abs(v2.pv - REF[name]["pv"]) <= V2_QUALIFIED              # F17: V2 is qualified here
     v2_alive, v2_ki = v2.expected_discounted_cashflows[-2], v2.expected_discounted_cashflows[-1]
     assert abs(s.expected_discounted_pre_maturity_cashflow - v2_alive) <= M_PRE

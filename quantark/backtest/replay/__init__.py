@@ -15,7 +15,7 @@ from .config import (
     HedgeSpec,
     SurfaceGridConfig,
 )
-from .dashboard import AutocallableBacktestDashboard, AutocallableDashboardConfig
+# .dashboard (plotly) is imported lazily via __getattr__ below.
 from .engine import BookAutocallableBacktestEngine, ReplayBacktestEngine
 from .engine_factory import (
     create_autocallable_engine,
@@ -103,3 +103,11 @@ __all__ = [
     "normalize_futures_chain",
     "normalize_time_series",
 ]
+
+
+def __getattr__(name):
+    if name in ("AutocallableBacktestDashboard", "AutocallableDashboardConfig"):
+        from quantark.backtest.replay import dashboard
+
+        return getattr(dashboard, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

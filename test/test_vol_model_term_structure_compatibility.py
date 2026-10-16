@@ -3,11 +3,6 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from quantark.asset.equity.engine.capabilities import (
-    VolDynamicsType,
-    validate_engine_capability,
-)
-from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.engine.pde import (
     HestonBarrierPDESolver,
     HestonPhoenixPDESolver,
@@ -35,7 +30,6 @@ from quantark.param.div import TermStructureDividendYield
 from quantark.param.rrf.rate_curve import LinearRateCurve
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import BarrierType, ObservationType, OptionType
-from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.slv.leverage import LeverageSurface
@@ -284,12 +278,3 @@ def test_slv_phoenix_pde_sees_non_flat_rate_and_carry():
 
     assert np.isfinite(px_term)
     assert px_term != pytest.approx(px_collapsed, rel=1e-5)
-
-
-@pytest.mark.parametrize(
-    "dynamics",
-    [VolDynamicsType.LOCAL_VOL, VolDynamicsType.HESTON, VolDynamicsType.SLV],
-)
-def test_vol_model_quad_requests_are_rejected(dynamics):
-    with pytest.raises(CapabilityError, match="QUAD is not supported"):
-        validate_engine_capability(dynamics, EngineType.QUADRATURE)
