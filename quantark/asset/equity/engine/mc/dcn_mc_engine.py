@@ -383,6 +383,23 @@ class DCNMCEngine(BaseEngine):
             product, pricing_env, lifecycle_state=lifecycle_state
         ).pv
 
+    def price_with_events(
+        self, product, pricing_env, emit_distribution=True, streams=None, *, lifecycle_state=None
+    ):
+        """NPV and the DCN's event distribution from one simulation (ship spec 2026-10-21 D10).
+
+        A run without statistics (a knocked-out or matured lifecycle state) and
+        ``emit_distribution=False`` get the maturity-only distribution.
+        """
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+
+        result = self.price_detailed(product, pricing_env, lifecycle_state=lifecycle_state)
+        if emit_distribution and result.event_stats is not None:
+            dist = EventDistribution.from_dcn_stats(result.event_stats)
+        else:
+            dist = EventDistribution.trivial(max(float(product.get_maturity(pricing_env)), 0.0))
+        return PricingResult(npv=result.pv, event_distribution=dist)
+
     def price_detailed(
         self, product, pricing_env, *, lifecycle_state=None
     ) -> DCNMCResult:

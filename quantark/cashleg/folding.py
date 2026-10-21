@@ -377,6 +377,52 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
     )
 
 
+def _dcn_structure(product, pricing_env) -> _Structure:
+    """DCN: monthly KO observations and the loss-leg settlement, as ``DCNMCEngine``'s ledger lays them out."""
+    from quantark.asset.equity.engine.event_stats import DCNEventStats, payment_aware_cashflow_fields
+    from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
+
+    ctx = build_dcn_grid_context(product)
+    obs = np.asarray(ctx.times[ctx.obs_cols], dtype=float)
+    n = obs.size
+    if n == 0:
+        return _trivial_structure(product, pricing_env)
+    observations = product.schedule.monthly
+    pay = product.payment_dates()
+    ledger = payment_aware_cashflow_fields(
+        pricing_env,
+        determination_times=np.concatenate([obs, obs, [obs[-1]]]),
+        payment_times=np.concatenate([ctx.coupon_pay_times, ctx.ko_pay_times, [ctx.loss_pay_time]]),
+        expected_discounted_cashflows=np.zeros(2 * n + 1),
+        determination_dates=[*(m.observation_date for m in observations),
+                             *(m.observation_date for m in observations),
+                             observations[-1].observation_date],
+        payment_dates=[*pay.coupon_payment_dates, *pay.ko_payment_dates, pay.loss_payment_date],
+    )
+
+    def distribution(p_ko, p_no_ki, p_ki):
+        stats = DCNEventStats(
+            ki_probability=float(p_ki),
+            ko_probability=float(np.sum(p_ko)),
+            ko_timing_distribution=tuple(float(x) for x in p_ko),
+            coupon_probability=tuple(0.0 for _ in range(n)),
+            expected_life_years=0.0,
+            prob_survive_no_ki=float(p_no_ki),
+            prob_survive_ki=float(p_ki),
+            expected_discounted_loss_leg=0.0,
+            **ledger,
+        )
+        return EventDistribution.from_dcn_stats(stats)
+
+    maturity = _Slot("main", float(obs[-1]), float(ctx.loss_pay_time))
+    return _Structure(
+        ko=tuple(_Slot("main", float(t), float(p)) for t, p in zip(obs, ctx.ko_pay_times)),
+        no_ki=maturity,
+        ki=maturity,
+        distribution=distribution,
+    )
+
+
 def _event_structure(product, pricing_env) -> _Structure:
     from quantark.asset.equity.product.option.ko_reset_snowball_option import (
         KnockOutResetSnowballOption,
@@ -385,6 +431,10 @@ def _event_structure(product, pricing_env) -> _Structure:
     from quantark.asset.equity.product.option.snowball_option import SnowballOption
     from quantark.execution.errors import CapabilityError
 
+    from quantark.asset.equity.product.option.dcn_option import DCNOption
+
+    if isinstance(product, DCNOption):
+        return _dcn_structure(product, pricing_env)
     if isinstance(product, KnockOutResetSnowballOption):
         return _ko_reset_structure(product, pricing_env)
     if isinstance(product, (SnowballOption, PhoenixOption)):
@@ -414,6 +464,8 @@ def fold_cash_legs(
         raise ValidationError("a position with quantity 0 has no product unit to fold its cash legs onto")
 
     structure = _event_structure(product, pricing_env)
+    # a DCN's engines sign every cash they add by its direction, so its overlay is buyer-view (D9)
+    unit = quantity * float(getattr(product, "direction_sign", 1))
     bases = structure.weights()
     dists = [structure.distribution(*w) for w in bases]
     anchor = len(structure.ko)                           # MATURITY_NO_KO follows the KO records
@@ -431,7 +483,7 @@ def fold_cash_legs(
             slot.schedule,
             slot.determination_time,
             slot.payment_time,
-            float(diff) / pricing_env.get_discount_factor(slot.payment_time) / quantity,
+            float(diff) / pricing_env.get_discount_factor(slot.payment_time) / unit,
         )
 
     ko = tuple(cash(slot, diffs[i]) for i, slot in enumerate(structure.ko))

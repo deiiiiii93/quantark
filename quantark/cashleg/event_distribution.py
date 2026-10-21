@@ -248,6 +248,57 @@ class EventDistribution:
         return dist.normalized()
 
     @classmethod
+    def from_dcn_stats(cls, stats) -> "EventDistribution":
+        """A DCN's knock-out observations and its two maturity outcomes (ship spec 2026-10-21 D9).
+
+        KO at monthly observation j with ``ko_timing_distribution[j]``, paid at its KO payment; the
+        survivors split into knocked-in (``prob_survive_ki``) and not, both determined at the last
+        observation and paid at the loss-leg settlement. MATURITY_NO_KO is the residual, as for every
+        other autocallable. Reads the statistics' ledger, laid out ``[coupons..., KO..., loss]``.
+        """
+        ko_probability = np.asarray(stats.ko_timing_distribution, dtype=float)
+        n = ko_probability.size
+        determination = np.asarray(stats.determination_times, dtype=float)
+        payment = np.asarray(stats.payment_times, dtype=float)
+        if n == 0 or determination.size != 2 * n + 1:
+            raise ValidationError(
+                "DCNEventStats needs a [coupons..., KO..., loss] ledger aligned to its observations"
+            )
+        maturity_probability = max(0.0, 1.0 - float(np.sum(ko_probability)))
+        maturity_with_ki = min(maturity_probability, max(0.0, float(stats.prob_survive_ki)))
+        maturity_no_ko = max(0.0, maturity_probability - maturity_with_ki)
+        loss_payment = float(payment[-1])
+        payment_times: Dict[EventType, Union[np.ndarray, float]] = {
+            EventType.KO: payment[n:2 * n],
+            EventType.MATURITY_NO_KO: loss_payment,
+            EventType.MATURITY_WITH_KI: loss_payment,
+        }
+        event_dates, payment_dates = None, None
+        if stats.determination_dates is not None:
+            event_dates = list(stats.determination_dates[n:2 * n])
+        if stats.payment_dates is not None:
+            payment_dates = {
+                EventType.KO: tuple(stats.payment_dates[n:2 * n]),
+                EventType.MATURITY_NO_KO: stats.payment_dates[-1],
+                EventType.MATURITY_WITH_KI: stats.payment_dates[-1],
+            }
+        dist = cls(
+            event_times=determination[n:2 * n],
+            event_dates=event_dates,
+            probabilities={
+                EventType.KO: ko_probability,
+                EventType.MATURITY_NO_KO: maturity_no_ko,
+                EventType.MATURITY_WITH_KI: maturity_with_ki,
+            },
+            survival_probability=np.concatenate(
+                [[1.0], np.maximum(0.0, 1.0 - np.cumsum(ko_probability))]
+            ),
+            payment_times=payment_times,
+            payment_dates=payment_dates,
+        )
+        return dist.normalized()
+
+    @classmethod
     def _from_ko_reset(cls, stats) -> "EventDistribution":
         """Both knock-out schedules on one time axis and, when the producer reports them, the two
         maturity outcomes with their own determination and payment times (spec 3B §5.4, plan F5, F6)."""
