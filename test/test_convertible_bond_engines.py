@@ -1,6 +1,7 @@
 """
 Comprehensive tests for convertible bond pricing engines.
 """
+import dataclasses
 import unittest
 from datetime import datetime
 
@@ -27,6 +28,8 @@ from quantark.param.quote import SpotQuote
 from quantark.param.vol import FlatVolSurface
 from quantark.param.rrf import FlatRateCurve
 from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
+from quantark.util.enum import PaymentFrequency
 from quantark.util.enum.engine_enums import EngineType, ConvertibleBondMethod
 from quantark.util.exceptions import ValidationError, PricingError
 
@@ -854,3 +857,76 @@ class TestPriceWithDetailsRiskMetrics(TestConvertibleBondEngineSetup):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCreditSpreadCS01(unittest.TestCase):
+    """CS01 bumps the input each model actually reads (spec D2, AC1).
+
+    GS and TF price off ``credit_spread``; bumping ``hazard_rate`` for TF left its CS01 identically zero.
+    """
+
+    def setUp(self):
+        self.bond = ConvertibleBond(
+            issue_date=datetime(2024, 12, 2),
+            maturity_date=datetime(2026, 12, 2),
+            face_value=100.0,
+            coupon_rate=0.05,
+            conversion_ratio=100.0 / 110.0,
+            conversion_price=110.0,
+            payment_frequency=PaymentFrequency.ANNUAL,
+            day_count_convention=DayCountConvention.ACT_365,
+            conversion_start_date=datetime(2025, 3, 3),
+            conversion_end_date=datetime(2026, 12, 2),
+            credit_spread=0.015,
+            continuous_dividend_yield=0.191219,
+        )
+        self.env = PricingEnvironment(
+            valuation_date=datetime(2025, 10, 27),
+            spot_quote=SpotQuote(spot=111.0),
+            vol_surface=FlatVolSurface(volatility=0.182784),
+            rate_curve=FlatRateCurve(rate=0.0209),
+        )
+
+    def _direct_cs01(self, engine):
+        s = self.bond.credit_spread
+        down = engine.price(dataclasses.replace(self.bond, credit_spread=s - 0.0001))
+        up = engine.price(dataclasses.replace(self.bond, credit_spread=s + 0.0001))
+        return (down - up) / 2
+
+    def test_tf_pde_cs01_bumps_credit_spread(self):
+        engine = ConvertibleBondEngine(
+            self.env,
+            method=EngineType.PDE(ConvertibleBondMethod.TF),
+            pde_params=ConvertibleBondPDEParams(num_space_steps=100, num_time_steps=200),
+        )
+        cs01 = engine.cs01(self.bond)
+        self.assertGreater(cs01, 0.0)
+        self.assertEqual(cs01, self._direct_cs01(engine))
+
+    def test_gs_cs01_bumps_credit_spread(self):
+        engine = ConvertibleBondEngine(
+            self.env, tree_params=ConvertibleBondTreeParams(num_steps=100)
+        )
+        self.assertEqual(engine.cs01(self.bond), self._direct_cs01(engine))
+
+    def test_bumped_bonds_keep_calendar_and_schedule(self):
+        # 2025-07-04 is a US holiday: the coupon rolls to 07-07 only under the bond's own calendar.
+        bond = ConvertibleBond(
+            issue_date=datetime(2024, 7, 4),
+            maturity_date=datetime(2027, 7, 4),
+            face_value=100.0,
+            coupon_rate=0.05,
+            conversion_ratio=1.0,
+            payment_frequency=PaymentFrequency.ANNUAL,
+            calendar=create_calendar(CalendarType.US),
+            credit_spread=0.015,
+            hazard_rate=0.02,
+        )
+        engine = ConvertibleBondEngine(self.env)
+        dates = [cf.payment_date for cf in bond.get_all_cashflows()]
+        for bumped in (
+            engine._create_spread_bumped_bond(bond, 0.016),
+            engine._create_hazard_bumped_bond(bond, 0.021),
+        ):
+            self.assertIs(bumped.calendar, bond.calendar)
+            self.assertEqual([cf.payment_date for cf in bumped.get_all_cashflows()], dates)

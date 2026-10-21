@@ -6,6 +6,7 @@ underlying engines based on method selection.
 """
 import math
 from copy import deepcopy
+import dataclasses
 from dataclasses import dataclass
 from typing import Dict, Optional, Union
 
@@ -600,8 +601,9 @@ class ConvertibleBondEngine:
 
         Uses numerical credit bumping.
 
-        - For BINOMIAL_GS: bumps credit_spread directly (GS credit-adjusted discounting).
-        - For TRINOMIAL_HW / JUMP_DIFFUSION / TF: bumps hazard_rate using an
+        - For BINOMIAL_GS / TF: bumps credit_spread directly (both discount
+          the cash component at r + credit_spread; neither reads hazard_rate).
+        - For TRINOMIAL_HW / JUMP_DIFFUSION: bumps hazard_rate using an
           approximate mapping from spread shift to intensity shift:
               d(lambda) ~= d(spread) / (1 - recovery)
 
@@ -613,7 +615,7 @@ class ConvertibleBondEngine:
         """
         spread_bump = 0.0001  # 1 basis point
 
-        if self.method == ConvertibleBondMethod.BINOMIAL_GS:
+        if self.method in (ConvertibleBondMethod.BINOMIAL_GS, ConvertibleBondMethod.TF):
             # Create bond with bumped spread up
             base_spread = bond.credit_spread if bond.credit_spread else 0.0
             bond_up = self._create_spread_bumped_bond(
@@ -741,26 +743,7 @@ class ConvertibleBondEngine:
         Returns:
             New bond with modified credit spread
         """
-        return ConvertibleBond(
-            issue_date=bond.issue_date,
-            maturity_date=bond.maturity_date,
-            face_value=bond.face_value,
-            coupon_rate=bond.coupon_rate,
-            conversion_ratio=bond.conversion_ratio,
-            conversion_price=bond.conversion_price,
-            payment_frequency=bond.payment_frequency,
-            day_count_convention=bond.day_count_convention,
-            conversion_start_date=bond.conversion_start_date,
-            conversion_end_date=bond.conversion_end_date,
-            call_schedule=bond.call_schedule,
-            put_schedule=bond.put_schedule,
-            credit_spread=new_spread,
-            hazard_rate=bond.hazard_rate,
-            recovery_rate=bond.recovery_rate,
-            stock_jump_on_default=bond.stock_jump_on_default,
-            continuous_dividend_yield=bond.continuous_dividend_yield,
-            discrete_dividends=bond.discrete_dividends,
-        )
+        return dataclasses.replace(bond, credit_spread=new_spread)
 
     def _create_hazard_bumped_bond(
         self, bond: ConvertibleBond, new_hazard_rate: float
@@ -775,26 +758,7 @@ class ConvertibleBondEngine:
         Returns:
             New bond with modified hazard rate
         """
-        return ConvertibleBond(
-            issue_date=bond.issue_date,
-            maturity_date=bond.maturity_date,
-            face_value=bond.face_value,
-            coupon_rate=bond.coupon_rate,
-            conversion_ratio=bond.conversion_ratio,
-            conversion_price=bond.conversion_price,
-            payment_frequency=bond.payment_frequency,
-            day_count_convention=bond.day_count_convention,
-            conversion_start_date=bond.conversion_start_date,
-            conversion_end_date=bond.conversion_end_date,
-            call_schedule=bond.call_schedule,
-            put_schedule=bond.put_schedule,
-            credit_spread=bond.credit_spread,
-            hazard_rate=new_hazard_rate,
-            recovery_rate=bond.recovery_rate,
-            stock_jump_on_default=bond.stock_jump_on_default,
-            continuous_dividend_yield=bond.continuous_dividend_yield,
-            discrete_dividends=bond.discrete_dividends,
-        )
+        return dataclasses.replace(bond, hazard_rate=new_hazard_rate)
 
     def __repr__(self):
         return f"ConvertibleBondEngine(method={self.method.value})"
