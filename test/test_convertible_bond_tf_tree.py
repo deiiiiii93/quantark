@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
+from quantark.asset.bond.engine.pde.convertible import ConvertibleBondPDEParams, ConvertibleBondTFEngine
 from quantark.asset.bond.engine.tree.convertible import (
     ConvertibleBondTFTreeEngine,
     ConvertibleBondTreeParams,
@@ -17,6 +18,7 @@ from quantark.asset.bond.product.convertible import (
 )
 from quantark.param.quote import SpotQuote
 from quantark.param.rrf import FlatRateCurve
+from quantark.param.rrf.rate_curve import RateCurve
 from quantark.param.vol import FlatVolSurface
 from quantark.param.vol.vol_surface import VolatilitySurface
 from quantark.priceenv import PricingEnvironment
@@ -216,3 +218,84 @@ def test_put_in_last_step_is_applied_at_maturity():
     engine = _tree(PUT_ENV, 200)
     with_put = _demo_bond(put_schedule=[PutScheduleEntry(DEMO_MATURITY - timedelta(days=2), 110.0)])
     assert engine.price(with_put) - engine.price(_demo_bond()) > 3.0
+
+
+# --------------------------------------------------------------------------- AC7
+
+
+class SteppedRateCurve(RateCurve):
+    """Short rate rate1 up to ``switch`` years, rate2 after."""
+
+    def __init__(self, rate1: float, rate2: float, switch: float):
+        self.rate1, self.rate2, self.switch = rate1, rate2, switch
+
+    def get_rate(self, time_to_maturity: float) -> float:
+        return self.rate1 if time_to_maturity < self.switch else self.rate2
+
+    def get_discount_factor(self, time_to_maturity: float) -> float:
+        t = max(time_to_maturity, 0.0)
+        return math.exp(-self.rate1 * min(t, self.switch) - self.rate2 * max(t - self.switch, 0.0))
+
+
+DEMO_ENV = _env(DEMO_VALUATION, 12.0, 0.30, 0.05)
+DEMO_PUT = [PutScheduleEntry(datetime(2026, 1, 1), 100.0)]
+
+# (bond, env, vol used to size the PDE domain)
+CROSS_CHECK_CASES = {
+    "sheet-0.909": (_sheet_bond(100.0 / 110.0), SHEET_ENV, 0.182784),
+    "sheet-1.1": (_sheet_bond(1.1), SHEET_ENV, 0.182784),
+    "demo-simple": (_demo_bond(), DEMO_ENV, 0.30),
+    "demo-puttable": (_demo_bond(put_schedule=DEMO_PUT), DEMO_ENV, 0.30),
+    "demo-puttable-otm": (_demo_bond(put_schedule=DEMO_PUT), PUT_ENV, 0.30),
+    "demo-soft-call": (
+        _demo_bond(call_schedule=[CallScheduleEntry(datetime(2026, 1, 1), 100.0, soft_call=True, trigger_level=130.0)]),
+        DEMO_ENV,
+        0.30,
+    ),
+    "term-structure": (
+        _demo_bond(),
+        PricingEnvironment(
+            valuation_date=DEMO_VALUATION,
+            spot_quote=SpotQuote(spot=12.0),
+            vol_surface=SteppedVolSurface(0.25, 0.35, 2.0),
+            rate_curve=SteppedRateCurve(0.03, 0.05, 2.0),
+        ),
+        0.35,
+    ),
+}
+
+
+def _reference_pde(bond, env, vol):
+    # The default 5×spot upper boundary forces u = parity, v = 0 within reach of long-dated
+    # low-q bonds; widen it to six standard deviations (spec AC7).
+    T = bond.time_to_maturity(env.valuation_date)
+    params = ConvertibleBondPDEParams(
+        num_space_steps=800,
+        num_time_steps=2000,
+        max_stock_multiple=max(5.0, math.exp(6.0 * vol * math.sqrt(T))),
+    )
+    return ConvertibleBondTFEngine(env, params).price_with_details(bond)
+
+
+@pytest.mark.parametrize("case", list(CROSS_CHECK_CASES))
+def test_tree_agrees_with_tf_pde(case):
+    bond, env, vol = CROSS_CHECK_CASES[case]
+    tree = _tree(env, 2000).price_with_details(bond)
+    pde = _reference_pde(bond, env, vol)
+    assert abs(tree.dirty_price - pde.dirty_price) <= 0.05
+    # Delta as a hedge ratio per conversion share, so bonds of any ratio share one tolerance
+    assert abs(tree.delta - pde.delta) / bond.conversion_ratio <= 0.01
+    assert abs(tree.conversion_probability - pde.conversion_probability) <= 0.05
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Open item: a hard call splits V into cash (B, risky-discounted) or shares at the call point, and on a "
+        "lattice a node just below parity = call price is spuriously called for cash; whether such a node exists "
+        "alternates with the grid, so both TF engines move ~0.9 with N on hard-callable bonds (GS does not)."
+    ),
+)
+def test_hard_callable_converges_in_n():
+    bond = _demo_bond(call_schedule=[CallScheduleEntry(datetime(2026, 1, 1), 105.0)])
+    assert abs(_tree(DEMO_ENV, 500).price(bond) - _tree(DEMO_ENV, 600).price(bond)) <= 0.1
