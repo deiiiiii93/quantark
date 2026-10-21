@@ -18,6 +18,7 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
 from quantark.util.enum.engine_enums import EngineType
+from quantark.execution.errors import CapabilityError
 from quantark.util.exceptions import ValidationError
 from .adapters import compile_contract
 from .context import prepare_compiled, interval_moments
@@ -29,6 +30,7 @@ class AutocallableQuadEngineV2(BaseEngine):
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True
     supports_spot_greeks_grid = True
+    supports_cash_leg_folding = True
     product_type = None
 
     def __init__(self, params=None):
@@ -40,7 +42,7 @@ class AutocallableQuadEngineV2(BaseEngine):
         self._prepared = None
         self._prepared_key = None
 
-    def _compile(self, product, pricing_env, components, event_phase, lifecycle_state, extra_ko_cash=(), extra_terminal_cash=0.0):
+    def _compile(self, product, pricing_env, components, event_phase, lifecycle_state, fold=None):
         if event_phase not in {"before", "after"}:
             raise ValidationError("event_phase must be before or after")
         if self.product_type is not None and type(product) is not self.product_type:
@@ -49,6 +51,11 @@ class AutocallableQuadEngineV2(BaseEngine):
             )
         validate_settlement_capability(self, product, lifecycle_state)
         if terminal_lifecycle_pv(lifecycle_state, pricing_env) is not None:
+            if fold is not None and not fold.is_empty:
+                raise CapabilityError(
+                    "a terminated V2 contract has no prospective event distribution; "
+                    "its cash legs cannot be folded"
+                )
             channels = (
                 ("total", "ko", "coupon", "terminal") if components else ("total",)
             )
@@ -67,8 +74,7 @@ class AutocallableQuadEngineV2(BaseEngine):
             components=components,
             event_phase=event_phase,
             lifecycle_state=lifecycle_state,
-            extra_ko_cash=extra_ko_cash,
-            extra_terminal_cash=extra_terminal_cash,
+            fold=fold,
         )
 
     def prepare(
@@ -80,26 +86,24 @@ class AutocallableQuadEngineV2(BaseEngine):
         components=False,
         event_phase="before",
         lifecycle_state=None,
-        extra_ko_cash=(),
-        extra_terminal_cash=0.0,
+        fold=None,
     ):
         """Compile and solve once for the explicitly declared spot range.
 
         Gaussian term inputs are sampled at the contractual strike. Strike-
         dependent volatility is rejected, rather than labelled local volatility.
-        ``extra_ko_cash``/``extra_terminal_cash`` fold path-independent
-        contingent cash (e.g. cash legs) into the KO records and terminal
-        payoff; the compiled contract carries them, so the cache key covers
-        them.
+        ``fold`` is a ``FoldOverlay`` of cash legs bound into the KO records and
+        each maturity branch's terminal payoff (see ``compile_contract``); the
+        compiled contract carries the bound cash and the cache key names the
+        overlay, so a later unfolded or differently folded call never reuses it.
         """
         self.params.__post_init__()
         env = deepcopy(pricing_env)
         product = deepcopy(product)
         lifecycle_state = deepcopy(lifecycle_state)
+        fold = self._active_fold(fold)
         contract = self._compile(
-            product, env, components, event_phase, lifecycle_state,
-            extra_ko_cash=extra_ko_cash,
-            extra_terminal_cash=extra_terminal_cash,
+            product, env, components, event_phase, lifecycle_state, fold=fold
         )
         self._validate_market(product, env, contract)
         if spot_levels is None:
@@ -111,8 +115,13 @@ class AutocallableQuadEngineV2(BaseEngine):
             contract, env, product.strike, self.params, spot_levels, pending_pv=pending
         )
         self._prepared = context
-        self._prepared_key = self._key(contract, env, product.strike, pending)
+        self._prepared_key = self._key(contract, env, product.strike, pending, fold)
         return context
+
+    @staticmethod
+    def _active_fold(fold):
+        """``None`` for an absent or empty overlay: the unfolded contract and key."""
+        return None if fold is None or fold.is_empty else fold
 
     @staticmethod
     def _validate_market(product, env, contract):
@@ -147,7 +156,7 @@ class AutocallableQuadEngineV2(BaseEngine):
                     "QUAD V2 requires strike-independent deterministic volatility"
                 )
 
-    def _key(self, contract, env, strike, pending):
+    def _key(self, contract, env, strike, pending, fold=None):
         moments = interval_moments(env, strike, [e.time for e in contract.events])
         return (
             contract,
@@ -155,6 +164,7 @@ class AutocallableQuadEngineV2(BaseEngine):
             repr(asdict(self.params)),
             pending,
             contract.metadata.get("continuous_model"),
+            fold,
         )
 
     def _context(
@@ -165,13 +175,15 @@ class AutocallableQuadEngineV2(BaseEngine):
         components=False,
         event_phase="before",
         lifecycle_state=None,
+        fold=None,
     ):
+        fold = self._active_fold(fold)
         contract = self._compile(
-            product, pricing_env, components, event_phase, lifecycle_state
+            product, pricing_env, components, event_phase, lifecycle_state, fold=fold
         )
         self._validate_market(product, pricing_env, contract)
         pending = pending_receivable_pv(lifecycle_state, pricing_env)
-        key = self._key(contract, pricing_env, product.strike, pending)
+        key = self._key(contract, pricing_env, product.strike, pending, fold)
         cached = self._prepared
         if (
             cached is not None
@@ -185,6 +197,7 @@ class AutocallableQuadEngineV2(BaseEngine):
             components=components,
             event_phase=event_phase,
             lifecycle_state=lifecycle_state,
+            fold=fold,
         )
 
     def price(
@@ -196,6 +209,44 @@ class AutocallableQuadEngineV2(BaseEngine):
                 pricing_env,
                 lifecycle_state=lifecycle_state,
                 event_phase=event_phase,
+            ).evaluate([pricing_env.spot])["price"][0]
+        )
+
+    def price_folded(
+        self,
+        product,
+        pricing_env,
+        overlay,
+        *,
+        lifecycle_state=None,
+        event_phase="before",
+    ):
+        """Per-unit NPV with ``overlay``'s cash legs folded into the contract: one context.
+
+        An empty overlay returns ``price()`` bitwise. A non-empty one refuses
+        ``event_phase="after"`` (the fold structure includes observations at the
+        valuation instant, which that phase drops) and a terminated lifecycle (no
+        prospective distribution). ``overlay.constant_pv`` is not included.
+        """
+        if overlay.is_empty:
+            return self.price(
+                product,
+                pricing_env,
+                lifecycle_state=lifecycle_state,
+                event_phase=event_phase,
+            )
+        if event_phase == "after":
+            raise CapabilityError(
+                "QUAD V2 folds cash legs only with event_phase='before': the folded "
+                "event structure includes observations at the valuation instant"
+            )
+        return float(
+            self._context(
+                product,
+                pricing_env,
+                lifecycle_state=lifecycle_state,
+                event_phase=event_phase,
+                fold=overlay,
             ).evaluate([pricing_env.spot])["price"][0]
         )
 

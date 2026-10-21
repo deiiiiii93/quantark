@@ -103,6 +103,31 @@ def _reset_records(product, env, config):
     return result
 
 
+def _bind_fold(fold, reset, pre, post, terminal, maturity, pre_maturity):
+    """Add a fold overlay's KO cash to the records; return the per-branch terminal cash.
+
+    Records are ``(observation_time, barrier, cash_at_settlement, payment_time)``.
+    Times are the raw contractual ones (before canonical merging), the timing the
+    overlay was built on. The alive branch of a KO-reset ends at its pre-maturity
+    and settles after the same terminal delay as the knocked-in branch.
+    """
+    schedules = (("pre", pre), ("post", post)) if reset else (("main", pre),)
+    records = [(name, r[0], r[3]) for name, rows in schedules for r in rows]
+    amounts = iter(fold.bind_ko(records))
+    folded = [
+        [(t, b, a + float(next(amounts)), p) for (t, b, a, p) in rows]
+        for _, rows in schedules
+    ]
+    new_pre = folded[0]
+    new_post = folded[1] if reset else new_pre
+    delay = terminal.payment_time - terminal.determination_time
+    branch_terminal = {
+        "no_ki": float(fold.bind_terminal("no_ki", pre_maturity, pre_maturity + delay)),
+        "ki": float(fold.bind_terminal("ki", maturity, terminal.payment_time)),
+    }
+    return new_pre, new_post, branch_terminal
+
+
 def compile_contract(
     product,
     env,
@@ -111,16 +136,19 @@ def compile_contract(
     components=False,
     event_phase="before",
     lifecycle_state=None,
-    extra_ko_cash=(),
-    extra_terminal_cash=0.0,
+    fold=None,
 ):
     """Compile only known product classes; unknown subclasses fail closed.
 
-    ``extra_ko_cash`` carries ``(observation_time, amount)`` pairs added to
-    the matching KO record's cash (path-independent contingent amounts such
-    as folded cash legs); a pair whose time matches no record raises.
-    ``extra_terminal_cash`` is added to the terminal payoff's cash component
-    at maturity in both the alive and knocked-in branches.
+    ``fold`` is a ``quantark.cashleg.folding.FoldOverlay`` of cash legs folded into
+    the payoff (ship spec 2026-10-21, D4/D5). Each KO record is bound one to one
+    through ``fold.bind_ko`` — schedule ``"main"`` for Snowball / Phoenix,
+    ``"pre"`` / ``"post"`` for KO-reset — and its amount (cash per unit at the
+    record's settlement) is added to the record's own cash. Each maturity branch is
+    bound through ``fold.bind_terminal`` at its own end: ``"no_ki"`` at the alive
+    branch's end (the KO-reset pre-maturity) and ``"ki"`` at maturity, both with
+    the terminal settlement delay. Any unbound entry or timing mismatch raises.
+    ``None`` or an empty overlay compiles exactly the unfolded contract.
     """
     if type(product) not in (
         SnowballOption,
@@ -231,29 +259,14 @@ def compile_contract(
             result[t] = r
         return result
 
-    if extra_ko_cash:
-        pending_extras = {}
-        for raw_time, raw_amount in extra_ko_cash:
-            t_extra = float(raw_time)
-            if t_extra not in mapping:
-                raise ValidationError(
-                    f"extra KO cash time {t_extra} is not a contract event time"
-                )
-            key = mapping[t_extra]
-            pending_extras[key] = pending_extras.get(key, 0.0) + float(raw_amount)
-
-        def with_extras(rows):
-            return [
-                (t, b, a + pending_extras.get(mapping[t], 0.0), p)
-                for (t, b, a, p) in rows
-            ]
-
-        pre = with_extras(pre)
-        post = with_extras(post)
-
+    terminal = resolve_terminal_timing(product, env)
+    fold_terminal = {}
+    if fold is not None and not fold.is_empty:
+        pre, post, fold_terminal = _bind_fold(
+            fold, reset, pre, post, terminal, maturity, pre_maturity
+        )
     pre_by, post_by, ki_by = keyed(pre), keyed(post), keyed(ki)
     maturity, pre_maturity = mapping[maturity], mapping[pre_maturity]
-    terminal = resolve_terminal_timing(product, env)
     channels = ("total", "ko", "coupon", "terminal") if components else ("total",)
     statistics = components == "events"
     ko_metadata = []
@@ -561,8 +574,8 @@ def compile_contract(
                     tc, ta = payoff(point_spots[x], pricing_env=env), 0.0
                 else:
                     tc, ta = _affine_payoff(product, env, new_hit, lo, hi)
-                if extra_terminal_cash and t == maturity:
-                    tc += extra_terminal_cash
+                if fold_terminal:
+                    tc += fold_terminal["ki" if new_hit else "no_ki"]
                 # KO-reset's pre branch can end before the post-KI branch.
                 delay = (
                     terminal.delay_df
