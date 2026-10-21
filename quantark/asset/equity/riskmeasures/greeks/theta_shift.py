@@ -346,7 +346,8 @@ def bumped_trade_value_folded(bump_engine, shift: ThetaShift, legs, *, quantity,
         from quantark.cashleg.leg_valuator import value_leg
 
         product_t0, env_t0, _payment_time, _time_bump = shift.ended_at_t0
-        result = bump_engine.price_with_events(product_t0, env_t0)
+        streams = frozenset().union(*(leg.required_event_types() for leg in legs)) if legs else frozenset()
+        result = bump_engine.price_with_events(product_t0, env_t0, streams=streams)
         unit = unit_of(env_t0)
         per_leg = {leg.leg_id: carried_ended_value(shift, value_leg(leg, result.event_distribution, env_t0, unit))
                    for leg in legs}

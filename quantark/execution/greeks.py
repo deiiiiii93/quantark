@@ -631,7 +631,8 @@ def greek_value_runner(cell, resolved, child_context):
         (GREEK_VALUE_RUNNER_ID, parameters["bump_id"], cell.cell_fingerprint,
          build_versions(), platform_tag())
     )
-    return values["npv"], tuple(economics), manifest_fp
+    # a folded cell's value is its trade total (spec D11d); event cells keep the npv
+    return values.get("total", values["npv"]), tuple(economics), manifest_fp
 
 
 if __name__ == "quantark.execution.greeks":

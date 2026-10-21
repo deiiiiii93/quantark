@@ -482,10 +482,11 @@ Cash legs on an autocallable position normally price on the event route: one
 `price_with_events` solve per bump, the legs valued on its event distribution. With
 `cash_leg_folding` set, the legs are folded into the product's own payoff instead (cash on each
 knock-out record and maturity branch), so one plain solve prices product and legs together.
-Every Snowball / Phoenix / KO-reset / DCN engine folds: PDE (1D, local vol, Heston/SLV 2D),
-Monte Carlo (incl. its vol-model subclasses), QUAD v1 and QUAD V2.
+Snowball, Phoenix and KO-reset fold on PDE (1D, local vol, Heston/SLV 2D), Monte Carlo (incl.
+its vol-model subclasses), QUAD v1 and QUAD V2; DCN folds on its MC and PDE engines.
 
 ```python
+from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.cashleg import FoldMode
 from quantark.portfolio import EquityPosition
 
@@ -497,15 +498,21 @@ risk.total                    # trade greeks; DRILLDOWN adds risk.product, risk.
 ```
 
 - `None` (default) keeps the event route exactly; a position without legs ignores the flag.
-- `TOTAL` reports trade totals only; `DRILLDOWN` also the product and each leg (one extra folded
-  solve per event-dependent leg). DRILLDOWN is refused where two solves may not share a
+- `TOTAL` reports trade totals only — 1.75–4× faster than the event route on QUAD and PDE
+  (`example/cash_leg_folding_benchmark.py`), about even on MC (one simulation either way).
+- `DRILLDOWN` also reports the product and each leg: per bump one plain solve, one folded
+  solve with all legs and one per event-dependent leg — slower than the event route, which
+  values every leg from one solve. It is refused where two solves may not share a
   discretization (MC RQMC / Dask, QUAD v1 `auto_converge`).
 - Folding is exact: a leg's cash per event comes from its own `value()` probed on unit event
   distributions. `DeterministicLeg`, `AccrualLeg`, `FixedPayoffLeg` (knock-out / maturity
-  triggers) and `AutocallableCashLeg` (knock-out / maturity basis) fold; an `AT_KI` trigger or
-  a COUPON-basis leg raises `CapabilityError` — price it on the event route.
+  triggers) and `AutocallableCashLeg` (knock-out / maturity basis) fold.
+- These refuse instead of approximating — price them on the event route: an `AT_KI` trigger
+  or a COUPON-basis leg (`CapabilityError`); a REBASED KO-reset; QUAD V2 with
+  `event_phase="after"` or a terminated lifecycle state; the Heston conditional-moment / SLV
+  control MC routes on a product with a terminal settlement lag; and a KO-reset handed to the
+  2D Heston Snowball PDE, which marches one knock-out schedule (its cash cannot bind).
 - The execution kernel takes the same switch: `TradeState(..., fold_mode=FoldMode.TOTAL)`.
-- `example/cash_leg_folding_benchmark.py` times the two routes side by side.
 
 ## RQMC Target Std Scaling (MC Benchmarking)
 

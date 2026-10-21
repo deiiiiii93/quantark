@@ -76,6 +76,10 @@ class EquityPosition:
             raise ValidationError("Product is required")
         if self.engine is None:
             raise ValidationError("Engine is required")
+        if self.cash_leg_folding is not None and not isinstance(self.cash_leg_folding, FoldMode):
+            raise ValidationError(
+                f"cash_leg_folding must be None or a FoldMode, got {self.cash_leg_folding!r}"
+            )
     
     def get_current_price(self, pricing_env: PricingEnvironment) -> float:
         """

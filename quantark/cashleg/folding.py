@@ -20,9 +20,8 @@ record, so the folded structure is the event route's, not a re-derivation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from dataclasses import field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np

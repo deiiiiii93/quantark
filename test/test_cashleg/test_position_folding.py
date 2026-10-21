@@ -169,3 +169,11 @@ def test_drilldown_refuses_where_two_solves_may_not_share_a_discretization(engin
         pos.get_trade_risk(env, GreeksCalculator(), ["delta"])
     with pytest.raises(CapabilityError):                      # CP4: the breakdown is a drilldown too
         pos.get_trade_value_breakdown(env)
+
+
+def test_cash_leg_folding_must_be_a_fold_mode():
+    product, _env, legs = _snowball_case()
+    with pytest.raises(ValidationError, match="FoldMode"):
+        EquityPosition(product=product, quantity=1.0, entry_price=0.0, underlying="X",
+                       engine=SnowballPDESolver(PDEParams()), entry_timestamp=datetime(2024, 1, 1),
+                       cash_legs=legs, cash_leg_folding="drilldown")
