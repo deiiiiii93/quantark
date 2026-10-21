@@ -700,9 +700,10 @@ class ConvertibleBondTrinomialEngine:
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
 
-        put_by_step = put_prices_by_step(
-            bond, valuation_date, np.arange(n_steps + 1) * dt
-        )
+        # Step edges for coupons and puts; the last step ends at maturity exactly
+        step_times = np.arange(n_steps + 1) * dt
+        step_times[-1] = bond.time_to_maturity(valuation_date)
+        put_by_step = put_prices_by_step(bond, valuation_date, step_times)
         terminal_put = put_by_step.get(n_steps)
 
         # Terminal values at maturity
@@ -811,7 +812,7 @@ class ConvertibleBondTrinomialEngine:
 
                 # Add any coupon payments in this period
                 for k, ct in enumerate(coupon_times):
-                    if t < ct <= (i + 1) * dt:
+                    if t < ct <= step_times[i + 1]:
                         continuation += coupon_amounts[k] * safe_exp(-r_local * (ct - t))
 
                 # Conversion value
@@ -911,9 +912,10 @@ class ConvertibleBondTrinomialEngine:
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
 
-        put_by_step = put_prices_by_step(
-            bond, valuation_date, np.arange(n_steps + 1) * dt
-        )
+        # Step edges for coupons and puts; the last step ends at maturity exactly
+        step_times = np.arange(n_steps + 1) * dt
+        step_times[-1] = bond.time_to_maturity(valuation_date)
+        put_by_step = put_prices_by_step(bond, valuation_date, step_times)
         terminal_put = put_by_step.get(n_steps)
 
         # Terminal values at maturity
@@ -1008,7 +1010,7 @@ class ConvertibleBondTrinomialEngine:
 
                 # Add any coupon payments in this period
                 for k, ct in enumerate(coupon_times):
-                    if t < ct <= (i + 1) * dt:
+                    if t < ct <= step_times[i + 1]:
                         continuation += coupon_amounts[k] * safe_exp(
                             -r_local * (ct - t)
                         )
@@ -1120,9 +1122,10 @@ class ConvertibleBondTrinomialEngine:
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
 
-        put_by_step = put_prices_by_step(
-            bond, valuation_date, np.arange(n_steps + 1) * dt
-        )
+        # Step edges for coupons and puts; the last step ends at maturity exactly
+        step_times = np.arange(n_steps + 1) * dt
+        step_times[-1] = bond.time_to_maturity(valuation_date)
+        put_by_step = put_prices_by_step(bond, valuation_date, step_times)
         terminal_put = put_by_step.get(n_steps)
 
         # Terminal values at maturity
@@ -1236,7 +1239,7 @@ class ConvertibleBondTrinomialEngine:
 
                 # Add any coupon payments in this period
                 for k, ct in enumerate(coupon_times):
-                    if t < ct <= (i + 1) * dt:
+                    if t < ct <= step_times[i + 1]:
                         continuation += coupon_amounts[k] * safe_exp(
                             -r_local * (ct - t)
                         )

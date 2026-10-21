@@ -145,10 +145,11 @@ class ConvertibleBondJumpDiffusionEngine:
         V = self._terminal_condition(bond, S)
         P = self._terminal_conversion_probability(bond, S)
 
-        # Puts by time step; one in the last step is exercised at maturity
-        put_by_step = put_prices_by_step(
-            bond, valuation_date, np.arange(N_t + 1) * dt
-        )
+        # Step edges for coupons and puts (the last ends at maturity exactly);
+        # a put in the last step is exercised at maturity
+        step_times = np.arange(N_t + 1) * dt
+        step_times[-1] = T
+        put_by_step = put_prices_by_step(bond, valuation_date, step_times)
         V, P = self._apply_put(V, P, put_by_step.get(N_t))
 
         # Get coupon schedule
@@ -173,7 +174,7 @@ class ConvertibleBondJumpDiffusionEngine:
             # Apply coupon payments (jump condition) to the known later-time state
             coupon_amount = 0.0
             for ct, ca in coupon_schedule:
-                if t < ct <= (n + 1) * dt:
+                if t < ct <= step_times[n + 1]:
                     coupon_amount += ca
             if coupon_amount > 0.0:
                 V = V + coupon_amount

@@ -232,3 +232,30 @@ def test_hw_put_value_is_continuous_in_n(env):
         engine = ConvertibleBondTrinomialEngine(env, ConvertibleBondTreeParams(num_steps=n))
         values.append(engine.price(with_put) - engine.price(no_put))
     assert abs(values[1] - values[0]) < 0.15
+
+
+# The last step ends at T itself: N * (T / N) can sit an ulp below T, and a coupon paid at maturity then fell
+# into no window (final review: GS 100.72 -> 98.28 on a 168-day bond at the default 200 steps).
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        pytest.param(lambda e, n: _gs(e, n), id="gs"),
+        pytest.param(
+            lambda e, n: ConvertibleBondTrinomialEngine(e, ConvertibleBondTreeParams(num_steps=n)), id="hw"
+        ),
+        pytest.param(lambda e, n: _jd(e, n), id="jd"),
+        pytest.param(lambda e, n: _tf(e, n), id="tf-pde"),
+    ],
+)
+@pytest.mark.parametrize("days", [168, 571])
+def test_maturity_coupon_is_paid_on_every_grid(make, days):
+    env = PricingEnvironment(
+        valuation_date=ULP_MATURITY - timedelta(days=days),
+        spot_quote=SpotQuote(spot=8.0),
+        vol_surface=FlatVolSurface(volatility=0.30),
+        rate_curve=FlatRateCurve(rate=0.05),
+    )
+    prices = [make(env, n).price(_ulp_bond()) for n in (199, 200, 201)]
+    assert max(prices) - min(prices) < 0.3

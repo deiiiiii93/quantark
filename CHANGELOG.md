@@ -27,22 +27,26 @@ During 0.x the public API may still change between minor versions.
   now land on the first step at or after their date (a coupon paid on the put date is kept), and a
   put in the last step is exercised at maturity.
 - Convertible coupons could fall between two steps and never be paid: the coupon window ended at
-  `t + dt` while the next step began at `(i + 1) * dt`. GS, HW, jump-diffusion and the TF PDE priced
-  a 5% semi-annual bond ~2.2 low on some grids (265 and 267 steps). Rate lookups are unchanged, so
-  every other price is bit-identical.
+  `t + dt` while the next step began at `(i + 1) * dt`, and the last step could end an ulp short of
+  maturity. GS, HW, jump-diffusion and the TF PDE priced a 5% semi-annual bond ~2.2–2.5 low on some
+  grids. Coupon windows now end on the step grid, whose last edge is maturity exactly; rate lookups
+  are unchanged. On a sweep of 300 GS grids, 264 prices are bit-identical and the other 36 rise by
+  one discounted coupon (2.21–2.46), each a grid that used to drop it.
 - TF CS01 was identically 0: `ConvertibleBondEngine.cs01` bumped `hazard_rate`, which the TF engine
   never reads. TF (tree and PDE) now bumps `credit_spread`, as GS does. The bumped bonds keep their
   calendar, business-day convention and settlement days, and a down bump floored at zero divides by
-  the actual bump width (HW and jump-diffusion CS01 at `hazard_rate = 0` were half the one-sided
-  value).
+  the actual bump width: GS and TF CS01 at `credit_spread` below 1bp, and HW and jump-diffusion CS01
+  at `hazard_rate` below the bumped intensity, were half the one-sided value.
 
 ### Known issues
 
 - TF prices of hard-callable bonds are grid-sensitive in both TF engines (about ±0.45 per 100 face
-  on the demo callable bond as N or the PDE grid changes). On a lattice, a node just below
-  parity = call price is called for cash rather than converted, which moves the call price into the
-  risky-discounted cash component; whether such a node exists alternates with the grid. The GS tree
-  is not affected.
+  on the demo callable bond as N or the PDE grid changes; conversion probability swings between
+  about 0.63 and 0.85, and delta with it). Refinement does not cure it: the tree is still bimodal at
+  N = 32,000. With the call price above the coupon carry, a hard call happens only at the tie
+  parity = call price, where the TF split into cash and shares is undefined; on a lattice the node
+  at the tie is called for cash (the call price joins the risky-discounted cash component) or
+  converted, depending on the grid. It needs `credit_spread > 0`; the GS tree is not affected.
 
 ## [0.5.5] - 2026-10-16
 

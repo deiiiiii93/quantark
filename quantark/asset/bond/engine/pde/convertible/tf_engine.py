@@ -148,10 +148,11 @@ class ConvertibleBondTFEngine:
         u, v = self._terminal_condition(bond, S)
         P = self._terminal_conversion_probability(bond, S)
 
-        # Puts by time step; one in the last step is exercised at maturity
-        put_by_step = put_prices_by_step(
-            bond, valuation_date, np.arange(N_t + 1) * dt
-        )
+        # Step edges for coupons and puts (the last ends at maturity exactly);
+        # a put in the last step is exercised at maturity
+        step_times = np.arange(N_t + 1) * dt
+        step_times[-1] = T
+        put_by_step = put_prices_by_step(bond, valuation_date, step_times)
         terminal_put = put_by_step.get(N_t)
         if terminal_put is not None:
             put_mask = terminal_put > u + v
@@ -191,7 +192,7 @@ class ConvertibleBondTFEngine:
             # known later-time state (coupons paid only if not converted).
             coupon_amount = 0.0
             for ct, ca in coupon_schedule:
-                if t < ct <= (n + 1) * dt:
+                if t < ct <= step_times[n + 1]:
                     coupon_amount += ca
             if coupon_amount > 0.0:
                 v = v + coupon_amount

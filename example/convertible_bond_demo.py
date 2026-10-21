@@ -159,8 +159,8 @@ def demo_method_comparison():
     tree_params = ConvertibleBondTreeParams(num_steps=200)
     pde_params = ConvertibleBondPDEParams(num_space_steps=200, num_time_steps=400)
 
-    print(f"\n{'Method':<25} {'Price':>10} {'Delta':>10} {'Conv Prob':>12}")
-    print("-" * 60)
+    print(f"\n{'Method':<27} {'Price':>10} {'Delta':>10} {'Conv Prob':>12}")
+    print("-" * 62)
 
     for name, method in methods:
         engine = ConvertibleBondEngine(
@@ -175,7 +175,7 @@ def demo_method_comparison():
             if result.conversion_probability > 0
             else "N/A"
         )
-        print(f"{name:<25} {result.price:>10.4f} {result.delta:>10.4f} {conv_prob:>12}")
+        print(f"{name:<27} {result.price:>10.4f} {result.delta:>10.4f} {conv_prob:>12}")
 
 
 def demo_tf_decomposition():

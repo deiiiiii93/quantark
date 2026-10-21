@@ -283,8 +283,8 @@ def test_tree_agrees_with_tf_pde(case):
     tree = _tree(env, 2000).price_with_details(bond)
     pde = _reference_pde(bond, env, vol)
     assert abs(tree.dirty_price - pde.dirty_price) <= 0.05
-    # Delta as a hedge ratio per conversion share, so bonds of any ratio share one tolerance
-    assert abs(tree.delta - pde.delta) / bond.conversion_ratio <= 0.01
+    # Delta within 0.05, and within 1% of a share for low-ratio bonds
+    assert abs(tree.delta - pde.delta) <= min(0.05, 0.01 * bond.conversion_ratio)
     assert abs(tree.conversion_probability - pde.conversion_probability) <= 0.05
 
 
