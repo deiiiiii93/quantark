@@ -16,7 +16,7 @@ from quantark.execution.errors import CapabilityError
 from quantark.util.numerical import is_close, is_zero
 
 __all__ = ["ThetaShift", "shift_for_theta", "bumped_value", "bumped_trade_value", "carried_ended_value",
-           "shift_cash_legs"]
+           "shift_cash_legs", "bumped_trade_value_folded"]
 
 
 @dataclass(frozen=True)
@@ -319,3 +319,40 @@ def bumped_trade_value(bump_engine, shift: ThetaShift, legs, *, streams, unit_of
     moved = shift_cash_legs(legs, shift.time_bump)
     return (float(result.npv) + shift.fixed_pv,
             sum(value_leg(leg, result.event_distribution, shift.env, unit) for leg in moved))
+
+
+def bumped_trade_value_folded(bump_engine, shift: ThetaShift, legs, *, quantity, unit_of, mode):
+    """``bumped_trade_value`` with the cash legs folded into the bumped solve (ship spec D13).
+
+    Returns a ``FoldedTradeValue`` at ``t1`` whose ``total`` is ``quantity·npv + Σ leg PV`` with
+    ``npv`` carrying ``fixed_pv`` exactly as ``bumped_trade_value``'s does. A contract ``t0`` settled
+    refuses legs; one ``t0`` ended keeps the event route (its ``t0`` values carried to ``t1`` — an ended
+    contract's solve is its short-circuit); a live one folds the moved legs onto the bumped product,
+    the overlay rebuilt from the bumped market."""
+    from quantark.cashleg.folding import FoldMode, FoldedTradeValue, folded_trade_value
+
+    q = float(quantity)
+    if shift.settled_value is not None:
+        if legs:
+            raise CapabilityError("theta: cash legs on a contract settled at the as-of date have no distribution")
+        npv = shift.settled_value + shift.fixed_pv
+        return FoldedTradeValue(total=q * npv, npv=npv if mode is FoldMode.DRILLDOWN else None)
+    if shift.ended_at_t0 is not None:
+        from quantark.cashleg.leg_valuator import value_leg
+
+        product_t0, env_t0, _payment_time, _time_bump = shift.ended_at_t0
+        result = bump_engine.price_with_events(product_t0, env_t0)
+        unit = unit_of(env_t0)
+        per_leg = {leg.leg_id: carried_ended_value(shift, value_leg(leg, result.event_distribution, env_t0, unit))
+                   for leg in legs}
+        npv = carried_ended_value(shift, float(result.npv)) + shift.fixed_pv
+        legs_t0 = sum(value_leg(leg, result.event_distribution, env_t0, unit) for leg in legs)
+        total = q * npv + carried_ended_value(shift, legs_t0)
+        if mode is FoldMode.DRILLDOWN:
+            return FoldedTradeValue(total=total, npv=npv, per_leg=per_leg)
+        return FoldedTradeValue(total=total)
+    moved = shift_cash_legs(legs, shift.time_bump)
+    value = folded_trade_value(bump_engine, shift.product, shift.env, moved, quantity=q,
+                               unit_notional=unit_of(shift.env), mode=mode)
+    npv = None if value.npv is None else value.npv + shift.fixed_pv
+    return FoldedTradeValue(total=value.total + q * shift.fixed_pv, npv=npv, per_leg=value.per_leg)

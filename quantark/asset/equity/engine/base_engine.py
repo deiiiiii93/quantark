@@ -19,6 +19,7 @@ from quantark.util.fixings import freeze_missing_fixings
 from quantark.util.numerical import is_close
 
 if TYPE_CHECKING:
+    from quantark.cashleg.folding import FoldOverlay
     from quantark.asset.equity.lifecycle import EquityOptionLifecycleState
 
 
@@ -89,6 +90,8 @@ class BaseEngine(ABC):
     supports_spot_greeks_grid = False
     settlement_support = SettlementSupport.NONE
     supports_lifecycle_state = False
+    #: Whether ``price_folded`` prices a ``FoldOverlay`` of cash legs inside the product solve.
+    supports_cash_leg_folding = False
 
     #: Attribute names that fully determine this engine's pricing function. ``None`` (the
     #: default) means "identity only": two instances are never equivalent. Engines whose
@@ -223,6 +226,29 @@ class BaseEngine(ABC):
         return PricingResult(
             npv=npv,
             event_distribution=EventDistribution.trivial(product.get_maturity(pricing_env)),
+        )
+
+    def price_folded(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        overlay: "FoldOverlay",
+        *,
+        lifecycle_state: Optional["EquityOptionLifecycleState"] = None,
+    ) -> float:
+        """Per-unit NPV of ``product`` with ``overlay``'s cash legs folded into its payoff.
+
+        An engine that supports folding adds each overlay amount exactly where it adds the
+        product's own cash for that event (knock-out record or maturity branch), so the one
+        solve returns ``npv + Σ_e P_e·amount_e·DF(pay_e)``; an empty overlay returns
+        ``price()`` bitwise. ``overlay.constant_pv`` is NOT included — the caller adds it.
+        Engines that cannot fold refuse rather than approximate.
+        """
+        from quantark.execution.errors import CapabilityError
+
+        raise CapabilityError(
+            f"{type(self).__name__} does not fold cash legs into its solve; "
+            "price the legs on the event route"
         )
 
     def calculate_greeks(

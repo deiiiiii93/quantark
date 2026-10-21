@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional
 
 from quantark.cashleg.base import CashLeg, LegDirection
@@ -47,8 +47,11 @@ class TradeGreeks:
     ``product`` holds ``quantity * d(npv)/dx``; ``total`` holds
     ``quantity * d(npv)/dx + d(Σ leg_pv)/dx`` — the legs carry their own
     direction and are NOT scaled by the note quantity sign [§11.8].
+    ``leg_greeks`` maps ``leg_id`` to that leg's own greeks; only a folded
+    DRILLDOWN valuation fills it.
     """
 
     product: Dict[str, float]
     total: Dict[str, float]
     leg_pvs: Dict[str, LegPV]
+    leg_greeks: Dict[str, Dict[str, float]] = field(default_factory=dict)

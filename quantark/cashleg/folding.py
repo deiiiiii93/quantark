@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, List, Optional, Sequence, Tuple
+from dataclasses import field
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -39,8 +40,10 @@ __all__ = [
     "FoldMode",
     "FoldedEventCash",
     "FoldOverlay",
+    "FoldedTradeValue",
     "ensure_foldable",
     "fold_cash_legs",
+    "folded_trade_value",
     "is_event_independent",
     "is_foldable",
 ]
@@ -452,3 +455,70 @@ def _check_affine(leg, structure, values, anchor, pricing_env, unit_notional) ->
             f"{type(leg).__name__} {leg.name or leg.leg_id} is not affine in the event "
             f"probabilities (mixed {actual!r} vs folded {predicted!r}); it cannot be folded"
         )
+
+
+# --- one trade valuation, folded --------------------------------------------------------------
+
+@dataclass(frozen=True)
+class FoldedTradeValue:
+    """A trade valued with its cash legs folded into the product solve.
+
+    ``total`` is absolute: ``quantity · npv + Σ leg PV``. ``npv`` (per unit) and ``per_leg``
+    (absolute, keyed by ``leg_id``) are filled only in ``FoldMode.DRILLDOWN``.
+    """
+
+    total: float
+    npv: Optional[float] = None
+    per_leg: Dict[str, float] = field(default_factory=dict)
+
+
+def folded_trade_value(
+    engine,
+    product,
+    pricing_env,
+    legs: Sequence[CashLeg],
+    *,
+    quantity: float,
+    unit_notional: float,
+    mode: FoldMode,
+    lifecycle_state=None,
+) -> FoldedTradeValue:
+    """Value a trade by folding its cash legs into ``engine``'s solve (ship spec D11).
+
+    TOTAL: one folded solve with every leg. DRILLDOWN: the plain solve, the folded
+    total, and one folded solve per event-dependent leg (leg j's PV is
+    ``quantity·(folded_j − npv) + constant_j``); event-independent legs are valued
+    directly and never solved. The overlay is rebuilt from ``pricing_env`` on every
+    call, so a bumped market gets its own discount ratios.
+    """
+    if not isinstance(mode, FoldMode):
+        raise ValidationError(f"mode must be a FoldMode, got {mode!r}")
+    from quantark.execution.errors import CapabilityError
+
+    if not getattr(engine, "supports_cash_leg_folding", False):
+        raise CapabilityError(
+            f"{type(engine).__name__} does not fold cash legs into its solve; "
+            "price the legs on the event route"
+        )
+    kwargs = {} if lifecycle_state is None else {"lifecycle_state": lifecycle_state}
+    quantity = float(quantity)
+    overlay = fold_cash_legs(
+        legs, product, pricing_env, quantity=quantity, unit_notional=unit_notional
+    )
+    folded = float(engine.price_folded(product, pricing_env, overlay, **kwargs))
+    total = quantity * folded + overlay.constant_pv
+    if mode is FoldMode.TOTAL:
+        return FoldedTradeValue(total=total)
+
+    npv = float(engine.price(product, pricing_env, **kwargs))
+    per_leg: Dict[str, float] = {}
+    for leg in legs:
+        own = fold_cash_legs(
+            [leg], product, pricing_env, quantity=quantity, unit_notional=unit_notional
+        )
+        if own.is_empty:
+            per_leg[leg.leg_id] = own.constant_pv
+        else:
+            alone = float(engine.price_folded(product, pricing_env, own, **kwargs))
+            per_leg[leg.leg_id] = quantity * (alone - npv) + own.constant_pv
+    return FoldedTradeValue(total=total, npv=npv, per_leg=per_leg)
