@@ -419,6 +419,20 @@ def test_a_memory_phoenix_is_refused_as_price_refuses_it():
         _heston_phoenix().price_folded(product, env, _hand_overlay(product, env, ko=1.0))
 
 
+@pytest.mark.parametrize("state", ["ko-decided-at-valuation", "expired"])
+def test_a_memory_phoenix_is_refused_on_every_short_circuit_as_price_refuses_it(state):
+    """CP3: the product refusal runs before the valuation-instant short-circuits, as in ``price``."""
+    from intraday.conftest import flat_env
+
+    product = dated_phoenix(CAL, T0)
+    dates = [r.observation_date for r in product.barrier_config.ko_observation_schedule.records]
+    env = flat_env(dates[2], spot=110.0) if state == "ko-decided-at-valuation" else flat_env(dates[-1], spot=90.0)
+    with pytest.raises(ValidationError, match="non-memory"):
+        _heston_phoenix().price(product, env)
+    with pytest.raises(ValidationError, match="non-memory"):
+        _heston_phoenix().price_folded(product, env, _hand_overlay(product, env, ko=1.0))
+
+
 def test_a_lifecycle_state_is_refused_as_price_refuses_it():
     from quantark.asset.equity.lifecycle import AutocallableLifecycleState
 

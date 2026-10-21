@@ -420,6 +420,14 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
     ) -> Dict[str, float]:
         return BaseEngine.calculate_greeks(self, product, pricing_env)
 
+    def _refuse_unsupported_product(self, product) -> None:
+        """The 2D route marches no coupon memory: refuse it before any valuation-instant short-circuit."""
+        if product.has_memory_coupon:
+            raise ValidationError(
+                f"{self._solver_name} supports non-memory Phoenix coupons only; "
+                "use PhoenixPDESolver or a Phoenix MC engine for memory coupons."
+            )
+
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
@@ -427,11 +435,7 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         if pricing_env is None:
             raise ValidationError(f"PricingEnvironment is required for {self._solver_name}")
         self._validate_product(product)
-        if product.has_memory_coupon:
-            raise ValidationError(
-                f"{self._solver_name} supports non-memory Phoenix coupons only; "
-                "use PhoenixPDESolver or a Phoenix MC engine for memory coupons."
-            )
+        self._refuse_unsupported_product(product)
 
         spot = float(pricing_env.spot)
         T = float(product.get_maturity(pricing_env))

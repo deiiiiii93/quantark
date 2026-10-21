@@ -89,6 +89,10 @@ def price_folded_2d(solver, product, pricing_env, overlay, lifecycle_state=None)
     if pricing_env is None:
         raise ValidationError(f"PricingEnvironment is required for {solver._solver_name}")
     solver._validate_product(product)
+    # the solver's own product refusals run before the short-circuits, as in ``price`` (CP3)
+    refuse = getattr(solver, "_refuse_unsupported_product", None)
+    if refuse is not None:
+        refuse(product)
     T = float(product.get_maturity(pricing_env))
     if T <= 0.0 or is_zero(T):
         solver._refuse_expired_fold()
