@@ -12,6 +12,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.cashleg import (
     CashLeg,
+    FoldMode,
     LegPV,
     TradeGreeks,
     TradeValueBreakdown,
@@ -39,6 +40,9 @@ class EquityPosition:
         position_id: Unique identifier for this position
         cash_legs: Optional cash terms attached to this position
         lifecycle_state: Optional realized lifecycle state attached by replay
+        cash_leg_folding: Opt-in: fold the cash legs into the product solve
+            (``FoldMode.TOTAL`` or ``FoldMode.DRILLDOWN``); ``None`` keeps the
+            event-distribution route. Ignored when there are no cash legs.
     """
     product: BaseEquityProduct
     quantity: float
@@ -49,6 +53,7 @@ class EquityPosition:
     position_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     cash_legs: List[CashLeg] = field(default_factory=list)
     lifecycle_state: Optional[Any] = None
+    cash_leg_folding: Optional[FoldMode] = None
     
     def __post_init__(self):
         """Validate position parameters."""
@@ -127,6 +132,8 @@ class EquityPosition:
         """
         if not self.cash_legs:
             return self.get_market_value(pricing_env)
+        if self.cash_leg_folding is not None:
+            return self._folded_value(self.engine, pricing_env, FoldMode.TOTAL).total
 
         needs_distribution = any(
             leg.requires_event_distribution() for leg in self.cash_legs
@@ -156,6 +163,17 @@ class EquityPosition:
             return TradeValueBreakdown(
                 product_npv=self.get_market_value(pricing_env),
                 leg_pvs={},
+            )
+        if self.cash_leg_folding is FoldMode.TOTAL:
+            raise ValidationError(
+                "a per-leg breakdown needs cash_leg_folding=FoldMode.DRILLDOWN "
+                "(FoldMode.TOTAL folds the legs into one trade total)"
+            )
+        if self.cash_leg_folding is FoldMode.DRILLDOWN:
+            value = self._folded_value(self.engine, pricing_env, FoldMode.DRILLDOWN)
+            return TradeValueBreakdown(
+                product_npv=value.npv * self.quantity,
+                leg_pvs=self._folded_leg_pvs(value),
             )
 
         needs_distribution = any(
@@ -272,6 +290,8 @@ class EquityPosition:
         frozen = self.with_past_fixings_frozen(pricing_env)
         if frozen is not self:
             return frozen.get_trade_risk(pricing_env, greeks_calculator, greeks)
+        if self.cash_legs and self.cash_leg_folding is not None:
+            return self._folded_trade_risk(pricing_env, greeks_calculator, greeks)
 
         gc = greeks_calculator
         bc = gc._bump_config
@@ -406,6 +426,144 @@ class EquityPosition:
         product_theta = q * (npv_t - base_npv)
         total_theta = q * (npv_t - base_npv) + (legs_t - base_legs)
         return product_theta, total_theta
+
+    # --- cash legs folded into the product solve (ship spec 2026-10-21 D11, D12) ------------
+
+    def _folded_value(self, engine, pricing_env: PricingEnvironment, mode: FoldMode):
+        """One folded trade valuation on ``engine``; the overlay is rebuilt from ``pricing_env``."""
+        from quantark.cashleg.folding import folded_trade_value
+
+        return folded_trade_value(
+            engine, self.product, pricing_env, self.cash_legs, quantity=self.quantity,
+            unit_notional=self._get_unit_notional(pricing_env), mode=mode,
+        )
+
+    def _folded_leg_pvs(self, value) -> Dict[str, LegPV]:
+        return {
+            leg.leg_id: LegPV(name=leg.name, direction=leg.direction, pv=float(value.per_leg[leg.leg_id]))
+            for leg in self.cash_legs
+        }
+
+    def _folded_trade_risk(self, pricing_env, greeks_calculator, greeks) -> TradeGreeks:
+        """``get_trade_risk`` with the legs folded: the same bumps and arithmetic, folded solves.
+
+        TOTAL reports only ``total``; DRILLDOWN also ``product``, ``leg_pvs`` and ``leg_greeks``
+        (``leg_id`` -> that leg's greeks), the product from plain solves of the same bump engine.
+        """
+        from copy import deepcopy
+        from quantark.execution.errors import CapabilityError
+
+        gc = greeks_calculator
+        bc = gc._bump_config
+        product = self.product
+        mode = self.cash_leg_folding
+        drill = mode is FoldMode.DRILLDOWN
+        q = float(self.quantity)
+        requested = set(
+            greeks
+            if greeks is not None
+            else ["delta", "gamma", "vega", "theta", "rho", "dividend_rho"]
+        )
+        bump_engine = gc._resolve_bump_engine(product, pricing_env, self.engine)
+        if drill:
+            reason = bump_engine.fold_drilldown_refusal(product, pricing_env)
+            if reason is not None:
+                raise CapabilityError(f"FoldMode.DRILLDOWN refused on {type(bump_engine).__name__}: {reason}")
+
+        def solve(env):
+            return self._folded_value(bump_engine, env, mode)
+
+        base = solve(pricing_env)
+        ids = [leg.leg_id for leg in self.cash_legs]
+        total_g: Dict[str, float] = {"price": base.total}
+        product_g: Dict[str, float] = {"price": q * base.npv} if drill else {}
+        leg_g: Dict[str, Dict[str, float]] = {i: {} for i in ids} if drill else {}
+
+        def record(name, f_total, f_npv, f_leg):
+            total_g[name] = f_total
+            if drill:
+                product_g[name] = q * f_npv
+                for i in ids:
+                    leg_g[i][name] = f_leg(i)
+
+        if {"delta", "gamma"} & requested:
+            h = pricing_env.spot * bc.spot_bump
+            env_up = deepcopy(pricing_env)
+            env_up.spot_quote.spot *= 1.0 + bc.spot_bump
+            env_dn = deepcopy(pricing_env)
+            env_dn.spot_quote.spot *= 1.0 - bc.spot_bump
+            up, dn = solve(env_up), solve(env_dn)
+            if "delta" in requested:
+                record(
+                    "delta", (up.total - dn.total) / (2.0 * h),
+                    drill and (up.npv - dn.npv) / (2.0 * h),
+                    lambda i: (up.per_leg[i] - dn.per_leg[i]) / (2.0 * h),
+                )
+            if "gamma" in requested:
+                record(
+                    "gamma", (up.total - 2.0 * base.total + dn.total) / h**2,
+                    drill and (up.npv - 2.0 * base.npv + dn.npv) / h**2,
+                    lambda i: (up.per_leg[i] - 2.0 * base.per_leg[i] + dn.per_leg[i]) / h**2,
+                )
+
+        T = product.get_maturity(pricing_env)
+
+        def one_sided(name, env, scale):
+            bumped = solve(env)
+            record(
+                name, (bumped.total - base.total) * scale,
+                drill and (bumped.npv - base.npv) * scale,
+                lambda i: (bumped.per_leg[i] - base.per_leg[i]) * scale,
+            )
+
+        # the event route's conventions: raw vega P&L; rho and dividend rho rescaled once to 1%
+        if "vega" in requested:
+            strike = getattr(product, "strike", pricing_env.spot)
+            cur_vol = gc._bump_unit_vol(pricing_env, strike, T)
+            one_sided("vega", gc._build_vol_bumped_env(pricing_env, product, cur_vol, bc.vol_bump, direction=1.0), 1.0)
+        if "rho" in requested:
+            one_sided("rho", gc._build_rate_bumped_env(pricing_env, bc.rate_bump, direction=1.0), 0.01 / bc.rate_bump)
+        if "dividend_rho" in requested:
+            cur_div = pricing_env.get_div_yield(T)
+            one_sided(
+                "dividend_rho",
+                gc._build_div_bumped_env(pricing_env, product, cur_div, bc.div_bump, direction=1.0),
+                0.01 / bc.div_bump,
+            )
+        if "theta" in requested:
+            self._folded_theta(gc, bump_engine, pricing_env, base, record)
+
+        if not drill:
+            return TradeGreeks(product={}, total=total_g, leg_pvs={})
+        return TradeGreeks(product=product_g, total=total_g, leg_pvs=self._folded_leg_pvs(base), leg_greeks=leg_g)
+
+    def _folded_theta(self, gc, bump_engine, pricing_env, base, record) -> None:
+        """Theta of the folded trade: the event route's time shift of product and legs."""
+        from quantark.asset.equity.riskmeasures.greeks.theta_shift import (
+            bumped_trade_value_folded,
+            shift_for_theta,
+        )
+
+        bc = gc._bump_config
+        product = self.product
+        drill = self.cash_leg_folding is FoldMode.DRILLDOWN
+        bumped_date, time_bump, _mode = gc._advance_theta_bump(
+            pricing_env, bc.time_bump_days, getattr(bc, "time_bump_mode", "auto")
+        )
+        current_maturity = product.get_maturity(pricing_env)
+        if time_bump <= 0.0 or current_maturity <= time_bump:
+            record("theta", 0.0, drill and 0.0, lambda i: 0.0)
+            return
+        shift = shift_for_theta(product, pricing_env, time_bump, bumped_date)
+        moved = bumped_trade_value_folded(
+            bump_engine, shift, self.cash_legs, quantity=self.quantity,
+            unit_of=self._get_unit_notional, mode=self.cash_leg_folding,
+        )
+        record(
+            "theta", moved.total - base.total,
+            drill and (moved.npv - base.npv),
+            lambda i: moved.per_leg.get(i, 0.0) - base.per_leg[i],
+        )
 
     def get_actual_notional(
         self, pricing_env: Optional[PricingEnvironment] = None

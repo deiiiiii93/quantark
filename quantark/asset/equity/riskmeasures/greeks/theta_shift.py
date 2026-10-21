@@ -329,9 +329,14 @@ def bumped_trade_value_folded(bump_engine, shift: ThetaShift, legs, *, quantity,
     refuses legs; one ``t0`` ended keeps the event route (its ``t0`` values carried to ``t1`` — an ended
     contract's solve is its short-circuit); a live one folds the moved legs onto the bumped product,
     the overlay rebuilt from the bumped market."""
-    from quantark.cashleg.folding import FoldMode, FoldedTradeValue, folded_trade_value
+    from quantark.cashleg.folding import FoldMode, FoldedTradeValue, ensure_foldable, folded_trade_value
+    from quantark.util.exceptions import ValidationError
+    from quantark.util.numerical import almost_equal
 
+    ensure_foldable(legs)                               # every branch refuses what the fold refuses (CP1)
     q = float(quantity)
+    if almost_equal(q, 0.0, tol=0.0):
+        raise ValidationError("a position with quantity 0 has no product unit to fold its cash legs onto")
     if shift.settled_value is not None:
         if legs:
             raise CapabilityError("theta: cash legs on a contract settled at the as-of date have no distribution")

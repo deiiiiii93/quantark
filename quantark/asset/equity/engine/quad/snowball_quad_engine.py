@@ -104,6 +104,13 @@ class SnowballQuadEngine(BaseEngine):
         "_last_convergence_info",
     )
 
+    def fold_drilldown_refusal(self, product, pricing_env) -> Optional[str]:
+        """``auto_converge`` refines the grid per solve: a folded and a plain solve may settle on
+        different grids, so per-leg differences would mix them (ship spec D11c)."""
+        if self.params.auto_converge:
+            return "auto_converge settles each solve on its own grid"
+        return None
+
     #: Readout modes this engine actually implements. A subclass with its own
     #: readout path narrows this rather than silently reporting a
     #: legacy-readout price as though it were something else.
