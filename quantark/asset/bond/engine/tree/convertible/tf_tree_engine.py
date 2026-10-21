@@ -236,7 +236,7 @@ class ConvertibleBondTFTreeEngine:
         T = bond.time_to_maturity(valuation_date)
         schedule = []
         for cf in bond.get_all_cashflows():
-            cf_time = (cf.payment_date - valuation_date).days / 365.0
+            cf_time = bond.coupon_time(cf, valuation_date)
             if 0 < cf_time <= T:
                 amount = bond.coupon_amount(cf)
                 if amount > 0:

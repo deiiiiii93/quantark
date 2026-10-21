@@ -23,7 +23,9 @@ During 0.x the public API may still change between minor versions.
   (maturity value `max(parity, face) + coupon`; prices byte-identical on all five engines). `FORFEIT`
   gives `max(parity, face + coupon)`, the QuantLib convention: GS, HW, jump-diffusion, the TF PDE and
   the TF tree fold the final coupon into `ConvertibleBond.maturity_redemption`, and
-  `ConvertibleBond.coupon_amount` drops it from the in-step coupons. Against QuantLib 1.44's
+  `ConvertibleBond.coupon_amount` drops it from the in-step coupons (HW therefore survival-weights
+  the folded coupon over the last step, about `coupon × hazard × dt`). The setting also accepts
+  `"keep"` / `"forfeit"`, and rejects anything else. Against QuantLib 1.44's
   `BinomialConvertibleEngine<CRR>` on the AC7 cases at 2000 steps this convention is the largest
   piece of the GS–QuantLib gap (up to 0.79 per 100 face, on the demo bond); with `FORFEIT` the GS
   tree lands within 0.02 of QuantLib at 500 steps.
@@ -41,6 +43,15 @@ During 0.x the public API may still change between minor versions.
   grids. Coupon windows now end on the step grid, whose last edge is maturity exactly; rate lookups
   are unchanged. On a sweep of 300 GS grids, 264 prices are bit-identical and the other 36 rise by
   one discounted coupon (2.21–2.46), each a grid that used to drop it.
+- GS and HW (all three vol schemes) converted at maturity even when the conversion window had closed
+  before it; the TF tree, TF PDE and jump-diffusion already redeemed. On the demo bond with
+  conversion ending seven months early, GS was 2.34 high at the money (now 122.19, next to the TF
+  tree's 122.85) and HW 1.23–1.86 high. Bonds convertible at maturity are unchanged.
+- A final coupon paid after the maturity date (a weekend maturity rolled forward, or
+  `settlement_days > 0`) fell after the last time step and was never paid: every convertible engine
+  priced such bonds about one discounted coupon low (0.90–0.95 per 100 face far out of the money on
+  the demo bond). `ConvertibleBond.coupon_time` now pays it at maturity; every other coupon keeps
+  its time, so other prices are unchanged.
 - TF CS01 was identically 0: `ConvertibleBondEngine.cs01` bumped `hazard_rate`, which the TF engine
   never reads. TF (tree and PDE) now bumps `credit_spread`, as GS does. The bumped bonds keep their
   calendar, business-day convention and settlement days, and a down bump floored at zero divides by

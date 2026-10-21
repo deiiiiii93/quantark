@@ -21,7 +21,10 @@ from quantark.param.quote import SpotQuote
 from quantark.param.rrf import FlatRateCurve
 from quantark.param.vol import FlatVolSurface
 from quantark.priceenv import PricingEnvironment
+from quantark.asset.bond.engine.tree.convertible.tree_params import ConvertibleBondTrinomialVolScheme
+from quantark.asset.bond.product.convertible import PutScheduleEntry
 from quantark.util.enum import FinalCouponOnConversion
+from quantark.util.exceptions import ValidationError
 
 VALUATION = datetime(2024, 6, 1)
 MATURITY = datetime(2029, 1, 1)
@@ -84,6 +87,17 @@ def test_maturity_redemption_is_face_when_keeping_and_face_plus_coupon_when_forf
     assert forfeit.maturity_redemption == pytest.approx(forfeit.face_value + _final_coupon(forfeit), abs=1e-12)
 
 
+@pytest.mark.parametrize("text, member", [("keep", FinalCouponOnConversion.KEEP), ("FORFEIT", FinalCouponOnConversion.FORFEIT)])
+def test_setting_given_as_text_becomes_the_enum(text, member):
+    assert _bond(text).final_coupon_on_conversion is member
+
+
+@pytest.mark.parametrize("bad", ["forfeited", True, None])
+def test_unknown_setting_is_rejected(bad):
+    with pytest.raises(ValidationError):
+        _bond(bad)
+
+
 def test_forfeit_moves_the_final_coupon_out_of_the_coupon_stream():
     keep, forfeit = _bond(), _bond(FinalCouponOnConversion.FORFEIT)
     for k_cf, f_cf in zip(keep.get_all_cashflows(), forfeit.get_all_cashflows()):
@@ -130,6 +144,80 @@ def test_far_out_of_the_money_the_setting_does_not_matter(engine):
     env = _env(0.5)
     keep = ENGINES[engine](env).price(_bond())
     forfeit = ENGINES[engine](env).price(_bond(FinalCouponOnConversion.FORFEIT))
+    assert keep == pytest.approx(forfeit, abs=1e-3)
+
+
+@pytest.mark.parametrize("scheme", list(ConvertibleBondTrinomialVolScheme))
+def test_trinomial_forfeit_costs_the_coupon_on_paths_converting_at_maturity(scheme):
+    # At the money and riskless the trinomial mostly holds to maturity, so every vol scheme must see
+    # the forfeited coupon on the paths that convert there (an engine ignoring FORFEIT shows 0). The
+    # bound is loose because the constant-vol scheme converts early on many paths (known issue): 0.09.
+    riskless = {"credit_spread": 0.0, "hazard_rate": 0.0}
+    engine = ConvertibleBondTrinomialEngine(_env(10.0), ConvertibleBondTreeParams(num_steps=200, trinomial_vol_scheme=scheme))
+    keep = engine.price(dataclasses.replace(_bond(), **riskless))
+    forfeit = engine.price(dataclasses.replace(_bond(FinalCouponOnConversion.FORFEIT), **riskless))
+    discounted_coupon = _final_coupon(_bond()) * math.exp(-RATE * _bond().time_to_maturity(VALUATION))
+    assert 0.05 * discounted_coupon <= keep - forfeit <= 1.01 * discounted_coupon
+
+
+@pytest.mark.parametrize("engine", list(ENGINES))
+def test_forfeit_put_in_the_last_step_at_or_below_face_plus_coupon_never_binds(engine):
+    # Under FORFEIT the unconverted holder already gets face + coupon (~101.26) at maturity,
+    # so a put at 101 two days before is worthless; the price is that of the bond without it.
+    put = [PutScheduleEntry(datetime(2028, 12, 30), 101.0)]
+    env = _env(0.5)
+    with_put = ENGINES[engine](env).price(dataclasses.replace(_bond(FinalCouponOnConversion.FORFEIT), put_schedule=put))
+    without = ENGINES[engine](env).price(_bond(FinalCouponOnConversion.FORFEIT))
+    assert with_put == without
+
+
+ENGINE_PATHS = {
+    **{name: make for name, make in ENGINES.items() if name != "trinomial"},
+    **{
+        f"trinomial-{scheme.value}": (
+            lambda env, s=scheme: ConvertibleBondTrinomialEngine(
+                env, ConvertibleBondTreeParams(num_steps=200, trinomial_vol_scheme=s)
+            )
+        )
+        for scheme in ConvertibleBondTrinomialVolScheme
+    },
+}
+
+
+@pytest.mark.parametrize("spot", [10.5, 30.0])
+@pytest.mark.parametrize("engine", list(ENGINE_PATHS))
+def test_conversion_window_closed_before_maturity_makes_the_setting_irrelevant(engine, spot):
+    # Conversion ends seven months before maturity: at T only redemption is possible, so the
+    # holder gets face + final coupon under either convention.
+    closed = {"conversion_end_date": datetime(2028, 6, 1)}
+    env = _env(spot)
+    keep = ENGINE_PATHS[engine](env).price(dataclasses.replace(_bond(), **closed))
+    forfeit = ENGINE_PATHS[engine](env).price(dataclasses.replace(_bond(FinalCouponOnConversion.FORFEIT), **closed))
+    assert keep == pytest.approx(forfeit, abs=1e-3)
+
+
+@pytest.mark.parametrize(
+    "late_payment",
+    [
+        {  # Saturday maturity, paid Monday
+            "issue_date": datetime(2024, 6, 2),
+            "maturity_date": datetime(2028, 12, 2),
+            "conversion_start_date": datetime(2024, 6, 2),
+            "conversion_end_date": datetime(2028, 12, 2),
+        },
+        {"settlement_days": 2},
+    ],
+    ids=["weekend-maturity", "settlement-days"],
+)
+@pytest.mark.parametrize("engine", list(ENGINE_PATHS))
+def test_final_coupon_paid_after_maturity_date_is_still_paid(engine, late_payment):
+    # The maturity cashflow is paid after maturity_date. Far out of the money nobody converts, so
+    # KEEP (coupon in the coupon stream) and FORFEIT (coupon in the redemption) must both pay it.
+    bond = dataclasses.replace(_bond(), **late_payment)
+    assert max(cf.payment_date for cf in bond.get_all_cashflows()) > bond.maturity_date
+    env = _env(0.5)
+    keep = ENGINE_PATHS[engine](env).price(bond)
+    forfeit = ENGINE_PATHS[engine](env).price(dataclasses.replace(bond, final_coupon_on_conversion=FinalCouponOnConversion.FORFEIT))
     assert keep == pytest.approx(forfeit, abs=1e-3)
 
 

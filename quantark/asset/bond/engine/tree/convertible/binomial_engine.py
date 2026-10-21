@@ -292,7 +292,7 @@ class ConvertibleBondBinomialEngine:
         coupon_times = []
         coupon_amounts = []
         for cf in all_cashflows:
-            cf_time = (cf.payment_date - valuation_date).days / 365.0
+            cf_time = bond.coupon_time(cf, valuation_date)
             if cf_time > 0:
                 coupon_times.append(cf_time)
                 # Only coupon, not principal (which is handled at maturity)
@@ -307,12 +307,13 @@ class ConvertibleBondBinomialEngine:
         # Terminal values at maturity
         terminal_put = put_by_step.get(n_steps)
         redemption = bond.maturity_redemption
+        convertible_at_maturity = bond.is_convertible_at(bond.maturity_date)
         for j in range(n_steps + 1):
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
 
-            # At maturity: max(redemption, conversion_value)
-            if conversion_value > redemption:
+            # At maturity: max(redemption, conversion_value), if conversion is still open
+            if convertible_at_maturity and conversion_value > redemption:
                 value_tree[n_steps, j] = conversion_value
                 conv_prob_tree[n_steps, j] = 1.0
             else:

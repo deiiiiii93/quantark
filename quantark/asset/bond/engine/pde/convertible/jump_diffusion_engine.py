@@ -559,7 +559,7 @@ class ConvertibleBondJumpDiffusionEngine:
         schedule = []
 
         for cf in bond.get_all_cashflows():
-            cf_time = (cf.payment_date - valuation_date).days / 365.0
+            cf_time = bond.coupon_time(cf, valuation_date)
             if 0 < cf_time <= T:
                 # Extract just the coupon (not principal)
                 coupon_amount = bond.coupon_amount(cf)

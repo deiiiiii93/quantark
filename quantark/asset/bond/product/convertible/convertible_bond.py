@@ -206,6 +206,23 @@ class ConvertibleBond(BaseBondProduct):
         if self.conversion_end_date is None:
             self.conversion_end_date = self.maturity_date
 
+        # Accept the final-coupon setting as text ("keep" / "forfeit"), as configs give it
+        if isinstance(self.final_coupon_on_conversion, str):
+            try:
+                self.final_coupon_on_conversion = FinalCouponOnConversion(
+                    self.final_coupon_on_conversion.lower()
+                )
+            except ValueError:
+                raise ValidationError(
+                    f"Unknown final_coupon_on_conversion {self.final_coupon_on_conversion!r}; "
+                    f"expected one of {[m.value for m in FinalCouponOnConversion]}"
+                ) from None
+        if not isinstance(self.final_coupon_on_conversion, FinalCouponOnConversion):
+            raise ValidationError(
+                f"final_coupon_on_conversion must be a FinalCouponOnConversion, "
+                f"got {self.final_coupon_on_conversion!r}"
+            )
+
         # Calculate conversion price if not provided
         if self.conversion_price is None:
             if self.conversion_ratio <= 0:
@@ -423,10 +440,12 @@ class ConvertibleBond(BaseBondProduct):
     @property
     def maturity_redemption(self) -> float:
         """
-        Cash the holder gets at maturity by not converting, the amount parity is compared against.
+        The amount parity is compared against at maturity, and the cash an unconverted holder
+        gets there on top of the coupons paid within the steps.
 
-        Under KEEP the final coupon is paid whatever the holder does, so this is the face value;
-        under FORFEIT converting gives the coupon up, so it is face value plus the final coupon.
+        Under KEEP the final coupon is paid whatever the holder does (it stays in the coupon
+        stream), so this is the face value; under FORFEIT converting gives the coupon up, so it
+        is face value plus the final coupon.
         """
         if self.final_coupon_on_conversion is FinalCouponOnConversion.KEEP:
             return self.face_value
@@ -454,6 +473,24 @@ class ConvertibleBond(BaseBondProduct):
         if self.final_coupon_on_conversion is FinalCouponOnConversion.KEEP:
             return cf.amount - self.face_value
         return 0.0
+
+    def coupon_time(self, cf: CashFlow, valuation_date: datetime) -> float:
+        """
+        Years (days / 365) from valuation to the time an engine pays the cashflow.
+
+        A cashflow paid after the maturity date (a weekend maturity rolled forward, or
+        settlement days) is paid at maturity, where the last time step ends; otherwise
+        it would fall after every step and never be paid.
+
+        Args:
+            cf: Scheduled cashflow of this bond
+            valuation_date: Valuation date
+
+        Returns:
+            Time of the payment in years
+        """
+        payment_date = min(cf.payment_date, self.maturity_date)
+        return (payment_date - valuation_date).days / 365.0
 
     def parity(self, stock_price: float) -> float:
         """

@@ -689,7 +689,7 @@ class ConvertibleBondTrinomialEngine:
         coupon_times = []
         coupon_amounts = []
         for cf in all_cashflows:
-            cf_time = (cf.payment_date - valuation_date).days / 365.0
+            cf_time = bond.coupon_time(cf, valuation_date)
             if cf_time > 0:
                 coupon_times.append(cf_time)
                 coupon_amounts.append(max(0, bond.coupon_amount(cf)))
@@ -703,17 +703,19 @@ class ConvertibleBondTrinomialEngine:
         put_by_step = put_prices_by_step(bond, valuation_date, step_times)
         terminal_put = put_by_step.get(n_steps)
 
-        # Terminal values at maturity
+        # Terminal values at maturity: max(redemption, conversion_value), if conversion is still open
+        redemption = bond.maturity_redemption
+        convertible_at_maturity = bond.is_convertible_at(bond.maturity_date)
         num_terminal = 2 * n_steps + 1
         for j in range(num_terminal):
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
 
-            if conversion_value > bond.maturity_redemption:
+            if convertible_at_maturity and conversion_value > redemption:
                 value_tree[n_steps, j] = conversion_value
                 conv_prob_tree[n_steps, j] = 1.0
             else:
-                value_tree[n_steps, j] = bond.maturity_redemption
+                value_tree[n_steps, j] = redemption
                 conv_prob_tree[n_steps, j] = 0.0
 
             # A put in the last step is exercised at maturity
@@ -898,7 +900,7 @@ class ConvertibleBondTrinomialEngine:
         coupon_times = []
         coupon_amounts = []
         for cf in all_cashflows:
-            cf_time = (cf.payment_date - valuation_date).days / 365.0
+            cf_time = bond.coupon_time(cf, valuation_date)
             if cf_time > 0:
                 coupon_times.append(cf_time)
                 coupon_amounts.append(max(0, bond.coupon_amount(cf)))
@@ -912,17 +914,19 @@ class ConvertibleBondTrinomialEngine:
         put_by_step = put_prices_by_step(bond, valuation_date, step_times)
         terminal_put = put_by_step.get(n_steps)
 
-        # Terminal values at maturity
+        # Terminal values at maturity: max(redemption, conversion_value), if conversion is still open
+        redemption = bond.maturity_redemption
+        convertible_at_maturity = bond.is_convertible_at(bond.maturity_date)
         num_terminal = 2 * n_steps + 1
         for j in range(num_terminal):
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
 
-            if conversion_value > bond.maturity_redemption:
+            if convertible_at_maturity and conversion_value > redemption:
                 value_tree[n_steps, j] = conversion_value
                 conv_prob_tree[n_steps, j] = 1.0
             else:
-                value_tree[n_steps, j] = bond.maturity_redemption
+                value_tree[n_steps, j] = redemption
                 conv_prob_tree[n_steps, j] = 0.0
 
             # A put in the last step is exercised at maturity
@@ -1105,7 +1109,7 @@ class ConvertibleBondTrinomialEngine:
         coupon_times = []
         coupon_amounts = []
         for cf in all_cashflows:
-            cf_time = (cf.payment_date - valuation_date).days / 365.0
+            cf_time = bond.coupon_time(cf, valuation_date)
             if cf_time > 0:
                 coupon_times.append(cf_time)
                 coupon_amounts.append(max(0, bond.coupon_amount(cf)))
@@ -1119,17 +1123,19 @@ class ConvertibleBondTrinomialEngine:
         put_by_step = put_prices_by_step(bond, valuation_date, step_times)
         terminal_put = put_by_step.get(n_steps)
 
-        # Terminal values at maturity
+        # Terminal values at maturity: max(redemption, conversion_value), if conversion is still open
+        redemption = bond.maturity_redemption
+        convertible_at_maturity = bond.is_convertible_at(bond.maturity_date)
         num_terminal = 2 * n_steps + 1
         for j in range(num_terminal):
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
 
-            if conversion_value > bond.maturity_redemption:
+            if convertible_at_maturity and conversion_value > redemption:
                 value_tree[n_steps, j] = conversion_value
                 conv_prob_tree[n_steps, j] = 1.0
             else:
-                value_tree[n_steps, j] = bond.maturity_redemption
+                value_tree[n_steps, j] = redemption
                 conv_prob_tree[n_steps, j] = 0.0
 
             # A put in the last step is exercised at maturity
