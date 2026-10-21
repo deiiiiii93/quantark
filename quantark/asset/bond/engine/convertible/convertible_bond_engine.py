@@ -8,10 +8,11 @@ import math
 from copy import deepcopy
 import dataclasses
 from dataclasses import dataclass
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Tuple, Union
 
 from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
 from quantark.asset.bond.engine.tree.convertible import (
+    ConvertibleBondTFTreeEngine,
     ConvertibleBondTreeParams,
     ConvertibleBondBinomialEngine,
     ConvertibleBondTrinomialEngine,
@@ -42,6 +43,7 @@ class ConvertibleBondResult:
         bond_component: Bond-like component of value (COCB for TF model)
         default_probability: Probability of default (trinomial model only)
         method: Method used for pricing
+        engine_type: Engine type that produced the price ("tree" or "pde")
         floor_bond_price: Straight bond price without conversion/options
         floor_bond_dv01: Floor bond DV01 (price change per bp rate move)
         floor_bond_cs01: Floor bond CS01 (price change per bp spread move)
@@ -62,6 +64,7 @@ class ConvertibleBondResult:
     bond_component: float = 0.0
     default_probability: float = 0.0
     method: str = ""
+    engine_type: str = ""
     # Floor bond metrics
     floor_bond_price: float = 0.0
     floor_bond_dv01: float = 0.0
@@ -117,6 +120,7 @@ class ConvertibleBondEngine:
     TREE_METHODS = {
         ConvertibleBondMethod.BINOMIAL_GS,
         ConvertibleBondMethod.TRINOMIAL_HW,
+        ConvertibleBondMethod.TF,
     }
 
     PDE_METHODS = {
@@ -125,6 +129,14 @@ class ConvertibleBondEngine:
     }
 
     DEFAULT_METHOD = ConvertibleBondMethod.BINOMIAL_GS
+
+    # Engine type used when a method is given without one (TF has both; the PDE is its default)
+    DEFAULT_ENGINE_TYPES = {
+        ConvertibleBondMethod.BINOMIAL_GS: EngineType.TREE,
+        ConvertibleBondMethod.TRINOMIAL_HW: EngineType.TREE,
+        ConvertibleBondMethod.JUMP_DIFFUSION: EngineType.PDE,
+        ConvertibleBondMethod.TF: EngineType.PDE,
+    }
 
     def __init__(
         self,
@@ -161,41 +173,45 @@ class ConvertibleBondEngine:
         self.pde_params = pde_params
         self.scheme = scheme
 
-        # Parse method
-        self.method = self._parse_method(method)
+        # Parse method and the engine type that implements it
+        self.method, self.engine_type = self._parse_method(method)
 
         # Create appropriate underlying engine
         self._engine = self._create_engine()
 
     def _parse_method(
         self, method: Optional[Union[str, ConvertibleBondMethod, tuple]]
-    ) -> ConvertibleBondMethod:
+    ) -> Tuple[ConvertibleBondMethod, EngineType]:
         """
-        Parse the method argument into a ConvertibleBondMethod enum.
+        Parse the method argument into a method and the engine type implementing it.
+
+        Only the two-level form names the engine type; a bare method or string
+        takes ``DEFAULT_ENGINE_TYPES`` (so ``"tf"`` stays the TF PDE).
 
         Args:
             method: Method specification
 
         Returns:
-            ConvertibleBondMethod enum value
+            Tuple of (ConvertibleBondMethod, EngineType)
 
         Raises:
             ValidationError: If invalid method
         """
         if method is None:
-            return self.DEFAULT_METHOD
+            method = self.DEFAULT_METHOD
 
         if isinstance(method, ConvertibleBondMethod):
-            return method
+            return method, self.DEFAULT_ENGINE_TYPES[method]
 
         if isinstance(method, str):
             try:
-                return ConvertibleBondMethod(method.lower())
+                cb_method = ConvertibleBondMethod(method.lower())
             except ValueError:
                 valid_methods = [m.value for m in ConvertibleBondMethod]
                 raise ValidationError(
                     f"Invalid method: {method}. Valid methods: {valid_methods}"
                 )
+            return cb_method, self.DEFAULT_ENGINE_TYPES[cb_method]
 
         if isinstance(method, tuple):
             if len(method) != 2:
@@ -227,7 +243,7 @@ class ConvertibleBondEngine:
                     f"Expected ConvertibleBondMethod, got {type(cb_method)}"
                 )
 
-            return cb_method
+            return cb_method, engine_type
 
         raise ValidationError(
             f"Invalid method type: {type(method)}. "
@@ -259,6 +275,9 @@ class ConvertibleBondEngine:
                 else:
                     params.scheme = str(self.scheme)
             return ConvertibleBondJumpDiffusionEngine(self.pricing_env, params)
+
+        elif self.method == ConvertibleBondMethod.TF and self.engine_type == EngineType.TREE:
+            return ConvertibleBondTFTreeEngine(self.pricing_env, self.tree_params)
 
         elif self.method == ConvertibleBondMethod.TF:
             params = self.pde_params or ConvertibleBondPDEParams()
@@ -310,6 +329,7 @@ class ConvertibleBondEngine:
             delta=getattr(raw_result, "delta", 0.0),
             gamma=getattr(raw_result, "gamma", 0.0),
             method=self.method.value,
+            engine_type=self.engine_type.name.lower(),
         )
 
         # Extract method-specific fields
@@ -724,6 +744,8 @@ class ConvertibleBondEngine:
         elif self.method == ConvertibleBondMethod.JUMP_DIFFUSION:
             params = self.pde_params or ConvertibleBondPDEParams()
             return ConvertibleBondJumpDiffusionEngine(bumped_env, params)
+        elif self.method == ConvertibleBondMethod.TF and self.engine_type == EngineType.TREE:
+            return ConvertibleBondTFTreeEngine(bumped_env, self.tree_params)
         elif self.method == ConvertibleBondMethod.TF:
             params = self.pde_params or ConvertibleBondPDEParams()
             return ConvertibleBondTFEngine(bumped_env, params)
@@ -761,4 +783,7 @@ class ConvertibleBondEngine:
         return dataclasses.replace(bond, hazard_rate=new_hazard_rate)
 
     def __repr__(self):
-        return f"ConvertibleBondEngine(method={self.method.value})"
+        return (
+            f"ConvertibleBondEngine(method={self.method.value}, "
+            f"engine_type={self.engine_type.name.lower()})"
+        )

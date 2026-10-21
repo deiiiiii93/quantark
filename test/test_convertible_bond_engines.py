@@ -11,6 +11,7 @@ from quantark.asset.bond.product.convertible.convertible_bond import (
     PutScheduleEntry,
 )
 from quantark.asset.bond.engine.tree.convertible import (
+    ConvertibleBondTFTreeEngine,
     ConvertibleBondTreeParams,
     ConvertibleBondBinomialEngine,
     ConvertibleBondTrinomialEngine,
@@ -511,7 +512,7 @@ class TestFacadeEngine(TestConvertibleBondEngineSetup):
         with self.assertRaises(ValidationError):
             ConvertibleBondEngine(
                 self.pricing_env,
-                method=EngineType.TREE(ConvertibleBondMethod.TF),  # TF is PDE
+                method=EngineType.TREE(ConvertibleBondMethod.JUMP_DIFFUSION),  # JD is PDE only
             )
 
     def test_cocb_only_tf(self):
@@ -930,3 +931,60 @@ class TestCreditSpreadCS01(unittest.TestCase):
         ):
             self.assertIs(bumped.calendar, bond.calendar)
             self.assertEqual([cf.payment_date for cf in bumped.get_all_cashflows()], dates)
+
+
+class TestTFEngineTypeDispatch(unittest.TestCase):
+    """TREE(TF) selects the TF tree; every other TF spelling stays the PDE (spec D1, D9, AC2, AC8)."""
+
+    def setUp(self):
+        fixtures = TestCreditSpreadCS01()
+        fixtures.setUp()
+        self.bond, self.env = fixtures.bond, fixtures.env
+        self.tree_params = ConvertibleBondTreeParams(num_steps=100)
+        self.pde_params = ConvertibleBondPDEParams(num_space_steps=100, num_time_steps=200)
+
+    def _engine(self, method):
+        return ConvertibleBondEngine(
+            self.env, method=method, tree_params=self.tree_params, pde_params=self.pde_params
+        )
+
+    def test_tree_tf_builds_the_tf_tree(self):
+        engine = self._engine(EngineType.TREE(ConvertibleBondMethod.TF))
+        self.assertIsInstance(engine._engine, ConvertibleBondTFTreeEngine)
+        self.assertEqual(engine.engine_type, EngineType.TREE)
+        self.assertIsInstance(engine._create_bumped_engine(self.env), ConvertibleBondTFTreeEngine)
+
+    def test_other_tf_spellings_stay_pde(self):
+        for method in (EngineType.PDE(ConvertibleBondMethod.TF), ConvertibleBondMethod.TF, "tf"):
+            engine = self._engine(method)
+            self.assertIsInstance(engine._engine, ConvertibleBondTFEngine)
+            self.assertEqual(engine.engine_type, EngineType.PDE)
+
+    def test_default_engine_types(self):
+        expected = {
+            ConvertibleBondMethod.BINOMIAL_GS: EngineType.TREE,
+            ConvertibleBondMethod.TRINOMIAL_HW: EngineType.TREE,
+            ConvertibleBondMethod.JUMP_DIFFUSION: EngineType.PDE,
+            ConvertibleBondMethod.TF: EngineType.PDE,
+        }
+        for method, engine_type in expected.items():
+            self.assertEqual(self._engine(method).engine_type, engine_type)
+        self.assertEqual(ConvertibleBondEngine(self.env).engine_type, EngineType.TREE)
+
+    def test_result_names_engine_type_and_cocb_works_on_the_tree(self):
+        tree = self._engine(EngineType.TREE(ConvertibleBondMethod.TF))
+        result = tree.price_with_details(self.bond, include_risk_metrics=False)
+        self.assertEqual((result.method, result.engine_type), ("tf", "tree"))
+        self.assertEqual(tree.get_cocb(self.bond), result.bond_component)
+        self.assertGreater(result.bond_component, 0.0)
+        pde = self._engine(ConvertibleBondMethod.TF).price_with_details(self.bond, include_risk_metrics=False)
+        self.assertEqual(pde.engine_type, "pde")
+
+    def test_tree_tf_cs01_bumps_credit_spread(self):
+        engine = self._engine(EngineType.TREE(ConvertibleBondMethod.TF))
+        s = self.bond.credit_spread
+        down = engine.price(dataclasses.replace(self.bond, credit_spread=s - 0.0001))
+        up = engine.price(dataclasses.replace(self.bond, credit_spread=s + 0.0001))
+        cs01 = engine.cs01(self.bond)
+        self.assertGreater(cs01, 0.0)
+        self.assertEqual(cs01, (down - up) / 2)
