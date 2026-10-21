@@ -386,11 +386,7 @@ def _lifecycle_cases():
 
 @pytest.mark.parametrize("case", list(_lifecycle_cases()))
 def test_lifecycle_states_fold_like_the_event_route(case):
-    """The legs' part of the folded value equals the legs on the route's distribution.
-
-    (The v1 Phoenix route's decided-at-valuation ``npv`` omits the coupon paid now -- its immediate
-    knock-out stats are the Snowball ones -- so the product part is the engine's own ``price``.)
-    """
+    """The legs' part of the folded value equals the legs on the route's distribution."""
     engine_cls, product, env = _lifecycle_cases()[case]
     route = _route(engine_cls(), product, env)
     dist = route.event_distribution
@@ -403,8 +399,7 @@ def test_lifecycle_states_fold_like_the_event_route(case):
     assert abs(folded - expected) <= tolerance * UNIT
     if "decided" in case:
         assert _p(dist, EventType.KO) == pytest.approx(1.0, abs=1e-12)
-    if case != "phoenix-ko-decided-at-valuation":
-        assert route.npv == npv
+    assert route.npv == npv
 
 
 def _ko_reset_lifecycle_cases():

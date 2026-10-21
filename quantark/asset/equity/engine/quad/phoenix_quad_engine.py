@@ -742,6 +742,70 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             value += discounted(decision.coupon, payment_time)
         return value
 
+    def _build_immediate_ko_event_stats(
+        self, product, pricing_env, ko_records, ko_record_0, knocked_in_at_valuation
+    ):
+        """A knock-out decided at valuation, with the coupon decided at the same instant.
+
+        The Snowball statistics report the knock-out redemption alone, while ``price`` pays redemption
+        and the coupon decided now (``_decided_at_valuation``). The pv here is that decided value and
+        the coupon is its own ledger entry, paid with the knock-out, so the ledger sums to the pv.
+        """
+        from quantark.asset.equity.engine.event_stats import payment_aware_cashflow_fields
+        from quantark.asset.equity.engine.quad.quad_adapters import (
+            resolve_structured_payment_timings,
+        )
+
+        stats = super()._build_immediate_ko_event_stats(
+            product, pricing_env, ko_records, ko_record_0, knocked_in_at_valuation
+        )
+        decision = product.decide_observations_at_valuation(
+            float(pricing_env.spot),
+            pricing_env,
+            knocked_in=bool(getattr(product, "_otc_lifecycle_knocked_in", False)),
+        )
+        if not decision.knocked_out or not decision.coupon:
+            return stats
+        pv = self._decided_at_valuation(product, pricing_env, float(pricing_env.spot))
+        n = len(ko_records)
+        i = int(np.argmax(stats.ko_probability))
+        ko_cash = np.asarray(stats.expected_discounted_ko_cashflow, dtype=float)
+        coupon_probability = np.zeros(n, dtype=float)
+        coupon_probability[i] = 1.0
+        coupon_cash = np.zeros(n, dtype=float)
+        coupon_cash[i] = pv - float(ko_cash[i])
+        timings = resolve_structured_payment_timings(product, pricing_env, ko_records)
+        terminal = timings.terminal
+        ko_times = np.asarray(stats.ko_times, dtype=float)
+        ko_dates = [record.observation_date for record in ko_records]
+        pay_dates = [record.settlement_date for record in ko_records]
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=np.concatenate([ko_times, ko_times, [terminal.determination_time]]),
+            payment_times=np.concatenate(
+                [timings.event_payment_times, timings.event_payment_times, [terminal.payment_time]]
+            ),
+            expected_discounted_cashflows=np.concatenate([ko_cash, coupon_cash, [0.0]]),
+            determination_dates=[*ko_dates, *ko_dates, terminal.determination_date],
+            payment_dates=[*pay_dates, *pay_dates, terminal.payment_date],
+        )
+        return self._make_event_stats(
+            pv=pv,
+            ko_times=ko_times,
+            ko_probability=stats.ko_probability,
+            survival_probability=stats.survival_probability,
+            expected_discounted_ko_cashflow=ko_cash,
+            ki_probability=stats.ki_probability,
+            expected_discounted_maturity_cashflow=0.0,
+            reconciliation_error=0.0,
+            ki_times=stats.ki_times,
+            ki_event_probability=stats.ki_event_probability,
+            ki_survival_probability=stats.ki_survival_probability,
+            coupon_probability=coupon_probability,
+            expected_discounted_coupon_cashflow=coupon_cash,
+            **cashflow_fields,
+        )
+
     def _event_stats_product_type(self) -> type:
         return PhoenixOption
 
