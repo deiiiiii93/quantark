@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from typing import Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.special import erfc
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import (
     AutocallableEventStats,
@@ -51,6 +52,9 @@ from quantark.util.numerical import (
     safe_log,
     validate_positive,
 )
+
+if TYPE_CHECKING:
+    from quantark.cashleg.folding import FoldOverlay
 
 # Broadie-Glasserman-Kou (1997) discrete-monitoring barrier correction:
 # beta = -zeta(1/2) / sqrt(2*pi). A barrier monitored discretely at spacing
@@ -90,6 +94,15 @@ class SnowballQuadEngine(BaseEngine):
     engine_type = EngineType.QUADRATURE
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_spot_greeks_grid = True
+    supports_cash_leg_folding = True
+
+    #: Per-solve artefacts a folded solve must not leave behind (they describe the plain price).
+    _FOLD_TRANSIENT_ATTRS: Tuple[str, ...] = (
+        "_last_spot_greeks_grid",
+        "_backward_grids",
+        "_last_ignored_ko_observation_indices",
+        "_last_convergence_info",
+    )
 
     #: Readout modes this engine actually implements. A subclass with its own
     #: readout path narrows this rather than silently reporting a
@@ -140,8 +153,105 @@ class SnowballQuadEngine(BaseEngine):
             return self._price_with_convergence(product, pricing_env)
         return self._price_once(product, pricing_env)
 
+    def price_folded(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        overlay: "FoldOverlay",
+        *,
+        lifecycle_state=None,
+    ) -> float:
+        """Per-unit NPV with ``overlay``'s cash folded into the product's own payoff (ship spec D4).
+
+        Knock-out cash is added to each knock-out record's payoff and maturity cash to each
+        branch's redemption, before the engine's own settlement-delay factors, on the same
+        lattice; the valuation-instant short-circuits pay the decided record's cash too. An
+        empty overlay is ``price()`` bitwise. The solve leaves the plain solve's artefacts
+        (spot-greeks grid, recorded backward grids) untouched.
+        """
+        if overlay.is_empty:
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        validate_settlement_capability(self, product, lifecycle_state)
+        saved = {
+            name: self.__dict__[name]
+            for name in self._FOLD_TRANSIENT_ATTRS
+            if name in self.__dict__
+        }
+        try:
+            return float(self._folded_solve(product, pricing_env, overlay))
+        finally:
+            for name in self._FOLD_TRANSIENT_ATTRS:
+                self.__dict__.pop(name, None)
+            self.__dict__.update(saved)
+
+    def _folded_solve(self, product, pricing_env, fold: "FoldOverlay") -> float:
+        """The solve ``price`` runs, with ``fold`` threaded through."""
+        if self.params.auto_converge:
+            return self._price_with_convergence(product, pricing_env, fold=fold)
+        return self._price_once(product, pricing_env, fold=fold)
+
+    @staticmethod
+    def _refuse_expired_fold(fold) -> None:
+        """Expired, the fold structure is trivial and leg overlays are empty: nothing can land."""
+        if fold is not None:
+            from quantark.execution.errors import CapabilityError
+
+            raise CapabilityError(
+                "an expired autocallable has no knock-out or maturity event left to carry "
+                "folded cash; its cash legs are constants on the event route"
+            )
+
+    @staticmethod
+    def _fold_in_life(records: Sequence, maturity: float) -> list:
+        """The knock-out records a solve can reach: from the valuation instant to maturity."""
+        return [
+            rec
+            for rec in records
+            if rec.observation_time is not None
+            and not is_less_than(float(rec.observation_time), 0.0, rel_tol=0.0, abs_tol=0.0)
+            and not is_greater_than(
+                float(rec.observation_time), maturity, rel_tol=0.0, abs_tol=Tolerance.PRECISION
+            )
+        ]
+
+    @staticmethod
+    def _bind_fold_ko(fold, tagged_records: Sequence[tuple]) -> dict:
+        """``{id(record): amount}`` for ``(schedule, record)`` pairs, bound one to one by the overlay."""
+        amounts = fold.bind_ko(
+            [
+                (
+                    tag,
+                    float(rec.observation_time),
+                    float(
+                        rec.settlement_time
+                        if rec.settlement_time is not None
+                        else rec.observation_time
+                    ),
+                )
+                for tag, rec in tagged_records
+            ]
+        )
+        return {
+            id(rec): float(amount)
+            for (_, rec), amount in zip(tagged_records, amounts)
+        }
+
+    @staticmethod
+    def _folded_amount(fold_ko: dict, record) -> float:
+        """The bound amount of a record a short-circuit decided; one outside the bound set refuses."""
+        if record is None or id(record) not in fold_ko:
+            raise ValidationError(
+                "the knock-out decided at the valuation instant is not one of the records the "
+                "folded cash was bound to"
+            )
+        return fold_ko[id(record)]
+
     def _price_once(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        fold=None,
     ) -> float:
         if not isinstance(product, SnowballOption):
             raise PricingError(
@@ -166,6 +276,7 @@ class SnowballQuadEngine(BaseEngine):
         validate_positive(maturity, "maturity", allow_zero=True)
         self._require_resolvable_time(maturity)
         if maturity <= 0.0:
+            self._refuse_expired_fold(fold)
             knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
             if type(product) is SnowballOption:
                 # The observations still pending at this instant are decided on the known spot, as the
@@ -224,8 +335,18 @@ class SnowballQuadEngine(BaseEngine):
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
 
+        fold_ko: Optional[dict] = None
+        if fold is not None:
+            fold_ko = self._bind_fold_ko(
+                fold, [("main", rec) for rec in self._fold_in_life(ko_records, maturity)]
+            )
+
         ko_record_0 = self._match_record(0.0, ko_records)
         if self._ko_record_triggers_at_spot(product, spot, ko_record_0):
+            if fold_ko is not None:
+                return self._get_immediate_ko_payoff(
+                    ko_record_0, pricing_env, extra_cash=self._folded_amount(fold_ko, ko_record_0)
+                )
             return self._get_immediate_ko_payoff(ko_record_0, pricing_env)
 
         # Valuation-time KI state follows the contractual monitoring semantics,
@@ -336,20 +457,30 @@ class SnowballQuadEngine(BaseEngine):
             vol_vec**4
         ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
-        v_in = np.array(
+        v_in_cash = np.array(
             [
                 product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
                 for spot_value in spot_grid
             ],
             dtype=float,
-        ) * payment_timings.terminal.delay_df
-        v_out = np.array(
+        )
+        v_out_cash = np.array(
             [
                 product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
                 for spot_value in spot_grid
             ],
             dtype=float,
-        ) * payment_timings.terminal.delay_df
+        )
+        if fold is not None:
+            terminal = payment_timings.terminal
+            v_in_cash = v_in_cash + fold.bind_terminal(
+                "ki", terminal.determination_time, terminal.payment_time
+            )
+            v_out_cash = v_out_cash + fold.bind_terminal(
+                "no_ki", terminal.determination_time, terminal.payment_time
+            )
+        v_in = v_in_cash * payment_timings.terminal.delay_df
+        v_out = v_out_cash * payment_timings.terminal.delay_df
 
         log_ki_barrier = None
         if product.has_ki_barrier and ki_continuous:
@@ -381,7 +512,10 @@ class SnowballQuadEngine(BaseEngine):
             if ko_record is not None:
                 ko_is_reachable = bool(reachable_by_record[id(ko_record)])
                 discount = event_delay_by_record[id(ko_record)]
-                ko_value = ko_record.payoff * discount
+                if fold_ko is None:
+                    ko_value = ko_record.payoff * discount
+                else:
+                    ko_value = (ko_record.payoff + fold_ko[id(ko_record)]) * discount
                 ko_weight = (
                     self._event_weight(
                         grid,
@@ -549,7 +683,11 @@ class SnowballQuadEngine(BaseEngine):
         return math_utils.interpolate(value_surface, x=0.0)
 
     def _price_with_convergence(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        fold=None,
     ) -> float:
         """Refine nested odd grids until consecutive prices meet tolerance.
 
@@ -570,7 +708,10 @@ class SnowballQuadEngine(BaseEngine):
             )
             candidate = self.__class__(params=candidate_params)
             candidate.record_backward_grids = self.record_backward_grids
-            value = float(candidate.price(product, pricing_env))
+            if fold is None:
+                value = float(candidate.price(product, pricing_env))
+            else:
+                value = float(candidate._price_once(product, pricing_env, fold=fold))
             grid_artifact = getattr(candidate, "_last_spot_greeks_grid", None)
             used = (
                 int(grid_artifact[0].size)
@@ -2502,9 +2643,15 @@ class SnowballQuadEngine(BaseEngine):
         self,
         ko_record: object,
         pricing_env: PricingEnvironment,
+        extra_cash: Optional[float] = None,
     ) -> float:
-        """Return discounted KO payoff for a KO triggered at valuation."""
+        """Return discounted KO payoff for a KO triggered at valuation.
+
+        ``extra_cash`` is folded cash paid with the record's payoff (ship spec D4).
+        """
         payoff = float(ko_record.payoff) if ko_record.payoff is not None else 0.0
+        if extra_cash is not None:
+            payoff += float(extra_cash)
         settlement_time = ko_record.settlement_time
         if settlement_time is not None and float(settlement_time) > 0.0:
             payoff *= float(pricing_env.get_discount_factor(float(settlement_time)))

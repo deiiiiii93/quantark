@@ -64,6 +64,30 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
+        return self._price_once(product, pricing_env)
+
+    def _folded_solve(self, product, pricing_env, fold) -> float:
+        """``price`` never auto-converges on this engine, so neither does the folded solve."""
+        return self._price_once(product, pricing_env, fold=fold)
+
+    def _bind_ko_reset_fold(self, fold, product, pricing_env, maturity: float):
+        """Both schedules' in-life records bound to the overlay: ``({id: amount}, pre, post)``."""
+        pre, post = (
+            self._fold_in_life(self._resolve_ko_records(product, pricing_env, config), maturity)
+            for config in (product.barrier_config, product.post_barrier_config)
+        )
+        amounts = self._bind_fold_ko(
+            fold, [("pre", rec) for rec in pre] + [("post", rec) for rec in post]
+        )
+        return amounts, pre, post
+
+    def _price_once(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        fold=None,
+    ) -> float:
         if not isinstance(product, KnockOutResetSnowballOption):
             raise PricingError(
                 "KOResetSnowballQuadEngine only supports KnockOutResetSnowballOption, "
@@ -91,6 +115,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         maturity = product.get_maturity(pricing_env)
         validate_positive(spot, "spot")
         validate_positive(maturity, "maturity", allow_zero=True)
+        if maturity <= 0.0:
+            self._refuse_expired_fold(fold)
         # Observations AT the valuation instant are decided on the known spot, on the schedule the
         # knock-in state puts in force and with the knock-out winning a tie; the recursion below
         # starts after them (``_merge_times`` drops time zero). This engine used to skip them, and at
@@ -111,6 +137,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 if settlement is not None and settlement > 0.0
                 else 1.0
             )
+            if fold is not None:
+                amounts, pre, post = self._bind_ko_reset_fold(fold, product, pricing_env, maturity)
+                decided = self._match_record(
+                    record.observation_time, pre if decision.ko_regime == "pre" else post
+                )
+                return (
+                    float(record.payoff) + self._folded_amount(amounts, decided)
+                ) * float(discount)
             return float(record.payoff) * float(discount)
         self._require_resolvable_time(maturity)
         if maturity <= 0.0:
@@ -169,6 +203,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 payment_timings.event_delay_dfs,
             )
         }
+        fold_ko: Optional[dict] = None
+        if fold is not None:
+            fold_ko = self._bind_fold_ko(
+                fold,
+                [("pre", rec) for rec in self._fold_in_life(pre_ko_records, maturity)]
+                + [("post", rec) for rec in self._fold_in_life(post_ko_records, maturity)],
+            )
 
         ki_continuous = product.has_ki_barrier and (
             product.barrier_config.ki_continuous
@@ -238,20 +279,26 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             vol_vec**4
         ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
-        v_in = np.array(
+        terminal = payment_timings.terminal
+        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+        v_in_cash = np.array(
             [
                 product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
                 for spot_value in spot_grid
             ],
             dtype=float,
-        ) * payment_timings.terminal.delay_df
+        )
+        if fold is not None:
+            v_in_cash = v_in_cash + fold.bind_terminal(
+                "ki", terminal.determination_time, terminal.payment_time
+            )
+        v_in = v_in_cash * terminal.delay_df
         # The not-yet-knocked-in contract matures on the PRE-KI schedule; only a
         # knocked-in one runs on to `maturity`. Seeding v_out at the end of the
         # grid would price it through a period it can never reach, so it is
         # seeded when the sweep reaches pre_maturity and is identically zero
         # above -- which is its true value there, the contract having already
         # terminated in that state.
-        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
         v_out_terminal = np.array(
             [
                 product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
@@ -259,6 +306,16 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             ],
             dtype=float,
         ) * payment_timings.terminal.delay_df
+        if fold is not None:
+            # Folded cash of the alive branch is paid at the first schedule's maturity plus the
+            # terminal settlement lag (the fold structure's slot), discounted from there to the
+            # pre-maturity by its own exact ratio; the product's own redemption keeps its discount.
+            no_ki_payment = pre_maturity + (terminal.payment_time - terminal.determination_time)
+            no_ki_cash = fold.bind_terminal("no_ki", pre_maturity, no_ki_payment)
+            v_out_terminal = v_out_terminal + no_ki_cash * (
+                pricing_env.get_discount_factor(no_ki_payment)
+                / pricing_env.get_discount_factor(pre_maturity)
+            )
         v_out = np.zeros_like(v_out_terminal)
         v_out_seeded = False
 
@@ -293,7 +350,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
             if pre_ko_record is not None:
                 discount = event_delay_by_record[id(pre_ko_record)]
-                ko_value = pre_ko_record.payoff * discount
+                if fold_ko is None:
+                    ko_value = pre_ko_record.payoff * discount
+                else:
+                    ko_value = (pre_ko_record.payoff + fold_ko[id(pre_ko_record)]) * discount
                 ko_weight = self._smooth_step_weight(
                     grid,
                     pre_ko_record.barrier,
@@ -329,7 +389,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             post_ko_record = self._match_record(obs_time, post_ko_records)
             if post_ko_record is not None and not disable_ko_after_ki:
                 discount = event_delay_by_record[id(post_ko_record)]
-                ko_value = post_ko_record.payoff * discount
+                if fold_ko is None:
+                    ko_value = post_ko_record.payoff * discount
+                else:
+                    ko_value = (post_ko_record.payoff + fold_ko[id(post_ko_record)]) * discount
                 ko_weight = self._smooth_step_weight(
                     grid,
                     post_ko_record.barrier,
@@ -465,6 +528,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     pricing_env,
                 )
                 redemption = product.get_maturity_payoff_v0(spot, pricing_env=pricing_env)
+                if fold is not None:
+                    redemption = float(redemption) + fold.bind_terminal(
+                        "no_ki", pre_maturity, timing.payment_time
+                    )
                 return float(redemption) * float(timing.payment_df)
 
         # This engine always read the not-knocked-in surface, so a knocked-in contract was priced as if

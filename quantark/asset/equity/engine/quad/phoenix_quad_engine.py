@@ -54,7 +54,11 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         return self._price_once(product, pricing_env)
 
     def _price_once(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        fold=None,
     ) -> float:
         if not isinstance(product, PhoenixOption):
             raise PricingError(
@@ -80,6 +84,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         maturity = product.get_maturity(pricing_env)
         self._require_resolvable_time(maturity)
         if maturity <= 0.0:
+            self._refuse_expired_fold(fold)
             return self._decided_at_valuation(product, pricing_env, float(spot))
 
         # An observation AT the valuation instant is decided on the known spot: the recursion below
@@ -90,6 +95,16 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             float(spot), pricing_env, knocked_in=carried_knock_in
         )
         if decision.knocked_out:
+            if fold is not None:
+                in_life = self._fold_in_life(
+                    product.resolve_ko_observations(pricing_env), maturity
+                )
+                fold_ko = self._bind_fold_ko(fold, [("main", rec) for rec in in_life])
+                decided = self._match_record(decision.ko_record.observation_time, in_life)
+                return self._decided_at_valuation(
+                    product, pricing_env, float(spot),
+                    extra_cash=self._folded_amount(fold_ko, decided),
+                )
             return self._decided_at_valuation(product, pricing_env, float(spot))
 
         rate = pricing_env.get_rate(maturity)
@@ -114,6 +129,19 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 ko_records, payment_timings.event_delay_dfs
             )
         }
+        fold_ko: Optional[dict] = None
+        fold_terminal = None
+        if fold is not None:
+            fold_ko = self._bind_fold_ko(
+                fold, [("main", rec) for rec in self._fold_in_life(ko_records, maturity)]
+            )
+            terminal = payment_timings.terminal
+            fold_terminal = {
+                branch: fold.bind_terminal(
+                    branch, terminal.determination_time, terminal.payment_time
+                )
+                for branch in ("no_ki", "ki")
+            }
 
         ki_continuous = product.has_ki_barrier and (
             product.barrier_config.ki_continuous
@@ -307,17 +335,17 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         # Terminal condition for each memory state (base payoff; coupons added via jumps)
         for k in range(num_obs + 1):
-            v_in_k = np.array(
+            v_in_cash = np.array(
                 [
                     product.get_maturity_payoff_v1(spot_value, pricing_env=pricing_env)
                     for spot_value in spot_grid
                 ],
                 dtype=float,
-            ) * payment_timings.terminal.delay_df
+            )
             # V1 usually doesn't pay coupons? Checked logic: get_maturity_payoff_v1 doesn't take accumulated.
             # So accumulated is ignored for V1.
 
-            v_out_k = np.array(
+            v_out_cash = np.array(
                 [
                     product.get_maturity_payoff_v0(
                         spot_value,
@@ -327,7 +355,12 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     for spot_value in spot_grid
                 ],
                 dtype=float,
-            ) * payment_timings.terminal.delay_df
+            )
+            if fold_terminal is not None:
+                v_in_cash = v_in_cash + fold_terminal["ki"]
+                v_out_cash = v_out_cash + fold_terminal["no_ki"]
+            v_in_k = v_in_cash * payment_timings.terminal.delay_df
+            v_out_k = v_out_cash * payment_timings.terminal.delay_df
             v_in_list.append(v_in_k)
             v_out_list.append(v_out_k)
 
@@ -395,6 +428,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
                 ko_discount = event_delay_by_record[id(ko_record)]
                 base_ko_payoff = float(ko_record.payoff or 0.0)
+                if fold_ko is not None:
+                    base_ko_payoff += fold_ko[id(ko_record)]
                 
                 # INSTANT pays the coupon at its record's settlement (the
                 # observation itself when no settlement terms exist); EXPIRY
@@ -666,13 +701,17 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             value += float(decision.coupon) * float(coupon_discount)
         return value
 
-    def _decided_at_valuation(self, product, pricing_env, spot: float) -> float:
+    def _decided_at_valuation(
+        self, product, pricing_env, spot: float, extra_cash: Optional[float] = None
+    ) -> float:
         """Zero time to maturity: the observations still pending at this instant are decided on the spot.
 
         The backward induction decides an observation at the valuation instant on the known spot when
         more of the claim lies ahead. The shortcut used to return the redemption of a never-knocked-in
         claim instead: no last coupon, no memory arrears, no knock-out, no knock-in, not even a knock-in
         carried from an earlier day.
+
+        ``extra_cash`` is folded cash paid with a knock-out decided now (ship spec D4).
         """
         from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 
@@ -688,7 +727,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
         if decision.knocked_out:
             record = decision.ko_record
-            return discounted(float(record.payoff or 0.0) + decision.coupon, record.settlement_time)
+            cash = float(record.payoff or 0.0) + decision.coupon
+            if extra_cash is not None:
+                cash += float(extra_cash)
+            return discounted(cash, record.settlement_time)
         redemption = product.get_payoff(spot, knocked_in=decision.knocked_in, pricing_env=pricing_env)
         value = discounted(redemption, resolve_terminal_timing(product, pricing_env).payment_time)
         if decision.coupon:
