@@ -1107,11 +1107,17 @@ class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
             # F6: each knock-out's settlement; a REBASED post schedule holds offsets from the
             # knock-in time, so it has no payment time and says so
             pre_ko_payment_times=np.asarray(pre_settlement_times, dtype=float),
+            # the post schedule's own resolved settlements, as the pricing path pays them: its raw
+            # records carry dates (not times) on a dated contract
             post_ko_payment_times=(
-                np.array([
-                    float(r.settlement_time if r.settlement_time is not None else r.observation_time)
-                    for r in grid["post_profile"]["records"]
-                ])
+                self._compute_ko_schedule_payoffs(
+                    product,
+                    post_times,
+                    np.array(grid["post_profile"]["rates"], dtype=float),
+                    grid["post_profile"]["records"],
+                    pricing_env,
+                    float(product.get_post_maturity_time(pricing_env)),
+                )[1]
                 if post_mode == PostKOScheduleMode.ABSOLUTE
                 else None
             ),

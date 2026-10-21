@@ -1,0 +1,42 @@
+"""MC event statistics on a dated KO-reset: post-schedule payment times come from the resolved schedule.
+
+The raw schedule records of a dated contract carry dates, not times, so reading their
+``settlement_time`` / ``observation_time`` crashed (``float(None)``).
+"""
+from datetime import datetime
+
+import numpy as np
+import pytest
+
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
+from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.cashleg import EventDistribution, EventType
+from quantark.modelvalidation.builders.equity_ko_reset import make_ko_reset
+from quantark.util.calendar import CalendarType, create_calendar
+
+from intraday.conftest import dated_ko_reset, flat_env
+from pde_3a.products import KO_RESET, env as numeric_env
+
+CAL = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+
+
+def _cases():
+    return {
+        "dated": (dated_ko_reset(CAL, datetime(2026, 3, 16)), flat_env(datetime(2026, 4, 1))),
+        "numeric": (make_ko_reset(KO_RESET), numeric_env()),
+    }
+
+
+@pytest.mark.parametrize("case", list(_cases()))
+def test_post_ko_payment_times_match_the_pde_route(case):
+    product, env = _cases()[case]
+    mc = SnowballMCEngine(params=MCParams(num_paths=4000, seed=7)).calculate_event_stats(product, env)
+    pde = KOResetSnowballPDESolver(PDEParams()).calculate_event_stats(product, env)
+    np.testing.assert_allclose(mc.post_ko_times, pde.post_ko_times, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(mc.post_ko_payment_times, pde.post_ko_payment_times, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(mc.pre_ko_payment_times, pde.pre_ko_payment_times, rtol=0, atol=1e-12)
+    dist = EventDistribution.from_autocallable_stats(mc)
+    total = sum(float(np.sum(dist.probabilities[e]))
+                for e in (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI))
+    assert total == pytest.approx(1.0, abs=1e-9)
