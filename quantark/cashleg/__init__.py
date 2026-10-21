@@ -12,6 +12,15 @@ from quantark.cashleg.base_amount import BaseAmount, BaseAmountMode
 from quantark.cashleg.deterministic_leg import DeterministicLeg
 from quantark.cashleg.event_distribution import EventDistribution, EventType, PricingResult
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
+from quantark.cashleg.folding import (
+    FoldedEventCash,
+    FoldMode,
+    FoldOverlay,
+    ensure_foldable,
+    fold_cash_legs,
+    is_event_independent,
+    is_foldable,
+)
 from quantark.cashleg.leg_schedule import LegSchedule
 from quantark.cashleg.leg_valuator import (
     LegPV,
@@ -33,6 +42,9 @@ __all__ = [
     "EventDistribution",
     "EventType",
     "FixedPayoffLeg",
+    "FoldedEventCash",
+    "FoldMode",
+    "FoldOverlay",
     "KOBehavior",
     "LegDirection",
     "LegPV",
@@ -43,5 +55,9 @@ __all__ = [
     "SurvivalBasis",
     "TradeGreeks",
     "TradeValueBreakdown",
+    "ensure_foldable",
+    "fold_cash_legs",
+    "is_event_independent",
+    "is_foldable",
     "value_leg",
 ]
