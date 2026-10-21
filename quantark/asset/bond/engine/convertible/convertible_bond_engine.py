@@ -636,21 +636,14 @@ class ConvertibleBondEngine:
         spread_bump = 0.0001  # 1 basis point
 
         if self.method in (ConvertibleBondMethod.BINOMIAL_GS, ConvertibleBondMethod.TF):
-            # Create bond with bumped spread up
+            # Bump the spread up and down (the down bump floors at zero spread)
             base_spread = bond.credit_spread if bond.credit_spread else 0.0
-            bond_up = self._create_spread_bumped_bond(
-                bond, base_spread + spread_bump
-            )
-            price_up = self.price(bond_up)
+            spread_up = base_spread + spread_bump
+            spread_down = max(0.0, base_spread - spread_bump)
+            price_up = self.price(self._create_spread_bumped_bond(bond, spread_up))
+            price_down = self.price(self._create_spread_bumped_bond(bond, spread_down))
 
-            # Create bond with bumped spread down
-            bond_down = self._create_spread_bumped_bond(
-                bond, max(0.0, base_spread - spread_bump)
-            )
-            price_down = self.price(bond_down)
-
-            # CS01 = (price_down - price_up) / 2 (central difference)
-            return (price_down - price_up) / 2
+            return self._per_bump(price_down - price_up, base_spread, spread_bump)
 
         # Hazard-based models: bump hazard_rate
         recovery = bond.recovery_rate if bond.recovery_rate is not None else 0.0
@@ -658,18 +651,29 @@ class ConvertibleBondEngine:
         hazard_bump = spread_bump / denom
 
         base_hazard = bond.hazard_rate if bond.hazard_rate else 0.0
-        bond_up = self._create_hazard_bumped_bond(
-            bond, base_hazard + hazard_bump
-        )
-        price_up = self.price(bond_up)
+        hazard_up = base_hazard + hazard_bump
+        hazard_down = max(0.0, base_hazard - hazard_bump)
+        price_up = self.price(self._create_hazard_bumped_bond(bond, hazard_up))
+        price_down = self.price(self._create_hazard_bumped_bond(bond, hazard_down))
 
-        bond_down = self._create_hazard_bumped_bond(
-            bond, max(0.0, base_hazard - hazard_bump)
-        )
-        price_down = self.price(bond_down)
+        return self._per_bump(price_down - price_up, base_hazard, hazard_bump)
 
-        # CS01 = (price_down - price_up) / 2 (central difference)
-        return (price_down - price_up) / 2
+    @staticmethod
+    def _per_bump(price_change: float, base: float, bump: float) -> float:
+        """
+        Price change per one bump from an up/down difference whose down leg floors at zero.
+
+        Args:
+            price_change: price(base - bump, floored at 0) - price(base + bump)
+            base: Unbumped parameter value
+            bump: Bump size
+
+        Returns:
+            Central difference (price_change / 2), or over the actual width when floored
+        """
+        if base >= bump:
+            return price_change / 2
+        return price_change * bump / (base + bump)
 
     def modified_duration(self, bond: ConvertibleBond) -> float:
         """

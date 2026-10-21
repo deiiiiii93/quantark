@@ -367,7 +367,7 @@ class ConvertibleBondBinomialEngine:
 
                 # Add any coupon payments in this period
                 for k, ct in enumerate(coupon_times):
-                    if t < ct <= t + dt:
+                    if t < ct <= (i + 1) * dt:
                         continuation += coupon_amounts[k] * safe_exp(
                             -discount_rate * (ct - t)
                         )

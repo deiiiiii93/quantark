@@ -11,8 +11,6 @@ from typing import TYPE_CHECKING, Dict
 
 import numpy as np
 
-from quantark.util.numerical.time_nodes import node_index
-
 if TYPE_CHECKING:  # the product module imports this package for its cash flows
     from quantark.asset.bond.product.convertible import ConvertibleBond
 
@@ -43,6 +41,8 @@ def put_prices_by_step(
         days = (entry.put_date.date() - valuation_date.date()).days
         if days < 0:
             continue
-        k = min(node_index(step_times, days / 365.0), last)
+        # First step with t_k >= t_put, no tolerance: the same comparison that puts a coupon
+        # at c <= t_k into an earlier step, so a coupon paid on the put date is never lost
+        k = min(int(np.searchsorted(step_times, days / 365.0, side="left")), last)
         prices[k] = max(prices.get(k, entry.put_price), entry.put_price)
     return prices

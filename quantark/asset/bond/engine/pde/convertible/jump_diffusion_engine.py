@@ -173,7 +173,7 @@ class ConvertibleBondJumpDiffusionEngine:
             # Apply coupon payments (jump condition) to the known later-time state
             coupon_amount = 0.0
             for ct, ca in coupon_schedule:
-                if t < ct <= t_next:
+                if t < ct <= (n + 1) * dt:
                     coupon_amount += ca
             if coupon_amount > 0.0:
                 V = V + coupon_amount

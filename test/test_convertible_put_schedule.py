@@ -163,3 +163,72 @@ def test_put_in_last_step_is_applied_at_maturity(env, make):
     with_put = _bond([(MATURITY - timedelta(days=2), 110.0)])
     # Put 110 against redemption at 100 two days before maturity: ~10 x risky discount x P(parity < 110) = 4.3-4.9.
     assert engine.price(with_put) - engine.price(_bond()) > 3.0
+
+
+# --------------------------------------------------------------------------- one clock for puts and coupons
+# A coupon enters the step (t_i, t_{i+1}] it falls in; a put lands on the first step t_k >= t_put. On grids
+# whose nodes sit an ulp from a coupon date, a tolerance in either rule split the two (CP1 review): the coupon
+# paid on the put date was lost, or a coupon fell between two steps and was never paid.
+
+ULP_VALUATION = datetime(2024, 10, 22)
+ULP_MATURITY = datetime(2027, 1, 1)
+ULP_PUT = datetime(2025, 7, 1)  # a coupon date; at N = 267 a step sits an ulp below it
+
+
+def _ulp_bond(put=False):
+    return ConvertibleBond(
+        issue_date=datetime(2024, 1, 1),
+        maturity_date=ULP_MATURITY,
+        face_value=100.0,
+        coupon_rate=0.05,
+        conversion_ratio=10.0,
+        credit_spread=0.02,
+        put_schedule=[PutScheduleEntry(put_date=ULP_PUT, put_price=100.0)] if put else [],
+    )
+
+
+@pytest.fixture(scope="module")
+def ulp_env():
+    return PricingEnvironment(
+        valuation_date=ULP_VALUATION,
+        spot_quote=SpotQuote(spot=8.0),
+        vol_surface=FlatVolSurface(volatility=0.30),
+        rate_curve=FlatRateCurve(rate=0.05),
+    )
+
+
+def test_put_on_a_coupon_date_keeps_the_coupon_on_every_grid(ulp_env):
+    from quantark.asset.bond.engine.tree.convertible import ConvertibleBondTFTreeEngine
+
+    values = []
+    for n in (266, 267, 268):
+        for engine in (_gs(ulp_env, n), ConvertibleBondTFTreeEngine(ulp_env, ConvertibleBondTreeParams(num_steps=n))):
+            values.append(engine.price(_ulp_bond(put=True)) - engine.price(_ulp_bond()))
+    assert max(values[0::2]) - min(values[0::2]) < 0.05  # GS
+    assert max(values[1::2]) - min(values[1::2]) < 0.05  # TF tree
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        pytest.param(lambda e, n: _gs(e, n), id="gs"),
+        pytest.param(
+            lambda e, n: ConvertibleBondTrinomialEngine(e, ConvertibleBondTreeParams(num_steps=n)), id="hw"
+        ),
+        pytest.param(lambda e, n: _jd(e, n), id="jd"),
+        pytest.param(lambda e, n: _tf(e, n), id="tf-pde"),
+    ],
+)
+def test_no_coupon_is_dropped_between_steps(ulp_env, make):
+    # 265 and 267 steps used to drop a coupon (GS 105.29 against ~107.4 on neighbouring grids)
+    prices = [make(ulp_env, n).price(_ulp_bond()) for n in (263, 264, 265, 266, 267)]
+    assert max(prices) - min(prices) < 0.3
+
+
+def test_hw_put_value_is_continuous_in_n(env):
+    with_put, no_put = _bond([(PUT_DATE, 100.0)]), _bond()
+    values = []
+    for n in (200, 201):
+        engine = ConvertibleBondTrinomialEngine(env, ConvertibleBondTreeParams(num_steps=n))
+        values.append(engine.price(with_put) - engine.price(no_put))
+    assert abs(values[1] - values[0]) < 0.15

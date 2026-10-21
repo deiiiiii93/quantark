@@ -125,7 +125,7 @@ class ConvertibleBondTFTreeEngine:
         # Terminal: convert or redeem; a put in the last step is exercised at maturity
         stock = self._stock_level(spot, u, n_steps)
         parity = ratio * stock
-        converted = parity > face if bond.is_convertible_at(bond.maturity_date) else np.zeros_like(parity, dtype=bool)
+        converted = (parity > face) & bond.is_convertible_at(bond.maturity_date)
         V = np.where(converted, parity, face)
         B = np.where(converted, 0.0, face)
         P = converted.astype(float)

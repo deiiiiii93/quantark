@@ -856,10 +856,6 @@ class TestPriceWithDetailsRiskMetrics(TestConvertibleBondEngineSetup):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestCreditSpreadCS01(unittest.TestCase):
     """CS01 bumps the input each model actually reads (spec D2, AC1).
 
@@ -988,3 +984,20 @@ class TestTFEngineTypeDispatch(unittest.TestCase):
         cs01 = engine.cs01(self.bond)
         self.assertGreater(cs01, 0.0)
         self.assertEqual(cs01, (down - up) / 2)
+
+
+class TestCS01FlooredBump(unittest.TestCase):
+    """A spread under 1bp floors the down bump at 0; the difference is over the actual width."""
+
+    def test_floored_bump_divides_by_actual_width(self):
+        fixtures = TestCreditSpreadCS01()
+        fixtures.setUp()
+        bond = dataclasses.replace(fixtures.bond, credit_spread=0.00005)
+        engine = ConvertibleBondEngine(fixtures.env, tree_params=ConvertibleBondTreeParams(num_steps=100))
+        down = engine.price(dataclasses.replace(bond, credit_spread=0.0))
+        up = engine.price(dataclasses.replace(bond, credit_spread=0.00015))
+        self.assertAlmostEqual(engine.cs01(bond), (down - up) / 0.00015 * 0.0001, places=12)
+
+
+if __name__ == "__main__":
+    unittest.main()

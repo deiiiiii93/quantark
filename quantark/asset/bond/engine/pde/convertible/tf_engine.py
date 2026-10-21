@@ -191,7 +191,7 @@ class ConvertibleBondTFEngine:
             # known later-time state (coupons paid only if not converted).
             coupon_amount = 0.0
             for ct, ca in coupon_schedule:
-                if t < ct <= t_next:
+                if t < ct <= (n + 1) * dt:
                     coupon_amount += ca
             if coupon_amount > 0.0:
                 v = v + coupon_amount

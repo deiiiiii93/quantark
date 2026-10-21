@@ -811,7 +811,7 @@ class ConvertibleBondTrinomialEngine:
 
                 # Add any coupon payments in this period
                 for k, ct in enumerate(coupon_times):
-                    if t < ct <= t_next:
+                    if t < ct <= (i + 1) * dt:
                         continuation += coupon_amounts[k] * safe_exp(-r_local * (ct - t))
 
                 # Conversion value
@@ -1008,7 +1008,7 @@ class ConvertibleBondTrinomialEngine:
 
                 # Add any coupon payments in this period
                 for k, ct in enumerate(coupon_times):
-                    if t < ct <= t_next:
+                    if t < ct <= (i + 1) * dt:
                         continuation += coupon_amounts[k] * safe_exp(
                             -r_local * (ct - t)
                         )
@@ -1236,7 +1236,7 @@ class ConvertibleBondTrinomialEngine:
 
                 # Add any coupon payments in this period
                 for k, ct in enumerate(coupon_times):
-                    if t < ct <= t_next:
+                    if t < ct <= (i + 1) * dt:
                         continuation += coupon_amounts[k] * safe_exp(
                             -r_local * (ct - t)
                         )
