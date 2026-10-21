@@ -86,16 +86,6 @@ def price_folded_2d(solver, product, pricing_env, overlay, lifecycle_state=None)
 
     validate_settlement_capability(solver, product, lifecycle_state)
     solver._check_product_type(product)
-    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
-
-    if isinstance(product, KnockOutResetSnowballOption):
-        from quantark.execution.errors import CapabilityError
-
-        # the 2D march fires one knock-out schedule; a KO-reset's pre/post schedules have no site here
-        raise CapabilityError(
-            f"{solver._solver_name} marches a single knock-out schedule: a KO-reset product's "
-            "pre/post schedules do not fold on the 2D route"
-        )
     if pricing_env is None:
         raise ValidationError(f"PricingEnvironment is required for {solver._solver_name}")
     solver._validate_product(product)

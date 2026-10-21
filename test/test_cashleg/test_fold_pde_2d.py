@@ -401,13 +401,14 @@ def test_a_decided_knock_out_refuses_an_overlay_for_another_schedule():
         factory().price_folded(product, env, _hand_overlay(make_snowball(), env, ko=1.0))
 
 
-def test_a_ko_reset_product_does_not_fold_on_the_2d_route():
-    """The 2D march fires one knock-out schedule: a KO-reset's pre/post schedules have no site (fail closed)."""
+def test_a_ko_reset_product_is_not_refused_for_its_engine_but_its_cash_cannot_bind():
+    """No wrong-engine guard: the 2D Snowball takes a KO-reset as ``price`` does (a plain Snowball). The
+    overlay names pre/post knock-out records that march has no site for, so binding fails closed."""
     from pde_3a.products import KO_RESET, env as ko_reset_env
     from quantark.modelvalidation.builders.equity_ko_reset import make_ko_reset
 
     product, env = make_ko_reset(KO_RESET), ko_reset_env()
-    with pytest.raises(CapabilityError, match="KO-reset"):
+    with pytest.raises(ValidationError, match="overlay entry|no engine record"):
         _heston_snowball().price_folded(product, env, _hand_overlay(product, env, ko=1.0))
 
 
