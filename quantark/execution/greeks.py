@@ -54,6 +54,9 @@ class TradeState:
     warnings: tuple = ()
     theta_degenerate: bool = False
     theta_shift: object = None
+    #: ``FoldMode`` to fold the cash legs into each cell's solve (cash-leg folding spec D11d);
+    #: ``None`` keeps the event-distribution cells, bitwise.
+    fold_mode: object = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -306,7 +309,11 @@ def run_greek_bump(bump_id: str, base: TradeState, bumped: TradeState,
     from quantark.cashleg.leg_valuator import value_leg
 
     if bumped.theta_degenerate:
+        if base.cash_legs and base.fold_mode is not None:
+            return {"degenerate": 1.0, "npv": 0.0, "leg_sum": 0.0, "total": 0.0, "per_leg": ()}
         return {"degenerate": 1.0, "npv": 0.0, "leg_sum": 0.0}
+    if base.cash_legs and base.fold_mode is not None:
+        return _run_folded_greek_bump(bump_id, base, bumped, gc)
     if base.cash_legs:
         bump_engine = gc._resolve_bump_engine(
             base.product, base.pricing_env, base.engine
@@ -364,9 +371,135 @@ def run_greek_bump(bump_id: str, base: TradeState, bumped: TradeState,
     return {"degenerate": 0.0, "npv": price, "leg_sum": 0.0}
 
 
+def _run_folded_greek_bump(bump_id, base, bumped, gc) -> dict:
+    """One folded cell: ``EquityPosition._folded_trade_risk``'s valuation of this bump.
+
+    TOTAL is one folded solve; DRILLDOWN adds the plain solve and one folded solve per
+    event-dependent leg (the "exactly one solve" contract is the event route's). ``per_leg``
+    holds ``(name, direction, value)`` in leg order on every cell.
+    """
+    from quantark.asset.equity.riskmeasures.greeks.theta_shift import bumped_trade_value_folded
+    from quantark.cashleg.folding import FoldMode, folded_trade_value
+    from quantark.execution.errors import CapabilityError
+
+    mode = base.fold_mode
+    bump_engine = gc._resolve_bump_engine(base.product, base.pricing_env, base.engine)
+    if mode is FoldMode.DRILLDOWN:
+        reason = bump_engine.fold_drilldown_refusal(base.product, base.pricing_env)
+        if reason is not None:
+            raise CapabilityError(f"FoldMode.DRILLDOWN refused on {type(bump_engine).__name__}: {reason}")
+    if bumped.theta_shift is not None:
+        value = bumped_trade_value_folded(
+            bump_engine, bumped.theta_shift, base.cash_legs, quantity=base.quantity,
+            unit_of=lambda env: _unit_notional(base, env), mode=mode,
+        )
+    else:
+        value = folded_trade_value(
+            bump_engine, bumped.product, bumped.pricing_env, base.cash_legs,
+            quantity=base.quantity, unit_notional=_unit_notional(base, bumped.pricing_env), mode=mode,
+        )
+    per_leg = ()
+    if mode is FoldMode.DRILLDOWN:
+        per_leg = tuple(
+            (str(leg.name), str(leg.direction), float(value.per_leg.get(leg.leg_id, 0.0)))
+            for leg in base.cash_legs
+        )
+    return {
+        "degenerate": 0.0,
+        "npv": 0.0 if value.npv is None else float(value.npv),
+        "leg_sum": 0.0,
+        "total": float(value.total),
+        "per_leg": per_leg,
+    }
+
+
+def _assemble_folded_trade_greeks(base_values, bump_values, *, quantity, spot,
+                                  bump_config, requested, fold_mode) -> dict:
+    """Verbatim ``EquityPosition._folded_trade_risk`` arithmetic on folded cell values."""
+    from quantark.cashleg.folding import FoldMode
+
+    bc = bump_config
+    q = float(quantity)
+    drill = fold_mode is FoldMode.DRILLDOWN
+    base = base_values
+    n_legs = len(base["per_leg"])
+    total_g = {"price": base["total"]}
+    product_g = {"price": q * base["npv"]} if drill else {}
+    leg_g = [{} for _ in range(n_legs)]
+
+    def leg(values, i):
+        return values["per_leg"][i][2]
+
+    def record(name, f_total, f_npv, f_leg):
+        total_g[name] = f_total
+        if drill:
+            product_g[name] = q * f_npv
+            for i in range(n_legs):
+                leg_g[i][name] = f_leg(i)
+
+    if {"delta", "gamma"} & requested:
+        h = spot * bc.spot_bump
+        up, dn = bump_values["spot_up"], bump_values["spot_down"]
+        if "delta" in requested:
+            record(
+                "delta", (up["total"] - dn["total"]) / (2.0 * h),
+                drill and (up["npv"] - dn["npv"]) / (2.0 * h),
+                lambda i: (leg(up, i) - leg(dn, i)) / (2.0 * h),
+            )
+        if "gamma" in requested:
+            record(
+                "gamma", (up["total"] - 2.0 * base["total"] + dn["total"]) / h**2,
+                drill and (up["npv"] - 2.0 * base["npv"] + dn["npv"]) / h**2,
+                lambda i: (leg(up, i) - 2.0 * leg(base, i) + leg(dn, i)) / h**2,
+            )
+
+    def one_sided(name, bumped, scale):
+        record(
+            name, (bumped["total"] - base["total"]) * scale,
+            drill and (bumped["npv"] - base["npv"]) * scale,
+            lambda i: (leg(bumped, i) - leg(base, i)) * scale,
+        )
+
+    if "vega" in requested:
+        one_sided("vega", bump_values["vol_up"], 1.0)
+    if "rho" in requested:
+        one_sided("rho", bump_values["rate_up"], 0.01 / bc.rate_bump)
+    if "dividend_rho" in requested:
+        one_sided("dividend_rho", bump_values["div_up"], 0.01 / bc.div_bump)
+    if "theta" in requested:
+        tv = bump_values["theta"]
+        if tv["degenerate"]:
+            record("theta", 0.0, drill and 0.0, lambda i: 0.0)
+        else:
+            record(
+                "theta", tv["total"] - base["total"],
+                drill and (tv["npv"] - base["npv"]),
+                lambda i: leg(tv, i) - leg(base, i),
+            )
+    if not drill:
+        return {"product": {}, "total": total_g, "leg_pvs": (), "leg_greeks": ()}
+    return {
+        "product": product_g,
+        "total": total_g,
+        "leg_pvs": tuple(base["per_leg"]),
+        "leg_greeks": tuple(
+            (name, direction, leg_g[i]) for i, (name, direction, _pv) in enumerate(base["per_leg"])
+        ),
+    }
+
+
 def assemble_trade_greeks(base_values, bump_values, *, quantity, spot,
-                          bump_config, requested) -> dict:
-    """Verbatim get_trade_risk arithmetic on (npv, leg_sum) pairs."""
+                          bump_config, requested, fold_mode=None) -> dict:
+    """Verbatim get_trade_risk arithmetic on (npv, leg_sum) pairs.
+
+    With ``fold_mode`` the cells are folded ones and the arithmetic is the folded
+    position's (cash-leg folding spec D11d); ``leg_greeks`` then lists each leg's greeks.
+    """
+    if fold_mode is not None:
+        return _assemble_folded_trade_greeks(
+            base_values, bump_values, quantity=quantity, spot=spot,
+            bump_config=bump_config, requested=requested, fold_mode=fold_mode,
+        )
     bc = bump_config
     q = float(quantity)
     base_npv = base_values["npv"]
@@ -488,6 +621,8 @@ def greek_value_runner(cell, resolved, child_context):
         ("linear", values.get("linear", 0.0)),
         ("spot", float(base.pricing_env.spot)),
     ]
+    if "total" in values:                               # a folded cell (spec D11d) only
+        economics.append(("total", values["total"]))
     for i, (name, direction, pv) in enumerate(values.get("per_leg", ())):
         economics.append((f"leg_pv::{i}", pv))
         economics.append((f"leg_name::{i}", name))
