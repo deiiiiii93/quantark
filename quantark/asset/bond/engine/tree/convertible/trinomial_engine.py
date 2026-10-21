@@ -76,7 +76,8 @@ class ConvertibleBondTrinomialEngine:
     where lambda is the hazard rate.
 
     Upon default:
-    - Stock price jumps to eta * S (stock_jump_on_default)
+    - Stock price drops to (1 - eta) * S (eta = stock_jump_on_default); while it
+      survives it drifts at r - q + hazard * eta, so it is a martingale overall
     - Bondholder receives recovery_rate * face_value
 
     Volatility schemes:
@@ -220,11 +221,13 @@ class ConvertibleBondTrinomialEngine:
         Returns arrays for each time step i:
         - r_steps[i]: forward rate over [t_i, t_{i+1}]
         - vol_steps[i]: effective step volatility over [t_i, t_{i+1}]
-        - alpha_steps[i]: deterministic log-drift over the step
+        - alpha_steps[i]: deterministic log-drift over the step, with
+          + hazard * eta so the stock is a martingale through its drop on default
         - drift_cum[i]: cumulative log-drift up to time t_i
         """
         n_steps = self.params.num_steps
         spot = self.pricing_env.spot
+        default_compensation = bond.hazard_rate * bond.stock_jump_on_default
 
         r_steps = np.zeros(n_steps)
         vol_steps = np.zeros(n_steps)
@@ -240,7 +243,7 @@ class ConvertibleBondTrinomialEngine:
             r_steps[i] = r_local
             vol_steps[i] = vol_local
 
-            alpha = (r_local - q - 0.5 * vol_local * vol_local) * dt
+            alpha = (r_local - q + default_compensation - 0.5 * vol_local * vol_local) * dt
             alpha_steps[i] = alpha
             drift_cum[i + 1] = drift_cum[i] + alpha
 
@@ -450,91 +453,47 @@ class ConvertibleBondTrinomialEngine:
             recovery_component=recovery_component,
         )
 
-    def _calculate_tree_params(
-        self, vol: float, r: float, q: float, hazard_rate: float, dt: float
-    ) -> Dict[str, float]:
+    @staticmethod
+    def _calculate_moment_probabilities(
+        u: float, d: float, growth_rate: float, step_variance: float, dt: float
+    ) -> Tuple[float, float, float]:
         """
-        Calculate trinomial tree parameters.
+        Trinomial probabilities for moves u, 1, d (conditional on survival) that match
+        the mean and variance of a lognormal step exactly:
+
+            p_u u + p_m + p_d d = g,    p_u u^2 + p_m + p_d d^2 = g^2 exp(step_variance)
+
+        with g = exp(growth_rate * dt). The surviving stock's growth rate must include
+        + hazard * eta, so the stock is a martingale through its drop on default.
 
         Args:
-            vol: Volatility
-            r: Risk-free rate
-            q: Dividend yield
-            hazard_rate: Default intensity
+            u: Up factor
+            d: Down factor
+            growth_rate: Drift of the stock while it survives (r - q + hazard * eta)
+            step_variance: Log variance of one step (sigma^2 dt)
             dt: Time step
 
         Returns:
-            Dictionary with tree parameters
+            Tuple of (p_up, p_mid, p_down)
+
+        Raises:
+            PricingError: If the probabilities are not all in [0, 1]
         """
-        # Default probability per step
-        p_default = 1.0 - safe_exp(-hazard_rate * dt)
-
-        # Survival probability
-        p_survive = 1.0 - p_default
-
-        # For surviving paths, use CRR-style binomial within trinomial
-        # Trinomial with stretching factor
-        stretch = math.sqrt(3.0)
-        u = safe_exp(vol * stretch * safe_sqrt(dt))
-        d = 1.0 / u
-
-        # Risk-neutral probabilities for up/down (conditional on survival)
-        drift = safe_exp((r - q) * dt)
-        var = safe_exp(vol * vol * dt) - 1.0
-
-        # Match first two moments for trinomial
-        # E[S_1/S_0] = drift
-        # Var[S_1/S_0] = S_0^2 * (exp(sigma^2 * dt) - 1)
-
-        # For trinomial: p_u * u + p_m * 1 + p_d * d = drift
-        # p_u * u^2 + p_m * 1 + p_d * d^2 - drift^2 = var
-
-        # Simplified: equal up/down probability around middle
-        # p_u = p_d = (drift^2 + var - 1) / (2 * (u^2 - 1))
-        # Capped to ensure valid probabilities
-
-        u2 = u * u
-        d2 = d * d
-
-        # Solve for probabilities
-        # Using standard trinomial parameterization
-        p_up = (
-            (drift - d) / (u - d) - (1.0 - d) * (drift - 1.0) / ((u - d) * (u - 1.0))
-        ) * 0.5 + 0.5 * (drift - 1.0) / (u - 1.0)
-
-        p_down = (
-            (u - drift) / (u - d) - (u - 1.0) * (1.0 - drift) / ((u - d) * (1.0 - d))
-        ) * 0.5 + 0.5 * (1.0 - drift) / (1.0 - d)
-
-        # Simpler approach: standard CRR-like probabilities
-        # adjusted for trinomial
-        exp_growth = safe_exp((r - q) * dt)
-        p_up = ((exp_growth - d) / (u - d)) * 0.5
-        p_down = ((u - exp_growth) / (u - d)) * 0.5
+        g = safe_exp(growth_rate * dt)
+        mean_excess = g - 1.0
+        second_excess = g * g * safe_exp(step_variance) - 1.0
+        a1, b1 = u - 1.0, d - 1.0
+        a2, b2 = u * u - 1.0, d * d - 1.0
+        det = a1 * b2 - a2 * b1
+        p_up = (mean_excess * b2 - second_excess * b1) / det
+        p_down = (a1 * second_excess - a2 * mean_excess) / det
         p_mid = 1.0 - p_up - p_down
-
-        # Ensure valid probabilities
-        p_up = max(0.0, min(1.0, p_up))
-        p_down = max(0.0, min(1.0, p_down))
-        p_mid = max(0.0, 1.0 - p_up - p_down)
-
-        # Renormalize
-        total = p_up + p_mid + p_down
-        if total > 0:
-            p_up /= total
-            p_mid /= total
-            p_down /= total
-
-        return {
-            "u": u,
-            "d": d,
-            "m": 1.0,  # Middle move is no change
-            "p_up": p_up * p_survive,
-            "p_mid": p_mid * p_survive,
-            "p_down": p_down * p_survive,
-            "p_default": p_default,
-            "discount": safe_exp(-r * dt),
-        }
+        if min(p_up, p_mid, p_down) < 0.0 or max(p_up, p_mid, p_down) > 1.0:
+            raise PricingError(
+                f"Invalid trinomial probabilities ({p_up}, {p_mid}, {p_down}); "
+                "increase num_steps or use a log-price scheme"
+            )
+        return p_up, p_mid, p_down
 
     def _build_stock_tree(
         self, spot: float, u: float, d: float, n_steps: int
@@ -679,6 +638,10 @@ class ConvertibleBondTrinomialEngine:
         max_nodes = 2 * n_steps + 1
         T = bond.time_to_maturity(valuation_date)
 
+        # The grid is u = exp(max_vol * sqrt(3 dt)): probabilities match that vol's variance
+        step_variance = math.log(u) ** 2 / 3.0
+        eta = bond.stock_jump_on_default
+
         # Initialize trees
         value_tree = np.zeros((n_steps + 1, max_nodes))
         conv_prob_tree = np.zeros((n_steps + 1, max_nodes))
@@ -742,23 +705,9 @@ class ConvertibleBondTrinomialEngine:
             p_default = 1.0 - safe_exp(-hazard_rate * dt)
             p_survive = 1.0 - p_default
 
-            # Risk-neutral probabilities using local rate
-            exp_growth = safe_exp((r_local - q) * dt)
-            p_up_raw = ((exp_growth - d) / (u - d)) * 0.5
-            p_down_raw = ((u - exp_growth) / (u - d)) * 0.5
-            p_mid_raw = 1.0 - p_up_raw - p_down_raw
-
-            # Ensure valid probabilities
-            p_up_raw = max(0.0, min(1.0, p_up_raw))
-            p_down_raw = max(0.0, min(1.0, p_down_raw))
-            p_mid_raw = max(0.0, 1.0 - p_up_raw - p_down_raw)
-
-            # Renormalize
-            total = p_up_raw + p_mid_raw + p_down_raw
-            if total > 0:
-                p_up_raw /= total
-                p_mid_raw /= total
-                p_down_raw /= total
+            p_up_raw, p_mid_raw, p_down_raw = self._calculate_moment_probabilities(
+                u, d, r_local - q + hazard_rate * eta, step_variance, dt
+            )
 
             # Scale by survival probability
             p_up = p_up_raw * p_survive

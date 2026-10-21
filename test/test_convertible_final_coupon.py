@@ -112,22 +112,10 @@ def test_forfeit_moves_the_final_coupon_out_of_the_coupon_stream():
 # --------------------------------------------------------------------------- engines
 
 
-TRINOMIAL_EARLY_CONVERSION = pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Open item: the constant-vol trinomial converts a riskless q = 0 bond at once (dirty 300.57, P 0.997 "
-        "at parity 300, where GS and the TF tree hold to 311.8), so almost no path reaches maturity unconverted"
-    ),
-)
-
-
-@pytest.mark.parametrize(
-    "engine",
-    [pytest.param(name, marks=TRINOMIAL_EARLY_CONVERSION) if name == "trinomial" else name for name in ENGINES],
-)
+@pytest.mark.parametrize("engine", list(ENGINES))
 def test_deep_in_the_money_forfeit_costs_one_discounted_coupon_per_conversion(engine):
-    # Riskless, so holding to maturity is optimal (with credit risk GS, the hazard engines and the
-    # trinomial convert deep in-the-money bonds early, and the final coupon is never at stake).
+    # Riskless, so holding to maturity is optimal (with credit risk the GS blend and the hazard
+    # engines convert deep in-the-money bonds early, and the final coupon is never at stake).
     # Parity 300 against redemption ~101: forfeiting takes c * exp(-rT) from every path converting at T.
     riskless = {"credit_spread": 0.0, "hazard_rate": 0.0}
     env = _env(30.0)
@@ -149,15 +137,14 @@ def test_far_out_of_the_money_the_setting_does_not_matter(engine):
 
 @pytest.mark.parametrize("scheme", list(ConvertibleBondTrinomialVolScheme))
 def test_trinomial_forfeit_costs_the_coupon_on_paths_converting_at_maturity(scheme):
-    # At the money and riskless the trinomial mostly holds to maturity, so every vol scheme must see
-    # the forfeited coupon on the paths that convert there (an engine ignoring FORFEIT shows 0). The
-    # bound is loose because the constant-vol scheme converts early on many paths (known issue): 0.09.
+    # At the money and riskless the trinomial holds to maturity, so every vol scheme must see the
+    # forfeited coupon on the paths that convert there (about half; an engine ignoring FORFEIT shows 0).
     riskless = {"credit_spread": 0.0, "hazard_rate": 0.0}
     engine = ConvertibleBondTrinomialEngine(_env(10.0), ConvertibleBondTreeParams(num_steps=200, trinomial_vol_scheme=scheme))
     keep = engine.price(dataclasses.replace(_bond(), **riskless))
     forfeit = engine.price(dataclasses.replace(_bond(FinalCouponOnConversion.FORFEIT), **riskless))
     discounted_coupon = _final_coupon(_bond()) * math.exp(-RATE * _bond().time_to_maturity(VALUATION))
-    assert 0.05 * discounted_coupon <= keep - forfeit <= 1.01 * discounted_coupon
+    assert 0.2 * discounted_coupon <= keep - forfeit <= 1.01 * discounted_coupon
 
 
 @pytest.mark.parametrize("engine", list(ENGINES))

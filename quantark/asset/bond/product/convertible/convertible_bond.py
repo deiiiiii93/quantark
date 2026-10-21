@@ -141,7 +141,8 @@ class ConvertibleBond(BaseBondProduct):
         credit_spread: Credit spread over risk-free rate (e.g., 0.02 for 200bp)
         hazard_rate: Default intensity for jump-diffusion model (annualized)
         recovery_rate: Recovery rate upon default (typically 0.4)
-        stock_jump_on_default: Stock price jump multiplier on default (eta, typically 0.4)
+        stock_jump_on_default: Fraction the stock drops on default (eta, typically 0.4):
+            S jumps to (1 - eta) * S; 1 sends it to zero
 
         # Dividend handling
         continuous_dividend_yield: Continuous dividend yield (annualized)

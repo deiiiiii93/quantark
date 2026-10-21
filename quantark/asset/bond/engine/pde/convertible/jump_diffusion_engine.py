@@ -49,15 +49,16 @@ class ConvertibleBondJumpDiffusionEngine:
 
     This engine implements a finite-difference PDE solver where the stock
     follows:
-        dS = (r - q - lambda * eta) * S * dt + sigma * S * dW - eta * S * dN
+        dS = (r - q + lambda * eta) * S * dt + sigma * S * dW - eta * S * dN
 
     where:
         lambda = hazard rate (default intensity)
         eta = stock price drop on default (stock_jump_on_default)
         dN = Poisson process with intensity lambda
 
-    The convertible bond PDE becomes:
-        V_t + 0.5 * sigma^2 * S^2 * V_SS + (r - q - lambda*eta) * S * V_S
+    The + lambda * eta drift compensates the expected drop, so the stock earns
+    r - q in total. The convertible bond PDE becomes:
+        V_t + 0.5 * sigma^2 * S^2 * V_SS + (r - q + lambda*eta) * S * V_S
             - r * V - lambda * (V - recovery) = 0
 
     Boundary conditions:
@@ -316,8 +317,8 @@ class ConvertibleBondJumpDiffusionEngine:
         N = len(S)
         recovery_value = recovery * bond.face_value
 
-        # Coefficient for drift term (adjusted for default jump)
-        drift = r - q - lambda_h * eta
+        # Drift while surviving: + lambda * eta compensates the drop on default
+        drift = r - q + lambda_h * eta
 
         # Build tridiagonal matrix coefficients
         # Using central differences for interior points
@@ -411,7 +412,8 @@ class ConvertibleBondJumpDiffusionEngine:
         """
         N = len(S)
 
-        drift = r - q - lambda_h * eta
+        # Drift while surviving, as in the value PDE
+        drift = r - q + lambda_h * eta
 
         diag = np.zeros(N)
         lower = np.zeros(N - 1)

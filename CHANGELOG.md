@@ -52,6 +52,17 @@ During 0.x the public API may still change between minor versions.
   priced such bonds about one discounted coupon low (0.90–0.95 per 100 face far out of the money on
   the demo bond). `ConvertibleBond.coupon_time` now pays it at maturity; every other coupon keeps
   its time, so other prices are unchanged.
+- The stock was not a martingale in the hazard-rate convertible engines. The stock drops by the
+  fraction `stock_jump_on_default` (η) on default, so while it survives it must drift at
+  `r - q + λη`; jump-diffusion used `r - q - λη` and the HW trinomial `r - q`. The constant-vol HW
+  scheme also moved u / 1 / d with weights ½p / ½ / ½(1−p), half the drift and 1.5× the variance,
+  so it converted deep in-the-money bonds almost at once even without credit risk (a riskless demo
+  bond at parity 300: 300.57, now 311.82 next to GS and the TF tree). Its probabilities now match the
+  step's mean and variance exactly and raise instead of clipping. On the demo bond at the default
+  hazard 1% and η = 0.4, jump-diffusion rises 1.7–4.4 and HW 0.9–5.0 per 100 face (spot 8–30), and
+  the four engines now agree to 0.015 (they were 2.7 apart). A European zero-coupon convertible now
+  matches its exact value to 0.002 on all four, and the demo bond matches Hull's tree (OFOD §27.4,
+  stock to zero) to 0.0012. With no hazard, jump-diffusion and the log-price HW schemes are unchanged.
 - TF CS01 was identically 0: `ConvertibleBondEngine.cs01` bumped `hazard_rate`, which the TF engine
   never reads. TF (tree and PDE) now bumps `credit_spread`, as GS does. The bumped bonds keep their
   calendar, business-day convention and settlement days, and a down bump floored at zero divides by
@@ -67,10 +78,6 @@ During 0.x the public API may still change between minor versions.
   parity = call price, where the TF split into cash and shares is undefined; on a lattice the node
   at the tie is called for cash (the call price joins the risky-discounted cash component) or
   converted, depending on the grid. It needs `credit_spread > 0`; the GS tree is not affected.
-- The constant-vol HW trinomial converts deep in-the-money bonds almost at once even without credit
-  risk: a riskless `q = 0` demo bond at parity 300 prices 300.57 with conversion probability 0.997,
-  where GS and the TF tree hold for the coupons and give 311.8. Its prices there are about 11 low,
-  and `final_coupon_on_conversion` barely moves them.
 
 ## [0.5.5] - 2026-10-16
 
