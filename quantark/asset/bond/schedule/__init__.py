@@ -9,6 +9,7 @@ from .cashflow import (
     calculate_accrued_interest,
     find_coupon_dates_for_settlement,
 )
+from .put_schedule import put_prices_by_step
 
 __all__ = [
     "CashFlow",
@@ -18,4 +19,5 @@ __all__ = [
     "ScheduleGenerator",
     "calculate_accrued_interest",
     "find_coupon_dates_for_settlement",
+    "put_prices_by_step",
 ]

@@ -14,6 +14,7 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 
 from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
+from quantark.asset.bond.schedule.put_schedule import put_prices_by_step
 from quantark.asset.bond.engine.pde.convertible.pde_params import ConvertibleBondPDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError, PricingError
@@ -147,6 +148,17 @@ class ConvertibleBondTFEngine:
         u, v = self._terminal_condition(bond, S)
         P = self._terminal_conversion_probability(bond, S)
 
+        # Puts by time step; one in the last step is exercised at maturity
+        put_by_step = put_prices_by_step(
+            bond, valuation_date, np.arange(N_t + 1) * dt
+        )
+        terminal_put = put_by_step.get(N_t)
+        if terminal_put is not None:
+            put_mask = terminal_put > u + v
+            u = np.where(put_mask, 0.0, u)
+            v = np.where(put_mask, terminal_put, v)
+            P = np.where(put_mask, 0.0, P)
+
         # Get coupon schedule
         coupon_schedule = self._build_coupon_schedule(bond, valuation_date)
 
@@ -201,7 +213,9 @@ class ConvertibleBondTFEngine:
             P = np.clip(P, 0.0, 1.0)
 
             # Apply constraints and update components and probability
-            u, v, P = self._apply_constraints(bond, S, u, v, node_date, P)
+            u, v, P = self._apply_constraints(
+                bond, S, u, v, node_date, P, put_by_step.get(n)
+            )
             P = np.clip(P, 0.0, 1.0)
 
         # Total value
@@ -394,6 +408,7 @@ class ConvertibleBondTFEngine:
         v: np.ndarray,
         node_date: datetime,
         P: np.ndarray,
+        put_price: Optional[float] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Apply early exercise constraints and update component decomposition.
@@ -404,6 +419,8 @@ class ConvertibleBondTFEngine:
             u: Equity component
             v: Bond component
             node_date: Current date
+            P: Conversion probability
+            put_price: Put price exercisable at this time step, if any
 
         Returns:
             Tuple of updated (u, v, conversion_probability)
@@ -443,7 +460,6 @@ class ConvertibleBondTFEngine:
                         optimal_value = call_price
 
             # Check put (holder's right)
-            put_price = bond.get_put_price_at(node_date)
             if put_price is not None:
                 if put_price > optimal_value:
                     action = "put"

@@ -14,6 +14,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 
 from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
+from quantark.asset.bond.schedule.put_schedule import put_prices_by_step
 from quantark.asset.bond.engine.tree.convertible.tree_params import ConvertibleBondTreeParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError, PricingError
@@ -301,8 +302,12 @@ class ConvertibleBondBinomialEngine:
                 coupon_amounts.append(max(0, coupon_amount))
 
         T = bond.time_to_maturity(valuation_date)
+        put_by_step = put_prices_by_step(
+            bond, valuation_date, np.arange(n_steps + 1) * dt
+        )
 
         # Terminal values at maturity
+        terminal_put = put_by_step.get(n_steps)
         for j in range(n_steps + 1):
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
@@ -313,6 +318,11 @@ class ConvertibleBondBinomialEngine:
                 conv_prob_tree[n_steps, j] = 1.0
             else:
                 value_tree[n_steps, j] = bond.face_value
+                conv_prob_tree[n_steps, j] = 0.0
+
+            # A put in the last step is exercised at maturity
+            if terminal_put is not None and terminal_put > value_tree[n_steps, j]:
+                value_tree[n_steps, j] = terminal_put
                 conv_prob_tree[n_steps, j] = 0.0
 
         # Backward induction
@@ -328,6 +338,8 @@ class ConvertibleBondBinomialEngine:
                     f"Invalid risk-neutral probability at step {i}: {p_up}. "
                     "Check volatility, rate curve, and num_steps."
                 )
+
+            put_price = put_by_step.get(i)
 
             for j in range(i + 1):
                 stock = stock_tree[i, j]
@@ -370,9 +382,6 @@ class ConvertibleBondBinomialEngine:
                 can_call = bond.is_callable_at(node_date, stock)
                 call_price = bond.get_call_price_at(node_date)
 
-                # Check for put
-                can_put = bond.is_puttable_at(node_date)
-                put_price = bond.get_put_price_at(node_date)
 
                 # Determine optimal action
                 value = continuation
@@ -395,7 +404,7 @@ class ConvertibleBondBinomialEngine:
                             is_converted = False
 
                 # Holder's put right
-                if can_put and put_price is not None:
+                if put_price is not None:
                     if put_price > value:
                         value = put_price
                         is_converted = False

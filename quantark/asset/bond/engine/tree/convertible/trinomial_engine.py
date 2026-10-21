@@ -14,6 +14,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 
 from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
+from quantark.asset.bond.schedule.put_schedule import put_prices_by_step
 from quantark.asset.bond.engine.tree.convertible.tree_params import ConvertibleBondTreeParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import ConvertibleBondTrinomialVolScheme
@@ -699,6 +700,11 @@ class ConvertibleBondTrinomialEngine:
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
 
+        put_by_step = put_prices_by_step(
+            bond, valuation_date, np.arange(n_steps + 1) * dt
+        )
+        terminal_put = put_by_step.get(n_steps)
+
         # Terminal values at maturity
         num_terminal = 2 * n_steps + 1
         for j in range(num_terminal):
@@ -712,6 +718,11 @@ class ConvertibleBondTrinomialEngine:
                 value_tree[n_steps, j] = bond.face_value
                 conv_prob_tree[n_steps, j] = 0.0
 
+            # A put in the last step is exercised at maturity
+            if terminal_put is not None and terminal_put > value_tree[n_steps, j]:
+                value_tree[n_steps, j] = terminal_put
+                conv_prob_tree[n_steps, j] = 0.0
+
             default_prob_tree[n_steps, j] = 0.0  # No default at maturity node
 
         # Backward induction with time-local parameters
@@ -719,6 +730,7 @@ class ConvertibleBondTrinomialEngine:
             t = i * dt  # Current time (years from valuation)
             t_next = t + dt  # End of this step
             node_date = valuation_date + timedelta(days=int(t * 365))
+            put_price = put_by_step.get(i)
             num_nodes = 2 * i + 1
 
             # Query time-local forward rate for this step
@@ -812,10 +824,6 @@ class ConvertibleBondTrinomialEngine:
                 can_call = bond.is_callable_at(node_date, stock)
                 call_price = bond.get_call_price_at(node_date)
 
-                # Check for put
-                can_put = bond.is_puttable_at(node_date)
-                put_price = bond.get_put_price_at(node_date)
-
                 # Determine optimal action
                 value = continuation
                 is_converted = False
@@ -836,7 +844,7 @@ class ConvertibleBondTrinomialEngine:
                             is_converted = False
 
                 # Holder's put right
-                if can_put and put_price is not None:
+                if put_price is not None:
                     if put_price > value:
                         value = put_price
                         is_converted = False
@@ -903,6 +911,11 @@ class ConvertibleBondTrinomialEngine:
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
 
+        put_by_step = put_prices_by_step(
+            bond, valuation_date, np.arange(n_steps + 1) * dt
+        )
+        terminal_put = put_by_step.get(n_steps)
+
         # Terminal values at maturity
         num_terminal = 2 * n_steps + 1
         for j in range(num_terminal):
@@ -916,6 +929,11 @@ class ConvertibleBondTrinomialEngine:
                 value_tree[n_steps, j] = bond.face_value
                 conv_prob_tree[n_steps, j] = 0.0
 
+            # A put in the last step is exercised at maturity
+            if terminal_put is not None and terminal_put > value_tree[n_steps, j]:
+                value_tree[n_steps, j] = terminal_put
+                conv_prob_tree[n_steps, j] = 0.0
+
             default_prob_tree[n_steps, j] = 0.0  # No default at maturity node
 
         # Backward induction with time-local parameters
@@ -923,6 +941,7 @@ class ConvertibleBondTrinomialEngine:
             t = i * dt  # Current time (years from valuation)
             t_next = t + dt  # End of this step
             node_date = valuation_date + timedelta(days=int(t * 365))
+            put_price = put_by_step.get(i)
             num_nodes = 2 * i + 1
 
             r_local = float(r_steps[i])
@@ -1004,10 +1023,6 @@ class ConvertibleBondTrinomialEngine:
                 can_call = bond.is_callable_at(node_date, stock)
                 call_price = bond.get_call_price_at(node_date)
 
-                # Check for put
-                can_put = bond.is_puttable_at(node_date)
-                put_price = bond.get_put_price_at(node_date)
-
                 # Determine optimal action
                 value = continuation
                 is_converted = False
@@ -1028,7 +1043,7 @@ class ConvertibleBondTrinomialEngine:
                             is_converted = False
 
                 # Holder's put right
-                if can_put and put_price is not None:
+                if put_price is not None:
                     if put_price > value:
                         value = put_price
                         is_converted = False
@@ -1105,6 +1120,11 @@ class ConvertibleBondTrinomialEngine:
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
 
+        put_by_step = put_prices_by_step(
+            bond, valuation_date, np.arange(n_steps + 1) * dt
+        )
+        terminal_put = put_by_step.get(n_steps)
+
         # Terminal values at maturity
         num_terminal = 2 * n_steps + 1
         for j in range(num_terminal):
@@ -1118,6 +1138,11 @@ class ConvertibleBondTrinomialEngine:
                 value_tree[n_steps, j] = bond.face_value
                 conv_prob_tree[n_steps, j] = 0.0
 
+            # A put in the last step is exercised at maturity
+            if terminal_put is not None and terminal_put > value_tree[n_steps, j]:
+                value_tree[n_steps, j] = terminal_put
+                conv_prob_tree[n_steps, j] = 0.0
+
             default_prob_tree[n_steps, j] = 0.0  # No default at maturity node
 
         # Backward induction with time-local parameters
@@ -1125,6 +1150,7 @@ class ConvertibleBondTrinomialEngine:
             t = i * dt  # Current time (years from valuation)
             t_next = t + dt  # End of this step
             node_date = valuation_date + timedelta(days=int(t * 365))
+            put_price = put_by_step.get(i)
             num_nodes = 2 * i + 1
 
             r_local = float(r_steps[i])
@@ -1225,10 +1251,6 @@ class ConvertibleBondTrinomialEngine:
                 can_call = bond.is_callable_at(node_date, stock)
                 call_price = bond.get_call_price_at(node_date)
 
-                # Check for put
-                can_put = bond.is_puttable_at(node_date)
-                put_price = bond.get_put_price_at(node_date)
-
                 # Determine optimal action
                 value = continuation
                 is_converted = False
@@ -1249,7 +1271,7 @@ class ConvertibleBondTrinomialEngine:
                             is_converted = False
 
                 # Holder's put right
-                if can_put and put_price is not None:
+                if put_price is not None:
                     if put_price > value:
                         value = put_price
                         is_converted = False

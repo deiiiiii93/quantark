@@ -14,6 +14,7 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 
 from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
+from quantark.asset.bond.schedule.put_schedule import put_prices_by_step
 from quantark.asset.bond.engine.pde.convertible.pde_params import ConvertibleBondPDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import ValidationError, PricingError
@@ -144,6 +145,12 @@ class ConvertibleBondJumpDiffusionEngine:
         V = self._terminal_condition(bond, S)
         P = self._terminal_conversion_probability(bond, S)
 
+        # Puts by time step; one in the last step is exercised at maturity
+        put_by_step = put_prices_by_step(
+            bond, valuation_date, np.arange(N_t + 1) * dt
+        )
+        V, P = self._apply_put(V, P, put_by_step.get(N_t))
+
         # Get coupon schedule
         coupon_schedule = self._build_coupon_schedule(bond, valuation_date)
 
@@ -202,7 +209,9 @@ class ConvertibleBondJumpDiffusionEngine:
             P = np.clip(P, 0.0, 1.0)
 
             # Apply early exercise constraints to both value and probability
-            V, P = self._apply_constraints(bond, S, V, node_date, P)
+            V, P = self._apply_constraints(
+                bond, S, V, node_date, P, put_by_step.get(n)
+            )
             P = np.clip(P, 0.0, 1.0)
 
         # Interpolate to get value at spot
@@ -458,6 +467,7 @@ class ConvertibleBondJumpDiffusionEngine:
         V: np.ndarray,
         node_date: datetime,
         P: np.ndarray,
+        put_price: Optional[float] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Apply early exercise constraints (conversion, call, put).
@@ -467,6 +477,8 @@ class ConvertibleBondJumpDiffusionEngine:
             S: Stock price grid
             V: Current values
             node_date: Current date in backward induction
+            P: Conversion probability
+            put_price: Put price exercisable at this time step, if any
 
         Returns:
             Tuple of (updated values, updated conversion probability) with
@@ -503,14 +515,31 @@ class ConvertibleBondJumpDiffusionEngine:
                             P_new[i] = 0.0
 
         # Put constraint (holder's right)
-        put_price = bond.get_put_price_at(node_date)
-        if put_price is not None:
-            put_mask = put_price >= (V_new - Tolerance.PRECISION)
-            V_new = np.maximum(V_new, put_price)
-            if np.any(put_mask):
-                P_new[put_mask] = 0.0
+        return self._apply_put(V_new, P_new, put_price)
 
-        return V_new, P_new
+    @staticmethod
+    def _apply_put(
+        V: np.ndarray, P: np.ndarray, put_price: Optional[float]
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Apply the holder's put at a time step (no-op when ``put_price`` is None).
+
+        Args:
+            V: Values at this time step
+            P: Conversion probability at this time step
+            put_price: Put price exercisable at this time step, if any
+
+        Returns:
+            Tuple of (values, conversion probability) after the put
+        """
+        if put_price is None:
+            return V, P
+        put_mask = put_price >= (V - Tolerance.PRECISION)
+        V = np.maximum(V, put_price)
+        if np.any(put_mask):
+            P = P.copy()
+            P[put_mask] = 0.0
+        return V, P
 
     def _build_coupon_schedule(
         self, bond: ConvertibleBond, valuation_date: datetime
