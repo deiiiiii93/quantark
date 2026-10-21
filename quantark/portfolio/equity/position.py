@@ -451,7 +451,6 @@ class EquityPosition:
         (``leg_id`` -> that leg's greeks), the product from plain solves of the same bump engine.
         """
         from copy import deepcopy
-        from quantark.execution.errors import CapabilityError
 
         gc = greeks_calculator
         bc = gc._bump_config
@@ -465,10 +464,6 @@ class EquityPosition:
             else ["delta", "gamma", "vega", "theta", "rho", "dividend_rho"]
         )
         bump_engine = gc._resolve_bump_engine(product, pricing_env, self.engine)
-        if drill:
-            reason = bump_engine.fold_drilldown_refusal(product, pricing_env)
-            if reason is not None:
-                raise CapabilityError(f"FoldMode.DRILLDOWN refused on {type(bump_engine).__name__}: {reason}")
 
         def solve(env):
             return self._folded_value(bump_engine, env, mode)

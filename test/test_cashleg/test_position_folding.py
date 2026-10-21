@@ -167,3 +167,5 @@ def test_drilldown_refuses_where_two_solves_may_not_share_a_discretization(engin
     pos = _position(product, engine(), legs, mode=FoldMode.DRILLDOWN)
     with pytest.raises(CapabilityError):
         pos.get_trade_risk(env, GreeksCalculator(), ["delta"])
+    with pytest.raises(CapabilityError):                      # CP4: the breakdown is a drilldown too
+        pos.get_trade_value_breakdown(env)

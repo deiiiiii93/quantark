@@ -380,14 +380,9 @@ def _run_folded_greek_bump(bump_id, base, bumped, gc) -> dict:
     """
     from quantark.asset.equity.riskmeasures.greeks.theta_shift import bumped_trade_value_folded
     from quantark.cashleg.folding import FoldMode, folded_trade_value
-    from quantark.execution.errors import CapabilityError
 
     mode = base.fold_mode
     bump_engine = gc._resolve_bump_engine(base.product, base.pricing_env, base.engine)
-    if mode is FoldMode.DRILLDOWN:
-        reason = bump_engine.fold_drilldown_refusal(base.product, base.pricing_env)
-        if reason is not None:
-            raise CapabilityError(f"FoldMode.DRILLDOWN refused on {type(bump_engine).__name__}: {reason}")
     if bumped.theta_shift is not None:
         value = bumped_trade_value_folded(
             bump_engine, bumped.theta_shift, base.cash_legs, quantity=base.quantity,

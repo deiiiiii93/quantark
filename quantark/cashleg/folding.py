@@ -556,6 +556,11 @@ def folded_trade_value(
             f"{type(engine).__name__} does not fold cash legs into its solve; "
             "price the legs on the event route"
         )
+    if mode is FoldMode.DRILLDOWN:
+        # one gate for every per-leg caller: breakdown, trade risk, kernel cells, theta (D11c, CP4)
+        reason = engine.fold_drilldown_refusal(product, pricing_env)
+        if reason is not None:
+            raise CapabilityError(f"FoldMode.DRILLDOWN refused on {type(engine).__name__}: {reason}")
     kwargs = {} if lifecycle_state is None else {"lifecycle_state": lifecycle_state}
     quantity = float(quantity)
     overlay = fold_cash_legs(
