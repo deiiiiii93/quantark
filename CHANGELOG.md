@@ -18,6 +18,15 @@ During 0.x the public API may still change between minor versions.
   `ConvertibleBondResult.engine_type` says which engine produced a price. Against the TF PDE at
   800×2000 on a widened domain the tree agrees to 0.05 per 100 face on seven cases (puts, soft
   call, term-structure rates and vol).
+- `ConvertibleBond.final_coupon_on_conversion` (`FinalCouponOnConversion.KEEP` or `FORFEIT`): whether
+  a holder converting at maturity still receives the final coupon. `KEEP`, the default, is unchanged
+  (maturity value `max(parity, face) + coupon`; prices byte-identical on all five engines). `FORFEIT`
+  gives `max(parity, face + coupon)`, the QuantLib convention: GS, HW, jump-diffusion, the TF PDE and
+  the TF tree fold the final coupon into `ConvertibleBond.maturity_redemption`, and
+  `ConvertibleBond.coupon_amount` drops it from the in-step coupons. Against QuantLib 1.44's
+  `BinomialConvertibleEngine<CRR>` on the AC7 cases at 2000 steps this convention is the largest
+  piece of the GS–QuantLib gap (up to 0.79 per 100 face, on the demo bond); with `FORFEIT` the GS
+  tree lands within 0.02 of QuantLib at 500 steps.
 
 ### Fixed
 
@@ -47,6 +56,10 @@ During 0.x the public API may still change between minor versions.
   parity = call price, where the TF split into cash and shares is undefined; on a lattice the node
   at the tie is called for cash (the call price joins the risky-discounted cash component) or
   converted, depending on the grid. It needs `credit_spread > 0`; the GS tree is not affected.
+- The constant-vol HW trinomial converts deep in-the-money bonds almost at once even without credit
+  risk: a riskless `q = 0` demo bond at parity 300 prices 300.57 with conversion probability 0.997,
+  where GS and the TF tree hold for the coupons and give 311.8. Its prices there are about 11 low,
+  and `final_coupon_on_conversion` barely moves them.
 
 ## [0.5.5] - 2026-10-16
 

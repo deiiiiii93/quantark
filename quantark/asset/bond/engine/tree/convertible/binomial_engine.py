@@ -296,10 +296,7 @@ class ConvertibleBondBinomialEngine:
             if cf_time > 0:
                 coupon_times.append(cf_time)
                 # Only coupon, not principal (which is handled at maturity)
-                coupon_amount = cf.amount
-                if cf.payment_date >= bond.maturity_date:
-                    coupon_amount -= bond.face_value  # Subtract principal
-                coupon_amounts.append(max(0, coupon_amount))
+                coupon_amounts.append(max(0, bond.coupon_amount(cf)))
 
         T = bond.time_to_maturity(valuation_date)
         # Step edges for coupons and puts; the last step ends at maturity exactly
@@ -309,16 +306,17 @@ class ConvertibleBondBinomialEngine:
 
         # Terminal values at maturity
         terminal_put = put_by_step.get(n_steps)
+        redemption = bond.maturity_redemption
         for j in range(n_steps + 1):
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
 
-            # At maturity: max(face_value, conversion_value)
-            if conversion_value > bond.face_value:
+            # At maturity: max(redemption, conversion_value)
+            if conversion_value > redemption:
                 value_tree[n_steps, j] = conversion_value
                 conv_prob_tree[n_steps, j] = 1.0
             else:
-                value_tree[n_steps, j] = bond.face_value
+                value_tree[n_steps, j] = redemption
                 conv_prob_tree[n_steps, j] = 0.0
 
             # A put in the last step is exercised at maturity

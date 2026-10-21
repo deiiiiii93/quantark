@@ -27,7 +27,7 @@ from quantark.util.calendar import (
     CalendarType,
     create_calendar,
 )
-from quantark.util.enum import PaymentFrequency, StubType
+from quantark.util.enum import FinalCouponOnConversion, PaymentFrequency, StubType
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import validate_positive, validate_probability
 
@@ -130,6 +130,8 @@ class ConvertibleBond(BaseBondProduct):
             (defaults to issue_date)
         conversion_end_date: Date until which conversion is allowed
             (defaults to maturity_date)
+        final_coupon_on_conversion: Whether converting at maturity keeps the final
+            coupon (KEEP, default) or forfeits it (FORFEIT)
 
         # Call/Put schedules
         call_schedule: List of call schedule entries (issuer's option)
@@ -183,6 +185,9 @@ class ConvertibleBond(BaseBondProduct):
     calendar: Optional[Calendar] = None
     business_day_convention: BusinessDayConvention = BusinessDayConvention.MODIFIED_FOLLOWING
     settlement_days: int = 0
+
+    # Conversion at maturity (last, so positional construction is unchanged)
+    final_coupon_on_conversion: FinalCouponOnConversion = FinalCouponOnConversion.KEEP
 
     # Cached schedule
     _cached_schedule: Optional[List[CashFlow]] = field(
@@ -414,6 +419,41 @@ class ConvertibleBond(BaseBondProduct):
             )
         except ValidationError:
             return 0.0
+
+    @property
+    def maturity_redemption(self) -> float:
+        """
+        Cash the holder gets at maturity by not converting, the amount parity is compared against.
+
+        Under KEEP the final coupon is paid whatever the holder does, so this is the face value;
+        under FORFEIT converting gives the coupon up, so it is face value plus the final coupon.
+        """
+        if self.final_coupon_on_conversion is FinalCouponOnConversion.KEEP:
+            return self.face_value
+        return self.face_value + sum(
+            cf.amount - self.face_value
+            for cf in self.get_all_cashflows()
+            if cf.payment_date >= self.maturity_date
+        )
+
+    def coupon_amount(self, cf: CashFlow) -> float:
+        """
+        Coupon an engine pays in the time step the cashflow falls in.
+
+        Principal is excluded (it is part of the maturity value); under FORFEIT the final
+        coupon is excluded as well, since it is part of maturity_redemption.
+
+        Args:
+            cf: Scheduled cashflow of this bond
+
+        Returns:
+            Coupon amount paid during the step
+        """
+        if cf.payment_date < self.maturity_date:
+            return cf.amount
+        if self.final_coupon_on_conversion is FinalCouponOnConversion.KEEP:
+            return cf.amount - self.face_value
+        return 0.0
 
     def parity(self, stock_price: float) -> float:
         """

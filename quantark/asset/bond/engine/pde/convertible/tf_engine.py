@@ -66,7 +66,8 @@ class ConvertibleBondTFEngine:
     with boundary conditions:
         - At conversion: u = conversion_value, v = 0
         - At redemption: u = 0, v = face_value
-        - At maturity: u = max(0, conversion_value - face_value), v = min(face_value, conversion_value)
+        - At maturity: u = conversion_value, v = 0 where conversion_value > maturity_redemption,
+          else u = 0, v = maturity_redemption
 
     This decomposition is particularly useful for analyzing the COCB
     (cash-only component of the bond) which is just v.
@@ -270,8 +271,8 @@ class ConvertibleBondTFEngine:
 
         At maturity:
         - If conversion: u = conversion_value, v = 0
-        - If redemption: u = 0, v = face_value
-        - Decision: max(face_value, conversion_value)
+        - If redemption: u = 0, v = maturity_redemption
+        - Decision: max(maturity_redemption, conversion_value)
 
         Args:
             bond: Convertible bond
@@ -280,7 +281,7 @@ class ConvertibleBondTFEngine:
         Returns:
             Tuple of (u, v) arrays
         """
-        face_value = bond.face_value
+        redemption = bond.maturity_redemption
         conversion_value = bond.conversion_ratio * S
 
         # u = equity component (value from conversion)
@@ -289,16 +290,16 @@ class ConvertibleBondTFEngine:
         v = np.zeros_like(S)
 
         if not bond.is_convertible_at(bond.maturity_date):
-            v[:] = face_value
+            v[:] = redemption
             return u, v
 
         for i in range(len(S)):
-            if conversion_value[i] > face_value:
+            if conversion_value[i] > redemption:
                 u[i] = conversion_value[i]
                 v[i] = 0.0
             else:
                 u[i] = 0.0
-                v[i] = face_value
+                v[i] = redemption
 
         return u, v
 
@@ -313,7 +314,7 @@ class ConvertibleBondTFEngine:
         if not bond.is_convertible_at(bond.maturity_date):
             return np.zeros_like(S)
         conversion_value = bond.conversion_ratio * S
-        return (conversion_value > bond.face_value).astype(float)
+        return (conversion_value > bond.maturity_redemption).astype(float)
 
     def _build_matrices(
         self,
@@ -507,9 +508,7 @@ class ConvertibleBondTFEngine:
         for cf in bond.get_all_cashflows():
             cf_time = (cf.payment_date - valuation_date).days / 365.0
             if 0 < cf_time <= T:
-                coupon_amount = cf.amount
-                if cf.payment_date >= bond.maturity_date:
-                    coupon_amount -= bond.face_value
+                coupon_amount = bond.coupon_amount(cf)
                 if coupon_amount > 0:
                     schedule.append((cf_time, coupon_amount))
 

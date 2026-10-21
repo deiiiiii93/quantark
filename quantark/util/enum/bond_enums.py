@@ -110,3 +110,16 @@ class BondDerivativeType(Enum):
     FUTURES = "futures"
     OPTION = "option"
     REPO = "repo"
+
+
+class FinalCouponOnConversion(Enum):
+    """
+    Whether a convertible holder who converts at maturity still receives the final coupon.
+
+    - KEEP: Conversion pays parity plus the final coupon (maturity value max(parity, face) + coupon)
+    - FORFEIT: Conversion gives up the final coupon (maturity value max(parity, face + coupon)),
+      the QuantLib convention
+    """
+
+    KEEP = "keep"
+    FORFEIT = "forfeit"

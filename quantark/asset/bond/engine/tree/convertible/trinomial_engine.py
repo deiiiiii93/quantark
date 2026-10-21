@@ -692,10 +692,7 @@ class ConvertibleBondTrinomialEngine:
             cf_time = (cf.payment_date - valuation_date).days / 365.0
             if cf_time > 0:
                 coupon_times.append(cf_time)
-                coupon_amount = cf.amount
-                if cf.payment_date >= bond.maturity_date:
-                    coupon_amount -= bond.face_value
-                coupon_amounts.append(max(0, coupon_amount))
+                coupon_amounts.append(max(0, bond.coupon_amount(cf)))
 
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
@@ -712,11 +709,11 @@ class ConvertibleBondTrinomialEngine:
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
 
-            if conversion_value > bond.face_value:
+            if conversion_value > bond.maturity_redemption:
                 value_tree[n_steps, j] = conversion_value
                 conv_prob_tree[n_steps, j] = 1.0
             else:
-                value_tree[n_steps, j] = bond.face_value
+                value_tree[n_steps, j] = bond.maturity_redemption
                 conv_prob_tree[n_steps, j] = 0.0
 
             # A put in the last step is exercised at maturity
@@ -904,10 +901,7 @@ class ConvertibleBondTrinomialEngine:
             cf_time = (cf.payment_date - valuation_date).days / 365.0
             if cf_time > 0:
                 coupon_times.append(cf_time)
-                coupon_amount = cf.amount
-                if cf.payment_date >= bond.maturity_date:
-                    coupon_amount -= bond.face_value
-                coupon_amounts.append(max(0, coupon_amount))
+                coupon_amounts.append(max(0, bond.coupon_amount(cf)))
 
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
@@ -924,11 +918,11 @@ class ConvertibleBondTrinomialEngine:
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
 
-            if conversion_value > bond.face_value:
+            if conversion_value > bond.maturity_redemption:
                 value_tree[n_steps, j] = conversion_value
                 conv_prob_tree[n_steps, j] = 1.0
             else:
-                value_tree[n_steps, j] = bond.face_value
+                value_tree[n_steps, j] = bond.maturity_redemption
                 conv_prob_tree[n_steps, j] = 0.0
 
             # A put in the last step is exercised at maturity
@@ -1114,10 +1108,7 @@ class ConvertibleBondTrinomialEngine:
             cf_time = (cf.payment_date - valuation_date).days / 365.0
             if cf_time > 0:
                 coupon_times.append(cf_time)
-                coupon_amount = cf.amount
-                if cf.payment_date >= bond.maturity_date:
-                    coupon_amount -= bond.face_value
-                coupon_amounts.append(max(0, coupon_amount))
+                coupon_amounts.append(max(0, bond.coupon_amount(cf)))
 
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
@@ -1134,11 +1125,11 @@ class ConvertibleBondTrinomialEngine:
             stock = stock_tree[n_steps, j]
             conversion_value = bond.parity(stock)
 
-            if conversion_value > bond.face_value:
+            if conversion_value > bond.maturity_redemption:
                 value_tree[n_steps, j] = conversion_value
                 conv_prob_tree[n_steps, j] = 1.0
             else:
-                value_tree[n_steps, j] = bond.face_value
+                value_tree[n_steps, j] = bond.maturity_redemption
                 conv_prob_tree[n_steps, j] = 0.0
 
             # A put in the last step is exercised at maturity

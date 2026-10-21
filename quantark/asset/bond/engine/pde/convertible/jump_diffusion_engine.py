@@ -63,7 +63,7 @@ class ConvertibleBondJumpDiffusionEngine:
     Boundary conditions:
         - At S=0: V = recovery * face_value
         - At S=S_max: V = conversion_ratio * S (pure equity)
-        - At maturity: V = max(face_value, conversion_ratio * S)
+        - At maturity: V = max(maturity_redemption, conversion_ratio * S)
     """
 
     def __init__(
@@ -253,7 +253,7 @@ class ConvertibleBondJumpDiffusionEngine:
         """
         Compute terminal condition at maturity.
 
-        At maturity: V = max(face_value, conversion_ratio * S)
+        At maturity: V = max(maturity_redemption, conversion_ratio * S)
 
         Args:
             bond: Convertible bond
@@ -262,11 +262,11 @@ class ConvertibleBondJumpDiffusionEngine:
         Returns:
             Array of terminal values
         """
-        face_value = bond.face_value
+        redemption = bond.maturity_redemption
         conversion_value = bond.conversion_ratio * S
         if bond.is_convertible_at(bond.maturity_date):
-            return np.maximum(face_value, conversion_value)
-        return face_value * np.ones_like(S)
+            return np.maximum(redemption, conversion_value)
+        return redemption * np.ones_like(S)
 
     def _terminal_conversion_probability(
         self, bond: ConvertibleBond, S: np.ndarray
@@ -279,7 +279,7 @@ class ConvertibleBondJumpDiffusionEngine:
         if not bond.is_convertible_at(bond.maturity_date):
             return np.zeros_like(S)
         conversion_value = bond.conversion_ratio * S
-        return (conversion_value > bond.face_value).astype(float)
+        return (conversion_value > bond.maturity_redemption).astype(float)
 
     def _build_matrices(
         self,
@@ -562,9 +562,7 @@ class ConvertibleBondJumpDiffusionEngine:
             cf_time = (cf.payment_date - valuation_date).days / 365.0
             if 0 < cf_time <= T:
                 # Extract just the coupon (not principal)
-                coupon_amount = cf.amount
-                if cf.payment_date >= bond.maturity_date:
-                    coupon_amount -= bond.face_value
+                coupon_amount = bond.coupon_amount(cf)
                 if coupon_amount > 0:
                     schedule.append((cf_time, coupon_amount))
 

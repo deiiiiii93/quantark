@@ -118,16 +118,16 @@ class ConvertibleBondTFTreeEngine:
         q = bond.continuous_dividend_yield
         spread = bond.credit_spread
         ratio = bond.conversion_ratio
-        face = bond.face_value
         coupons = self._coupon_schedule(bond)
         put_by_step = put_prices_by_step(bond, valuation_date, times)
 
         # Terminal: convert or redeem; a put in the last step is exercised at maturity
         stock = self._stock_level(spot, u, n_steps)
         parity = ratio * stock
-        converted = (parity > face) & bond.is_convertible_at(bond.maturity_date)
-        V = np.where(converted, parity, face)
-        B = np.where(converted, 0.0, face)
+        redemption = bond.maturity_redemption
+        converted = (parity > redemption) & bond.is_convertible_at(bond.maturity_date)
+        V = np.where(converted, parity, redemption)
+        B = np.where(converted, 0.0, redemption)
         P = converted.astype(float)
         V, B, P = self._apply_put(V, B, P, put_by_step.get(n_steps))
 
@@ -231,16 +231,14 @@ class ConvertibleBondTFTreeEngine:
         return spot * u ** (2.0 * np.arange(step + 1) - step)
 
     def _coupon_schedule(self, bond: ConvertibleBond) -> List[Tuple[float, float]]:
-        """(time, amount) of future coupons, principal excluded, on the TF PDE's clock."""
+        """(time, amount) of future coupons paid within a step, on the TF PDE's clock."""
         valuation_date = self.pricing_env.valuation_date
         T = bond.time_to_maturity(valuation_date)
         schedule = []
         for cf in bond.get_all_cashflows():
             cf_time = (cf.payment_date - valuation_date).days / 365.0
             if 0 < cf_time <= T:
-                amount = cf.amount
-                if cf.payment_date >= bond.maturity_date:
-                    amount -= bond.face_value
+                amount = bond.coupon_amount(cf)
                 if amount > 0:
                     schedule.append((cf_time, amount))
         return schedule
