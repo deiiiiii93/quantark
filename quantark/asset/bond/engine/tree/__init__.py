@@ -5,10 +5,12 @@ from quantark.asset.bond.engine.tree.convertible import (
     ConvertibleBondTreeParams,
     ConvertibleBondBinomialEngine,
     ConvertibleBondTrinomialEngine,
+    ConvertibleBondTFTreeEngine,
 )
 
 __all__ = [
     "ConvertibleBondTreeParams",
     "ConvertibleBondBinomialEngine",
     "ConvertibleBondTrinomialEngine",
+    "ConvertibleBondTFTreeEngine",
 ]

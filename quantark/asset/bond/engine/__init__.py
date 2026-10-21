@@ -12,6 +12,7 @@ from .tree.convertible import (
     ConvertibleBondTreeParams,
     ConvertibleBondBinomialEngine,
     ConvertibleBondTrinomialEngine,
+    ConvertibleBondTFTreeEngine,
 )
 from .pde.convertible import (
     ConvertibleBondPDEParams,
@@ -36,6 +37,7 @@ __all__ = [
     "ConvertibleBondTreeParams",
     "ConvertibleBondBinomialEngine",
     "ConvertibleBondTrinomialEngine",
+    "ConvertibleBondTFTreeEngine",
     "ConvertibleBondPDEParams",
     "ConvertibleBondJumpDiffusionEngine",
     "ConvertibleBondTFEngine",
