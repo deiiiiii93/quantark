@@ -7,6 +7,43 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ConvertibleBondTFTreeEngine`: the Tsiveriotis-Fernandes model on a CRR binomial tree, a lattice
+  twin of the TF PDE. Each node carries the total value and its cash-only component (COCB), which
+  discounts at `r + credit_spread`. Time steps are equal in total implied variance, so a vol term
+  structure keeps the tree recombining; flat vol gives equal time steps. Select it with
+  `ConvertibleBondEngine(env, method=EngineType.TREE(ConvertibleBondMethod.TF))`;
+  `EngineType.PDE(TF)`, `ConvertibleBondMethod.TF` and `"tf"` still mean the TF PDE.
+  `ConvertibleBondResult.engine_type` says which engine produced a price. Against the TF PDE at
+  800×2000 on a widened domain the tree agrees to 0.05 per 100 face on seven cases (puts, soft
+  call, term-structure rates and vol).
+
+### Fixed
+
+- Convertible puts were silently dropped. GS, HW (all three vol schemes), jump-diffusion and the
+  TF PDE applied a put only on a step whose whole-day date equalled the put date; at the default
+  200 GS steps the demo puttable bond priced the same with or without its put (worth ~2.4). Puts
+  now land on the first step at or after their date (a coupon paid on the put date is kept), and a
+  put in the last step is exercised at maturity.
+- Convertible coupons could fall between two steps and never be paid: the coupon window ended at
+  `t + dt` while the next step began at `(i + 1) * dt`. GS, HW, jump-diffusion and the TF PDE priced
+  a 5% semi-annual bond ~2.2 low on some grids (265 and 267 steps). Rate lookups are unchanged, so
+  every other price is bit-identical.
+- TF CS01 was identically 0: `ConvertibleBondEngine.cs01` bumped `hazard_rate`, which the TF engine
+  never reads. TF (tree and PDE) now bumps `credit_spread`, as GS does. The bumped bonds keep their
+  calendar, business-day convention and settlement days, and a down bump floored at zero divides by
+  the actual bump width (HW and jump-diffusion CS01 at `hazard_rate = 0` were half the one-sided
+  value).
+
+### Known issues
+
+- TF prices of hard-callable bonds are grid-sensitive in both TF engines (about ±0.45 per 100 face
+  on the demo callable bond as N or the PDE grid changes). On a lattice, a node just below
+  parity = call price is called for cash rather than converted, which moves the call price into the
+  risky-discounted cash component; whether such a node exists alternates with the grid. The GS tree
+  is not affected.
+
 ## [0.5.5] - 2026-10-16
 
 > **Version numbering.** The `[0.6.0]` to `[0.10.0]` sections below were internal milestones and were

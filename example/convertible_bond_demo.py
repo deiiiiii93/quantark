@@ -152,6 +152,7 @@ def demo_method_comparison():
         ("Trinomial HW", ConvertibleBondMethod.TRINOMIAL_HW),
         ("Jump-Diffusion PDE", ConvertibleBondMethod.JUMP_DIFFUSION),
         ("Tsiveriotis-Fernandes PDE", ConvertibleBondMethod.TF),
+        ("Tsiveriotis-Fernandes tree", EngineType.TREE(ConvertibleBondMethod.TF)),
     ]
 
     # Use higher resolution for better accuracy
