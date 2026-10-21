@@ -129,5 +129,14 @@ def problem_identity(prepared) -> Optional[str]:
         (plain(env.valuation_date), plain(env.day_count_convention), int(env.bus_days_in_year)),
         plain(calendar_identity(effective_settlement_calendar(product, env))),
         plain(solver.params.event_projection),
-        plain(prepared.request),
+        _plain_request(prepared.request),
     ))
+
+
+def _plain_request(request):
+    """``plain(request)``; a folded request (``request.fold``) adds its overlay, an unfolded one keeps
+    the identity it had before requests could carry one (cash-leg folding spec D8)."""
+    value = plain(request)
+    if getattr(request, "fold", None) is None:
+        return tuple(item for item in value if item[0] != "fold")
+    return value

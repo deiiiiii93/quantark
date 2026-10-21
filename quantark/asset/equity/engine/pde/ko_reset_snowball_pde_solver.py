@@ -37,6 +37,9 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     _supported_product_type: type = KnockOutResetSnowballOption
     _solver_name: str = "KOResetSnowballPDESolver"
     _adapter_class = KOResetAdapter
+    #: the not-knocked-in surface fires the pre-KI schedule, the knocked-in one the post-KI schedule
+    _fold_alive_schedule = "pre"
+    _fold_ki_schedule = "post"
 
     def __init__(self, params=None):
         super().__init__(params=params)
@@ -214,6 +217,34 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             return float(record.payoff) * float(pricing_env.get_discount_factor(settlement_time))
         return float(record.payoff)
 
+    # --- cash-leg folding --------------------------------------------------------------------
+
+    def _fold_ko_records(self, product, pricing_env, tau: float):
+        """Both schedules' in-life records: the pre schedule's, then the post schedule's."""
+        pre = self._filter_observations_by_tau(self._get_cached_pre_ko_records(pricing_env, product), tau)
+        post = self._filter_observations_by_tau(self._get_cached_post_ko_records(pricing_env, product), tau)
+        return [("pre", rec) for rec in pre] + [("post", rec) for rec in post]
+
+    def _fold_no_ki_timing(self, product, pricing_env):
+        """The alive branch matures on the first schedule: determined at its maturity, paid the terminal
+        settlement lag later, discounted from there to the pre-maturity by its own ratio."""
+        timing = self._terminal_timing(product, pricing_env)
+        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+        payment = pre_maturity + (float(timing.payment_time) - float(timing.determination_time))
+        return pre_maturity, payment, self._df_between_times(pricing_env, pre_maturity, payment)
+
+    def _folded_knock_out_cash(self, product, pricing_env, decision, fold) -> float:
+        """The folded cash of the record the valuation-date decision fired, on its own schedule, at
+        its payment (as ``_knocked_out_value`` discounts its payoff)."""
+        bound = self._bind_fold(product, pricing_env, fold)
+        record = decision.ko_record
+        schedule = "pre" if decision.ko_regime == "pre" else "post"
+        amount = bound.ko_amount(schedule, record.observation_time)
+        settlement_time = self._ko_settlement_time(product, pricing_env, record)
+        if settlement_time is not None and settlement_time > 0.0:
+            return float(amount) * float(pricing_env.get_discount_factor(settlement_time))
+        return float(amount)
+
     def _uses_grid_layer(self) -> bool:
         return True
 
@@ -326,6 +357,8 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             [product.get_maturity_payoff_v0(s, pricing_env, contract_tenor=tenor) for s in s_vec]
         )
         grid[:, -1] = payoffs * self._structured_terminal_delay_df
+        if self._fold is not None:
+            grid[:, -1] += self._fold.no_ki * self._fold.no_ki_df
 
     def _apply_step_modifications_two_surface(
         self,

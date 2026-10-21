@@ -52,6 +52,9 @@ class OutputRequest:
     external_pv: Optional[float] = None
     #: False: no valuation-date short-circuit (a spot curve reads the solved surface itself)
     short_circuit: bool = True
+    #: Cash legs folded into the payoff (``quantark.cashleg.folding.FoldOverlay``): a PRICE
+    #: operation only (``price_folded``); ``None`` on every other request
+    fold: Any = None
 
 
 @dataclass(frozen=True)

@@ -40,6 +40,11 @@ class SnowballAdapter(FamilyAdapter):
         # is a pure function of the product, so a clear only costs a rebuild.
         solver = self.solver
         solver._product_token_memo.clear()
+        if request.fold is not None and (request.operation is not Operation.PRICE or request.event_stats):
+            from quantark.execution.errors import CapabilityError
+
+            # the statistics columns are the event route: folded cash in them would corrupt it
+            raise CapabilityError("folded cash legs price a PRICE operation only (price_folded)")
         if request.operation is Operation.EVENT_STATS:
             return   # the facade checked the type and the environment; the product after tau
         solver._check_product_type(product)
@@ -80,12 +85,17 @@ class SnowballAdapter(FamilyAdapter):
             # the spot curve's surface: the solve alone, no valuation-date short-circuit
             return None
         if tau <= 0:
+            if request.fold is not None:
+                solver._refuse_expired_fold()
             # Expired: return terminal payoff (Greeks zero)
             return self._outcome("expired", op, solver._calculate_terminal_value(product, spot, env))
         # Knocked out at valuation by the contract's own decision (the payoff is fixed: delta, gamma 0)
         decision = self._valuation_decision(product, env)
         if decision.knocked_out:
             value = solver._knocked_out_value(product, env, decision)
+            if request.fold is not None:
+                # the deciding record's folded cash, discounted as the short-circuit discounts its payoff
+                value = value + solver._folded_knock_out_cash(product, env, decision, request.fold)
             if op is Operation.SESSION_OUTPUTS and request.event_stats and self.supports_statistics_group:
                 stats = self._knocked_out_statistics(product, env, request, decision, pv=value)
                 return TerminalOutcome("knocked_out_at_valuation", self._session_outputs(value, None, stats))
@@ -112,6 +122,8 @@ class SnowballAdapter(FamilyAdapter):
         # date schedules against (_stash_grid_request_env)
         solver = self.solver
         knocked_in = solver._prepare_solve_state(product, env)
+        # per solve: the bound overlay of a folded PRICE, None on every other operation
+        solver._fold = solver._bind_fold(product, env, request.fold)
         solver._stash_grid_request_env(env)
         if solver._profile_enabled:
             solver._reset_profile_stats()
@@ -186,9 +198,12 @@ class SnowballAdapter(FamilyAdapter):
             ):
                 continue
             step = layout.time.step_at(t_obs)
+            payoff = rec.payoff if rec.payoff is not None else 0.0
+            if solver._fold is not None:
+                payoff = float(payoff) + solver._fold_ko_cash(rec, ("alive", "ki"))
             cash = solver._cashflow_value_at_time(
                 pricing_env=pricing_env,
-                cashflow=rec.payoff if rec.payoff is not None else 0.0,
+                cashflow=payoff,
                 current_time=t_obs,
                 settlement_time=rec.settlement_time,
             )

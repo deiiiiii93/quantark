@@ -13,8 +13,9 @@ For detailed design, see: asset/equity/engine/docs/snowball_pde_engine.md
 """
 
 from collections import OrderedDict
+from dataclasses import dataclass
 from time import perf_counter
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import scipy.sparse as sp
@@ -57,11 +58,47 @@ from quantark.util.enum.engine_enums import EventProjectionMode
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
+    almost_equal,
     is_close,
     is_greater_than_or_close,
     is_less_than_or_close,
 )
 
+if TYPE_CHECKING:
+    from quantark.cashleg.folding import FoldOverlay
+
+
+
+@dataclass(frozen=True)
+class _BoundFold:
+    """A ``FoldOverlay`` bound to one solve's records (cash-leg folding spec D4, D5).
+
+    ``ko`` maps ``(schedule, observation_time)`` of every in-life knock-out record to its folded
+    cash per unit, paid at the record's own settlement. ``no_ki`` / ``ki`` are the maturity
+    branches' cash per unit at their payments; ``no_ki_df`` / ``ki_df`` discount it from the
+    branch's determination to its payment (the product's terminal delay factor, or the KO-reset
+    alive branch's own ratio at its pre-maturity).
+    """
+
+    ko: Dict[Tuple[str, float], float]
+    no_ki: float
+    ki: float
+    no_ki_df: float
+    ki_df: float
+
+    def ko_amount(self, schedule: str, observation_time: float) -> float:
+        """The folded cash of one record; a record the overlay was not bound to raises (fail closed)."""
+        key = (schedule, float(observation_time))
+        amount = self.ko.get(key)
+        if amount is not None:
+            return amount
+        for (tag, t), value in self.ko.items():
+            if tag == schedule and almost_equal(t, float(observation_time), tol=Tolerance.ZERO):
+                return value
+        raise ValidationError(
+            f"knock-out record ({schedule}, t={float(observation_time)}) carries no folded cash: "
+            "the overlay was bound to other records"
+        )
 
 
 class _ContinuousKIFirstPassage:
@@ -280,6 +317,13 @@ class _ContinuousKIFirstPassage:
         return out
 
 
+def _with_cash(row: EdgeRow, cash: float) -> EdgeRow:
+    """``row`` with folded maturity ``cash`` added (an alive or knocked-in branch's, discounted)."""
+    if almost_equal(cash, 0.0, tol=0.0):
+        return row
+    return EdgeRow(row.value + cash, row.branch, row.terms + (RowTerm("M", cash),), row.copy_from_ki)
+
+
 class SnowballPDESolver(BasePDESolver):
     """
     PDE solver for Snowball (autocallable) options using the Two-Surface method.
@@ -320,6 +364,10 @@ class SnowballPDESolver(BasePDESolver):
     _first_passage_ki_supported: bool = True
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     _adapter_class = SnowballAdapter
+    supports_cash_leg_folding = True
+    #: The overlay schedule of the knock-out records each surface fires (KO-reset: "pre" / "post").
+    _fold_alive_schedule: str = "main"
+    _fold_ki_schedule: str = "main"
 
     def __init__(
         self, params: Optional[PDEParams] = None, enable_profiling: bool = False
@@ -372,6 +420,9 @@ class SnowballPDESolver(BasePDESolver):
         # mutated (or GC'd and id-reused) between solves can never hit a stale
         # token.
         self._product_token_memo: Dict[Tuple[int, str], Tuple[str, object]] = {}
+        # The overlay a folded PRICE binds (``price_folded``): set by the adapter's solve state,
+        # None on every other operation and outside a folded solve.
+        self._fold: Optional[_BoundFold] = None
 
     def _constructor_kwargs(self) -> dict:
         return {**super()._constructor_kwargs(), "enable_profiling": self._profile_enabled}
@@ -519,6 +570,104 @@ class SnowballPDESolver(BasePDESolver):
             ValidationError: If product configuration is incompatible with PDE
         """
         return self._run(product, pricing_env, OutputRequest(Operation.PRICE))
+
+    def price_folded(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        overlay: "FoldOverlay",
+        *,
+        lifecycle_state=None,
+    ) -> float:
+        """Per-unit NPV with ``overlay``'s cash legs folded into the product's own payoff (ship spec D4).
+
+        One PRICE march on the plain solve's layout, damping and steps: knock-out cash is added to
+        each knock-out record's payoff wherever the record pays (interior and terminal events, the
+        valuation-date column, the knock-out edge row) before its settlement discount; maturity cash
+        to each branch's redemption before the terminal delay factor (the knocked-in branch also on
+        the knocked-in rows, as the event statistics' knock-in column carries it; the alive branch on
+        the alive no-event rows, as the product's own redemption); the valuation-instant knock-out
+        pays the deciding record's cash. ``overlay.constant_pv`` is not included. An empty overlay is
+        ``price()`` bitwise; the event statistics never see an overlay.
+        """
+        if overlay.is_empty:
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
+
+        validate_settlement_capability(self, product, lifecycle_state)
+        try:
+            return float(self._run(product, pricing_env, OutputRequest(Operation.PRICE, fold=overlay)))
+        finally:
+            self._fold = None
+
+    # --- cash-leg folding: the overlay bound to this solve's records -------------------------------
+
+    def _fold_ko_records(self, product, pricing_env, tau: float):
+        """``(schedule, record)`` of every knock-out record a solve can reach, in [0, tau]."""
+        records = self._filter_observations_by_tau(self._get_cached_ko_records(pricing_env, product), tau)
+        return [(self._fold_alive_schedule, rec) for rec in records]
+
+    def _fold_no_ki_timing(self, product, pricing_env):
+        """``(determination, payment, determination -> payment DF)`` of the alive maturity branch."""
+        timing = self._terminal_timing(product, pricing_env)
+        return (float(timing.determination_time), float(timing.payment_time),
+                self._terminal_delay_df(product, pricing_env))
+
+    def _bind_fold(self, product, pricing_env, fold: Optional["FoldOverlay"]) -> Optional[_BoundFold]:
+        """``fold`` bound one to one to this solve's knock-out records and maturity branches (D5)."""
+        if fold is None:
+            return None
+        tau = float(product.get_maturity(pricing_env))
+        tagged = self._fold_ko_records(product, pricing_env, tau)
+        amounts = fold.bind_ko([
+            (tag, float(rec.observation_time),
+             float(rec.settlement_time if rec.settlement_time is not None else rec.observation_time))
+            for tag, rec in tagged
+        ])
+        ko: Dict[Tuple[str, float], float] = {}
+        for (tag, rec), amount in zip(tagged, amounts):
+            key = (tag, float(rec.observation_time))
+            if key in ko:
+                raise ValidationError(f"two knock-out records share {key}: their folded cash is ambiguous")
+            ko[key] = float(amount)
+        no_ki_det, no_ki_pay, no_ki_df = self._fold_no_ki_timing(product, pricing_env)
+        timing = self._terminal_timing(product, pricing_env)
+        return _BoundFold(
+            ko=ko,
+            no_ki=float(fold.bind_terminal("no_ki", no_ki_det, no_ki_pay)),
+            ki=float(fold.bind_terminal("ki", float(timing.determination_time), float(timing.payment_time))),
+            no_ki_df=float(no_ki_df),
+            ki_df=float(self._terminal_delay_df(product, pricing_env)),
+        )
+
+    def _fold_ko_cash(self, record, surfaces) -> float:
+        """The folded cash of ``record`` fired on ``surfaces`` (the knocked-in surface alone fires the
+        knocked-in schedule)."""
+        schedule = self._fold_ki_schedule if tuple(surfaces) == ("ki",) else self._fold_alive_schedule
+        return self._fold.ko_amount(schedule, record.observation_time)
+
+    def _folded_knock_out_cash(self, product, pricing_env, decision, fold) -> float:
+        """The folded cash a knock-out decided at valuation pays: the record at time zero, discounted
+        from its settlement as ``_get_immediate_ko_payoff`` discounts its payoff."""
+        bound = self._bind_fold(product, pricing_env, fold)
+        record = self._find_record_at_time(product.resolve_ko_observations(pricing_env), 0.0)
+        if record is None:
+            raise ValidationError("a knock-out decided at valuation needs a knock-out record at time zero")
+        amount = bound.ko_amount(self._fold_alive_schedule, record.observation_time)
+        settlement_time = record.settlement_time
+        if settlement_time is not None and settlement_time > 0.0:
+            return float(amount) * float(pricing_env.get_discount_factor(settlement_time))
+        return float(amount)
+
+    @staticmethod
+    def _refuse_expired_fold() -> None:
+        """Expired, the fold structure is trivial and leg overlays are empty: no event can carry cash."""
+        from quantark.execution.errors import CapabilityError
+
+        raise CapabilityError(
+            "an expired autocallable has no knock-out or maturity event left to carry folded cash; "
+            "its cash legs are constants on the event route"
+        )
 
     def _spot_curve_solution(self, product, pricing_env):
         # the solved surface alone: no valuation-date short-circuit (as _solve had none)
@@ -1328,6 +1477,8 @@ class SnowballPDESolver(BasePDESolver):
             [product.get_maturity_payoff_v0(s, pricing_env) for s in s_vec]
         )
         grid[:, -1] = payoffs * self._structured_terminal_delay_df
+        if self._fold is not None:
+            grid[:, -1] += self._fold.no_ki * self._fold.no_ki_df
 
     def _set_terminal_condition_v1(
         self,
@@ -1347,6 +1498,8 @@ class SnowballPDESolver(BasePDESolver):
             [product.get_maturity_payoff_v1(s, pricing_env) for s in s_vec]
         )
         grid[:, -1] = payoffs * self._structured_terminal_delay_df
+        if self._fold is not None:
+            grid[:, -1] += self._fold.ki * self._fold.ki_df
 
     def _apply_terminal_ko(
         self,
@@ -1370,6 +1523,8 @@ class SnowballPDESolver(BasePDESolver):
         barrier = ko_record.barrier
         if breach is None:
             payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
+            if self._fold is not None:
+                payoff = float(payoff) + self._fold_ko_cash(ko_record, surfaces)
             # Discount payoff if settlement is different from observation
             cashflow_value = self._cashflow_value_at_time(
                 pricing_env=pricing_env,
@@ -1464,6 +1619,8 @@ class SnowballPDESolver(BasePDESolver):
             # Use current KO payoff, allocated to the knock-out unit of the record it pays
             rec = self._next_ko_record_at_time(product, pricing_env, current_time, t_idx)
             payoff = float(rec.payoff or 0.0) if rec is not None else 0.0
+            if rec is not None and self._fold is not None:
+                payoff = payoff + self._fold_ko_cash(rec, ("alive",))
             unit = (self._cashflow_value_at_time(pricing_env=pricing_env, cashflow=1.0, current_time=current_time,
                                                  settlement_time=rec.settlement_time) if rec is not None else 0.0)
             # _get_ko_payoff_at_time's cash from the record and unit already found: _cashflow_value_at_time
@@ -1487,6 +1644,9 @@ class SnowballPDESolver(BasePDESolver):
             if edge not in edges:
                 edges[edge] = self._v0_no_event_row(edge, tau, product, pricing_env, s_vec, principal, rebate,
                                                     df_to_maturity, call_rebate)
+                if self._fold is not None:
+                    # the alive branch's folded cash, discounted as the product's own redemption on this row
+                    edges[edge] = _with_cash(edges[edge], self._fold.no_ki * df_to_maturity)
         lower, upper = edges["lower"], edges["upper"]
         return self._knock_in_side_row(t_idx, tau, product, pricing_env, s_vec, lower, upper)
 
@@ -1664,6 +1824,16 @@ class SnowballPDESolver(BasePDESolver):
             # Put is worthless at high S
             v = principal * df_to_maturity
             upper = EdgeRow(v, "v1_upper_principal", (RowTerm("M", v),))
+        if self._fold is not None:
+            # The knocked-in branch's folded cash on the rows the event statistics' knock-in column
+            # carries it: settled knocked in at the knock-in edge, and at the knock-out edge only when
+            # the knock-out cannot fire on the knocked-in surface (``_ki_rows``).
+            cash = self._fold.ki * df_to_maturity
+            at_ko_edge = 0.0 if self._ko_survives_ki(product) else cash
+            if product.is_reverse:
+                lower, upper = _with_cash(lower, at_ko_edge), _with_cash(upper, cash)
+            else:
+                lower, upper = _with_cash(lower, cash), _with_cash(upper, at_ko_edge)
         return lower, upper
 
     def _apply_step_modifications_two_surface(
@@ -1761,6 +1931,8 @@ class SnowballPDESolver(BasePDESolver):
         barrier = ko_record.barrier
         if breach is None:
             payoff = ko_record.payoff if ko_record.payoff is not None else 0.0
+            if self._fold is not None:
+                payoff = float(payoff) + self._fold_ko_cash(ko_record, surfaces)
             # Discount payoff based on settlement time
             cashflow_value = self._cashflow_value_at_time(
                 pricing_env=pricing_env,

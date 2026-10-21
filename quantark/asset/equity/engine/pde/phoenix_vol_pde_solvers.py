@@ -66,6 +66,15 @@ class LocalVolPhoenixPDESolver(LocalVolSurfaceMixin, LocalVolBarrierCrossingMixi
             lambda: PhoenixPDESolver.price(self, product, pricing_env),
         )
 
+    def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:
+        """``PhoenixPDESolver.price_folded`` inside the surface scope ``price`` runs in."""
+        return self._with_surface(
+            pricing_env,
+            lambda: PhoenixPDESolver.price_folded(
+                self, product, pricing_env, overlay, lifecycle_state=lifecycle_state
+            ),
+        )
+
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Dict[str, float]:
@@ -103,6 +112,10 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
     engine_type = EngineType.PDE
     _solver_name = "Heston2DPhoenixPDESolver"
     _adapter_class = Heston2DPhoenixAdapter
+    # The 1D fold marches the 1D two-surface core, not this route's 2D ADI march: refuse until the
+    # 2D march folds (cash-leg folding spec, task T6).
+    supports_cash_leg_folding = False
+    price_folded = BaseEngine.price_folded
 
     def __init__(
         self,

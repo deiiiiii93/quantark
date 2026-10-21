@@ -180,6 +180,8 @@ class PhoenixPDESolver(SnowballPDESolver):
         payoff_v1 = np.array(
             [product.get_maturity_payoff_v1(s, pricing_env) for s in s_vec]
         ) * self._structured_terminal_delay_df
+        if self._fold is not None:
+            payoff_v1 = payoff_v1 + self._fold.ki * self._fold.ki_df
         for grid in grid_v1_list:
             grid[:, -1] = payoff_v1
 
@@ -193,6 +195,9 @@ class PhoenixPDESolver(SnowballPDESolver):
                     for s in s_vec
                 ]
             ) * self._structured_terminal_delay_df
+            if self._fold is not None:
+                # the same cash on every memory state: a unit of arrears is worth what it was
+                payoff_v0 = payoff_v0 + self._fold.no_ki * self._fold.no_ki_df
             grid[:, -1] = payoff_v0
 
     def _coupon_payment_time(
@@ -942,6 +947,9 @@ class PhoenixPDESolver(SnowballPDESolver):
     ) -> None:
         barrier = ko_record.barrier
         base_payoff = float(ko_record.payoff or 0.0)
+        if self._fold is not None:
+            # folded knock-out cash rides with the redemption on every branch (joint, sequential, nodal)
+            base_payoff = base_payoff + self._fold_ko_cash(ko_record, ("alive", "ki"))
 
         coupon_amt = 0.0
         obs_idx = self._coupon_observation_indices.get(t_idx)

@@ -83,6 +83,8 @@ class PDEEngine(BaseEngine):
     """
 
     engine_type = EngineType.PDE
+    #: the autocallable solvers fold (``price_folded``); the others refuse through the dispatch
+    supports_cash_leg_folding = True
 
     PRODUCT_SOLVER_MAP: Dict[Type[BaseEquityProduct], Type[BasePDESolver]] = {
         EuropeanVanillaOption: EuropeanPDESolver,
@@ -163,6 +165,22 @@ class PDEEngine(BaseEngine):
 
         solver = self._get_solver(product)
         return solver.price(product, pricing_env)
+
+    def price_folded(self, product: BaseEquityProduct, pricing_env: PricingEnvironment, overlay, *,
+                     lifecycle_state=None) -> float:
+        """Fold cash legs on the dispatched solver (``price``'s dispatch); a solver that cannot fold
+        refuses (``CapabilityError``)."""
+        if product is None:
+            raise ValidationError("Product cannot be None")
+        solver = self._get_solver(product)
+        if not getattr(solver, "supports_cash_leg_folding", False):
+            from quantark.execution.errors import CapabilityError
+
+            raise CapabilityError(
+                f"{type(solver).__name__} does not fold cash legs into its solve; "
+                "price the legs on the event route"
+            )
+        return solver.price_folded(product, pricing_env, overlay, lifecycle_state=lifecycle_state)
 
     def create_bump_context(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
