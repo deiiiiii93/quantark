@@ -9,7 +9,7 @@ the observation set) — no barrier continuity correction, per spec.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
 
@@ -19,6 +19,9 @@ from quantark.asset.equity.product.option.dcn_grid import (  # noqa: F401
 )
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.util.exceptions import ValidationError
+
+if TYPE_CHECKING:
+    from quantark.asset.equity.engine.dcn_valuation import DCNFoldCash
 
 
 @dataclass(frozen=True)
@@ -41,7 +44,15 @@ def compute_dcn_cashflows(
     product: DCNOption,
     ctx: DCNGridContext,
     df: Callable[[float], float],
+    fold: Optional["DCNFoldCash"] = None,
 ) -> DCNPathCashflows:
+    """Per-path DCN legs (buyer view, discounted to t=0).
+
+    ``fold`` (a bound ``dcn_valuation.DCNFoldCash``, ``price_folded`` only) adds folded cash-leg cash where
+    the product's own cash goes: to the knock-out coupon of a path knocking out at observation ``j``, and to
+    the maturity leg of each survivor (the loss leg when knocked in, a no-knock-in survivor's leg otherwise),
+    before their payment discount. ``None`` is the product alone, bit for bit.
+    """
     paths = np.asarray(paths, dtype=float)
     if paths.ndim != 2 or paths.shape[1] != ctx.times.size:
         raise ValidationError(
@@ -87,10 +98,16 @@ def compute_dcn_cashflows(
         # 2) KO priority (alive paths, KO-eligible obs)
         if ctx.obs_is_ko[j]:
             ko_now = alive & (s_obs >= b_ko)
-            ko_pv[ko_now] = (
-                part * product.ko_coupon_rate * ctx.ko_accruals[j]
-                * notional * dfs_k[j]
-            )
+            if fold is None:
+                ko_pv[ko_now] = (
+                    part * product.ko_coupon_rate * ctx.ko_accruals[j]
+                    * notional * dfs_k[j]
+                )
+            else:
+                ko_pv[ko_now] = (
+                    part * product.ko_coupon_rate * ctx.ko_accruals[j]
+                    * notional + fold.ko[j]
+                ) * dfs_k[j]
             ko_obs_row[ko_now] = j
             alive &= ~ko_now
         # 3) fixed coupon (not KO'd today, not knocked in, coupon-eligible)
@@ -107,10 +124,20 @@ def compute_dcn_cashflows(
     s_t = paths[:, int(ctx.obs_cols[-1])]
     loss_pv = np.zeros(n_paths)
     hit = alive & knocked_in
-    loss_pv[hit] = (
-        -(notional / s0) * part * np.maximum(product.k_loss - s_t[hit], 0.0)
-        * df_loss
-    )
+    if fold is None:
+        loss_pv[hit] = (
+            -(notional / s0) * part * np.maximum(product.k_loss - s_t[hit], 0.0)
+            * df_loss
+        )
+    else:
+        # folded maturity cash: the knocked-in survivors beside their loss
+        # leg, the never-knocked-in survivors on their own (both settled at
+        # the loss-leg payment)
+        loss_pv[hit] = (
+            -(notional / s0) * part * np.maximum(product.k_loss - s_t[hit], 0.0)
+            + fold.ki
+        ) * df_loss
+        loss_pv[alive & ~knocked_in] = fold.no_ki * df_loss
     return DCNPathCashflows(
         fixed_coupon_pv=coupon_pv_by.sum(axis=1),
         fixed_coupon_pv_by_period=coupon_pv_by,

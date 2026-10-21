@@ -20,10 +20,12 @@ __all__ = ["DCNAdapter", "DCNEvents"]
 class DCNEvents:
     """One solve's contract on its layout: cash per observation, events per date, edge rows per time."""
 
-    def __init__(self, solver, product, env, layout):
+    def __init__(self, solver, product, env, layout, fold=None):
         self.solver, self.product, self.env, self.layout = solver, product, env, layout
         self.ctx = ctx = build_dcn_grid_context(product)
         self.df = make_df_fn(env)
+        # folded cash legs (a PRICE request's ``fold``, price_folded only): bound to this solve's rows, buyer-view
+        self.fold = None if fold is None else _bind(fold, ctx)
         time = layout.time
         self.node_of = {float(t): time.step_at(float(t)) for t in ctx.times[1:-1]}
         self.event_nodes = frozenset(self.node_of.values())
@@ -41,7 +43,11 @@ class DCNEvents:
         if ctx.obs_is_coupon[j]:
             cpn = p.participation * p.coupon_rate * ctx.coupon_accruals[j] * p.notional * (df(ctx.coupon_pay_times[j]) / df(t_obs))
         if ctx.obs_is_ko[j]:
-            ko = p.participation * p.ko_coupon_rate * ctx.ko_accruals[j] * p.notional * (df(ctx.ko_pay_times[j]) / df(t_obs))
+            if self.fold is None:
+                ko = p.participation * p.ko_coupon_rate * ctx.ko_accruals[j] * p.notional * (df(ctx.ko_pay_times[j]) / df(t_obs))
+            else:   # the folded knock-out cash joins the knock-out coupon, paid on its date
+                ko = ((p.participation * p.ko_coupon_rate * ctx.ko_accruals[j] * p.notional + self.fold.ko[j])
+                      * (df(ctx.ko_pay_times[j]) / df(t_obs)))
         return cpn, ko
 
     def apply(self, v0, v1, j, t_obs):
@@ -76,7 +82,12 @@ class DCNEvents:
         # lower edge: knock-in at the next date is certain and no knock-out: the loss put deep in the money, on the
         # edge carried forward to the horizon (spec 3A §5.10's forward factors)
         fwd = s_lo * solver._carry_df_between_times(env, t, self.T) / solver._df_between_times(env, t, self.T)
-        loss = -(p.notional / p.initial_price) * p.participation * max(p.k_loss - fwd, 0.0) * df(ctx.loss_pay_time) / df(t)
+        fold = self.fold
+        if fold is None:
+            loss = -(p.notional / p.initial_price) * p.participation * max(p.k_loss - fwd, 0.0) * df(ctx.loss_pay_time) / df(t)
+        else:   # the knocked-in survivor's folded maturity cash beside its loss leg
+            loss = ((-(p.notional / p.initial_price) * p.participation * max(p.k_loss - fwd, 0.0) + fold.ki)
+                    * df(ctx.loss_pay_time) / df(t))
         # upper edge: knock-out at the next eligible observation is certain; alive also collects the coupons before it
         ki_up = alive_up = 0.0
         for j, c in enumerate(ctx.obs_cols):
@@ -90,7 +101,18 @@ class DCNEvents:
                 break
             if cpn is not None:
                 alive_up += cpn * df(t_obs) / df(t)
+        else:
+            if fold is not None:
+                # no knock-out left: the edge survives to the loss-leg settlement on its own branch
+                alive_up += fold.no_ki * df(ctx.loss_pay_time) / df(t)
+                ki_up += fold.ki * df(ctx.loss_pay_time) / df(t)
         return (loss, loss), (alive_up, ki_up)
+
+
+def _bind(fold, ctx):
+    """``fold`` bound to the DCN's rows (``dcn_valuation.bind_dcn_fold``, fail closed)."""
+    from quantark.asset.equity.engine.dcn_valuation import bind_dcn_fold
+    return bind_dcn_fold(fold, ctx)
 
 
 def _receivables(product, env, lifecycle_state):
@@ -110,6 +132,9 @@ class DCNAdapter(FamilyAdapter):
             raise PricingError(f"{type(self.solver).__name__} only supports DCNOption")
         validate_settlement_capability(self.solver, product, lifecycle_state)
         _receivables(product, env, lifecycle_state)
+        if request.fold is not None and request.operation is not Operation.PRICE:
+            from quantark.execution.errors import CapabilityError
+            raise CapabilityError("folded cash legs price a PRICE operation only (price_folded)")
 
     def terminal_outcome(self, product, env, request, lifecycle_state):
         """The valuation-date row when it ends the contract (``dcn_valuation``, pointwise at the spot, Q2): the final
@@ -119,6 +144,9 @@ class DCNAdapter(FamilyAdapter):
         from quantark.asset.equity.engine.dcn_valuation import observe_valuation_row, settled_row_delta
         state = _receivables(product, env, lifecycle_state)
         if state is not None and state.terminal:
+            if request.fold is not None:
+                from quantark.asset.equity.engine.dcn_valuation import refuse_terminal_fold
+                refuse_terminal_fold()
             price = state.pending_pv
             if request.operation is Operation.GREEKS:
                 return TerminalOutcome("lifecycle", {"price": price, "delta": 0.0, "gamma": 0.0})
@@ -130,6 +158,11 @@ class DCNAdapter(FamilyAdapter):
             return None
         reason = "expired" if row.is_final else "knocked_out"
         price = row.pv
+        if request.fold is not None:      # the decided event's folded cash, discounted as the row's own (D13)
+            from quantark.asset.equity.engine.dcn_valuation import folded_row_cash
+            ctx = build_dcn_grid_context(product)
+            price = price + float(product.direction_sign) * folded_row_cash(
+                row, _bind(request.fold, ctx), ctx, make_df_fn(env))
         if state is not None:
             price = price + state.pending_pv
         if request.operation is Operation.GREEKS:
@@ -146,7 +179,7 @@ class DCNAdapter(FamilyAdapter):
         return product.initial_price
 
     def prepare_events(self, product, env, layout, tau, request):
-        return DCNEvents(self.solver, product, env, layout)
+        return DCNEvents(self.solver, product, env, layout, fold=request.fold)
 
     def groups(self, product, layout, request) -> tuple:
         return (ColumnGroup("value", ("alive", "ki"), Backend.BANDED, VALUE),)
@@ -157,9 +190,16 @@ class DCNAdapter(FamilyAdapter):
 
     def terminal(self, prepared, states, captures) -> None:
         ev, p = prepared.events, prepared.product
-        v1 = (-(p.notional / p.initial_price) * p.participation * np.maximum(p.k_loss - ev.s, 0.0)
-              * ev.df(ev.ctx.loss_pay_time) / ev.df(ev.T))
-        v0, v1 = ev.apply(np.zeros_like(v1), v1, len(ev.ctx.obs_cols) - 1, ev.T)
+        if ev.fold is None:
+            v1 = (-(p.notional / p.initial_price) * p.participation * np.maximum(p.k_loss - ev.s, 0.0)
+                  * ev.df(ev.ctx.loss_pay_time) / ev.df(ev.T))
+            v0 = np.zeros_like(v1)
+        else:   # folded maturity cash on each survivor branch, at the loss-leg settlement
+            settle = ev.df(ev.ctx.loss_pay_time) / ev.df(ev.T)
+            v1 = (-(p.notional / p.initial_price) * p.participation * np.maximum(p.k_loss - ev.s, 0.0)
+                  + ev.fold.ki) * settle
+            v0 = np.full_like(v1, ev.fold.no_ki * settle)
+        v0, v1 = ev.apply(v0, v1, len(ev.ctx.obs_cols) - 1, ev.T)
         states["alive"][:, -1], states["ki"][:, -1] = v0, v1
 
     def boundaries(self, prepared, group, states, j) -> None:

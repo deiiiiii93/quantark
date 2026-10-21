@@ -29,6 +29,9 @@ from quantark.asset.equity.engine.event_stats import (
 )
 from quantark.asset.equity.engine.dcn_valuation import (
     DCNStateValuation,
+    bind_dcn_fold,
+    folded_row_cash,
+    refuse_terminal_fold,
     resolve_dcn_lifecycle_state,
     settle_final_observation,
 )
@@ -282,17 +285,26 @@ def receivables_only_result(product, seed, t0, receivables: DCNStateValuation) -
     )
 
 
-def settled_dcn_result(product, pricing_env, ctx, seed, t0, receivables=None) -> "DCNMCResult":
+def settled_dcn_result(product, pricing_env, ctx, seed, t0, receivables=None, fold=None) -> "DCNMCResult":
     """The DCN on its final observation date (W10, ruling Q6): the settled
     final row from ``dcn_valuation`` as a one-path result, so pv, legs and
     event statistics are the row's 0/1 decisions; ``std_error`` is 0.0 and
-    ``expected_life_years`` 0.0."""
+    ``expected_life_years`` 0.0. ``fold`` (a bound ``DCNFoldCash``,
+    ``price_folded`` only) adds the decided event's folded cash to its leg:
+    the knock-out leg on a knock-out, the maturity leg on a survivor (D13)."""
     row = settle_final_observation(product, pricing_env, ctx)
+    ko_pv, loss_pv = row.ko_pv, row.loss_pv
+    if fold is not None:
+        cash = folded_row_cash(row, fold, ctx, make_df_fn(pricing_env))
+        if row.knocked_out:
+            ko_pv = ko_pv + cash
+        else:
+            loss_pv = loss_pv + cash
     cf = DCNPathCashflows(
         fixed_coupon_pv=np.array([row.coupon_pv]),
         fixed_coupon_pv_by_period=np.array([[row.coupon_pv]]),
-        ko_pv=np.array([row.ko_pv]),
-        loss_pv=np.array([row.loss_pv]),
+        ko_pv=np.array([ko_pv]),
+        loss_pv=np.array([loss_pv]),
         ko_obs_row=np.array([0 if row.knocked_out else -1], dtype=int),
         knocked_in=np.array([row.knocked_in]),
         coupon_paid=np.array([[row.coupon_paid]]),
@@ -333,6 +345,9 @@ class DCNMCEngine(BaseEngine):
     engine_type = EngineType.MONTE_CARLO
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True  # DCNLifecycleState (W14)
+    supports_cash_leg_folding = True
+    #: the overlay of a running ``price_folded``; None on every other call
+    _fold = None
     # Session-path hook (execution-framework adapter clones only): a callable
     # ``(n_dims, n_paths, batch_id) -> ndarray | None`` consulted before the
     # engine's own generators; None on every direct-path engine.
@@ -375,6 +390,35 @@ class DCNMCEngine(BaseEngine):
         self.num_workers = int(num_workers)
         self._last_result: Optional[DCNMCResult] = None
 
+    # -- cash-leg folding (ship spec 2026-10-21 D4, D9, D11c, D13) --
+    def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:
+        """Per-unit PV with ``overlay``'s (buyer-view) cash legs folded into each path's legs.
+
+        One ``price`` on the same paths: knock-out cash joins the knock-out
+        coupon of every path knocking out at that observation, maturity cash
+        the loss leg of every surviving path on its branch (knocked in or
+        not), both before their payment discount and before
+        ``direction_sign``; the final observation date's settled row pays
+        its decided event's cash. ``overlay.constant_pv`` is not included.
+        An empty overlay is ``price()`` bitwise; a knocked-out or matured
+        lifecycle state refuses a non-empty one (CapabilityError).
+        """
+        if overlay.is_empty:
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        self._fold = overlay
+        try:
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        finally:
+            self._fold = None
+
+    def fold_drilldown_refusal(self, product, pricing_env) -> Optional[str]:
+        """None on every DCN MC layout (D11c): the path set never depends on
+        the payoff. ``num_batches`` is fixed (no adaptive stopping), each
+        batch's draws are keyed by its batch id alone, and worker threads are
+        reduced in batch-id order, so a folded and a plain solve run the
+        same paths and their per-leg differences are exact."""
+        return None
+
     # -- BaseEngine-compatible entry point --
     def price(self, product, pricing_env, *, lifecycle_state=None) -> float:
         if lifecycle_state is None:
@@ -415,15 +459,19 @@ class DCNMCEngine(BaseEngine):
             product, pricing_env, lifecycle_state
         )
         if receivables is not None and receivables.terminal:
+            if self._fold is not None:
+                refuse_terminal_fold()
             result = receivables_only_result(product, self.seed, t0, receivables)
             self._last_result = result
             return result
         ctx = build_dcn_grid_context(product)
+        # folded cash legs (price_folded only), bound to this grid's rows
+        fold = None if self._fold is None else bind_dcn_fold(self._fold, ctx)
         if ctx.times.size == 1:
             # the final observation date (W10): the settled final row, no
             # simulation and no model preparation
             result = settled_dcn_result(
-                product, pricing_env, ctx, self.seed, t0, receivables
+                product, pricing_env, ctx, self.seed, t0, receivables, fold=fold
             )
             self._last_result = result
             return result
@@ -452,7 +500,7 @@ class DCNMCEngine(BaseEngine):
                 spot0, term, dt_array, pricing_env,
                 n_paths=batch_size, batch_id=batch_id,
             )
-            return compute_dcn_cashflows(paths, product, ctx, df)
+            return compute_dcn_cashflows(paths, product, ctx, df, fold=fold)
 
         workers = min(self.num_workers, self.num_batches)
         if workers > 1:

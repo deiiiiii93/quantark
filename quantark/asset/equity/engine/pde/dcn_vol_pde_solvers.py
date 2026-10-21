@@ -32,7 +32,10 @@ import numpy as np
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.dcn_valuation import (
+    bind_dcn_fold,
+    folded_row_cash,
     observe_valuation_row,
+    refuse_terminal_fold,
     resolve_dcn_lifecycle_state,
 )
 from quantark.asset.equity.engine.pde.core.adapters.local_vol import LocalVolDCNAdapter
@@ -77,6 +80,12 @@ class LocalVolDCNPDEEngine(LocalVolSurfaceMixin, DCNPDEEngine):
         return self._with_surface(pricing_env, lambda: DCNPDEEngine.price(
             self, product, pricing_env, lifecycle_state=lifecycle_state))
 
+    def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None):
+        if overlay.is_empty:
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        return self._with_surface(pricing_env, lambda: DCNPDEEngine.price_folded(
+            self, product, pricing_env, overlay, lifecycle_state=lifecycle_state))
+
     def calculate_greeks(self, product, pricing_env, *, lifecycle_state=None):
         return self._with_surface(pricing_env, lambda: DCNPDEEngine.calculate_greeks(
             self, product, pricing_env, lifecycle_state=lifecycle_state))
@@ -114,6 +123,7 @@ class HestonDCNPDESolver(BaseEngine):
     engine_type = EngineType.PDE
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True  # DCNLifecycleState (W14)
+    supports_cash_leg_folding = True
 
     def __init__(
         self,
@@ -186,6 +196,20 @@ class HestonDCNPDESolver(BaseEngine):
     def price(self, product, pricing_env, *, lifecycle_state=None) -> float:
         return self.price_detailed(product, pricing_env, lifecycle_state=lifecycle_state).pv
 
+    def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:
+        """Per-unit PV with ``overlay``'s (buyer-view) cash legs folded into both 2-D surfaces (ship spec D4, D9).
+
+        One march on the plain solve's grid: knock-out cash joins each knock-out observation's coupon, maturity
+        cash the terminal surface of each survivor branch and the low-spot rows (certain knock-in) that carry the
+        knocked-in branch, before ``direction_sign``; the far high-spot rows stay at zero, as they do for the
+        product's own knock-out coupon. A valuation-date row that ends the contract pays its decided event's
+        cash. ``overlay.constant_pv`` is not included; an empty overlay is ``price()`` bitwise; a knocked-out
+        or matured lifecycle state refuses a non-empty one (CapabilityError).
+        """
+        if overlay.is_empty:
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        return self._detailed(product, pricing_env, lifecycle_state, overlay).pv
+
     def _fine_grid(self, times: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Refine each daily interval into equal substeps; return the fine
         grid and, per fine node, the daily-grid column it coincides with
@@ -250,26 +274,36 @@ class HestonDCNPDESolver(BaseEngine):
     def price_detailed(self, product, pricing_env, *, lifecycle_state=None) -> DCNPDEResult:
         """Price ``product``; a ``DCNLifecycleState`` adds its pending
         receivables, and a knocked-out / matured one prices them alone (W14)."""
+        return self._detailed(product, pricing_env, lifecycle_state, None)
+
+    def _detailed(self, product, pricing_env, lifecycle_state, overlay) -> DCNPDEResult:
         if not isinstance(product, DCNOption):
             raise PricingError("HestonDCNPDESolver only supports DCNOption")
         state = resolve_dcn_lifecycle_state(product, pricing_env, lifecycle_state)
         if state is not None and state.terminal:
+            if overlay is not None:
+                refuse_terminal_fold()
             return DCNPDEResult(pv=state.pending_pv, direction_sign=product.direction_sign,
                                 num_space_nodes=0, num_time_steps=0)
-        result = self._price_contingent(product, pricing_env)
+        result = self._price_contingent(product, pricing_env, overlay)
         if state is None:
             return result
         return dataclasses.replace(result, pv=result.pv + state.pending_pv)
 
-    def _price_contingent(self, product, pricing_env) -> DCNPDEResult:
+    def _price_contingent(self, product, pricing_env, overlay=None) -> DCNPDEResult:
         ctx = build_dcn_grid_context(product)
         df = make_df_fn(pricing_env)
+        # folded cash legs (price_folded only), bound to this grid's rows, buyer-view
+        fold = None if overlay is None else bind_dcn_fold(overlay, ctx)
         # the monthly row observed today, pointwise at the spot: the final
         # observation date (W10) or a knock-out today (W10b) settle here
         row = observe_valuation_row(product, pricing_env, ctx, df)
         if row is not None and row.ends_contract:
+            pv = row.pv
+            if fold is not None:
+                pv = pv + product.direction_sign * folded_row_cash(row, fold, ctx, df)
             return DCNPDEResult(
-                pv=row.pv,
+                pv=pv,
                 direction_sign=product.direction_sign,
                 num_space_nodes=0,
                 num_time_steps=0,
@@ -327,13 +361,23 @@ class HestonDCNPDESolver(BaseEngine):
                 )
             ko = None
             if ctx.obs_is_ko[j]:
-                ko = (
-                    part * product.ko_coupon_rate * ctx.ko_accruals[j]
-                    * notional * (df(ctx.ko_pay_times[j]) / df(t_obs))
-                )
+                if fold is None:
+                    ko = (
+                        part * product.ko_coupon_rate * ctx.ko_accruals[j]
+                        * notional * (df(ctx.ko_pay_times[j]) / df(t_obs))
+                    )
+                else:  # the folded knock-out cash joins the coupon
+                    ko = (
+                        part * product.ko_coupon_rate * ctx.ko_accruals[j]
+                        * notional + fold.ko[j]
+                    ) * (df(ctx.ko_pay_times[j]) / df(t_obs))
             return cpn, ko
 
         loss_bound = -(notional / s0) * part * float(product.k_loss)
+        if fold is not None:
+            # the low-spot rows are a certain knock-in: the knocked-in
+            # survivor's folded maturity cash beside its loss leg
+            loss_bound = loss_bound + fold.ki
 
         def v1_boundary_hook(U, tau):
             t = min(max(T - float(tau), 0.0), T)
@@ -355,15 +399,27 @@ class HestonDCNPDESolver(BaseEngine):
 
         # terminal (t = T = final observation date)
         d_settle = df(ctx.loss_pay_time) / df(T)
-        v1 = np.repeat(
-            (
-                -(notional / s0) * part
-                * np.maximum(product.k_loss - s_grid, 0.0) * d_settle
-            )[:, None],
-            self.n_v,
-            axis=1,
-        )
-        v0 = np.zeros_like(v1)
+        if fold is None:
+            v1 = np.repeat(
+                (
+                    -(notional / s0) * part
+                    * np.maximum(product.k_loss - s_grid, 0.0) * d_settle
+                )[:, None],
+                self.n_v,
+                axis=1,
+            )
+            v0 = np.zeros_like(v1)
+        else:  # folded maturity cash on each survivor branch
+            v1 = np.repeat(
+                (
+                    (-(notional / s0) * part
+                     * np.maximum(product.k_loss - s_grid, 0.0) + fold.ki)
+                    * d_settle
+                )[:, None],
+                self.n_v,
+                axis=1,
+            )
+            v0 = np.full_like(v1, fold.no_ki * d_settle)
         cpn_amt, ko_amt = event_amounts(len(ctx.obs_cols) - 1, T)
         v0, v1 = self._apply_events(
             v0, v1, cpn_amt, ko_amt, x_grid, masks, product

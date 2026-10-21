@@ -73,6 +73,7 @@ class DCNPDEEngine(BasePDESolver):
     engine_type = EngineType.PDE
     settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_lifecycle_state = True  # DCNLifecycleState (W14), read by DCNAdapter
+    supports_cash_leg_folding = True
     _adapter_class = DCNAdapter
 
     def __init__(self, params: Optional[PDEParams] = None, **removed):
@@ -123,6 +124,21 @@ class DCNPDEEngine(BasePDESolver):
 
     def price(self, product, pricing_env, *, lifecycle_state=None) -> float:
         return self._run(product, pricing_env, OutputRequest(Operation.PRICE), lifecycle_state=lifecycle_state)
+
+    def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:
+        """Per-unit PV with ``overlay``'s (buyer-view) cash legs folded into both surfaces (ship spec D4, D9).
+
+        One PRICE march on the plain solve's layout: knock-out cash joins each knock-out observation's coupon
+        (interior events, the terminal date, the knock-out edge rows), maturity cash the terminal column of each
+        survivor branch (alive: never knocked in; ki: the loss leg) and the edge rows that carry it, all before
+        ``direction_sign``; a valuation-date row that ends the contract pays its decided event's cash.
+        ``overlay.constant_pv`` is not included. An empty overlay is ``price()`` bitwise; a knocked-out or
+        matured lifecycle state refuses a non-empty one (CapabilityError).
+        """
+        if overlay.is_empty:
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        return float(self._run(product, pricing_env, OutputRequest(Operation.PRICE, fold=overlay),
+                               lifecycle_state=lifecycle_state))
 
     def calculate_greeks(self, product, pricing_env, *, lifecycle_state=None):
         return self._run(product, pricing_env, OutputRequest(Operation.GREEKS, greeks=True),

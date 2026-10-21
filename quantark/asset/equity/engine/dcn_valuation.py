@@ -28,13 +28,17 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
 __all__ = [
+    "DCNFoldCash",
     "DCNStateValuation",
     "DCNValuationRow",
     "at_final_observation",
+    "bind_dcn_fold",
     "check_dcn_ledger",
+    "folded_row_cash",
     "observe_valuation_row",
     "resolve_dcn_lifecycle_state",
     "settle_final_observation",
+    "refuse_terminal_fold",
     "settled_row_delta",
 ]
 
@@ -221,3 +225,61 @@ def check_dcn_ledger(product, valuation_date, ledger, *, alive: bool) -> None:
                 "has a monthly row in the product's schedule (it would be paid twice); price the post-close view "
                 "(DCNSchedule.without_observed_through)"
             )
+
+
+# --- cash-leg folding (ship spec 2026-10-21 D9, D13) ----------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DCNFoldCash:
+    """A ``FoldOverlay`` bound to one DCN solve: buyer-view cash per unit, paid at the event's payment date.
+
+    ``ko[j]`` is paid at monthly observation ``j``'s knock-out payment by a path knocking out there (0 on an
+    observation that is not a knock-out observation, whose knock-out probability is zero on every route);
+    ``no_ki`` / ``ki`` by a survivor of the final observation, never / ever knocked in, at the loss-leg
+    settlement. The engines add it where they add the knock-out coupon and the loss leg, before
+    ``direction_sign``.
+    """
+
+    ko: np.ndarray
+    no_ki: float
+    ki: float
+
+
+def bind_dcn_fold(overlay, ctx: DCNGridContext) -> DCNFoldCash:
+    """``overlay`` bound one to one to the DCN's monthly rows and its two survivor branches (D5, fail closed).
+
+    Every monthly observation is a knock-out slot at ``(t_obs, ko_pay_time)`` (the event route's axis); both
+    maturity branches are determined at the final observation and paid at ``loss_pay_time``. A slot on an
+    observation that is not a knock-out observation binds and carries nothing: the event it is conditional on
+    cannot happen (a leg's own overlay does carry cash there, ``v_e - v_anchor``, which its zero probability
+    removes from the event route's leg value).
+    """
+    obs = np.asarray(ctx.times[ctx.obs_cols], dtype=float)
+    amounts = overlay.bind_ko(
+        [("main", float(t), float(p)) for t, p in zip(obs, ctx.ko_pay_times)]
+    )
+    determination, payment = float(obs[-1]), float(ctx.loss_pay_time)
+    return DCNFoldCash(
+        ko=np.where(ctx.obs_is_ko, amounts, 0.0),
+        no_ki=float(overlay.bind_terminal("no_ki", determination, payment)),
+        ki=float(overlay.bind_terminal("ki", determination, payment)),
+    )
+
+
+def folded_row_cash(row: DCNValuationRow, fold: DCNFoldCash, ctx: DCNGridContext, df) -> float:
+    """The folded cash a valuation-date row that ends the contract pays (D13), buyer-view, discounted as the row
+    discounts its own legs: a knock-out today at the knock-out payment; the final row's survivor branch at the
+    loss-leg settlement; nothing on a row that does not end the contract."""
+    if row.knocked_out:
+        return float(fold.ko[0]) * float(df(ctx.ko_pay_times[0]))
+    if row.is_final:
+        return float(fold.ki if row.knocked_in else fold.no_ki) * row.loss_df
+    return 0.0
+
+
+def refuse_terminal_fold() -> None:
+    """A knocked-out or matured lifecycle state prices its receivables alone: no event is left to carry cash."""
+    raise CapabilityError(
+        "a knocked-out or matured DCN lifecycle state has no knock-out or maturity event left to fold cash onto; "
+        "its cash legs are constants on the event route"
+    )
