@@ -98,7 +98,7 @@ def _route_dist(engine, product, env):
 
 def _reassemble(overlay, dist, env, quantity):
     """Σ_e P_e · amount_e · DF(pay_e) · q + constant — the folded leg PV on a route's own weights."""
-    p_ko = np.asarray(dist.probabilities[EventType.KO], dtype=float)
+    p_ko = np.asarray(dist.probabilities.get(EventType.KO, np.zeros(0)), dtype=float)
     assert len(overlay.ko) == p_ko.size
     total = 0.0
     for p, entry in zip(p_ko, overlay.ko):
@@ -274,3 +274,57 @@ def test_an_overlay_without_branches_binds_zero_and_is_empty():
     assert overlay.is_empty
     assert overlay.bind_ko([]).size == 0
     assert overlay.bind_terminal("ki", 1.0, 1.0) == 0.0
+
+
+# --- AC2 on dated contracts and their edge states (CP1 finding 1, 5) -------------------------
+
+def _dated_cases():
+    from copy import deepcopy
+    from intraday.conftest import dated_phoenix, dated_snowball
+    from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+    from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+
+    cal = create_calendar(CalendarType.CHINA_SSE, year_range=(2026, 2028))
+    t0, live = datetime(2026, 3, 16), datetime(2026, 4, 1)
+    sb = dated_snowball(cal, t0)
+    ko_dates = [r.observation_date for r in sb.barrier_config.ko_observation_schedule.records]
+    knocked_in = deepcopy(sb)
+    knocked_in._otc_lifecycle_knocked_in = True
+    return {
+        "snowball-live": (SnowballPDESolver, sb, flat_env(live)),
+        "phoenix-live": (PhoenixPDESolver, dated_phoenix(cal, t0), flat_env(live)),
+        "snowball-ko-decided-at-valuation": (SnowballPDESolver, sb, flat_env(ko_dates[2], spot=110.0)),
+        "snowball-knocked-in": (SnowballPDESolver, knocked_in, flat_env(live, spot=90.0)),
+        "snowball-exercise-date": (SnowballPDESolver, sb, flat_env(ko_dates[-1], spot=95.0)),
+    }
+
+
+@pytest.mark.parametrize("case", list(_dated_cases()))
+def test_dated_structure_and_value_match_the_pde_route(case):
+    from quantark.cashleg.folding import _event_structure
+
+    solver, product, env = _dated_cases()[case]
+    dist = _route_dist(solver(PDEParams()), product, env)
+    structure = _event_structure(product, env)
+    n = len(structure.ko)
+    basis = structure.distribution(np.zeros(n), 1.0, 0.0)
+    np.testing.assert_array_equal(basis.event_times, dist.event_times)
+    assert basis.event_dates == dist.event_dates
+    assert basis.determination_times == dist.determination_times
+    for et in (EventType.KO, EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI):
+        np.testing.assert_array_equal(np.asarray(basis.payment_times.get(et, np.nan)),
+                                      np.asarray(dist.payment_times.get(et, np.nan)))
+        if dist.payment_dates is not None and et in dist.payment_dates:
+            assert basis.payment_dates[et] == dist.payment_dates[et]
+    legs = []
+    for leg in _leg_set(basis.event_times if n else [1.0]):
+        try:
+            leg.value(dist, env, 100.0)               # legs the route itself refuses are out of scope
+        except Exception:
+            continue
+        legs.append(leg)
+    overlay = fold_cash_legs(legs, product, env, quantity=1.0, unit_notional=100.0)
+    if EventType.KO not in dist.probabilities:
+        assert overlay.is_empty and overlay.ko == ()
+    expected = sum(leg.value(dist, env, 100.0) for leg in legs)
+    assert _reassemble(overlay, dist, env, 1.0) == pytest.approx(expected, rel=1e-12, abs=1e-6)

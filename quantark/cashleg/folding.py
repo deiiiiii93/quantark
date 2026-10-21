@@ -34,7 +34,7 @@ from quantark.cashleg.deterministic_leg import DeterministicLeg
 from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import Tolerance, almost_equal, is_close
+from quantark.util.numerical import Tolerance, almost_equal, is_close, is_non_positive
 
 __all__ = [
     "FoldMode",
@@ -250,6 +250,8 @@ def _autocallable_structure(product, pricing_env) -> _Structure:
     from quantark.asset.equity.engine.settlement_support import resolve_terminal_timing
 
     tau = float(product.get_maturity(pricing_env))
+    if is_non_positive(tau, tol=0.0):                   # the engines' expired outcome: trivial
+        return _trivial_structure(product, pricing_env)
     records = _in_life(product.resolve_ko_observations(pricing_env), tau)
     if not records:
         return _trivial_structure(product, pricing_env)
@@ -303,6 +305,8 @@ def _ko_reset_structure(product, pricing_env) -> _Structure:
             "cannot be folded (the event route refuses it too)"
         )
     tau = float(product.get_maturity(pricing_env))
+    if is_non_positive(tau, tol=0.0):                   # the engines' expired outcome: trivial
+        return _trivial_structure(product, pricing_env)
     terminal = resolve_terminal_timing(product, pricing_env)
     expiry = product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY
 
