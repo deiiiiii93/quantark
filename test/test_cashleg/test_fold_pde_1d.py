@@ -148,12 +148,11 @@ def test_the_1d_solvers_and_the_pde_engine_declare_folding(cls):
 
 @pytest.mark.parametrize("cls", [HestonSnowballPDESolver, HestonPhoenixPDESolver])
 def test_the_2d_solvers_do_not_inherit_the_1d_fold(cls):
-    """Their price is a 2D march: the 1D fold would price the 1D surrogate. They refuse until they fold."""
-    assert cls.supports_cash_leg_folding is False
-    product = make_snowball(ko_dates=KO_DATES) if cls is HestonSnowballPDESolver else _phoenix_product()
-    env = make_env()
-    with pytest.raises(CapabilityError):
-        object.__new__(cls).price_folded(product, env, _hand_overlay(product, env, ko=1.0))
+    """Their price is a 2D march: the 1D fold would price the 1D surrogate. They fold on their own 2D march
+    (task T6, test/test_cashleg/test_fold_pde_2d.py)."""
+    assert cls.supports_cash_leg_folding is True
+    assert cls.price_folded is not SnowballPDESolver.price_folded
+    assert cls.price_folded is not PhoenixPDESolver.price_folded
 
 
 @pytest.mark.parametrize("family", list(FAMILIES))

@@ -34,6 +34,7 @@ from quantark.asset.equity.engine.pde.vol_continuous_ki import (
 )
 from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
     event_damped_step_keys,
+    price_folded_2d,
 )
 from quantark.util.numerical import is_close, is_zero
 from quantark.volmodels.adi_core import HestonSLVADICore
@@ -112,10 +113,8 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
     engine_type = EngineType.PDE
     _solver_name = "Heston2DPhoenixPDESolver"
     _adapter_class = Heston2DPhoenixAdapter
-    # The 1D fold marches the 1D two-surface core, not this route's 2D ADI march: refuse until the
-    # 2D march folds (cash-leg folding spec, task T6).
-    supports_cash_leg_folding = False
-    price_folded = BaseEngine.price_folded
+    #: ``price_folded`` folds on this route's own 2D ADI march (``price_folded_2d``)
+    supports_cash_leg_folding = True
 
     def __init__(
         self,
@@ -512,6 +511,10 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         read_surface = self._t0_pre_U if self._t0_pre_U is not None else surface
         return float(core.interpolate(read_surface, np.log(spot), self.model_params.v0))
 
+    def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:
+        """Per-unit NPV with ``overlay``'s cash legs folded into the 2D march (``price_folded_2d``)."""
+        return price_folded_2d(self, product, pricing_env, overlay, lifecycle_state)
+
     def _capture_t0_pre_event_surface(self, U, tau, T, event_maps) -> None:
         """Capture the smooth 0+ surface before valuation-date events land.
 
@@ -566,6 +569,10 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
                 for s in core.S_grid
             ]
         values = np.asarray(values, dtype=float) * self._structured_terminal_delay_df
+        if self._fold is not None:
+            # the branch's folded maturity cash, discounted as its redemption (determination -> payment)
+            values = values + (self._fold.ki * self._fold.ki_df if knocked_in
+                               else self._fold.no_ki * self._fold.no_ki_df)
         return np.repeat(values[:, None], core.V_grid.size, axis=1)
 
     def _boundary_hook(self, core, product, env, knocked_in: bool):
@@ -757,6 +764,9 @@ class _Heston2DPhoenixPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixin
         current_time = max(T - float(tau), 0.0)
 
         base_payoff = float(ko_record.payoff or 0.0)
+        if self._fold is not None:
+            # folded knock-out cash rides with the redemption on every branch (joint, sequential, nodal)
+            base_payoff = base_payoff + self._fold_ko_cash(ko_record, ("alive", "ki"))
         df = 1.0
         if ko_record.settlement_time is not None and ko_record.settlement_time > current_time:
             df = self._df_between_times(env, current_time, ko_record.settlement_time)

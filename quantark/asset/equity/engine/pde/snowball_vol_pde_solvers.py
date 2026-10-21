@@ -68,6 +68,52 @@ def event_damped_step_keys(stepper, event_maps, n_t: int):
     return keys or None
 
 
+def price_folded_2d(solver, product, pricing_env, overlay, lifecycle_state=None) -> float:
+    """``price_folded`` of a 2D Heston/SLV two-surface solver (cash-leg folding spec D4, D5).
+
+    An empty overlay is ``solver.price`` bitwise. Otherwise the valuation-instant short-circuits fold
+    as ``price`` takes them (an expired product refuses: no event is left to carry cash; a knock-out
+    decided at valuation pays the deciding record's cash, discounted as its payoff is), and a live
+    trade runs ``price``'s own 2D march with ``overlay`` bound one to one to the solve's knock-out
+    records and maturity branches on the solver's per-solve fold state. The march adds the cash where
+    the product's own cash goes (knock-out record payoffs at the step hooks, the branch terminal
+    surfaces, the 1D Dirichlet rows the boundary hook reuses); the state is cleared on every exit, so
+    every other solve on the instance is unfolded. ``overlay.constant_pv`` is not included.
+    """
+    if overlay.is_empty:
+        return solver.price(product, pricing_env, lifecycle_state=lifecycle_state)
+    from quantark.asset.equity.engine.settlement_support import validate_settlement_capability
+
+    validate_settlement_capability(solver, product, lifecycle_state)
+    solver._check_product_type(product)
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import KnockOutResetSnowballOption
+
+    if isinstance(product, KnockOutResetSnowballOption):
+        from quantark.execution.errors import CapabilityError
+
+        # the 2D march fires one knock-out schedule; a KO-reset's pre/post schedules have no site here
+        raise CapabilityError(
+            f"{solver._solver_name} marches a single knock-out schedule: a KO-reset product's "
+            "pre/post schedules do not fold on the 2D route"
+        )
+    if pricing_env is None:
+        raise ValidationError(f"PricingEnvironment is required for {solver._solver_name}")
+    solver._validate_product(product)
+    T = float(product.get_maturity(pricing_env))
+    if T <= 0.0 or is_zero(T):
+        solver._refuse_expired_fold()
+    decision = solver._valuation_decision(product, pricing_env)
+    if decision.knocked_out:
+        return float(solver._get_immediate_ko_payoff(product, pricing_env)) + float(
+            solver._folded_knock_out_cash(product, pricing_env, decision, overlay)
+        )
+    solver._fold = solver._bind_fold(product, pricing_env, overlay)
+    try:
+        return float(solver.price(product, pricing_env))
+    finally:
+        solver._fold = None
+
+
 class LocalVolSnowballPDESolver(LocalVolSurfaceMixin, LocalVolBarrierCrossingMixin, SnowballPDESolver):
 
     """Two-surface Snowball PDE with Dupire local volatility on the S grid."""
@@ -142,10 +188,8 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
     engine_type = EngineType.PDE
     _solver_name = "Heston2DSnowballPDESolver"
     _adapter_class = Heston2DSnowballAdapter
-    # The 1D fold marches the 1D two-surface core, not this route's 2D ADI march: refuse until the
-    # 2D march folds (cash-leg folding spec, task T6).
-    supports_cash_leg_folding = False
-    price_folded = BaseEngine.price_folded
+    #: ``price_folded`` folds on this route's own 2D ADI march (``price_folded_2d``)
+    supports_cash_leg_folding = True
     DEFAULT_V_GRID_POWER = 2.5
     DEFAULT_BARRIER_GREEK_STEPS_PER_TICK = 8
     PRODUCTION_BARRIER_GREEK_STEPS_PER_TICK = 16
@@ -907,6 +951,10 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             core.interpolate(read_surface, np.log(spot), self.model_params.v0)
         )
 
+    def price_folded(self, product, pricing_env, overlay, *, lifecycle_state=None) -> float:
+        """Per-unit NPV with ``overlay``'s cash legs folded into the 2D march (``price_folded_2d``)."""
+        return price_folded_2d(self, product, pricing_env, overlay, lifecycle_state)
+
     def _solve_live_surface(
         self,
         product: SnowballOption,
@@ -1013,6 +1061,10 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
         else:
             values = [product.get_maturity_payoff_v0(float(s), env) for s in core.S_grid]
         values = np.asarray(values, dtype=float) * self._structured_terminal_delay_df
+        if self._fold is not None:
+            # the branch's folded maturity cash, discounted as its redemption (determination -> payment)
+            values = values + (self._fold.ki * self._fold.ki_df if knocked_in
+                               else self._fold.no_ki * self._fold.no_ki_df)
         return np.repeat(values[:, None], core.V_grid.size, axis=1)
 
     def _boundary_hook(self, core, product, env, knocked_in: bool):
@@ -1085,6 +1137,9 @@ class _Heston2DSnowballPDEBase(LegacyBumpCloneMixin, Heston2DBarrierCrossingMixi
             if rec.barrier is None:
                 continue
             cashflow = rec.payoff if rec.payoff is not None else 0.0
+            if self._fold is not None:
+                # folded knock-out cash rides with the record's payoff on both surfaces (one schedule)
+                cashflow = float(cashflow) + self._fold_ko_cash(rec, ("alive", "ki"))
             current_time = max(T - float(tau), 0.0)
             value = self._cashflow_value_at_time(
                 pricing_env=env,
