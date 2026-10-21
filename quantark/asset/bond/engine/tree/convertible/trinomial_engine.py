@@ -81,7 +81,8 @@ class ConvertibleBondTrinomialEngine:
     - Bondholder receives recovery_rate * face_value
 
     Volatility schemes:
-    - CONSTANT_VOL: CRR-style constant-vol grid (ignores term structure)
+    - CONSTANT_VOL: u / 1 / d grid at the maximum vol, moment-matched probabilities
+      (ignores term structure)
     - LOG_FIXED_DX: fixed log-price step with time-dependent probabilities
     - LOG_VARIABLE_DX: variable log-price step with re-gridding/interpolation
     """
@@ -477,7 +478,7 @@ class ConvertibleBondTrinomialEngine:
             Tuple of (p_up, p_mid, p_down)
 
         Raises:
-            PricingError: If the probabilities are not all in [0, 1]
+            NumericalError: If the probabilities are not all in [0, 1]
         """
         g = safe_exp(growth_rate * dt)
         mean_excess = g - 1.0
@@ -489,7 +490,7 @@ class ConvertibleBondTrinomialEngine:
         p_down = (a1 * second_excess - a2 * mean_excess) / det
         p_mid = 1.0 - p_up - p_down
         if min(p_up, p_mid, p_down) < 0.0 or max(p_up, p_mid, p_down) > 1.0:
-            raise PricingError(
+            raise NumericalError(
                 f"Invalid trinomial probabilities ({p_up}, {p_mid}, {p_down}); "
                 "increase num_steps or use a log-price scheme"
             )
@@ -618,7 +619,7 @@ class ConvertibleBondTrinomialEngine:
         dt: float,
     ) -> Dict[str, np.ndarray]:
         """
-        Perform backward induction with constant-vol CRR-style probabilities.
+        Perform backward induction on the constant-vol grid with moment-matched probabilities.
 
         Args:
             bond: Convertible bond
@@ -700,8 +701,8 @@ class ConvertibleBondTrinomialEngine:
             r_local = self.pricing_env.rate_curve.get_forward_rate(t, t_next)
 
             # Calculate time-local transition probabilities
-            # Note: u, d remain constant (based on max_vol) to maintain recombination
-            # Probabilities only adjust for local rate under constant-vol scheme
+            # Note: u, d remain constant (based on max_vol) to maintain recombination;
+            # probabilities match the step's mean (local rate, + hazard * eta) and max-vol variance
             p_default = 1.0 - safe_exp(-hazard_rate * dt)
             p_survive = 1.0 - p_default
 

@@ -55,11 +55,18 @@ def _european_zero(hazard, eta, **terms):
     )
 
 
-def _exact_european_zero(hazard, eta):
+def _d1_d2(hazard, eta):
+    """Black-Scholes d1, d2 for the surviving stock (dividend yield q - hazard * eta, q = 0)."""
     T = (MATURITY - VALUATION).days / 365.0
     K, q_eff = FACE / RATIO, -hazard * eta
     d1 = (math.log(SPOT / K) + (RATE - q_eff + 0.5 * VOL**2) * T) / (VOL * math.sqrt(T))
-    d2 = d1 - VOL * math.sqrt(T)
+    return d1, d1 - VOL * math.sqrt(T)
+
+
+def _exact_european_zero(hazard, eta):
+    T = (MATURITY - VALUATION).days / 365.0
+    K, q_eff = FACE / RATIO, -hazard * eta
+    d1, d2 = _d1_d2(hazard, eta)
     call = SPOT * math.exp(-q_eff * T) * norm.cdf(d1) - K * math.exp(-RATE * T) * norm.cdf(d2)
     survival = math.exp(-hazard * T) * (FACE * math.exp(-RATE * T) + RATIO * call)
     recovery = RECOVERY * FACE * hazard / (RATE + hazard) * (1.0 - math.exp(-(RATE + hazard) * T))
@@ -88,14 +95,29 @@ ENGINES = {"jump-diffusion": _jd, **{f"trinomial-{s.value}": _trinomial(s) for s
 @pytest.mark.parametrize("engine", list(ENGINES))
 def test_european_zero_coupon_convertible_matches_the_exact_value(engine, credit):
     hazard, eta = CREDIT[credit]
-    assert ENGINES[engine](_european_zero(hazard, eta)) == pytest.approx(_exact_european_zero(hazard, eta), abs=0.01)
+    assert ENGINES[engine](_european_zero(hazard, eta)) == pytest.approx(_exact_european_zero(hazard, eta), abs=0.003)
+
+
+@pytest.mark.parametrize("credit", list(CREDIT))
+def test_jump_diffusion_conversion_probability_is_exact(credit):
+    # The probability PDE carries the same surviving drift: P(convert at T) = e^{-lambda T} N(d2)
+    hazard, eta = CREDIT[credit]
+    bond = _european_zero(hazard, eta)
+    T = bond.time_to_maturity(VALUATION)
+    params = ConvertibleBondPDEParams(
+        num_space_steps=800, num_time_steps=2000, max_stock_multiple=max(5.0, math.exp(6.0 * VOL * math.sqrt(T)))
+    )
+    p = ConvertibleBondJumpDiffusionEngine(ENV, params).price_with_details(bond).conversion_probability
+    assert p == pytest.approx(math.exp(-hazard * T) * norm.cdf(_d1_d2(hazard, eta)[1]), abs=0.01)
 
 
 @pytest.mark.parametrize("engine", list(ENGINES))
 def test_coupon_bond_matches_hulls_tree(engine):
     # Demo bond (2.5% semi-annual, American conversion) at Hull's stock-to-zero credit (lambda = 2% / (1 - R)).
-    # Reference: Hull OFOD 27.4 binomial tree at 2000 steps (a replica that reproduces the book's
-    # Example 27.1, 107.44, and agrees with the drift-corrected jump-diffusion PDE to 0.011): 141.3302.
+    # Reference: Hull OFOD 27.4's tree (sigma the vol conditional on no default, u = e^{sigma sqrt(dt)}, as in
+    # the edition whose Example 27.1 gives 107.44; later editions use sqrt(sigma^2 - lambda)) at 2000 steps,
+    # from a replica that reproduces Example 27.1 and agrees with the drift-corrected jump-diffusion PDE to
+    # 0.011: 141.3302.
     hazard, eta = CREDIT["hull-eta1"]
     bond = dataclasses.replace(
         _european_zero(hazard, eta), coupon_rate=0.025, conversion_start_date=datetime(2024, 1, 1), credit_spread=0.02

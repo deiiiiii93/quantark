@@ -61,8 +61,10 @@ During 0.x the public API may still change between minor versions.
   step's mean and variance exactly and raise instead of clipping. On the demo bond at the default
   hazard 1% and η = 0.4, jump-diffusion rises 1.7–4.4 and HW 0.9–5.0 per 100 face (spot 8–30), and
   the four engines now agree to 0.015 (they were 2.7 apart). A European zero-coupon convertible now
-  matches its exact value to 0.002 on all four, and the demo bond matches Hull's tree (OFOD §27.4,
-  stock to zero) to 0.0012. With no hazard, jump-diffusion and the log-price HW schemes are unchanged.
+  matches its exact value to 0.002 on all four (and jump-diffusion's conversion probability matches
+  `e^{-λT} N(d2)`), and the demo bond matches Hull's tree to 0.0012 (OFOD §27.4: stock to zero,
+  σ the vol conditional on no default, `u = e^{σ√Δt}`, Example 27.1 = 107.44; later editions use
+  `√(σ² − λ)`). With no hazard, jump-diffusion and the log-price HW schemes are unchanged.
 - TF CS01 was identically 0: `ConvertibleBondEngine.cs01` bumped `hazard_rate`, which the TF engine
   never reads. TF (tree and PDE) now bumps `credit_spread`, as GS does. The bumped bonds keep their
   calendar, business-day convention and settlement days, and a down bump floored at zero divides by
