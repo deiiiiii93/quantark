@@ -14,7 +14,7 @@ payoff is not represented by that interval decomposition.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 import numpy as np
 from scipy.special import log_ndtr, ndtr
@@ -112,6 +112,9 @@ def conditional_standard_snowball_moments(
     ki_indices: np.ndarray,
     maturity: float,
     discount_factors: Callable[[np.ndarray], np.ndarray],
+    ko_cash: Optional[np.ndarray] = None,
+    no_ki_cash: float = 0.0,
+    ki_cash: float = 0.0,
 ) -> ConditionalSnowballMoments:
     """Integrate a standard discrete Snowball payoff over one Gaussian factor.
 
@@ -119,6 +122,13 @@ def conditional_standard_snowball_moments(
     ``(n_outer_paths, n_contractual_times + 1)``. Column zero is valuation
     spot; event index ``i`` maps to column ``i + 1`` just as in the native MC
     payoff kernel.
+
+    ``ko_cash`` (one amount per KO record), ``no_ki_cash`` and ``ki_cash`` are
+    folded cash legs (ship spec 2026-10-21 D4): each is added to the payoff of
+    its event where the record's own cash sits -- the KO record's payoff under
+    the record's settlement discount, the never-knocked-in / knocked-in
+    redemption under the maturity discount. The payoff stays affine in them, so
+    the integration is exact. The defaults leave every number unchanged.
     """
 
     _validate_supported_product(product)
@@ -166,6 +176,11 @@ def conditional_standard_snowball_moments(
         ko_dfs = np.full(n_ko, float(ko_dfs), dtype=float)
     if ko_dfs.shape != (n_ko,) or not np.all(np.isfinite(ko_dfs)):
         raise PricingError("invalid KO discount factors in conditional payoff")
+    if ko_cash is not None:
+        ko_cash = np.asarray(ko_cash, dtype=float)
+        if ko_cash.shape != (n_ko,) or not np.all(np.isfinite(ko_cash)):
+            raise ValidationError("folded KO cash must hold one finite amount per KO record")
+        ko_payoffs = ko_payoffs + ko_cash
 
     discounted_payoff = np.zeros(n_outer, dtype=float)
     ko_probability = np.zeros(n_outer, dtype=float)
@@ -234,6 +249,11 @@ def conditional_standard_snowball_moments(
     downside_slope = (v1_principal - v1_below) / probe
     if not np.isfinite(downside_slope) or downside_slope < 0.0:
         raise PricingError("unsupported V1 payoff slope in conditional payoff")
+
+    # Folded branch cash shifts each redemption by a constant: the knocked-in
+    # downside slope is the product's own, read before the shift.
+    v0_payoff = v0_payoff + float(no_ki_cash)
+    v1_principal = v1_principal + float(ki_cash)
 
     terminal_base = base[:, -1]
     terminal_loading = loading[:, -1]

@@ -36,6 +36,7 @@ from quantark.asset.equity.process.bsm.qmc_sobol import (
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.engine.mc.snowball_mc_engine import _FoldedPayoffMixin
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
@@ -71,7 +72,7 @@ class PhoenixMCResult:
     expected_discounted_coupon_cashflow: Optional[np.ndarray] = None
 
 
-class PhoenixMCEngine(BaseEngine):
+class PhoenixMCEngine(_FoldedPayoffMixin, BaseEngine):
     """
     Monte Carlo pricing engine for Phoenix options.
 
@@ -173,6 +174,7 @@ class PhoenixMCEngine(BaseEngine):
 
 
         if T <= 0.0:
+            self._refuse_expired_fold()
             return self._decided_at_valuation(product, pricing_env, float(S))
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
@@ -222,7 +224,9 @@ class PhoenixMCEngine(BaseEngine):
     def _complete_price(self, product, result) -> float:
         """price() postamble shared with the session adaptive path."""
         self._last_result = result
-        if result.price < 0 and product.payoff_config.include_principal:
+        # (A folded solve carries cash legs, which may outweigh the product: the check is the
+        # product's own.)
+        if result.price < 0 and product.payoff_config.include_principal and self._fold is None:
             raise PricingError(f"Negative price computed: {result.price}")
         return result.price
 
@@ -944,6 +948,19 @@ class PhoenixMCEngine(BaseEngine):
         )
         instant_coupon_discounted = np.zeros(num_paths, dtype=float)
 
+        # Folded cash legs (price_folded only): a knock-out's cash beside its record payoff (the
+        # coupons it releases are the product's own), a branch's beside its redemption.
+        fold = None
+        ko_record_cash = ko_payoffs_schedule
+        if self._fold is not None:
+            terminal = (float(timings.terminal.determination_time), float(timings.terminal.payment_time))
+            fold = self._bound_fold(
+                [("main", float(t), float(p)) for t, p in zip(ko_times, ko_settlement_times)],
+                terminal,
+                terminal,
+            )
+            ko_record_cash = ko_payoffs_schedule + fold[0]
+
         coupon_probabilities = np.zeros(num_obs, dtype=float)
         coupon_cashflows = np.zeros(num_obs, dtype=float)
 
@@ -1010,7 +1027,7 @@ class PhoenixMCEngine(BaseEngine):
                 if product.coupon_config.memory_coupon:
                     ko_coupon = ko_coupon + accrued
 
-                payoffs[ko_at_obs] = ko_payoffs_schedule[obs_idx] + ko_coupon[ko_at_obs]
+                payoffs[ko_at_obs] = ko_record_cash[obs_idx] + ko_coupon[ko_at_obs]
 
                 if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
                     # EXPIRY rolls coupons up and pays them when the note ends.
@@ -1052,6 +1069,9 @@ class PhoenixMCEngine(BaseEngine):
                     ],
                     dtype=float,
                 )
+            if fold is not None:
+                maturity_payoff[is_v0[~is_ko]] += fold[1]
+                maturity_payoff[is_v1[~is_ko]] += fold[2]
             if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
                 maturity_payoff += expiry_coupon[~is_ko]
             payoffs[~is_ko] += maturity_payoff

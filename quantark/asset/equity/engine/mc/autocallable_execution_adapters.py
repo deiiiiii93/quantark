@@ -27,6 +27,7 @@ would corrupt its own request state.)
 Parallel-wave adaptive RQMC (a distinct opt-in plan) is deferred on Phase 2
 benchmark evidence (host-limited thread scaling).
 """
+import hashlib
 import threading
 import weakref
 
@@ -151,11 +152,20 @@ class AutocallableAdaptiveMCAdapter(LegacyPriceAdapter):
         est = 8 * spec.paths_per_batch * (
             2 * dimension + 4 * (spec.time_steps + 1)
         ) + (1 << 20)
+        # A folded solve (price_folded) prices a different payoff on the same draws: its
+        # overlay enters the plan identity (ship spec 2026-10-21 D8); unfolded ids are unchanged.
+        fold = getattr(engine, "_fold", None)
+        fold_part = (
+            ""
+            if fold is None
+            else ":fold=" + hashlib.sha256(repr(fold).encode("utf-8")).hexdigest()[:16]
+        )
         return AdaptivePlan(
             plan_id=(
                 f"{engine_class_path}:{spec.scheme}:{seed}"
                 f":{spec.paths_per_batch}"
                 f":{spec.min_batches}-{spec.max_batches}:{spec.target_std!r}"
+                f"{fold_part}"
             ),
             engine_class_path=engine_class_path,
             max_batches=int(spec.max_batches),

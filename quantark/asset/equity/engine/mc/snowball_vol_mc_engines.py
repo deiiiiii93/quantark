@@ -1072,6 +1072,15 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
         else:
             ko_settle = np.full(n_ko, float(timings.terminal.payment_time))
         ko_df = np.asarray(self._df(ko_settle), dtype=float)
+        # Folded cash legs (price_folded only): each KO date's cash beside its record payoff,
+        # each maturity branch's beside its redemption -- the branch weights stay the estimator's.
+        fold = None
+        if self._fold is not None:
+            terminal = (float(timings.terminal.determination_time), float(timings.terminal.payment_time))
+            fold = self._bound_fold(
+                [("main", float(t), float(p)) for t, p in zip(ko_times, ko_settle)], terminal, terminal
+            )
+            ko_pay = ko_pay + fold[0]
         ko_w = W_prev * q_ko  # per-path branch weight of KO at date k
         branch_pv = ko_w @ (ko_pay * ko_df)
 
@@ -1098,6 +1107,9 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
                     for spot in terminal_spots[need_v1]
                 ]
             )
+        if fold is not None:
+            v0_payoffs[need_v0] += fold[1]
+            v1_payoffs[need_v1] += fold[2]
         terminal_df = float(self._df(float(timings.terminal.payment_time)))
         maturity_pv = (
             W_final * (w_ki * v0_payoffs + (1.0 - w_ki) * v1_payoffs) * terminal_df

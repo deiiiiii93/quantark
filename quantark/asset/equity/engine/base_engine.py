@@ -251,6 +251,21 @@ class BaseEngine(ABC):
             "price the legs on the event route"
         )
 
+    def fold_drilldown_refusal(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+    ) -> Optional[str]:
+        """Why a folded DRILLDOWN (per-leg differences of folded solves) is unsound here, else None.
+
+        DRILLDOWN values each leg as the difference of two solves of the same product. That is
+        exact only when both solves run one discretization (one grid, one path set). An engine
+        whose path set depends on the payoff it prices (adaptive batch stopping) or that splits a
+        price into separately reduced batches returns the reason; the caller refuses DRILLDOWN
+        and may still run TOTAL (ship spec D11c).
+        """
+        return None
+
     def calculate_greeks(
         self,
         product: BaseEquityProduct,

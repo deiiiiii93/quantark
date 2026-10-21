@@ -13,6 +13,7 @@ This engine prices snowball options using Monte Carlo simulation with support fo
 
 import math
 import warnings
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
@@ -77,6 +78,118 @@ except ImportError:
     DASK_AVAILABLE = False
 
 
+class _FoldedPayoffMixin:
+    """Cash-leg folding for the autocallable MC engines (ship spec 2026-10-21 D4, D5, D8, D11c, D14).
+
+    ``price_folded`` runs the engine's own ``price`` with the overlay held for that one call
+    (``_fold``, None on every other call). Each per-path payoff kernel binds it to the records it
+    actually pays -- ``(schedule, determination, settlement)`` of every knock-out record and of each
+    maturity branch, through ``FoldOverlay.bind_ko`` / ``bind_terminal`` (fail closed) -- and adds
+    the cash where the record's own payoff goes, before the path's settlement discount. Every route
+    that prices through the kernel (serial, Dask batches, RQMC batches) therefore folds; the
+    estimators with their own assembly (LocalVol one-step survival, the Heston conditional moments)
+    fold at their own sites.
+    """
+
+    supports_cash_leg_folding = True
+    #: the overlay of a running ``price_folded``; None on every other call
+    _fold = None
+
+    @contextmanager
+    def _folding(self, overlay):
+        """Hold ``overlay`` for the solves run inside the block; never left behind."""
+        self._fold = overlay
+        try:
+            yield
+        finally:
+            self._fold = None
+
+    def price_folded(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        overlay,
+        *,
+        lifecycle_state=None,
+    ) -> float:
+        """Per-unit NPV with ``overlay``'s cash legs folded into each path's payoff.
+
+        One ``price`` on the same paths: knock-out cash is added to the knock-out record's payoff
+        of every path that knocks out there, maturity cash to the payoff of every path ending on
+        that branch, both before the path's settlement discount. ``overlay.constant_pv`` is not
+        included. An empty overlay is ``price()`` bitwise.
+        """
+        if overlay.is_empty:
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        if (
+            isinstance(product, KnockOutResetSnowballOption)
+            and product.post_ko_mode != PostKOScheduleMode.ABSOLUTE
+        ):
+            self._refuse_rebased_fold()
+        with self._folding(overlay):
+            return self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+
+    def fold_drilldown_refusal(self, product, pricing_env) -> Optional[str]:
+        """Adaptive RQMC and Dask batch routes refuse DRILLDOWN (ship spec D11c)."""
+        if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
+            return (
+                "adaptive RQMC stops on the batch statistics of the payoff it prices, so a "
+                "folded and a plain solve may run different path sets; per-leg differences "
+                "would mix them"
+            )
+        if self.use_dask and self.num_batches > 1:
+            return (
+                "Dask batch pricing reduces separately priced batches; per-leg differences "
+                "of folded and plain solves are refused on it"
+            )
+        return None
+
+    @staticmethod
+    def _refuse_rebased_fold():
+        from quantark.execution.errors import CapabilityError
+
+        raise CapabilityError(
+            "a REBASED KO-reset schedule settles at knock-in-dependent times; cash legs "
+            "cannot be folded onto it"
+        )
+
+    def _refuse_expired_fold(self) -> None:
+        """At zero time to maturity the event structure is trivial: folded cash has no event."""
+        if self._fold is not None:
+            from quantark.execution.errors import CapabilityError
+
+            raise CapabilityError(
+                "an expired product has no knock-out or maturity event left to fold cash onto"
+            )
+
+    def _bound_fold(self, records, no_ki_timing, ki_timing):
+        """``(KO amounts aligned to records, alive cash, knocked-in cash)``, or None unfolded."""
+        fold = self._fold
+        if fold is None:
+            return None
+        return (
+            fold.bind_ko(records),
+            fold.bind_terminal("no_ki", *no_ki_timing),
+            fold.bind_terminal("ki", *ki_timing),
+        )
+
+    def _conditional_fold(self, product, pricing_env, maturity: float) -> dict:
+        """The conditional-moment estimator's fold: KO cash at each record's settlement (its
+        knock-out discount) and branch cash at the maturity it discounts the terminal leg to."""
+        if self._fold is None:
+            return {}
+        profile = product.get_ko_observation_profile(pricing_env)
+        settle = np.asarray(profile["settlement_times"], dtype=float)
+        records = [
+            ("main", float(t), float(s))
+            for t, s in zip(profile["observation_times"], settle)
+        ]
+        ko, no_ki, ki = self._bound_fold(
+            records, (float(maturity), float(maturity)), (float(maturity), float(maturity))
+        )
+        return {"ko_cash": ko, "no_ki_cash": no_ki, "ki_cash": ki}
+
+
 @dataclass
 class SnowballMCResult:
     """Result container for Snowball MC pricing."""
@@ -110,7 +223,7 @@ def _ki_level_breached(spots: np.ndarray, ki_barrier: float, is_reverse: bool) -
     return spots >= ki_barrier if is_reverse else spots <= ki_barrier
 
 
-class SnowballMCEngine(BaseEngine):
+class SnowballMCEngine(_FoldedPayoffMixin, BaseEngine):
     """
     Monte Carlo pricing engine for Snowball (autocallable) options.
 
@@ -276,6 +389,7 @@ class SnowballMCEngine(BaseEngine):
         # Zero time to maturity. Exactly zero: a positive maturity, however short, still carries variance and is
         # simulated (a 1e-10-year cut decided an observation 3 ms ahead on the spot, review 2026-09-21 R1).
         if T <= 0.0:
+            self._refuse_expired_fold()
             knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
             if type(product) is SnowballOption:
                 # The observations still pending at this instant are decided on the known spot, as
@@ -383,7 +497,9 @@ class SnowballMCEngine(BaseEngine):
         self._last_result = result
         # Negative PV is valid for some structures (e.g., principal-excluded notes)
         # where the payoff is effectively "coupon minus embedded option loss".
-        if result.price < 0 and product.payoff_config.include_principal:
+        # (A folded solve carries cash legs, which may outweigh the product: the check is the
+        # product's own.)
+        if result.price < 0 and product.payoff_config.include_principal and self._fold is None:
             raise PricingError(f"Negative price computed: {result.price}")
         return result.price
 
@@ -1832,6 +1948,21 @@ class SnowballMCEngine(BaseEngine):
             float(timings.terminal.payment_time),
         )
 
+        # Folded cash legs (price_folded only): each record's cash where its own payoff goes
+        fold = None
+        if self._fold is not None:
+            terminal = (float(timings.terminal.determination_time), float(timings.terminal.payment_time))
+            instant = product.accrual_config.coupon_pay_type == CouponPayType.INSTANT
+            fold = self._bound_fold(
+                [
+                    ("main", float(t), float(ko_settlement_times[i]) if instant else terminal[1])
+                    for i, t in enumerate(ko_times)
+                ],
+                terminal,
+                terminal,
+            )
+            ko_payoffs_schedule = ko_payoffs_schedule + fold[0]
+
         # KO payoffs
         if is_ko.any():
             ko_idx_for_payoff = first_ko_idx[is_ko]
@@ -1851,7 +1982,7 @@ class SnowballMCEngine(BaseEngine):
                     for spot in terminal_spots
                 ]
             )
-            payoffs[is_v0] = v0_payoffs
+            payoffs[is_v0] = v0_payoffs if fold is None else v0_payoffs + fold[1]
 
         # V1 payoffs (never KO, KI happened)
         if is_v1.any():
@@ -1862,7 +1993,7 @@ class SnowballMCEngine(BaseEngine):
                     for spot in terminal_spots
                 ]
             )
-            payoffs[is_v1] = v1_payoffs
+            payoffs[is_v1] = v1_payoffs if fold is None else v1_payoffs + fold[2]
 
         # Compute statistics
         ko_count = int(is_ko.sum())
@@ -2118,6 +2249,33 @@ class SnowballMCEngine(BaseEngine):
         payoffs = np.zeros(num_paths, dtype=float)
         settlement_times = np.zeros(num_paths, dtype=float)
 
+        # Folded cash legs (price_folded only): bound to the records and branch settlements paid below
+        fold = None
+        if self._fold is not None:
+            if post_mode != PostKOScheduleMode.ABSOLUTE:
+                self._refuse_rebased_fold()
+            fold = self._bound_fold(
+                [("pre", float(t), float(p)) for t, p in zip(pre_times, pre_settlement_times)]
+                + [("post", float(t), float(p)) for t, p in zip(post_times, post_settlement_times)],
+                (
+                    float(pre_maturity),
+                    self._resolve_payment_time(
+                        product, pricing_env, float(pre_maturity), CashflowKind.TERMINAL,
+                        cashflow_id="ko_reset_v0_terminal",
+                    ),
+                ),
+                (
+                    float(post_maturity_abs),
+                    self._resolve_payment_time(
+                        product, pricing_env, float(post_maturity_abs), CashflowKind.TERMINAL,
+                        cashflow_id="ko_reset_v1_terminal",
+                    ),
+                ),
+            )
+            n_pre = len(pre_times)
+            pre_payoffs = pre_payoffs + fold[0][:n_pre]
+            post_payoffs = post_payoffs + fold[0][n_pre:]
+
         if is_pre_ko.any():
             ko_idx = first_pre_idx[is_pre_ko]
             payoffs[is_pre_ko] = pre_payoffs[ko_idx]
@@ -2185,7 +2343,7 @@ class SnowballMCEngine(BaseEngine):
                 ],
                 dtype=float,
             )
-            payoffs[is_v0] = v0_payoffs
+            payoffs[is_v0] = v0_payoffs if fold is None else v0_payoffs + fold[1]
             settlement_times[is_v0] = self._resolve_payment_time(
                 product,
                 pricing_env,
@@ -2224,7 +2382,7 @@ class SnowballMCEngine(BaseEngine):
                 ],
                 dtype=float,
             )
-            payoffs[is_v1] = v1_payoffs
+            payoffs[is_v1] = v1_payoffs if fold is None else v1_payoffs + fold[2]
             if post_mode == PostKOScheduleMode.ABSOLUTE:
                 settlement_times[is_v1] = self._resolve_payment_time(
                     product,
@@ -2635,6 +2793,7 @@ class SnowballMCEngine(BaseEngine):
                 ki_indices=ki_indices,
                 maturity=T,
                 discount_factors=self._df,
+                **self._conditional_fold(product, pricing_env, T),
             )
 
         def collapse_conditional_outer(values, aux):
@@ -2676,6 +2835,7 @@ class SnowballMCEngine(BaseEngine):
                 ki_indices=ki_indices,
                 maturity=T,
                 discount_factors=self._df,
+                **self._conditional_fold(product, pricing_env, T),
             ).discounted_payoff
 
         def conditional_control_payoffs(paths, aux):
