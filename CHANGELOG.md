@@ -32,6 +32,16 @@ During 0.x the public API may still change between minor versions.
 
 ### Changed
 
+- `ConvertibleBond.hazard_rate` now defaults to `None`, which derives the intensity from the credit
+  triangle: `ConvertibleBond.effective_hazard_rate = credit_spread / (1 − recovery_rate)` (new
+  `quantark.asset.credit.conventions.spread_to_hazard`). Jump-diffusion, the HW trinomial and their
+  CS01 read it, so a bond priced on GS/TF (which read `credit_spread`) and on the hazard engines
+  carries the same credit. An explicit `hazard_rate`, zero included, still wins, and those prices
+  are unchanged; a bond that set a spread but no hazard used to price riskless on the hazard
+  engines and now prices its spread. With no hazard and `recovery_rate = 1` the spread does not
+  determine the intensity, so the hazard engines raise. The convertible demos drop their
+  hand-picked 1% hazard: on the demo bond HW and jump-diffusion move from 138.74 to 136.64–136.65,
+  and the five engines now span 136.37–136.80 (they were 2.4 apart).
 - On default, the jump-diffusion and HW trinomial convertible engines (all three vol schemes) now
   pay the holder `max(conversion_ratio × (1 − η) × S, recovery_rate × face)` while conversion is
   open: the better of the recovery and conversion into the shares left after the stock drops by

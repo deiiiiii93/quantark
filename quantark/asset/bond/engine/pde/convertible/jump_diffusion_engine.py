@@ -123,7 +123,7 @@ class ConvertibleBondJumpDiffusionEngine:
         T = bond.time_to_maturity(valuation_date)
 
         # Credit parameters from bond
-        lambda_h = bond.hazard_rate  # Hazard rate
+        lambda_h = bond.effective_hazard_rate  # Hazard rate (or credit_spread / (1 - R))
         eta = bond.stock_jump_on_default  # Stock drop on default
         recovery = bond.recovery_rate
 

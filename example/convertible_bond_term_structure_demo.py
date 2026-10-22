@@ -58,8 +58,7 @@ def create_convertible_bond() -> ConvertibleBond:
         face_value=100.0,
         coupon_rate=0.03,  # 3% coupon
         conversion_ratio=8.0,  # Conversion price = $12.50
-        credit_spread=0.015,  # 150bp credit spread
-        hazard_rate=0.01,  # 1% default probability
+        credit_spread=0.015,  # 150bp; hazard engines use 0.015 / (1 - 0.4)
         recovery_rate=0.4,  # 40% recovery
     )
 

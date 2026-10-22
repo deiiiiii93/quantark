@@ -45,8 +45,7 @@ def create_simple_convertible():
         face_value=100.0,
         coupon_rate=0.025,  # 2.5% coupon
         conversion_ratio=10.0,  # 10 shares per bond (conversion price = $10)
-        credit_spread=0.02,  # 200bp credit spread
-        hazard_rate=0.01,  # 1% annual default probability
+        credit_spread=0.02,  # 200bp; hazard engines use 0.02 / (1 - 0.4)
         recovery_rate=0.4,  # 40% recovery on default
     )
 
@@ -60,7 +59,6 @@ def create_callable_convertible():
         coupon_rate=0.025,
         conversion_ratio=10.0,
         credit_spread=0.02,
-        hazard_rate=0.01,
         recovery_rate=0.4,
         call_schedule=[
             # Issuer can call at 105 after year 2
@@ -86,7 +84,6 @@ def create_puttable_convertible():
         coupon_rate=0.025,
         conversion_ratio=10.0,
         credit_spread=0.02,
-        hazard_rate=0.01,
         recovery_rate=0.4,
         put_schedule=[
             # Holder can put at par after year 2

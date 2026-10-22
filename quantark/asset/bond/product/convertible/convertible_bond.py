@@ -27,6 +27,7 @@ from quantark.util.calendar import (
     CalendarType,
     create_calendar,
 )
+from quantark.asset.credit.conventions import spread_to_hazard
 from quantark.util.enum import FinalCouponOnConversion, PaymentFrequency, StubType
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import validate_positive, validate_probability
@@ -138,8 +139,11 @@ class ConvertibleBond(BaseBondProduct):
         put_schedule: List of put schedule entries (holder's option)
 
         # Credit attributes
-        credit_spread: Credit spread over risk-free rate (e.g., 0.02 for 200bp)
-        hazard_rate: Default intensity for jump-diffusion model (annualized)
+        credit_spread: Credit spread over risk-free rate (e.g., 0.02 for 200bp); GS and TF
+            discount the cash component at r + credit_spread
+        hazard_rate: Default intensity (annualized) for jump-diffusion and HW; None (the
+            default) derives it from credit_spread / (1 - recovery_rate), see
+            effective_hazard_rate
         recovery_rate: Recovery rate upon default (typically 0.4)
         stock_jump_on_default: Fraction the stock drops on default (eta, typically 0.4):
             S jumps to (1 - eta) * S; 1 sends it to zero
@@ -174,7 +178,7 @@ class ConvertibleBond(BaseBondProduct):
 
     # Credit attributes
     credit_spread: float = 0.0
-    hazard_rate: float = 0.0
+    hazard_rate: Optional[float] = None
     recovery_rate: float = 0.4
     stock_jump_on_default: float = 0.4
 
@@ -283,7 +287,7 @@ class ConvertibleBond(BaseBondProduct):
                 f"Credit spread must be non-negative, got {self.credit_spread}"
             )
 
-        if self.hazard_rate < 0:
+        if self.hazard_rate is not None and self.hazard_rate < 0:
             raise ValidationError(
                 f"Hazard rate must be non-negative, got {self.hazard_rate}"
             )
@@ -437,6 +441,21 @@ class ConvertibleBond(BaseBondProduct):
             )
         except ValidationError:
             return 0.0
+
+    @property
+    def effective_hazard_rate(self) -> float:
+        """
+        The default intensity jump-diffusion and HW price with: hazard_rate if set (zero
+        included), else credit_spread / (1 - recovery_rate) by the credit triangle, so the
+        hazard engines carry the same credit as GS and TF.
+
+        Raises:
+            ValidationError: If hazard_rate is unset and recovery_rate is 1, where the
+                spread does not determine the intensity
+        """
+        if self.hazard_rate is not None:
+            return self.hazard_rate
+        return spread_to_hazard(self.credit_spread, self.recovery_rate)
 
     @property
     def maturity_redemption(self) -> float:

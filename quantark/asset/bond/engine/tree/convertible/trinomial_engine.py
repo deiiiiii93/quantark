@@ -232,7 +232,7 @@ class ConvertibleBondTrinomialEngine:
         """
         n_steps = self.params.num_steps
         spot = self.pricing_env.spot
-        default_compensation = bond.hazard_rate * bond.stock_jump_on_default
+        default_compensation = bond.effective_hazard_rate * bond.stock_jump_on_default
 
         r_steps = np.zeros(n_steps)
         vol_steps = np.zeros(n_steps)
@@ -305,7 +305,7 @@ class ConvertibleBondTrinomialEngine:
             raise PricingError("Time step must be positive for trinomial engine")
 
         q = bond.continuous_dividend_yield
-        hazard_rate = bond.hazard_rate
+        hazard_rate = bond.effective_hazard_rate
         scheme = self.params.trinomial_vol_scheme
 
         # Warn if the selected scheme ignores term structure

@@ -650,7 +650,7 @@ class ConvertibleBondEngine:
         denom = max(1e-8, 1.0 - recovery)
         hazard_bump = spread_bump / denom
 
-        base_hazard = bond.hazard_rate if bond.hazard_rate else 0.0
+        base_hazard = bond.effective_hazard_rate
         hazard_up = base_hazard + hazard_bump
         hazard_down = max(0.0, base_hazard - hazard_bump)
         price_up = self.price(self._create_hazard_bumped_bond(bond, hazard_up))
