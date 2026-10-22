@@ -98,7 +98,7 @@ from quantark.validation import (
 # affect a number.
 from quantark.validation.cell_identity import (
     cell_identity_sha256,
-    source_projection_sha256,
+    project_source,
 )
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface
@@ -488,6 +488,9 @@ NON_NUMERICAL_SYMBOLS = (
     #     here; an allocation table or a bound the arithmetic reads does not.
     "IMPLEMENTATION_INPUTS",
     "NUMERICAL_EXEMPT_INPUTS",
+    "STUDY_INPUT_PREFIX",
+    "digest_label",
+    "labelled_projection_sha256",
     "NON_NUMERICAL_SYMBOLS",
     # (1) after the fact
     "validate_payload",
@@ -4713,6 +4716,42 @@ def _atomic_write(path: Path, text: str) -> None:
             os.unlink(temporary)
 
 
+STUDY_INPUT_PREFIX = "example/case_studies/mo_volmodels/"
+
+
+def digest_label(relative: str) -> str:
+    """The name an implementation input is hashed under.
+
+    A study script is hashed as ``mo_volmodels/<file>`` rather than by its repo
+    path, so relocating the study folder (as the example/ reorganisation did)
+    does not change the digest and invalidate banked evidence. Library files keep
+    their repo path: moving one of those is a real change.
+    """
+    if relative.startswith(STUDY_INPUT_PREFIX):
+        return "mo_volmodels/" + relative[len(STUDY_INPUT_PREFIX):]
+    return relative
+
+
+def labelled_projection_sha256(inputs, *, root: Path) -> str:
+    """`source_projection_sha256` with `digest_label` names in place of paths."""
+    digest = hashlib.sha256()
+    for relative, exempt in inputs:
+        path = Path(root) / relative
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise ValueError(f"cannot hash implementation input {path}") from exc
+        if exempt:
+            payload = project_source(raw.decode("utf-8"), exempt=exempt).encode("utf-8")
+        else:
+            payload = raw
+        digest.update(digest_label(relative).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(payload)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def implementation_sha256() -> str:
     """Hash every in-repo numerical input used by the certification run."""
     root = Path(__file__).resolve().parents[3]
@@ -4723,7 +4762,7 @@ def implementation_sha256() -> str:
             contents = path.read_bytes()
         except OSError as exc:
             raise ValueError(f"cannot hash certification input {path}") from exc
-        digest.update(relative.encode("utf-8"))
+        digest.update(digest_label(relative).encode("utf-8"))
         digest.update(b"\0")
         digest.update(contents)
         digest.update(b"\0")
@@ -4741,12 +4780,9 @@ def numerical_implementation_sha256() -> str:
     """
     root = Path(__file__).resolve().parents[3]
     here = Path(__file__).resolve().relative_to(root).as_posix()
-    return source_projection_sha256(
+    return labelled_projection_sha256(
         [
-            (
-                root / relative,
-                NON_NUMERICAL_SYMBOLS if relative == here else (),
-            )
+            (relative, NON_NUMERICAL_SYMBOLS if relative == here else ())
             for relative in IMPLEMENTATION_INPUTS
             if relative not in NUMERICAL_EXEMPT_INPUTS
         ],

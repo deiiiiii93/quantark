@@ -1767,3 +1767,40 @@ def test_a_declared_sequential_run_cannot_bank_a_cell_without_a_decision():
         )
         == 1024
     )
+
+
+def test_digest_survives_relocating_the_study_folder(tmp_path):
+    """Moving the study folder must not invalidate banked evidence.
+
+    Study scripts are hashed under ``mo_volmodels/<file>``, not their repo path,
+    so the same bytes at a new location give the same digest; library files keep
+    their repo path, so moving one of those still does.
+    """
+    module = _load()
+    prefix = module.STUDY_INPUT_PREFIX
+    assert module.digest_label(prefix + "11_pde_convergence_gate.py") == (
+        "mo_volmodels/11_pde_convergence_gate.py"
+    )
+    assert module.digest_label("quantark/validation/greek_certification.py") == (
+        "quantark/validation/greek_certification.py"
+    )
+
+    def digest(study_dir: str, library_dir: str) -> str:
+        study = tmp_path / study_dir
+        library = tmp_path / library_dir
+        study.mkdir(parents=True, exist_ok=True)
+        library.mkdir(parents=True, exist_ok=True)
+        (study / "a.py").write_text("A = 1\n")
+        (library / "b.py").write_text("B = 2\n")
+        original = module.STUDY_INPUT_PREFIX
+        module.STUDY_INPUT_PREFIX = study_dir + "/"
+        try:
+            return module.labelled_projection_sha256(
+                [(study_dir + "/a.py", ()), (library_dir + "/b.py", ())],
+                root=tmp_path,
+            )
+        finally:
+            module.STUDY_INPUT_PREFIX = original
+
+    assert digest("example/mo_volmodels", "lib") == digest("example/case_studies/mo", "lib")
+    assert digest("example/mo_volmodels", "lib") != digest("example/mo_volmodels", "lib2")

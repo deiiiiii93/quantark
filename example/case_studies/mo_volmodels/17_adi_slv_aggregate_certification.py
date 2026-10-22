@@ -293,7 +293,7 @@ def implementation_sha256() -> str:
             contents = path.read_bytes()
         except OSError as exc:
             raise ValueError(f"cannot hash aggregate certification input {path}") from exc
-        digest.update(relative.encode("utf-8"))
+        digest.update(stage16().digest_label(relative).encode("utf-8"))
         digest.update(b"\0")
         digest.update(contents)
         digest.update(b"\0")
