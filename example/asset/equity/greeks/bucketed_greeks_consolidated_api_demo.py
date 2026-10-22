@@ -36,7 +36,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent.parent))
 
 from quantark.asset.equity.engine.analytical.black_scholes_engine import (  # noqa: E402
     BlackScholesEngine,

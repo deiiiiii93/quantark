@@ -11,7 +11,7 @@ import numpy as np
 
 HERE=Path(__file__).resolve().parent
 RESULTS=HERE/'results'
-ROOT=HERE.parents[1]
+ROOT=HERE.parents[2]
 
 
 def read(name):

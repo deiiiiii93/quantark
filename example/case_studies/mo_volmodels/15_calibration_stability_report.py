@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
 DEFAULT_SURFACE_MANIFEST = HERE / "data" / "history" / "surface_manifest.json"
 DEFAULT_CALIBRATION_MANIFEST = (

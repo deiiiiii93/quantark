@@ -26,7 +26,7 @@ import scipy
 from scipy.stats import norm
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
+ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 import quad_reference_snapshot as ref
 from contracts import Case, cases, european_put, mc

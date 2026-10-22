@@ -39,7 +39,7 @@ import pandas as pd
 
 from quantark.util.numerical import is_zero
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_RUN_DIR = PROJECT_ROOT / "output/volmodel_backtest"
 
 BASELINE_VARIANT = "flat_bsm"

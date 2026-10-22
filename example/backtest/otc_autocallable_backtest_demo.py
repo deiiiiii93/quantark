@@ -43,7 +43,7 @@ from quantark.backtest.replay import (
 from quantark.util.enum.engine_enums import EngineType, PDEMethod
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "example" / "output" / "otc_autocallable_backtest"
 DEFAULT_START_DATE = "2024-01-02"
 DEFAULT_END_DATE = "2024-04-30"

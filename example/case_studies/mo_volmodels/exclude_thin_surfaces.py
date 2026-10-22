@@ -33,7 +33,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
 
 # Dupire's dC/dT needs an interior maturity node.

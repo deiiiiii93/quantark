@@ -61,7 +61,7 @@ import pandas as pd
 
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
+ROOT = HERE.parents[2]
 CASE_STUDY_CACHE = (
     ROOT
     / "output"

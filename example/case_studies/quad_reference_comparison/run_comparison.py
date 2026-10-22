@@ -26,7 +26,7 @@ import warnings
 import numpy as np
 import scipy
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from independent_mc import (Case, TERM_TIMES, TERM_RATES, TERM_DIVS, TERM_VOLS,
                             coupon_only_exact, estimate, vanilla_put)

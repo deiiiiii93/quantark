@@ -52,7 +52,7 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, MutableMapping, S
 from zoneinfo import ZoneInfo
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
 DEFAULT_HISTORY_DIR = HERE / "data" / "history"
 DEFAULT_RUNTIME_DIR = PROJECT_ROOT / "output" / "mo_daily_calibration"

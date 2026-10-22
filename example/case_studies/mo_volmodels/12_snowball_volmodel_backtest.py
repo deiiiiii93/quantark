@@ -115,7 +115,7 @@ from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 STAGE11_PATH = Path(__file__).resolve().parent / "11_pde_convergence_gate.py"
 STAGE16_PATH = Path(__file__).resolve().parent / "16_adi_greek_certification.py"
 STAGE17_PATH = Path(__file__).resolve().parent / "17_adi_slv_aggregate_certification.py"

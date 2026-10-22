@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 
 from quantark.asset.equity.engine.pde import GridConfig, SnowballPDESolver
 from quantark.asset.equity.param import PDEParams

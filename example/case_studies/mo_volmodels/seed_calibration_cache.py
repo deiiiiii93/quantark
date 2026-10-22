@@ -16,7 +16,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SRC = PROJECT_ROOT / "output/mo_daily_calibration/calibration_cache"
 
 

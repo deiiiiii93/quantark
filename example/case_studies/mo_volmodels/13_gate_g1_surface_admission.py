@@ -24,7 +24,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_IV_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history/iv_surface"
 
 # Dupire local vol needs at least three expiries to form dw/dT; the Phase-1

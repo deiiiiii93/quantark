@@ -47,7 +47,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
-PROJECT_ROOT = HERE.parents[1]
+PROJECT_ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 
 DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PIPELINE_SCRIPT = Path(__file__).resolve().parent / "14_daily_calibration_pipeline.py"
 DEFAULT_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
 DEFAULT_RUNTIME_DIR = PROJECT_ROOT / "output" / "mo_daily_calibration"

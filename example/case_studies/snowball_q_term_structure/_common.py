@@ -68,7 +68,7 @@ from quantark.util.numerical import is_close, is_zero
 # ---------------------------------------------------------------------------
 
 STUDY_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = STUDY_DIR.parents[1]
+PROJECT_ROOT = STUDY_DIR.parents[2]
 DATA_DIR = STUDY_DIR / "data"
 DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example" / "mo_volmodels" / "data" / "history"
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output" / "snowball_q_term_structure"

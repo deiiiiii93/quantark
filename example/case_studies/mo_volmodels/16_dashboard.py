@@ -20,7 +20,7 @@ from mo_dashboard.payload import collect  # noqa: E402
 from mo_dashboard.render import render  # noqa: E402
 from mo_dashboard.serve import serve  # noqa: E402
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUT = PROJECT_ROOT / "output/snowball_dashboard_latest.html"
 DEFAULT_REGISTRY = PROJECT_ROOT / "example/mo_volmodels/mo_dashboard.yaml"
 

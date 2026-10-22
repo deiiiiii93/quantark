@@ -59,7 +59,7 @@ from quantark.util.enum.engine_enums import EngineType, PDEMethod
 from quantark.util.exceptions import ValidationError
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "output" / "case_study"
 UNDERLYING_SYMBOL = "000852"
 UNDERLYING_NAME = "CSI1000"

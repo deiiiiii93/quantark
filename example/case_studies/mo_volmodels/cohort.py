@@ -17,7 +17,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
 
 # Frozen 2026-08-01 (spec §7A.12).  Raising this is a deliberate re-baseline:

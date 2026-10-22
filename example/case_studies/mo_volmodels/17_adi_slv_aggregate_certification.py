@@ -285,7 +285,7 @@ def runtime_environment() -> dict:
 
 
 def implementation_sha256() -> str:
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     digest = hashlib.sha256()
     for relative in IMPLEMENTATION_INPUTS:
         path = root / relative

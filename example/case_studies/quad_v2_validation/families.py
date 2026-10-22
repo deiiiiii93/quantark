@@ -16,7 +16,7 @@ import numpy as np
 from scipy.special import ndtri
 from scipy.stats import qmc, t as student_t
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from quantark.asset.equity.engine.quad import (
     PhoenixQuadEngineV2,

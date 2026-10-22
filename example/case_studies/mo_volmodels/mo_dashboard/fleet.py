@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from . import provenance as P
 from .registry import Registry, classify_run_dirs, norm
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 MO_DIR = PROJECT_ROOT / "example/mo_volmodels"
 
 STATES = ("unreadable", "running", "failed", "void", "stale", "fresh", "missing")

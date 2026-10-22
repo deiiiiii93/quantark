@@ -4715,7 +4715,7 @@ def _atomic_write(path: Path, text: str) -> None:
 
 def implementation_sha256() -> str:
     """Hash every in-repo numerical input used by the certification run."""
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     digest = hashlib.sha256()
     for relative in IMPLEMENTATION_INPUTS:
         path = root / relative
@@ -4739,7 +4739,7 @@ def numerical_implementation_sha256() -> str:
     was the whole source state" -- it is simply the wrong question to ask of a
     banked cell.
     """
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     here = Path(__file__).resolve().relative_to(root).as_posix()
     return source_projection_sha256(
         [
@@ -4862,7 +4862,7 @@ def production_pde_compatibility_sha256() -> str:
     completed PDE evidence only when the production numerical implementation
     itself is byte-for-byte compatible with its schema-9 parent.
     """
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     paths: set[Path] = set()
     for relative in PRODUCTION_PDE_INPUT_ROOTS:
         path = root / relative
