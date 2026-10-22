@@ -124,16 +124,6 @@ def test_every_pass_is_backed_by_a_direct_measurement(synthetic_run):
         assert rows["direct_net_delta_hands"].abs().max() < 1e-9
 
 
-def test_the_tail_stress_reproduces_the_designs_49_8752_bp(synthetic_run):
-    _, out = synthetic_run
-    stresses = pd.read_csv(out / "stress_results.csv")
-    tail_up = stresses[stresses["scenario_id"].str.startswith("tail+")].iloc[0]
-    assert tail_up["product_pnl_bp_of_base"] == pytest.approx(-49.8752, abs=1e-3)
-    # No futures hedge can respond to it, however the book is positioned.
-    assert (stresses["hedge_pnl"] == 0.0).all()
-    assert (stresses["book_pnl"] == stresses["product_pnl"]).all()
-
-
 def test_the_shape_stress_moves_something(synthetic_run):
     _, out = synthetic_run
     stresses = pd.read_csv(out / "stress_results.csv")

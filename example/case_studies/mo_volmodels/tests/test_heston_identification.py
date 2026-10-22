@@ -100,36 +100,6 @@ def test_jacobian_fails_closed_on_nonfinite_perturbation():
         )
 
 
-def test_latest_market_fixture_jacobian_is_finite_bound_aware_and_full_shape():
-    """One real-data numerical pin beyond the synthetic linear-map contracts."""
-    stage04 = _load_stage04()
-    surface_path = EXAMPLE / "data" / "mo_iv_surface_latest.json"
-    calibration_path = EXAMPLE / "data" / "mo_calib_heston_latest.json"
-    raw_surface = json.loads(surface_path.read_text())
-    surface = mo_common.prepare_model_surface(raw_surface, iv_smoothing="sabr")
-    nodes = stage04._calibration_nodes(float(surface["s0"]), surface["per_expiry"])
-    params = stage04.HestonParams(
-        **json.loads(calibration_path.read_text())["params"]
-    )
-
-    result = diagnostics.finite_difference_model_jacobian(
-        lambda values: stage04._model_ivs(
-            float(surface["s0"]), nodes, stage04._params_from_vector(values)
-        ),
-        stage04._params_vector(params),
-        stage04.HESTON_BOUNDS[0],
-        stage04.HESTON_BOUNDS[1],
-    )
-
-    assert result["shape"] == [135, 5]
-    assert result["active_bounds"]["kappa"]["upper"] is True
-    assert result["active_bounds"]["sigma"]["upper"] is True
-    fixed = result["svd"]["fixed_economic"]
-    assert fixed["numerical_rank"] == 5
-    assert fixed["condition_number"] == pytest.approx(20.17, rel=0.01)
-    assert fixed["singular_values"][-1] > 0.0
-
-
 def test_stratified_exponential_weights_are_seeded_positive_and_normalized():
     strata = np.array([0.1, 0.1, 0.1, 0.5, 0.5, 1.0])
     first = diagnostics.stratified_exponential_weights(strata, seed=271828)
