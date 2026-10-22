@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[4]
 OUT = ROOT / "example/case_studies/mo_volmodels/data/mo_hedging_sample.json"
 PLOT = ROOT / "example/case_studies/mo_volmodels/data/plots/09_delta_hedging_sample.png"
 
