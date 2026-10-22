@@ -30,7 +30,7 @@ from quantark.modelvalidation.registry import list_builders
 from quantark.modelvalidation.yaml_loader import load_study, load_study_text
 
 DEFAULT_OUT = "output/modelvalidation"
-STUDY_DIR = Path("example/modelvalidation")
+STUDY_DIR = Path("modelvalidation_studies")
 
 
 def _build_parser() -> argparse.ArgumentParser:

@@ -106,14 +106,24 @@ class _Surface:
     local_vol: LocalVolSurface
 
 
+#: The ``surface:`` strings in the study YAML enter the identity hash of the banked
+#: certificates, so they are frozen logical ids: they keep naming the folder the
+#: surfaces were first committed under. They resolve to ``_STUDIES_DIR`` today.
+_LEGACY_STUDY_PREFIX = "example/modelvalidation/"
+_STUDIES_DIR = "modelvalidation_studies/"
+
+
 def _resolve_path(surface: str) -> Path:
     path = Path(surface)
     if not path.is_absolute():
+        text = path.as_posix()
+        if text.startswith(_LEGACY_STUDY_PREFIX):
+            path = Path(_STUDIES_DIR + text[len(_LEGACY_STUDY_PREFIX):])
         path = _REPO_ROOT / path
     if not path.is_file():
         raise ValidationError(
             f"equity.snowball.localvol_market surface artifact not found: {path}. "
-            "Study surfaces live under example/modelvalidation/data/ and are "
+            "Study surfaces live under modelvalidation_studies/data/ and are "
             "committed; they are NOT read from example/mo_volmodels/data/history, "
             "which is excluded per-clone and would not exist in CI."
         )

@@ -26,7 +26,7 @@ from quantark.modelvalidation.yaml_loader import load_study
 from quantark.util.exceptions import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA = REPO_ROOT / "example" / "modelvalidation" / "data"
+DATA = REPO_ROOT / "modelvalidation_studies" / "data"
 
 CRASH = "example/modelvalidation/data/iv_surface_20240208.json"
 CALM = "example/modelvalidation/data/iv_surface_20231115.json"
@@ -208,7 +208,7 @@ def test_unsupported_reference_knob_is_refused():
 # The study
 # --------------------------------------------------------------------------
 
-STUDY_PATH = REPO_ROOT / "example" / "modelvalidation" / "snowball_localvol_1d.yaml"
+STUDY_PATH = REPO_ROOT / "modelvalidation_studies" / "snowball_localvol_1d.yaml"
 
 EXPECTED_CASES = [
     "crash_ordinary", "crash_inside_listed_grid", "crash_near_ko",
@@ -275,3 +275,18 @@ def test_study_runs_end_to_end_and_gates_every_cell(study, tmp_path):
     assert (tmp_path / "snowball-localvol-1d" / "report.md").is_file()
     assert (tmp_path / "snowball-localvol-1d" / "report.html").is_file()
     assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# Frozen surface ids: the YAML keeps the legacy `example/modelvalidation/data/…`
+# string because it enters the identity hash of five banked certificates.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", ["iv_surface_20240208.json", "iv_surface_20231115.json"])
+def test_legacy_surface_path_resolves_to_studies_dir(name):
+    from quantark.modelvalidation.builders.equity_snowball_localvol import _resolve_path
+
+    expected = REPO_ROOT / "modelvalidation_studies" / "data" / name
+    assert _resolve_path(f"example/modelvalidation/data/{name}") == expected
+    assert _resolve_path(f"modelvalidation_studies/data/{name}") == expected
+    assert _resolve_path(str(expected)) == expected

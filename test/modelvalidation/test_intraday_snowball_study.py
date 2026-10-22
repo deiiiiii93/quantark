@@ -14,7 +14,7 @@ from quantark.modelvalidation.yaml_loader import load_study
 from quantark.intraday.context import resolve_context
 from quantark.intraday.timestamp import to_utc
 
-STUDY_PATH = Path("example/modelvalidation/snowball_intraday_daily_ki_bsm.yaml")
+STUDY_PATH = Path("modelvalidation_studies/snowball_intraday_daily_ki_bsm.yaml")
 CANDIDATES = ("equity.snowball.intraday.quad_v2", "equity.snowball.intraday.pde")
 CASES = [
     "ordinary", "near_ki_above", "near_ki_below", "near_ki_1s", "near_ki_10s", "near_ki_5m",

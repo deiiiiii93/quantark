@@ -23,7 +23,7 @@ from quantark.modelvalidation.anchors import ANCHOR_SCHEMA
 from quantark.util.exceptions import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-STUDY = REPO_ROOT / "example/modelvalidation/adi2d_snowball_greeks.yaml"
+STUDY = REPO_ROOT / "modelvalidation_studies/adi2d_snowball_greeks.yaml"
 BANKED = (
     REPO_ROOT
     / "docs/modelvalidation/certificates/adi2d-snowball-greeks/2026-08-19"

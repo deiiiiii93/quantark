@@ -16,7 +16,7 @@ from quantark.modelvalidation.evidence import atomic_write_json
 from quantark.modelvalidation.pipeline import certify
 from quantark.modelvalidation.yaml_loader import load_study
 
-STUDY_PATH = Path("example/modelvalidation/european_selftest.yaml")
+STUDY_PATH = Path("modelvalidation_studies/european_selftest.yaml")
 
 CANDIDATE = "equity.european.analytical"
 

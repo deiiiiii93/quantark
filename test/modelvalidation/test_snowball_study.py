@@ -19,7 +19,7 @@ from quantark.modelvalidation.pipeline import certify
 from quantark.modelvalidation.study import CaseSpec
 from quantark.modelvalidation.yaml_loader import load_study
 
-STUDY_PATH = Path("example/modelvalidation/snowball_flat_bsm.yaml")
+STUDY_PATH = Path("modelvalidation_studies/snowball_flat_bsm.yaml")
 
 #: The quadrature engine appears twice: once on its own lattice, and
 #: once on one widened until the separations between barriers are whole

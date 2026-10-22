@@ -126,7 +126,7 @@ BUILD = {f"{tag}|{s:g}": (lambda d=KI_DATES[tag], s=s: (snowball(d), env(spot=s)
 
 
 def KO_RESET_AFTER_FIRST():
-    """The certified KO-reset study's ``discrete_ki`` cell (``example/modelvalidation/ko_reset_flat_bsm.yaml``): monthly
+    """The certified KO-reset study's ``discrete_ki`` cell (``modelvalidation_studies/ko_reset_flat_bsm.yaml``): monthly
     knock-in to the end of its first schedule (one year), a second schedule to two years. Its march runs a year past
     its last knock-in observation, where the gate withholds the row (6,114 times in r4_anchors_gated.log)."""
     return make_ko_reset(dict(KO_RESET, ki_continuous=False)), env()

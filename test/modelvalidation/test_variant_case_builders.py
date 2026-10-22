@@ -154,9 +154,9 @@ def test_phoenix_default_barriers_stay_scalar():
 # change and after it.
 
 STUDY_YAML = {
-    "snowball-flat-bsm": "example/modelvalidation/snowball_flat_bsm.yaml",
-    "phoenix-flat-bsm": "example/modelvalidation/phoenix_flat_bsm.yaml",
-    "ko-reset-flat-bsm": "example/modelvalidation/ko_reset_flat_bsm.yaml",
+    "snowball-flat-bsm": "modelvalidation_studies/snowball_flat_bsm.yaml",
+    "phoenix-flat-bsm": "modelvalidation_studies/phoenix_flat_bsm.yaml",
+    "ko-reset-flat-bsm": "modelvalidation_studies/ko_reset_flat_bsm.yaml",
 }
 
 BANKED_CERTIFICATES = sorted(
