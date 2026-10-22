@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Union
 
 from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
+from quantark.asset.credit.conventions import spread_shift_to_hazard_shift
 from quantark.asset.bond.engine.tree.convertible import (
     ConvertibleBondTFTreeEngine,
     ConvertibleBondTreeParams,
@@ -646,9 +647,7 @@ class ConvertibleBondEngine:
             return self._per_bump(price_down - price_up, base_spread, spread_bump)
 
         # Hazard-based models: bump hazard_rate
-        recovery = bond.recovery_rate if bond.recovery_rate is not None else 0.0
-        denom = max(1e-8, 1.0 - recovery)
-        hazard_bump = spread_bump / denom
+        hazard_bump = spread_shift_to_hazard_shift(spread_bump, bond.recovery_rate)
 
         base_hazard = bond.effective_hazard_rate
         hazard_up = base_hazard + hazard_bump

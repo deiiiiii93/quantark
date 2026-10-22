@@ -30,11 +30,5 @@ def spread_to_hazard(spread: float, recovery: float = STANDARD_RECOVERY) -> floa
 def spread_shift_to_hazard_shift(
     spread_shift: float, recovery: float = STANDARD_RECOVERY
 ) -> float:
-    """Absolute spread move -> hazard move: ``Δlambda = Δs / (1 - R)``."""
-    lgd = 1.0 - recovery
-    if lgd <= 1e-6:
-        raise ValidationError(
-            "Spread-to-hazard conversion is undefined at full recovery (R=1): "
-            "the spread s = lambda (1 - R) is identically zero."
-        )
-    return spread_shift / lgd
+    """Absolute spread move -> hazard move: ``Δlambda = Δs / (1 - R)`` (the triangle is linear)."""
+    return spread_to_hazard(spread_shift, recovery)

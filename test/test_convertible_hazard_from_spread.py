@@ -114,3 +114,11 @@ def test_cs01_bumps_the_derived_hazard(method):
     engine = ConvertibleBondEngine(ENV, method=method)
     assert engine.cs01(derived) == engine.cs01(explicit)
     assert engine.cs01(derived) > 0.0
+
+
+@pytest.mark.parametrize("method", [ConvertibleBondMethod.JUMP_DIFFUSION, ConvertibleBondMethod.TRINOMIAL_HW])
+def test_cs01_at_full_recovery_raises(method):
+    # A spread move does not map to an intensity move at R = 1 (it used to bump the hazard by 1e4)
+    bond = _bond(credit_spread=0.02, recovery_rate=1.0, hazard_rate=0.01)
+    with pytest.raises(ValidationError):
+        ConvertibleBondEngine(ENV, method=method).cs01(bond)
