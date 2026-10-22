@@ -19,13 +19,13 @@ def _run_example(name: str) -> subprocess.CompletedProcess:
 
 
 def test_execution_session_demo_runs():
-    result = _run_example("execution_session_demo.py")
+    result = _run_example("execution/execution_session_demo.py")
     assert result.returncode == 0, result.stderr
     assert "session == direct" in result.stdout
     assert "DCN serial == threads == direct" in result.stdout
 
 
 def test_execution_scenarios_demo_runs():
-    result = _run_example("execution_scenarios_demo.py")
+    result = _run_example("execution/execution_scenarios_demo.py")
     assert result.returncode == 0, result.stderr
     assert "5/5 scenarios" in result.stdout

@@ -1,7 +1,7 @@
 {
   "artifacts": {
-    "csv": "example/case_studies/mo_volmodels/data/mo_calibration_diagnostics_latest.csv",
-    "plot": "example/case_studies/mo_volmodels/data/plots/10_heston_cross_date_latest.png"
+    "csv": "example/mo_volmodels/data/mo_calibration_diagnostics_latest.csv",
+    "plot": "example/mo_volmodels/data/plots/10_heston_cross_date_latest.png"
   },
   "exclusions": [
     {

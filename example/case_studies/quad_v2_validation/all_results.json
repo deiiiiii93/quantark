@@ -15,7 +15,7 @@
       "repeats": 3
     },
     "source_sha256": {
-      "example/case_studies/quad_v2_validation/validate.py": "8054e081a2d8f6681058a5957dbc3258656d4653e64f59198f7a03c8e92bdc47",
+      "example/quad_v2_validation/validate.py": "8054e081a2d8f6681058a5957dbc3258656d4653e64f59198f7a03c8e92bdc47",
       "quantark/asset/equity/engine/quad/__init__.py": "fdc8dd46571d02c5cff17720f9205448afcf8364e44521a2e6edf91bf53101ed",
       "quantark/asset/equity/engine/quad/discrete_quad_engine.py": "3cd9977fdbf7496a832feb5a0e80b6fdea2198c94e414929533ee22f7572a836",
       "quantark/asset/equity/engine/quad/european_quad_engine.py": "82a6cebe23880c89224d6185365a7ff66b4d5a0c712119cdec92999beb978fd1",

@@ -16,10 +16,10 @@
       "only": "monthly,near_ki_above,aged_five_days,ki_ko_close"
     },
     "sha256": {
-      "example/case_studies/gaussian_quad_comparison/contracts.py": "d29170f503a719d10922df55aeca88734868664e8b352005f0ad0f188804bf5d",
-      "example/case_studies/gaussian_quad_comparison/quad_reference_snapshot.py": "70938c07768f0512765bed99ca9d2c50dd561bb649fe595ebda90bbe3d090ac7",
-      "example/case_studies/gaussian_quad_comparison/supplement.py": "525d2a9208cbb3a9d531007c6425305393acec0cf93607fef333179bcb62e16d",
-      "example/case_studies/gaussian_quad_comparison/study.py": "cb69f46e0efee43a63a0331225faca865493b01729a38e630bc8a5e328cc95ef",
+      "example/gaussian_quad_comparison/contracts.py": "d29170f503a719d10922df55aeca88734868664e8b352005f0ad0f188804bf5d",
+      "example/gaussian_quad_comparison/quad_reference_snapshot.py": "70938c07768f0512765bed99ca9d2c50dd561bb649fe595ebda90bbe3d090ac7",
+      "example/gaussian_quad_comparison/supplement.py": "525d2a9208cbb3a9d531007c6425305393acec0cf93607fef333179bcb62e16d",
+      "example/gaussian_quad_comparison/study.py": "cb69f46e0efee43a63a0331225faca865493b01729a38e630bc8a5e328cc95ef",
       "quantark/asset/equity/engine/quad/quad_adapters.py": "34adb6481fb214c826b0d8cd11a83fef74e79d71a3c91d2f467d197a3f2a04d0",
       "quantark/asset/equity/engine/quad/quad_core.py": "c2fe64c6b40e397e719ab2be0f25cc50994d752a2d8d44756313e5613d733f83",
       "quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py": "14b0ff79208573704d8f721522194f6bf38e230a6e6fca50c54b2b4372d72937",
