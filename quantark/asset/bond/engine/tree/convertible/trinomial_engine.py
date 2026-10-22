@@ -78,7 +78,9 @@ class ConvertibleBondTrinomialEngine:
     Upon default:
     - Stock price drops to (1 - eta) * S (eta = stock_jump_on_default); while it
       survives it drifts at r - q + hazard * eta, so it is a martingale overall
-    - Bondholder receives recovery_rate * face_value
+    - Bondholder receives max(conversion_ratio * (1 - eta) * S, recovery_rate *
+      face_value) while conversion is open, else the recovery (Ayache, Forsyth &
+      Vetzal 2003)
 
     Volatility schemes:
     - CONSTANT_VOL: u / 1 / d grid at the maximum vol, moment-matched probabilities
@@ -660,6 +662,8 @@ class ConvertibleBondTrinomialEngine:
 
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
+        # Shares per bond left after the stock drops to (1 - eta) S on default
+        shares_on_default = bond.conversion_ratio * (1.0 - bond.stock_jump_on_default)
 
         # Step edges for coupons and puts; the last step ends at maturity exactly
         step_times = np.arange(n_steps + 1) * dt
@@ -718,6 +722,9 @@ class ConvertibleBondTrinomialEngine:
             # Local discount factor
             discount_local = safe_exp(-r_local * dt)
 
+            # On default the holder takes max(shares value, recovery) if conversion is open (AFV 2003)
+            default_shares = shares_on_default if bond.is_convertible_at(node_date) else 0.0
+
             for j in range(num_nodes):
                 stock = stock_tree[i, j]
 
@@ -744,7 +751,7 @@ class ConvertibleBondTrinomialEngine:
                 # Expected continuation value with local discount
                 continuation = discount_local * (
                     p_up * v_up + p_mid * v_mid + p_down * v_down
-                    + p_default * recovery_value
+                    + p_default * max(default_shares * stock, recovery_value)
                 )
 
                 # Expected conversion probability
@@ -857,6 +864,8 @@ class ConvertibleBondTrinomialEngine:
 
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
+        # Shares per bond left after the stock drops to (1 - eta) S on default
+        shares_on_default = bond.conversion_ratio * (1.0 - bond.stock_jump_on_default)
 
         # Step edges for coupons and puts; the last step ends at maturity exactly
         step_times = np.arange(n_steps + 1) * dt
@@ -913,6 +922,9 @@ class ConvertibleBondTrinomialEngine:
             # Local discount factor
             discount_local = safe_exp(-r_local * dt)
 
+            # On default the holder takes max(shares value, recovery) if conversion is open (AFV 2003)
+            default_shares = shares_on_default if bond.is_convertible_at(node_date) else 0.0
+
             for j in range(num_nodes):
                 stock = stock_tree[i, j]
 
@@ -941,7 +953,7 @@ class ConvertibleBondTrinomialEngine:
                     p_up * v_up
                     + p_mid * v_mid
                     + p_down * v_down
-                    + p_default * recovery_value
+                    + p_default * max(default_shares * stock, recovery_value)
                 )
 
                 # Expected conversion probability
@@ -1066,6 +1078,8 @@ class ConvertibleBondTrinomialEngine:
 
         # Recovery value on default
         recovery_value = bond.recovery_rate * bond.face_value
+        # Shares per bond left after the stock drops to (1 - eta) S on default
+        shares_on_default = bond.conversion_ratio * (1.0 - bond.stock_jump_on_default)
 
         # Step edges for coupons and puts; the last step ends at maturity exactly
         step_times = np.arange(n_steps + 1) * dt
@@ -1124,6 +1138,9 @@ class ConvertibleBondTrinomialEngine:
             # Local discount factor
             discount_local = safe_exp(-r_local * dt)
 
+            # On default the holder takes max(shares value, recovery) if conversion is open (AFV 2003)
+            default_shares = shares_on_default if bond.is_convertible_at(node_date) else 0.0
+
             for j in range(num_nodes):
                 stock = stock_tree[i, j]
                 log_s = log_grid[i, j]
@@ -1169,7 +1186,7 @@ class ConvertibleBondTrinomialEngine:
                     p_up * v_up
                     + p_mid * v_mid
                     + p_down * v_down
-                    + p_default * recovery_value
+                    + p_default * max(default_shares * stock, recovery_value)
                 )
 
                 # Expected conversion probability

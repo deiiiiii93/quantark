@@ -57,9 +57,11 @@ class ConvertibleBondJumpDiffusionEngine:
         dN = Poisson process with intensity lambda
 
     The + lambda * eta drift compensates the expected drop, so the stock earns
-    r - q in total. The convertible bond PDE becomes:
+    r - q in total. On default the holder takes the better of the recovery and
+    conversion into the surviving shares while conversion is open (Ayache,
+    Forsyth & Vetzal 2003), so the convertible bond PDE becomes:
         V_t + 0.5 * sigma^2 * S^2 * V_SS + (r - q + lambda*eta) * S * V_S
-            - r * V - lambda * (V - recovery) = 0
+            - r * V - lambda * (V - max(kappa * (1 - eta) * S, recovery)) = 0
 
     Boundary conditions:
         - At S=0: V = recovery * face_value
@@ -180,9 +182,14 @@ class ConvertibleBondJumpDiffusionEngine:
             if coupon_amount > 0.0:
                 V = V + coupon_amount
 
+            # On default the holder takes max(kappa (1 - eta) S, R F) if conversion is open
+            default_value, converts_on_default = self._default_payoff(
+                bond, S, bond.is_convertible_at(node_date)
+            )
+
             # Build discretization matrices with time-local parameters
             A, b = self._build_matrices(
-                S, V, r_local, q, vol_local, lambda_h, eta, recovery, bond, dt, use_implicit
+                S, V, r_local, q, vol_local, lambda_h, eta, recovery, default_value, bond, dt, use_implicit
             )
 
             # Solve system
@@ -203,6 +210,7 @@ class ConvertibleBondJumpDiffusionEngine:
                 vol_local,
                 lambda_h,
                 eta,
+                converts_on_default,
                 dt,
                 use_implicit,
                 p_upper_boundary=p_upper_boundary,
@@ -282,6 +290,26 @@ class ConvertibleBondJumpDiffusionEngine:
         conversion_value = bond.conversion_ratio * S
         return (conversion_value > bond.maturity_redemption).astype(float)
 
+    @staticmethod
+    def _default_payoff(
+        bond: ConvertibleBond, S: np.ndarray, conversion_open: bool
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        What the holder receives on default at each pre-default stock price.
+
+        The stock drops to (1 - eta) S; the holder takes the better of the recovery
+        R F and conversion into the surviving shares, if conversion is open
+        (Ayache, Forsyth & Vetzal 2003, eq. 4.9).
+
+        Returns:
+            Tuple of (default value, whether the holder converts on default)
+        """
+        recovery_value = bond.recovery_rate * bond.face_value
+        if not conversion_open:
+            return np.full_like(S, recovery_value), np.zeros_like(S, dtype=bool)
+        shares_value = bond.conversion_ratio * (1.0 - bond.stock_jump_on_default) * S
+        return np.maximum(shares_value, recovery_value), shares_value > recovery_value
+
     def _build_matrices(
         self,
         S: np.ndarray,
@@ -292,6 +320,7 @@ class ConvertibleBondJumpDiffusionEngine:
         lambda_h: float,
         eta: float,
         recovery: float,
+        default_value: np.ndarray,
         bond: ConvertibleBond,
         dt: float,
         use_implicit: bool,
@@ -307,6 +336,7 @@ class ConvertibleBondJumpDiffusionEngine:
             lambda_h: Hazard rate
             eta: Stock jump on default
             recovery: Recovery rate
+            default_value: What the holder receives on default at each S
             bond: Convertible bond
             dt: Time step
             use_implicit: Whether to use fully implicit scheme
@@ -382,8 +412,8 @@ class ConvertibleBondJumpDiffusionEngine:
         else:
             b = V.copy()
 
-        # Add jump term contribution (recovery on default)
-        b[1:-1] += dt * lambda_h * recovery_value
+        # Add jump term contribution (recovery or conversion on default)
+        b[1:-1] += dt * lambda_h * default_value[1:-1]
 
         # Apply boundary conditions
         b[0] = recovery_value
@@ -400,6 +430,7 @@ class ConvertibleBondJumpDiffusionEngine:
         vol: float,
         lambda_h: float,
         eta: float,
+        converts_on_default: np.ndarray,
         dt: float,
         use_implicit: bool,
         p_upper_boundary: float,
@@ -407,8 +438,9 @@ class ConvertibleBondJumpDiffusionEngine:
         """
         Build finite difference matrices for the eventual conversion probability.
 
-        The probability PDE incorporates default as a killing term (-lambda * P)
-        and uses Dirichlet boundaries at the grid endpoints.
+        The probability PDE incorporates default as a killing term (-lambda * P),
+        a source + lambda where the holder converts on default, and Dirichlet
+        boundaries at the grid endpoints.
         """
         N = len(S)
 
@@ -457,6 +489,8 @@ class ConvertibleBondJumpDiffusionEngine:
             b = A_old @ P
         else:
             b = P.copy()
+
+        b[1:-1] += dt * lambda_h * converts_on_default[1:-1]
 
         b[0] = 0.0
         b[-1] = p_upper_boundary
