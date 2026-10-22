@@ -120,8 +120,8 @@ PRODUCTS = {
 
 # --- e18: discrete-KI Phoenix variants and the local-vol markets ---------------------
 
-CRASH = dict(surface="example/modelvalidation/data/iv_surface_20240208.json", rate=0.02)
-CALM = dict(CRASH, surface="example/modelvalidation/data/iv_surface_20231115.json")
+CRASH = dict(surface="test/golden/modelvalidation/data/iv_surface_20240208.json", rate=0.02)
+CALM = dict(CRASH, surface="test/golden/modelvalidation/data/iv_surface_20231115.json")
 
 #: variant -> phoenix spec overrides (levels as fractions of the initial price), KI monitoring
 PHOENIX_VARIANTS = {
