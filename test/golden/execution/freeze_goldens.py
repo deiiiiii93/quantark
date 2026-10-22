@@ -1,7 +1,7 @@
 """Representative cross-family fixtures + golden freeze script (Phase 0).
 
 Run once to (re)generate the checked-in goldens:
-    .venv/bin/python test/execution/freeze_goldens.py
+    .venv/bin/python test/golden/execution/freeze_goldens.py
 Goldens protect later phases against silent serial-path changes; they are
 same-machine, version-stamped references, not cross-platform bit claims.
 """
@@ -141,7 +141,7 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 # Phase 4 pre-refactor PDE goldens (independent oracle for the seam refactor;
 # plan-gate finding 2026-07-16). Run ONCE on the pristine tree:
-#     .venv/bin/python test/execution/freeze_goldens.py phase4
+#     .venv/bin/python test/golden/execution/freeze_goldens.py phase4
 # ---------------------------------------------------------------------------
 
 PHASE4_GOLDEN_PATH = (
@@ -180,7 +180,7 @@ _PHASE4_REFINED_CASES = ("EuropeanPDESolver", "SnowballPDESolver")
 def _phase4_fixtures():
     import sys
 
-    sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep
 
     return FIXTURE_BUILDERS, _pdep
@@ -260,7 +260,7 @@ def freeze_phase4() -> None:
 # ---------------------------------------------------------------------------
 # Phase 6 pre-refactor legacy-Dask goldens (bitwise gate for the shared batch
 # reducer extraction; spec §17.3). Run ONCE on the pristine tree:
-#     .venv/bin/python test/execution/freeze_goldens.py phase6_dask
+#     .venv/bin/python test/golden/execution/freeze_goldens.py phase6_dask
 # ---------------------------------------------------------------------------
 
 PHASE6_DASK_GOLDEN_PATH = (
@@ -272,7 +272,7 @@ def build_phase6_dask_cases() -> dict:
     """Engine/product/env triples exercising every legacy Dask loop variant."""
     import sys
 
-    sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from execution.matrix_fixtures import (
         _eq_flat_env,
         _eq_grid_env,

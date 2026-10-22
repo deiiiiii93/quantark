@@ -210,7 +210,7 @@ class TestCrossFamilyParity:
 
     @pytest.fixture(scope="class")
     def cases(self):
-        from execution.freeze_goldens import build_representative_cases
+        from golden.execution.freeze_goldens import build_representative_cases
 
         return build_representative_cases()
 
@@ -275,7 +275,7 @@ class TestCrossFamilyParity:
         import pathlib
 
         golden_path = (
-            pathlib.Path(__file__).parent / "goldens" / "phase0_goldens.json"
+            pathlib.Path(__file__).resolve().parents[1] / "golden" / "execution" / "goldens" / "phase0_goldens.json"
         )
         goldens = json.loads(golden_path.read_text())["values"]
         for name, (engine, product, env, call_shape) in cases.items():

@@ -11,7 +11,7 @@ import pathlib
 
 import pytest
 
-from execution.freeze_goldens import (
+from golden.execution.freeze_goldens import (
     PHASE4_GOLDEN_PATH,
     _PHASE4_CASES,
     _PHASE4_CURVE_CASES,

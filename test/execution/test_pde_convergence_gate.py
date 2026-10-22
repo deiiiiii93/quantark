@@ -12,7 +12,7 @@ import pytest
 
 from quantark.execution import PricingRequest, PricingSession
 
-from execution.freeze_goldens import PHASE4_GOLDEN_PATH
+from golden.execution.freeze_goldens import PHASE4_GOLDEN_PATH
 from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep_refined
 from golden_compare import GOLDEN_REL_TOL
 

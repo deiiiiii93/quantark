@@ -1,6 +1,6 @@
 # Execution goldens — provenance notes
 
-Frozen with `test/execution/freeze_goldens.py` (`main()` for `phase0_goldens.json`,
+Frozen with `test/golden/execution/freeze_goldens.py` (`main()` for `phase0_goldens.json`,
 `phase4` for `pde_phase4_goldens.json`, `phase6_dask` for
 `legacy_dask_phase6_goldens.json`). They are same-machine references (arm64);
 other architectures compare through `test/golden_compare.py`. A diff after a

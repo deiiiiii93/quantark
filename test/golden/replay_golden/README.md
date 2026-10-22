@@ -157,8 +157,8 @@ default projection, they hold no Phoenix, and they hold no put.
 both `localvol_surfaces` and `book_*` frames are byte-identical: the hedge
 rounds the moved delta to the same futures quantity on every day.
 
-**Execution goldens** (`test/execution/goldens/`, regenerated in the same
-commit): see `test/execution/goldens/PROVENANCE.md`.
+**Execution goldens** (`test/golden/execution/goldens/`, regenerated in the same
+commit): see `test/golden/execution/goldens/PROVENANCE.md`.
 
 ## 2026-10-04 regeneration: PDE 1D event statistics (0.9.0, spec 3B §8)
 

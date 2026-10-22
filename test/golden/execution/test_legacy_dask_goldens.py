@@ -32,7 +32,7 @@ def test_phoenix_dask_available_with_dask_installed():
 
 @pytest.mark.parametrize("name", sorted(_golden_cases()))
 def test_legacy_dask_path_matches_frozen_golden(name):
-    from execution.freeze_goldens import (
+    from golden.execution.freeze_goldens import (
         _phase6_result_payload,
         build_phase6_dask_cases,
     )
