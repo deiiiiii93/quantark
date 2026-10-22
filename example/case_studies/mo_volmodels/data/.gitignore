@@ -11,3 +11,6 @@ comparison_summary_sample.csv
 plots/*_sample.png
 mo_barrier_sample.json
 mo_calibration_explainer_sample.html
+
+# Vendor history cache (large, untracked; previously excluded per clone).
+history/
