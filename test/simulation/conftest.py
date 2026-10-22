@@ -67,7 +67,7 @@ KI_BARRIER = 0.75 * SPOT
 #: naming it is how the fixture says which contract it means: without it the
 #: accrual runs from the product's own time origin, which is the same thing
 #: on the trade date and a different one on every day after.  Ageing carries
-#: either reading correctly (``test/test_aged_accrual.py``); the anchor is
+#: either reading correctly (``test/test_asset/equity/product_other/test_aged_accrual.py``); the anchor is
 #: here so the fixture states the one it intends.
 INCEPTION = datetime(2024, 1, 2)
 

@@ -2,7 +2,7 @@
 
 Spec: `docs/superpowers/specs/2026-08-24-quad-forward-density-event-stats-design.md`
 Plan: `docs/superpowers/plans/2026-08-24-quad-forward-density-event-stats.md`
-Battery: `test/test_quad_forward_density_stats.py`
+Battery: `test/test_asset/equity/product_other/test_quad_forward_density_stats.py`
 Pilot driver: session scratchpad `fwd_tolerance_pilot.py` (grids 1001/2001/4001,
 one machine, one window). All numbers measured 2026-08-24 on the ARM64 dev
 machine, numpy 2.4.6.

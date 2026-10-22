@@ -164,7 +164,7 @@ def test_local_vol_snowball_pde_matches_flat_bsm_pde():
     # coefficients are assembled. The old 1.5% tolerance was wide enough to
     # hide the 0.1% continuous-KI gap that came from gating the local-vol
     # solver off the FIRST_PASSAGE correction; see
-    # test/test_vol_pde_continuous_ki.py.
+    # test/test_asset/equity/engine_pde/test_vol_pde_continuous_ki.py.
     assert lv == pytest.approx(bsm, rel=1e-9)
 
 

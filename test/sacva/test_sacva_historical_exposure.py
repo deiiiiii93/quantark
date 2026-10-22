@@ -2,7 +2,7 @@
 
 Run (worktree shadow):
     PYTHONPATH=$PWD /Users/fuxinyao/quant-ark/.venv/bin/python -m pytest -n0 \
-        test/test_sacva_historical_exposure.py -v
+        test/sacva/test_sacva_historical_exposure.py -v
 """
 import numpy as np
 import pandas as pd

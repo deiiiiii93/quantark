@@ -619,18 +619,18 @@ strategy: it sizes one contract per day and carries no futures chain.
 Run unit tests:
 
 ```bash
-pytest test/test_backtest.py -v
+pytest test/test_backtest/test_backtest.py -v
 ```
 
 The multi-leg carry hedge has its own suites:
 
 ```bash
-pytest -n0 -q test/test_futures_risk.py test/test_carry_curve_context.py \
-  test/test_futures_carry_risk.py test/test_futures_carry_audit.py \
-  test/test_futures_carry_stress.py test/test_futures_bucket_strategy.py \
-  test/test_futures_hedge_book.py test/test_futures_bucket_config.py \
-  test/test_futures_bucket_results.py test/test_futures_carry_recorder.py \
-  test/test_replay_futures_buckets.py
+pytest -n0 -q test/test_backtest/test_futures_risk.py test/test_backtest/test_carry_curve_context.py \
+  test/test_backtest/test_futures_carry_risk.py test/test_backtest/test_futures_carry_audit.py \
+  test/test_backtest/test_futures_carry_stress.py test/test_backtest/test_futures_bucket_strategy.py \
+  test/test_backtest/test_futures_hedge_book.py test/test_backtest/test_futures_bucket_config.py \
+  test/test_backtest/test_futures_bucket_results.py test/test_backtest/test_futures_carry_recorder.py \
+  test/test_backtest/test_replay_futures_buckets.py
 ```
 
 ## Dependencies

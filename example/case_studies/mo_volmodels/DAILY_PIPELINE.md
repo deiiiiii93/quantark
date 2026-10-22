@@ -202,5 +202,5 @@ PYTHONPATH=. .venv/bin/python -m pytest -o addopts='' -p no:cacheprovider \
   test/mo_volmodels/test_daily_scheduler.py \
   test/mo_volmodels/test_build_iv_surface_history.py \
   test/mo_volmodels/test_stage12_backtest_runner.py \
-  test/test_mo_frozen_feller.py -q
+  test/volcalibration/test_mo_frozen_feller.py -q
 ```

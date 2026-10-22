@@ -15,7 +15,7 @@ Phase 9 successfully completed all testing and validation for the VaR module, de
 ## ✅ Task Completion
 
 ### ✅ Phase 9.1: Test Suite Expansion - COMPLETE
-**File**: `test/test_var_integration.py` (602 lines)
+**File**: `test/test_var/test_var_integration.py` (602 lines)
 
 **Comprehensive Integration Tests Including**:
 
@@ -101,7 +101,7 @@ Phase 9 successfully completed all testing and validation for the VaR module, de
    - Large dataset handling (3000+ days)
 
 ### ✅ Phase 9.3: Backtesting Validation - COMPLETE
-**File**: `test/test_var_backtest.py` (597 lines)
+**File**: `test/test_var/test_var_backtest.py` (597 lines)
 
 **Comprehensive Backtesting Framework**:
 
@@ -244,9 +244,9 @@ LR_ind = -2 * ln((1-p)^(n00+n10) * p^(n01+n11) /
 ## Files Modified/Created
 
 ### New Test Files (3)
-1. **test/test_var_integration.py**: 602 lines - Integration tests
+1. **test/test_var/test_var_integration.py**: 602 lines - Integration tests
 2. **test/test_benchmark_var.py**: 615 lines - Performance benchmarks
-3. **test/test_var_backtest.py**: 597 lines - Backtesting validation
+3. **test/test_var/test_var_backtest.py**: 597 lines - Backtesting validation
 
 ### Modified Files (0)
 - All tests standalone, no code modifications
@@ -305,26 +305,26 @@ LR_ind = -2 * ln((1-p)^(n00+n10) * p^(n01+n11) /
 ### Test Execution
 ```bash
 # Run all VaR tests
-python -m pytest test/test_var_integration.py -v
+python -m pytest test/test_var/test_var_integration.py -v
 python -m pytest test/test_benchmark_var.py -v
-python -m pytest test/test_var_backtest.py -v
+python -m pytest test/test_var/test_var_backtest.py -v
 
 # Run specific test categories
-python -m pytest test/test_var_integration.py::TestVarEngineConsistency -v
+python -m pytest test/test_var/test_var_integration.py::TestVarEngineConsistency -v
 python -m pytest test/test_benchmark_var.py::TestVarPortfolioSizeScaling -v
-python -m pytest test/test_var_backtest.py::TestVarBacktestMethodology -v
+python -m pytest test/test_var/test_var_backtest.py::TestVarBacktestMethodology -v
 ```
 
 ### Standalone Execution
 ```bash
 # Integration tests
-python test/test_var_integration.py
+python test/test_var/test_var_integration.py
 
 # Benchmark tests
 python test/test_benchmark_var.py
 
 # Backtesting tests
-python test/test_var_backtest.py
+python test/test_var/test_var_backtest.py
 ```
 
 ---
@@ -358,9 +358,9 @@ python test/test_var_backtest.py
 ## Integration with Existing Tests
 
 **Existing Test Files** (from previous phases):
-- `test/test_var_attribution.py`: 524 lines (17 tests) - Attribution methods
-- `test/test_stressed_var.py`: 485 lines (17 tests) - Stressed VaR
-- `test/test_incremental_var.py`: 545 lines (31 tests) - Incremental VaR
+- `test/test_var/test_var_attribution.py`: 524 lines (17 tests) - Attribution methods
+- `test/test_portfolio/test_stressed_var.py`: 485 lines (17 tests) - Stressed VaR
+- `test/test_var/test_incremental_var.py`: 545 lines (31 tests) - Incremental VaR
 
 **Total VaR Test Suite**: 3,368 lines, 166 tests across 6 files
 

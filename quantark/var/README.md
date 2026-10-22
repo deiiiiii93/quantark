@@ -658,9 +658,9 @@ Run the comprehensive test suite:
 python -m pytest test/test_var*.py -v
 
 # Specific test files
-python -m pytest test/test_var_attribution.py -v
-python -m pytest test/test_stressed_var.py -v
-python -m pytest test/test_incremental_var.py -v
+python -m pytest test/test_var/test_var_attribution.py -v
+python -m pytest test/test_portfolio/test_stressed_var.py -v
+python -m pytest test/test_var/test_incremental_var.py -v
 
 # Run with coverage
 python -m pytest test/test_var*.py --cov=var --cov-report=html

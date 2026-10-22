@@ -1,7 +1,7 @@
 # Sequential admission: shipped policy, and the honest fleet number
 
 **Date** 2026-08-11 · Module `quantark/validation/sequential_admission.py` ·
-Tests `test/test_sequential_admission.py` (25) · Probe
+Tests `test/validation/test_sequential_admission.py` (25) · Probe
 `probes/probe_sequential_policy_replay.py` · Raw `output/sequential_policy_replay/`
 
 Adopts the cert-cost-reduction P1 finding. The rule itself is P1's; what is new

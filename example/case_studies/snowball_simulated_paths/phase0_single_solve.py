@@ -80,7 +80,7 @@ HEDGE = "front"
 OUT = C.DEFAULT_OUT_DIR / "phase0"
 SUITES = {
     "conformance": ["test/simulation/test_conformance.py"],
-    "replay_goldens": ["test/test_replay_goldens.py"],
+    "replay_goldens": ["test/test_backtest/test_replay_goldens.py"],
 }
 SESSION_ATTRS = ("_session_grids", "_session_step_coefficients", "_session_matrix_pack",
                  "_session_banded_pack", "_frozen_base_layout")

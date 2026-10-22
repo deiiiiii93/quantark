@@ -145,7 +145,7 @@ Parquet exports use efficient columnar storage with:
 
 Run the test suite:
 ```bash
-pytest test/test_portfolio.py -v
+pytest test/test_asset/equity/product_other/test_portfolio.py -v
 ```
 
 Run the demo:

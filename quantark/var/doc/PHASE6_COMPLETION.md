@@ -72,7 +72,7 @@ Phase 6 successfully implemented **Incremental VaR (IVaR)** functionality across
 - Parametric VaR: Lines 741-760
 
 ### ✅ Phase 6.4: IVaR Unit Tests - COMPLETE
-**File**: `test/test_incremental_var.py` (545 lines)
+**File**: `test/test_var/test_incremental_var.py` (545 lines)
 
 **Test Coverage**:
 1. **TestIncrementalVaRResult** (11 tests)
@@ -164,7 +164,7 @@ Phase 6 successfully implemented **Incremental VaR (IVaR)** functionality across
    - Added `calculate_incremental_var()` to VaREngine protocol (19 lines)
 
 ### New Files (1)
-1. `test/test_incremental_var.py` (545 lines)
+1. `test/test_var/test_incremental_var.py` (545 lines)
    - Comprehensive unit tests for all IVaR functionality
    - 31 tests across 7 test classes
    - Tests for all three VaR engines
@@ -216,7 +216,7 @@ Phase 6 successfully implemented **Incremental VaR (IVaR)** functionality across
 
 **Test Execution**: ✅ All tests pass
 ```bash
-PYTHONPATH=/Users/fuxinyao/quant-ark python test/test_incremental_var.py
+PYTHONPATH=/Users/fuxinyao/quant-ark python test/test_var/test_incremental_var.py
 ```
 
 **Test Categories**:

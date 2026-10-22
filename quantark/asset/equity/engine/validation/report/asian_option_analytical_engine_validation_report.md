@@ -379,7 +379,7 @@ python asset/equity/engine/validation/script/boundary_check_asian_analytical.py
 python asset/equity/engine/validation/script/benchmark_check_asian_analytical.py
 
 # Run existing tests
-python -m pytest test/test_asian_option_analytical.py -v
+python -m pytest test/test_asset/equity/product_options/test_asian_option_analytical.py -v
 ```
 
 ### C. Test Coverage Summary

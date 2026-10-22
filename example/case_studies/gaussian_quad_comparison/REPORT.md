@@ -223,7 +223,7 @@ export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
 .venv/bin/python example/case_studies/gaussian_quad_comparison/study.py --phase benchmark --only monthly,daily,aged_five_days,three_years
 .venv/bin/python example/case_studies/gaussian_quad_comparison/extra_checks.py
 .venv/bin/python example/case_studies/gaussian_quad_comparison/build_report.py
-.venv/bin/python -m pytest -n0 -q test/test_snowball_quad_engine.py test/test_quad_readout.py test/test_quad_term_structure_engines.py test/test_snowball_lifecycle_ki.py test/test_quad_event_stats_smoothing.py
+.venv/bin/python -m pytest -n0 -q test/test_asset/equity/engine_quad/test_snowball_quad_engine.py test/test_asset/equity/engine_quad/test_quad_readout.py test/test_asset/equity/engine_quad/test_quad_term_structure_engines.py test/test_asset/equity/product_snowball/test_snowball_lifecycle_ki.py test/test_asset/equity/product_other/test_quad_event_stats_smoothing.py
 ```
 
 These are a scenario study and identified failure cases, not exhaustive engine-release certification. Timing is machine dependent. Reference self-convergence is not a statistical confidence interval. Monte Carlo intervals describe sampling uncertainty, not numerical model misspecification. No live market calibration, settlement-specific external repricing, continuous-KI external accuracy ladder, smile dynamics, or non-spot Greek certification is claimed.

@@ -17,7 +17,7 @@ This probe checks that claim three ways, from weakest to strongest:
      ``_ki_bridge_wanted False`` and no recorded step variance.  Positive
      controls (the same engines under continuous monitoring) keep the
      assertions from passing vacuously.  This extends main's own
-     test/test_continuous_ki_scope.py to the SLV classes it does not cover,
+     test/test_asset/equity/product_other/test_continuous_ki_scope.py to the SLV classes it does not cover,
      which are exactly the ones this certification certifies.
 
   2. NUMERICAL, against banked evidence.  For every cell, rebuild the target

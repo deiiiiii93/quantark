@@ -196,7 +196,7 @@ def test_dcn_year_fraction_convention_is_refused():
     """W15 (A2): a DCN's convention now times all its cash, on DATES, so a
     YEAR_FRACTION lag is refused (it used to be ignored in favour of the
     schedule's explicit payment dates). Day-based conventions are covered by
-    test/test_dcn_settlement_convention.py."""
+    test/test_asset/equity/engine_pde/test_dcn_settlement_convention.py."""
     product = make_dcn(DCN_A)
     product.settlement_convention = _lagged()
     with pytest.raises(ValidationError, match="YEAR_FRACTION"):

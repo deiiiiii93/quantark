@@ -85,7 +85,7 @@ def test_single_product_summary_is_stable(single_summary):
     # Re-pinned 2026-09-14: this contract has a time-based KO schedule and no
     # initial_date, so its accrual ran from the product's own time origin --
     # and ageing moved that origin every day, shrinking all twelve coupons by
-    # the elapsed period (see test/test_aged_accrual.py). Banking the elapsed
+    # the elapsed period (see test/test_asset/equity/product_other/test_aged_accrual.py). Banking the elapsed
     # accrual restores the coupons the contract promised at inception, which
     # moves PV, the hedge ladder and the realised P&L, and fires one more
     # rebalance over the 86 days. Day count is unchanged.

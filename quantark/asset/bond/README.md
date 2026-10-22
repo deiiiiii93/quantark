@@ -189,13 +189,13 @@ bond = FixedBond(
 ## Testing
 
 Comprehensive tests are available in:
-- `test/test_fixed_bond.py`: Unit tests for all components
+- `test/test_asset/bond/test_fixed_bond.py`: Unit tests for all components
 - `example/asset/bond/fixed_bond_demo.py`: Demonstration script with 7 examples
 
 Run tests with:
 ```bash
 cd /Users/fuxinyao/QuantArk
-PYTHONPATH=. python -m pytest test/test_fixed_bond.py -v
+PYTHONPATH=. python -m pytest test/test_asset/bond/test_fixed_bond.py -v
 ```
 
 Run examples:

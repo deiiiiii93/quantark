@@ -68,7 +68,7 @@ stressed_var = z_score * np.sqrt(stressed_variance)
 ```
 
 ### ✅ Phase 5.3: SVaR Unit Tests - COMPLETE
-**File**: `test/test_stressed_var.py` (485 lines)
+**File**: `test/test_portfolio/test_stressed_var.py` (485 lines)
 
 **Test Coverage**:
 1. **TestStressedVaRDetection** (3 tests)
@@ -144,7 +144,7 @@ stressed_var = z_score * np.sqrt(stressed_variance)
    - Added datetime import
 
 ### New Files (1)
-1. `test/test_stressed_var.py` (485 lines)
+1. `test/test_portfolio/test_stressed_var.py` (485 lines)
    - Comprehensive unit tests for all SVaR functionality
    - Tests for crisis period detection
    - Tests for VaRResult with SVaR
@@ -196,7 +196,7 @@ stressed_var = z_score * np.sqrt(stressed_variance)
 
 **Test Execution**: ✅ All tests pass
 ```bash
-PYTHONPATH=/Users/fuxinyao/quant-ark python test/test_stressed_var.py
+PYTHONPATH=/Users/fuxinyao/quant-ark python test/test_portfolio/test_stressed_var.py
 ```
 
 **Test Categories**:

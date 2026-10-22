@@ -106,7 +106,7 @@ env = PricingEnvironment(
 
 Both axes price the same date schedule identically (analytical European to
 1e-12; PDE/QUAD/MC to discretization tolerance —
-`test/test_trading_clock_axis_equivalence.py`).
+`test/test_asset/equity/product_other/test_trading_clock_axis_equivalence.py`).
 
 ## Unit conventions (documented consequence, not a defect)
 

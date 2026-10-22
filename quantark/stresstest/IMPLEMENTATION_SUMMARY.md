@@ -145,7 +145,7 @@ Successfully implemented a comprehensive static scenario analysis module for por
 
 ### ✅ 7. Testing
 
-#### Unit Tests (`test/test_stress_test.py`)
+#### Unit Tests (`test/test_stresstest/test_stress_test.py`)
 - Scenario and stress definition tests
 - Scenario builder tests
 - Scenario library tests

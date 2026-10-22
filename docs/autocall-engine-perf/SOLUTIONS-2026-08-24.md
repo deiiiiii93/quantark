@@ -224,7 +224,7 @@ unrelated signed-div-yield WIP out of both arms.
 
 Spec `docs/superpowers/specs/2026-08-24-quad-forward-density-event-stats-design.md`;
 evidence `docs/autocall-engine-perf/FORWARD-DENSITY-EVIDENCE-2026-08.md`;
-battery `test/test_quad_forward_density_stats.py` (21 tests).
+battery `test/test_asset/equity/product_other/test_quad_forward_density_stats.py` (21 tests).
 
 - **F2 (Track 1, fuse the walks)** — the KI-probability recursion's four
   surfaces now ride the main stacked time loop (single loop, shared step

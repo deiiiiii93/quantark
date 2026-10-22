@@ -80,7 +80,7 @@ Only if D-1 rejects any compiled artifact *and* 1.3× (A1) is insufficient. Requ
 
 **Status:** shipped as opt-in `v_drift_scheme="semi_lagrangian"` in
 `quantark/volmodels/adi_core.py` (+ the solver-layer validator), 18 tests in
-`test/test_adi_semi_lagrangian.py`, measured evidence in
+`test/volmodels/test_adi_semi_lagrangian.py`, measured evidence in
 `logs/wsc_semi_lagrangian.log`, engine doc updated.
 
 Unit-level gate outcomes:

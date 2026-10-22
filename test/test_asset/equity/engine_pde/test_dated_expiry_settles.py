@@ -658,7 +658,7 @@ def test_vol_model_route_greeks_on_its_exercise_date_are_its_black_scholes_count
 
 #: The hand settled value of the knock-in carried as triggered (user ruling 2026-10-10, "check knock in state first"):
 #: knocked in, it pays the call payoff, never the rebate 5 -- W9 pinned these cells only as "equal to the BSM
-#: counterpart", which returned the rebate at 110 (test/test_expiry_carried_knock_in.py covers every route)
+#: counterpart", which returned the rebate at 110 (test/test_asset/equity/engine_pde/test_expiry_carried_knock_in.py covers every route)
 _CARRIED = [c for c in VOL_CASES if c[3] == "up_in_call_knocked_in"]
 
 

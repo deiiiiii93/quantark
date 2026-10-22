@@ -90,7 +90,7 @@ PYTHONPATH=. MPLCONFIGDIR=/private/tmp/gate-d-mpl \
 ```
 
 Use `term_flat_fwd__front` and a different output path for the other curve.
-The frozen regression at `test/test_futures_carry_identity_quad.py` requires
+The frozen regression at `test/test_asset/equity/engine_quad/test_futures_carry_identity_quad.py` requires
 no market-data cache and reproduces the original 0.548283-hand residual.
 
 The next numerical task is external accuracy of the hedge deltas. A fresh

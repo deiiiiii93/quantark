@@ -12,7 +12,7 @@ package behaves identically. Build it with
 The kernel performs the same recurrences in the same order with the same pivot
 threshold, and is compiled with ``-ffp-contract=off`` so FMA contraction cannot
 change the rounding sequence; results are therefore bit-identical, which
-``test/test_tridiag_c_backend.py`` pins.
+``test/test_util/test_tridiag_c_backend.py`` pins.
 """
 
 from __future__ import annotations

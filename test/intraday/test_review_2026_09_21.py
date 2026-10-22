@@ -39,8 +39,8 @@ from intraday.conftest import SHANGHAI, dated_ko_reset, dated_phoenix, dated_sno
 
 #: Findings asserted in the file that owns the behaviour rather than here.
 COVERED_ELSEWHERE = {
-    8: "test/test_ko_reset_contract_rules.py::test_r8_*",
-    9: "test/test_ko_reset_contract_rules.py::test_r9_*",
+    8: "test/test_asset/equity/product_autocallable/test_ko_reset_contract_rules.py::test_r8_*",
+    9: "test/test_asset/equity/product_autocallable/test_ko_reset_contract_rules.py::test_r9_*",
 }
 
 T0 = datetime(2026, 3, 16)

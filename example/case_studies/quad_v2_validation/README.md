@@ -94,10 +94,10 @@ For `EXPIRY`, earned coupons are paid at the actual KO settlement or terminal se
 
 `price_with_events()` and framework `EVENT_STATS` requests support Phoenix. Deferred stats set `coupon_payment_is_path_dependent=True`; their `EventDistribution` includes coupon-trigger probabilities but cannot supply a single fixed payment time for each trigger. `payment_times_for(EventType.COUPON)` raises for this case; use the payment ledger for expected coupon cashflows. Lifecycle memory, pending receivables and `event_phase="before"/"after"` are preserved.
 
-Coupon-specific controls are in `test/test_quad_v2_coupon_event_stats.py`: analytical lognormal probabilities and discounted payments, deterministic memory/KO cases, non-flat curves and settlement lags, direct/FFT agreement, and four independent QMC cases using eight scrambles of 65,536 paths each. The QMC tests compare three spatial refinements `(order, cells_per_sd) = (6, 1.5), (8, 2), (10, 3)` and use Student-t uncertainty across scrambles; these cases do not certify the entire parameter envelope.
+Coupon-specific controls are in `test/test_asset/equity/lifecycle/test_quad_v2_coupon_event_stats.py`: analytical lognormal probabilities and discounted payments, deterministic memory/KO cases, non-flat curves and settlement lags, direct/FFT agreement, and four independent QMC cases using eight scrambles of 65,536 paths each. The QMC tests compare three spatial refinements `(order, cells_per_sd) = (6, 1.5), (8, 2), (10, 3)` and use Student-t uncertainty across scrambles; these cases do not certify the entire parameter envelope.
 
 ```bash
-.venv/bin/python -m pytest -n0 test/test_quad_v2_coupon_event_stats.py -q
+.venv/bin/python -m pytest -n0 test/test_asset/equity/lifecycle/test_quad_v2_coupon_event_stats.py -q
 ```
 
 Known deterministic volatility classes and their supported wrappers are accepted. A custom deterministic variance object must declare `quad_v2_deterministic_variance=True`; this declaration is a model assertion by its author. A sampled smile is not a local-volatility transition model.
@@ -230,15 +230,15 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
 
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
   .venv/bin/python -m pytest -n0 \
-  test/test_quad_v2_core.py test/test_quad_v2_engine.py \
-  test/test_quad_v2_continuous.py test/test_quad_v2_terms_lifecycle.py \
-  test/test_snowball_quad_engine.py test/test_phoenix_quad.py \
-  test/test_ko_reset_snowball_quad_engine.py test/test_quad_term_structure_engines.py \
-  test/test_quad_zero_vol_step.py test/test_spot_greeks_curve.py \
-  test/test_greeks_mode_and_engine_type.py test/execution/test_registry.py \
-  test/execution/test_capability_matrix.py test/test_engine_settlement_capabilities.py \
-  test/test_structured_numerical_settlement.py \
-  test/test_settlement_event_stats_reconciliation.py \
+  test/test_asset/equity/engine_quad/test_quad_v2_core.py test/test_asset/equity/product_other/test_quad_v2_engine.py \
+  test/test_asset/equity/engine_quad/test_quad_v2_continuous.py test/test_asset/equity/lifecycle/test_quad_v2_terms_lifecycle.py \
+  test/test_asset/equity/engine_quad/test_snowball_quad_engine.py test/test_asset/equity/product_phoenix/test_phoenix_quad.py \
+  test/test_asset/equity/engine_quad/test_ko_reset_snowball_quad_engine.py test/test_asset/equity/engine_quad/test_quad_term_structure_engines.py \
+  test/test_asset/equity/engine_quad/test_quad_zero_vol_step.py test/test_asset/equity/product_other/test_spot_greeks_curve.py \
+  test/test_asset/equity/engine_analytical/test_greeks_mode_and_engine_type.py test/execution/test_registry.py \
+  test/execution/test_capability_matrix.py test/test_asset/equity/engine_analytical/test_engine_settlement_capabilities.py \
+  test/test_asset/equity/product_other/test_structured_numerical_settlement.py \
+  test/test_asset/equity/engine_mc/test_settlement_event_stats_reconciliation.py \
   test/test_cashleg/test_phoenix_quad_event_stats.py -q
 ```
 

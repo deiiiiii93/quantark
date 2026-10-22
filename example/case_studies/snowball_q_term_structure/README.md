@@ -178,7 +178,7 @@ Persisted outputs (small) live in `data/`: `curve_anatomy.csv`,
 whose closing appendix defines every column of every table it shows.
 Per-run frames go under `output/snowball_q_term_structure/` (locally
 excluded from git). Tests: `test/test_snowball_q_term_structure_study.py`
-and `test/test_replay_dividend_source.py`.
+and `test/test_backtest/test_replay_dividend_source.py`.
 
 ## The bucket futures hedge (revised study)
 

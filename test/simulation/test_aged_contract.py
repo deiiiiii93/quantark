@@ -165,7 +165,7 @@ def test_an_unanchored_contract_ages_without_losing_its_coupon():
     the accrual rather than dropped -- otherwise every surviving coupon
     would shrink by exactly the time that has passed, on a contract that
     is right on its trade date and wrong from the first day onward.
-    ``test/test_aged_accrual.py`` states the same invariant at the product
+    ``test/test_asset/equity/product_other/test_aged_accrual.py`` states the same invariant at the product
     level and across the autocallable family; this checks the simulation's
     own ageing path carries it.
     """

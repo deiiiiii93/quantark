@@ -18,10 +18,10 @@ Independent reprices, all three residual formulas, node/parallel/spot
 ladders, quantity/sign/multiplier cases.
 
 ```sh
-.venv/bin/python -m pytest -n0 -q test/test_futures_risk.py \
-  test/test_carry_curve_context.py test/test_futures_carry_risk.py \
-  test/test_futures_carry_audit.py test/test_futures_bucket_strategy.py \
-  test/test_futures_carry_stress.py test/test_futures_delta_strategy.py
+.venv/bin/python -m pytest -n0 -q test/test_backtest/test_futures_risk.py \
+  test/test_backtest/test_carry_curve_context.py test/test_backtest/test_futures_carry_risk.py \
+  test/test_backtest/test_futures_carry_audit.py test/test_backtest/test_futures_bucket_strategy.py \
+  test/test_backtest/test_futures_carry_stress.py test/test_backtest/test_futures_delta_strategy.py
 ```
 
 **Result: 253 passed.**
@@ -59,10 +59,10 @@ Exact local ledger comparison, old goldens, atomic failure and lifecycle
 close.
 
 ```sh
-.venv/bin/python -m pytest -n0 -q test/test_replay_futures_buckets.py \
-  test/test_futures_hedge_book.py test/test_replay_goldens.py \
-  test/test_replay_engine_unified.py test/test_replay_termination.py \
-  test/test_pnlexplain_backtest_replay.py test/test_replay_greeks_failclosed.py
+.venv/bin/python -m pytest -n0 -q test/test_backtest/test_replay_futures_buckets.py \
+  test/test_backtest/test_futures_hedge_book.py test/test_backtest/test_replay_goldens.py \
+  test/test_backtest/test_replay_engine_unified.py test/test_backtest/test_replay_termination.py \
+  test/pnlexplain/test_pnlexplain_backtest_replay.py test/test_backtest/test_replay_greeks_failclosed.py
 ```
 
 **Result: 122 passed, 4 skipped.**
@@ -92,10 +92,10 @@ the pre-trade one. The quirk is preserved and now documented.
 Both result APIs, genuine direct audits, finite stress residuals.
 
 ```sh
-.venv/bin/python -m pytest -n0 -q test/test_futures_carry_recorder.py \
-  test/test_replay_futures_buckets.py test/test_futures_bucket_results.py \
-  test/test_replay_schema.py test/test_replay_termination.py \
-  test/test_replay_goldens.py
+.venv/bin/python -m pytest -n0 -q test/test_backtest/test_futures_carry_recorder.py \
+  test/test_backtest/test_replay_futures_buckets.py test/test_backtest/test_futures_bucket_results.py \
+  test/test_backtest/test_replay_schema.py test/test_backtest/test_replay_termination.py \
+  test/test_backtest/test_replay_goldens.py
 ```
 
 **Result: 123 passed, 4 skipped.**
@@ -133,26 +133,26 @@ Two findings:
 ### Required regression
 
 ```sh
-.venv/bin/python -m pytest -n0 -q test/test_futures_risk.py \
-  test/test_carry_curve_context.py test/test_futures_carry_risk.py \
-  test/test_futures_carry_audit.py test/test_futures_carry_stress.py \
-  test/test_futures_bucket_strategy.py test/test_futures_hedge_book.py \
-  test/test_futures_bucket_config.py test/test_futures_bucket_results.py \
-  test/test_futures_carry_recorder.py test/test_replay_futures_buckets.py \
+.venv/bin/python -m pytest -n0 -q test/test_backtest/test_futures_risk.py \
+  test/test_backtest/test_carry_curve_context.py test/test_backtest/test_futures_carry_risk.py \
+  test/test_backtest/test_futures_carry_audit.py test/test_backtest/test_futures_carry_stress.py \
+  test/test_backtest/test_futures_bucket_strategy.py test/test_backtest/test_futures_hedge_book.py \
+  test/test_backtest/test_futures_bucket_config.py test/test_backtest/test_futures_bucket_results.py \
+  test/test_backtest/test_futures_carry_recorder.py test/test_backtest/test_replay_futures_buckets.py \
   test/test_bucket_hedge_study.py test/test_bucket_hedge_analysis.py \
-  test/test_bucket_hedge_validation_cli.py test/test_futures_ledger.py \
-  test/test_futures_delta_strategy.py test/test_replay_dividend_source.py \
-  test/test_replay_env_helpers.py test/test_replay_greeks_failclosed.py \
-  test/test_replay_schema.py test/test_replay_goldens.py \
-  test/test_replay_engine_unified.py test/test_replay_termination.py \
-  test/test_pnlexplain_backtest_replay.py \
+  test/test_bucket_hedge_validation_cli.py test/test_backtest/test_futures_ledger.py \
+  test/test_backtest/test_futures_delta_strategy.py test/test_backtest/test_replay_dividend_source.py \
+  test/test_backtest/test_replay_env_helpers.py test/test_backtest/test_replay_greeks_failclosed.py \
+  test/test_backtest/test_replay_schema.py test/test_backtest/test_replay_goldens.py \
+  test/test_backtest/test_replay_engine_unified.py test/test_backtest/test_replay_termination.py \
+  test/pnlexplain/test_pnlexplain_backtest_replay.py \
   test/test_snowball_q_term_structure_study.py test/simulation/test_config.py
 ```
 
 **Result: 636 passed, 4 skipped, 131 s.** No golden was updated.
 
 Re-run on 2026-09-10 with the matched identity, adding
-`test/test_futures_carry_identity_quad.py` to the list above:
+`test/test_asset/equity/engine_quad/test_futures_carry_identity_quad.py` to the list above:
 **658 passed, 4 skipped, 178 s.** Still no golden updated. The two warnings
 are the pre-existing `quantark.backtest.otc` import aliases.
 
@@ -593,7 +593,7 @@ separate net-delta reproduction check.
 
 Evidence: `quad-readout/identity-fix.md`, `identity-review.md`,
 `identity_fix_flat_q.csv`, `identity_fix_flat_forward.csv`, and the frozen
-regression `test/test_futures_carry_identity_quad.py`, which needs no market
+regression `test/test_asset/equity/engine_quad/test_futures_carry_identity_quad.py`, which needs no market
 cache and reproduces the original 0.548283-hand residual under both readouts.
 
 ### The subset, re-run

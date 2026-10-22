@@ -123,4 +123,4 @@ def test_localvol_calibrates(data_free_artifact):
 # (0.053 against a 0.05 tolerance at the default grid).  That is the guard
 # working.  Making it pass would mean tuning a grid until the number moved,
 # which tests nothing -- SLV on a real MO surface is covered by
-# test/test_otc_vol_calibrators.py where the preset matches the market.
+# test/test_asset/equity/engine_pde/test_otc_vol_calibrators.py where the preset matches the market.
