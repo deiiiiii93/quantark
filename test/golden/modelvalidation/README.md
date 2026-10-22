@@ -9,16 +9,16 @@ verbatim — so a banked certificate is re-runnable anywhere the builders exist.
 
 ```bash
 # Wiring check (seconds; explicitly not bankable evidence)
-python -m quantark.modelvalidation run modelvalidation_studies/european_selftest.yaml --quick
+python -m quantark.modelvalidation run test/golden/modelvalidation/european_selftest.yaml --quick
 
 # Real runs
-python -m quantark.modelvalidation run modelvalidation_studies/european_selftest.yaml
-python -m quantark.modelvalidation run modelvalidation_studies/snowball_flat_bsm.yaml
-python -m quantark.modelvalidation run modelvalidation_studies/phoenix_flat_bsm.yaml
-python -m quantark.modelvalidation run modelvalidation_studies/ko_reset_flat_bsm.yaml
+python -m quantark.modelvalidation run test/golden/modelvalidation/european_selftest.yaml
+python -m quantark.modelvalidation run test/golden/modelvalidation/snowball_flat_bsm.yaml
+python -m quantark.modelvalidation run test/golden/modelvalidation/phoenix_flat_bsm.yaml
+python -m quantark.modelvalidation run test/golden/modelvalidation/ko_reset_flat_bsm.yaml
 
 # Resume an interrupted run (reuses checkpoints whose configuration still matches)
-python -m quantark.modelvalidation run modelvalidation_studies/snowball_flat_bsm.yaml --resume
+python -m quantark.modelvalidation run test/golden/modelvalidation/snowball_flat_bsm.yaml --resume
 
 # What builders and studies exist?
 python -m quantark.modelvalidation list

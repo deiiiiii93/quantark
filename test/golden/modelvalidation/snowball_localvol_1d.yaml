@@ -21,7 +21,7 @@
 #               cohort differently, so the contrast rests primarily on the
 #               empirical per-cell gaps (-1.2726 vs +0.2614).
 #
-# Both artifacts are COMMITTED under modelvalidation_studies/data/ (the `surface:` strings below keep
+# Both artifacts are COMMITTED under test/golden/modelvalidation/data/ (the `surface:` strings below keep
 # the legacy example/modelvalidation/data/ prefix: they enter the banked identity hashes, so they are
 # frozen logical ids that the builder maps to this folder). They are not
 # read from example/mo_volmodels/data/history, which is excluded per-clone and
@@ -44,7 +44,7 @@
 # the configurations its YAML names.
 #
 # Offline study (hours, not minutes). Run it with:
-#   python -m quantark.modelvalidation run modelvalidation_studies/snowball_localvol_1d.yaml
+#   python -m quantark.modelvalidation run test/golden/modelvalidation/snowball_localvol_1d.yaml
 # Add --quick for a wiring check that is explicitly not bankable evidence.
 
 study: snowball-localvol-1d

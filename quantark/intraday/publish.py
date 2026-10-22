@@ -20,7 +20,7 @@ Requests outside the matrix raise `CapabilityError` naming the intraday alternat
 inherit a row.
 
 Numerical accuracy is not a property of a row. It is measured offline by the studies under
-`modelvalidation_studies/` and banked under `docs/modelvalidation/`; a production release ships an engine only for
+`test/golden/modelvalidation/` and banked under `docs/modelvalidation/`; a production release ships an engine only for
 the studies that admit its shipped configuration (`docs/modelvalidation/RELEASE_PROCEDURE.md`).
 
 """

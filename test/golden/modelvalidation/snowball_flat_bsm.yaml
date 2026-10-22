@@ -21,7 +21,7 @@
 # mean signed bias across cells.
 #
 # This is an offline study (minutes, not seconds). Run it with:
-#   python -m quantark.modelvalidation run modelvalidation_studies/snowball_flat_bsm.yaml
+#   python -m quantark.modelvalidation run test/golden/modelvalidation/snowball_flat_bsm.yaml
 # Add --quick for a wiring check that is explicitly not bankable evidence.
 
 study: snowball-flat-bsm

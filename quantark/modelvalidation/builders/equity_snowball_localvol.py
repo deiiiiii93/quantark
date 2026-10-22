@@ -12,7 +12,7 @@ Two things differ from the flat-BSM study, and both are deliberate.
 history`` is excluded through ``.git/info/exclude``, a per-clone file that is
 never pushed, so a study reading from it would bank a certificate whose CI
 anchors fail everywhere but one machine. The artifacts live under
-``modelvalidation_studies/data/`` (the YAML ids keep the legacy ``example/modelvalidation/data/`` prefix, resolved by ``_resolve_path``) and their sha256 enters the identity hash, so
+``test/golden/modelvalidation/data/`` (the YAML ids keep the legacy ``example/modelvalidation/data/`` prefix, resolved by ``_resolve_path``) and their sha256 enters the identity hash, so
 the certificate pins the exact surface bytes it was certified against.
 
 **Levels are declared as moneyness and resolved against each artifact's own
@@ -110,7 +110,7 @@ class _Surface:
 #: certificates, so they are frozen logical ids: they keep naming the folder the
 #: surfaces were first committed under. They resolve to ``_STUDIES_DIR`` today.
 _LEGACY_STUDY_PREFIX = "example/modelvalidation/"
-_STUDIES_DIR = "modelvalidation_studies/"
+_STUDIES_DIR = "test/golden/modelvalidation/"
 
 
 def _resolve_path(surface: str) -> Path:
@@ -123,7 +123,7 @@ def _resolve_path(surface: str) -> Path:
     if not path.is_file():
         raise ValidationError(
             f"equity.snowball.localvol_market surface artifact not found: {path}. "
-            "Study surfaces live under modelvalidation_studies/data/ and are "
+            "Study surfaces live under test/golden/modelvalidation/data/ and are "
             "committed; they are NOT read from example/mo_volmodels/data/history, "
             "which is excluded per-clone and would not exist in CI."
         )

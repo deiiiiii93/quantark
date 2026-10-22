@@ -15,7 +15,7 @@ Date: 2026-10-22. Status: draft for approval. Repo: quant-ark (`quantark` packag
 
 1. **How-to examples** (how to use quantark) live in a tree that **mirrors the `quantark/` package tree** (e.g. `example/asset/bond/`, `example/var/`, `example/saccr/`), so a user finds the demo by the module they are using.
 2. **Case studies** live apart from the how-tos, **one self-contained subfolder per study** (README, scripts, committed inputs). `mo_volmodels` is the flagship: it is finished work and the reference pattern for users who want to calibrate vol models for a new market. Its README says so.
-3. **`test/` is reorganised the same way**: root-level `test_*.py` files grouped into subfolders mirroring the package, extending what `pde_core/`, `execution/`, `intraday/` already do.
+3. **`test/` is reorganised the same way**, with a separate **golden** division for numeric-correctness tests and their frozen data: root-level `test_*.py` files grouped into subfolders mirroring the package, extending what `pde_core/`, `execution/`, `intraday/` already do.
 4. **The library never reads from `example/`.** Anything the package needs at runtime lives inside the package or a package-owned location.
 5. **Studies are not re-run by the unit test suite.** `mo_volmodels` keeps exactly one end-to-end test (it is a user-facing pattern a user will copy, so it must keep working), and that test writes to a temp directory, never into the repo.
 6. Generated output stays out of git (the rule applied in `cc975cac`), as does `__pycache__`.
@@ -43,11 +43,15 @@ Decided by the user: every existing branch is resolved before any file moves, be
 For each branch the builder reports: commits ahead of `main`, whether it is already contained in `main`, files touched under `example/` and `test/`, and last activity. Then one of: **already merged** (delete), **land** (ff-only onto `main`, after the full suite), **rebase later** (kept, but the user accepts rebasing over the reorg), or **abandon** (user's explicit word). Nothing unmerged is deleted without the user naming that branch. Landing a branch is the user's decision per branch; the builder never pushes.
 
 
-### 1. Take `modelvalidation` out of `example/`
+### 1. Split `modelvalidation` into a user example and CI golden studies
 
-The package reads `example/modelvalidation` at runtime. Move the study definitions (YAMLs) and the committed surface data it depends on to a **new top-level repo folder that is not part of the wheel** (decided by the user; the 124 KB must not ship in the release), update `STUDY_DIR`, the builders' data lookups and the identity-hash inputs, and update the references in `docs/modelvalidation` (~89) and `docs/` generally.
+Decided by the user (2026-10-22, replacing the earlier "new folder outside the wheel"): `example/modelvalidation/` is meant to show users how to use the module. Whatever CI needs to stay reliable (the study YAMLs the banked certificates and tests load, and the committed surface data) is **isolated in `test/`**, in a new **golden** division. `example/modelvalidation/` keeps only the user-facing material: a README and the small `european_selftest.yaml` wiring-check study as the pattern to copy. The golden folder holds its own copy of every study (copy, not shared, so a user editing the example cannot break CI).
 
-Constraint: identity hashes and banked certificates must stay valid. Moving a file must not change a sha256 that enters an identity hash; if hashing includes the path string, that is a decision to surface, not to bury (see Open points).
+Golden location: `test/golden/modelvalidation/` (studies and `data/`). It is not in the wheel (outside `quantark/`). The CLI's default `STUDY_DIR` stays `example/modelvalidation` (the user-facing listing).
+
+Identity constraint (verified): the localvol builder's identity hash covers the `surface:` path *string*, and five banked certificates embed it. The strings stay **frozen logical ids** (`example/modelvalidation/data/...`) and `_resolve_path` maps that prefix to the golden folder. Banked certificates are never edited and no re-banking occurs.
+
+Moving the existing `test/modelvalidation/*` test files into `test/golden/` is project 4, not here.
 
 ### 2. Reorganise `example/`
 
@@ -84,6 +88,8 @@ For each of the ~100 study-scoped test files, decide by reading it:
 
 ### 4. Reorganise `test/`
 
+Introduce a **golden** division (decided by the user) for tests whose job is numeric correctness against frozen references: banked certificates and anchor replay, `replay_golden`, `pde_bitwise`, golden-compare fixtures, and their committed data. Everything else mirrors the package tree. The builder decides which existing tests belong in golden by reading them; the rule is "fails when a number moves, not when behaviour breaks".
+
 Group the 550 root-level `test_*.py` files into subfolders mirroring the package, using `git mv` only. Handle `conftest.py`, shared fixture modules (`*_fixtures.py`, `helpers_*.py`, `golden_compare.py`), relative data paths and `test/data`. Must preserve: collection count, golden/bitwise gates, CI invocation.
 
 Do 4 last: it should not run while test paths are still moving for other reasons.
@@ -102,12 +108,13 @@ Do 4 last: it should not run while test paths are still moving for other reasons
 - `test/` is reorganised too.
 - `mo_volmodels` is finished work and a reference pattern for users calibrating vol models; it is not live tooling.
 - Order: clean up all branches, then modelvalidation out of `example/`, then `example/`, then study tests, then `test/`.
-- `modelvalidation` data goes to a new top-level folder that stays out of the wheel.
+- `example/modelvalidation` stays a user-facing example; the studies and data CI needs are isolated in `test/golden/modelvalidation/`.
+- `test/` gets a golden division for numeric-correctness tests.
 - All branches are cleaned up before any file moves.
 
 ## Open points (my calls, flagged for the user to check)
 
-- **Name of the new folder** (project 1). Decided by the user: top-level, outside the wheel. My call on the name: `modelvalidation_studies/` at the repo root (the CLI's `STUDY_DIR` is cwd-relative today, so this keeps working from a checkout). The builder confirms the wheel `include` list in `pyproject.toml` does not pick it up.
+- **Golden folder name.** My call: `test/golden/modelvalidation/`. The builder confirms it stays outside the wheel (it is outside `quantark/`).
 - **Names of the two example areas.** My call: the package-mirror folders sit directly under `example/` (`example/asset/bond/`, `example/var/`, …) and the studies sit side by side with them under `example/case_studies/<study>/`.
 - **Identity hashes and paths** (project 1). Checked: the `equity_snowball_localvol` identity covers the surface *content* sha256 (`surface_sha256`), not the file path, so moving the two surface JSONs leaves it unchanged. The builder verifies the other builders the same way, and if any hash covers a path, it stops and reports rather than re-banking.
 - **End-to-end `mo_volmodels` test** (project 3). My call: it runs the same offline stages 02–10 the old smoke test ran, on a *copy* of the committed sample snapshot in a temp directory, with all outputs in that directory (no shared artifact, so no xdist race), and with the old smoke test's runtime as its budget. It must not use `--quick` or any MC_FULL gate.

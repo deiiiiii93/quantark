@@ -253,7 +253,7 @@ Each requested output carries its own status: a finite delta is reported `ok` be
 that `failed`.
 
 Accuracy is certified offline. The daily-KI snowball study
-`modelvalidation_studies/snowball_intraday_daily_ki_bsm.yaml` measures QUAD V2 and PDE on PV,
+`test/golden/modelvalidation/snowball_intraday_daily_ki_bsm.yaml` measures QUAD V2 and PDE on PV,
 desk and point spot Greeks and desk theta against a deterministic reference (an
 engine-independent Gaussian-transition solver with a declared uncertainty radius, qualified
 case by case by paired RQMC, which cannot itself resolve intraday budgets). The banked

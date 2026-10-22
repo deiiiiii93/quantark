@@ -1,0 +1,62 @@
+# The framework's own calibration check.
+#
+# The candidate is the closed-form Black-Scholes engine, so its answer is exact
+# by construction: every difference against the Monte Carlo benchmark is
+# benchmark noise. If this study does not ADMIT, the certification machinery is
+# wrong -- which is precisely what makes it worth running in CI on every commit.
+#
+# Bounds are calibrated to the achievable standard error at this sampling
+# budget (measured, not guessed), with roughly 4x margin so the test does not
+# flap. They are deliberately loose compared with a real desk study: the point
+# here is the machinery, not the precision.
+
+study: european-selftest
+schema: 1
+
+quantities: [pv, delta, gamma]
+
+bounds:
+  cell: 5.0
+  mean_signed_bias: 3.0
+
+sampling:
+  paths_per_batch: 32768
+  min_batches: 4
+  max_batches: 16
+  seed: 20260814
+  bump: 0.01
+
+economic_scale:
+  builder: hedge_contracts
+  params:
+    hedge_multiplier: 100.0
+    hedge_inception_spot: 100.0
+    notional: 1000000.0
+
+environment:
+  builder: flat_bsm
+  params:
+    spot: 100.0
+    vol: 0.20
+    rate: 0.025
+    div_yield: 0.03
+
+product:
+  builder: equity.european
+  params:
+    strike: 100.0
+    maturity: 1.0
+    option_type: call
+
+reference:
+  builder: equity.european.mc
+  params: {}
+
+candidates:
+  - builder: equity.european.analytical
+    params: {}
+
+cases:
+  - {name: atm}
+  - {name: itm, environment: {spot: 110.0}}
+  - {name: otm, environment: {spot: 90.0}}

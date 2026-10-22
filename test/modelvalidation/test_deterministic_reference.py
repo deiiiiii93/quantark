@@ -361,7 +361,7 @@ def test_r3_the_daily_ki_study_contract_changes_with_its_qualifier_sampling():
     from quantark.modelvalidation.pipeline import study_contract
     from quantark.modelvalidation.yaml_loader import load_study
 
-    study = load_study("modelvalidation_studies/snowball_intraday_daily_ki_bsm.yaml")
+    study = load_study("test/golden/modelvalidation/snowball_intraday_daily_ki_bsm.yaml")
     smaller = dataclasses.replace(study, sampling=dataclasses.replace(study.sampling, paths_per_batch=128, min_batches=2, max_batches=2))
     contracts = [study_contract(s, s.reference.bind(s.sampling), s.qualification.builder.bind(s.sampling)) for s in (study, smaller)]
     assert contracts[0]["qualification"]["sampling"]["paths_per_batch"] == 32768

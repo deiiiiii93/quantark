@@ -593,7 +593,6 @@ quantark/
 └── util/               # enum/, numerical/, calendar, market-data adapters, exceptions
 
 example/                # 90+ runnable example scripts
-modelvalidation_studies/ # Certification study YAMLs + committed surfaces for quantark.modelvalidation (repo only, not in the wheel)
 test/                   # Unit-test suite
 ```
 
